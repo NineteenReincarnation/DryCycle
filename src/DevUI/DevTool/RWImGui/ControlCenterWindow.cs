@@ -24,6 +24,13 @@ internal static class ControlCenterWindow
     private static readonly Num.Vector4 BadgeBorder = new(0.30f, 0.58f, 0.92f, 0.95f);
     private static readonly Num.Vector4 BadgeText = new(0.86f, 0.94f, 1.00f, 1f);
 
+    // ImGui child windows own an independent FontWindowScale. Without setting it explicitly,
+    // text inside cards falls back to 1.0 even when the surrounding DevTool pane is enlarged.
+    // CJK needs a little more body size because its glyphs read smaller at the same nominal scale.
+    private const float CardBodyScaleEnglish = 1.18f;
+    private const float CardBodyScaleChinese = 1.24f;
+    private const float CardTitleBoost = 1.10f;
+
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
@@ -31,14 +38,17 @@ internal static class ControlCenterWindow
         float width = Math.Min(
             maxWidth,
             Math.Max(Math.Min(660f, maxWidth), Math.Min(920f * Math.Min(1.18f, scale), display.X * 0.78f)));
-        float normalHeight = Math.Min(214f * Math.Min(1.18f, scale), Math.Max(176f, display.Y - 16f));
+
+        // The information cards are deliberately fully visible. The previous 214 px default and
+        // 170 px minimum could force their child windows to scroll, especially with Chinese fonts.
+        float normalHeight = Math.Min(320f, Math.Max(304f, display.Y - 16f));
         float defaultHeight = snapshot.FocusMode ? Math.Min(92f, Math.Max(72f, display.Y - 16f)) : normalHeight;
         float defaultX = Math.Max(8f, display.X - width - 8f);
 
         ImGui.SetNextWindowPos(new Num.Vector2(defaultX, 8f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, defaultHeight), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(560f, maxWidth), snapshot.FocusMode ? 68f : 170f),
+            new Num.Vector2(Math.Min(560f, maxWidth), snapshot.FocusMode ? 68f : Math.Min(304f, Math.Max(170f, display.Y - 16f))),
             new Num.Vector2(maxWidth, Math.Max(170f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
@@ -146,11 +156,14 @@ internal static class ControlCenterWindow
         float gap = Math.Max(8f, ImGui.GetStyle().ItemSpacing.X);
         bool twoColumns = available >= 560f;
         float leftWidth = twoColumns ? Math.Max(250f, available * 0.48f) : available;
-        float cardHeight = 82f * Math.Max(1f, Math.Min(1.20f, DevToolUiSettings.UiScale));
+        float cardHeight = DevToolUiSettings.IsChinese ? 154f : 142f;
 
         PushCardStyle();
         if (ImGui.BeginChild("##ControlCenterInterface", new Num.Vector2(leftWidth, cardHeight), ImGuiChildFlags.Borders))
+        {
+            ApplyCardBodyScale();
             DrawInterfaceCard();
+        }
         ImGui.EndChild();
         PopCardStyle();
 
@@ -159,7 +172,10 @@ internal static class ControlCenterWindow
             ImGui.SameLine(0f, gap);
             PushCardStyle();
             if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
+            {
+                ApplyCardBodyScale();
                 DrawSessionCard(snapshot);
+            }
             ImGui.EndChild();
             PopCardStyle();
         }
@@ -168,7 +184,10 @@ internal static class ControlCenterWindow
             ImGui.Spacing();
             PushCardStyle();
             if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
+            {
+                ApplyCardBodyScale();
                 DrawSessionCard(snapshot);
+            }
             ImGui.EndChild();
             PopCardStyle();
         }
@@ -176,11 +195,12 @@ internal static class ControlCenterWindow
 
     private static void DrawInterfaceCard()
     {
-        ImGui.TextColored(AccentText, DevToolUiSettings.T("界面", "INTERFACE"));
+        DrawCardTitle(DevToolUiSettings.T("界面", "INTERFACE"));
         ImGui.Spacing();
 
+        float keyColumn = CardKeyColumn();
         DevToolWidgets.MutedText(DevToolUiSettings.T("模式", "Mode"));
-        ImGui.SameLine(92f);
+        ImGui.SameLine(keyColumn);
         bool vanilla = EditorUiModeState.UseVanilla;
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("新 UI", "New UI"),
@@ -194,8 +214,9 @@ internal static class ControlCenterWindow
                 vanilla ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
             EditorUiModeState.SetVanilla(true);
 
+        ImGui.Spacing();
         DevToolWidgets.MutedText(DevToolUiSettings.T("语言", "Language"));
-        ImGui.SameLine(92f);
+        ImGui.SameLine(keyColumn);
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
         if (DevToolWidgets.ActionButton(
                 "中文",
@@ -212,31 +233,55 @@ internal static class ControlCenterWindow
 
     private static void DrawSessionCard(EditorPresentationSnapshot snapshot)
     {
-        ImGui.TextColored(AccentText, DevToolUiSettings.T("会话", "SESSION"));
+        DrawCardTitle(DevToolUiSettings.T("会话", "SESSION"));
         ImGui.Spacing();
 
         DrawKeyValue(DevToolUiSettings.T("房间", "Room"), CurrentRoom(snapshot));
+        ImGui.Spacing();
         DrawKeyValue(DevToolUiSettings.T("工具", "Tool"), DevToolUiSettings.ToolMode(snapshot.ToolMode));
+        ImGui.Spacing();
 
         DevToolWidgets.MutedText(DevToolUiSettings.T("状态", "Status"));
-        ImGui.SameLine(92f);
+        ImGui.SameLine(CardKeyColumn());
         ImGui.TextWrapped(BuildStatusText(snapshot));
     }
 
     private static void DrawKeyValue(string key, string value)
     {
         DevToolWidgets.MutedText(key);
-        ImGui.SameLine(92f);
+        ImGui.SameLine(CardKeyColumn());
         ImGui.TextUnformatted(string.IsNullOrEmpty(value) ? "-" : value);
     }
 
     private static void DrawShortcutFooter()
     {
+        float previousScale = 1f;
+        ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.08f : 1.04f);
         string text = DevToolUiSettings.T(
             "Shift+左键拖框  多选窗口   ·   Ctrl+G  编组   ·   拖动组内标题栏  整组移动",
             "Shift+left drag  Multi-select   ·   Ctrl+G  Group   ·   Drag grouped title  Move group");
         ImGui.TextDisabled(text);
+        ImGui.SetWindowFontScale(previousScale);
     }
+
+    private static void ApplyCardBodyScale()
+    {
+        ImGui.SetWindowFontScale(CardBodyScale());
+    }
+
+    private static void DrawCardTitle(string text)
+    {
+        float bodyScale = CardBodyScale();
+        ImGui.SetWindowFontScale(bodyScale * CardTitleBoost);
+        ImGui.TextColored(AccentText, text);
+        ImGui.SetWindowFontScale(bodyScale);
+    }
+
+    private static float CardBodyScale() =>
+        DevToolUiSettings.IsChinese ? CardBodyScaleChinese : CardBodyScaleEnglish;
+
+    private static float CardKeyColumn() =>
+        DevToolUiSettings.IsChinese ? 116f : 108f;
 
     private static string CurrentRoom(EditorPresentationSnapshot snapshot) =>
         string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
