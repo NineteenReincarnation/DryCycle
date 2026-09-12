@@ -92,19 +92,19 @@ public sealed class EditorMapRoomVisualSnapshot
 /// <summary>
 /// Geometry cache for the unified World Map.
 ///
-/// Vanilla's MapObject raster remains the cheap base layer, including TerrainManager coverage,
-/// while continuous terrain is reconstructed from authored splines. DryCycle terrain such as
-/// QuicksandZone can therefore expose both its actual surface and its material intervals instead
-/// of being collapsed into a coarse tile-coverage colour.
+/// The vanilla MapObject raster remains the cheap base layer. Continuous terrain is rebuilt from
+/// the authored RoomSettings geometry so Watcher terrain (TerrainHandle room curves, LocalTerrain,
+/// CurvedSlope and SuperSlope) and DryCycle terrain keep their real silhouette instead of being
+/// flattened into tile coverage.
 ///
-/// Static rooms are revision driven. Unloaded room settings are warmed incrementally so opening a
-/// large region never synchronously parses every room in one frame.
+/// Curve bodies are converted to narrow cached fill runs. This keeps the frontend draw path cheap
+/// while still producing a visually continuous filled terrain band at normal map zoom levels.
 /// </summary>
 internal static class MapRoomGeometryPresentationHub
 {
     private const float PixelsPerTile = 20f;
     private const float CurveSimplifyToleranceTiles = 0.075f;
-    private const int MaxCurveSamples = 128;
+    private const int MaxCurveSamples = 192;
     private const int UnloadedCurveLoadsPerFrame = 4;
     private const int SettingsPollIntervalFrames = 90;
 
@@ -125,7 +125,8 @@ internal static class MapRoomGeometryPresentationHub
         internal bool CurvesInitialized;
         internal float WidthTiles = 12f;
         internal float HeightTiles = 6f;
-        internal EditorMapRectSnapshot[] RasterRuns = Array.Empty<EditorMapRectSnapshot>();
+        internal EditorMapRectSnapshot[] BaseRasterRuns = Array.Empty<EditorMapRectSnapshot>();
+        internal EditorMapRectSnapshot[] TerrainFillRuns = Array.Empty<EditorMapRectSnapshot>();
         internal EditorMapPolylineSnapshot[] Curves = Array.Empty<EditorMapPolylineSnapshot>();
         internal EditorMapNodeVisualSnapshot[] Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
         internal EditorMapRoomVisualSnapshot Snapshot = EditorMapRoomVisualSnapshot.Empty;
@@ -225,6 +226,7 @@ internal static class MapRoomGeometryPresentationHub
 
         entry.WidthTiles = width;
         entry.HeightTiles = height;
+        entry.CurvesInitialized = false;
         entry.Revision++;
     }
 
@@ -266,7 +268,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.RasterInitialized = true;
         entry.WidthTiles = Math.Max(1f, width);
         entry.HeightTiles = Math.Max(1f, height);
-        entry.RasterRuns = runs.ToArray();
+        entry.BaseRasterRuns = runs.ToArray();
         entry.Revision++;
     }
 
@@ -293,7 +295,6 @@ internal static class MapRoomGeometryPresentationHub
                 return pixels != null && pixels.Length == width * height;
             }
 
-            // Cached MapTex atlas elements do not always retain RoomRepresentation.texture.
             FAtlasElement element = roomRep?.mapTex;
             if (element?.atlas?.texture is not Texture2D atlasTexture) return false;
 
@@ -386,8 +387,6 @@ internal static class MapRoomGeometryPresentationHub
 
         if (curveLoadsRemaining <= 0)
         {
-            // A changed/uninitialised room is retried next frame rather than being pushed to the
-            // normal slow timestamp poll.
             entry.NextSettingsPollFrame = Time.frameCount + 1;
             return;
         }
@@ -416,7 +415,14 @@ internal static class MapRoomGeometryPresentationHub
         entry.SettingsPath = settings.filePath ?? string.Empty;
         entry.SettingsWriteTimeUtc = FileWriteTime(entry.SettingsPath);
         entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames + Math.Abs(entry.RoomIndex % 30);
-        entry.Curves = BuildCurveGeometry(settings).ToArray();
+
+        BuildCurveGeometry(
+            settings,
+            entry.WidthTiles,
+            out List<EditorMapPolylineSnapshot> curves,
+            out List<EditorMapRectSnapshot> fills);
+        entry.Curves = curves.ToArray();
+        entry.TerrainFillRuns = fills.ToArray();
         entry.CurvesInitialized = true;
         entry.Revision++;
     }
@@ -458,35 +464,68 @@ internal static class MapRoomGeometryPresentationHub
     private static bool IsThumbnailTerrain(PlacedObject placed)
     {
         if (placed == null || !placed.active) return false;
-        if (placed.type == PlacedObject.Type.LocalTerrain || placed.type == PlacedObject.Type.CurvedSlope)
+        if (placed.type == PlacedObject.Type.TerrainHandle ||
+            placed.type == PlacedObject.Type.LocalTerrain ||
+            placed.type == PlacedObject.Type.CurvedSlope ||
+            placed.type == PlacedObject.Type.SuperSlope)
             return true;
         return string.Equals(placed.type?.value, "QuicksandZone", StringComparison.Ordinal);
     }
 
-    private static List<EditorMapPolylineSnapshot> BuildCurveGeometry(RoomSettings settings)
+    private static void BuildCurveGeometry(
+        RoomSettings settings,
+        float roomWidthTiles,
+        out List<EditorMapPolylineSnapshot> curves,
+        out List<EditorMapRectSnapshot> fills)
     {
-        List<EditorMapPolylineSnapshot> result = new();
+        curves = new List<EditorMapPolylineSnapshot>();
+        fills = new List<EditorMapRectSnapshot>();
         List<PlacedObject> objects = settings?.placedObjects;
-        if (objects == null) return result;
+        if (objects == null) return;
+
+        AddRoomTerrainCurve(objects, roomWidthTiles, curves, fills);
 
         for (int i = 0; i < objects.Count; i++)
         {
             PlacedObject placed = objects[i];
-            if (!IsThumbnailTerrain(placed)) continue;
+            if (!IsThumbnailTerrain(placed) || placed.type == PlacedObject.Type.TerrainHandle) continue;
 
-            if ((placed.type == PlacedObject.Type.LocalTerrain || placed.type == PlacedObject.Type.CurvedSlope) &&
-                placed.data is PlacedObject.LocalTerrainData local)
+            if (placed.type == PlacedObject.Type.LocalTerrain &&
+                placed.data is PlacedObject.LocalTerrainData localTerrain)
             {
-                AddSplineBand(
-                    result,
-                    local.spline,
+                AddSplineFlatBand(
+                    curves,
+                    fills,
+                    localTerrain.spline,
                     placed.pos,
-                    local.bottom,
-                    placed.type == PlacedObject.Type.CurvedSlope
-                        ? EditorMapGeometryKind.CurvedSlope
-                        : EditorMapGeometryKind.LocalTerrain,
+                    localTerrain.bottom,
+                    EditorMapGeometryKind.LocalTerrain,
+                    EditorMapGeometryKind.Detail,
                     0f,
                     1f);
+                continue;
+            }
+
+            if (placed.type == PlacedObject.Type.CurvedSlope &&
+                placed.data is PlacedObject.LocalTerrainData curvedSlope)
+            {
+                AddSplineThicknessBand(
+                    curves,
+                    fills,
+                    curvedSlope.spline,
+                    placed.pos,
+                    curvedSlope.bottom,
+                    EditorMapGeometryKind.CurvedSlope,
+                    EditorMapGeometryKind.Solid,
+                    0f,
+                    1f);
+                continue;
+            }
+
+            if (placed.type == PlacedObject.Type.SuperSlope &&
+                placed.data is PlacedObject.SuperSlopeData superSlope)
+            {
+                AddSuperSlope(curves, fills, placed.pos, superSlope);
                 continue;
             }
 
@@ -494,11 +533,13 @@ internal static class MapRoomGeometryPresentationHub
                 placed.data is QuicksandZoneData quicksand &&
                 quicksand.SurfaceSpline != null)
             {
-                AddSplineBand(
-                    result,
+                AddSplineFlatBand(
+                    curves,
+                    fills,
                     quicksand.SurfaceSpline,
                     placed.pos,
                     quicksand.BottomDepth,
+                    EditorMapGeometryKind.QuicksandBody,
                     EditorMapGeometryKind.QuicksandBody,
                     0f,
                     1f);
@@ -508,35 +549,149 @@ internal static class MapRoomGeometryPresentationHub
                 for (int interval = 0; interval < intervals.Count; interval++)
                 {
                     Vector2 range = intervals[interval];
-                    AddSplineBand(
-                        result,
+                    AddSplineFlatBand(
+                        curves,
+                        fills,
                         quicksand.SurfaceSpline,
                         placed.pos,
                         quicksand.BottomDepth,
+                        EditorMapGeometryKind.QuicksandMaterial,
                         EditorMapGeometryKind.QuicksandMaterial,
                         range.x,
                         range.y);
                 }
             }
         }
-
-        return result;
     }
 
-    private static void AddSplineBand(
-        List<EditorMapPolylineSnapshot> output,
+    private static void AddRoomTerrainCurve(
+        List<PlacedObject> objects,
+        float roomWidthTiles,
+        List<EditorMapPolylineSnapshot> curves,
+        List<EditorMapRectSnapshot> fills)
+    {
+        List<TerrainCurve.Handle> handles = new();
+        for (int i = 0; i < objects.Count; i++)
+        {
+            PlacedObject placed = objects[i];
+            if (placed == null || !placed.active || placed.type != PlacedObject.Type.TerrainHandle ||
+                placed.data is not PlacedObject.TerrainHandleData data)
+                continue;
+
+            handles.Add(new TerrainCurve.Handle(
+                data.leftOffset + placed.pos,
+                placed.pos,
+                data.rightOffset + placed.pos,
+                data.backHeight));
+        }
+
+        if (handles.Count < 2) return;
+        handles.Sort((a, b) => a.Middle.x.CompareTo(b.Middle.x));
+
+        float roomWidthPixels = Math.Max(PixelsPerTile, roomWidthTiles * PixelsPerTile);
+        int sampleCount = Mathf.Clamp(Mathf.CeilToInt(roomWidthPixels / 10f) + 1, 16, MaxCurveSamples);
+        List<EditorMapPointSnapshot> surface = new(sampleCount);
+        int handle = 0;
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float x = Mathf.Lerp(0f, roomWidthPixels, (float)i / (sampleCount - 1));
+            while (handle < handles.Count - 2 && handles[handle + 1].Middle.x < x) handle++;
+            float y = TerrainCurve.Handle.Sample(handles[handle], handles[handle + 1], x);
+            if (float.IsNaN(y) || float.IsInfinity(y)) continue;
+            surface.Add(new EditorMapPointSnapshot(x / PixelsPerTile, y / PixelsPerTile));
+        }
+
+        if (surface.Count < 2) return;
+        AddFlatFillRuns(fills, surface, 0f, EditorMapGeometryKind.Solid);
+        AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
+    }
+
+    private static void AddSplineFlatBand(
+        List<EditorMapPolylineSnapshot> curves,
+        List<EditorMapRectSnapshot> fills,
         BezierSpline spline,
         Vector2 origin,
         float depthPixels,
-        EditorMapGeometryKind kind,
+        EditorMapGeometryKind lineKind,
+        EditorMapGeometryKind fillKind,
         float startU,
         float endU)
     {
-        if (spline == null || endU <= startU + 0.0001f) return;
+        List<EditorMapPointSnapshot> surface = SampleSpline(spline, origin, startU, endU);
+        if (surface.Count < 2) return;
+
+        float bottomY = (origin.y - Math.Max(1f, depthPixels)) / PixelsPerTile;
+        AddFlatFillRuns(fills, surface, bottomY, fillKind);
+        AddSurfaceCurve(curves, surface, lineKind);
+    }
+
+    private static void AddSplineThicknessBand(
+        List<EditorMapPolylineSnapshot> curves,
+        List<EditorMapRectSnapshot> fills,
+        BezierSpline spline,
+        Vector2 origin,
+        float thicknessPixels,
+        EditorMapGeometryKind lineKind,
+        EditorMapGeometryKind fillKind,
+        float startU,
+        float endU)
+    {
+        List<EditorMapPointSnapshot> surface = SampleSpline(spline, origin, startU, endU);
+        if (surface.Count < 2) return;
+
+        float thicknessTiles = Math.Max(1f, thicknessPixels) / PixelsPerTile;
+        List<EditorMapPointSnapshot> back = new(surface.Count);
+        for (int i = 0; i < surface.Count; i++)
+            back.Add(new EditorMapPointSnapshot(surface[i].X, surface[i].Y - thicknessTiles));
+
+        AddPairedFillRuns(fills, surface, back, fillKind);
+        AddSurfaceCurve(curves, surface, lineKind);
+    }
+
+    private static void AddSuperSlope(
+        List<EditorMapPolylineSnapshot> curves,
+        List<EditorMapRectSnapshot> fills,
+        Vector2 origin,
+        PlacedObject.SuperSlopeData data)
+    {
+        Vector2 a = origin;
+        Vector2 b = origin + data.handlePos;
+        if (b.x < a.x)
+        {
+            Vector2 swap = a;
+            a = b;
+            b = swap;
+        }
+
+        float length = Math.Max(1f, Vector2.Distance(a, b));
+        int sampleCount = Mathf.Clamp(Mathf.CeilToInt(length / 10f) + 1, 2, 96);
+        float thicknessTiles = Math.Max(1f, data.bottom) / PixelsPerTile;
+        List<EditorMapPointSnapshot> surface = new(sampleCount);
+        List<EditorMapPointSnapshot> back = new(sampleCount);
+        for (int i = 0; i < sampleCount; i++)
+        {
+            Vector2 p = Vector2.Lerp(a, b, sampleCount <= 1 ? 0f : (float)i / (sampleCount - 1));
+            EditorMapPointSnapshot top = ToTilePoint(p);
+            surface.Add(top);
+            back.Add(new EditorMapPointSnapshot(top.X, top.Y - thicknessTiles));
+        }
+
+        AddPairedFillRuns(fills, surface, back, EditorMapGeometryKind.Solid);
+        AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
+    }
+
+    private static List<EditorMapPointSnapshot> SampleSpline(
+        BezierSpline spline,
+        Vector2 origin,
+        float startU,
+        float endU)
+    {
+        List<EditorMapPointSnapshot> surface = new();
+        if (spline == null || endU <= startU + 0.0001f) return surface;
 
         float sampledLength = Math.Max(1f, spline.GetFullLength * (endU - startU));
         int sampleCount = Mathf.Clamp(Mathf.CeilToInt(sampledLength / 10f) + 1, 8, MaxCurveSamples);
-        List<EditorMapPointSnapshot> surface = new(sampleCount);
+        surface.Capacity = sampleCount;
         for (int i = 0; i < sampleCount; i++)
         {
             float t = sampleCount <= 1 ? 0f : (float)i / (sampleCount - 1);
@@ -544,21 +699,75 @@ internal static class MapRoomGeometryPresentationHub
             Vector2 point = origin + EvaluateSplineByLength(spline, u);
             surface.Add(ToTilePoint(point));
         }
+        return surface;
+    }
 
-        surface = Simplify(surface, CurveSimplifyToleranceTiles);
-        if (surface.Count < 2) return;
-
-        float bottomY = (origin.y - Math.Max(1f, depthPixels)) / PixelsPerTile;
-        List<EditorMapPointSnapshot> polygon = new(surface.Count + 2);
-        polygon.AddRange(surface);
-        polygon.Add(new EditorMapPointSnapshot(surface[surface.Count - 1].X, bottomY));
-        polygon.Add(new EditorMapPointSnapshot(surface[0].X, bottomY));
+    private static void AddSurfaceCurve(
+        List<EditorMapPolylineSnapshot> output,
+        List<EditorMapPointSnapshot> surface,
+        EditorMapGeometryKind kind)
+    {
+        List<EditorMapPointSnapshot> simplified = Simplify(surface, CurveSimplifyToleranceTiles);
+        if (simplified.Count < 2) return;
         output.Add(new EditorMapPolylineSnapshot
         {
             Kind = kind,
-            Closed = true,
-            Points = polygon.ToArray()
+            Closed = false,
+            Points = simplified.ToArray()
         });
+    }
+
+    private static void AddFlatFillRuns(
+        List<EditorMapRectSnapshot> output,
+        List<EditorMapPointSnapshot> surface,
+        float bottomY,
+        EditorMapGeometryKind kind)
+    {
+        for (int i = 0; i < surface.Count - 1; i++)
+        {
+            EditorMapPointSnapshot a = surface[i];
+            EditorMapPointSnapshot b = surface[i + 1];
+            AddFillRun(output, a.X, b.X, a.Y, b.Y, bottomY, bottomY, kind);
+        }
+    }
+
+    private static void AddPairedFillRuns(
+        List<EditorMapRectSnapshot> output,
+        List<EditorMapPointSnapshot> front,
+        List<EditorMapPointSnapshot> back,
+        EditorMapGeometryKind kind)
+    {
+        int count = Math.Min(front.Count, back.Count);
+        for (int i = 0; i < count - 1; i++)
+        {
+            EditorMapPointSnapshot a = front[i];
+            EditorMapPointSnapshot b = front[i + 1];
+            EditorMapPointSnapshot c = back[i];
+            EditorMapPointSnapshot d = back[i + 1];
+            AddFillRun(output, a.X, b.X, a.Y, b.Y, c.Y, d.Y, kind);
+        }
+    }
+
+    private static void AddFillRun(
+        List<EditorMapRectSnapshot> output,
+        float x0,
+        float x1,
+        float frontY0,
+        float frontY1,
+        float backY0,
+        float backY1,
+        EditorMapGeometryKind kind)
+    {
+        float minX = Math.Min(x0, x1);
+        float width = Math.Abs(x1 - x0);
+        if (width < 0.0025f) return;
+
+        float minY = Math.Min(Math.Min(frontY0, frontY1), Math.Min(backY0, backY1));
+        float maxY = Math.Max(Math.Max(frontY0, frontY1), Math.Max(backY0, backY1));
+        float height = maxY - minY;
+        if (height < 0.0025f) return;
+
+        output.Add(new EditorMapRectSnapshot(minX, minY, width + 0.015f, height, kind));
     }
 
     private static Vector2 EvaluateSplineByLength(BezierSpline spline, float u)
@@ -643,16 +852,31 @@ internal static class MapRoomGeometryPresentationHub
         return px * px + py * py;
     }
 
+    private static EditorMapRectSnapshot[] MergeRuns(
+        EditorMapRectSnapshot[] baseRuns,
+        EditorMapRectSnapshot[] terrainRuns)
+    {
+        int baseCount = baseRuns?.Length ?? 0;
+        int terrainCount = terrainRuns?.Length ?? 0;
+        if (terrainCount == 0) return baseRuns ?? Array.Empty<EditorMapRectSnapshot>();
+        if (baseCount == 0) return terrainRuns ?? Array.Empty<EditorMapRectSnapshot>();
+
+        EditorMapRectSnapshot[] merged = new EditorMapRectSnapshot[baseCount + terrainCount];
+        Array.Copy(baseRuns, 0, merged, 0, baseCount);
+        Array.Copy(terrainRuns, 0, merged, baseCount, terrainCount);
+        return merged;
+    }
+
     private static void Publish(CacheEntry entry)
     {
         if (entry.PublishedRevision == entry.Revision) return;
         entry.Snapshot = new EditorMapRoomVisualSnapshot
         {
             Available = entry.WidthTiles > 0f && entry.HeightTiles > 0f,
-            DetailedRasterAvailable = entry.RasterInitialized,
+            DetailedRasterAvailable = entry.RasterInitialized || entry.TerrainFillRuns.Length > 0,
             WidthTiles = Math.Max(1f, entry.WidthTiles),
             HeightTiles = Math.Max(1f, entry.HeightTiles),
-            RasterRuns = entry.RasterRuns,
+            RasterRuns = MergeRuns(entry.BaseRasterRuns, entry.TerrainFillRuns),
             Curves = entry.Curves,
             Nodes = entry.Nodes
         };
