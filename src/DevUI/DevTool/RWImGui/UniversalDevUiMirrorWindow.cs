@@ -6,9 +6,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Movable frontend surface for the page-agnostic semantic mirror. It is intentionally separate
-/// from page-specific inspectors so the same generic renderer can be exercised against every
-/// active vanilla/RK/DryCycle/third-party DevInterface page during migration testing.
+/// Movable frontend surface for the page-agnostic semantic mirror and its generic audit status.
+/// It is intentionally separate from page-specific inspectors so the same compatibility path can
+/// be exercised against every active vanilla/RK/DryCycle/third-party DevInterface page.
 /// </summary>
 internal static class UniversalDevUiMirrorWindow
 {
@@ -18,11 +18,8 @@ internal static class UniversalDevUiMirrorWindow
         UniversalDevUiPresentationSnapshot snapshot = UniversalDevUiPresentationHub.Current;
         if (!snapshot.Available) return;
 
-        LegacyControlSnapshot[] controls = snapshot.Controls ?? Array.Empty<LegacyControlSnapshot>();
-        if (controls.Length == 0 && snapshot.UnmappedProtocolCount == 0) return;
-
         float width = Math.Min(520f, Math.Max(360f, display.X * 0.34f));
-        float height = Math.Min(620f, Math.Max(300f, display.Y * 0.58f));
+        float height = Math.Min(680f, Math.Max(320f, display.Y * 0.62f));
         float x = Math.Max(8f, display.X - width - 16f);
         float y = Math.Max(96f, Math.Min(display.Y - height - 8f, 180f));
 
@@ -42,6 +39,7 @@ internal static class UniversalDevUiMirrorWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("UniversalDevUiMirror");
+        DevUiPageCoverageView.Draw();
         UniversalDevUiMirrorView.Draw(snapshot);
         ImGui.End();
     }
