@@ -118,9 +118,9 @@ public sealed class DevUiMigrationCoverageSnapshot
 /// any optional mod. Unknown controls are always Unmapped until an adapter explicitly proves
 /// otherwise.
 ///
-/// Coverage is context-sensitive enough to avoid a dangerous false positive: the generic
-/// Button/Slider bridge currently exists only inside PlacedObjectRepresentation inspectors, so
-/// the same Button/Slider type elsewhere on a page remains Unmapped.
+/// Coverage is context-sensitive enough to avoid dangerous false positives: generic legacy
+/// adapters currently exist only inside PlacedObjectRepresentation inspectors, so the same
+/// control type elsewhere on a page remains Unmapped.
 /// </summary>
 public static class DevUiMigrationCoverage
 {
@@ -316,9 +316,10 @@ public static class DevUiMigrationCoverage
         if (!stockLabelFragment)
             AddObservation(node, path, insideRepresentation, pageType, output);
 
-        // Slider owns title/number labels, optional inherit button and SliderNub. Treat the slider
-        // as one migration obligation so its implementation details cannot distort coverage.
-        if (node is Slider) return;
+        // Composite controls are one migration obligation. Their internal presentation nodes do
+        // not represent separate user-facing capabilities and must not inflate coverage counts.
+        if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel)
+            return;
         if (node.subNodes == null) return;
 
         for (int i = 0; i < node.subNodes.Count; i++)
@@ -378,13 +379,34 @@ public static class DevUiMigrationCoverage
             return;
         }
 
-        // The existing object compatibility bridge recursively exposes arbitrary Button/Slider
-        // subclasses under the selected PlacedObjectRepresentation and delegates mutations back
-        // through Clicked/NubDragged. Do not apply this rule anywhere else.
+        // ButtonWithSelectPanel is a semantic selection popup, not a one-shot button. It creates a
+        // SelectPanel and routes the selected item through OnValueChange/IDevUISignals. Keep it
+        // visibly unmapped until a dedicated selection adapter proves that full behavior.
+        if (insideRepresentation && node is ButtonWithSelectPanel)
+        {
+            state = DevUiMigrationState.Unmapped;
+            note = "Composite select panel requires dedicated adapter";
+            return;
+        }
+
+        // The object compatibility bridge exposes these stock semantic controls under the selected
+        // PlacedObjectRepresentation and delegates back through their original behavior boundaries.
         if (insideRepresentation && node is Slider)
         {
             state = DevUiMigrationState.GenericAdapter;
             note = "PlacedObject legacy Slider bridge";
+            return;
+        }
+        if (insideRepresentation && node is Cycler)
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "PlacedObject legacy Cycler bridge";
+            return;
+        }
+        if (insideRepresentation && node is IntegerControl)
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "PlacedObject legacy IntegerControl bridge";
             return;
         }
         if (insideRepresentation && node is Button)
