@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select、文本输入与方向选择；无法证明等价的复合控件仍保持未映射。",
-            "Buttons, sliders, cyclers, integers, selects, text inputs and direction pickers are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
+            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
+            "Buttons, sliders, cyclers, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -315,11 +315,17 @@ internal static class ObjectInspectorView
                 case LegacyControlKind.Select:
                     DrawLegacySelect(inspector, control, stateKey, visibleLabel);
                     break;
+                case LegacyControlKind.PanelSelect:
+                    DrawLegacyPanelSelect(inspector, control, stateKey, visibleLabel);
+                    break;
                 case LegacyControlKind.Text:
                     DrawLegacyText(inspector, control, stateKey, visibleLabel);
                     break;
                 case LegacyControlKind.Direction:
                     DrawLegacyDirection(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Color:
+                    DrawLegacyColor(inspector, control, stateKey, visibleLabel);
                     break;
             }
         }
@@ -411,6 +417,21 @@ internal static class ObjectInspectorView
             visibleLabel,
             "LegacySelectOption_",
             i => LegacyDevInterfaceBridge.SelectAction(control.Path, i));
+    }
+
+    private static void DrawLegacyPanelSelect(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        DrawLegacyChoice(
+            inspector,
+            control,
+            stateKey,
+            visibleLabel,
+            "LegacyPanelSelectOption_",
+            i => LegacyDevInterfaceBridge.PanelSelectAction(control.Path, i));
     }
 
     private static void DrawLegacyChoice(
@@ -532,6 +553,40 @@ internal static class ObjectInspectorView
             DevToolTooltip.Show(DevToolUiSettings.T(
                 "提交时会标准化为单位方向；零向量按向上处理。",
                 "Normalized to a unit direction on commit; a zero vector becomes up."));
+    }
+
+    private static void DrawLegacyColor(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string editKey = "legacy-color:" + stateKey;
+        Num.Vector4 value = Get(
+            ColorEdits,
+            editKey,
+            new Num.Vector4(control.X, control.Y, control.Z, control.W));
+        string label = visibleLabel + "##DevToolLegacyColor_" + stateKey;
+        bool changed = ImGui.ColorEdit4(label, ref value, ImGuiColorEditFlags.NoAlpha);
+        ColorEdits[editKey] = value;
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacyColor,
+                inspector.ObjectIndex,
+                text: control.Path,
+                propertyValue: new EditorPropertyValue(
+                    EditorPropertyKind.Color,
+                    x: value.X,
+                    y: value.Y,
+                    z: value.Z,
+                    w: value.W)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            ColorEdits[editKey] = new Num.Vector4(control.X, control.Y, control.Z, control.W);
+        }
     }
 
     private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
