@@ -109,17 +109,11 @@ internal static class WorldTopologyCommandQueue
                 break;
 
             case WorldTopologyCommandKind.RemoveExplicitMapping:
-                if (WorldTopologyRegistry.RemoveEdge(region, command.EdgeId))
-                    Succeed("Removed explicit connection mapping.");
-                else
-                    Fail("The explicit connection mapping no longer exists.");
+                RemoveExplicitMapping(page.world, region, command.EdgeId);
                 break;
 
             case WorldTopologyCommandKind.SetDirection:
-                if (WorldTopologyRegistry.SetDirection(region, command.EdgeId, command.Direction))
-                    Succeed("Changed connection direction to " + DirectionText(command.Direction) + ".");
-                else
-                    Fail("Connection direction was unchanged or the mapping no longer exists.");
+                SetDirection(page.world, region, command.EdgeId, command.Direction);
                 break;
         }
     }
@@ -144,8 +138,28 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out string error))
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error))
         {
+            Fail(error);
+            return;
+        }
+
+        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out error))
+        {
+            Fail(error);
+            return;
+        }
+
+        if (!ApplyDirectionToWorld(
+                region,
+                roomA,
+                command.NodeA,
+                roomB,
+                command.NodeB,
+                command.Direction,
+                out error))
+        {
+            WorldTopologyRegistry.RemoveEdge(region, edgeId);
             Fail(error);
             return;
         }
@@ -176,30 +190,31 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!WorldTextRegistry.EnsureLoaded(region) ||
-            !WorldTextRegistry.HasRoom(region, roomA.name) ||
-            !WorldTextRegistry.HasRoom(region, roomB.name))
-        {
-            Fail(WorldTextRegistry.LoadError ?? "The editable world.txt does not contain both rooms.");
-            return;
-        }
-
-        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out string error))
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error))
         {
             Fail(error);
             return;
         }
 
-        if (!WorldTextRegistry.TrySetConnection(region, roomA.name, command.NodeA, roomB.name, out error) ||
-            !WorldTextRegistry.TrySetConnection(region, roomB.name, command.NodeB, roomA.name, out error))
+        if (!TryAddTopologyEdge(region, roomA, command.NodeA, roomB, command.NodeB, command.Direction, out string edgeId, out error))
         {
-            WorldTopologyRegistry.RemoveEdge(region, edgeId);
-            Fail(error ?? "Could not update world.txt.");
+            Fail(error);
             return;
         }
 
-        SetLiveConnection(roomA, command.NodeA, roomB.index);
-        SetLiveConnection(roomB, command.NodeB, roomA.index);
+        if (!ApplyDirectionToWorld(
+                region,
+                roomA,
+                command.NodeA,
+                roomB,
+                command.NodeB,
+                command.Direction,
+                out error))
+        {
+            WorldTopologyRegistry.RemoveEdge(region, edgeId);
+            Fail(error);
+            return;
+        }
 
         Succeed(
             "Created " + roomA.name + ":" + command.NodeA + " " + DirectionGlyph(command.Direction) + " " +
@@ -214,14 +229,14 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!WorldTextRegistry.EnsureLoaded(region))
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error))
         {
-            Fail(WorldTextRegistry.LoadError ?? "world.txt is unavailable.");
+            Fail(error);
             return;
         }
 
-        if (!WorldTextRegistry.TrySetConnection(region, roomA.name, command.NodeA, "DISCONNECTED", out string error) ||
-            !WorldTextRegistry.TrySetConnection(region, roomB.name, command.NodeB, "DISCONNECTED", out error))
+        if (!SetWorldConnection(region, roomA, command.NodeA, null, out error) ||
+            !SetWorldConnection(region, roomB, command.NodeB, null, out error))
         {
             Fail(error ?? "Could not disconnect the endpoints in world.txt.");
             return;
@@ -236,6 +251,170 @@ internal static class WorldTopologyCommandQueue
         Succeed(
             "Disconnected " + roomA.name + ":" + command.NodeA + " and " +
             roomB.name + ":" + command.NodeB + ".");
+    }
+
+    private static void SetDirection(
+        World world,
+        string region,
+        string edgeId,
+        WorldConnectionDirection direction)
+    {
+        if (!TryFindEdge(region, edgeId, out WorldConnectionEdge edge))
+        {
+            Fail("The explicit connection mapping no longer exists.");
+            return;
+        }
+        if (edge.Direction == direction)
+        {
+            Succeed("Connection direction is already " + DirectionText(direction) + ".");
+            return;
+        }
+
+        AbstractRoom roomA = world.GetAbstractRoom(edge.A.Room);
+        AbstractRoom roomB = world.GetAbstractRoom(edge.B.Room);
+        if (roomA == null || roomB == null ||
+            !IsExit(roomA, edge.A.NodeIndex) ||
+            !IsExit(roomB, edge.B.NodeIndex))
+        {
+            Fail("The connection endpoints are no longer valid in the loaded world.");
+            return;
+        }
+
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error) ||
+            !ApplyDirectionToWorld(
+                region,
+                roomA,
+                edge.A.NodeIndex,
+                roomB,
+                edge.B.NodeIndex,
+                direction,
+                out error))
+        {
+            Fail(error);
+            return;
+        }
+
+        if (!WorldTopologyRegistry.SetDirection(region, edgeId, direction))
+        {
+            Fail("Could not update the connection direction in WorldTopology.json.");
+            return;
+        }
+
+        Succeed("Changed connection direction to " + DirectionText(direction) + ".");
+    }
+
+    private static void RemoveExplicitMapping(World world, string region, string edgeId)
+    {
+        if (!TryFindEdge(region, edgeId, out WorldConnectionEdge edge))
+        {
+            Fail("The explicit connection mapping no longer exists.");
+            return;
+        }
+
+        AbstractRoom roomA = world.GetAbstractRoom(edge.A.Room);
+        AbstractRoom roomB = world.GetAbstractRoom(edge.B.Room);
+        if (roomA == null || roomB == null ||
+            !IsExit(roomA, edge.A.NodeIndex) ||
+            !IsExit(roomB, edge.B.NodeIndex))
+        {
+            Fail("The connection endpoints are no longer valid in the loaded world.");
+            return;
+        }
+
+        // Vanilla needs reciprocal room references in order to recover an entrance node through
+        // ExitIndex(sourceRoom). Restore that shape before removing the exact endpoint sidecar.
+        if (!EnsureWorldTextRooms(region, roomA, roomB, out string error) ||
+            !ApplyDirectionToWorld(
+                region,
+                roomA,
+                edge.A.NodeIndex,
+                roomB,
+                edge.B.NodeIndex,
+                WorldConnectionDirection.Bidirectional,
+                out error))
+        {
+            Fail(error);
+            return;
+        }
+
+        if (!WorldTopologyRegistry.RemoveEdge(region, edgeId))
+        {
+            Fail("The explicit connection mapping no longer exists.");
+            return;
+        }
+
+        Succeed("Removed explicit mapping and restored a vanilla bidirectional room link.");
+    }
+
+    private static bool ApplyDirectionToWorld(
+        string region,
+        AbstractRoom roomA,
+        int nodeA,
+        AbstractRoom roomB,
+        int nodeB,
+        WorldConnectionDirection direction,
+        out string error)
+    {
+        error = null;
+        string targetFromA = direction == WorldConnectionDirection.BToA ? null : roomB.name;
+        string targetFromB = direction == WorldConnectionDirection.AToB ? null : roomA.name;
+
+        if (!SetWorldConnection(region, roomA, nodeA, targetFromA, out error)) return false;
+        if (!SetWorldConnection(region, roomB, nodeB, targetFromB, out error)) return false;
+
+        SetLiveConnection(roomA, nodeA, targetFromA == null ? -1 : roomB.index);
+        SetLiveConnection(roomB, nodeB, targetFromB == null ? -1 : roomA.index);
+        return true;
+    }
+
+    private static bool SetWorldConnection(
+        string region,
+        AbstractRoom room,
+        int nodeIndex,
+        string targetRoom,
+        out string error)
+    {
+        return WorldTextRegistry.TrySetConnection(
+            region,
+            room.name,
+            nodeIndex,
+            targetRoom ?? "DISCONNECTED",
+            out error);
+    }
+
+    private static bool EnsureWorldTextRooms(
+        string region,
+        AbstractRoom roomA,
+        AbstractRoom roomB,
+        out string error)
+    {
+        error = null;
+        if (!WorldTextRegistry.EnsureLoaded(region))
+        {
+            error = WorldTextRegistry.LoadError ?? "world.txt is unavailable.";
+            return false;
+        }
+        if (!WorldTextRegistry.HasRoom(region, roomA.name) ||
+            !WorldTextRegistry.HasRoom(region, roomB.name))
+        {
+            error = "The editable world.txt does not contain both endpoint rooms.";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool TryFindEdge(string region, string edgeId, out WorldConnectionEdge edge)
+    {
+        edge = null;
+        if (string.IsNullOrWhiteSpace(edgeId)) return false;
+        WorldConnectionEdge[] edges = WorldTopologyRegistry.GetRegionEdges(region);
+        for (int i = 0; i < edges.Length; i++)
+        {
+            if (!string.Equals(edges[i].Id, edgeId, StringComparison.OrdinalIgnoreCase)) continue;
+            edge = edges[i];
+            return true;
+        }
+        return false;
     }
 
     private static bool TryResolveEndpoints(
