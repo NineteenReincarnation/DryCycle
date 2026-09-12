@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -8,15 +7,9 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Objects;
 
 /// <summary>
-/// Native ImGui-facing inspector adapter for POM ManagedData.
-///
-/// RegionKit uses POM as a hard dependency and a large share of its placed objects are backed by
-/// ManagedData/ManagedField definitions. Instead of mirroring every generated DevInterface panel,
-/// this adapter reads the same ManagedField metadata and drives ManagedData.GetValue/SetValue.
-/// Unknown/custom ManagedField subclasses remain editable through their own ToString/FromString
-/// serialization contract, so custom POM fields do not silently disappear from the rebuilt UI.
-///
-/// No compile-time POM reference is taken; POM remains an optional runtime dependency for DryCycle.
+/// Native ImGui-facing inspector adapter for POM ManagedData. The adapter consumes POM's own
+/// ManagedField definitions rather than its generated legacy DevInterface controls. POM remains
+/// an optional runtime dependency: all interaction is reflection based.
 /// </summary>
 public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
 {
@@ -29,6 +22,7 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     private const string Vector2FieldTypeName = "Pom.Pom+Vector2Field";
     private const string ColorFieldTypeName = "Pom.Pom+ColorField";
     private const string EnumFieldDefinitionName = "Pom.Pom+EnumField`1";
+    private const string ExtEnumFieldDefinitionName = "Pom.Pom+ExtEnumField`1";
 
     public static readonly PomManagedDataInspectorAdapter Instance = new();
     private static bool registered;
@@ -42,16 +36,13 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         ObjectInspectorRegistry.Register(Instance, 1000);
     }
 
-    public static bool IsManagedData(object data) =>
-        data != null && IsTypeOrBase(data.GetType(), ManagedDataTypeName);
-
+    public static bool IsManagedData(object data) => data != null && IsTypeOrBase(data.GetType(), ManagedDataTypeName);
     public bool CanInspect(PlacedObject target) => IsManagedData(target?.data);
 
     public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target)
     {
         object data = target?.data;
         if (!IsManagedData(data)) return Array.Empty<EditorPropertySnapshot>();
-
         Array fields = ReadMember(data, "fields") as Array;
         if (fields == null || fields.Length == 0) return Array.Empty<EditorPropertySnapshot>();
 
@@ -60,13 +51,9 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         {
             result.Add(new EditorPropertySnapshot
             {
-                Key = "pom.__panelPos",
-                DisplayName = "Legacy Panel Position",
-                Group = "POM Layout",
+                Key = "pom.__panelPos", DisplayName = "Legacy Panel Position", Group = "POM Layout",
                 Source = "POM ManagedData · preserved for serialization compatibility",
-                Kind = EditorPropertyKind.Vector2,
-                X = panelPos.x,
-                Y = panelPos.y
+                Kind = EditorPropertyKind.Vector2, X = panelPos.x, Y = panelPos.y
             });
         }
 
@@ -74,13 +61,10 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         {
             object field = fields.GetValue(i);
             if (field == null || !IsTypeOrBase(field.GetType(), ManagedFieldTypeName)) continue;
-
             string key = ReadMember(field, "key") as string;
             if (string.IsNullOrEmpty(key)) continue;
-            object value = GetManagedValue(data, key);
-            result.Add(CaptureField(field, key, value, i));
+            result.Add(CaptureField(field, key, GetManagedValue(data, key)));
         }
-
         return result;
     }
 
@@ -88,7 +72,6 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     {
         object data = target?.data;
         if (!IsManagedData(data) || string.IsNullOrEmpty(key)) return false;
-
         if (key == "pom.__panelPos")
         {
             if (value.Kind != EditorPropertyKind.Vector2) return false;
@@ -101,23 +84,17 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         object field = FindManagedField(data, managedKey);
         if (field == null) return false;
 
-        object current = GetManagedValue(data, managedKey);
-        object next;
         Type fieldType = field.GetType();
-
+        object next;
         if (IsTypeOrBase(fieldType, FloatFieldTypeName))
         {
             if (value.Kind != EditorPropertyKind.Float) return false;
-            float min = ReadFloat(field, "min", float.NegativeInfinity);
-            float max = ReadFloat(field, "max", float.PositiveInfinity);
-            next = Mathf.Clamp(value.X, min, max);
+            next = Mathf.Clamp(value.X, ReadFloat(field, "min", float.NegativeInfinity), ReadFloat(field, "max", float.PositiveInfinity));
         }
         else if (IsTypeOrBase(fieldType, IntegerFieldTypeName))
         {
             if (value.Kind != EditorPropertyKind.Integer) return false;
-            int min = ReadInt(field, "min", int.MinValue);
-            int max = ReadInt(field, "max", int.MaxValue);
-            next = Mathf.Clamp(value.Integer, min, max);
+            next = Mathf.Clamp(value.Integer, ReadInt(field, "min", int.MinValue), ReadInt(field, "max", int.MaxValue));
         }
         else if (IsTypeOrBase(fieldType, BooleanFieldTypeName))
         {
@@ -127,8 +104,7 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         else if (IsTypeOrBase(fieldType, StringFieldTypeName))
         {
             if (value.Kind != EditorPropertyKind.String) return false;
-            next = ParseFieldText(field, value.Text ?? string.Empty, out bool parsedString)
-                ?? value.Text ?? string.Empty;
+            next = ParseFieldText(field, value.Text ?? string.Empty, out bool parsedString);
             if (!parsedString) next = value.Text ?? string.Empty;
         }
         else if (IsTypeOrBase(fieldType, Vector2FieldTypeName))
@@ -141,11 +117,10 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
             if (value.Kind != EditorPropertyKind.Color) return false;
             next = new Color(value.X, value.Y, value.Z, value.W);
         }
-        else if (TryGetEnumOptions(fieldType, field, out object[] enumValues, out _))
+        else if (TryGetChoiceOptions(fieldType, field, out object[] choiceValues, out _))
         {
-            if (value.Kind != EditorPropertyKind.Enum || value.Integer < 0 || value.Integer >= enumValues.Length)
-                return false;
-            next = enumValues[value.Integer];
+            if (value.Kind != EditorPropertyKind.Enum || value.Integer < 0 || value.Integer >= choiceValues.Length) return false;
+            next = choiceValues[value.Integer];
         }
         else
         {
@@ -153,12 +128,10 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
             next = ParseFieldText(field, value.Text ?? string.Empty, out bool parsed);
             if (!parsed) return false;
         }
-
-        if (next == null && current != null) return false;
-        return SetManagedValue(data, managedKey, next);
+        return next != null && SetManagedValue(data, managedKey, next);
     }
 
-    private static EditorPropertySnapshot CaptureField(object field, string key, object value, int index)
+    private static EditorPropertySnapshot CaptureField(object field, string key, object value)
     {
         Type type = field.GetType();
         string display = ReadDisplayName(field, key);
@@ -167,135 +140,92 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
 
         if (IsTypeOrBase(type, FloatFieldTypeName))
         {
-            float current = ConvertFloat(value, 0f);
-            float min = ReadFloat(field, "min", current - 1f);
-            float max = ReadFloat(field, "max", current + 1f);
+            float current = ConvertFloat(value, 0f), min = ReadFloat(field, "min", current - 1f), max = ReadFloat(field, "max", current + 1f);
             float increment = Math.Abs(ReadFloat(field, "increment", 0.1f));
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Float,
-                X = current,
-                Min = min,
-                Max = max,
-                Step = increment <= 0f ? 0.1f : increment,
-                HasRange = IsFinite(min) && IsFinite(max) && max >= min
-            };
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Float, X = current, Min = min, Max = max, Step = increment <= 0f ? 0.1f : increment,
+                HasRange = IsFinite(min) && IsFinite(max) && max >= min };
         }
-
         if (IsTypeOrBase(type, IntegerFieldTypeName))
         {
-            int current = ConvertInt(value, 0);
-            int min = ReadInt(field, "min", current - 100);
-            int max = ReadInt(field, "max", current + 100);
-            int increment = Math.Abs(ReadInt(field, "increment", 1));
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Integer,
-                IntegerValue = current,
-                Min = min,
-                Max = max,
-                Step = Math.Max(1, increment),
-                HasRange = max >= min
-            };
+            int current = ConvertInt(value, 0), min = ReadInt(field, "min", current - 100), max = ReadInt(field, "max", current + 100);
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Integer, IntegerValue = current, Min = min, Max = max, Step = 1f, HasRange = max >= min };
         }
-
         if (IsTypeOrBase(type, BooleanFieldTypeName))
-        {
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Boolean,
-                BooleanValue = value is bool boolean && boolean
-            };
-        }
-
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Boolean, BooleanValue = value is bool boolean && boolean };
         if (IsTypeOrBase(type, StringFieldTypeName))
-        {
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.String,
-                StringValue = value?.ToString() ?? string.Empty
-            };
-        }
-
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.String, StringValue = value?.ToString() ?? string.Empty };
         if (IsTypeOrBase(type, Vector2FieldTypeName) && value is Vector2 vector)
-        {
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Vector2,
-                X = vector.x,
-                Y = vector.y
-            };
-        }
-
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Vector2, X = vector.x, Y = vector.y };
         if (IsTypeOrBase(type, ColorFieldTypeName) && value is Color color)
-        {
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Color,
-                X = color.r,
-                Y = color.g,
-                Z = color.b,
-                W = color.a
-            };
-        }
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Color, X = color.r, Y = color.g, Z = color.b, W = color.a };
 
-        if (TryGetEnumOptions(type, field, out object[] values, out string[] names))
+        if (TryGetChoiceOptions(type, field, out object[] values, out string[] names))
         {
-            int selected = -1;
-            for (int i = 0; i < values.Length; i++)
-            {
-                if (Equals(values[i], value) || string.Equals(values[i]?.ToString(), value?.ToString(), StringComparison.Ordinal))
-                {
-                    selected = i;
-                    break;
-                }
-            }
-            return new EditorPropertySnapshot
-            {
-                Key = propertyKey,
-                DisplayName = display,
-                Group = "POM Managed Fields",
-                Source = source,
-                Kind = EditorPropertyKind.Enum,
-                IntegerValue = selected,
-                StringValue = value?.ToString() ?? string.Empty,
-                Options = names
-            };
+            int selected = FindChoice(values, value);
+            return new EditorPropertySnapshot { Key = propertyKey, DisplayName = display, Group = "POM Managed Fields", Source = source,
+                Kind = EditorPropertyKind.Enum, IntegerValue = selected, StringValue = value?.ToString() ?? string.Empty, Options = names };
         }
 
         return new EditorPropertySnapshot
         {
-            Key = propertyKey,
-            DisplayName = display,
-            Group = "POM Managed Fields · Serialized",
+            Key = propertyKey, DisplayName = display, Group = "POM Managed Fields · Serialized",
             Source = source + " · custom field uses its own POM ToString/FromString contract",
-            Kind = EditorPropertyKind.String,
-            StringValue = SerializeFieldValue(field, value)
+            Kind = EditorPropertyKind.String, StringValue = SerializeFieldValue(field, value)
         };
+    }
+
+    private static bool TryGetChoiceOptions(Type fieldType, object field, out object[] values, out string[] names)
+    {
+        if (TryGetEnumOptions(fieldType, field, out values, out names)) return true;
+        return TryGetExtEnumOptions(fieldType, field, out values, out names);
+    }
+
+    private static bool TryGetEnumOptions(Type fieldType, object field, out object[] values, out string[] names)
+    {
+        values = Array.Empty<object>(); names = Array.Empty<string>();
+        Type enumFieldType = FindGenericBase(fieldType, EnumFieldDefinitionName);
+        if (enumFieldType == null) return false;
+        Type enumType = enumFieldType.GetGenericArguments()[0];
+        if (!enumType.IsEnum) return false;
+        Array possible = ReadMember(field, "PossibleValues") as Array ?? ReadMember(field, "_possibleValues") as Array;
+        if (possible == null || possible.Length == 0) possible = Enum.GetValues(enumType);
+        CopyChoices(possible, out values, out names);
+        return values.Length > 0;
+    }
+
+    private static bool TryGetExtEnumOptions(Type fieldType, object field, out object[] values, out string[] names)
+    {
+        values = Array.Empty<object>(); names = Array.Empty<string>();
+        if (FindGenericBase(fieldType, ExtEnumFieldDefinitionName) == null) return false;
+        // POM's protected PossibleValues performs its own valuesVersion refresh and honors any
+        // explicit allowed-value subset. Reading it is safer than reconstructing ExtEnum globals.
+        Array possible = ReadMember(field, "PossibleValues") as Array ?? ReadMember(field, "_possibleValues") as Array;
+        if (possible == null || possible.Length == 0) return false;
+        CopyChoices(possible, out values, out names);
+        return values.Length > 0;
+    }
+
+    private static void CopyChoices(Array source, out object[] values, out string[] names)
+    {
+        values = new object[source?.Length ?? 0]; names = new string[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = source.GetValue(i);
+            names[i] = values[i]?.ToString() ?? string.Empty;
+        }
+    }
+
+    private static int FindChoice(object[] values, object current)
+    {
+        for (int i = 0; i < values.Length; i++)
+            if (Equals(values[i], current) || string.Equals(values[i]?.ToString(), current?.ToString(), StringComparison.Ordinal)) return i;
+        return -1;
     }
 
     private static object FindManagedField(object data, string key)
@@ -305,8 +235,7 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         for (int i = 0; i < fields.Length; i++)
         {
             object field = fields.GetValue(i);
-            if (field == null) continue;
-            if (string.Equals(ReadMember(field, "key") as string, key, StringComparison.Ordinal)) return field;
+            if (field != null && string.Equals(ReadMember(field, "key") as string, key, StringComparison.Ordinal)) return field;
         }
         return null;
     }
@@ -316,14 +245,9 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         try
         {
             MethodInfo method = FindGenericMethod(data?.GetType(), "GetValue", 1, 1);
-            if (method == null) return null;
-            return method.MakeGenericMethod(typeof(object)).Invoke(data, new object[] { key });
+            return method?.MakeGenericMethod(typeof(object)).Invoke(data, new object[] { key });
         }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool POM GetValue failed for '" + key + "': " + error.Message);
-            return null;
-        }
+        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool POM GetValue failed for '" + key + "': " + error.Message); return null; }
     }
 
     private static bool SetManagedValue(object data, string key, object value)
@@ -336,84 +260,40 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
             method.MakeGenericMethod(value.GetType()).Invoke(data, new[] { (object)key, value });
             return true;
         }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool POM SetValue failed for '" + key + "': " + error.Message);
-            return false;
-        }
+        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool POM SetValue failed for '" + key + "': " + error.Message); return false; }
     }
 
     private static MethodInfo FindGenericMethod(Type type, string name, int genericArguments, int parameters)
     {
-        Type current = type;
-        while (current != null)
+        for (Type current = type; current != null; current = current.BaseType)
         {
             MethodInfo[] methods = current.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             for (int i = 0; i < methods.Length; i++)
             {
                 MethodInfo method = methods[i];
-                if (!string.Equals(method.Name, name, StringComparison.Ordinal) || !method.IsGenericMethodDefinition) continue;
-                if (method.GetGenericArguments().Length != genericArguments || method.GetParameters().Length != parameters) continue;
-                return method;
+                if (string.Equals(method.Name, name, StringComparison.Ordinal) && method.IsGenericMethodDefinition &&
+                    method.GetGenericArguments().Length == genericArguments && method.GetParameters().Length == parameters) return method;
             }
-            current = current.BaseType;
         }
         return null;
     }
 
-    private static bool TryGetEnumOptions(Type fieldType, object field, out object[] values, out string[] names)
-    {
-        values = Array.Empty<object>();
-        names = Array.Empty<string>();
-        Type enumFieldType = FindGenericBase(fieldType, EnumFieldDefinitionName);
-        if (enumFieldType == null) return false;
-        Type enumType = enumFieldType.GetGenericArguments()[0];
-        if (!enumType.IsEnum) return false;
-
-        object possibleRaw = ReadMember(field, "_possibleValues");
-        Array possible = possibleRaw as Array;
-        if (possible == null || possible.Length == 0)
-            possible = Enum.GetValues(enumType);
-
-        values = new object[possible.Length];
-        names = new string[possible.Length];
-        for (int i = 0; i < possible.Length; i++)
-        {
-            object entry = possible.GetValue(i);
-            values[i] = entry;
-            names[i] = entry?.ToString() ?? string.Empty;
-        }
-        return true;
-    }
-
     private static Type FindGenericBase(Type type, string genericDefinitionName)
     {
-        Type current = type;
-        while (current != null)
-        {
-            if (current.IsGenericType && string.Equals(current.GetGenericTypeDefinition().FullName, genericDefinitionName, StringComparison.Ordinal))
-                return current;
-            current = current.BaseType;
-        }
+        for (Type current = type; current != null; current = current.BaseType)
+            if (current.IsGenericType && string.Equals(current.GetGenericTypeDefinition().FullName, genericDefinitionName, StringComparison.Ordinal)) return current;
         return null;
     }
 
     private static string SerializeFieldValue(object field, object value)
     {
-        if (field == null) return value?.ToString() ?? string.Empty;
         try
         {
-            MethodInfo method = field.GetType().GetMethod("ToString",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(object) },
-                null);
+            MethodInfo method = field?.GetType().GetMethod("ToString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new[] { typeof(object) }, null);
             return method?.Invoke(field, new[] { value })?.ToString() ?? value?.ToString() ?? string.Empty;
         }
-        catch
-        {
-            return value?.ToString() ?? string.Empty;
-        }
+        catch { return value?.ToString() ?? string.Empty; }
     }
 
     private static object ParseFieldText(object field, string text, out bool parsed)
@@ -421,11 +301,8 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         parsed = false;
         try
         {
-            MethodInfo method = field?.GetType().GetMethod("FromString",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(string) },
-                null);
+            MethodInfo method = field?.GetType().GetMethod("FromString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new[] { typeof(string) }, null);
             if (method == null) return null;
             object value = method.Invoke(field, new object[] { text ?? string.Empty });
             parsed = value != null;
@@ -436,34 +313,24 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
             Plugin.Logger?.LogWarning("DevTool POM field parse rejected value: " + (error.InnerException?.Message ?? error.Message));
             return null;
         }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool POM field parse failed: " + error.Message);
-            return null;
-        }
+        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool POM field parse failed: " + error.Message); return null; }
     }
 
     private static string ReadDisplayName(object field, string fallback)
     {
         string display = ReadMember(field, "displayName") as string;
-        if (!string.IsNullOrWhiteSpace(display)) return display.Trim().TrimEnd(':').Trim();
-        return string.IsNullOrWhiteSpace(fallback) ? "Field" : fallback;
+        return !string.IsNullOrWhiteSpace(display) ? display.Trim().TrimEnd(':').Trim() : (string.IsNullOrWhiteSpace(fallback) ? "Field" : fallback);
     }
 
     private static object ReadMember(object instance, string name)
     {
         if (instance == null || string.IsNullOrEmpty(name)) return null;
-        Type current = instance.GetType();
-        while (current != null)
+        for (Type current = instance.GetType(); current != null; current = current.BaseType)
         {
-            FieldInfo field = current.GetField(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            FieldInfo field = current.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             if (field != null) return field.GetValue(instance);
-            PropertyInfo property = current.GetProperty(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (property != null && property.CanRead && property.GetIndexParameters().Length == 0)
-                return property.GetValue(instance, null);
-            current = current.BaseType;
+            PropertyInfo property = current.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property != null && property.CanRead && property.GetIndexParameters().Length == 0) return property.GetValue(instance, null);
         }
         return null;
     }
@@ -471,66 +338,33 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     private static bool WriteMember(object instance, string name, object value)
     {
         if (instance == null || string.IsNullOrEmpty(name)) return false;
-        Type current = instance.GetType();
-        while (current != null)
+        for (Type current = instance.GetType(); current != null; current = current.BaseType)
         {
-            FieldInfo field = current.GetField(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (field != null && !field.IsInitOnly && (value == null || field.FieldType.IsInstanceOfType(value)))
-            {
-                field.SetValue(instance, value);
-                return true;
-            }
-            PropertyInfo property = current.GetProperty(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0 &&
-                (value == null || property.PropertyType.IsInstanceOfType(value)))
-            {
-                property.SetValue(instance, value, null);
-                return true;
-            }
-            current = current.BaseType;
+            FieldInfo field = current.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null && !field.IsInitOnly && (value == null || field.FieldType.IsInstanceOfType(value))) { field.SetValue(instance, value); return true; }
+            PropertyInfo property = current.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0 && (value == null || property.PropertyType.IsInstanceOfType(value)))
+            { property.SetValue(instance, value, null); return true; }
         }
         return false;
     }
 
     private static bool IsTypeOrBase(Type type, string fullName)
     {
-        Type current = type;
-        while (current != null)
-        {
+        for (Type current = type; current != null; current = current.BaseType)
             if (string.Equals(current.FullName, fullName, StringComparison.Ordinal)) return true;
-            current = current.BaseType;
-        }
         return false;
     }
 
     private static float ReadFloat(object instance, string name, float fallback)
-    {
-        object value = ReadMember(instance, name);
-        return value == null ? fallback : ConvertFloat(value, fallback);
-    }
-
+    { object value = ReadMember(instance, name); return value == null ? fallback : ConvertFloat(value, fallback); }
     private static int ReadInt(object instance, string name, int fallback)
-    {
-        object value = ReadMember(instance, name);
-        return value == null ? fallback : ConvertInt(value, fallback);
-    }
-
+    { object value = ReadMember(instance, name); return value == null ? fallback : ConvertInt(value, fallback); }
     private static float ConvertFloat(object value, float fallback)
-    {
-        try { return Convert.ToSingle(value, CultureInfo.InvariantCulture); }
-        catch { return fallback; }
-    }
-
+    { try { return Convert.ToSingle(value, CultureInfo.InvariantCulture); } catch { return fallback; } }
     private static int ConvertInt(object value, int fallback)
-    {
-        try { return Convert.ToInt32(value, CultureInfo.InvariantCulture); }
-        catch { return fallback; }
-    }
-
+    { try { return Convert.ToInt32(value, CultureInfo.InvariantCulture); } catch { return fallback; } }
     private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
-
     private static string EncodeKey(string key) => Uri.EscapeDataString(key ?? string.Empty);
     private static string DecodeKey(string key) => Uri.UnescapeDataString(key ?? string.Empty);
 }
