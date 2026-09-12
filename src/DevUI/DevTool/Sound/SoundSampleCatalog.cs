@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using DevInterface;
 
 namespace DryCycle.DevUI.DevTool.Sound;
@@ -13,22 +12,43 @@ internal static class SoundSampleCatalog
 
     private static readonly Dictionary<string, EditorSoundSampleSnapshot> samples =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, string> looseAmbientFiles =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, ModManager.Mod> modAmbientOwners =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, ModManager.Mod> officialDlcAmbientOwners =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private static SoundPage observedPage;
+    private static string[] observedNames;
+    private static EditorSoundSampleSnapshot[] sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
+    private static bool sortedDirty;
 
     internal static EditorSoundSampleSnapshot[] Refresh(SoundPage page)
     {
         if (page == null)
         {
-            observedPage = null;
-            samples.Clear();
+            Reset();
             return Array.Empty<EditorSoundSampleSnapshot>();
         }
 
-        if (!ReferenceEquals(observedPage, page))
+        string[] names = page.fileNames ?? Array.Empty<string>();
+        bool pageChanged = !ReferenceEquals(observedPage, page);
+        bool namesChanged = !ReferenceEquals(observedNames, names);
+        if (pageChanged || namesChanged)
         {
             observedPage = page;
+            observedNames = names;
             samples.Clear();
-            string[] names = page.fileNames ?? Array.Empty<string>();
+            sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
+            sortedDirty = true;
+
+            // The old implementation called AssetManager.ListDirectory and repeatedly probed every
+            // active mod once per sample. A large ambient library therefore produced hundreds or
+            // thousands of filesystem scans on the first Sound-page frame. Build those lookup
+            // indexes once for the page instead, then resolve each sample with O(1) fallbacks.
+            BuildAmbientIndexes();
+
             for (int i = 0; i < names.Length; i++)
             {
                 string sample = names[i];
@@ -37,9 +57,9 @@ internal static class SoundSampleCatalog
             }
         }
 
-        EditorSoundSampleSnapshot[] result = samples.Values.ToArray();
-        Array.Sort(result, CompareSamples);
-        return result;
+        if (sortedDirty)
+            RebuildSortedCache();
+        return sortedCache;
     }
 
     internal static EditorSoundSampleSnapshot Resolve(string sample)
@@ -60,7 +80,113 @@ internal static class SoundSampleCatalog
 
         EditorSoundSampleSnapshot resolved = ResolveCore(sample, knownAvailable: false);
         samples[sample] = resolved;
+        sortedDirty = true;
         return resolved;
+    }
+
+    private static void Reset()
+    {
+        observedPage = null;
+        observedNames = null;
+        samples.Clear();
+        looseAmbientFiles.Clear();
+        modAmbientOwners.Clear();
+        officialDlcAmbientOwners.Clear();
+        sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
+        sortedDirty = false;
+    }
+
+    private static void RebuildSortedCache()
+    {
+        sortedCache = new EditorSoundSampleSnapshot[samples.Count];
+        int index = 0;
+        foreach (EditorSoundSampleSnapshot value in samples.Values)
+            sortedCache[index++] = value;
+        Array.Sort(sortedCache, CompareSamples);
+        sortedDirty = false;
+    }
+
+    private static void BuildAmbientIndexes()
+    {
+        looseAmbientFiles.Clear();
+        modAmbientOwners.Clear();
+        officialDlcAmbientOwners.Clear();
+
+        try
+        {
+            string[] loose = AssetManager.ListDirectory("soundeffects/ambient") ?? Array.Empty<string>();
+            for (int i = 0; i < loose.Length; i++)
+            {
+                string path = loose[i];
+                string key = SampleKey(path);
+                if (string.IsNullOrEmpty(key) || looseAmbientFiles.ContainsKey(key)) continue;
+                looseAmbientFiles[key] = path;
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool sound ambient index failed: " + error.Message);
+        }
+
+        // Walk in the same priority direction used elsewhere in the catalog. The first owner wins,
+        // so mergedmods provenance and official-DLC fallback become dictionary lookups instead of
+        // repeated File.Exists calls for every sample and every active mod.
+        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
+        {
+            ModManager.Mod mod = ModManager.ActiveMods[i];
+            if (mod == null) continue;
+            IndexModAmbient(mod);
+        }
+    }
+
+    private static void IndexModAmbient(ModManager.Mod mod)
+    {
+        HashSet<string> roots = new(StringComparer.OrdinalIgnoreCase);
+        AddRoot(roots, mod.TargetedPath);
+        AddRoot(roots, mod.NewestPath);
+        AddRoot(roots, mod.path);
+
+        foreach (string root in roots)
+        {
+            IndexAmbientDirectory(mod, Path.Combine(root, "loadedsoundeffects", "ambient"));
+            IndexAmbientDirectory(mod, Path.Combine(root, "soundeffects", "ambient"));
+        }
+    }
+
+    private static void AddRoot(HashSet<string> roots, string root)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return;
+        try
+        {
+            roots.Add(Path.GetFullPath(root));
+        }
+        catch
+        {
+            roots.Add(root);
+        }
+    }
+
+    private static void IndexAmbientDirectory(ModManager.Mod mod, string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory)) return;
+            string[] files = Directory.GetFiles(directory, "*", SearchOption.TopDirectoryOnly);
+            for (int i = 0; i < files.Length; i++)
+            {
+                string key = SampleKey(files[i]);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (!modAmbientOwners.ContainsKey(key))
+                    modAmbientOwners[key] = mod;
+                if (IsOfficialDlc(mod.id) && !officialDlcAmbientOwners.ContainsKey(key))
+                    officialDlcAmbientOwners[key] = mod;
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool sound mod ambient index failed for " + SafeModName(mod) + ": " + error.Message);
+        }
     }
 
     private static EditorSoundSampleSnapshot ResolveCore(string sample, bool knownAvailable)
@@ -73,7 +199,7 @@ internal static class SoundSampleCatalog
 
             // Official DLC assets may be served by Rain World's combined consolefiles directory,
             // so the effective path is not always physically beneath the DLC mod root. Recover
-            // provenance from the official package roots without doing this for arbitrary mods.
+            // provenance from the pre-indexed official package roots.
             if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
 
@@ -82,10 +208,6 @@ internal static class SoundSampleCatalog
 
         if (knownAvailable)
         {
-            // SoundPage can also expose clips backed by a bundled ambient AudioClip archive. The
-            // old implementation treated all of these as Vanilla, which merged Downpour and
-            // Watcher into the base-game section. Official-package probing keeps those DLCs
-            // distinct while avoiding false attribution to arbitrary third-party mods.
             if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
 
@@ -137,9 +259,6 @@ internal static class SoundSampleCatalog
             return EditorSoundSourceKind.Downpour;
         if (string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase))
             return EditorSoundSourceKind.Watcher;
-
-        // "PrePackagedModIDs" also contains DevTools/MMF/Jolly/Expedition, so it must not be
-        // treated as a synonym for paid DLC provenance.
         return EditorSoundSourceKind.Mod;
     }
 
@@ -152,13 +271,11 @@ internal static class SoundSampleCatalog
             if (File.Exists(loadedPath))
                 return loadedPath;
 
-            string[] loose = AssetManager.ListDirectory("soundeffects/ambient");
-            for (int i = 0; i < loose.Length; i++)
-            {
-                if (string.Equals(Path.GetFileName(loose[i]), sample, StringComparison.OrdinalIgnoreCase) &&
-                    File.Exists(loose[i]))
-                    return loose[i];
-            }
+            string key = SampleKey(sample);
+            if (!string.IsNullOrEmpty(key) &&
+                looseAmbientFiles.TryGetValue(key, out string loosePath) &&
+                File.Exists(loosePath))
+                return loosePath;
         }
         catch (Exception error)
         {
@@ -186,65 +303,36 @@ internal static class SoundSampleCatalog
             }
         }
 
-        // AssetManager may return mergedmods as the effective file. Only in that case do we
-        // recover provenance from the original mod roots. Do not use this fallback for a base-game
-        // file: a lower-priority loose mod file with the same name does not override the bundled
-        // ambient asset, and attributing it to that mod would be incorrect.
         if (!IsMergedModsPath(filePath)) return false;
-
-        string file = Path.GetFileName(filePath);
-        if (string.IsNullOrEmpty(file)) return false;
-        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
-        {
-            ModManager.Mod mod = ModManager.ActiveMods[i];
-            if (mod == null) continue;
-            if (ModContainsAmbient(mod, file))
-            {
-                owner = mod;
-                return true;
-            }
-        }
-
-        return false;
+        string key = SampleKey(filePath);
+        return !string.IsNullOrEmpty(key) && modAmbientOwners.TryGetValue(key, out owner);
     }
 
     private static bool TryIdentifyOfficialDlcBySample(string sample, out ModManager.Mod owner)
     {
-        owner = null;
-        if (string.IsNullOrWhiteSpace(sample)) return false;
-
-        // Match AssetManager's active-mod priority direction. Restrict this fallback to the two
-        // official DLC ids so a same-named file in a lower-priority third-party mod never steals
-        // ownership from a base-game/bundled clip.
-        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
-        {
-            ModManager.Mod mod = ModManager.ActiveMods[i];
-            if (mod == null || !IsOfficialDlc(mod.id)) continue;
-            if (!ModContainsAmbient(mod, sample)) continue;
-            owner = mod;
+        string key = SampleKey(sample);
+        if (!string.IsNullOrEmpty(key) && officialDlcAmbientOwners.TryGetValue(key, out owner))
             return true;
-        }
-
+        owner = null;
         return false;
+    }
+
+    private static string SampleKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        try
+        {
+            return Path.GetFileName(value.Trim()) ?? string.Empty;
+        }
+        catch
+        {
+            return value.Trim();
+        }
     }
 
     private static bool IsOfficialDlc(string id) =>
         string.Equals(id, DownpourModId, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase);
-
-    private static bool ModContainsAmbient(ModManager.Mod mod, string sample)
-    {
-        string[] roots = { mod.TargetedPath, mod.NewestPath, mod.path };
-        for (int i = 0; i < roots.Length; i++)
-        {
-            string root = roots[i];
-            if (string.IsNullOrEmpty(root)) continue;
-            if (File.Exists(Path.Combine(root, "loadedsoundeffects", "ambient", sample)) ||
-                File.Exists(Path.Combine(root, "soundeffects", "ambient", sample)))
-                return true;
-        }
-        return false;
-    }
 
     private static bool IsMergedModsPath(string path)
     {
