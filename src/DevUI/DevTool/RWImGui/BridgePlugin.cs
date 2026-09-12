@@ -423,13 +423,10 @@ internal static class DevToolFrontend
             ImFontPtr candidate = fonts[i];
             if (candidate.NativePtr == null) continue;
 
-            if (candidate.FindGlyphNoFallback((ushort)'中').NativePtr == null ||
-                candidate.FindGlyphNoFallback((ushort)'文').NativePtr == null ||
-                candidate.FindGlyphNoFallback((ushort)'房').NativePtr == null ||
-                candidate.FindGlyphNoFallback((ushort)'间').NativePtr == null)
+            string name = ReadFontName(candidate, i);
+            if (!DevToolFontCatalog.IsChineseUiSelectable(candidate, name))
                 continue;
 
-            string name = ReadFontName(candidate, i);
             CjkFonts.Add(new FontCandidate
             {
                 Font = candidate,
@@ -441,13 +438,13 @@ internal static class DevToolFrontend
         if (CjkFonts.Count > 0)
         {
             if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
-                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} CJK-capable ImGui atlas font(s).");
+                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} Chinese-UI selectable ImGui atlas font(s).");
             return;
         }
 
         if (Interlocked.Exchange(ref cjkFontMissingLogged, 1) == 0)
             log?.LogWarning(
-                "DryCycle DevTool could not find Simplified Chinese glyphs in RWImGUI's font atlas; " +
+                "DryCycle DevTool could not find a selectable Simplified Chinese UI font in RWImGUI's font atlas; " +
                 "falling back to English UI.");
     }
 
