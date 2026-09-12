@@ -17,7 +17,8 @@ namespace DryCycle.DevUI.DevTool.Preview;
 internal static class EffectPreviewExtendedRecipeBootstrap
 {
     private const int MaxBackwardInstructions = 96;
-    private const int MaxImmediateConstantDistance = 8;
+    private const int MaxForwardInstructions = 18;
+    private const int MaxImmediateConstantDistance = 4;
 
     internal static int TryBootstrap(
         global::Room room,
@@ -65,7 +66,7 @@ internal static class EffectPreviewExtendedRecipeBootstrap
         {
             if (il[i].OpCode != OpCodes.Newobj || il[i].Operand is not ConstructorInfo ctor)
                 continue;
-            if (!SupportsExtendedConstructor(ctor))
+            if (!SupportsExtendedConstructor(ctor) || !HasNearbyRoomAddObject(il, i))
                 continue;
 
             int blockStart = FindBlockStart(il, i);
@@ -170,7 +171,8 @@ internal static class EffectPreviewExtendedRecipeBootstrap
                 if (enums > 1) return false;
                 continue;
             }
-            if (parameter.HasDefaultValue)
+            if (parameter.HasDefaultValue &&
+                (type.IsPrimitive || type.IsEnum || type == typeof(string)))
                 continue;
             return false;
         }
@@ -228,7 +230,8 @@ internal static class EffectPreviewExtendedRecipeBootstrap
                     return false;
                 args[i] = value;
             }
-            else if (parameter.HasDefaultValue)
+            else if (parameter.HasDefaultValue &&
+                     (type.IsPrimitive || type.IsEnum || type == typeof(string)))
             {
                 args[i] = parameter.DefaultValue;
             }
@@ -253,6 +256,26 @@ internal static class EffectPreviewExtendedRecipeBootstrap
                 return i + 1;
         }
         return min;
+    }
+
+    private static bool HasNearbyRoomAddObject(List<DecodedInstruction> il, int ctorIndex)
+    {
+        int limit = Math.Min(il.Count, ctorIndex + MaxForwardInstructions + 1);
+        for (int i = ctorIndex + 1; i < limit; i++)
+        {
+            DecodedInstruction instruction = il[i];
+            if (instruction.Operand is MethodBase called && IsRoomAddObject(called))
+                return true;
+            if (instruction.OpCode.FlowControl == FlowControl.Return ||
+                instruction.OpCode.FlowControl == FlowControl.Throw)
+                break;
+            if (instruction.OpCode == OpCodes.Newobj &&
+                instruction.Operand is ConstructorInfo next &&
+                next.DeclaringType != null &&
+                typeof(UpdatableAndDeletable).IsAssignableFrom(next.DeclaringType))
+                break;
+        }
+        return false;
     }
 
     private static bool BlockContainsEffect(
@@ -299,13 +322,13 @@ internal static class EffectPreviewExtendedRecipeBootstrap
     {
         value = false;
 
-        // Direct bool constants are accepted only when they are loaded immediately before newobj.
+        // Direct bool constants are accepted only when they occur at the constructor tail.
         int immediateStart = Math.Max(blockStart, ctorIndex - MaxImmediateConstantDistance);
         for (int i = ctorIndex - 1; i >= immediateStart; i--)
         {
-            if (!TryReadIntConstant(method, il[i], out int constant))
-                continue;
-            if (constant == 0 || constant == 1)
+            if (il[i].OpCode == OpCodes.Nop) continue;
+            if (TryReadIntConstant(method, il[i], out int constant) &&
+                (constant == 0 || constant == 1))
             {
                 value = constant != 0;
                 return true;
@@ -348,8 +371,10 @@ internal static class EffectPreviewExtendedRecipeBootstrap
         int start = Math.Max(blockStart, ctorIndex - MaxImmediateConstantDistance);
         for (int i = ctorIndex - 1; i >= start; i--)
         {
+            if (il[i].OpCode == OpCodes.Nop) continue;
             if (TryReadIntConstant(method, il[i], out value))
                 return true;
+            break;
         }
         value = 0;
         return false;
@@ -363,9 +388,10 @@ internal static class EffectPreviewExtendedRecipeBootstrap
         Type enumType,
         out object value)
     {
-        int start = Math.Max(blockStart, ctorIndex - 16);
+        int start = Math.Max(blockStart, ctorIndex - 12);
         for (int i = ctorIndex - 1; i >= start; i--)
         {
+            if (il[i].OpCode == OpCodes.Nop) continue;
             if (il[i].Operand is FieldInfo field && field.IsStatic && field.FieldType == enumType)
             {
                 try
@@ -375,6 +401,7 @@ internal static class EffectPreviewExtendedRecipeBootstrap
                 }
                 catch { }
             }
+            break;
         }
 
         if (TryInferIntConstant(method, il, blockStart, ctorIndex, out int raw))
