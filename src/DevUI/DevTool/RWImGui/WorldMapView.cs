@@ -10,8 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
 /// Unified region canvas: dragging room geometry edits MapPage Dev Position; dragging an Exit edits
-/// endpoint topology. The interaction is unified for the mapper, while the command paths remain
-/// separate so map layout and world topology do not become coupled internally.
+/// endpoint topology. The mapper sees one coherent map while the command paths remain independent.
 /// </summary>
 internal static class WorldMapView
 {
@@ -87,18 +86,22 @@ internal static class WorldMapView
 
     private static void DrawToolbar(EditorMapPresentationSnapshot snapshot)
     {
+        float available = ImGui.GetContentRegionAvail().X;
+        bool compact = available < 760f;
+
         ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
         ImGui.SameLine();
         ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
         ImGui.SameLine(0f, 14f);
-
         if (DevToolWidgets.ActionButton(DevToolUiSettings.T("适配", "Fit"), "WorldMapFit", DevToolButtonTone.Subtle))
             fitRequested = true;
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton("100%", "WorldMapZoom100", DevToolButtonTone.Subtle))
             zoom = 1f;
 
-        ImGui.SameLine(0f, 16f);
+        if (!compact) ImGui.SameLine(0f, 16f);
+        else ImGui.Spacing();
+
         DrawCompactCheckbox(DevToolUiSettings.T("地形", "Terrain"), "WorldMapTerrain", ref showTerrain);
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
@@ -107,7 +110,9 @@ internal static class WorldMapView
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("子区域", "Subregions"), "WorldMapSubregions", ref showSubregionLabels);
 
-        ImGui.SameLine(0f, 16f);
+        if (!compact) ImGui.SameLine(0f, 16f);
+        else ImGui.Spacing();
+
         for (int i = 0; i < layerVisible.Length; i++)
         {
             bool value = layerVisible[i];
@@ -131,8 +136,8 @@ internal static class WorldMapView
         if (linkingRoom >= 0)
         {
             EditorMapRoomSnapshot source = FindRoom(snapshot, linkingRoom);
-            ImGui.SameLine(0f, 12f);
-            ImGui.TextDisabled("· " + (source?.Name ?? linkingRoom.ToString()) + ":" + linkingNode + " " + DirectionGlyph(linkDirection) + " …");
+            if (DevToolWidgets.SameLineIfFits(120f, 4f))
+                ImGui.TextDisabled("· " + (source?.Name ?? linkingRoom.ToString()) + ":" + linkingNode + " " + DirectionGlyph(linkDirection) + " …");
         }
     }
 
@@ -195,10 +200,9 @@ internal static class WorldMapView
             : null;
         hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
-        if (showConnections)
-            DrawConnections(draw, snapshot, canvasMin, canvasSize);
+        if (showConnections) DrawConnections(draw, snapshot, canvasMin, canvasSize);
         DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
-        HandleInteraction(snapshot, canvasMin, canvasSize, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
+        HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
     }
@@ -255,30 +259,31 @@ internal static class WorldMapView
         float width = Math.Max(1f, visual.WidthTiles) * scale;
         float height = Math.Max(1f, visual.HeightTiles) * scale;
         Num.Vector2 roomMax = roomMin + new Num.Vector2(width, height);
-
         uint outline = ImGui.GetColorU32(
             selected ? ImGuiCol.ButtonActive :
             room.CurrentRoom ? ImGuiCol.Header :
             hovered ? ImGuiCol.ButtonHovered :
             room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Border);
 
-        // Low zoom keeps the room readable without emitting every interior run.
         bool lowLod = zoom < 0.48f;
         bool highLod = zoom >= 0.82f;
 
-        if (!visual.DetailedRasterAvailable || lowLod)
+        if (!visual.DetailedRasterAvailable)
         {
             uint fill = ImGui.GetColorU32(selected ? ImGuiCol.Button : ImGuiCol.FrameBg);
             draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
         }
 
-        if (showTerrain && visual.DetailedRasterAvailable && !lowLod)
+        // Even at low zoom keep the real room silhouette. Detail is reduced by hiding water and
+        // labels rather than replacing the room with a fake card/rectangle.
+        if (showTerrain && visual.DetailedRasterAvailable)
         {
             EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
             for (int i = 0; i < runs.Length; i++)
             {
                 EditorMapRectSnapshot run = runs[i];
-                if (!highLod && run.Kind == EditorMapGeometryKind.Detail) continue;
+                if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
+                if (!highLod && run.Kind == EditorMapGeometryKind.Detail && zoom < 0.32f) continue;
                 Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
                 Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
                 draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
@@ -453,8 +458,6 @@ internal static class WorldMapView
 
     private static void HandleInteraction(
         EditorMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        Num.Vector2 canvasSize,
         bool canvasHovered,
         ImGuiIOPtr io,
         EditorMapRoomSnapshot hoveredRoom,
@@ -502,16 +505,13 @@ internal static class WorldMapView
                 CompleteLink(snapshot, hoveredPort);
             CancelLink();
         }
-        if (linkingRoom >= 0 && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-            CancelLink();
+        if (linkingRoom >= 0 && ImGui.IsMouseClicked(ImGuiMouseButton.Right)) CancelLink();
 
         if (draggingRoom >= 0)
         {
             EditorMapRoomSnapshot dragged = FindRoom(snapshot, draggingRoom);
             if (dragged != null && ImGui.IsMouseDown(ImGuiMouseButton.Left))
-            {
                 localPositions[draggingRoom] = dragStartWorld + (io.MousePos - dragStartMouse) / zoom;
-            }
             else
             {
                 if (dragged != null && localPositions.TryGetValue(draggingRoom, out Num.Vector2 final))
@@ -655,8 +655,6 @@ internal static class WorldMapView
             return LocalToScreen(min, visual, nodes[i].X, nodes[i].Y);
         }
 
-        // Until MapObject finishes preparing a room, use a stable edge fallback. The port moves to
-        // its real shortcut position automatically when RoomRepresentation.nodePositions arrives.
         EditorMapRoomNodeSnapshot[] roomNodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
         int ordinal = 0;
         int exits = 0;
@@ -724,7 +722,7 @@ internal static class WorldMapView
 
     private static void HandleDelete(EditorMapPresentationSnapshot snapshot)
     {
-        if (string.IsNullOrEmpty(selectedConnectionId)) return;
+        if (!showConnections || string.IsNullOrEmpty(selectedConnectionId)) return;
         ImGuiIOPtr io = ImGui.GetIO();
         if (io.WantTextInput || !ImGui.IsKeyPressed(ImGuiKey.Delete)) return;
         EditorMapConnectionSnapshot connection = FindConnection(snapshot, selectedConnectionId);
