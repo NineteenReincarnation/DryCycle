@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.World;
 
 namespace DryCycle.DevUI.DevTool.Map;
 
@@ -24,8 +25,14 @@ public sealed class EditorMapRoomSnapshot
 
 public sealed class EditorMapConnectionSnapshot
 {
+    public string ConnectionId { get; init; } = string.Empty;
     public int FromRoomIndex { get; init; }
+    public int FromNodeIndex { get; init; } = -1;
     public int ToRoomIndex { get; init; }
+    public int ToNodeIndex { get; init; } = -1;
+    public WorldConnectionDirection Direction { get; init; } = WorldConnectionDirection.Bidirectional;
+    public bool Explicit { get; init; }
+    public bool Ambiguous { get; init; }
 }
 
 public sealed class EditorMapPresentationSnapshot
@@ -56,6 +63,13 @@ internal static class MapEditorStateHub
 
 public static class MapEditorPresentationHub
 {
+    private sealed class DirectedConnectionArc
+    {
+        internal int FromRoom;
+        internal int FromNode;
+        internal int ToRoom;
+    }
+
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
 
     public static EditorMapPresentationSnapshot Current => current;
@@ -71,6 +85,7 @@ public static class MapEditorPresentationHub
         MapEditorState state = MapEditorStateHub.Get(session);
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
+        Dictionary<string, int> roomIndexByName = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> disabled = new(StringComparer.Ordinal);
         if (page.world.DisabledMapRooms != null)
         {
@@ -88,6 +103,7 @@ public static class MapEditorPresentationHub
             if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
             AbstractRoom room = panel.roomRep.room;
             roomIndices.Add(room.index);
+            if (!string.IsNullOrWhiteSpace(room.name)) roomIndexByName[room.name] = room.index;
             rooms.Add(new EditorMapRoomSnapshot
             {
                 RoomIndex = room.index,
@@ -106,28 +122,11 @@ public static class MapEditorPresentationHub
         if (state.SelectedRoomIndex >= 0 && !roomIndices.Contains(state.SelectedRoomIndex))
             state.SelectedRoomIndex = -1;
 
-        List<EditorMapConnectionSnapshot> connections = new();
-        HashSet<long> seen = new();
-        for (int i = 0; i < rooms.Count; i++)
-        {
-            AbstractRoom room = page.world.GetAbstractRoom(rooms[i].RoomIndex);
-            if (room?.connections == null) continue;
-
-            for (int c = 0; c < room.connections.Length; c++)
-            {
-                int other = room.connections[c];
-                if (other < 0 || !roomIndices.Contains(other)) continue;
-                int a = Math.Min(room.index, other);
-                int b = Math.Max(room.index, other);
-                long key = ((long)(uint)a << 32) | (uint)b;
-                if (!seen.Add(key)) continue;
-                connections.Add(new EditorMapConnectionSnapshot
-                {
-                    FromRoomIndex = a,
-                    ToRoomIndex = b
-                });
-            }
-        }
+        List<EditorMapConnectionSnapshot> connections = BuildConnections(
+            page.world,
+            rooms,
+            roomIndices,
+            roomIndexByName);
 
         current = new EditorMapPresentationSnapshot
         {
@@ -138,6 +137,115 @@ public static class MapEditorPresentationHub
             Connections = connections.ToArray()
         };
     }
+
+    private static List<EditorMapConnectionSnapshot> BuildConnections(
+        World world,
+        List<EditorMapRoomSnapshot> rooms,
+        HashSet<int> roomIndices,
+        Dictionary<string, int> roomIndexByName)
+    {
+        List<EditorMapConnectionSnapshot> result = new();
+        HashSet<long> reservedEndpoints = new();
+
+        WorldConnectionEdge[] explicitEdges = WorldTopologyRegistry.GetRegionEdges(world.name);
+        for (int i = 0; i < explicitEdges.Length; i++)
+        {
+            WorldConnectionEdge edge = explicitEdges[i];
+            if (!roomIndexByName.TryGetValue(edge.A.Room, out int aRoom) ||
+                !roomIndexByName.TryGetValue(edge.B.Room, out int bRoom))
+                continue;
+
+            reservedEndpoints.Add(EndpointKey(aRoom, edge.A.NodeIndex));
+            reservedEndpoints.Add(EndpointKey(bRoom, edge.B.NodeIndex));
+            result.Add(new EditorMapConnectionSnapshot
+            {
+                ConnectionId = "explicit:" + edge.Id,
+                FromRoomIndex = aRoom,
+                FromNodeIndex = edge.A.NodeIndex,
+                ToRoomIndex = bRoom,
+                ToNodeIndex = edge.B.NodeIndex,
+                Direction = edge.Direction,
+                Explicit = true,
+                Ambiguous = false
+            });
+        }
+
+        List<DirectedConnectionArc> arcs = new();
+        for (int i = 0; i < rooms.Count; i++)
+        {
+            AbstractRoom room = world.GetAbstractRoom(rooms[i].RoomIndex);
+            if (room?.connections == null) continue;
+
+            for (int node = 0; node < room.connections.Length; node++)
+            {
+                if (reservedEndpoints.Contains(EndpointKey(room.index, node))) continue;
+                int other = room.connections[node];
+                if (other < 0 || !roomIndices.Contains(other)) continue;
+                arcs.Add(new DirectedConnectionArc
+                {
+                    FromRoom = room.index,
+                    FromNode = node,
+                    ToRoom = other
+                });
+            }
+        }
+
+        bool[] used = new bool[arcs.Count];
+        for (int i = 0; i < arcs.Count; i++)
+        {
+            if (used[i]) continue;
+            DirectedConnectionArc arc = arcs[i];
+            List<int> reverse = new();
+            for (int j = 0; j < arcs.Count; j++)
+            {
+                if (i == j || used[j]) continue;
+                if (arcs[j].FromRoom == arc.ToRoom && arcs[j].ToRoom == arc.FromRoom)
+                    reverse.Add(j);
+            }
+
+            if (reverse.Count == 1)
+            {
+                int reverseIndex = reverse[0];
+                DirectedConnectionArc back = arcs[reverseIndex];
+                used[i] = true;
+                used[reverseIndex] = true;
+                result.Add(new EditorMapConnectionSnapshot
+                {
+                    ConnectionId = LegacyId(arc.FromRoom, arc.FromNode, back.FromRoom, back.FromNode, true),
+                    FromRoomIndex = arc.FromRoom,
+                    FromNodeIndex = arc.FromNode,
+                    ToRoomIndex = arc.ToRoom,
+                    ToNodeIndex = back.FromNode,
+                    Direction = WorldConnectionDirection.Bidirectional,
+                    Explicit = false,
+                    Ambiguous = false
+                });
+                continue;
+            }
+
+            used[i] = true;
+            result.Add(new EditorMapConnectionSnapshot
+            {
+                ConnectionId = LegacyId(arc.FromRoom, arc.FromNode, arc.ToRoom, -1, false),
+                FromRoomIndex = arc.FromRoom,
+                FromNodeIndex = arc.FromNode,
+                ToRoomIndex = arc.ToRoom,
+                ToNodeIndex = -1,
+                Direction = WorldConnectionDirection.AToB,
+                Explicit = false,
+                Ambiguous = true
+            });
+        }
+
+        return result;
+    }
+
+    private static long EndpointKey(int roomIndex, int nodeIndex) =>
+        ((long)(uint)roomIndex << 32) | (uint)nodeIndex;
+
+    private static string LegacyId(int aRoom, int aNode, int bRoom, int bNode, bool bidirectional) =>
+        "legacy:" + aRoom + ":" + aNode + ":" + bRoom + ":" + bNode + ":" +
+        (bidirectional ? "both" : "oneway");
 
     internal static void Clear() => current = EditorMapPresentationSnapshot.Empty;
 }
