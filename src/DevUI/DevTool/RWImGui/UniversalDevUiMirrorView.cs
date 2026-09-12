@@ -47,12 +47,20 @@ internal static class UniversalDevUiMirrorView
         }
 
         DevToolWidgets.MutedText(snapshot.PageType);
+
+        DevUiProtocolInventorySnapshot inventory = DevUiProtocolInventory.Current;
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "已加载 DevUINode 类型 " + inventory.ConcreteNodeTypeCount + " · 潜在协议缺口 " + inventory.PotentialGapCount,
+            "Loaded DevUINode types " + inventory.ConcreteNodeTypeCount + " · potential protocol gaps " + inventory.PotentialGapCount));
+
         if (snapshot.UnmappedProtocolCount > 0)
         {
             ImGui.TextWrapped(DevToolUiSettings.T(
-                "仍有 " + snapshot.UnmappedProtocolCount + " 种交互协议未被通用桥覆盖；详见 Migration Coverage。",
-                snapshot.UnmappedProtocolCount + " interaction protocol(s) are still unmapped; see Migration Coverage."));
+                "当前页面仍有 " + snapshot.UnmappedProtocolCount + " 种交互协议未被通用桥覆盖；详见 Migration Coverage。",
+                snapshot.UnmappedProtocolCount + " interaction protocol(s) on this page are still unmapped; see Migration Coverage."));
         }
+
+        DrawLoadedTypeGaps(inventory);
 
         ImGui.Spacing();
         ImGui.SetNextItemWidth(-1f);
@@ -70,6 +78,28 @@ internal static class UniversalDevUiMirrorView
 
         if (visible == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的通用控件。", "No matching generic controls."));
+    }
+
+    private static void DrawLoadedTypeGaps(DevUiProtocolInventorySnapshot inventory)
+    {
+        if (inventory == null || inventory.PotentialGapCount <= 0) return;
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("已加载类型协议缺口##LoadedDevUiProtocolGaps", "LOADED TYPE PROTOCOL GAPS##LoadedDevUiProtocolGaps")))
+            return;
+
+        DevUiProtocolInventoryEntry[] gaps = inventory.PotentialGaps ?? Array.Empty<DevUiProtocolInventoryEntry>();
+        int limit = Math.Min(32, gaps.Length);
+        for (int i = 0; i < limit; i++)
+        {
+            DevUiProtocolInventoryEntry gap = gaps[i];
+            if (gap == null) continue;
+            ImGui.TextWrapped(gap.AssemblyName + " · " + gap.TypeName);
+            DevToolWidgets.MutedText(gap.Protocol, true);
+        }
+        if (gaps.Length > limit)
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
+                "另有 " + (gaps.Length - limit) + " 项未展开；完整列表已写入日志。",
+                (gaps.Length - limit) + " additional gap(s) omitted here; the full batch is logged."), true);
     }
 
     private static void DrawControl(UniversalDevUiPresentationSnapshot snapshot, LegacyControlSnapshot control)
