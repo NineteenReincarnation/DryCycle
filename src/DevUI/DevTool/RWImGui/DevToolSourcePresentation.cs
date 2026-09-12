@@ -33,10 +33,12 @@ internal static class DevToolSourcePresentation
     internal const string DownpourModId = "moreslugcats";
     internal const string WatcherModId = "watcher";
 
-    private static readonly Num.Vector4 VanillaColor = new(0.82f, 0.84f, 0.88f, 1f);
-    private static readonly Num.Vector4 DownpourColor = new(0.98f, 0.64f, 0.28f, 1f);
-    private static readonly Num.Vector4 WatcherColor = new(0.42f, 0.82f, 0.88f, 1f);
-    private static readonly Num.Vector4 MissingColor = new(0.96f, 0.38f, 0.40f, 1f);
+    // Official-family colours are intentionally semantic rather than random-hash colours:
+    // base game = crimson/red, Downpour = water/cyan, Watcher = charcoal/black.
+    private static readonly Num.Vector4 VanillaColor = new(0.80f, 0.20f, 0.24f, 1f);
+    private static readonly Num.Vector4 DownpourColor = new(0.18f, 0.72f, 0.92f, 1f);
+    private static readonly Num.Vector4 WatcherColor = new(0.13f, 0.15f, 0.19f, 1f);
+    private static readonly Num.Vector4 MissingColor = new(0.96f, 0.43f, 0.24f, 1f);
 
     internal static DevToolSourceMark FromSound(
         EditorSoundSourceKind kind,
@@ -86,8 +88,10 @@ internal static class DevToolSourcePresentation
         string.Equals(a.Key, b.Key, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Draws the shared full-row source marker. The coloured rail and low-opacity band make the
-    /// source boundary readable as one UI unit instead of relying on a small coloured word alone.
+    /// Draws the shared full-row source marker. Keep the source family itself in the background
+    /// band/rail, while choosing a readable face colour for the label. This matters for Watcher:
+    /// its identity remains visibly black/charcoal instead of being lifted into generic grey merely
+    /// to make the text readable on the translucent Rain World editor.
     /// </summary>
     internal static void DrawHeader(
         in DevToolSourceMark source,
@@ -95,7 +99,8 @@ internal static class DevToolSourcePresentation
         float restoreScale = 1f)
     {
         string label = string.IsNullOrWhiteSpace(source.Label) ? "Unknown" : source.Label;
-        Num.Vector4 color = Brighten(source.Color);
+        Num.Vector4 family = source.Color;
+        Num.Vector4 textColor = ReadableTextColor(family);
 
         ImGui.Spacing();
         ImGui.SetWindowFontScale(fontScale);
@@ -105,15 +110,17 @@ internal static class DevToolSourcePresentation
         float height = Math.Max(ImGui.GetTextLineHeight() + 8f, 22f);
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
 
-        Num.Vector4 band = new(color.X * 0.30f, color.Y * 0.30f, color.Z * 0.30f, 0.26f);
-        Num.Vector4 edge = new(color.X, color.Y, color.Z, 0.82f);
+        float luminance = Luminance(family);
+        float bandAlpha = luminance < 0.24f ? 0.72f : 0.30f;
+        Num.Vector4 band = new(family.X * 0.72f, family.Y * 0.72f, family.Z * 0.72f, bandAlpha);
+        Num.Vector4 edge = new(family.X, family.Y, family.Z, 0.96f);
         draw.AddRectFilled(pos, new Num.Vector2(pos.X + width, pos.Y + height), ImGui.GetColorU32(band));
         draw.AddRectFilled(pos, new Num.Vector2(pos.X + 4f, pos.Y + height), ImGui.GetColorU32(edge));
 
         float cursorX = ImGui.GetCursorPosX();
         ImGui.SetCursorPosX(cursorX + 11f);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextColored(color, label);
+        ImGui.TextColored(textColor, label);
         ImGui.SetWindowFontScale(restoreScale);
         ImGui.Separator();
     }
@@ -124,7 +131,7 @@ internal static class DevToolSourcePresentation
             ImGui.TextDisabled(prefix);
 
         if (!string.IsNullOrEmpty(prefix)) ImGui.SameLine();
-        ImGui.TextColored(Brighten(source.Color), source.Label);
+        ImGui.TextColored(ReadableTextColor(source.Color), source.Label);
     }
 
     private static DevToolSourceMark Vanilla() => new(
@@ -214,8 +221,14 @@ internal static class DevToolSourcePresentation
         };
     }
 
-    private static Num.Vector4 Brighten(Num.Vector4 color)
+    private static float Luminance(Num.Vector4 color) =>
+        color.X * 0.2126f + color.Y * 0.7152f + color.Z * 0.0722f;
+
+    private static Num.Vector4 ReadableTextColor(Num.Vector4 color)
     {
+        if (Luminance(color) < 0.24f)
+            return new Num.Vector4(0.82f, 0.84f, 0.88f, Math.Max(0.96f, color.W));
+
         const float floor = 0.58f;
         const float lift = 0.16f;
         return new Num.Vector4(
