@@ -35,10 +35,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
 
-        // Match the RWImGui font-loading pattern used by existing tooling: register mod-local
-        // font files during plugin startup, before the shared atlas starts serving editor frames.
-        // If RWImGui has not created its ImGui context yet, OnModsInit performs one safe retry.
-        DevToolFontCatalog.TryRegisterFonts(Logger);
+        // Do not touch ImGui.GetIO() here. BepInEx constructs this plugin before RWImGui owns an
+        // ImGui context; calling font-atlas APIs during plugin loading can terminate the native
+        // backend before BepInEx has a chance to log a managed exception. Font registration is
+        // deferred to DevToolFrontend.EnsureContext(), after our RWImGui context becomes current.
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
@@ -87,7 +87,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         orig(self);
-        DevToolFontCatalog.TryRegisterFonts(log);
         TryRegisterCallback();
     }
 
@@ -140,6 +139,7 @@ internal static class DevToolFrontend
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static bool cjkFontsScanned;
+    private static bool localFontsRegisteredForContext;
     private static ImFontPtr cjkFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -174,7 +174,11 @@ internal static class DevToolFrontend
     {
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
+            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
+            {
+                EnsureLocalFontsRegistered();
+                return;
+            }
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
@@ -185,12 +189,28 @@ internal static class DevToolFrontend
 
             ImGUIAPI.SwitchContext(InputContext);
             Interlocked.Exchange(ref contextBusyLogged, 0);
+            EnsureLocalFontsRegistered();
         }
         catch (Exception error)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             log?.LogWarning("DevTool RWImGui context activation failed: " + error.Message);
         }
+    }
+
+    private static void EnsureLocalFontsRegistered()
+    {
+        if (localFontsRegisteredForContext) return;
+        if (!ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
+
+        // This is the same lifecycle boundary used by working RWImGui font integrations: only
+        // access ImGui.GetIO().Fonts after a real RWImGui context is current, and before this
+        // DevTool context submits its first interactive frame.
+        if (!DevToolFontCatalog.TryRegisterFonts(log)) return;
+
+        localFontsRegisteredForContext = true;
+        cjkFontsScanned = false;
+        cjkFont = default;
     }
 
     private static void ReleaseContext()
