@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -76,16 +77,69 @@ internal static class SoundGroupProblemsWindow
                     error ? new Num.Vector4(1f, 0.42f, 0.40f, 1f) : new Num.Vector4(1f, 0.72f, 0.36f, 1f),
                     error ? "ERROR" : "WARNING");
                 ImGui.SameLine();
-                ImGui.TextWrapped(problem.Message);
+
+                // Keep the message inside the current child width even when the Problems window is
+                // resized narrower than its default size.
+                ImGui.PushTextWrapPos(0f);
+                ImGui.TextUnformatted(problem.Message ?? string.Empty);
+                ImGui.PopTextWrapPos();
 
                 if (!string.IsNullOrEmpty(problem.GroupId))
-                    ImGui.TextDisabled(DevToolUiSettings.T("编组：", "Group: ") + problem.GroupId);
+                    DevToolWidgets.MutedText(
+                        WrapLongDetail(DevToolUiSettings.T("编组：", "Group: ") + problem.GroupId),
+                        true);
                 if (!string.IsNullOrEmpty(problem.SourcePath))
-                    ImGui.TextDisabled(DevToolUiSettings.T("来源：", "Source: ") + problem.SourcePath);
+                    DevToolWidgets.MutedText(
+                        WrapLongDetail(DevToolUiSettings.T("来源：", "Source: ") + problem.SourcePath),
+                        true);
                 if (i + 1 < problems.Length) ImGui.Separator();
             }
         }
         ImGui.EndChild();
         ImGui.End();
+    }
+
+    /// <summary>
+    /// ImGui's normal word wrapping cannot split one very long token such as a filesystem path.
+    /// Insert line breaks at path/punctuation boundaries, falling back to a character boundary for
+    /// exceptionally long file names. This keeps diagnostics readable without horizontal clipping.
+    /// </summary>
+    private static string WrapLongDetail(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+
+        float maxWidth = Math.Max(120f, ImGui.GetContentRegionAvail().X - 6f);
+        if (ImGui.CalcTextSize(text).X <= maxWidth) return text;
+
+        StringBuilder result = new(text.Length + 16);
+        int lineStart = 0;
+        int lastBreak = -1;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '/' || c == '\\' || c == ' ' || c == '-' || c == '_' || c == ':' || c == '.')
+                lastBreak = i + 1;
+
+            string candidate = text.Substring(lineStart, i - lineStart + 1);
+            if (ImGui.CalcTextSize(candidate).X <= maxWidth) continue;
+
+            int breakAt = lastBreak > lineStart ? lastBreak : i;
+            if (breakAt <= lineStart) breakAt = i + 1;
+
+            result.Append(text, lineStart, breakAt - lineStart);
+            result.Append('\n');
+            lineStart = breakAt;
+            while (lineStart < text.Length && text[lineStart] == ' ')
+                lineStart++;
+
+            i = lineStart - 1;
+            lastBreak = -1;
+        }
+
+        if (lineStart < text.Length)
+            result.Append(text, lineStart, text.Length - lineStart);
+
+        return result.ToString();
     }
 }
