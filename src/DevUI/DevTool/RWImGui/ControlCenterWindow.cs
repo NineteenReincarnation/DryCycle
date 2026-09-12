@@ -35,22 +35,30 @@ internal static class ControlCenterWindow
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+
+        // The frontend's outer layout push scales stock ImGui scrollbars too aggressively at large
+        // typography sizes. Override the active frame with the compact animated DevTool rail before
+        // any of this window's child regions are created.
+        DevToolScrollChrome.Apply(ImGui.GetIO(), scale);
+
         float maxWidth = Math.Max(320f, display.X - 16f);
         float width = Math.Min(
             maxWidth,
             Math.Max(Math.Min(660f, maxWidth), Math.Min(920f * Math.Min(1.18f, scale), display.X * 0.78f)));
 
-        // The information cards are deliberately fully visible. The previous 214 px default and
-        // 170 px minimum could force their child windows to scroll, especially with Chinese fonts.
-        float normalHeight = Math.Min(320f, Math.Max(304f, display.Y - 16f));
-        float defaultHeight = snapshot.FocusMode ? Math.Min(92f, Math.Max(72f, display.Y - 16f)) : normalHeight;
+        // Height is only an initial seed. Once the window has drawn, FitWindowHeightToContents()
+        // keeps it exactly tall enough for the visible controls. This removes the dead Focus-mode
+        // rectangle and lets the information cards grow with the active language/font size.
+        float defaultHeight = snapshot.FocusMode
+            ? Math.Min(132f, Math.Max(86f, display.Y - 16f))
+            : Math.Min(360f, Math.Max(260f, display.Y - 16f));
         float defaultX = Math.Max(8f, display.X - width - 8f);
 
         ImGui.SetNextWindowPos(new Num.Vector2(defaultX, 8f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, defaultHeight), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(560f, maxWidth), snapshot.FocusMode ? 68f : Math.Min(304f, Math.Max(170f, display.Y - 16f))),
-            new Num.Vector2(maxWidth, Math.Max(170f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(560f, maxWidth), 72f),
+            new Num.Vector2(maxWidth, Math.Max(96f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
@@ -74,6 +82,7 @@ internal static class ControlCenterWindow
             DrawInformationRow(snapshot);
         }
 
+        FitWindowHeightToContents(display, snapshot.FocusMode);
         ImGui.End();
     }
 
@@ -155,10 +164,16 @@ internal static class ControlCenterWindow
         float gap = Math.Max(8f, ImGui.GetStyle().ItemSpacing.X);
         bool twoColumns = available >= 560f;
         float leftWidth = twoColumns ? Math.Max(250f, available * 0.48f) : available;
-        float cardHeight = DevToolUiSettings.IsChinese ? 154f : 142f;
+
+        // These cards contain only a handful of controls and status rows. Let the child windows
+        // grow vertically to their content instead of giving them a scroll range. This also makes
+        // the SESSION card adapt to wrapped status text and to Chinese/English font differences.
+        ImGuiChildFlags cardFlags = ImGuiChildFlags.Borders |
+                                    ImGuiChildFlags.AutoResizeY |
+                                    ImGuiChildFlags.AlwaysAutoResize;
 
         PushCardStyle();
-        if (ImGui.BeginChild("##ControlCenterInterface", new Num.Vector2(leftWidth, cardHeight), ImGuiChildFlags.Borders))
+        if (ImGui.BeginChild("##ControlCenterInterface", new Num.Vector2(leftWidth, 0f), cardFlags))
         {
             ApplyCardBodyScale();
             DrawInterfaceCard();
@@ -170,7 +185,7 @@ internal static class ControlCenterWindow
         {
             ImGui.SameLine(0f, gap);
             PushCardStyle();
-            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
+            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, 0f), cardFlags))
             {
                 ApplyCardBodyScale();
                 DrawSessionCard(snapshot);
@@ -182,7 +197,7 @@ internal static class ControlCenterWindow
         {
             ImGui.Spacing();
             PushCardStyle();
-            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
+            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, 0f), cardFlags))
             {
                 ApplyCardBodyScale();
                 DrawSessionCard(snapshot);
@@ -270,6 +285,19 @@ internal static class ControlCenterWindow
 
     private static float CardKeyColumn() =>
         DevToolUiSettings.IsChinese ? 116f : 108f;
+
+    private static void FitWindowHeightToContents(Num.Vector2 display, bool focusMode)
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float minimum = focusMode ? 82f : 180f;
+        float maximum = Math.Max(minimum, display.Y - 16f);
+        float desired = ImGui.GetCursorPosY() + style.WindowPadding.Y;
+        desired = Math.Max(minimum, Math.Min(maximum, desired));
+
+        Num.Vector2 current = ImGui.GetWindowSize();
+        if (Math.Abs(current.Y - desired) > 0.5f)
+            ImGui.SetWindowSize(new Num.Vector2(current.X, desired), ImGuiCond.Always);
+    }
 
     private static string CurrentRoom(EditorPresentationSnapshot snapshot) =>
         string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
