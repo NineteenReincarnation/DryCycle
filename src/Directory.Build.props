@@ -17,6 +17,13 @@
     <Compile Remove="**/DesertBatflyRoleScores.cs" />
     <Compile Remove="**/*DesertBatfly*SocialRoles*.cs" />
     <Compile Remove="**/*DesertBatfly*RoleScores*.cs" />
+
+    <!-- The DevTool RWImGui frontend is a separate BepInEx assembly with its own
+         ImGui/RWImGui references. This src-local props file is the one inherited by
+         DryCycle.csproj, so keep the frontend out of DryCycle.dll here rather than only
+         in the repository-root Directory.Build.props. -->
+    <Compile Remove="DevUI/DevTool/RWImGui/**/*.cs"
+             Condition="'$(MSBuildProjectName)' == 'DryCycle'" />
   </ItemGroup>
 
   <!-- Performance validation configuration for AI Observatory work. Profile keeps
