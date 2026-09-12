@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.TemperatureSystem;
 using DryCycle.Weather.Spatial;
@@ -11,10 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
 /// Structured editor for DryCycle-owned world data.
-///
-/// The editor talks to the runtime authorities directly instead of maintaining
-/// a parallel UI model. TemperatureSetsLoader and WeatherSpatialRegistry therefore
-/// remain the single source of truth for both gameplay and authoring.
+/// Runtime loaders remain the single source of truth; this class is presentation only.
 /// </summary>
 internal static class WorldWorkspaceDataView
 {
@@ -53,15 +49,10 @@ internal static class WorldWorkspaceDataView
         DrawPageNavigation();
         ImGui.Spacing();
 
-        switch (currentPage)
-        {
-            case DataPage.Environment:
-                DrawEnvironment(region, room);
-                break;
-            case DataPage.Weather:
-                DrawWeather(region, room);
-                break;
-        }
+        if (currentPage == DataPage.Environment)
+            DrawEnvironment(region, room);
+        else
+            DrawWeather(region, room);
     }
 
     internal static bool SaveDirty()
@@ -148,6 +139,7 @@ internal static class WorldWorkspaceDataView
     private static void DrawStoreState(string displayName, bool dirty, string path, string error)
     {
         ImGui.TextUnformatted(displayName);
+
         string state;
         Num.Vector4 color;
         if (!string.IsNullOrEmpty(error))
@@ -172,19 +164,18 @@ internal static class WorldWorkspaceDataView
         else
             ImGui.TextColored(color, state);
 
-        if (ImGui.IsItemHovered())
+        if (!ImGui.IsItemHovered()) return;
+
+        ImGui.BeginTooltip();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(path)
+            ? DevToolUiSettings.T("尚未解析到文件路径", "No file path has been resolved yet")
+            : path);
+        if (!string.IsNullOrEmpty(error))
         {
-            ImGui.BeginTooltip();
-            ImGui.TextUnformatted(string.IsNullOrEmpty(path)
-                ? DevToolUiSettings.T("尚未解析到文件路径", "No file path has been resolved yet")
-                : path);
-            if (!string.IsNullOrEmpty(error))
-            {
-                ImGui.Separator();
-                ImGui.TextWrapped(error);
-            }
-            ImGui.EndTooltip();
+            ImGui.Separator();
+            ImGui.TextWrapped(error);
         }
+        ImGui.EndTooltip();
     }
 
     private static void DrawPageNavigation()
@@ -211,7 +202,7 @@ internal static class WorldWorkspaceDataView
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("房间环境", "ROOM ENVIRONMENT"));
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "调整当前房间的热环境、太阳暴露和空气湿度。修改会立即进入运行时；保存只负责写回 TemperatureSets.json。",
+            "调整当前房间的热环境、太阳暴露和空气湿度。修改立即进入运行时；保存只负责写回 TemperatureSets.json。",
             "Tune the selected room's thermal environment, solar exposure and humidity. Changes affect runtime immediately; Save only persists TemperatureSets.json."), true);
         ImGui.Spacing();
 
@@ -230,7 +221,6 @@ internal static class WorldWorkspaceDataView
 
         bool hasProfile = TemperatureSetsLoader.HasProfile(region, room.Name);
         RoomEnvironmentProfile profile = TemperatureSetsLoader.GetProfileOrDefault(region, room.Name);
-
         DrawRoomEnvironmentContext(room.Name, hasProfile, region);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("热环境", "THERMAL"));
@@ -258,7 +248,7 @@ internal static class WorldWorkspaceDataView
                 1f,
                 SunlightSemantic(sunlight),
                 "SunlightIntensity",
-                true))
+                percentage: true))
         {
             profile.SunlightIntensity = RoomEnvironmentProfile.ClampUnit(sunlight);
             TemperatureSetsLoader.SetProfile(region, room.Name, profile);
@@ -273,7 +263,7 @@ internal static class WorldWorkspaceDataView
                 1f,
                 ShadeSemantic(shade),
                 "RoomShade",
-                true))
+                percentage: true))
         {
             profile.RoomShade = RoomEnvironmentProfile.ClampUnit(shade);
             TemperatureSetsLoader.SetProfile(region, room.Name, profile);
@@ -330,8 +320,8 @@ internal static class WorldWorkspaceDataView
         if (!hasProfile) ImGui.EndDisabled();
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "只要修改任意参数，就会为这个房间创建覆盖；恢复默认会删除该覆盖。",
-            "Changing any value creates a room override. Reset removes that override."), true);
+            "修改任意参数会创建该房间的覆盖；恢复默认会删除覆盖并重新使用系统默认值。",
+            "Changing any value creates a room override. Reset removes it and returns to system defaults."), true);
     }
 
     private static bool DrawScalarControl(
@@ -347,18 +337,63 @@ internal static class WorldWorkspaceDataView
         ImGui.PushID(id);
 
         ImGui.TextUnformatted(label);
-        string technical = technicalName;
-        float technicalWidth = ImGui.CalcTextSize(technical).X;
-        if (DevToolWidgets.SameLineIfFits(technicalWidth + 8f))
-            ImGui.TextColored(TechnicalColor, technical);
+        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technicalName).X + 8f))
+            ImGui.TextColored(TechnicalColor, technicalName);
 
         string summary = percentage
             ? Math.Round(value * 100f) + "% · " + semantic
             : value.ToString("0.###") + " · " + semantic;
         DevToolWidgets.MutedText(summary);
 
-        ImGui.SetNextItemWidth(-1f);
-        bool changed = ImGui.SliderFloat("##Value", ref value, min, max, "%.3f");
+        float editValue = percentage ? value * 100f : value;
+        float editMin = percentage ? min * 100f : min;
+        float editMax = percentage ? max * 100f : max;
+        float available = ImGui.GetContentRegionAvail().X;
+        float exactWidth = 92f;
+        float spacing = ImGui.GetStyle().ItemSpacing.X;
+        bool changed = false;
+
+        if (available >= 280f)
+        {
+            ImGui.SetNextItemWidth(Math.Max(120f, available - exactWidth - spacing));
+            changed |= ImGui.SliderFloat(
+                "##Slider",
+                ref editValue,
+                editMin,
+                editMax,
+                percentage ? "%.0f%%" : "%.3f");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(exactWidth);
+            changed |= ImGui.InputFloat(
+                "##Exact",
+                ref editValue,
+                0f,
+                0f,
+                percentage ? "%.1f" : "%.3f");
+        }
+        else
+        {
+            ImGui.SetNextItemWidth(-1f);
+            changed |= ImGui.SliderFloat(
+                "##Slider",
+                ref editValue,
+                editMin,
+                editMax,
+                percentage ? "%.0f%%" : "%.3f");
+            ImGui.SetNextItemWidth(-1f);
+            changed |= ImGui.InputFloat(
+                "##Exact",
+                ref editValue,
+                0f,
+                0f,
+                percentage ? "%.1f" : "%.3f");
+        }
+
+        if (changed)
+        {
+            editValue = Math.Max(editMin, Math.Min(editMax, editValue));
+            value = percentage ? editValue / 100f : editValue;
+        }
 
         ImGui.Spacing();
         ImGui.PopID();
@@ -369,8 +404,8 @@ internal static class WorldWorkspaceDataView
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("天气", "WEATHER"));
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "先决定区域里哪些天气会参与循环，再决定具体 Weather / DangerType 在区域和房间中是否允许。",
-            "First decide which weather families participate in the region cycle, then control whether each concrete Weather / DangerType is allowed in the region and selected room."), true);
+            "先决定区域中哪些天气族参与循环，再配置具体 Weather / DangerType 在区域和房间中的空间权限。",
+            "First decide which weather families participate in the region cycle, then configure spatial permission for each concrete Weather / DangerType."), true);
         ImGui.Spacing();
 
         if (!string.IsNullOrEmpty(WeatherSpatialRegistry.FatalLoadError))
@@ -378,15 +413,15 @@ internal static class WorldWorkspaceDataView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("区域天气调度", "REGION WEATHER SCHEDULE"));
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "族开关控制这一类天气是否参与区域循环；族概率控制抽到这一类的机会；子天气再决定该类中具体事件是否启用及权重。",
-            "The family toggle controls whether a family participates in the region cycle. Family chance controls its roll, while each child controls its own enabled state and weight."), true);
+            "开关决定是否参与循环；概率控制出现机会。关闭项目不会清空概率，方便先配置、后启用。",
+            "Toggles control participation and chance controls occurrence. Disabling an item keeps its configured chance so it can be prepared before enabling."), true);
         ImGui.Spacing();
         DrawRegionSchedule(region);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("空间规则", "SPATIAL RULES"));
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "区域“继承”最终使用全局默认（当前为禁止）；房间“继承”使用区域结果。FamWeather 不参与房间级空间规则。",
-            "Region Inherit falls back to the global default (currently Forbidden). Room Inherit uses the region result. FamWeather is not a room-level spatial rule."), true);
+            "区域继承使用全局默认；房间继承使用区域结果。房间层只编辑具体子天气 / DangerType，不编辑 FamWeather。",
+            "Region Inherit uses the global default; Room Inherit uses the region result. Rooms edit concrete sub-weather / DangerType only, never FamWeather."), true);
         ImGui.Spacing();
         DrawSpatialRuleMatrix(region, room);
 
@@ -396,6 +431,8 @@ internal static class WorldWorkspaceDataView
     private static void DrawRegionSchedule(string region)
     {
         IReadOnlyList<WeatherSpatialFamily> families = WeatherSpatialCatalog.AllFamilies;
+        float rowHeight = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y;
+
         for (int i = 0; i < families.Count; i++)
         {
             WeatherSpatialFamily family = families[i];
@@ -407,15 +444,21 @@ internal static class WorldWorkspaceDataView
                 out float familyChance);
 
             ImGui.PushID("WeatherFamily_" + familyId);
-            float rowHeight = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y;
-            float cardHeight = 74f + rowHeight * (family.Members.Count * 2 + 1);
-
+            float cardHeight = 92f + rowHeight * (family.Members.Count * 3 + 1);
             if (ImGui.BeginChild("##FamilyCard", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
             {
-                DrawFamilyHeader(family, familyEnabled);
+                if (DrawToggleRow(
+                        FamilyFriendlyName(familyId),
+                        "FamWeather / " + familyId,
+                        "FamilyToggle",
+                        familyEnabled,
+                        DevToolUiSettings.T("已启用", "Enabled"),
+                        DevToolUiSettings.T("已关闭", "Disabled")))
+                {
+                    WeatherSpatialRegistry.SetFamilyScheduleEnabled(region, familyId, !familyEnabled);
+                }
 
                 float chance = familyChance;
-                if (!familyEnabled) ImGui.BeginDisabled();
                 if (DrawPercentControl(
                         DevToolUiSettings.T("区域出现概率", "Region chance"),
                         "FamilyChance",
@@ -423,13 +466,11 @@ internal static class WorldWorkspaceDataView
                 {
                     WeatherSpatialRegistry.SetFamilyScheduleChance(region, familyId, chance);
                 }
-                if (!familyEnabled) ImGui.EndDisabled();
 
                 ImGui.Separator();
-                IReadOnlyList<WeatherSpatialMember> members = family.Members;
-                for (int j = 0; j < members.Count; j++)
+                for (int j = 0; j < family.Members.Count; j++)
                 {
-                    WeatherSpatialMember member = members[j];
+                    WeatherSpatialMember member = family.Members[j];
                     WeatherSpatialRegistry.TryGetSubWeatherSchedule(
                         region,
                         member.Kind,
@@ -438,12 +479,24 @@ internal static class WorldWorkspaceDataView
                         out float subChance);
 
                     ImGui.PushID(member.Key);
-                    DrawSubWeatherHeader(member, subEnabled);
+                    if (DrawToggleRow(
+                            WeatherFriendlyName(member.Id),
+                            WeatherTechnicalName(member.Kind.ToString(), member.Id),
+                            "SubWeatherToggle",
+                            subEnabled,
+                            DevToolUiSettings.T("启用", "On"),
+                            DevToolUiSettings.T("关闭", "Off")))
+                    {
+                        WeatherSpatialRegistry.SetSubWeatherScheduleEnabled(
+                            region,
+                            member.Kind,
+                            member.Id,
+                            !subEnabled);
+                    }
 
                     float nextChance = subChance;
-                    if (!subEnabled) ImGui.BeginDisabled();
                     if (DrawPercentControl(
-                            DevToolUiSettings.T("权重", "Weight"),
+                            DevToolUiSettings.T("子天气概率", "Sub-weather chance"),
                             "SubChance",
                             ref nextChance))
                     {
@@ -453,9 +506,8 @@ internal static class WorldWorkspaceDataView
                             member.Id,
                             nextChance);
                     }
-                    if (!subEnabled) ImGui.EndDisabled();
 
-                    if (j < members.Count - 1) ImGui.Separator();
+                    if (j < family.Members.Count - 1) ImGui.Separator();
                     ImGui.PopID();
                 }
             }
@@ -465,19 +517,22 @@ internal static class WorldWorkspaceDataView
         }
     }
 
-    private static void DrawFamilyHeader(WeatherSpatialFamily family, bool enabled)
+    private static bool DrawToggleRow(
+        string label,
+        string technical,
+        string id,
+        bool enabled,
+        string enabledLabel,
+        string disabledLabel)
     {
         float startX = ImGui.GetCursorPosX();
         float rightX = startX + ImGui.GetContentRegionAvail().X;
 
-        ImGui.TextUnformatted(FamilyFriendlyName(family.Id));
-        string technical = "FamWeather / " + family.Id;
+        ImGui.TextUnformatted(label);
         if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technical).X + 8f, 100f))
             ImGui.TextColored(TechnicalColor, technical);
 
-        string toggleLabel = enabled
-            ? DevToolUiSettings.T("已启用", "Enabled")
-            : DevToolUiSettings.T("已关闭", "Disabled");
+        string toggleLabel = enabled ? enabledLabel : disabledLabel;
         float toggleWidth = DevToolWidgets.ButtonWidth(toggleLabel);
         float toggleX = rightX - toggleWidth;
         if (toggleX > ImGui.GetCursorPosX() + 12f)
@@ -486,64 +541,17 @@ internal static class WorldWorkspaceDataView
             ImGui.SetCursorPosX(toggleX);
         }
 
-        if (DevToolWidgets.ActionButton(
-                toggleLabel,
-                "FamilyToggle",
-                enabled ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-        {
-            WeatherSpatialRegistry.SetFamilyScheduleEnabled(
-                string.Empty,
-                string.Empty,
-                enabled);
-        }
-
-        if (ImGui.IsItemClicked())
-        {
-            // The real mutation is performed below by DrawRegionSchedule, where the
-            // current region/family identity is available. This branch is intentionally
-            // empty so the button remains visually self-contained.
-        }
-    }
-
-    private static void DrawSubWeatherHeader(WeatherSpatialMember member, bool enabled)
-    {
-        float startX = ImGui.GetCursorPosX();
-        float rightX = startX + ImGui.GetContentRegionAvail().X;
-
-        ImGui.TextUnformatted(WeatherFriendlyName(member.Id));
-        string technical = WeatherTechnicalName(member.Kind, member.Id);
-        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technical).X + 8f, 100f))
-            ImGui.TextColored(TechnicalColor, technical);
-
-        string toggleLabel = enabled
-            ? DevToolUiSettings.T("启用", "On")
-            : DevToolUiSettings.T("关闭", "Off");
-        float toggleWidth = DevToolWidgets.ButtonWidth(toggleLabel);
-        float toggleX = rightX - toggleWidth;
-        if (toggleX > ImGui.GetCursorPosX() + 12f)
-        {
-            ImGui.SameLine();
-            ImGui.SetCursorPosX(toggleX);
-        }
-
-        if (DevToolWidgets.ActionButton(
-                toggleLabel,
-                "SubWeatherToggle",
-                enabled ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-        {
-            WeatherSpatialRegistry.SetSubWeatherScheduleEnabled(
-                string.Empty,
-                member.Kind,
-                member.Id,
-                enabled);
-        }
+        return DevToolWidgets.ActionButton(
+            toggleLabel,
+            id,
+            enabled ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle);
     }
 
     private static bool DrawPercentControl(string label, string id, ref float value)
     {
         ImGui.TextUnformatted(label);
-        ImGui.SameLine();
-        ImGui.TextDisabled(Math.Round(value) + "%");
+        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize("100%").X + 8f))
+            ImGui.TextDisabled(Math.Round(value) + "%");
         ImGui.SetNextItemWidth(-1f);
         return ImGui.SliderFloat("##" + id, ref value, 0f, 100f, "%.0f%%");
     }
@@ -583,7 +591,7 @@ internal static class WorldWorkspaceDataView
     {
         ImGui.PushID("Spatial_" + target.Key);
         ImGui.TextUnformatted(WeatherFriendlyName(target.WeatherId));
-        string technical = WeatherTechnicalName(target.Kind, target.WeatherId);
+        string technical = WeatherTechnicalName(target.Kind.ToString(), target.WeatherId);
         if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technical).X + 8f))
             ImGui.TextColored(TechnicalColor, technical);
 
@@ -607,7 +615,7 @@ internal static class WorldWorkspaceDataView
         {
             WeatherSpatialRule roomRule = WeatherSpatialRegistry.GetRoomRule(region, room.Name, target);
             WeatherSpatialRule effectiveRegion = regionRule == WeatherSpatialRule.Inherit
-                ? WeatherSpatialRule.Deny
+                ? NormalizeEffectiveRule(WeatherSpatialRegistry.GlobalDefault)
                 : regionRule;
             if (DrawRuleEditor(
                     DevToolUiSettings.T("房间 · ", "Room · ") + room.Name,
@@ -679,6 +687,9 @@ internal static class WorldWorkspaceDataView
         return changed;
     }
 
+    private static WeatherSpatialRule NormalizeEffectiveRule(WeatherSpatialRule rule) =>
+        rule == WeatherSpatialRule.Allow ? WeatherSpatialRule.Allow : WeatherSpatialRule.Deny;
+
     private static string RuleLabel(WeatherSpatialRule rule)
     {
         return rule switch
@@ -691,9 +702,9 @@ internal static class WorldWorkspaceDataView
 
     private static string RegionInheritanceHint(WeatherSpatialRule rule)
     {
-        return rule == WeatherSpatialRule.Inherit
-            ? DevToolUiSettings.T("继承 → 全局默认：禁止", "Inherit → global default: Forbidden")
-            : string.Empty;
+        if (rule != WeatherSpatialRule.Inherit) return string.Empty;
+        WeatherSpatialRule fallback = NormalizeEffectiveRule(WeatherSpatialRegistry.GlobalDefault);
+        return DevToolUiSettings.T("继承 → 全局默认：", "Inherit → global default: ") + RuleLabel(fallback);
     }
 
     private static string RoomInheritanceHint(
@@ -701,10 +712,7 @@ internal static class WorldWorkspaceDataView
         WeatherSpatialRule effectiveRegion)
     {
         if (roomRule != WeatherSpatialRule.Inherit) return string.Empty;
-        string effective = effectiveRegion == WeatherSpatialRule.Allow
-            ? DevToolUiSettings.T("允许", "Allow")
-            : DevToolUiSettings.T("禁止", "Forbidden");
-        return DevToolUiSettings.T("继承 → 区域结果：", "Inherit → region result: ") + effective;
+        return DevToolUiSettings.T("继承 → 区域结果：", "Inherit → region result: ") + RuleLabel(effectiveRegion);
     }
 
     private static string FamilyFriendlyName(string id)
@@ -736,9 +744,9 @@ internal static class WorldWorkspaceDataView
         };
     }
 
-    private static string WeatherTechnicalName(object kind, string id)
+    private static string WeatherTechnicalName(string kindName, string id)
     {
-        return (kind?.ToString()?.Equals("DangerType", StringComparison.OrdinalIgnoreCase) == true
+        return (string.Equals(kindName, "DangerType", StringComparison.OrdinalIgnoreCase)
             ? "DangerType / "
             : "Weather / ") + id;
     }
