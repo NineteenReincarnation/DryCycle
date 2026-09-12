@@ -265,7 +265,7 @@ internal static class RoomSettingsView
 
         if (ImGui.BeginCombo(id, string.IsNullOrEmpty(current) ? "NO PALETTE" : current))
         {
-            if (fade && ImGui.Selectable("NO PALETTE##TerrainFadeNone", !snapshot.HasFadePalette))
+            if (fade && ImGui.Selectable("NO PALETTE##TerrainFadeNone", !snapshot.HasTerrainFadePalette))
                 SendSetting(RoomSettingKeys.TerrainFadePalette,
                     new EditorPropertyValue(EditorPropertyKind.String, text: "NO PALETTE"));
 
