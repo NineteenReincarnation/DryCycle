@@ -29,6 +29,7 @@ internal static class WorldTopologyRuntime
         if (enabled) return;
         enabled = true;
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+        WorldConnectionSyntax.Enable();
         On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
         On.ShortcutHandler.VesselAllowedInRoom += ShortcutHandler_VesselAllowedInRoom;
         On.AbstractCreature.Abstractize += AbstractCreature_Abstractize;
@@ -43,6 +44,7 @@ internal static class WorldTopologyRuntime
         On.ShortcutHandler.VesselAllowedInRoom -= ShortcutHandler_VesselAllowedInRoom;
         On.AbstractCreature.Abstractize -= AbstractCreature_Abstractize;
         On.Creature.SuckedIntoShortCut -= Creature_SuckedIntoShortCut;
+        WorldConnectionSyntax.Disable();
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
     }
 
@@ -232,8 +234,8 @@ internal static class WorldTopologyRuntime
     }
 
     /// <summary>
-    /// Returns true when an explicit edge owns the endpoint. allowsTravel tells the caller
-    /// whether the edge direction permits leaving from that endpoint.
+    /// Exact world.txt syntax is authoritative. WorldTopology.json remains only as a compatibility
+    /// fallback for older editor-authored maps that have not yet been resaved with &lt;Exit&gt;Room tokens.
     /// </summary>
     private static bool TryGetExplicitRoute(
         string region,
@@ -242,6 +244,12 @@ internal static class WorldTopologyRuntime
         out WorldConnectionEndpoint destination,
         out bool allowsTravel)
     {
+        if (WorldConnectionSyntax.TryGetLoadedRoute(region, sourceRoom, sourceNode, out destination))
+        {
+            allowsTravel = true;
+            return true;
+        }
+
         destination = default;
         allowsTravel = false;
         WorldConnectionEndpoint source = new(sourceRoom, sourceNode);
