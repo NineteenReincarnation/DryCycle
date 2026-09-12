@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using UnityEngine;
 
 namespace DryCycle.Creatures.DesertBatfly;
 
@@ -14,6 +15,7 @@ namespace DryCycle.Creatures.DesertBatfly;
 internal static class DB_WarpCompatibility
 {
     private const int DesertRoomTypeValue = 6;
+    private const float EnglishDesertGroupOffset = -48f;
     private static bool enabled;
     private static object harmony;
     private static Type roomInfoType;
@@ -69,17 +71,19 @@ internal static class DB_WarpCompatibility
         MethodInfo colorPrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(ColorLoadPrefix), BindingFlags.NonPublic | BindingFlags.Static);
 
-        // WarpContainer is a top-level class in Warp 1.9.x, not a nested type of
-        // WarpModMenu. This prefix is only a safety net; colors are already expanded
-        // during Enable and before ColorInfo.Load.
-        Type warpContainerType = DB_RuntimePatch.FindType("WarpContainer");
+        // WarpContainer is top-level in Warp 1.9.x and nested in newer builds.
+        // Resolve both forms so the integration stays soft across Warp revisions.
+        Type warpContainerType = DB_RuntimePatch.FindType("WarpContainer")
+            ?? warpMenuType.GetNestedType("WarpContainer", BindingFlags.Public | BindingFlags.NonPublic);
         MethodInfo generate = warpContainerType?.GetMethod(
             "GenerateRoomButtons", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         MethodInfo generatePrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(GenerateRoomButtonsPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo generatePostfix = typeof(DB_WarpCompatibility).GetMethod(
+            nameof(GenerateRoomButtonsPostfix), BindingFlags.NonPublic | BindingFlags.Static);
 
         DB_RuntimePatch.Patch(harmony, colorLoad, colorPrefix);
-        DB_RuntimePatch.Patch(harmony, generate, generatePrefix);
+        DB_RuntimePatch.Patch(harmony, generate, generatePrefix, generatePostfix);
         enabled = true;
     }
 
@@ -116,8 +120,9 @@ internal static class DB_WarpCompatibility
 
         var names = values.Select(entry => entry.name).ToList();
         while (names.Count < DesertRoomTypeValue) names.Add("Room" + names.Count);
-        if (names.Count == DesertRoomTypeValue) names.Add("Desert Swarmroom");
-        else names[DesertRoomTypeValue] = "Desert Swarmroom";
+        string desertName = IsChineseLanguage() ? "沙漠蝙蝠房" : "Desert Swarmroom";
+        if (names.Count == DesertRoomTypeValue) names.Add(desertName);
+        else names[DesertRoomTypeValue] = desertName;
         __result = names.ToArray();
         return false;
     }
@@ -130,6 +135,58 @@ internal static class DB_WarpCompatibility
     private static void GenerateRoomButtonsPrefix()
     {
         EnsureWarpTypeColors();
+    }
+
+    private static void GenerateRoomButtonsPostfix(object __instance, object[] __args)
+    {
+        // "DESERT SWARMROOM" is considerably wider than Warp's stock type headers.
+        // In English only, move the whole Desert group left so the header no longer
+        // collides with the adjacent OUTPOST/TRADER groups while keeping its buttons
+        // centered beneath the header. Chinese uses the shorter localized label and
+        // therefore keeps Warp's original spacing.
+        if (__instance == null || !IsEnglishLanguage() || __args == null || __args.Length == 0 ||
+            __args[0] is not IEnumerable rooms || roomInfoType == null)
+            return;
+
+        FieldInfo nameField = FindField(roomInfoType, "name");
+        FieldInfo typeField = FindField(roomInfoType, "type");
+        if (nameField == null || typeField == null) return;
+
+        var desertRoomNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (object room in rooms)
+        {
+            if (room == null || !roomInfoType.IsInstanceOfType(room)) continue;
+            object type = typeField.GetValue(room);
+            if (type == null || Convert.ToInt32(type) != DesertRoomTypeValue) continue;
+            if (nameField.GetValue(room) is string name && !string.IsNullOrEmpty(name))
+                desertRoomNames.Add(name);
+        }
+        if (desertRoomNames.Count == 0) return;
+
+        object categoryLabels = GetMemberValue(__instance, "categoryLabels");
+        if (categoryLabels is IEnumerable labels)
+        {
+            foreach (object label in labels)
+            {
+                if (!string.Equals(GetMenuLabelText(label), "DESERT SWARMROOM", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                ShiftMenuObject(label, EnglishDesertGroupOffset);
+                break;
+            }
+        }
+
+        object roomButtons = GetMemberValue(__instance, "roomButtons");
+        if (roomButtons is not IEnumerable buttons) return;
+        foreach (object button in buttons)
+        {
+            if (GetMemberValue(button, "signalText") is not string signal ||
+                !signal.EndsWith("warp", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string roomName = signal.Substring(0, signal.Length - 4);
+            if (desertRoomNames.Contains(roomName))
+                ShiftMenuObject(button, EnglishDesertGroupOffset);
+        }
     }
 
     private static void ParseWorldFilePostfix(object __result, string path)
@@ -216,5 +273,82 @@ internal static class DB_WarpCompatibility
         Array original = Array.CreateInstance(elementType, DesertRoomTypeValue);
         Array.Copy(current, original, DesertRoomTypeValue);
         field.SetValue(null, original);
+    }
+
+    private static bool IsChineseLanguage()
+    {
+        try
+        {
+            InGameTranslator.LanguageID language = RWCustom.Custom.rainWorld?.inGameTranslator?.currentLanguage;
+            return language == InGameTranslator.LanguageID.Chinese ||
+                   language == InGameTranslator.LanguageID.TraditionalChinese;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsEnglishLanguage()
+    {
+        try
+        {
+            return RWCustom.Custom.rainWorld?.inGameTranslator?.currentLanguage == InGameTranslator.LanguageID.English;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string GetMenuLabelText(object menuLabel)
+    {
+        object label = GetMemberValue(menuLabel, "label");
+        return GetMemberValue(label, "text") as string;
+    }
+
+    private static object GetMemberValue(object instance, string name)
+    {
+        if (instance == null || string.IsNullOrEmpty(name)) return null;
+        Type type = instance.GetType();
+        while (type != null)
+        {
+            FieldInfo field = type.GetField(name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null) return field.GetValue(instance);
+
+            PropertyInfo property = type.GetProperty(name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property?.CanRead == true) return property.GetValue(instance, null);
+            type = type.BaseType;
+        }
+        return null;
+    }
+
+    private static FieldInfo FindField(Type type, string name)
+    {
+        while (type != null)
+        {
+            FieldInfo field = type.GetField(name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null) return field;
+            type = type.BaseType;
+        }
+        return null;
+    }
+
+    private static void ShiftMenuObject(object menuObject, float deltaX)
+    {
+        if (menuObject == null || Math.Abs(deltaX) < 0.001f) return;
+        ShiftVectorField(menuObject, "pos", deltaX);
+        ShiftVectorField(menuObject, "lastPos", deltaX);
+    }
+
+    private static void ShiftVectorField(object instance, string fieldName, float deltaX)
+    {
+        FieldInfo field = FindField(instance.GetType(), fieldName);
+        if (field?.GetValue(instance) is not Vector2 value) return;
+        value.x += deltaX;
+        field.SetValue(instance, value);
     }
 }
