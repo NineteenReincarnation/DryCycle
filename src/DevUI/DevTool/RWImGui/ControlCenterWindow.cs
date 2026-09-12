@@ -27,17 +27,19 @@ internal static class ControlCenterWindow
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        float maxWidth = Math.Max(320f, display.X - 16f);
         float width = Math.Min(
-            Math.Max(620f, display.X - 16f),
-            Math.Max(660f, Math.Min(920f * Math.Min(1.18f, scale), display.X * 0.78f)));
-        float normalHeight = Math.Min(230f * Math.Min(1.22f, scale), Math.Max(178f, display.Y - 16f));
+            maxWidth,
+            Math.Max(Math.Min(660f, maxWidth), Math.Min(920f * Math.Min(1.18f, scale), display.X * 0.78f)));
+        float normalHeight = Math.Min(214f * Math.Min(1.18f, scale), Math.Max(176f, display.Y - 16f));
         float defaultHeight = snapshot.FocusMode ? Math.Min(92f, Math.Max(72f, display.Y - 16f)) : normalHeight;
+        float defaultX = Math.Max(8f, display.X - width - 8f);
 
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Num.Vector2(defaultX, 8f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, defaultHeight), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(560f, Math.Max(320f, display.X - 16f)), snapshot.FocusMode ? 68f : 170f),
-            new Num.Vector2(Math.Max(560f, display.X - 16f), Math.Max(170f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(560f, maxWidth), snapshot.FocusMode ? 68f : 170f),
+            new Num.Vector2(maxWidth, Math.Max(170f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
