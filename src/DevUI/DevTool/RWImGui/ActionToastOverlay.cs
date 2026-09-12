@@ -22,6 +22,7 @@ internal static class ActionToastOverlay
     private const double FadeSeconds = 0.32;
 
     private static string message = string.Empty;
+    private static string shortcutKeys = string.Empty;
     private static bool warning;
     private static double shownAt = -1000d;
 
@@ -32,14 +33,17 @@ internal static class ActionToastOverlay
         double age = ImGui.GetTime() - shownAt;
         if (age < 0d || age >= VisibleSeconds) return;
 
+        string visibleMessage = string.IsNullOrEmpty(message)
+            ? DevToolUiSettings.T("已执行", "Done")
+            : message;
+        if (!string.IsNullOrWhiteSpace(shortcutKeys))
+            visibleMessage += "  ·  " + shortcutKeys;
+
         float alpha = 1f;
         double fadeStart = VisibleSeconds - FadeSeconds;
         if (age > fadeStart)
             alpha = (float)Math.Max(0d, Math.Min(1d, (VisibleSeconds - age) / FadeSeconds));
 
-        string visibleMessage = string.IsNullOrEmpty(message)
-            ? DevToolUiSettings.T("已执行", "Done")
-            : message;
         float messageWidth = ImGui.CalcTextSize(visibleMessage).X;
         float width = Math.Max(168f, messageWidth + 34f);
         float height = Math.Max(34f, ImGui.GetFrameHeight() + 12f);
@@ -87,11 +91,10 @@ internal static class ActionToastOverlay
         ImGui.PopStyleVar(3);
     }
 
-    // Keep the optional keys parameter so existing callers and compatibility layers do not break.
-    // Key labels are intentionally not rendered here; ShortcutWindow is the single discovery UI.
     internal static void Notify(string chinese, string english, string keys = null, bool isWarning = false)
     {
         message = DevToolUiSettings.T(chinese, english);
+        shortcutKeys = keys ?? string.Empty;
         warning = isWarning;
         shownAt = ImGui.GetTime();
     }
