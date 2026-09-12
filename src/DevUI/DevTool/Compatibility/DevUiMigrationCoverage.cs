@@ -346,6 +346,11 @@ public static class DevUiMigrationCoverage
         if (output.TryGetValue(key, out MutableEntry existing))
         {
             existing.InstanceCount++;
+            if (state == DevUiMigrationState.Unmapped)
+            {
+                existing.State = DevUiMigrationState.Unmapped;
+                existing.AdapterNote = note ?? string.Empty;
+            }
             return;
         }
 
@@ -379,13 +384,18 @@ public static class DevUiMigrationCoverage
             return;
         }
 
-        // ButtonWithSelectPanel is a semantic selection popup, not a one-shot button. It creates a
-        // SelectPanel and routes the selected item through OnValueChange/IDevUISignals. Keep it
-        // visibly unmapped until a dedicated selection adapter proves that full behavior.
-        if (insideRepresentation && node is ButtonWithSelectPanel)
+        if (insideRepresentation && node is ButtonWithSelectPanel select)
         {
-            state = DevUiMigrationState.Unmapped;
-            note = "Composite select panel requires dedicated adapter";
+            if (LegacyDevInterfaceBridge.CanAdaptSelect(select))
+            {
+                state = DevUiMigrationState.GenericAdapter;
+                note = "PlacedObject legacy ButtonWithSelectPanel bridge";
+            }
+            else
+            {
+                state = DevUiMigrationState.Unmapped;
+                note = "Select options could not be discovered safely";
+            }
             return;
         }
 
