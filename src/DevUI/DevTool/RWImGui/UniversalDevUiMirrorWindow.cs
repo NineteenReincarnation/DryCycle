@@ -40,6 +40,7 @@ internal static class UniversalDevUiMirrorWindow
 
         FloatingWindowSnap.TrackCurrentWindow("UniversalDevUiMirror");
         DevUiPageCoverageView.Draw();
+        DevUiSemanticConformanceView.Draw(snapshot);
         UniversalDevUiMirrorView.Draw(snapshot);
         ImGui.End();
     }
