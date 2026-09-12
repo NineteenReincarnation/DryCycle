@@ -95,6 +95,19 @@ internal static class WorldTextRegistry
         return document.TryGetConnection(roomName, exitIndex, out destination);
     }
 
+    internal static bool TryGetConnectionEndpoint(
+        string region,
+        string roomName,
+        int exitIndex,
+        out string destinationRoom,
+        out int destinationNode)
+    {
+        destinationRoom = string.Empty;
+        destinationNode = -1;
+        if (!TryGetConnection(region, roomName, exitIndex, out string token)) return false;
+        return WorldConnectionSyntax.TryParseDestination(token, out destinationRoom, out destinationNode);
+    }
+
     internal static bool TrySetConnection(
         string region,
         string roomName,
@@ -115,7 +128,12 @@ internal static class WorldTextRegistry
             return false;
         }
 
-        document.TrySetConnection(roomName, exitIndex, destinationRoom);
+        string storedDestination = WorldConnectionSyntax.FormatForSource(
+            region,
+            roomName,
+            exitIndex,
+            destinationRoom);
+        document.TrySetConnection(roomName, exitIndex, storedDestination);
         return true;
     }
 
