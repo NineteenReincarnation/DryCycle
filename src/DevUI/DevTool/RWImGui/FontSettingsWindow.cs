@@ -120,6 +120,8 @@ internal static class FontSettingsWindow
         string[] families = DevToolFontCatalog.GetAvailableChineseFamilies();
         string selectedFamily = DevToolUiSettings.ChineseFontFamily;
         int localFontFiles = DevToolFontCatalog.CountLocalFontFiles();
+        int registeredLocalFaces = DevToolFontCatalog.RegisteredLocalFaceCount;
+        int localChineseFaces = DevToolFontCatalog.CountSelectableLocalChineseFaces();
 
         DevToolWidgets.MutedText("中文字体");
         ImGui.SetNextItemWidth(-1f);
@@ -139,17 +141,35 @@ internal static class FontSettingsWindow
         if (families.Length == 0)
         {
             ImGui.TextWrapped(
-                "RWImGui 的共享字体 Atlas 中暂未检测到可用于中文界面的字体。DryCycle 不会在运行期直接修改共享 Atlas，以避免破坏渲染器字体纹理。"
+                "当前 Atlas 中没有可用于简体中文界面的字体。DryCycle 会在 RWImGui 初始化完成、第一帧开始前尝试加入本地字体；如果安全窗口已关闭，则不会强行重建 Atlas。"
             );
         }
         else
         {
-            ImGui.TextDisabled($"Atlas 中可选 {families.Length} 个字体族 · 中文偏好默认 HarmonyOS Sans SC Bold");
+            ImGui.TextDisabled($"可选 {families.Length} 个字体族 · 本地中文字体面 {localChineseFaces} 个 · 默认 HarmonyOS Sans SC Medium");
         }
 
         DevToolWidgets.MutedText("字体目录");
         ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-        ImGui.TextDisabled($"目录中检测到 {localFontFiles} 个字体文件。只有已经由 RWImGui 在其字体初始化阶段加入共享 Atlas 的字体，才会出现在上面的列表中。");
+        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 · 启动阶段已注册 {registeredLocalFaces} 个 · 可用于中文 {localChineseFaces} 个");
+
+        if (DevToolFontCatalog.RegistrationAttempted && !DevToolFontCatalog.RegistrationSucceeded)
+        {
+            ImGui.TextWrapped("注册状态：" + DevToolFontCatalog.RegistrationMessage);
+        }
+        else if (registeredLocalFaces > 0 && localChineseFaces == 0)
+        {
+            ImGui.TextWrapped(
+                "本地字体已经加入 Atlas，但没有一个包含所需的简体中文字形。HarmonyOS Sans 请使用 HarmonyOS_Sans_SC_*.ttf；HarmonyOS_Sans_*.ttf 是通用西文字体，不是简中字体。"
+            );
+        }
+        else if (localChineseFaces > 0)
+        {
+            ImGui.TextDisabled(
+                "同一字体族的 Regular / Medium / Bold 等会合并为一个字体族条目；使用下面的字重滑块切换具体字体面。选择字体族或字重后下一帧立即生效。"
+            );
+        }
+
         ImGui.Spacing();
     }
 }
