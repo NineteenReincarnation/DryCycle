@@ -115,7 +115,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
 [SuppressUnmanagedCodeSecurity]
 internal static class ObservatoryFrontend
 {
-    private static readonly ObservatoryInputContext InputContext = new();
+    // Keep BepInEx/RainWorld startup free of consumer context construction. The context is created
+    // only when F7 actually makes the Observatory visible and RWImGui reports no competing owner.
+    private static ObservatoryInputContext inputContext;
 
     private static ManualLogSource log;
     private static int firstPresentLogged;
@@ -171,7 +173,8 @@ internal static class ObservatoryFrontend
     {
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext)) return;
+            ObservatoryInputContext context = inputContext;
+            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context)) return;
 
             // Never steal another RWImGUI consumer's active context. Once that context is
             // released, the next Unity Update will acquire ours automatically.
@@ -185,7 +188,13 @@ internal static class ObservatoryFrontend
                 return;
             }
 
-            ImGUIAPI.SwitchContext(InputContext);
+            if (context == null)
+            {
+                context = new ObservatoryInputContext();
+                inputContext = context;
+            }
+
+            ImGUIAPI.SwitchContext(context);
             Interlocked.Exchange(ref contextBusyLogged, 0);
             if (Interlocked.Exchange(ref inputContextLogged, 1) == 0)
                 log?.LogInfo(
@@ -205,7 +214,8 @@ internal static class ObservatoryFrontend
     {
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, InputContext))
+            ObservatoryInputContext context = inputContext;
+            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
                 ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
