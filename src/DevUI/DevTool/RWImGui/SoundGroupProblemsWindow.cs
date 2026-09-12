@@ -23,9 +23,11 @@ internal static class SoundGroupProblemsWindow
         int warnings = 0;
         for (int i = 0; i < problems.Length; i++)
         {
+            if (!ShouldDisplayProblem(problems[i])) continue;
             if (problems[i].Severity == DevToolProblemSeverity.Error) errors++;
             else warnings++;
         }
+        if (errors == 0 && warnings == 0) return;
 
         ImGuiIOPtr io = ImGui.GetIO();
         Num.Vector2 display = io.DisplaySize;
@@ -69,9 +71,13 @@ internal static class SoundGroupProblemsWindow
         {
             // Child windows do not inherit FontWindowScale from their parent in ImGui.
             ImGui.SetWindowFontScale(bodyScale);
+            int rendered = 0;
             for (int i = 0; i < problems.Length; i++)
             {
                 DevToolProblemSnapshot problem = problems[i];
+                if (!ShouldDisplayProblem(problem)) continue;
+                if (rendered++ > 0) ImGui.Separator();
+
                 bool error = problem.Severity == DevToolProblemSeverity.Error;
                 ImGui.TextColored(
                     error ? new Num.Vector4(1f, 0.42f, 0.40f, 1f) : new Num.Vector4(1f, 0.72f, 0.36f, 1f),
@@ -92,11 +98,24 @@ internal static class SoundGroupProblemsWindow
                     DevToolWidgets.MutedText(
                         WrapLongDetail(DevToolUiSettings.T("来源：", "Source: ") + problem.SourcePath),
                         true);
-                if (i + 1 < problems.Length) ImGui.Separator();
             }
         }
         ImGui.EndChild();
         ImGui.End();
+    }
+
+    private static bool ShouldDisplayProblem(DevToolProblemSnapshot problem)
+    {
+        if (problem == null) return false;
+
+        // An empty developer-local group is a valid draft state: users may create the Working Group
+        // first and populate it from Library/Scene immediately afterwards. Portable Mod groups remain
+        // strict, so an empty registered group still reports the original warning.
+        if (string.Equals(problem.Code, "sound-group-empty", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(problem.SourcePath, SoundGroupLibrary.Current.LocalFilePath, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return true;
     }
 
     /// <summary>
