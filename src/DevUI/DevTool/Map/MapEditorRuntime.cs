@@ -9,6 +9,14 @@ using DryCycle.DevUI.DevTool.World;
 
 namespace DryCycle.DevUI.DevTool.Map;
 
+public sealed class EditorMapRoomNodeSnapshot
+{
+    public int NodeIndex { get; init; }
+    public string Type { get; init; } = string.Empty;
+    public bool Exit { get; init; }
+    public int ConnectedRoomIndex { get; init; } = -1;
+}
+
 public sealed class EditorMapRoomSnapshot
 {
     public int RoomIndex { get; init; }
@@ -21,6 +29,7 @@ public sealed class EditorMapRoomSnapshot
     public bool Disabled { get; init; }
     public bool CurrentRoom { get; init; }
     public bool Selected { get; init; }
+    public EditorMapRoomNodeSnapshot[] Nodes { get; init; } = Array.Empty<EditorMapRoomNodeSnapshot>();
 }
 
 public sealed class EditorMapConnectionSnapshot
@@ -116,7 +125,8 @@ public static class MapEditorPresentationHub
                 OffScreenDen = room.offScreenDen,
                 Disabled = disabled.Contains(room.name ?? string.Empty),
                 CurrentRoom = room.index == currentRoomIndex,
-                Selected = room.index == state.SelectedRoomIndex
+                Selected = room.index == state.SelectedRoomIndex,
+                Nodes = BuildNodes(room)
             });
         }
 
@@ -137,6 +147,29 @@ public static class MapEditorPresentationHub
             Rooms = rooms.ToArray(),
             Connections = connections.ToArray()
         };
+    }
+
+    private static EditorMapRoomNodeSnapshot[] BuildNodes(AbstractRoom room)
+    {
+        if (room?.nodes == null || room.nodes.Length == 0)
+            return Array.Empty<EditorMapRoomNodeSnapshot>();
+
+        EditorMapRoomNodeSnapshot[] result = new EditorMapRoomNodeSnapshot[room.nodes.Length];
+        for (int i = 0; i < room.nodes.Length; i++)
+        {
+            AbstractRoomNode node = room.nodes[i];
+            bool exit = node.type == AbstractRoomNode.Type.Exit;
+            result[i] = new EditorMapRoomNodeSnapshot
+            {
+                NodeIndex = i,
+                Type = node.type?.value ?? string.Empty,
+                Exit = exit,
+                ConnectedRoomIndex = exit && room.connections != null && i < room.connections.Length
+                    ? room.connections[i]
+                    : -1
+            };
+        }
+        return result;
     }
 
     private static List<EditorMapConnectionSnapshot> BuildConnections(
@@ -348,10 +381,13 @@ public static class MapEditorCommandQueue
                 Plugin.Logger?.LogWarning("DevTool map command failed: " + error.Message);
             }
         }
+
+        WorldTopologyCommandQueue.Process(session);
     }
 
     internal static void Clear()
     {
         while (queue.TryDequeue(out _)) { }
+        WorldTopologyCommandQueue.Clear();
     }
 }
