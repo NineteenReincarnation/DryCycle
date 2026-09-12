@@ -28,6 +28,29 @@ internal static class DevUiFullAudit
     private static string lastGapFingerprint = string.Empty;
     private static int lastPageCount = -1;
 
+    /// <summary>
+    /// Entry point used by the legacy presentation layer. Owner discovery is structural so the
+    /// caller does not need to know which DevUINode base class/version exposes the owner member.
+    /// </summary>
+    internal static void ObserveAll(Page activePage)
+    {
+        if (activePage == null)
+        {
+            DevUiMigrationCoverage.Observe(null);
+            return;
+        }
+
+        global::DevInterface.DevUI owner = FindOwner(activePage);
+        if (owner != null)
+        {
+            ObserveAll(owner);
+            return;
+        }
+
+        // Conservative fallback for an unexpected DevInterface build: still audit the active tree.
+        DevUiMigrationCoverage.Observe(activePage);
+    }
+
     internal static void ObserveAll(global::DevInterface.DevUI owner)
     {
         if (owner == null) return;
@@ -61,6 +84,67 @@ internal static class DevUiFullAudit
         lastActivePage = null;
         lastGapFingerprint = string.Empty;
         lastPageCount = -1;
+    }
+
+    private static global::DevInterface.DevUI FindOwner(DevUINode node)
+    {
+        if (node == null) return null;
+        Type current = node.GetType();
+        while (current != null)
+        {
+            FieldInfo[] fields;
+            try
+            {
+                fields = current.GetFields(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            }
+            catch
+            {
+                current = current.BaseType;
+                continue;
+            }
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo field = fields[i];
+                if (!typeof(global::DevInterface.DevUI).IsAssignableFrom(field.FieldType)) continue;
+                try
+                {
+                    if (field.GetValue(node) is global::DevInterface.DevUI owner)
+                        return owner;
+                }
+                catch { }
+            }
+
+            PropertyInfo[] properties;
+            try
+            {
+                properties = current.GetProperties(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            }
+            catch
+            {
+                current = current.BaseType;
+                continue;
+            }
+
+            for (int i = 0; i < properties.Length; i++)
+            {
+                PropertyInfo property = properties[i];
+                if (!property.CanRead || property.GetIndexParameters().Length != 0 ||
+                    !typeof(global::DevInterface.DevUI).IsAssignableFrom(property.PropertyType))
+                    continue;
+                try
+                {
+                    if (property.GetValue(node, null) is global::DevInterface.DevUI owner)
+                        return owner;
+                }
+                catch { }
+            }
+
+            current = current.BaseType;
+        }
+        return null;
     }
 
     private static HashSet<Page> DiscoverInstantiatedPages(global::DevInterface.DevUI owner)
