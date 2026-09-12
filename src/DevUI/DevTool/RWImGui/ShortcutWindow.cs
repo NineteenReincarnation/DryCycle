@@ -35,17 +35,21 @@ internal static class ShortcutWindow
         float width = DevToolUiSettings.IsChinese
             ? Math.Min(500f, Math.Max(390f, display.X * 0.255f))
             : Math.Min(540f, Math.Max(420f, display.X * 0.275f));
-        float height = Math.Min(410f, Math.Max(300f, display.Y * 0.38f));
+
+        // Keep the lower-left utility clear of the default Tools window on common 900p layouts.
+        // The content child scrolls, so the window does not need to become tall enough to compete
+        // with the room viewport merely because the common catalog grows over time.
+        float height = Math.Min(380f, Math.Max(280f, display.Y * 0.34f));
         width = Math.Min(width * Math.Min(1.12f, scale), Math.Max(300f, display.X - 16f));
-        height = Math.Min(height * Math.Min(1.08f, scale), Math.Max(240f, display.Y - 16f));
+        height = Math.Min(height * Math.Min(1.06f, scale), Math.Max(220f, display.Y - 16f));
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(8f, Math.Max(8f, display.Y - height - 8f)),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(340f, 240f),
-            new Num.Vector2(Math.Max(340f, display.X - 16f), Math.Max(240f, display.Y - 16f)));
+            new Num.Vector2(340f, 220f),
+            new Num.Vector2(Math.Max(340f, display.X - 16f), Math.Max(220f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
