@@ -401,14 +401,14 @@ internal sealed class MapStateSnapshot : IEditorStateSnapshot
         internal bool IsAir;
     }
 
-    private readonly World world;
+    private readonly global::World world;
     private readonly List<RoomState> rooms;
     private readonly Dictionary<CreatureTemplate.Type, string> defaultAttractions;
     private readonly Dictionary<string, string> defaultNamedAttractions;
     private readonly List<MaterialState> materials;
 
     private MapStateSnapshot(
-        World world,
+        global::World world,
         List<RoomState> rooms,
         Dictionary<CreatureTemplate.Type, string> defaultAttractions,
         Dictionary<string, string> defaultNamedAttractions,
