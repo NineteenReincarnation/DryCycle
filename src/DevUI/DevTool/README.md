@@ -68,6 +68,8 @@ DevTool/
 - Effect 浏览器已接入悬停实时预览：约 180ms 后把一个 `save=false` 的临时 `RoomEffect` 放到当前 `RoomSettings.effects` 最前端，移开、切换页面或关闭 DevTools 时按对象身份精确回滚。
 - Effect 预览不识别 Mod 名称、程序集或私有 API；任何通过正常 `RoomSettings.effects`、`GetEffect`、`GetEffectAmount` 读取效果状态的未知 Mod 都可以自动看到同一份预览状态。
 - 对只在加载阶段创建视觉对象的 Effect，已加入第二层通用 bootstrap：优先从本体 `Room.Loaded` 和已注册 HookGen `Room.Loaded` 回调的 IL 中寻找“Effect 判断 → 构造 UAD → `Room.AddObject`”关系，只执行可证明安全的构造器，不重跑整个房间加载流程。
+- 当基础 Recipe 因额外标量参数而拒绝构造器时，会进入更保守的扩展 Recipe：当前可从同一 IL block 推导单个 `float amount`、末尾 `bool` 常量/双 Effect 选择器、单个 `int` 常量和单个 enum 常量，并补齐 `RoomSettings`、`RoomEffect.Type`、`RainWorldGame`、`World`、`AbstractRoom` 等上下文参数；找不到明确证据时仍然 fail closed。像本体 `Lightning / BkgOnlyLightning` 这种共用构造器的模式不需要写 Effect 名特判。
+- 扩展 Recipe 还要求目标 UAD 构造器后方在很近的 IL 范围内确实进入 `Room.AddObject`，并拒绝 PhysicalObject、多同类标量参数和不明确的自定义可选参数，避免仅仅因为同一代码块里出现了一个构造器就误实例化。
 - IL 无法直接确定构造器时，只允许经过安全扫描的 HookGen 回调进入 A/B Probe；明显涉及静态写入、AbstractEntity、文件、AssetBundle、存档等持久副作用的回调直接 fail closed，不做高级预览。
 - 高级预览的 Runtime Object、Drawable、Camera SpriteLeaser 和安全 Room 字段由独立 Ownership Transaction 持有；结束 Preview 时按对象身份逆序回滚，不按类型名猜测删除对象。
 - 预览对象运行后继续通过 `Room.AddObject` 生成的非物理子对象可以继承同一份 Preview ownership。正常 `Room.Update` 内优先使用 `Room.updateIndex` 精确确认当前生成者身份；仅在 Update 循环之外才使用“该调用类型的所有房间实例都属于 Preview”的保守栈回退。
@@ -139,7 +141,7 @@ Effect Hover Preview 额外遵守一条规则：兼容对象是 Rain World 的�
 ## 继续审查 / 完善的重点
 
 - 真正使用游戏安装中的 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、RuntimeDetour 和 RWImGui 进行完整联编、进游戏运行测试与错误清理；当前仓库没有覆盖这套环境的编译 CI。
-- Effect Preview 继续扩展通用 IL Recipe 参数推导。当前安全构造器主要覆盖 `Room`、`RoomEffect`、`float`、`RoomCamera` 和无参模式；带额外 `bool / enum / int` 条件或复杂多分支初始化的 Effect 仍应 fail closed，而不是猜参数。
+- Effect Preview 的 IL Recipe 后续只扩展“能从 IL 明确证明来源”的参数表达式，例如多个标量参数、局部变量回传或 helper 返回值；复杂条件仍然保持 fail closed，不通过默认值猜测第三方语义。
 - Effect Preview 继续审查 Camera / Futile / 全局 shader 等不经过 `Room.AddObject` 的运行时副作用；只有能建立可证明所有权和可逆性的通用 Journal 后才扩大自动预览范围。
 - Objects 框选、吸附、网格、对齐/分布等高效场景编辑工具。
 - 更多本体常用 PlacedObject 的语义化 Inspector 与我们自己的 Gizmo。
