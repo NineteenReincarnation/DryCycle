@@ -105,20 +105,35 @@ internal static class MapRoomGeometryPresentationHub
     private const float PixelsPerTile = 20f;
     private const float CurveSimplifyToleranceTiles = 0.075f;
     private const int MaxCurveSamples = 192;
-    private const int UnloadedCurveLoadsPerFrame = 4;
+
+    // Opening a large region must never synchronously decode every minimap/RoomSettings file.
+    // Cheap room bounds appear immediately; detailed raster and authored terrain are filled in
+    // incrementally with the current/selected room receiving first priority.
+    private const int RasterLoadsPerFrame = 10;
+    private const int UnloadedCurveLoadsPerFrame = 3;
+    private const int BackgroundRoomsPerFrame = 24;
+    private const int StructureSyncIntervalFrames = 120;
+    private const int RasterPollIntervalFrames = 180;
+    private const int NodePollIntervalFrames = 30;
+    private const int LiveSettingsPollIntervalFrames = 12;
     private const int SettingsPollIntervalFrames = 90;
 
     private sealed class CacheEntry
     {
         internal int RoomIndex;
         internal string RoomName = string.Empty;
+        internal AbstractRoom Room;
+        internal MapObject.RoomRepresentation RoomRep;
         internal int RasterSourceKey;
         internal int RasterWidth;
         internal int RasterHeight;
         internal bool RasterInitialized;
+        internal int NextRasterPollFrame;
         internal int NodeFingerprint;
         internal bool NodesInitialized;
+        internal int NextNodePollFrame;
         internal int SettingsFingerprint;
+        internal int NextLiveSettingsPollFrame;
         internal string SettingsPath = string.Empty;
         internal DateTime SettingsWriteTimeUtc;
         internal int NextSettingsPollFrame;
@@ -135,8 +150,13 @@ internal static class MapRoomGeometryPresentationHub
     }
 
     private static readonly Dictionary<int, CacheEntry> cache = new();
+    private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
+    private static int lastSubNodeCount = -1;
+    private static int nextStructureSyncFrame;
+    private static int backgroundCursor;
+    private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex) =>
@@ -153,23 +173,84 @@ internal static class MapRoomGeometryPresentationHub
         }
 
         string nextRegion = page.world.name ?? string.Empty;
-        if (!string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase))
+        bool regionChanged = !string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase);
+        if (regionChanged)
         {
-            cache.Clear();
-            region = nextRegion;
-            lastPrimeFrame = -1;
+            ResetRegion(nextRegion);
         }
 
         if (lastPrimeFrame == Time.frameCount) return;
         lastPrimeFrame = Time.frameCount;
+
+        bool structureDue = regionChanged ||
+                            cache.Count == 0 ||
+                            page.subNodes.Count != lastSubNodeCount ||
+                            Time.frameCount >= nextStructureSyncFrame;
+        if (structureDue)
+            SynchronizeStructure(page);
+
+        rasterLoadsRemaining = RasterLoadsPerFrame;
         curveLoadsRemaining = UnloadedCurveLoadsPerFrame;
 
+        int currentRoom = session.Room?.abstractRoom?.index ?? -1;
+        int selectedRoom = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
+
+        // The room being inspected/played is always fully prioritized. This keeps authoring feedback
+        // immediate while the rest of a large region continues warming in the background.
+        RefreshPriorityRoom(currentRoom, page.world);
+        if (selectedRoom != currentRoom) RefreshPriorityRoom(selectedRoom, page.world);
+
+        ProcessBackground(page.world, currentRoom, selectedRoom);
+    }
+
+    internal static void InvalidateRoom(int roomIndex)
+    {
+        if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
+        entry.RasterInitialized = false;
+        entry.CurvesInitialized = false;
+        entry.NodesInitialized = false;
+        entry.NextRasterPollFrame = 0;
+        entry.NextNodePollFrame = 0;
+        entry.NextSettingsPollFrame = 0;
+        entry.NextLiveSettingsPollFrame = 0;
+        entry.Revision++;
+    }
+
+    internal static void Clear()
+    {
+        cache.Clear();
+        roomOrder.Clear();
+        region = string.Empty;
+        lastPrimeFrame = -1;
+        lastSubNodeCount = -1;
+        nextStructureSyncFrame = 0;
+        backgroundCursor = 0;
+        rasterLoadsRemaining = 0;
+        curveLoadsRemaining = 0;
+    }
+
+    private static void ResetRegion(string nextRegion)
+    {
+        cache.Clear();
+        roomOrder.Clear();
+        region = nextRegion ?? string.Empty;
+        lastPrimeFrame = -1;
+        lastSubNodeCount = -1;
+        nextStructureSyncFrame = 0;
+        backgroundCursor = 0;
+    }
+
+    private static void SynchronizeStructure(MapPage page)
+    {
         HashSet<int> alive = new();
+        roomOrder.Clear();
+
         for (int i = 0; i < page.subNodes.Count; i++)
         {
             if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
             AbstractRoom room = panel.roomRep.room;
             alive.Add(room.index);
+            roomOrder.Add(room.index);
 
             if (!cache.TryGetValue(room.index, out CacheEntry entry))
             {
@@ -181,28 +262,67 @@ internal static class MapRoomGeometryPresentationHub
                 cache.Add(room.index, entry);
             }
 
+            entry.Room = room;
+            entry.RoomRep = panel.roomRep;
+            entry.RoomName = room.name ?? entry.RoomName;
+
+            // Bounds are cheap and are enough to display/use the map immediately. Do not decode
+            // the room texture or parse RoomSettings while doing this structural pass.
             RefreshDimensions(entry, panel.roomRep);
-            RefreshRaster(entry, panel.roomRep);
-            RefreshNodes(entry, panel.roomRep);
-            RefreshCurves(entry, page.world, room);
+            RefreshNodes(entry, panel.roomRep, force: !entry.NodesInitialized);
             Publish(entry);
         }
 
-        if (cache.Count == alive.Count) return;
-        List<int> stale = new();
-        foreach (int key in cache.Keys)
-            if (!alive.Contains(key)) stale.Add(key);
-        for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
+        if (cache.Count != alive.Count)
+        {
+            List<int> stale = new();
+            foreach (int key in cache.Keys)
+                if (!alive.Contains(key)) stale.Add(key);
+            for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
+        }
+
+        if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
+        lastSubNodeCount = page.subNodes.Count;
+        nextStructureSyncFrame = Time.frameCount + StructureSyncIntervalFrames;
     }
 
-    internal static void InvalidateRoom(int roomIndex) => cache.Remove(roomIndex);
-
-    internal static void Clear()
+    private static void RefreshPriorityRoom(int roomIndex, global::World world)
     {
-        cache.Clear();
-        region = string.Empty;
-        lastPrimeFrame = -1;
-        curveLoadsRemaining = 0;
+        if (roomIndex < 0 || !cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
+        RefreshDimensions(entry, entry.RoomRep);
+        RefreshNodes(entry, entry.RoomRep, force: true);
+        if (RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: true))
+            rasterLoadsRemaining = Math.Max(0, rasterLoadsRemaining - 1);
+        if (RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
+            curveLoadsRemaining = Math.Max(0, curveLoadsRemaining - 1);
+        Publish(entry);
+    }
+
+    private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
+    {
+        int count = roomOrder.Count;
+        if (count == 0) return;
+
+        int checks = Math.Min(count, BackgroundRoomsPerFrame);
+        for (int i = 0; i < checks; i++)
+        {
+            if (backgroundCursor >= count) backgroundCursor = 0;
+            int roomIndex = roomOrder[backgroundCursor++];
+            if (roomIndex == currentRoom || roomIndex == selectedRoom) continue;
+            if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) continue;
+
+            RefreshDimensions(entry, entry.RoomRep);
+            RefreshNodes(entry, entry.RoomRep, force: false);
+            if (rasterLoadsRemaining > 0 &&
+                RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: false))
+                rasterLoadsRemaining--;
+
+            if (curveLoadsRemaining > 0 &&
+                RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
+                curveLoadsRemaining--;
+
+            Publish(entry);
+        }
     }
 
     private static void RefreshDimensions(CacheEntry entry, MapObject.RoomRepresentation roomRep)
@@ -230,24 +350,57 @@ internal static class MapRoomGeometryPresentationHub
         entry.Revision++;
     }
 
-    private static void RefreshRaster(CacheEntry entry, MapObject.RoomRepresentation roomRep)
+    private readonly struct RasterSourceInfo
     {
-        if (!TryReadMapPixels(roomRep, out Color[] pixels, out int width, out int height, out int sourceKey))
-            return;
+        internal RasterSourceInfo(Texture2D texture, int x, int y, int width, int height, int sourceKey)
+        {
+            Texture = texture;
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
+            SourceKey = sourceKey;
+        }
+
+        internal Texture2D Texture { get; }
+        internal int X { get; }
+        internal int Y { get; }
+        internal int Width { get; }
+        internal int Height { get; }
+        internal int SourceKey { get; }
+    }
+
+    private static bool RefreshRaster(
+        CacheEntry entry,
+        MapObject.RoomRepresentation roomRep,
+        bool allowDecode,
+        bool forcePoll)
+    {
+        if (entry.RasterInitialized && !forcePoll && Time.frameCount < entry.NextRasterPollFrame)
+            return false;
+
+        if (!TryGetRasterSourceInfo(roomRep, out RasterSourceInfo source))
+            return false;
 
         if (entry.RasterInitialized &&
-            entry.RasterSourceKey == sourceKey &&
-            entry.RasterWidth == width &&
-            entry.RasterHeight == height)
-            return;
+            entry.RasterSourceKey == source.SourceKey &&
+            entry.RasterWidth == source.Width &&
+            entry.RasterHeight == source.Height)
+        {
+            entry.NextRasterPollFrame = Time.frameCount + RasterPollIntervalFrames + Math.Abs(entry.RoomIndex % 37);
+            return false;
+        }
+
+        if (!allowDecode) return false;
+        if (!TryReadMapPixels(source, out Color[] pixels)) return false;
 
         List<EditorMapRectSnapshot> runs = new();
-        for (int y = 0; y < height; y++)
+        for (int y = 0; y < source.Height; y++)
         {
             int x = 0;
-            while (x < width)
+            while (x < source.Width)
             {
-                EditorMapGeometryKind? kind = ClassifyPixel(pixels[y * width + x]);
+                EditorMapGeometryKind? kind = ClassifyPixel(pixels[y * source.Width + x]);
                 if (!kind.HasValue)
                 {
                     x++;
@@ -256,43 +409,42 @@ internal static class MapRoomGeometryPresentationHub
 
                 int start = x;
                 x++;
-                while (x < width && ClassifyPixel(pixels[y * width + x]) == kind)
+                while (x < source.Width && ClassifyPixel(pixels[y * source.Width + x]) == kind)
                     x++;
                 runs.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind.Value));
             }
         }
 
-        entry.RasterSourceKey = sourceKey;
-        entry.RasterWidth = width;
-        entry.RasterHeight = height;
+        entry.RasterSourceKey = source.SourceKey;
+        entry.RasterWidth = source.Width;
+        entry.RasterHeight = source.Height;
         entry.RasterInitialized = true;
-        entry.WidthTiles = Math.Max(1f, width);
-        entry.HeightTiles = Math.Max(1f, height);
+        entry.NextRasterPollFrame = Time.frameCount + RasterPollIntervalFrames + Math.Abs(entry.RoomIndex % 37);
+        entry.WidthTiles = Math.Max(1f, source.Width);
+        entry.HeightTiles = Math.Max(1f, source.Height);
         entry.BaseRasterRuns = runs.ToArray();
         entry.Revision++;
+        return true;
     }
 
-    private static bool TryReadMapPixels(
+    private static bool TryGetRasterSourceInfo(
         MapObject.RoomRepresentation roomRep,
-        out Color[] pixels,
-        out int width,
-        out int height,
-        out int sourceKey)
+        out RasterSourceInfo source)
     {
-        pixels = null;
-        width = 0;
-        height = 0;
-        sourceKey = 0;
-
+        source = default;
         try
         {
             if (roomRep?.texture != null)
             {
-                width = roomRep.texture.width;
-                height = roomRep.texture.height;
-                pixels = roomRep.texture.GetPixels();
-                sourceKey = roomRep.texture.GetInstanceID();
-                return pixels != null && pixels.Length == width * height;
+                Texture2D texture = roomRep.texture;
+                source = new RasterSourceInfo(
+                    texture,
+                    0,
+                    0,
+                    Math.Max(1, texture.width),
+                    Math.Max(1, texture.height),
+                    texture.GetInstanceID());
+                return true;
             }
 
             FAtlasElement element = roomRep?.mapTex;
@@ -301,16 +453,44 @@ internal static class MapRoomGeometryPresentationHub
             Rect uv = element.uvRect;
             int atlasX = Mathf.Clamp(Mathf.RoundToInt(uv.x * atlasTexture.width), 0, Math.Max(0, atlasTexture.width - 1));
             int atlasY = Mathf.Clamp(Mathf.RoundToInt(uv.y * atlasTexture.height), 0, Math.Max(0, atlasTexture.height - 1));
-            width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * atlasTexture.width), 1, atlasTexture.width - atlasX);
-            height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * atlasTexture.height), 1, atlasTexture.height - atlasY);
-            pixels = atlasTexture.GetPixels(atlasX, atlasY, width, height);
-            sourceKey = atlasTexture.GetInstanceID() ^ (element.name?.GetHashCode() ?? 0);
-            return pixels != null && pixels.Length == width * height;
+            int width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * atlasTexture.width), 1, atlasTexture.width - atlasX);
+            int height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * atlasTexture.height), 1, atlasTexture.height - atlasY);
+
+            unchecked
+            {
+                int key = atlasTexture.GetInstanceID();
+                key = key * 397 ^ (element.name?.GetHashCode() ?? 0);
+                key = key * 397 ^ uv.x.GetHashCode();
+                key = key * 397 ^ uv.y.GetHashCode();
+                key = key * 397 ^ uv.width.GetHashCode();
+                key = key * 397 ^ uv.height.GetHashCode();
+                source = new RasterSourceInfo(atlasTexture, atlasX, atlasY, width, height, key);
+            }
+            return true;
         }
         catch (Exception error)
         {
             global::DryCycle.Plugin.Logger?.LogDebug(
-                "WorldMap minimap raster unavailable for " + (roomRep?.room?.name ?? "?") + ": " + error.Message);
+                "WorldMap minimap source unavailable for " + (roomRep?.room?.name ?? "?") + ": " + error.Message);
+            return false;
+        }
+    }
+
+    private static bool TryReadMapPixels(RasterSourceInfo source, out Color[] pixels)
+    {
+        pixels = null;
+        try
+        {
+            if (source.Texture == null) return false;
+            pixels = source.X == 0 && source.Y == 0 &&
+                     source.Width == source.Texture.width && source.Height == source.Texture.height
+                ? source.Texture.GetPixels()
+                : source.Texture.GetPixels(source.X, source.Y, source.Width, source.Height);
+            return pixels != null && pixels.Length == source.Width * source.Height;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.Plugin.Logger?.LogDebug("WorldMap minimap raster read failed: " + error.Message);
             return false;
         }
     }
@@ -328,11 +508,19 @@ internal static class MapRoomGeometryPresentationHub
         return null;
     }
 
-    private static void RefreshNodes(CacheEntry entry, MapObject.RoomRepresentation roomRep)
+    private static void RefreshNodes(
+        CacheEntry entry,
+        MapObject.RoomRepresentation roomRep,
+        bool force)
     {
+        if (entry.NodesInitialized && !force && Time.frameCount < entry.NextNodePollFrame) return;
+
         Vector2[] positions = roomRep?.nodePositions;
         if (positions == null || positions.Length == 0)
         {
+            // RoomRepresentation often receives its node positions a little later than its bounds.
+            // Retry quickly until they exist, then switch to the normal low-frequency poll.
+            entry.NextNodePollFrame = Time.frameCount + (entry.NodesInitialized ? NodePollIntervalFrames : 1);
             if (entry.NodesInitialized && entry.Nodes.Length == 0) return;
             entry.Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
             entry.NodesInitialized = true;
@@ -349,6 +537,8 @@ internal static class MapRoomGeometryPresentationHub
                 fingerprint = fingerprint * 31 + positions[i].x.GetHashCode();
                 fingerprint = fingerprint * 31 + positions[i].y.GetHashCode();
             }
+
+            entry.NextNodePollFrame = Time.frameCount + NodePollIntervalFrames + Math.Abs(entry.RoomIndex % 11);
             if (entry.NodesInitialized && fingerprint == entry.NodeFingerprint) return;
 
             List<EditorMapNodeVisualSnapshot> nodes = new(positions.Length);
@@ -366,31 +556,41 @@ internal static class MapRoomGeometryPresentationHub
         }
     }
 
-    private static void RefreshCurves(CacheEntry entry, global::World world, AbstractRoom room)
+    /// <summary>
+    /// Returns true only when this call performed an expensive RoomSettings load/rebuild.
+    /// </summary>
+    private static bool RefreshCurves(
+        CacheEntry entry,
+        global::World world,
+        AbstractRoom room,
+        bool allowDiskLoad,
+        bool forceLivePoll)
     {
         RoomSettings liveSettings = room?.realizedRoom?.roomSettings;
         if (liveSettings != null)
         {
+            if (entry.CurvesInitialized && !forceLivePoll && Time.frameCount < entry.NextLiveSettingsPollFrame)
+                return false;
+
+            entry.NextLiveSettingsPollFrame = Time.frameCount + LiveSettingsPollIntervalFrames;
             int liveFingerprint = GeometrySettingsFingerprint(liveSettings);
-            if (entry.CurvesInitialized && liveFingerprint == entry.SettingsFingerprint) return;
+            if (entry.CurvesInitialized && liveFingerprint == entry.SettingsFingerprint) return false;
             RebuildCurves(entry, liveSettings, liveFingerprint);
-            return;
+            return true;
         }
+
+        if (!entry.CurvesInitialized && Time.frameCount < entry.NextSettingsPollFrame)
+            return false;
 
         if (entry.CurvesInitialized)
         {
-            if (string.IsNullOrWhiteSpace(entry.SettingsPath)) return;
-            if (Time.frameCount < entry.NextSettingsPollFrame) return;
+            if (string.IsNullOrWhiteSpace(entry.SettingsPath)) return false;
+            if (Time.frameCount < entry.NextSettingsPollFrame) return false;
             entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames + Math.Abs(entry.RoomIndex % 30);
-            if (FileWriteTime(entry.SettingsPath) == entry.SettingsWriteTimeUtc) return;
+            if (FileWriteTime(entry.SettingsPath) == entry.SettingsWriteTimeUtc) return false;
         }
 
-        if (curveLoadsRemaining <= 0)
-        {
-            entry.NextSettingsPollFrame = Time.frameCount + 1;
-            return;
-        }
-        curveLoadsRemaining--;
+        if (!allowDiskLoad) return false;
 
         RoomSettings settings = null;
         try
@@ -401,12 +601,14 @@ internal static class MapRoomGeometryPresentationHub
         }
         catch (Exception error)
         {
+            entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames;
             global::DryCycle.Plugin.Logger?.LogDebug(
                 "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
         }
 
-        if (settings != null)
-            RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
+        if (settings == null) return false;
+        RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
+        return true;
     }
 
     private static void RebuildCurves(CacheEntry entry, RoomSettings settings, int fingerprint)
@@ -483,6 +685,8 @@ internal static class MapRoomGeometryPresentationHub
         List<PlacedObject> objects = settings?.placedObjects;
         if (objects == null) return;
 
+        // TerrainHandle is not a local spline object. Two or more handles jointly define the
+        // room-wide TerrainCurve, so it must be reconstructed as one continuous surface.
         AddRoomTerrainCurve(objects, roomWidthTiles, curves, fills);
 
         for (int i = 0; i < objects.Count; i++)
@@ -677,6 +881,8 @@ internal static class MapRoomGeometryPresentationHub
         }
 
         AddPairedFillRuns(fills, surface, back, EditorMapGeometryKind.Solid);
+        // SuperSlope is a straight slope band; use the strong slope surface treatment rather than
+        // the subdued LocalTerrain treatment so it remains readable over the vanilla raster.
         AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
     }
 
