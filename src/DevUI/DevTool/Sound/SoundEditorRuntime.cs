@@ -28,6 +28,7 @@ public sealed class EditorSoundSnapshot
     public bool ResourceAvailable { get; init; }
     public EditorSoundSourceKind ResourceSourceKind { get; init; }
     public string ResourceSourceName { get; init; } = string.Empty;
+    public string ResourceSourceId { get; init; } = string.Empty;
 }
 
 public sealed class EditorSoundPresentationSnapshot
@@ -132,7 +133,8 @@ public static class SoundEditorPresentationHub
                 Selected = i == state.SelectedIndex,
                 ResourceAvailable = resource.Available,
                 ResourceSourceKind = resource.SourceKind,
-                ResourceSourceName = resource.SourceName
+                ResourceSourceName = resource.SourceName,
+                ResourceSourceId = resource.SourceId
             };
         }
 
