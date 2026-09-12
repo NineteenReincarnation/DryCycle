@@ -18,7 +18,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Fonts must be present before the RWImGui atlas is built. We register them during plugin
 /// startup and keep runtime switching limited to faces that are already in that atlas.
 /// </summary>
-internal static class DevToolFontCatalog
+internal static unsafe class DevToolFontCatalog
 {
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
 
