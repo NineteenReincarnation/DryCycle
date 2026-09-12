@@ -50,10 +50,23 @@ public static class DevToolShortcutRegistry
     private static readonly Dictionary<string, Registration> Common = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<EditorToolMode, Dictionary<string, Registration>> Modes = new();
     private static long sequence;
+    private static long revision;
 
     static DevToolShortcutRegistry()
     {
         RegisterBuiltIns();
+    }
+
+    /// <summary>
+    /// Monotonic content revision. Frontends can keep their sorted snapshot instead of allocating
+    /// and sorting the registry every render frame, then refresh only when registrations change.
+    /// </summary>
+    public static long Revision
+    {
+        get
+        {
+            lock (Gate) return revision;
+        }
     }
 
     public static void RegisterCommon(DevToolShortcutDescriptor descriptor) =>
@@ -76,14 +89,23 @@ public static class DevToolShortcutRegistry
     public static bool UnregisterCommon(string id)
     {
         if (string.IsNullOrWhiteSpace(id)) return false;
-        lock (Gate) return Common.Remove(id.Trim());
+        lock (Gate)
+        {
+            bool removed = Common.Remove(id.Trim());
+            if (removed) revision++;
+            return removed;
+        }
     }
 
     public static bool UnregisterMode(EditorToolMode mode, string id)
     {
         if (string.IsNullOrWhiteSpace(id)) return false;
         lock (Gate)
-            return Modes.TryGetValue(mode, out Dictionary<string, Registration> bucket) && bucket.Remove(id.Trim());
+        {
+            bool removed = Modes.TryGetValue(mode, out Dictionary<string, Registration> bucket) && bucket.Remove(id.Trim());
+            if (removed) revision++;
+            return removed;
+        }
     }
 
     public static DevToolShortcutDescriptor[] GetCommon()
@@ -110,6 +132,7 @@ public static class DevToolShortcutRegistry
         if (bucket.TryGetValue(descriptor.Id, out Registration current))
         {
             current.Descriptor = descriptor;
+            revision++;
             return;
         }
 
@@ -118,6 +141,7 @@ public static class DevToolShortcutRegistry
             Descriptor = descriptor,
             Sequence = sequence++
         };
+        revision++;
     }
 
     private static DevToolShortcutDescriptor[] Snapshot(Dictionary<string, Registration> bucket) =>
