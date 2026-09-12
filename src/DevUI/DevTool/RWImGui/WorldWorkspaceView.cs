@@ -78,9 +78,9 @@ internal static class WorldWorkspaceView
         EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
 
         float defaultX = 188f;
-        float defaultY = 86f;
+        float defaultY = 8f;
         float defaultWidth = Math.Max(720f, display.X - defaultX - 10f);
-        float defaultHeight = Math.Max(430f, display.Y - defaultY - 14f);
+        float defaultHeight = Math.Max(430f, display.Y - defaultY - 10f);
 
         ImGui.SetNextWindowPos(new Num.Vector2(defaultX, defaultY), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
@@ -107,7 +107,7 @@ internal static class WorldWorkspaceView
         }
 
         SynchronizeSelection(snapshot);
-        DrawToolbar(snapshot);
+        DrawToolbar(editor, snapshot);
         ImGui.Separator();
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
@@ -122,7 +122,7 @@ internal static class WorldWorkspaceView
         ImGui.End();
     }
 
-    private static void DrawToolbar(EditorMapPresentationSnapshot snapshot)
+    private static void DrawToolbar(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)
     {
         ImGui.TextUnformatted(snapshot.RegionName);
         ImGui.SameLine();
@@ -138,6 +138,38 @@ internal static class WorldWorkspaceView
         DrawWorkspaceModeButton(WorkspaceMode.Subregions, DevToolUiSettings.T("子区域", "Subregions"));
         ImGui.SameLine();
         DrawWorkspaceModeButton(WorkspaceMode.Validation, DevToolUiSettings.T("验证", "Validation"));
+
+        ImGui.SameLine(0f, 18f);
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("保存", "Save"),
+                "WorldWorkspaceSave",
+                DevToolButtonTone.Primary))
+            Send(EditorUiCommandKind.Save);
+
+        ImGui.SameLine();
+        if (!editor.CanUndo) ImGui.BeginDisabled();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("撤销", "Undo"),
+                "WorldWorkspaceUndo",
+                DevToolButtonTone.Normal))
+            Send(EditorUiCommandKind.Undo);
+        if (!editor.CanUndo) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (!editor.CanRedo) ImGui.BeginDisabled();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("重做", "Redo"),
+                "WorldWorkspaceRedo",
+                DevToolButtonTone.Normal))
+            Send(EditorUiCommandKind.Redo);
+        if (!editor.CanRedo) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("专注", "Focus"),
+                "WorldWorkspaceFocus",
+                DevToolButtonTone.Subtle))
+            Send(EditorUiCommandKind.ToggleFocus);
     }
 
     private static void DrawWorkspaceModeButton(WorkspaceMode mode, string label)
@@ -819,4 +851,7 @@ internal static class WorldWorkspaceView
         }
         return false;
     }
+
+    private static void Send(EditorUiCommandKind kind) =>
+        EditorUiCommandQueue.Enqueue(new EditorUiCommand(kind));
 }
