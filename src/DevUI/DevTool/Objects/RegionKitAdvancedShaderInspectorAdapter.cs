@@ -12,8 +12,8 @@ namespace DryCycle.DevUI.DevTool.Objects;
 /// Full native inspector adapter for RegionKit's AdvancedShaderController.
 ///
 /// This adapter deliberately uses runtime type names and reflection instead of a compile-time
-/// RegionKit reference. The old RegionKit DevInterface panel remains only as a hidden behavior
-/// backend; every persisted AdvancedShader.Data field is exposed through the rebuilt inspector.
+/// RegionKit reference. Every persisted AdvancedShader.Data field is exposed through the rebuilt
+/// inspector while RegionKit remains an optional dependency.
 /// </summary>
 public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAdapter
 {
@@ -24,6 +24,7 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     private const int PngScanEntryLimit = 8192;
 
     public static readonly RegionKitAdvancedShaderInspectorAdapter Instance = new();
+    private static bool registered;
 
     private static readonly object CacheGate = new();
     private static string[] cachedShaders = Array.Empty<string>();
@@ -33,14 +34,16 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     private static string[] cachedPngAssets = Array.Empty<string>();
     private static bool pngAssetsScanned;
 
-    static RegionKitAdvancedShaderInspectorAdapter()
-    {
-        // Registration is lazy and idempotent. Coverage or the frontend touching this type is
-        // enough to activate the adapter without introducing a hard RegionKit dependency in Plugin.
-        ObjectInspectorRegistry.Register(Instance, 5000);
-    }
+    static RegionKitAdvancedShaderInspectorAdapter() => EnsureRegistered();
 
     private RegionKitAdvancedShaderInspectorAdapter() { }
+
+    public static void EnsureRegistered()
+    {
+        if (registered) return;
+        registered = true;
+        ObjectInspectorRegistry.Register(Instance, 5000);
+    }
 
     public static bool IsDataTypeName(string fullName) =>
         string.Equals(fullName, DataTypeName, StringComparison.Ordinal);
@@ -69,70 +72,74 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
             string[] pngAssets = PngAssetPaths(filePath);
             if (pngAssets.Length > 0)
                 result.Add(EnumProperty("rk.as.fileAsset", "PNG Asset", "Material", filePath, pngAssets));
-            result.Add(StringProperty(
-                "rk.as.filePath",
-                "Manual PNG Path",
-                "Material",
-                filePath,
-                "AssetManager-relative path. The searchable PNG Asset list replaces RegionKit's paged FilePicker; manual entry remains available for merged or late-loaded assets."));
+            result.Add(StringProperty("rk.as.filePath", "Manual PNG Path", "Material", filePath,
+                "AssetManager-relative PNG path. The searchable PNG Asset field above is preferred when available."));
         }
         else
         {
-            string sprite = ReadString(data, "spriteName", "Futile_White");
-            result.Add(EnumProperty("rk.as.sprite", "Sprite", "Material", sprite, SpriteNames()));
+            string spriteName = ReadString(data, "spriteName", "Futile_White");
+            result.Add(EnumProperty("rk.as.spriteName", "Sprite", "Material", spriteName, SpriteNames()));
         }
 
-        FieldInfo containerField = FindField(data.GetType(), "container");
-        if (containerField != null && containerField.FieldType.IsEnum)
-            result.Add(EnumProperty("rk.as.container", "Container", "Material", containerField.GetValue(data)?.ToString() ?? string.Empty,
-                Enum.GetNames(containerField.FieldType)));
-
-        FieldInfo shapeField = FindField(data.GetType(), "shapeLock");
-        if (shapeField != null && shapeField.FieldType.IsEnum)
-            result.Add(EnumProperty("rk.as.shapeLock", "Shape Lock", "Geometry", shapeField.GetValue(data)?.ToString() ?? string.Empty,
-                Enum.GetNames(shapeField.FieldType)));
-
-        Vector2 panelPos = ReadVector2(data, "panelPos", new Vector2(0f, 150f));
-        result.Add(VectorProperty("rk.as.panelPos", "Legacy Panel Position", "Geometry", panelPos,
-            "Preserved for RegionKit serialization compatibility. It no longer controls the ImGui inspector position."));
-
-        Vector2[] vertices = ReadField(data, "vertices") as Vector2[] ?? Array.Empty<Vector2>();
-        for (int i = 0; i < vertices.Length; i++)
-            result.Add(VectorProperty("rk.as.vertex." + i, "Vertex " + i, "Geometry · Vertices", vertices[i]));
-
-        bool restrictColors = ReadBool(data, "restrictColors");
-        bool lockColors = ReadBool(data, "lockColors");
-        result.Add(BooleanProperty("rk.as.restrictColors", "Clamp Colors", "Vertex Colors", restrictColors));
-        result.Add(BooleanProperty("rk.as.lockColors", "Sync Colors", "Vertex Colors", lockColors));
-        result.Add(ActionProperty("rk.as.resetColors", "Reset Colors", "Vertex Colors"));
-
-        Color[] colors = ReadField(data, "colors") as Color[] ?? Array.Empty<Color>();
-        for (int i = 0; i < colors.Length; i++)
+        object container = ReadMember(data, "container");
+        Type containerType = container?.GetType();
+        if (containerType?.IsEnum == true)
         {
-            Color color = colors[i];
-            string group = "Vertex Colors · Vertex " + i;
-            result.Add(FloatProperty("rk.as.color." + i + ".r", "Red", group, color.r, restrictColors));
-            result.Add(FloatProperty("rk.as.color." + i + ".g", "Green", group, color.g, restrictColors));
-            result.Add(FloatProperty("rk.as.color." + i + ".b", "Blue", group, color.b, restrictColors));
-            result.Add(FloatProperty("rk.as.color." + i + ".a", "Alpha", group, color.a, restrictColors));
+            string[] options = Enum.GetNames(containerType);
+            int selected = FindOption(options, container.ToString());
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = "rk.as.container", DisplayName = "Container", Group = "Material",
+                Source = "RegionKit AdvancedShader.Data.container", Kind = EditorPropertyKind.Enum,
+                IntegerValue = selected, StringValue = container.ToString(), Options = options
+            });
         }
 
-        bool restrictUVs = ReadBool(data, "restrictUVs");
-        bool lockUVs = ReadBool(data, "lockUVs");
-        result.Add(BooleanProperty("rk.as.restrictUVs", "Clamp UVs", "UVs", restrictUVs));
-        result.Add(BooleanProperty("rk.as.lockUVs", "Sync UVs", "UVs", lockUVs));
+        object shapeLock = ReadMember(data, "shapeLock");
+        Type shapeType = shapeLock?.GetType();
+        if (shapeType?.IsEnum == true)
+        {
+            string[] options = Enum.GetNames(shapeType);
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = "rk.as.shapeLock", DisplayName = "Shape Lock", Group = "Geometry",
+                Source = "RegionKit AdvancedShader.Data.shapeLock (runtime editing state; not serialized by RK)",
+                Kind = EditorPropertyKind.Enum, IntegerValue = FindOption(options, shapeLock.ToString()),
+                StringValue = shapeLock.ToString(), Options = options
+            });
+        }
 
-        Vector2[][] uvs = ReadField(data, "uvs") as Vector2[][];
-        if (uvs != null)
+        if (ReadMember(data, "panelPos") is Vector2 panelPos)
+            result.Add(VectorProperty("rk.as.panelPos", "Legacy Panel Position", "Layout", panelPos,
+                "Preserved because RegionKit serializes panelPos."));
+
+        if (ReadMember(data, "vertices") is Vector2[] vertices)
+        {
+            for (int i = 0; i < vertices.Length; i++)
+                result.Add(VectorProperty("rk.as.vertex." + i, "Vertex " + i, "Geometry", vertices[i], "RegionKit AdvancedShader.Data.vertices"));
+        }
+
+        result.Add(BooleanProperty("rk.as.restrictColors", "Restrict Colors", "Colors", ReadBool(data, "restrictColors")));
+        result.Add(BooleanProperty("rk.as.lockColors", "Lock Colors", "Colors", ReadBool(data, "lockColors")));
+        result.Add(ActionProperty("rk.as.resetColors", "Reset Colors", "Colors", "RegionKit AdvancedShader.Data.ResetColors"));
+        if (ReadMember(data, "colors") is Color[] colors)
+        {
+            for (int i = 0; i < colors.Length; i++)
+                result.Add(ColorProperty("rk.as.color." + i, "Vertex " + i + " Color", "Colors", colors[i]));
+        }
+
+        result.Add(BooleanProperty("rk.as.restrictUVs", "Restrict UVs", "UVs", ReadBool(data, "restrictUVs")));
+        result.Add(BooleanProperty("rk.as.lockUVs", "Lock UVs", "UVs", ReadBool(data, "lockUVs")));
+        if (ReadMember(data, "uvs") is Vector2[][] uvs)
         {
             for (int channel = 0; channel < uvs.Length; channel++)
             {
+                result.Add(ActionProperty("rk.as.resetUv." + channel, "Reset UV Channel " + channel, "UV Channel " + channel,
+                    "RegionKit AdvancedShader.Data.ResetUVs(" + channel + ")"));
                 Vector2[] channelValues = uvs[channel] ?? Array.Empty<Vector2>();
-                string group = "UVs · Channel " + channel;
-                result.Add(ActionProperty("rk.as.resetUv." + channel, "Reset Channel " + channel, group));
                 for (int vertex = 0; vertex < channelValues.Length; vertex++)
-                    result.Add(VectorProperty("rk.as.uv." + channel + "." + vertex,
-                        "Vertex " + vertex, group, channelValues[vertex]));
+                    result.Add(VectorProperty("rk.as.uv." + channel + "." + vertex, "Vertex " + vertex, "UV Channel " + channel,
+                        channelValues[vertex], "RegionKit AdvancedShader.Data.uvs"));
             }
         }
 
@@ -143,289 +150,104 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
     {
         if (!CanInspect(target) || string.IsNullOrEmpty(key)) return false;
         object data = target.data;
+        bool refreshSprite = false;
+        bool success = false;
 
-        if (key == "rk.as.shader")
+        switch (key)
         {
-            if (!TrySetEnumString(data, "shader", ShaderNames(), value)) return false;
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.useFile")
-        {
-            if (value.Kind != EditorPropertyKind.Boolean || !WriteField(data, "useFile", value.Boolean)) return false;
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.fileAsset")
-        {
-            string current = ReadString(data, "filePath", "illustrations/icon0.png");
-            if (!TrySetEnumString(data, "filePath", PngAssetPaths(current), value)) return false;
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.filePath")
-        {
-            if (value.Kind != EditorPropertyKind.String || !WriteField(data, "filePath", value.Text ?? string.Empty)) return false;
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.sprite")
-        {
-            if (!TrySetEnumString(data, "spriteName", SpriteNames(), value)) return false;
-            InvokeDataMethod(data, "ResetUVs", 0);
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.container")
-        {
-            if (!TrySetEnumField(data, "container", value)) return false;
-            RefreshRuntime(target);
-            return true;
-        }
-        if (key == "rk.as.shapeLock")
-            return TrySetEnumField(data, "shapeLock", value);
-        if (key == "rk.as.panelPos")
-            return value.Kind == EditorPropertyKind.Vector2 && WriteField(data, "panelPos", new Vector2(value.X, value.Y));
-        if (key == "rk.as.restrictColors")
-            return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "restrictColors", value.Boolean);
-        if (key == "rk.as.lockColors")
-            return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "lockColors", value.Boolean);
-        if (key == "rk.as.resetColors")
-        {
-            if (value.Kind != EditorPropertyKind.Action) return false;
-            return InvokeDataMethod(data, "ResetColors");
-        }
-        if (key == "rk.as.restrictUVs")
-            return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "restrictUVs", value.Boolean);
-        if (key == "rk.as.lockUVs")
-            return value.Kind == EditorPropertyKind.Boolean && WriteField(data, "lockUVs", value.Boolean);
-
-        if (TryParseIndexedKey(key, "rk.as.resetUv.", 1, out int[] resetUvParts))
-        {
-            if (value.Kind != EditorPropertyKind.Action) return false;
-            return InvokeDataMethod(data, "ResetUVs", resetUvParts[0]);
-        }
-
-        if (TryParseIndexedKey(key, "rk.as.vertex.", 1, out int[] vertexParts))
-        {
-            if (value.Kind != EditorPropertyKind.Vector2) return false;
-            Vector2[] vertices = ReadField(data, "vertices") as Vector2[];
-            int index = vertexParts[0];
-            if (vertices == null || index < 0 || index >= vertices.Length) return false;
-            vertices[index] = new Vector2(value.X, value.Y);
-            return true;
-        }
-
-        if (TryParseColorKey(key, out int colorIndex, out int component))
-        {
-            if (value.Kind != EditorPropertyKind.Float) return false;
-            Color[] colors = ReadField(data, "colors") as Color[];
-            if (colors == null || colorIndex < 0 || colorIndex >= colors.Length) return false;
-
-            float next = ReadBool(data, "restrictColors") ? Mathf.Clamp01(value.X) : value.X;
-            Color color = colors[colorIndex];
-            switch (component)
+            case "rk.as.shader":
+                success = SetEnumString(data, "shader", value, ShaderNames()); refreshSprite = success; break;
+            case "rk.as.useFile":
+                success = value.Kind == EditorPropertyKind.Boolean && WriteMember(data, "useFile", value.Boolean); refreshSprite = success; break;
+            case "rk.as.fileAsset":
             {
-                case 0: color.r = next; break;
-                case 1: color.g = next; break;
-                case 2: color.b = next; break;
-                default: color.a = next; break;
+                string[] paths = PngAssetPaths(ReadString(data, "filePath", string.Empty));
+                success = SetEnumString(data, "filePath", value, paths); refreshSprite = success; break;
             }
-
-            if (ReadBool(data, "lockColors"))
-            {
-                for (int i = 0; i < colors.Length; i++) colors[i] = color;
-            }
-            else
-            {
-                colors[colorIndex] = color;
-            }
-            return true;
+            case "rk.as.filePath":
+                success = value.Kind == EditorPropertyKind.String && WriteMember(data, "filePath", value.Text ?? string.Empty); refreshSprite = success; break;
+            case "rk.as.spriteName":
+                success = SetEnumString(data, "spriteName", value, SpriteNames());
+                if (success) { Invoke(data, "ResetUVs", 0); refreshSprite = true; }
+                break;
+            case "rk.as.container":
+                success = SetEnumMember(data, "container", value); refreshSprite = success; break;
+            case "rk.as.shapeLock":
+                success = SetEnumMember(data, "shapeLock", value); break;
+            case "rk.as.panelPos":
+                success = value.Kind == EditorPropertyKind.Vector2 && WriteMember(data, "panelPos", new Vector2(value.X, value.Y)); break;
+            case "rk.as.restrictColors":
+                success = value.Kind == EditorPropertyKind.Boolean && WriteMember(data, "restrictColors", value.Boolean); break;
+            case "rk.as.lockColors":
+                success = value.Kind == EditorPropertyKind.Boolean && WriteMember(data, "lockColors", value.Boolean); break;
+            case "rk.as.resetColors":
+                success = value.Kind == EditorPropertyKind.Action && Invoke(data, "ResetColors"); break;
+            case "rk.as.restrictUVs":
+                success = value.Kind == EditorPropertyKind.Boolean && WriteMember(data, "restrictUVs", value.Boolean); break;
+            case "rk.as.lockUVs":
+                success = value.Kind == EditorPropertyKind.Boolean && WriteMember(data, "lockUVs", value.Boolean); break;
+            default:
+                if (TryParseIndexedKey(key, "rk.as.vertex.", 1, out int[] vertexIndex))
+                    success = SetVectorArray(data, "vertices", vertexIndex[0], value);
+                else if (TryParseIndexedKey(key, "rk.as.color.", 1, out int[] colorIndex))
+                    success = SetColorArray(data, "colors", colorIndex[0], value);
+                else if (TryParseIndexedKey(key, "rk.as.resetUv.", 1, out int[] resetUv) && value.Kind == EditorPropertyKind.Action)
+                    success = Invoke(data, "ResetUVs", resetUv[0]);
+                else if (TryParseIndexedKey(key, "rk.as.uv.", 2, out int[] uvIndex))
+                    success = SetUv(data, uvIndex[0], uvIndex[1], value);
+                break;
         }
 
-        if (TryParseIndexedKey(key, "rk.as.uv.", 2, out int[] uvParts))
-        {
-            if (value.Kind != EditorPropertyKind.Vector2) return false;
-            Vector2[][] uvs = ReadField(data, "uvs") as Vector2[][];
-            int channel = uvParts[0];
-            int vertex = uvParts[1];
-            if (uvs == null || channel < 0 || channel >= uvs.Length || uvs[channel] == null ||
-                vertex < 0 || vertex >= uvs[channel].Length)
-                return false;
-
-            Vector2 next = new(value.X, value.Y);
-            if (ReadBool(data, "restrictUVs"))
-            {
-                next.x = Mathf.Clamp01(next.x);
-                next.y = Mathf.Clamp01(next.y);
-            }
-
-            uvs[channel][vertex] = next;
-            if (ReadBool(data, "lockUVs") && uvs[channel].Length >= 4 && vertex < 4)
-                ApplyLockedUvRectangle(uvs[channel], vertex, next);
-            return true;
-        }
-
-        return false;
+        if (success && refreshSprite) RefreshRuntime(target);
+        return success;
     }
 
-    private static void ApplyLockedUvRectangle(Vector2[] values, int changedIndex, Vector2 changed)
-    {
-        float left = changedIndex == 0 || changedIndex == 1 ? changed.x : values[0].x;
-        float bottom = changedIndex == 0 || changedIndex == 2 ? changed.y : values[0].y;
-        float right = changedIndex == 2 || changedIndex == 3 ? changed.x : values[3].x;
-        float top = changedIndex == 1 || changedIndex == 3 ? changed.y : values[3].y;
-        values[0] = new Vector2(left, bottom);
-        values[1] = new Vector2(left, top);
-        values[2] = new Vector2(right, bottom);
-        values[3] = new Vector2(right, top);
-    }
+    private static EditorPropertySnapshot StringProperty(string key, string name, string group, string value, string source) => new()
+    { Key = key, DisplayName = name, Group = group, Source = source, Kind = EditorPropertyKind.String, StringValue = value ?? string.Empty };
+    private static EditorPropertySnapshot BooleanProperty(string key, string name, string group, bool value) => new()
+    { Key = key, DisplayName = name, Group = group, Source = "RegionKit AdvancedShader", Kind = EditorPropertyKind.Boolean, BooleanValue = value };
+    private static EditorPropertySnapshot VectorProperty(string key, string name, string group, Vector2 value, string source) => new()
+    { Key = key, DisplayName = name, Group = group, Source = source, Kind = EditorPropertyKind.Vector2, X = value.x, Y = value.y };
+    private static EditorPropertySnapshot ColorProperty(string key, string name, string group, Color value) => new()
+    { Key = key, DisplayName = name, Group = group, Source = "RegionKit AdvancedShader.Data.colors", Kind = EditorPropertyKind.Color, X = value.r, Y = value.g, Z = value.b, W = value.a };
+    private static EditorPropertySnapshot ActionProperty(string key, string name, string group, string source) => new()
+    { Key = key, DisplayName = name, Group = group, Source = source, Kind = EditorPropertyKind.Action };
 
-    private static bool TrySetEnumString(object data, string fieldName, string[] options, EditorPropertyValue value)
-    {
-        if (value.Kind != EditorPropertyKind.Enum || options == null ||
-            value.Integer < 0 || value.Integer >= options.Length)
-            return false;
-        return WriteField(data, fieldName, options[value.Integer]);
-    }
-
-    private static bool TrySetEnumField(object data, string fieldName, EditorPropertyValue value)
-    {
-        if (value.Kind != EditorPropertyKind.Enum) return false;
-        FieldInfo field = FindField(data?.GetType(), fieldName);
-        if (field == null || !field.FieldType.IsEnum) return false;
-        string[] names = Enum.GetNames(field.FieldType);
-        if (value.Integer < 0 || value.Integer >= names.Length) return false;
-        object parsed = Enum.Parse(field.FieldType, names[value.Integer], false);
-        field.SetValue(data, parsed);
-        return true;
-    }
-
-    private static EditorPropertySnapshot EnumProperty(string key, string label, string group, string current, string[] options)
-    {
-        options ??= Array.Empty<string>();
-        int index = Array.IndexOf(options, current ?? string.Empty);
-        return new EditorPropertySnapshot
-        {
-            Key = key,
-            DisplayName = label,
-            Group = group,
-            Source = "RegionKit AdvancedShader",
-            Kind = EditorPropertyKind.Enum,
-            IntegerValue = index,
-            StringValue = current ?? string.Empty,
-            Options = options
-        };
-    }
-
-    private static EditorPropertySnapshot BooleanProperty(string key, string label, string group, bool value) => new()
-    {
-        Key = key,
-        DisplayName = label,
-        Group = group,
-        Source = "RegionKit AdvancedShader",
-        Kind = EditorPropertyKind.Boolean,
-        BooleanValue = value
-    };
-
-    private static EditorPropertySnapshot StringProperty(string key, string label, string group, string value, string source = null) => new()
-    {
-        Key = key,
-        DisplayName = label,
-        Group = group,
-        Source = source ?? "RegionKit AdvancedShader",
-        Kind = EditorPropertyKind.String,
-        StringValue = value ?? string.Empty
-    };
-
-    private static EditorPropertySnapshot VectorProperty(string key, string label, string group, Vector2 value, string source = null) => new()
-    {
-        Key = key,
-        DisplayName = label,
-        Group = group,
-        Source = source ?? "RegionKit AdvancedShader",
-        Kind = EditorPropertyKind.Vector2,
-        X = value.x,
-        Y = value.y
-    };
-
-    private static EditorPropertySnapshot FloatProperty(string key, string label, string group, float value, bool restrict) => new()
-    {
-        Key = key,
-        DisplayName = label,
-        Group = group,
-        Source = "RegionKit AdvancedShader",
-        Kind = EditorPropertyKind.Float,
-        X = value,
-        Min = 0f,
-        Max = 1f,
-        Step = 0.01f,
-        HasRange = restrict
-    };
-
-    private static EditorPropertySnapshot ActionProperty(string key, string label, string group) => new()
-    {
-        Key = key,
-        DisplayName = label,
-        Group = group,
-        Source = "RegionKit AdvancedShader",
-        Kind = EditorPropertyKind.Action
-    };
+    private static EditorPropertySnapshot EnumProperty(string key, string name, string group, string current, string[] options) => new()
+    { Key = key, DisplayName = name, Group = group, Source = "RegionKit AdvancedShader", Kind = EditorPropertyKind.Enum,
+      IntegerValue = FindOption(options, current), StringValue = current ?? string.Empty, Options = options ?? Array.Empty<string>() };
 
     private static string[] ShaderNames()
     {
         try
         {
-            IDictionary shaders = RWCustom.Custom.rainWorld?.Shaders as IDictionary;
-            int count = shaders?.Count ?? 0;
+            int count = Custom.rainWorld?.Shaders?.Count ?? 0;
             lock (CacheGate)
             {
-                if (count == cachedShaderCount && cachedShaders.Length > 0) return cachedShaders;
+                if (cachedShaderCount == count && cachedShaders.Length > 0) return Clone(cachedShaders);
                 List<string> names = new(count);
-                if (shaders != null)
-                {
-                    foreach (DictionaryEntry entry in shaders)
-                        if (entry.Key != null) names.Add(entry.Key.ToString());
-                }
-                names.Sort(StringComparer.OrdinalIgnoreCase);
-                cachedShaders = names.ToArray();
-                cachedShaderCount = count;
-                return cachedShaders;
+                if (Custom.rainWorld?.Shaders != null) foreach (string name in Custom.rainWorld.Shaders.Keys) names.Add(name);
+                names.Sort(StringComparer.OrdinalIgnoreCase); cachedShaders = names.ToArray(); cachedShaderCount = count; return Clone(cachedShaders);
             }
         }
-        catch
-        {
-            return cachedShaders.Length > 0 ? cachedShaders : new[] { "Basic" };
-        }
+        catch { return Array.Empty<string>(); }
     }
 
     private static string[] SpriteNames()
     {
         try
         {
-            object manager = Futile.atlasManager;
-            FieldInfo field = FindField(manager?.GetType(), "_allElementsByName");
-            IDictionary elements = field?.GetValue(manager) as IDictionary;
-            int count = elements?.Count ?? 0;
+            IDictionary dictionary = Futile.atlasManager?._allElementsByName;
+            int count = dictionary?.Count ?? 0;
             lock (CacheGate)
             {
-                if (count == cachedSpriteCount && cachedSprites.Length > 0) return cachedSprites;
+                if (cachedSpriteCount == count && cachedSprites.Length > 0) return Clone(cachedSprites);
                 List<string> names = new(count);
-                if (elements != null)
-                {
-                    foreach (DictionaryEntry entry in elements)
-                        if (entry.Key != null) names.Add(entry.Key.ToString());
-                }
-                names.Sort(StringComparer.OrdinalIgnoreCase);
-                cachedSprites = names.ToArray();
-                cachedSpriteCount = count;
-                return cachedSprites;
+                if (dictionary != null) foreach (object key in dictionary.Keys) if (key is string text) names.Add(text);
+                names.Sort(StringComparer.OrdinalIgnoreCase); cachedSprites = names.ToArray(); cachedSpriteCount = count; return Clone(cachedSprites);
             }
         }
-        catch
-        {
-            return cachedSprites.Length > 0 ? cachedSprites : new[] { "Futile_White" };
-        }
+        catch { return Array.Empty<string>(); }
     }
 
     private static string[] PngAssetPaths(string current)
@@ -434,197 +256,136 @@ public sealed class RegionKitAdvancedShaderInspectorAdapter : IObjectInspectorAd
         {
             if (!pngAssetsScanned)
             {
-                cachedPngAssets = ScanPngAssets();
                 pngAssetsScanned = true;
+                try
+                {
+                    string root = AssetManager.ResolveFilePath(string.Empty);
+                    List<string> files = new();
+                    ScanPng(root, root, 0, files);
+                    files.Sort(StringComparer.OrdinalIgnoreCase);
+                    cachedPngAssets = files.ToArray();
+                }
+                catch (Exception error) { Plugin.Logger?.LogWarning("DevTool AdvancedShader PNG scan failed: " + error.Message); }
             }
-
-            string normalizedCurrent = NormalizeAssetPath(current);
-            if (string.IsNullOrWhiteSpace(normalizedCurrent)) return (string[])cachedPngAssets.Clone();
-
-            for (int i = 0; i < cachedPngAssets.Length; i++)
-                if (string.Equals(cachedPngAssets[i], normalizedCurrent, StringComparison.OrdinalIgnoreCase))
-                    return (string[])cachedPngAssets.Clone();
-
-            string[] withCurrent = new string[cachedPngAssets.Length + 1];
-            withCurrent[0] = normalizedCurrent;
-            Array.Copy(cachedPngAssets, 0, withCurrent, 1, cachedPngAssets.Length);
-            return withCurrent;
+            if (string.IsNullOrEmpty(current) || Array.IndexOf(cachedPngAssets, current) >= 0) return Clone(cachedPngAssets);
+            string[] extended = new string[cachedPngAssets.Length + 1]; extended[0] = current;
+            Array.Copy(cachedPngAssets, 0, extended, 1, cachedPngAssets.Length); return extended;
         }
     }
 
-    private static string[] ScanPngAssets()
+    private static void ScanPng(string root, string directory, int depth, List<string> output)
     {
-        HashSet<string> visited = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> found = new(StringComparer.OrdinalIgnoreCase);
-        ScanPngDirectory(string.Empty, 0, visited, found);
-        List<string> sorted = new(found);
-        sorted.Sort(StringComparer.OrdinalIgnoreCase);
-        return sorted.ToArray();
-    }
-
-    private static void ScanPngDirectory(string relativeDirectory, int depth, HashSet<string> visited, HashSet<string> found)
-    {
-        if (depth > PngScanDepthLimit || found.Count >= PngScanEntryLimit) return;
-        string normalizedDirectory = NormalizeAssetPath(relativeDirectory).Trim('/');
-        if (!visited.Add(normalizedDirectory)) return;
-
-        try
+        if (depth > PngScanDepthLimit || output.Count >= PngScanEntryLimit || !Directory.Exists(directory)) return;
+        string[] files;
+        try { files = Directory.GetFiles(directory, "*.png", SearchOption.TopDirectoryOnly); } catch { return; }
+        for (int i = 0; i < files.Length && output.Count < PngScanEntryLimit; i++)
         {
-            string[] files = AssetManager.ListDirectory(normalizedDirectory, false, false, false) ?? Array.Empty<string>();
-            for (int i = 0; i < files.Length && found.Count < PngScanEntryLimit; i++)
-            {
-                string name = Path.GetFileName(files[i]);
-                if (string.IsNullOrWhiteSpace(name) || !name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
-                found.Add(CombineAssetPath(normalizedDirectory, name));
-            }
-
-            string[] folders = AssetManager.ListDirectory(normalizedDirectory, true, false, false) ?? Array.Empty<string>();
-            for (int i = 0; i < folders.Length && found.Count < PngScanEntryLimit; i++)
-            {
-                string raw = (folders[i] ?? string.Empty).TrimEnd('/', '\\');
-                string name = Path.GetFileName(raw);
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                ScanPngDirectory(CombineAssetPath(normalizedDirectory, name), depth + 1, visited, found);
-            }
+            string relative = files[i].Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/');
+            output.Add(relative);
         }
-        catch (Exception error)
-        {
-            if (depth == 0)
-                Plugin.Logger?.LogWarning("DevTool RegionKit AdvancedShader PNG asset scan failed: " + error.Message);
-        }
+        string[] directories;
+        try { directories = Directory.GetDirectories(directory); } catch { return; }
+        for (int i = 0; i < directories.Length && output.Count < PngScanEntryLimit; i++) ScanPng(root, directories[i], depth + 1, output);
     }
 
-    private static string CombineAssetPath(string directory, string name)
+    private static bool SetEnumString(object data, string member, EditorPropertyValue value, string[] options)
     {
-        if (string.IsNullOrWhiteSpace(directory)) return NormalizeAssetPath(name);
-        return NormalizeAssetPath(directory.TrimEnd('/', '\\') + "/" + (name ?? string.Empty).TrimStart('/', '\\'));
+        if (value.Kind != EditorPropertyKind.Enum || value.Integer < 0 || value.Integer >= (options?.Length ?? 0)) return false;
+        return WriteMember(data, member, options[value.Integer]);
     }
 
-    private static string NormalizeAssetPath(string path) =>
-        (path ?? string.Empty).Replace('\\', '/').Trim();
+    private static bool SetEnumMember(object data, string member, EditorPropertyValue value)
+    {
+        object current = ReadMember(data, member); Type type = current?.GetType();
+        if (type?.IsEnum != true || value.Kind != EditorPropertyKind.Enum) return false;
+        Array values = Enum.GetValues(type); if (value.Integer < 0 || value.Integer >= values.Length) return false;
+        return WriteMember(data, member, values.GetValue(value.Integer));
+    }
+
+    private static bool SetVectorArray(object data, string member, int index, EditorPropertyValue value)
+    {
+        if (value.Kind != EditorPropertyKind.Vector2 || ReadMember(data, member) is not Vector2[] array || index < 0 || index >= array.Length) return false;
+        array[index] = new Vector2(value.X, value.Y); return true;
+    }
+    private static bool SetColorArray(object data, string member, int index, EditorPropertyValue value)
+    {
+        if (value.Kind != EditorPropertyKind.Color || ReadMember(data, member) is not Color[] array || index < 0 || index >= array.Length) return false;
+        array[index] = new Color(value.X, value.Y, value.Z, value.W); return true;
+    }
+    private static bool SetUv(object data, int channel, int vertex, EditorPropertyValue value)
+    {
+        if (value.Kind != EditorPropertyKind.Vector2 || ReadMember(data, "uvs") is not Vector2[][] uvs || channel < 0 || channel >= uvs.Length ||
+            uvs[channel] == null || vertex < 0 || vertex >= uvs[channel].Length) return false;
+        uvs[channel][vertex] = new Vector2(value.X, value.Y); return true;
+    }
 
     private static void RefreshRuntime(PlacedObject target)
     {
         try
         {
-            RainWorldGame game = RWCustom.Custom.rainWorld?.processManager?.currentMainLoop as RainWorldGame;
-            if (game?.cameras == null) return;
-            for (int c = 0; c < game.cameras.Length; c++)
+            Room room = DevTool.Core.DevToolRuntime.ActiveSession?.Owner?.room;
+            if (room?.updateList == null) return;
+            for (int i = 0; i < room.updateList.Count; i++)
             {
-                Room room = game.cameras[c]?.room;
-                if (room?.updateList == null) continue;
-                for (int i = 0; i < room.updateList.Count; i++)
-                {
-                    object item = room.updateList[i];
-                    if (item == null || !string.Equals(item.GetType().FullName, RuntimeTypeName, StringComparison.Ordinal)) continue;
-                    FieldInfo pObjField = FindField(item.GetType(), "pObj");
-                    if (!ReferenceEquals(pObjField?.GetValue(item), target)) continue;
-                    MethodInfo refresh = item.GetType().GetMethod("CompletelyRefreshSprite",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    refresh?.Invoke(item, null);
-                    return;
-                }
+                object candidate = room.updateList[i];
+                if (candidate == null || !string.Equals(candidate.GetType().FullName, RuntimeTypeName, StringComparison.Ordinal)) continue;
+                if (ReadMember(candidate, "pObj") is PlacedObject owner && ReferenceEquals(owner, target)) { Invoke(candidate, "CompletelyRefreshSprite"); return; }
             }
         }
-        catch (Exception error)
+        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool AdvancedShader runtime refresh failed: " + error.Message); }
+    }
+
+    private static bool Invoke(object target, string name, params object[] args)
+    {
+        if (target == null) return false;
+        try
         {
-            Plugin.Logger?.LogWarning("DevTool RegionKit AdvancedShader live refresh failed: " + error.Message);
+            MethodInfo[] methods = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo method = methods[i]; if (method.Name != name || method.GetParameters().Length != args.Length) continue;
+                method.Invoke(target, args); return true;
+            }
         }
+        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool AdvancedShader invoke failed: " + error.Message); }
+        return false;
     }
 
-    private static object ReadField(object instance, string name)
+    private static object ReadMember(object target, string name)
     {
-        FieldInfo field = FindField(instance?.GetType(), name);
-        return field?.GetValue(instance);
-    }
-
-    private static bool WriteField(object instance, string name, object value)
-    {
-        FieldInfo field = FindField(instance?.GetType(), name);
-        if (field == null || field.IsInitOnly || (value != null && !field.FieldType.IsInstanceOfType(value))) return false;
-        field.SetValue(instance, value);
-        return true;
-    }
-
-    private static FieldInfo FindField(Type type, string name)
-    {
-        Type current = type;
-        while (current != null)
+        if (target == null) return null;
+        for (Type type = target.GetType(); type != null; type = type.BaseType)
         {
-            FieldInfo field = current.GetField(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (field != null) return field;
-            current = current.BaseType;
+            FieldInfo field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null) return field.GetValue(target);
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property?.CanRead == true) return property.GetValue(target, null);
         }
         return null;
     }
-
-    private static string ReadString(object instance, string name, string fallback)
+    private static bool WriteMember(object target, string name, object value)
     {
-        return ReadField(instance, name) as string ?? fallback;
-    }
-
-    private static bool ReadBool(object instance, string name)
-    {
-        return ReadField(instance, name) is bool value && value;
-    }
-
-    private static Vector2 ReadVector2(object instance, string name, Vector2 fallback)
-    {
-        return ReadField(instance, name) is Vector2 value ? value : fallback;
-    }
-
-    private static bool InvokeDataMethod(object data, string name, params object[] args)
-    {
-        try
+        if (target == null) return false;
+        for (Type type = target.GetType(); type != null; type = type.BaseType)
         {
-            Type[] signature = new Type[args?.Length ?? 0];
-            for (int i = 0; i < signature.Length; i++) signature[i] = args[i]?.GetType() ?? typeof(object);
-            MethodInfo method = data?.GetType().GetMethod(name,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                signature,
-                null);
-            if (method == null) return false;
-            method.Invoke(data, args);
-            return true;
+            FieldInfo field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null && !field.IsInitOnly) { field.SetValue(target, value); return true; }
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property?.CanWrite == true) { property.SetValue(target, value, null); return true; }
         }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool RegionKit AdvancedShader data method failed: " + error.Message);
-            return false;
-        }
+        return false;
     }
 
-    private static bool TryParseColorKey(string key, out int index, out int component)
-    {
-        index = -1;
-        component = -1;
-        const string prefix = "rk.as.color.";
-        if (!key.StartsWith(prefix, StringComparison.Ordinal)) return false;
-        string[] parts = key.Substring(prefix.Length).Split('.');
-        if (parts.Length != 2 || !int.TryParse(parts[0], out index)) return false;
-        component = parts[1] switch
-        {
-            "r" => 0,
-            "g" => 1,
-            "b" => 2,
-            "a" => 3,
-            _ => -1
-        };
-        return component >= 0;
-    }
-
+    private static bool ReadBool(object target, string name) => ReadMember(target, name) is bool value && value;
+    private static string ReadString(object target, string name, string fallback) => ReadMember(target, name) as string ?? fallback;
+    private static int FindOption(string[] options, string value)
+    { for (int i = 0; i < (options?.Length ?? 0); i++) if (string.Equals(options[i], value, StringComparison.Ordinal)) return i; return -1; }
     private static bool TryParseIndexedKey(string key, string prefix, int count, out int[] values)
     {
-        values = Array.Empty<int>();
-        if (!key.StartsWith(prefix, StringComparison.Ordinal)) return false;
-        string[] parts = key.Substring(prefix.Length).Split('.');
-        if (parts.Length != count) return false;
-        int[] parsed = new int[count];
-        for (int i = 0; i < count; i++)
-            if (!int.TryParse(parts[i], out parsed[i])) return false;
-        values = parsed;
-        return true;
+        values = Array.Empty<int>(); if (!key.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        string[] parts = key.Substring(prefix.Length).Split('.'); if (parts.Length != count) return false;
+        values = new int[count]; for (int i = 0; i < count; i++) if (!int.TryParse(parts[i], out values[i])) return false; return true;
     }
+    private static string[] Clone(string[] values)
+    { if (values == null || values.Length == 0) return Array.Empty<string>(); string[] copy = new string[values.Length]; Array.Copy(values, copy, values.Length); return copy; }
 }
