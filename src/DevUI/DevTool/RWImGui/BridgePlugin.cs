@@ -26,7 +26,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private static bool nativeImGuiReady;
     private bool sessionWasVisible;
     private bool sessionWasPaused;
-    private int focusReturnGraceFrames;
+    private bool focusTransitionActive;
+    private bool applicationFocused;
 
     private void OnEnable()
     {
@@ -34,10 +35,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
         nativeImGuiReady = false;
         sessionWasVisible = false;
         sessionWasPaused = false;
-        focusReturnGraceFrames = 0;
+        focusTransitionActive = false;
+        applicationFocused = UnityEngine.Application.isFocused;
         EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
+        DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused);
 
         // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
         // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -46,6 +49,19 @@ public sealed class BridgePlugin : BaseUnityPlugin
         On.RainWorld.Start += RainWorld_Start;
         On.RainWorld.PreModsInit += RainWorld_PreModsInit;
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        applicationFocused = hasFocus;
+
+        // Unity may stop calling Update while the window is unfocused. Remember the transition in
+        // the focus callback itself so the very first frame after Alt+Tab cannot mistake a transient
+        // DevUI/game-state mismatch for an actual DevTools shutdown and release the ImGui context.
+        if (!hasFocus && sessionWasVisible)
+            focusTransitionActive = true;
+
+        DevToolFrontend.SetApplicationFocusedFromMainThread(hasFocus);
     }
 
     private void Update()
@@ -61,20 +77,21 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorSession session = DevToolSessionHub.Current;
         RainWorldGame game = session?.Owner?.game;
         bool rawSessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+        bool definitelyClosed = IsSessionDefinitelyClosed(session, game);
 
-        // Alt+Tab can interrupt Rain World's live-session probe for several frames, including the
-        // first frames after focus returns. Keep a short return grace window so the RWImGui consumer
-        // context is never detached just because the game has not rebuilt its live-session signal yet.
-        // This preserves window positions/sizes and open UI state instead of falling back to defaults.
-        bool appFocused = UnityEngine.Application.isFocused;
-        if (!appFocused && sessionWasVisible)
-            focusReturnGraceFrames = 12;
-        else if (rawSessionVisible)
-            focusReturnGraceFrames = 0;
-        else if (focusReturnGraceFrames > 0)
-            focusReturnGraceFrames--;
+        // Do not use a frame-count grace period here. In exclusive/fullscreen transitions Unity can
+        // stop Update entirely while unfocused and Rain World may take an arbitrary number of frames
+        // to restore game.devUI/room after focus returns. Keep the same consumer context until the
+        // live signal comes back or we have positive evidence that DevTools really closed.
+        if (rawSessionVisible)
+            focusTransitionActive = false;
+        else if (!applicationFocused && sessionWasVisible)
+            focusTransitionActive = true;
+        else if (focusTransitionActive && definitelyClosed)
+            focusTransitionActive = false;
 
-        bool preserveAcrossFocusTransition = sessionWasVisible && (!appFocused || focusReturnGraceFrames > 0);
+        bool preserveAcrossFocusTransition =
+            sessionWasVisible && focusTransitionActive && !definitelyClosed;
         bool sessionVisible = rawSessionVisible || preserveAcrossFocusTransition;
         bool sessionPaused = sessionVisible && game?.GamePaused == true;
 
@@ -94,10 +111,24 @@ public sealed class BridgePlugin : BaseUnityPlugin
         sessionWasPaused = sessionPaused;
 
         // Keep the RWImGui frontend alive in Vanilla presentation mode so the tiny New UI /
-        // Vanilla switch remains reachable. Escape-hidden mode still releases the context so
-        // Warp Menu and other RWImGui consumers can own input without interference.
+        // Vanilla switch remains reachable. Alt+Tab never calls SetVisible(false): the context stays
+        // attached and its ImGui window positions/sizes/open-state survive the focus transition.
         bool frontendVisible = sessionVisible && !EditorUiModeState.OverlayHidden;
         DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
+    }
+
+    private static bool IsSessionDefinitelyClosed(EditorSession session, RainWorldGame game)
+    {
+        if (session == null || game == null) return true;
+        if (!game.processActive || !game.devToolsActive) return true;
+
+        // currentMainLoop changing is an actual process transition. By contrast game.devUI == null,
+        // a temporary owner mismatch, or owner.room == null can occur around Alt+Tab and therefore
+        // must not be used as reasons to destroy the frontend context.
+        if (game.manager?.currentMainLoop != null && !ReferenceEquals(game.manager.currentMainLoop, game))
+            return true;
+
+        return false;
     }
 
     private void OnDisable()
@@ -107,10 +138,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         nativeImGuiReady = false;
         DevToolFrontend.SetVisibleFromMainThread(false);
+        DevToolFrontend.SetApplicationFocusedFromMainThread(true);
         EditorUiModeState.SetOverlayHidden(false);
         sessionWasVisible = false;
         sessionWasPaused = false;
-        focusReturnGraceFrames = 0;
+        focusTransitionActive = false;
+        applicationFocused = true;
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
     }
@@ -223,6 +256,7 @@ internal static class DevToolFrontend
     private static readonly List<FontCandidate> CjkFonts = new();
     private static ManualLogSource log;
     private static volatile bool visible;
+    private static volatile bool applicationFocused = true;
     private static int contextBusyLogged;
     private static int drawFailureLogged;
     private static int cjkFontLogged;
@@ -238,6 +272,13 @@ internal static class DevToolFrontend
     internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
+
+    internal static void SetApplicationFocusedFromMainThread(bool value)
+    {
+        applicationFocused = value;
+        if (!value)
+            EditorInputRouter.SetFrontendCapture(false, false, false);
+    }
 
     internal static void SetVisibleFromMainThread(bool value)
     {
@@ -309,6 +350,16 @@ internal static class DevToolFrontend
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
+
+        // While the OS owns focus, keep the consumer context alive but submit no ImGui windows.
+        // This prevents temporary fullscreen/display-size changes and stale mouse input from moving,
+        // snapping, resizing or recreating any DevTool window during Alt+Tab.
+        if (!applicationFocused)
+        {
+            EditorInputRouter.SetFrontendCapture(false, false, false);
+            return;
+        }
+
         if (!visible || !snapshot.Available || EditorUiModeState.OverlayHidden)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
