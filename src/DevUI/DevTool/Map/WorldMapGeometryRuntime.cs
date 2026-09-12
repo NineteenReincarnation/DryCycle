@@ -97,15 +97,16 @@ public sealed class EditorMapRoomVisualSnapshot
 /// QuicksandZone can therefore expose both its actual surface and its material intervals instead
 /// of being collapsed into a coarse tile-coverage colour.
 ///
-/// Static rooms are revision driven: the atlas/raster, node coordinates and curve settings are
-/// only rebuilt when their inputs change. The ImGui frontend consumes compact raster runs and
-/// simplified polylines and never resamples room geometry itself.
+/// Static rooms are revision driven. Unloaded room settings are warmed incrementally so opening a
+/// large region never synchronously parses every room in one frame.
 /// </summary>
 internal static class MapRoomGeometryPresentationHub
 {
     private const float PixelsPerTile = 20f;
     private const float CurveSimplifyToleranceTiles = 0.075f;
     private const int MaxCurveSamples = 128;
+    private const int UnloadedCurveLoadsPerFrame = 4;
+    private const int SettingsPollIntervalFrames = 90;
 
     private sealed class CacheEntry
     {
@@ -120,6 +121,7 @@ internal static class MapRoomGeometryPresentationHub
         internal int SettingsFingerprint;
         internal string SettingsPath = string.Empty;
         internal DateTime SettingsWriteTimeUtc;
+        internal int NextSettingsPollFrame;
         internal bool CurvesInitialized;
         internal float WidthTiles = 12f;
         internal float HeightTiles = 6f;
@@ -134,6 +136,7 @@ internal static class MapRoomGeometryPresentationHub
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
+    private static int curveLoadsRemaining;
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex) =>
         cache.TryGetValue(roomIndex, out CacheEntry entry)
@@ -156,10 +159,9 @@ internal static class MapRoomGeometryPresentationHub
             lastPrimeFrame = -1;
         }
 
-        // WorldWorkspace and WorldMapView can both request geometry during one UI frame. Treat the
-        // cache as a frame-level presentation source so the second request is effectively free.
         if (lastPrimeFrame == Time.frameCount) return;
         lastPrimeFrame = Time.frameCount;
+        curveLoadsRemaining = UnloadedCurveLoadsPerFrame;
 
         HashSet<int> alive = new();
         for (int i = 0; i < page.subNodes.Count; i++)
@@ -199,6 +201,7 @@ internal static class MapRoomGeometryPresentationHub
         cache.Clear();
         region = string.Empty;
         lastPrimeFrame = -1;
+        curveLoadsRemaining = 0;
     }
 
     private static void RefreshDimensions(CacheEntry entry, MapObject.RoomRepresentation roomRep)
@@ -290,8 +293,7 @@ internal static class MapRoomGeometryPresentationHub
                 return pixels != null && pixels.Length == width * height;
             }
 
-            // MapObject can reuse a cached Futile atlas element and leave RoomRepresentation.texture
-            // null. Sampling the atlas element keeps those rooms from degrading into plain boxes.
+            // Cached MapTex atlas elements do not always retain RoomRepresentation.texture.
             FAtlasElement element = roomRep?.mapTex;
             if (element?.atlas?.texture is not Texture2D atlasTexture) return false;
 
@@ -314,8 +316,6 @@ internal static class MapRoomGeometryPresentationHub
 
     private static EditorMapGeometryKind? ClassifyPixel(Color color)
     {
-        // Exact buckets emitted by MapObject.CreateMapTexture. Shortcut colour is intentionally left
-        // to node markers so one visual primitive remains responsible for one semantic layer.
         if (color.b > color.r + 0.12f && color.b > color.g + 0.12f)
             return EditorMapGeometryKind.Water;
         if (color.r < 0.40f && color.g < 0.40f && color.b < 0.40f)
@@ -354,8 +354,6 @@ internal static class MapRoomGeometryPresentationHub
             for (int i = 0; i < positions.Length; i++)
             {
                 Vector2 point = positions[i];
-                // MiniMap itself treats (0,0) as "not prepared yet" and falls back to its node
-                // square. Do the same so an unfinished RoomPreparer does not pin an Exit to a corner.
                 if (Math.Abs(point.x) < 0.001f && Math.Abs(point.y) < 0.001f) continue;
                 nodes.Add(new EditorMapNodeVisualSnapshot(i, point.x, point.y));
             }
@@ -381,8 +379,19 @@ internal static class MapRoomGeometryPresentationHub
         if (entry.CurvesInitialized)
         {
             if (string.IsNullOrWhiteSpace(entry.SettingsPath)) return;
+            if (Time.frameCount < entry.NextSettingsPollFrame) return;
+            entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames + Math.Abs(entry.RoomIndex % 30);
             if (FileWriteTime(entry.SettingsPath) == entry.SettingsWriteTimeUtc) return;
         }
+
+        if (curveLoadsRemaining <= 0)
+        {
+            // A changed/uninitialised room is retried next frame rather than being pushed to the
+            // normal slow timestamp poll.
+            entry.NextSettingsPollFrame = Time.frameCount + 1;
+            return;
+        }
+        curveLoadsRemaining--;
 
         RoomSettings settings = null;
         try
@@ -406,6 +415,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.SettingsFingerprint = fingerprint;
         entry.SettingsPath = settings.filePath ?? string.Empty;
         entry.SettingsWriteTimeUtc = FileWriteTime(entry.SettingsPath);
+        entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames + Math.Abs(entry.RoomIndex % 30);
         entry.Curves = BuildCurveGeometry(settings).ToArray();
         entry.CurvesInitialized = true;
         entry.Revision++;
