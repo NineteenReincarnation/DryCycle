@@ -298,10 +298,12 @@ public static class DevUiMigrationCoverage
             AddObservation(node, path, insideRepresentation, pageType, output);
 
         if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
+            LegacyDevInterfaceBridge.CanAdaptBoolean(node) ||
             LegacyDevInterfaceBridge.CanAdaptText(node) ||
             LegacyDevInterfaceBridge.CanAdaptDirection(node) ||
             LegacyDevInterfaceBridge.CanAdaptPanelSelect(node) ||
-            LegacyDevInterfaceBridge.CanAdaptColorSelect(node))
+            LegacyDevInterfaceBridge.CanAdaptColorSelect(node) ||
+            LegacyDevInterfaceBridge.IsTerminalSemanticButton(node))
             return;
         if (node.subNodes == null) return;
 
@@ -380,6 +382,13 @@ public static class DevUiMigrationCoverage
             return;
         }
 
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptBoolean(node))
+        {
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "RegionKit BoolButton native checkbox adapter";
+            return;
+        }
+
         if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptPanelSelect(node))
         {
             state = DevUiMigrationState.SpecializedAdapter;
@@ -426,10 +435,16 @@ public static class DevUiMigrationCoverage
             note = "PlacedObject legacy IntegerControl bridge";
             return;
         }
-        if (insideRepresentation && node is Button)
+        if (insideRepresentation && node is Button && LegacyDevInterfaceBridge.IsTerminalSemanticButton(node))
         {
             state = DevUiMigrationState.GenericAdapter;
-            note = "PlacedObject legacy Button bridge";
+            note = "Verified terminal semantic button bridge";
+            return;
+        }
+        if (insideRepresentation && node is Button)
+        {
+            state = DevUiMigrationState.Unmapped;
+            note = "Button semantics are not proven; hidden panels and composite actions require a dedicated adapter";
             return;
         }
 
