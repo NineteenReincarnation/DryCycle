@@ -32,6 +32,10 @@ internal static class ObjectInspectorView
             return;
         }
 
+        // Touching the optional RegionKit adapter lazily registers it in the core registry.
+        // The first frame may still contain the legacy snapshot; the next publication is native.
+        _ = RegionKitAdvancedShaderInspectorAdapter.IsDataTypeName(inspector.DataType);
+
         if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
             Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
 
@@ -263,10 +267,26 @@ internal static class ObjectInspectorView
                 : property.StringValue ?? string.Empty;
 
         if (!ImGui.BeginCombo(label, preview)) return;
+
+        string filterKey = "enum-search:" + inspector.ObjectIndex + ":" + property.Key;
+        string filter = Get(StringEdits, filterKey, string.Empty);
+        if (options.Length >= 24)
+        {
+            ImGui.SetNextItemWidth(-1f);
+            ImGui.InputText(DevToolUiSettings.T("搜索##", "Search##") + filterKey, ref filter, 256);
+            StringEdits[filterKey] = filter;
+            ImGui.Separator();
+        }
+
         for (int i = 0; i < options.Length; i++)
         {
+            string option = options[i] ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(filter) &&
+                option.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
             bool selected = !mixed && i == property.IntegerValue;
-            if (ImGui.Selectable(options[i] + "##" + label + i, selected))
+            if (ImGui.Selectable(option + "##" + label + i, selected))
                 SendProperty(inspector, property.Key,
                     new EditorPropertyValue(EditorPropertyKind.Enum, integer: i));
             if (selected) ImGui.SetItemDefaultFocus();
@@ -276,6 +296,10 @@ internal static class ObjectInspectorView
 
     private static void DrawCompatibility(EditorInspectorSnapshot inspector)
     {
+        // AdvancedShader is now represented completely by first-class inspector properties.
+        // Do not show its old RegionKit panel controls in parallel.
+        if (RegionKitAdvancedShaderInspectorAdapter.IsDataTypeName(inspector.DataType)) return;
+
         LegacyControlSnapshot[] controls = inspector.LegacyControls ?? Array.Empty<LegacyControlSnapshot>();
         if (controls.Length == 0 && !inspector.LegacyUiAvailable) return;
 
@@ -577,7 +601,7 @@ internal static class ObjectInspectorView
         string label = visibleLabel + "##DevToolLegacyDirection_" + stateKey;
         ImGui.SetNextItemWidth(-1f);
         bool changed = ImGui.InputFloat2(label, ref value, "%.3f");
-        Vector2Edits[stateKey] = value;
+        Vector2Edits[editKey] = value;
 
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
