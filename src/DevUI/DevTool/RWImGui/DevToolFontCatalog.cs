@@ -82,7 +82,10 @@ internal static unsafe class DevToolFontCatalog
                 return false;
             }
 
-            if (io.Fonts.Locked || io.Fonts.TexID != IntPtr.Zero)
+            // RWImGui ships a modified ImGui.NET binding where ImFontAtlas.TexID is ulong
+            // rather than System.IntPtr. Compare against the binding's actual zero value so this
+            // frontend compiles against the DLL that Rain World loads at runtime.
+            if (io.Fonts.Locked || io.Fonts.TexID != 0UL)
             {
                 registrationMessage = "已错过安全注册窗口：字体 Atlas 已锁定或已上传纹理。";
                 log?.LogWarning(
