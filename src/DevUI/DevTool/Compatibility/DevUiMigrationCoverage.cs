@@ -310,16 +310,16 @@ public static class DevUiMigrationCoverage
         bool insideRepresentation = insidePlacedObjectRepresentation || node is PlacedObjectRepresentation;
         Type nodeType = node.GetType();
 
-        // Exact stock labels are presentation fragments of their parent control, not independent
-        // editor capabilities. Derived label types are kept because mods often add behavior there.
-        bool stockLabelFragment = nodeType == typeof(DevUILabel);
-        if (!stockLabelFragment)
+        // Exact stock labels and known layout-only helper nodes are implementation fragments of
+        // their parent control, not independent editor capabilities.
+        bool presentationFragment = nodeType == typeof(DevUILabel) || IsKnownPresentationFragment(nodeType);
+        if (!presentationFragment)
             AddObservation(node, path, insideRepresentation, pageType, output);
 
         // Composite controls are one migration obligation. Their internal presentation nodes do
         // not represent separate user-facing capabilities and must not inflate coverage counts.
         if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
-            LegacyDevInterfaceBridge.CanAdaptText(node))
+            LegacyDevInterfaceBridge.CanAdaptText(node) || LegacyDevInterfaceBridge.CanAdaptDirection(node))
             return;
         if (node.subNodes == null) return;
 
@@ -410,6 +410,15 @@ public static class DevUiMigrationCoverage
             return;
         }
 
+        // RegionKit DirectionPicker is also recognized structurally. The adapter mutates the
+        // nested direction handle and immediately synchronizes the polling parent representation.
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptDirection(node))
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "PlacedObject reflected direction-picker bridge";
+            return;
+        }
+
         // The object compatibility bridge exposes these stock semantic controls under the selected
         // PlacedObjectRepresentation and delegates back through their original behavior boundaries.
         if (insideRepresentation && node is Slider)
@@ -468,6 +477,14 @@ public static class DevUiMigrationCoverage
                string.Equals(fullName,
                    "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton",
                    StringComparison.Ordinal);
+    }
+
+    private static bool IsKnownPresentationFragment(Type type)
+    {
+        string fullName = type?.FullName ?? string.Empty;
+        return string.Equals(fullName,
+            "RegionKit.Modules.DevUIMisc.GenericNodes.TemplatePositionedNode",
+            StringComparison.Ordinal);
     }
 
     private static bool IsRebuiltPageInfrastructure(DevUINode node)
