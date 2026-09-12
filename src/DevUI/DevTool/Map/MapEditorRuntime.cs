@@ -68,6 +68,7 @@ public static class MapEditorPresentationHub
         internal int FromRoom;
         internal int FromNode;
         internal int ToRoom;
+        internal bool AmbiguousPair;
     }
 
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
@@ -181,11 +182,16 @@ public static class MapEditorPresentationHub
                 if (reservedEndpoints.Contains(EndpointKey(room.index, node))) continue;
                 int other = room.connections[node];
                 if (other < 0 || !roomIndices.Contains(other)) continue;
+
+                AbstractRoom target = world.GetAbstractRoom(other);
+                bool repeated = CountDestination(room.connections, other) > 1 ||
+                                CountDestination(target?.connections, room.index) > 1;
                 arcs.Add(new DirectedConnectionArc
                 {
                     FromRoom = room.index,
                     FromNode = node,
-                    ToRoom = other
+                    ToRoom = other,
+                    AmbiguousPair = repeated
                 });
             }
         }
@@ -195,17 +201,39 @@ public static class MapEditorPresentationHub
         {
             if (used[i]) continue;
             DirectedConnectionArc arc = arcs[i];
-            List<int> reverse = new();
-            for (int j = 0; j < arcs.Count; j++)
+
+            if (arc.AmbiguousPair)
             {
-                if (i == j || used[j]) continue;
-                if (arcs[j].FromRoom == arc.ToRoom && arcs[j].ToRoom == arc.FromRoom)
-                    reverse.Add(j);
+                used[i] = true;
+                result.Add(new EditorMapConnectionSnapshot
+                {
+                    ConnectionId = LegacyId(arc.FromRoom, arc.FromNode, arc.ToRoom, -1, false),
+                    FromRoomIndex = arc.FromRoom,
+                    FromNodeIndex = arc.FromNode,
+                    ToRoomIndex = arc.ToRoom,
+                    ToNodeIndex = -1,
+                    Direction = WorldConnectionDirection.AToB,
+                    Explicit = false,
+                    Ambiguous = true
+                });
+                continue;
             }
 
-            if (reverse.Count == 1)
+            int reverseIndex = -1;
+            for (int j = 0; j < arcs.Count; j++)
             {
-                int reverseIndex = reverse[0];
+                if (i == j || used[j] || arcs[j].AmbiguousPair) continue;
+                if (arcs[j].FromRoom != arc.ToRoom || arcs[j].ToRoom != arc.FromRoom) continue;
+                if (reverseIndex >= 0)
+                {
+                    reverseIndex = -2;
+                    break;
+                }
+                reverseIndex = j;
+            }
+
+            if (reverseIndex >= 0)
+            {
                 DirectedConnectionArc back = arcs[reverseIndex];
                 used[i] = true;
                 used[reverseIndex] = true;
@@ -238,6 +266,15 @@ public static class MapEditorPresentationHub
         }
 
         return result;
+    }
+
+    private static int CountDestination(int[] connections, int roomIndex)
+    {
+        if (connections == null) return 0;
+        int count = 0;
+        for (int i = 0; i < connections.Length; i++)
+            if (connections[i] == roomIndex) count++;
+        return count;
     }
 
     private static long EndpointKey(int roomIndex, int nodeIndex) =>
