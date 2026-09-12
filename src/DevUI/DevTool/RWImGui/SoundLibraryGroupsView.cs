@@ -36,8 +36,8 @@ internal static class SoundLibraryGroupsView
         ImGui.Spacing();
 
         EditorSoundSampleSnapshot[] samples = snapshot.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
-        EditorSoundSourceKind? lastKind = null;
-        string lastSource = null;
+        DevToolSourceMark lastSource = default;
+        bool hasLastSource = false;
         int matches = 0;
         for (int i = 0; i < samples.Length; i++)
         {
@@ -45,22 +45,15 @@ internal static class SoundLibraryGroupsView
             if (!MatchesSample(sample, search)) continue;
             matches++;
 
-            if (lastKind != sample.SourceKind)
+            DevToolSourceMark source = DevToolSourcePresentation.FromSound(
+                sample.SourceKind,
+                sample.SourceId,
+                sample.SourceName);
+            if (!hasLastSource || !DevToolSourcePresentation.SameSource(lastSource, source))
             {
-                lastKind = sample.SourceKind;
-                lastSource = null;
-                DevToolWidgets.SourceHeader(
-                    SourceKindLabel(sample.SourceKind),
-                    SourceColor(sample.SourceKind),
-                    1.52f,
-                    BrowserBodyFontScale);
-            }
-
-            if ((sample.SourceKind == EditorSoundSourceKind.Dlc || sample.SourceKind == EditorSoundSourceKind.Mod) &&
-                !string.Equals(lastSource, sample.SourceName, StringComparison.Ordinal))
-            {
-                lastSource = sample.SourceName;
-                DevToolWidgets.SectionHeader(sample.SourceName, BrowserBodyFontScale);
+                hasLastSource = true;
+                lastSource = source;
+                DevToolWidgets.SourceHeader(source, 1.52f, BrowserBodyFontScale);
             }
 
             if (ImGui.Selectable(sample.Sample + "##CreateSound" + i, false))
@@ -73,7 +66,7 @@ internal static class SoundLibraryGroupsView
             if (ImGui.IsItemHovered())
             {
                 DevToolTooltip.Show(
-                    DevToolUiSettings.T("来源：", "Source: ") + sample.SourceName + "\n" +
+                    DevToolUiSettings.T("来源：", "Source: ") + source.Label + "\n" +
                     DevToolUiSettings.T("添加为 ", "Add as ") + TypeName(createType));
             }
         }
@@ -250,12 +243,11 @@ internal static class SoundLibraryGroupsView
         // Resource ownership is resolved on the Rain World/DevUI thread and copied into the
         // immutable presentation snapshot. The RWImGui thread must not touch AssetManager or
         // the live SoundPage merely to render this status line.
-        string sourceName = string.IsNullOrWhiteSpace(selected.ResourceSourceName)
-            ? (selected.ResourceAvailable ? "Vanilla" : "Missing")
-            : selected.ResourceSourceName;
-        ImGui.TextDisabled(
-            DevToolUiSettings.T("资源：", "Resource: ") +
-            SourceKindLabel(selected.ResourceSourceKind) + " · " + sourceName);
+        DevToolSourceMark source = DevToolSourcePresentation.FromSound(
+            selected.ResourceSourceKind,
+            selected.ResourceSourceId,
+            selected.ResourceSourceName);
+        DevToolSourcePresentation.DrawInline(source, DevToolUiSettings.T("资源：", "Resource:"));
     }
 
     internal static void DrawProblemsOnce() => SoundGroupProblemsWindow.DrawOnce();
@@ -289,7 +281,13 @@ internal static class SoundLibraryGroupsView
                 : new Num.Vector4(1f, 0.42f, 0.40f, 1f);
             ImGui.TextColored(color, status + sound.Sample);
             ImGui.SameLine();
-            ImGui.TextDisabled("· " + sound.Type + " · " + sound.SourceName);
+            ImGui.TextDisabled("· " + sound.Type);
+            ImGui.SameLine();
+            DevToolSourceMark source = DevToolSourcePresentation.FromSound(
+                sound.SourceKind,
+                sound.SourceId,
+                sound.SourceName);
+            DevToolSourcePresentation.DrawInline(source);
         }
 
         string applyLabel = group.HasMissingResources
@@ -358,7 +356,8 @@ internal static class SoundLibraryGroupsView
         if (string.IsNullOrWhiteSpace(query)) return true;
         string q = query.Trim();
         return (value?.Sample?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
-               (value?.SourceName?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
+               (value?.SourceName?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+               (value?.SourceId?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
     private static string TypeName(int type) => type switch
@@ -367,21 +366,5 @@ internal static class SoundLibraryGroupsView
         1 => DevToolUiSettings.T("定向声音", "Directional"),
         2 => DevToolUiSettings.T("点声源", "Spot"),
         _ => DevToolUiSettings.T("声音", "Sound")
-    };
-
-    private static string SourceKindLabel(EditorSoundSourceKind kind) => kind switch
-    {
-        EditorSoundSourceKind.Vanilla => DevToolUiSettings.T("原版", "VANILLA"),
-        EditorSoundSourceKind.Dlc => DevToolUiSettings.T("DLC 添加", "DLC"),
-        EditorSoundSourceKind.Mod => DevToolUiSettings.T("模组添加", "MODS"),
-        _ => DevToolUiSettings.T("缺失", "MISSING")
-    };
-
-    private static Num.Vector4 SourceColor(EditorSoundSourceKind kind) => kind switch
-    {
-        EditorSoundSourceKind.Vanilla => new Num.Vector4(0.88f, 0.88f, 0.88f, 1f),
-        EditorSoundSourceKind.Dlc => new Num.Vector4(1f, 0.70f, 0.34f, 1f),
-        EditorSoundSourceKind.Mod => new Num.Vector4(0.78f, 0.72f, 1f, 1f),
-        _ => new Num.Vector4(1f, 0.42f, 0.40f, 1f)
     };
 }
