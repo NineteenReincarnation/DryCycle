@@ -40,7 +40,6 @@ internal static class WorldMapView
     private static Num.Vector2 pan;
     private static float zoom = 1f;
     private static bool fitRequested = true;
-    private static bool showTerrain = true;
     private static bool showConnections = true;
     private static bool showPortLabels = true;
     private static bool showSubregionLabels = true;
@@ -104,8 +103,6 @@ internal static class WorldMapView
         if (!compact) ImGui.SameLine(0f, 16f);
         else ImGui.Spacing();
 
-        DrawCompactCheckbox(DevToolUiSettings.T("地形", "Terrain"), "WorldMapTerrain", ref showTerrain);
-        ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("出口编号", "Exit IDs"), "WorldMapPortLabels", ref showPortLabels);
@@ -277,21 +274,20 @@ internal static class WorldMapView
             draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
         }
 
-        if (showTerrain && visual.DetailedRasterAvailable)
+        if (visual.DetailedRasterAvailable)
         {
             EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
             for (int i = 0; i < runs.Length; i++)
             {
                 EditorMapRectSnapshot run = runs[i];
                 if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
-                if (!highLod && run.Kind == EditorMapGeometryKind.Detail && zoom < 0.32f) continue;
                 Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
                 Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
                 draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
             }
         }
 
-        if (showTerrain && visual.Curves != null)
+        if (visual.Curves != null)
         {
             for (int i = 0; i < visual.Curves.Length; i++)
                 DrawCurve(draw, visual, roomMin, visual.Curves[i], highLod);
@@ -339,12 +335,17 @@ internal static class WorldMapView
     {
         return kind switch
         {
-            EditorMapGeometryKind.Solid => ImGui.GetColorU32(ImGuiCol.TextDisabled),
-            EditorMapGeometryKind.Detail => ImGui.GetColorU32(ImGuiCol.Border),
-            EditorMapGeometryKind.Water => ImGui.GetColorU32(ImGuiCol.Header),
+            EditorMapGeometryKind.Air => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.59f, 0.60f, 1.00f)),
+            EditorMapGeometryKind.BackWall => ImGui.GetColorU32(new Num.Vector4(0.47f, 0.48f, 0.49f, 1.00f)),
+            EditorMapGeometryKind.Solid => ImGui.GetColorU32(new Num.Vector4(0.29f, 0.30f, 0.31f, 1.00f)),
+            EditorMapGeometryKind.Structure => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.31f, 0.31f, 1.00f)),
+            EditorMapGeometryKind.Shortcut => ImGui.GetColorU32(new Num.Vector4(0.84f, 0.85f, 0.84f, 1.00f)),
+            EditorMapGeometryKind.Transport => ImGui.GetColorU32(new Num.Vector4(0.72f, 0.20f, 0.28f, 1.00f)),
+            EditorMapGeometryKind.Water => ImGui.GetColorU32(new Num.Vector4(0.12f, 0.34f, 0.78f, 0.24f)),
+            EditorMapGeometryKind.LocalTerrain => ImGui.GetColorU32(new Num.Vector4(0.73f, 0.46f, 0.39f, 1.00f)),
+            EditorMapGeometryKind.CurvedSlope => ImGui.GetColorU32(new Num.Vector4(0.88f, 0.89f, 0.90f, 1.00f)),
             EditorMapGeometryKind.QuicksandMaterial => ImGui.GetColorU32(ImGuiCol.ButtonHovered),
             EditorMapGeometryKind.QuicksandBody => ImGui.GetColorU32(ImGuiCol.Separator),
-            EditorMapGeometryKind.CurvedSlope => ImGui.GetColorU32(ImGuiCol.Text),
             _ => ImGui.GetColorU32(ImGuiCol.Border)
         };
     }
