@@ -35,6 +35,7 @@ public sealed class EditorSoundPresentationSnapshot
     public float BackgroundDroneVolume { get; init; }
     public float NoThreatDroneVolume { get; init; }
     public string[] Samples { get; init; } = Array.Empty<string>();
+    public EditorSoundSampleSnapshot[] SampleEntries { get; init; } = Array.Empty<EditorSoundSampleSnapshot>();
     public EditorSoundSnapshot[] Sounds { get; init; } = Array.Empty<EditorSoundSnapshot>();
     public int SelectedIndex { get; init; } = -1;
 }
@@ -122,8 +123,11 @@ public static class SoundEditorPresentationHub
             };
         }
 
-        string[] samples = page.fileNames == null ? Array.Empty<string>() : (string[])page.fileNames.Clone();
-        Array.Sort(samples, StringComparer.OrdinalIgnoreCase);
+        EditorSoundSampleSnapshot[] sampleEntries = SoundSampleCatalog.Refresh(page);
+        SoundGroupLibrary.EnsureLoaded();
+
+        string[] samples = new string[sampleEntries.Length];
+        for (int i = 0; i < sampleEntries.Length; i++) samples[i] = sampleEntries[i].Sample;
 
         current = new EditorSoundPresentationSnapshot
         {
@@ -131,6 +135,7 @@ public static class SoundEditorPresentationHub
             BackgroundDroneVolume = session.RoomSettings.BkgDroneVolume,
             NoThreatDroneVolume = session.RoomSettings.BkgDroneNoThreatVolume,
             Samples = samples,
+            SampleEntries = sampleEntries,
             Sounds = sounds,
             SelectedIndex = state.SelectedIndex
         };
@@ -145,7 +150,14 @@ public enum SoundEditorCommandKind
     Create,
     Delete,
     SetRoomValue,
-    SetSoundValue
+    SetSoundValue,
+    ReloadGroups,
+    SetGroupDirectory,
+    ResetGroupDirectory,
+    CreateGroup,
+    DeleteGroup,
+    AddSoundToGroup,
+    ApplyGroup
 }
 
 public readonly struct SoundEditorCommand
@@ -201,6 +213,27 @@ public static class SoundEditorCommandQueue
                         break;
                     case SoundEditorCommandKind.SetSoundValue:
                         SoundEditorActions.SetSoundValue(session, command.Index, command.Key, command.Value);
+                        break;
+                    case SoundEditorCommandKind.ReloadGroups:
+                        SoundGroupLibrary.Reload();
+                        break;
+                    case SoundEditorCommandKind.SetGroupDirectory:
+                        SoundGroupLibrary.SetLocalDirectory(command.Text);
+                        break;
+                    case SoundEditorCommandKind.ResetGroupDirectory:
+                        SoundGroupLibrary.ResetLocalDirectory();
+                        break;
+                    case SoundEditorCommandKind.CreateGroup:
+                        SoundGroupLibrary.CreateLocalGroup(command.Key, command.Text);
+                        break;
+                    case SoundEditorCommandKind.DeleteGroup:
+                        SoundGroupLibrary.DeleteLocalGroup(command.Key);
+                        break;
+                    case SoundEditorCommandKind.AddSoundToGroup:
+                        SoundEditorActions.AddSoundToGroup(session, command.Index, command.Key);
+                        break;
+                    case SoundEditorCommandKind.ApplyGroup:
+                        SoundEditorActions.ApplyGroup(session, command.Key);
                         break;
                 }
             }
