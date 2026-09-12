@@ -115,19 +115,24 @@ public static class DevUiProtocolInventory
         if (typeof(IntegerControl).IsAssignableFrom(type)) return "IntegerControl";
         if (typeof(ButtonWithSelectPanel).IsAssignableFrom(type)) return "Select/Button";
         if (typeof(Button).IsAssignableFrom(type)) return "Button.Clicked";
-        if (typeof(DevUILabel).IsAssignableFrom(type)) return "Presentation label";
 
+        // Do not classify DevUILabel subclasses as passive before checking semantic contracts.
+        // RegionKit and other mods legitimately implement editable text controls by deriving from
+        // DevUILabel, so inheritance alone is not evidence that a node is presentation-only.
         if (HasMethod(type, "TrySetValue", new[] { typeof(string), typeof(bool) }) &&
             HasReadableMember(type, "actualValue", typeof(string)))
             return "Text value";
 
-        if (HasWritableMember(type, "Dir", typeof(Vector2)))
+        if (HasWritableMember(type, "Dir", typeof(Vector2)) ||
+            HasNestedWritableMember(type, "handle", "Dir", typeof(Vector2)))
             return "Direction<Vector2>";
+
+        if (typeof(DevUILabel).IsAssignableFrom(type)) return "Presentation label";
 
         // Containers are recursively traversed. IDevUISignals is a parent event sink rather than
         // an interaction surface by itself, so it does not need a standalone ImGui widget.
-        if (typeof(IDevUISignals).IsAssignableFrom(type)) return "Signal container";
         if (typeof(Panel).IsAssignableFrom(type)) return "Panel container";
+        if (typeof(IDevUISignals).IsAssignableFrom(type)) return "Signal container";
 
         List<string> unknownBoundaries = new();
         AddBoundary(type, unknownBoundaries, "Clicked", Type.EmptyTypes);
@@ -194,6 +199,16 @@ public static class DevUiProtocolInventory
         PropertyInfo property = FindProperty(type, name);
         return property != null && property.CanWrite && property.GetIndexParameters().Length == 0 &&
                expected.IsAssignableFrom(property.PropertyType);
+    }
+
+    private static bool HasNestedWritableMember(Type type, string holderName, string memberName, Type expected)
+    {
+        FieldInfo holderField = FindField(type, holderName);
+        if (holderField != null && HasWritableMember(holderField.FieldType, memberName, expected)) return true;
+
+        PropertyInfo holderProperty = FindProperty(type, holderName);
+        return holderProperty != null && holderProperty.CanRead && holderProperty.GetIndexParameters().Length == 0 &&
+               HasWritableMember(holderProperty.PropertyType, memberName, expected);
     }
 
     private static FieldInfo FindField(Type type, string name)
