@@ -77,6 +77,7 @@ public static class MapEditorPresentationHub
         internal int FromRoom;
         internal int FromNode;
         internal int ToRoom;
+        internal int ToNode = -1;
         internal bool AmbiguousPair;
     }
 
@@ -181,6 +182,7 @@ public static class MapEditorPresentationHub
         List<EditorMapConnectionSnapshot> result = new();
         HashSet<long> reservedEndpoints = new();
 
+        // Compatibility with maps authored before exact targets moved into world.txt.
         WorldConnectionEdge[] explicitEdges = WorldTopologyRegistry.GetRegionEdges(world.name);
         for (int i = 0; i < explicitEdges.Length; i++)
         {
@@ -217,13 +219,29 @@ public static class MapEditorPresentationHub
                 if (other < 0 || !roomIndices.Contains(other)) continue;
 
                 AbstractRoom target = world.GetAbstractRoom(other);
-                bool repeated = CountDestination(room.connections, other) > 1 ||
-                                CountDestination(target?.connections, room.index) > 1;
+                int exactTargetNode = -1;
+                if (WorldTextRegistry.TryGetConnectionEndpoint(
+                        world.name,
+                        room.name,
+                        node,
+                        out string destinationRoom,
+                        out int destinationNode) &&
+                    destinationNode >= 0 &&
+                    roomIndexByName.TryGetValue(destinationRoom, out int destinationRoomIndex) &&
+                    destinationRoomIndex == other)
+                {
+                    exactTargetNode = destinationNode;
+                }
+
+                bool repeated = exactTargetNode < 0 &&
+                                (CountDestination(room.connections, other) > 1 ||
+                                 CountDestination(target?.connections, room.index) > 1);
                 arcs.Add(new DirectedConnectionArc
                 {
                     FromRoom = room.index,
                     FromNode = node,
                     ToRoom = other,
+                    ToNode = exactTargetNode,
                     AmbiguousPair = repeated
                 });
             }
@@ -234,6 +252,57 @@ public static class MapEditorPresentationHub
         {
             if (used[i]) continue;
             DirectedConnectionArc arc = arcs[i];
+
+            // <targetExit>Room is already a complete endpoint mapping. Pair only with the exact
+            // reciprocal token; if none exists, this is a valid one-way exact connection.
+            if (arc.ToNode >= 0)
+            {
+                int exactReverse = -1;
+                for (int j = 0; j < arcs.Count; j++)
+                {
+                    if (i == j || used[j]) continue;
+                    DirectedConnectionArc back = arcs[j];
+                    if (back.FromRoom != arc.ToRoom ||
+                        back.FromNode != arc.ToNode ||
+                        back.ToRoom != arc.FromRoom ||
+                        back.ToNode != arc.FromNode)
+                        continue;
+                    exactReverse = j;
+                    break;
+                }
+
+                used[i] = true;
+                if (exactReverse >= 0)
+                {
+                    used[exactReverse] = true;
+                    result.Add(new EditorMapConnectionSnapshot
+                    {
+                        ConnectionId = LegacyId(arc.FromRoom, arc.FromNode, arc.ToRoom, arc.ToNode, true),
+                        FromRoomIndex = arc.FromRoom,
+                        FromNodeIndex = arc.FromNode,
+                        ToRoomIndex = arc.ToRoom,
+                        ToNodeIndex = arc.ToNode,
+                        Direction = WorldConnectionDirection.Bidirectional,
+                        Explicit = false,
+                        Ambiguous = false
+                    });
+                }
+                else
+                {
+                    result.Add(new EditorMapConnectionSnapshot
+                    {
+                        ConnectionId = LegacyId(arc.FromRoom, arc.FromNode, arc.ToRoom, arc.ToNode, false),
+                        FromRoomIndex = arc.FromRoom,
+                        FromNodeIndex = arc.FromNode,
+                        ToRoomIndex = arc.ToRoom,
+                        ToNodeIndex = arc.ToNode,
+                        Direction = WorldConnectionDirection.AToB,
+                        Explicit = false,
+                        Ambiguous = false
+                    });
+                }
+                continue;
+            }
 
             if (arc.AmbiguousPair)
             {
@@ -255,7 +324,7 @@ public static class MapEditorPresentationHub
             int reverseIndex = -1;
             for (int j = 0; j < arcs.Count; j++)
             {
-                if (i == j || used[j] || arcs[j].AmbiguousPair) continue;
+                if (i == j || used[j] || arcs[j].AmbiguousPair || arcs[j].ToNode >= 0) continue;
                 if (arcs[j].FromRoom != arc.ToRoom || arcs[j].ToRoom != arc.FromRoom) continue;
                 if (reverseIndex >= 0)
                 {
