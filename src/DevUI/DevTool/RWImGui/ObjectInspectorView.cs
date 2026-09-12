@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原控件行为边界驱动布尔、Button、Slider、Cycler、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
-            "Booleans, buttons, sliders, cyclers, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
+            "通过原控件行为边界驱动布尔、Button、Slider、Cycler、ExtEnum、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
+            "Booleans, buttons, sliders, cyclers, ExtEnums, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -311,6 +311,9 @@ internal static class ObjectInspectorView
                     break;
                 case LegacyControlKind.Cycler:
                     DrawLegacyCycler(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.ExtEnum:
+                    DrawLegacyExtEnum(inspector, control, stateKey, visibleLabel);
                     break;
                 case LegacyControlKind.Integer:
                     DrawLegacyInteger(inspector, control, stateKey, visibleLabel);
@@ -428,6 +431,21 @@ internal static class ObjectInspectorView
             visibleLabel,
             "LegacyCyclerOption_",
             i => LegacyDevInterfaceBridge.CyclerAction(control.Path, i));
+    }
+
+    private static void DrawLegacyExtEnum(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        DrawLegacyChoice(
+            inspector,
+            control,
+            stateKey,
+            visibleLabel,
+            "LegacyExtEnumOption_",
+            i => LegacyDevInterfaceBridge.ExtEnumAction(control.Path, i));
     }
 
     private static void DrawLegacySelect(
@@ -559,7 +577,7 @@ internal static class ObjectInspectorView
         string label = visibleLabel + "##DevToolLegacyDirection_" + stateKey;
         ImGui.SetNextItemWidth(-1f);
         bool changed = ImGui.InputFloat2(label, ref value, "%.3f");
-        Vector2Edits[editKey] = value;
+        Vector2Edits[stateKey] = value;
 
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
