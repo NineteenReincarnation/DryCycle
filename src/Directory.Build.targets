@@ -27,20 +27,23 @@
     <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</ResolvedRWImGuiPluginDir>
   </PropertyGroup>
 
-  <!-- During the RWImGUI migration DryCycle must not leave a second ImGui.NET or
-       cimgui runtime beside DryCycle.dll. RWImGUI ships a modified ImGui.NET/native
-       stack and duplicate copies can break its startup with MissingMethodException.
-       Compile-only validation must never mutate a game/mod installation. -->
+  <!-- During the RWImGUI migration DryCycle must not leave a second RWImGui API,
+       ImGui.NET or cimgui runtime beside DryCycle.dll. RWImGUI ships a matched API + modified
+       ImGui.NET/native stack and duplicate/private copies can make the CLR or native backend bind
+       an incompatible version during startup. Compile-only validation must never mutate a game/mod
+       installation. -->
   <Target Name="RemoveLegacyDryCycleImGuiRuntime"
           AfterTargets="Build"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(GameModOutputDir)' != ''">
     <ItemGroup>
+      <LegacyDryCycleImGuiRuntime Include="$(GameModOutputDir)/rain-world-imgui-api.dll" />
+      <LegacyDryCycleImGuiRuntime Include="$(GameModOutputDir)/rain-world-imgui-api.pdb" />
       <LegacyDryCycleImGuiRuntime Include="$(GameModOutputDir)/ImGui.NET.dll" />
       <LegacyDryCycleImGuiRuntime Include="$(GameModOutputDir)/cimgui.dll" />
     </ItemGroup>
     <Delete Files="@(LegacyDryCycleImGuiRuntime)" />
     <Message Importance="high"
-             Text="DryCycle RWImGUI migration: removed stale local ImGui.NET/cimgui runtime copies from $(GameModOutputDir)." />
+             Text="DryCycle RWImGUI migration: removed stale local RWImGui API/ImGui.NET/cimgui runtime copies from $(GameModOutputDir)." />
   </Target>
 
   <!-- Build optional frontends automatically when RWImGUI is installed. Each frontend
