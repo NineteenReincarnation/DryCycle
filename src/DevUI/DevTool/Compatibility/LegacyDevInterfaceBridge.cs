@@ -31,7 +31,7 @@ public sealed class LegacyControlSnapshot
     public string[] Options { get; init; } = Array.Empty<string>();
 }
 
-internal static class LegacyDevInterfaceBridge
+public static class LegacyDevInterfaceBridge
 {
     private const string CyclerActionPrefix = "@cycler|";
     private const string IntegerActionPrefix = "@integer|";
@@ -49,16 +49,9 @@ internal static class LegacyDevInterfaceBridge
         return result.ToArray();
     }
 
-    /// <summary>
-    /// Encodes a cycler mutation so the optional ImGui assembly can reuse the existing
-    /// InvokeLegacyButton command path without adding a second cross-assembly command ABI.
-    /// </summary>
     public static string CyclerAction(string path, int selectedIndex) =>
         CyclerActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
 
-    /// <summary>
-    /// Encodes an IntegerControl increment through the existing legacy action command path.
-    /// </summary>
     public static string IntegerAction(string path, int change) =>
         IntegerActionPrefix + change + "|" + (path ?? string.Empty);
 
