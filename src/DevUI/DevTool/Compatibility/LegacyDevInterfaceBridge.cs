@@ -13,7 +13,8 @@ public enum LegacyControlKind
     Slider,
     Cycler,
     Integer,
-    Select
+    Select,
+    Text
 }
 
 /// <summary>
@@ -71,6 +72,9 @@ public static class LegacyDevInterfaceBridge
 
     internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
         button != null && ReadSelectOptions(button).Length > 0;
+
+    internal static bool CanAdaptText(DevUINode node) =>
+        node != null && FindTextCommitMethod(node.GetType()) != null && TryReadTextValue(node, out _);
 
     internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
@@ -229,6 +233,33 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
+    internal static bool SetText(global::DevInterface.DevUI owner, PlacedObject target, string path, string value)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        DevUINode node = ResolveNode(representation, path);
+        if (node == null) return false;
+
+        MethodInfo commit = FindTextCommitMethod(node.GetType());
+        if (commit == null || !TryReadTextValue(node, out _)) return false;
+
+        try
+        {
+            // RegionKit StringControl validates through TrySetValue and only emits StringFinish at
+            // the end of a transaction. Calling that exact protected boundary preserves validators,
+            // OnValueChanged handlers and parent IDevUISignals without linking RegionKit directly.
+            commit.Invoke(node, new object[] { value ?? string.Empty, true });
+            owner.activePage?.Refresh();
+            return TryReadTextValue(node, out string actual) &&
+                   string.Equals(actual, value ?? string.Empty, StringComparison.Ordinal);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy text mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
     private static void CaptureChildren(DevUINode parent, string parentPath, List<LegacyControlSnapshot> output)
     {
         if (parent?.subNodes == null) return;
@@ -301,6 +332,19 @@ public static class LegacyDevInterfaceBridge
                         Options = options
                     });
                 }
+                continue;
+            }
+
+            if (CanAdaptText(node) && TryReadTextValue(node, out string textValue))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = TextTitle(node),
+                    Kind = LegacyControlKind.Text,
+                    ValueText = textValue
+                });
                 continue;
             }
 
@@ -411,6 +455,55 @@ public static class LegacyDevInterfaceBridge
         {
             return false;
         }
+    }
+
+    private static MethodInfo FindTextCommitMethod(Type type)
+    {
+        Type current = type;
+        while (current != null)
+        {
+            MethodInfo method = current.GetMethod(
+                "TrySetValue",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                null,
+                new[] { typeof(string), typeof(bool) },
+                null);
+            if (method != null && method.ReturnType == typeof(void)) return method;
+            current = current.BaseType;
+        }
+        return null;
+    }
+
+    private static bool TryReadTextValue(object instance, out string value)
+    {
+        value = string.Empty;
+        if (instance == null) return false;
+
+        Type type = instance.GetType();
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        FieldInfo field = type.GetField("actualValue", flags);
+        if (field != null && field.FieldType == typeof(string))
+        {
+            value = field.GetValue(instance) as string ?? string.Empty;
+            return true;
+        }
+
+        PropertyInfo property = type.GetProperty("actualValue", flags);
+        if (property != null && property.PropertyType == typeof(string) &&
+            property.GetIndexParameters().Length == 0 && property.CanRead)
+        {
+            value = property.GetValue(instance, null) as string ?? string.Empty;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string TextTitle(DevUINode node)
+    {
+        string id = node?.IDstring ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(id)) return "Text";
+        return id.Replace('_', ' ').Trim();
     }
 
     private static string CyclerTitle(Cycler cycler)
