@@ -148,6 +148,10 @@ internal static class ActionToastOverlay
             return;
         }
 
+        // These shortcuts are intentionally disabled behind Vanilla presentation, matching the
+        // core input router. Do not show a confirmation for a command that did not actually fire.
+        if (EditorUiModeState.UseVanilla) return;
+
         if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
         {
             int selected = snapshot.Inspector?.SelectionCount ?? 0;
