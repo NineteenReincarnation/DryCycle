@@ -1,14 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using DevInterface;
-using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
-/// <summary>
-/// Origin of a legacy DevInterface node observed by the migration coverage scanner.
-/// Source detection is intentionally reflection/name based so RegionKit remains optional.
-/// </summary>
+/// <summary>Origin of a legacy DevInterface obligation.</summary>
 public enum DevUiMigrationSource
 {
     Vanilla,
@@ -17,10 +14,7 @@ public enum DevUiMigrationSource
     Other
 }
 
-/// <summary>
-/// How a legacy DevInterface obligation is represented by the rebuilt editor.
-/// Unmapped is deliberately the default: coverage must be proven rather than assumed.
-/// </summary>
+/// <summary>How an observed interactive obligation is represented in the rebuilt editor.</summary>
 public enum DevUiMigrationState
 {
     NativeNewUi,
@@ -29,10 +23,6 @@ public enum DevUiMigrationState
     Unmapped
 }
 
-/// <summary>
-/// Immutable coverage row. One row represents a node type in one page/context bucket,
-/// not one frame. InstanceCount is the maximum simultaneously observed instance count.
-/// </summary>
 public sealed class DevUiMigrationCoverageEntry
 {
     public string PageType { get; init; } = string.Empty;
@@ -57,10 +47,7 @@ public sealed class DevUiMigrationSourceSummary
     public int UnmappedTypeCount => TotalTypeCount - MappedTypeCount;
 }
 
-/// <summary>
-/// Detached immutable snapshot safe for the optional RWImGui frontend to read.
-/// CurrentPage contains the live page; Observed is the cumulative process/session catalog.
-/// </summary>
+/// <summary>Detached immutable coverage snapshot consumed by the optional ImGui frontend.</summary>
 public sealed class DevUiMigrationCoverageSnapshot
 {
     public static readonly DevUiMigrationCoverageSnapshot Empty = new()
@@ -80,6 +67,7 @@ public sealed class DevUiMigrationCoverageSnapshot
     public DevUiMigrationSourceSummary Other { get; init; } = EmptySummary(DevUiMigrationSource.Other);
 
     public int TotalTypeCount => Entries?.Length ?? 0;
+
     public int UnmappedTypeCount
     {
         get
@@ -92,16 +80,13 @@ public sealed class DevUiMigrationCoverageSnapshot
         }
     }
 
-    public DevUiMigrationSourceSummary Summary(DevUiMigrationSource source)
+    public DevUiMigrationSourceSummary Summary(DevUiMigrationSource source) => source switch
     {
-        return source switch
-        {
-            DevUiMigrationSource.Vanilla => Vanilla,
-            DevUiMigrationSource.RegionKit => RegionKit,
-            DevUiMigrationSource.DryCycle => DryCycle,
-            _ => Other
-        };
-    }
+        DevUiMigrationSource.Vanilla => Vanilla,
+        DevUiMigrationSource.RegionKit => RegionKit,
+        DevUiMigrationSource.DryCycle => DryCycle,
+        _ => Other
+    };
 
     private static DevUiMigrationSourceSummary EmptySummary(DevUiMigrationSource source) => new()
     {
@@ -112,8 +97,16 @@ public sealed class DevUiMigrationCoverageSnapshot
 }
 
 /// <summary>
-/// Runtime migration guard for vanilla, RegionKit and DryCycle DevInterface trees.
-/// Unknown controls remain Unmapped until an adapter proves equivalent behavior.
+/// Capability-based migration audit.
+///
+/// The old implementation accumulated a growing list of concrete RegionKit control types. This
+/// scanner instead asks a single question for every interactive node in the real runtime tree:
+/// can the generic semantic bridge operate it through the same contract the legacy UI uses?
+///
+/// Buttons, sliders, cyclers, integer controls, select controls and structurally discoverable
+/// value controls are therefore covered regardless of whether they came from vanilla, RegionKit,
+/// DryCycle or another mod. Unknown custom interactive protocols remain Unmapped and are reported
+/// by runtime type/path so the next missing *protocol* can be added once for every mod.
 /// </summary>
 public static class DevUiMigrationCoverage
 {
@@ -145,6 +138,7 @@ public static class DevUiMigrationCoverage
     private static volatile DevUiMigrationCoverageSnapshot currentPage = DevUiMigrationCoverageSnapshot.Empty;
     private static volatile DevUiMigrationCoverageSnapshot observed = DevUiMigrationCoverageSnapshot.Empty;
     private static int lastLoggedObservedCount = -1;
+    private static int lastLoggedUnmappedCount = -1;
 
     static DevUiMigrationCoverage()
     {
@@ -163,28 +157,58 @@ public static class DevUiMigrationCoverage
     public static void RegisterExact(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
-        Register(new Registration { Type = type, FullTypeName = type.FullName ?? type.Name, State = state, Note = note ?? string.Empty });
+        Register(new Registration
+        {
+            Type = type,
+            FullTypeName = type.FullName ?? type.Name,
+            IncludeDerived = false,
+            State = state,
+            Note = note ?? string.Empty
+        });
     }
 
     public static void RegisterAssignable(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
-        Register(new Registration { Type = type, FullTypeName = type.FullName ?? type.Name, IncludeDerived = true, State = state, Note = note ?? string.Empty });
+        Register(new Registration
+        {
+            Type = type,
+            FullTypeName = type.FullName ?? type.Name,
+            IncludeDerived = true,
+            State = state,
+            Note = note ?? string.Empty
+        });
     }
 
     public static void RegisterTypeName(string fullTypeName, DevUiMigrationState state, string note = null)
     {
-        if (string.IsNullOrWhiteSpace(fullTypeName)) throw new ArgumentException("Type name is required.", nameof(fullTypeName));
-        Register(new Registration { FullTypeName = fullTypeName.Trim(), State = state, Note = note ?? string.Empty });
+        if (string.IsNullOrWhiteSpace(fullTypeName))
+            throw new ArgumentException("Type name is required.", nameof(fullTypeName));
+        Register(new Registration
+        {
+            Type = null,
+            FullTypeName = fullTypeName.Trim(),
+            IncludeDerived = false,
+            State = state,
+            Note = note ?? string.Empty
+        });
     }
 
     internal static void Observe(Page page)
     {
-        if (page == null) { currentPage = DevUiMigrationCoverageSnapshot.Empty; return; }
+        if (page == null)
+        {
+            currentPage = DevUiMigrationCoverageSnapshot.Empty;
+            return;
+        }
+
         try
         {
             Dictionary<string, MutableEntry> pageEntries = new(StringComparer.Ordinal);
-            Walk(page, "root", false, page.GetType().FullName ?? page.GetType().Name, pageEntries);
+            string pageType = page.GetType().FullName ?? page.GetType().Name;
+            DevUiMigrationSource pageSource = ResolveSource(page.GetType());
+            Walk(page, "root", false, pageType, pageSource, pageEntries);
+
             lock (Gate)
             {
                 foreach (KeyValuePair<string, MutableEntry> pair in pageEntries)
@@ -192,19 +216,27 @@ public static class DevUiMigrationCoverage
                     MutableEntry incoming = pair.Value;
                     if (ObservedEntries.TryGetValue(pair.Key, out MutableEntry existing))
                     {
-                        if (incoming.InstanceCount > existing.InstanceCount) existing.InstanceCount = incoming.InstanceCount;
+                        if (incoming.InstanceCount > existing.InstanceCount)
+                            existing.InstanceCount = incoming.InstanceCount;
                         existing.State = incoming.State;
                         existing.AdapterNote = incoming.AdapterNote;
                         existing.Source = incoming.Source;
                     }
-                    else ObservedEntries[pair.Key] = Clone(incoming);
+                    else
+                    {
+                        ObservedEntries[pair.Key] = Clone(incoming);
+                    }
                 }
-                currentPage = BuildSnapshot(page.GetType().FullName ?? page.GetType().Name, pageEntries.Values);
+
+                currentPage = BuildSnapshot(pageType, pageEntries.Values);
                 observed = BuildSnapshot("Observed", ObservedEntries.Values);
                 LogCoverageGrowthIfNeeded(observed);
             }
         }
-        catch (Exception error) { Plugin.Logger?.LogWarning("DevTool migration coverage scan failed: " + error.Message); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool migration coverage scan failed: " + error.Message);
+        }
     }
 
     internal static void Reset()
@@ -215,6 +247,7 @@ public static class DevUiMigrationCoverage
             currentPage = DevUiMigrationCoverageSnapshot.Empty;
             observed = DevUiMigrationCoverageSnapshot.Empty;
             lastLoggedObservedCount = -1;
+            lastLoggedUnmappedCount = -1;
         }
     }
 
@@ -222,14 +255,16 @@ public static class DevUiMigrationCoverage
     {
         if (registration == null) return;
         if (registration.State == DevUiMigrationState.Unmapped)
-            throw new ArgumentException("Registering Unmapped is not useful; simply leave the node unregistered.");
+            throw new ArgumentException("Leave unsupported types unregistered instead of registering Unmapped.");
+
         lock (Gate)
         {
             for (int i = Registrations.Count - 1; i >= 0; i--)
             {
                 Registration existing = Registrations[i];
                 bool sameType = registration.Type != null && existing.Type == registration.Type;
-                bool sameName = registration.Type == null && existing.Type == null && string.Equals(existing.FullTypeName, registration.FullTypeName, StringComparison.Ordinal);
+                bool sameName = registration.Type == null && existing.Type == null &&
+                                string.Equals(existing.FullTypeName, registration.FullTypeName, StringComparison.Ordinal);
                 if ((!sameType && !sameName) || existing.IncludeDerived != registration.IncludeDerived) continue;
                 Registrations.RemoveAt(i);
             }
@@ -237,162 +272,241 @@ public static class DevUiMigrationCoverage
         }
     }
 
-    private static void Walk(DevUINode node, string path, bool insidePlacedObjectRepresentation, string pageType, Dictionary<string, MutableEntry> output)
+    private static void Walk(
+        DevUINode node,
+        string path,
+        bool insidePlacedObjectRepresentation,
+        string pageType,
+        DevUiMigrationSource inheritedSource,
+        Dictionary<string, MutableEntry> output)
     {
         if (node == null) return;
+
         bool insideRepresentation = insidePlacedObjectRepresentation || node is PlacedObjectRepresentation;
-        Type nodeType = node.GetType();
-        bool presentationFragment = nodeType == typeof(DevUILabel) || IsKnownPresentationFragment(nodeType);
-        if (!presentationFragment) AddObservation(node, path, insideRepresentation, pageType, output);
+        DevUiMigrationSource localSource = ResolveContextSource(node, inheritedSource);
 
-        // Full native data-model inspectors supersede their generated legacy subtrees. Descending
-        // into those implementation details would report controls that the user no longer needs.
-        if (RegionKitAdvancedShaderInspectorAdapter.IsRepresentation(node) || IsPomManagedRepresentation(node))
-            return;
+        if (IsObligation(node))
+            AddObservation(node, path, insideRepresentation, pageType, localSource, output);
 
-        if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
-            LegacyDevInterfaceBridge.CanAdaptBoolean(node) || LegacyDevInterfaceBridge.CanAdaptExtEnum(node) ||
-            LegacyDevInterfaceBridge.CanAdaptText(node) || LegacyDevInterfaceBridge.CanAdaptDirection(node) ||
-            LegacyDevInterfaceBridge.CanAdaptPanelSelect(node) || LegacyDevInterfaceBridge.CanAdaptColorSelect(node) ||
-            LegacyDevInterfaceBridge.IsTerminalSemanticButton(node))
-            return;
+        // Atomic controls own presentation-only children such as slider nubs and labels. Composite
+        // Buttons are deliberately not atomic: when Clicked() opens a custom panel its descendants
+        // must be scanned and tested by the same protocol rules.
+        if (LegacyDevInterfaceBridge.IsAtomicAdaptedControl(node)) return;
         if (node.subNodes == null) return;
+
         for (int i = 0; i < node.subNodes.Count; i++)
         {
             DevUINode child = node.subNodes[i];
-            if (child != null) Walk(child, path + "." + i, insideRepresentation, pageType, output);
+            if (child == null) continue;
+            Walk(child, path + "." + i, insideRepresentation, pageType, localSource, output);
         }
     }
 
-    private static void AddObservation(DevUINode node, string path, bool insideRepresentation, string pageType, Dictionary<string, MutableEntry> output)
+    private static bool IsObligation(DevUINode node)
+    {
+        if (node == null || node is DevUILabel) return false;
+        if (node is Page) return true;
+        if (LegacyDevInterfaceBridge.CanAdaptNode(node)) return true;
+        if (node is Handle) return true;
+        if (MatchesAnyRegistration(node.GetType())) return true;
+        return LooksInteractiveByReflection(node.GetType());
+    }
+
+    private static bool LooksInteractiveByReflection(Type type)
+    {
+        if (type == null) return false;
+        // These method shapes are common custom DevInterface interaction boundaries. If a new mod
+        // invents one that our semantic bridge cannot drive, it appears as Unmapped instead of
+        // silently disappearing from the audit.
+        return HasDeclaredMethod(type, "Clicked", Type.EmptyTypes) ||
+               HasDeclaredMethod(type, "NubDragged", new[] { typeof(float) }) ||
+               HasDeclaredMethod(type, "NubDragged2", new[] { typeof(float) }) ||
+               HasDeclaredMethod(type, "Increment", new[] { typeof(int) }) ||
+               HasDeclaredMethod(type, "TrySetValue", new[] { typeof(string), typeof(bool) });
+    }
+
+    private static bool HasDeclaredMethod(Type type, string name, Type[] parameters)
+    {
+        Type current = type;
+        while (current != null && current != typeof(DevUINode))
+        {
+            MethodInfo method = current.GetMethod(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                null,
+                parameters,
+                null);
+            if (method != null) return true;
+            current = current.BaseType;
+        }
+        return false;
+    }
+
+    private static void AddObservation(
+        DevUINode node,
+        string path,
+        bool insideRepresentation,
+        string pageType,
+        DevUiMigrationSource source,
+        Dictionary<string, MutableEntry> output)
     {
         Type type = node.GetType();
         string context = insideRepresentation ? "PlacedObject" : "Page";
-        ResolveMigration(type, node, insideRepresentation, out DevUiMigrationState state, out string note);
-        DevUiMigrationSource source = ResolveSource(node);
-        string key = pageType + "|" + context + "|" + (type.AssemblyQualifiedName ?? type.FullName ?? type.Name);
+        ResolveMigration(type, node, out DevUiMigrationState state, out string note);
+        string key = pageType + "|" + context + "|" + source + "|" +
+                     (type.AssemblyQualifiedName ?? type.FullName ?? type.Name);
+
         if (output.TryGetValue(key, out MutableEntry existing))
         {
             existing.InstanceCount++;
-            if (state == DevUiMigrationState.Unmapped) { existing.State = state; existing.AdapterNote = note ?? string.Empty; }
+            if (state == DevUiMigrationState.Unmapped)
+            {
+                existing.State = state;
+                existing.AdapterNote = note ?? string.Empty;
+            }
             return;
         }
+
         output[key] = new MutableEntry
         {
-            PageType = pageType, Context = context, NodeType = type, ExamplePath = path ?? string.Empty,
-            ExampleId = node.IDstring ?? string.Empty, Source = source, State = state,
-            AdapterNote = note ?? string.Empty, InstanceCount = 1
+            PageType = pageType,
+            Context = context,
+            NodeType = type,
+            ExamplePath = path ?? string.Empty,
+            ExampleId = node.IDstring ?? string.Empty,
+            Source = source,
+            State = state,
+            AdapterNote = note ?? string.Empty,
+            InstanceCount = 1
         };
     }
 
-    private static void ResolveMigration(Type type, DevUINode node, bool insideRepresentation, out DevUiMigrationState state, out string note)
+    private static void ResolveMigration(
+        Type type,
+        DevUINode node,
+        out DevUiMigrationState state,
+        out string note)
     {
-        if (IsRebuiltPageInfrastructure(node)) { state = DevUiMigrationState.NativeNewUi; note = "Rebuilt page navigation/command infrastructure"; return; }
-        if (insideRepresentation && RegionKitAdvancedShaderInspectorAdapter.IsRepresentation(node))
-        { state = DevUiMigrationState.SpecializedAdapter; note = "RegionKit AdvancedShader full native inspector"; return; }
-        if (insideRepresentation && IsPomManagedRepresentation(node))
-        { state = DevUiMigrationState.SpecializedAdapter; note = "POM ManagedData full native inspector"; return; }
-
-        if (insideRepresentation && node is ButtonWithSelectPanel select)
-        {
-            if (LegacyDevInterfaceBridge.CanAdaptSelect(select)) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject legacy ButtonWithSelectPanel bridge"; }
-            else { state = DevUiMigrationState.Unmapped; note = "Select options could not be discovered safely"; }
-            return;
-        }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptBoolean(node)) { state = DevUiMigrationState.SpecializedAdapter; note = "RegionKit BoolButton native checkbox adapter"; return; }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptExtEnum(node)) { state = DevUiMigrationState.SpecializedAdapter; note = "RegionKit ExtEnumCycler native combo adapter"; return; }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptPanelSelect(node)) { state = DevUiMigrationState.SpecializedAdapter; note = "RegionKit PanelSelectButton native combo adapter"; return; }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptColorSelect(node)) { state = DevUiMigrationState.SpecializedAdapter; note = "RegionKit RGBSelectButton native color adapter"; return; }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptText(node)) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject reflected text-control bridge"; return; }
-        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptDirection(node)) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject reflected direction-picker bridge"; return; }
-        if (insideRepresentation && node is Slider) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject semantic Slider bridge"; return; }
-        if (insideRepresentation && node is Cycler) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject legacy Cycler bridge"; return; }
-        if (insideRepresentation && node is IntegerControl) { state = DevUiMigrationState.GenericAdapter; note = "PlacedObject legacy IntegerControl bridge"; return; }
-        if (insideRepresentation && node is Button && LegacyDevInterfaceBridge.IsTerminalSemanticButton(node))
-        { state = DevUiMigrationState.SpecializedAdapter; note = "Verified immediate-action button bridge"; return; }
-        if (insideRepresentation && node is Button)
-        { state = DevUiMigrationState.Unmapped; note = "Button semantics are not proven; hidden panels and composite actions require a dedicated adapter"; return; }
-
         lock (Gate)
         {
             for (int i = Registrations.Count - 1; i >= 0; i--)
             {
                 Registration registration = Registrations[i];
                 if (!Matches(registration, type)) continue;
-                state = registration.State; note = registration.Note; return;
+                state = registration.State;
+                note = registration.Note;
+                return;
             }
         }
-        state = DevUiMigrationState.Unmapped; note = string.Empty;
+
+        if (LegacyDevInterfaceBridge.CanAdaptNode(node))
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = GenericNote(node);
+            return;
+        }
+
+        if (node is Handle)
+        {
+            state = DevUiMigrationState.Unmapped;
+            note = "Scene-handle protocol is not yet mirrored by the generic ImGui bridge";
+            return;
+        }
+
+        state = DevUiMigrationState.Unmapped;
+        note = "Unknown interactive DevInterface protocol; add one structural capability adapter, not a per-mod type adapter";
     }
 
-    private static bool IsPomManagedRepresentation(DevUINode node) =>
-        node is PlacedObjectRepresentation representation && PomManagedDataInspectorAdapter.IsManagedData(representation.pObj?.data);
-
-    private static bool IsKnownPresentationFragment(Type type)
+    private static string GenericNote(DevUINode node)
     {
-        string fullName = type?.FullName ?? string.Empty;
-        return string.Equals(fullName, "RegionKit.Modules.DevUIMisc.GenericNodes.TemplatePositionedNode", StringComparison.Ordinal);
+        if (node is Slider) return "Generic Slider/NubDragged semantic bridge";
+        if (node is Cycler) return "Generic Cycler semantic bridge";
+        if (node is IntegerControl) return "Generic IntegerControl semantic bridge";
+        if (node is ButtonWithSelectPanel) return "Generic select/button semantic bridge";
+        if (LegacyDevInterfaceBridge.CanAdaptBoolean(node)) return "actualValue<bool> protocol";
+        if (LegacyDevInterfaceBridge.CanAdaptExtEnum(node)) return "ExtEnum-valued button protocol";
+        if (LegacyDevInterfaceBridge.CanAdaptPanelSelect(node)) return "actualValue<string> + values protocol";
+        if (LegacyDevInterfaceBridge.CanAdaptColorSelect(node)) return "actualValue<Color> protocol";
+        if (LegacyDevInterfaceBridge.CanAdaptText(node)) return "TrySetValue(string,bool) protocol";
+        if (LegacyDevInterfaceBridge.CanAdaptDirection(node)) return "Dir<Vector2> protocol";
+        if (node is Button) return "Generic Button.Clicked semantic bridge; child panels are recursively mirrored";
+        return "Generic DevInterface semantic bridge";
     }
 
-    private static bool IsRebuiltPageInfrastructure(DevUINode node)
+    private static bool MatchesAnyRegistration(Type actual)
     {
-        if (node is SwitchPageButton) return true;
-        if (node is not Button button) return false;
-        string id = button.IDstring ?? string.Empty;
-        return id == "Save_Settings" || id == "Save_Specific" || id == "Export_Sandbox" || id == "Prev_Button" || id == "Next_Button";
+        lock (Gate)
+        {
+            for (int i = Registrations.Count - 1; i >= 0; i--)
+                if (Matches(Registrations[i], actual)) return true;
+        }
+        return false;
     }
 
     private static bool Matches(Registration registration, Type actual)
     {
         if (registration == null || actual == null) return false;
-        if (registration.Type != null) return registration.IncludeDerived ? registration.Type.IsAssignableFrom(actual) : registration.Type == actual;
+        if (registration.Type != null)
+            return registration.IncludeDerived ? registration.Type.IsAssignableFrom(actual) : registration.Type == actual;
         return string.Equals(registration.FullTypeName, actual.FullName, StringComparison.Ordinal);
     }
 
-    private static DevUiMigrationSource ResolveSource(DevUINode node)
+    private static DevUiMigrationSource ResolveContextSource(DevUINode node, DevUiMigrationSource inherited)
     {
-        // Prefer the node's actual implementation owner. If it is a vanilla/POM generated node,
-        // walk outward so a RegionKit/DryCycle custom representation keeps ownership of its child UI.
-        DevUINode current = node;
-        while (current != null)
-        {
-            DevUiMigrationSource? classified = ClassifyOwnedType(current.GetType());
-            if (classified.HasValue) return classified.Value;
+        if (node == null) return inherited;
 
-            if (current is PlacedObjectRepresentation representation && representation.pObj?.data != null)
-            {
-                classified = ClassifyOwnedType(representation.pObj.data.GetType());
-                if (classified.HasValue) return classified.Value;
-            }
-            current = current.parentNode;
+        // A custom representation/panel is the strongest ownership signal. Its vanilla Button and
+        // Slider descendants should remain attributed to that mod rather than Assembly-CSharp.
+        DevUiMigrationSource own = ResolveSource(node.GetType());
+        if (own == DevUiMigrationSource.RegionKit || own == DevUiMigrationSource.DryCycle || own == DevUiMigrationSource.Other)
+            return own;
+
+        if (node is PlacedObjectRepresentation representation)
+        {
+            DevUiMigrationSource dataSource = ResolveSource(representation.pObj?.data?.GetType());
+            if (dataSource != DevUiMigrationSource.Vanilla) return dataSource;
         }
 
-        Type type = node?.GetType();
-        string ns = type?.Namespace ?? string.Empty;
-        string assembly = type?.Assembly?.GetName().Name ?? string.Empty;
-        if ((type != null && type.Assembly == typeof(DevUINode).Assembly && StartsWith(ns, "DevInterface")) ||
+        return inherited;
+    }
+
+    private static DevUiMigrationSource ResolveSource(Type type)
+    {
+        if (type == null) return DevUiMigrationSource.Vanilla;
+        string ns = type.Namespace ?? string.Empty;
+        string assembly = type.Assembly?.GetName().Name ?? string.Empty;
+
+        if (StartsWith(ns, "DryCycle") || Contains(assembly, "DryCycle"))
+            return DevUiMigrationSource.DryCycle;
+        if (StartsWith(ns, "RegionKit") || Contains(assembly, "RegionKit"))
+            return DevUiMigrationSource.RegionKit;
+
+        if ((type.Assembly == typeof(DevUINode).Assembly && StartsWith(ns, "DevInterface")) ||
             (StartsWith(ns, "DevInterface") && Contains(assembly, "Assembly-CSharp")))
             return DevUiMigrationSource.Vanilla;
+
+        // POM is the generic backend used by RegionKit and other mods; keep it in Other unless a
+        // custom parent representation already established stronger ownership.
         return DevUiMigrationSource.Other;
     }
 
-    private static DevUiMigrationSource? ClassifyOwnedType(Type type)
-    {
-        string ns = type?.Namespace ?? string.Empty;
-        string assembly = type?.Assembly?.GetName().Name ?? string.Empty;
-        if (StartsWith(ns, "DryCycle") || Contains(assembly, "DryCycle")) return DevUiMigrationSource.DryCycle;
-        if (StartsWith(ns, "RegionKit") || Contains(assembly, "RegionKit")) return DevUiMigrationSource.RegionKit;
-        return null;
-    }
+    private static bool StartsWith(string value, string prefix) =>
+        value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 
-    private static bool StartsWith(string value, string prefix) => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-    private static bool Contains(string value, string needle) => value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+    private static bool Contains(string value, string needle) =>
+        value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static MutableEntry Clone(MutableEntry source) => new()
     {
-        PageType = source.PageType, Context = source.Context, NodeType = source.NodeType,
-        ExamplePath = source.ExamplePath, ExampleId = source.ExampleId, Source = source.Source,
-        State = source.State, AdapterNote = source.AdapterNote, InstanceCount = source.InstanceCount
+        PageType = source.PageType,
+        Context = source.Context,
+        NodeType = source.NodeType,
+        ExamplePath = source.ExamplePath,
+        ExampleId = source.ExampleId,
+        Source = source.Source,
+        State = source.State,
+        AdapterNote = source.AdapterNote,
+        InstanceCount = source.InstanceCount
     };
 
     private static DevUiMigrationCoverageSnapshot BuildSnapshot(string pageType, ICollection<MutableEntry> source)
@@ -405,55 +519,86 @@ public static class DevUiMigrationCoverage
                 Type type = item.NodeType;
                 entries.Add(new DevUiMigrationCoverageEntry
                 {
-                    PageType = item.PageType ?? string.Empty, Context = item.Context ?? string.Empty,
-                    TypeName = type?.FullName ?? type?.Name ?? string.Empty, Namespace = type?.Namespace ?? string.Empty,
-                    AssemblyName = type?.Assembly?.GetName().Name ?? string.Empty, ExamplePath = item.ExamplePath ?? string.Empty,
-                    ExampleId = item.ExampleId ?? string.Empty, AdapterNote = item.AdapterNote ?? string.Empty,
-                    Source = item.Source, State = item.State, InstanceCount = item.InstanceCount
+                    PageType = item.PageType ?? string.Empty,
+                    Context = item.Context ?? string.Empty,
+                    TypeName = type?.FullName ?? type?.Name ?? string.Empty,
+                    Namespace = type?.Namespace ?? string.Empty,
+                    AssemblyName = type?.Assembly?.GetName().Name ?? string.Empty,
+                    ExamplePath = item.ExamplePath ?? string.Empty,
+                    ExampleId = item.ExampleId ?? string.Empty,
+                    AdapterNote = item.AdapterNote ?? string.Empty,
+                    Source = item.Source,
+                    State = item.State,
+                    InstanceCount = item.InstanceCount
                 });
             }
         }
+
         entries.Sort(CompareEntries);
         DevUiMigrationCoverageEntry[] array = entries.ToArray();
         return new DevUiMigrationCoverageSnapshot
         {
-            PageType = pageType ?? string.Empty, Entries = array,
-            Vanilla = BuildSummary(array, DevUiMigrationSource.Vanilla), RegionKit = BuildSummary(array, DevUiMigrationSource.RegionKit),
-            DryCycle = BuildSummary(array, DevUiMigrationSource.DryCycle), Other = BuildSummary(array, DevUiMigrationSource.Other)
+            PageType = pageType ?? string.Empty,
+            Entries = array,
+            Vanilla = BuildSummary(array, DevUiMigrationSource.Vanilla),
+            RegionKit = BuildSummary(array, DevUiMigrationSource.RegionKit),
+            DryCycle = BuildSummary(array, DevUiMigrationSource.DryCycle),
+            Other = BuildSummary(array, DevUiMigrationSource.Other)
         };
     }
 
     private static int CompareEntries(DevUiMigrationCoverageEntry a, DevUiMigrationCoverageEntry b)
     {
-        int source = a.Source.CompareTo(b.Source); if (source != 0) return source;
-        int state = a.State.CompareTo(b.State); if (state != 0) return state;
-        int page = string.Compare(a.PageType, b.PageType, StringComparison.Ordinal); if (page != 0) return page;
-        int context = string.Compare(a.Context, b.Context, StringComparison.Ordinal); if (context != 0) return context;
+        int source = a.Source.CompareTo(b.Source);
+        if (source != 0) return source;
+        int state = a.State.CompareTo(b.State);
+        if (state != 0) return state;
+        int page = string.Compare(a.PageType, b.PageType, StringComparison.Ordinal);
+        if (page != 0) return page;
+        int context = string.Compare(a.Context, b.Context, StringComparison.Ordinal);
+        if (context != 0) return context;
         return string.Compare(a.TypeName, b.TypeName, StringComparison.Ordinal);
     }
 
-    private static DevUiMigrationSourceSummary BuildSummary(DevUiMigrationCoverageEntry[] entries, DevUiMigrationSource source)
+    private static DevUiMigrationSourceSummary BuildSummary(
+        DevUiMigrationCoverageEntry[] entries,
+        DevUiMigrationSource source)
     {
-        int total = 0, mapped = 0;
+        int total = 0;
+        int mapped = 0;
         for (int i = 0; i < entries.Length; i++)
         {
             DevUiMigrationCoverageEntry entry = entries[i];
             if (entry == null || entry.Source != source) continue;
-            total++; if (entry.State != DevUiMigrationState.Unmapped) mapped++;
+            total++;
+            if (entry.State != DevUiMigrationState.Unmapped) mapped++;
         }
-        return new DevUiMigrationSourceSummary { Source = source, TotalTypeCount = total, MappedTypeCount = mapped };
+
+        return new DevUiMigrationSourceSummary
+        {
+            Source = source,
+            TotalTypeCount = total,
+            MappedTypeCount = mapped
+        };
     }
 
     private static void LogCoverageGrowthIfNeeded(DevUiMigrationCoverageSnapshot snapshot)
     {
         int count = snapshot?.TotalTypeCount ?? 0;
-        if (count == lastLoggedObservedCount) return;
+        int unmapped = snapshot?.UnmappedTypeCount ?? 0;
+        if (count == lastLoggedObservedCount && unmapped == lastLoggedUnmappedCount) return;
         lastLoggedObservedCount = count;
+        lastLoggedUnmappedCount = unmapped;
+
+        DevUiMigrationSourceSummary vanilla = snapshot?.Vanilla;
+        DevUiMigrationSourceSummary rk = snapshot?.RegionKit;
+        DevUiMigrationSourceSummary dry = snapshot?.DryCycle;
+        DevUiMigrationSourceSummary other = snapshot?.Other;
         Plugin.Logger?.LogInfo(
-            "DevTool migration coverage observed " + count + " obligations; unmapped: " +
-            "Vanilla=" + (snapshot?.Vanilla?.UnmappedTypeCount ?? 0) + ", " +
-            "RegionKit=" + (snapshot?.RegionKit?.UnmappedTypeCount ?? 0) + ", " +
-            "DryCycle=" + (snapshot?.DryCycle?.UnmappedTypeCount ?? 0) + ", " +
-            "Other=" + (snapshot?.Other?.UnmappedTypeCount ?? 0) + ".");
+            "DevTool generic compatibility audit: " + count + " interactive protocols observed; unmapped: " +
+            "Vanilla=" + (vanilla?.UnmappedTypeCount ?? 0) + ", " +
+            "RegionKit=" + (rk?.UnmappedTypeCount ?? 0) + ", " +
+            "DryCycle=" + (dry?.UnmappedTypeCount ?? 0) + ", " +
+            "Other=" + (other?.UnmappedTypeCount ?? 0) + ".");
     }
 }
