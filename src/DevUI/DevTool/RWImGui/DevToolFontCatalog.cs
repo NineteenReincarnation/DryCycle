@@ -273,13 +273,13 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Determines whether a face is allowed in the Chinese-interface selector. A normal face must
-    /// expose representative Simplified-Chinese glyphs after the atlas is built. Ubuntu Mono is
-    /// kept as an explicit developer option only when it is actually present in the atlas.
+    /// A face is offered by the Chinese-interface selector only when its built atlas actually
+    /// contains representative Simplified-Chinese glyphs. Merely finding a font file or matching
+    /// a family name is not sufficient.
     /// </summary>
     internal static bool IsChineseUiSelectable(ImFontPtr font, string candidateName)
     {
-        return SupportsChinese(font) || IsUbuntuMono(candidateName);
+        return SupportsChinese(font);
     }
 
     internal static bool IsFamilyMatch(string candidateName, string family)
@@ -354,14 +354,6 @@ internal static unsafe class DevToolFontCatalog
         {
             return false;
         }
-    }
-
-    private static bool IsUbuntuMono(string candidateName)
-    {
-        return string.Equals(
-            NormalizeFamily(FamilyFromName(candidateName)),
-            NormalizeFamily(UbuntuMonoFamily),
-            StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AddUnique(List<string> values, string value)
