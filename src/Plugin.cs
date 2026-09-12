@@ -8,6 +8,7 @@ using DryCycle.Creatures.DesertBatfly;
 using DryCycle.Creatures.MantleCrab;
 using DryCycle.DayNight;
 using DryCycle.Debugging.AI;
+using DryCycle.DevUI.DevTool.World;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
 using DryCycle.Items.KingVultureSpear;
@@ -68,6 +69,11 @@ internal sealed class Plugin : BaseUnityPlugin
         // MiscRuntime.Enable keeps the same idempotent call for normal initialization.
         PaletteDirectInputRuntime.Enable();
 
+        // Explicit endpoint routing is gameplay support for topology authored by the rebuilt WE.
+        // It must be active even when DevTools are closed so repeated room links and one-way links
+        // resolve correctly during normal play.
+        WorldTopologyRuntime.Enable();
+
         CreatureCoreRegistry.Enable();
         DryCycleContent.Enable();
         DB_Relationships.Enable();
@@ -98,6 +104,7 @@ internal sealed class Plugin : BaseUnityPlugin
         // PaletteDirectInputRuntime is installed from OnEnable, so always remove it even when
         // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
         PaletteDirectInputRuntime.Disable();
+        WorldTopologyRuntime.Disable();
 
         if (_initialized)
         {
