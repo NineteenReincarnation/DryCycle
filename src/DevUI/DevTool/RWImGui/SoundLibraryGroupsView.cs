@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -133,6 +132,16 @@ internal static class SoundLibraryGroupsView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("新建本地音效组", "NEW LOCAL SOUND GROUP"), BrowserBodyFontScale);
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("编组 ID", "Group ID"), "SoundGroupNewId", ref groupIdEdit, 128);
+        bool nonAsciiLetterId = ContainsNonAsciiLetter(groupIdEdit);
+        if (nonAsciiLetterId)
+        {
+            ImGui.TextColored(
+                new Num.Vector4(1f, 0.64f, 0.30f, 1f),
+                DevToolUiSettings.T(
+                    "检测到非英文字母字符。建议 Group ID 仅使用 A-Z / a-z；中文和其他字符请写在显示名称里。",
+                    "Group ID contains non-letter characters. Prefer A-Z / a-z only; use Display name for Unicode text."));
+        }
+
         DrawUnicodeInputText(
             DevToolUiSettings.T("显示名称", "Display name"),
             "SoundGroupNewName",
@@ -140,8 +149,8 @@ internal static class SoundLibraryGroupsView
             512);
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "显示名称支持中文和其他 Unicode 字符；ID 用于去重和共享，建议使用 ModID.GroupName。",
-                "Display names support Unicode; IDs are used for deduplication and sharing, so ModID.GroupName is recommended."),
+                "显示名称支持中文和其他 Unicode 字符；Group ID 用于去重和共享，建议只使用英文字母 A-Z / a-z。",
+                "Display names support Unicode; Group IDs are used for deduplication and sharing, so A-Z / a-z only is recommended."),
             true);
 
         bool canCreate = !string.IsNullOrWhiteSpace(groupIdEdit) && !string.IsNullOrWhiteSpace(groupNameEdit);
@@ -178,14 +187,24 @@ internal static class SoundLibraryGroupsView
     internal static void DrawAddToGroup(EditorSoundSnapshot selected)
     {
         SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
-        List<SoundGroupSnapshot> local = new();
+        SoundGroupSnapshot firstLocal = null;
+        SoundGroupSnapshot current = null;
+
+        // Do not allocate a temporary List every frame. Groups are already a stable snapshot; scan
+        // that array directly and skip non-local entries when the combo is actually opened.
         for (int i = 0; i < groups.Length; i++)
-            if (groups[i].IsLocal) local.Add(groups[i]);
+        {
+            SoundGroupSnapshot group = groups[i];
+            if (!group.IsLocal) continue;
+            firstLocal ??= group;
+            if (string.Equals(group.Id, targetGroupId, StringComparison.OrdinalIgnoreCase))
+                current = group;
+        }
 
         ImGui.Separator();
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("音效组", "SOUND GROUP"));
 
-        if (local.Count == 0)
+        if (firstLocal == null)
         {
             DevToolWidgets.MutedText(
                 DevToolUiSettings.T("没有可写入的本地音效组，请先在“音效组”页新建。", "No writable local group. Create one in the Groups tab first."),
@@ -193,21 +212,19 @@ internal static class SoundLibraryGroupsView
             return;
         }
 
-        bool targetExists = false;
-        for (int i = 0; i < local.Count; i++)
-            targetExists |= string.Equals(local[i].Id, targetGroupId, StringComparison.OrdinalIgnoreCase);
-        if (!targetExists) targetGroupId = local[0].Id;
-
-        SoundGroupSnapshot current = local[0];
-        for (int i = 0; i < local.Count; i++)
-            if (string.Equals(local[i].Id, targetGroupId, StringComparison.OrdinalIgnoreCase)) current = local[i];
+        if (current == null)
+        {
+            current = firstLocal;
+            targetGroupId = current.Id;
+        }
 
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo("##SoundTargetGroup", current.Name + " · " + current.Id))
         {
-            for (int i = 0; i < local.Count; i++)
+            for (int i = 0; i < groups.Length; i++)
             {
-                SoundGroupSnapshot group = local[i];
+                SoundGroupSnapshot group = groups[i];
+                if (!group.IsLocal) continue;
                 bool chosen = string.Equals(group.Id, targetGroupId, StringComparison.OrdinalIgnoreCase);
                 if (ImGui.Selectable(group.Name + " · " + group.Id + "##TargetGroup" + i, chosen))
                     targetGroupId = group.Id;
@@ -326,12 +343,22 @@ internal static class SoundLibraryGroupsView
 
     private static bool DrawUnicodeInputText(string label, string id, ref string value, uint utf8Capacity)
     {
-        // ImGui.NET's string overload is UTF-8. Keep a generous byte capacity and do not install
-        // any character filter so IME commits (Chinese/Japanese/etc.) are accepted intact.
         DevToolWidgets.MutedText(label);
         ImGui.SetNextItemWidth(-1f);
         value ??= string.Empty;
         return ImGui.InputText("##" + id, ref value, utf8Capacity);
+    }
+
+    private static bool ContainsNonAsciiLetter(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) continue;
+            return true;
+        }
+        return false;
     }
 
     private static bool MatchesSample(EditorSoundSampleSnapshot value, string query)
