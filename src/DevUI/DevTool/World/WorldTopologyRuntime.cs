@@ -48,6 +48,16 @@ internal static class WorldTopologyRuntime
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
     }
 
+    /// <summary>
+    /// Called by the world.txt editor whenever topology changes in the already loaded World.
+    /// Creatures that entered a shortcut before the edit must not carry a stale target Exit into
+    /// the new topology, so discard only those transient route captures; the World itself stays live.
+    /// </summary>
+    internal static void NotifyTopologyChanged()
+    {
+        pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+    }
+
     private static void ShortcutHandler_SuckInCreature(
         On.ShortcutHandler.orig_SuckInCreature orig,
         ShortcutHandler self,
