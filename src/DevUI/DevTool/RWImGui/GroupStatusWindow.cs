@@ -88,6 +88,7 @@ internal static class GroupStatusWindow
 
         return id switch
         {
+            "ControlCenter" => DevToolUiSettings.T("总控", "Control center"),
             "UI" => DevToolUiSettings.T("界面", "UI"),
             "Commands" => DevToolUiSettings.T("命令", "Commands"),
             "Tools" => DevToolUiSettings.T("工具", "Tools"),
