@@ -89,7 +89,10 @@ internal static class ControlCenterWindow
             ? DevToolUiSettings.T("专注", "FOCUS")
             : DevToolUiSettings.T("编辑中", "EDITING");
         float badgeWidth = BadgeWidth(badge);
-        float right = ImGui.GetWindowContentRegionMax().X;
+        // RWImGui ships a trimmed ImGui.NET surface that does not expose
+        // GetWindowContentRegionMax(). Window width minus the active style padding gives the
+        // same right content edge without depending on that unavailable API.
+        float right = ImGui.GetWindowWidth() - ImGui.GetStyle().WindowPadding.X;
         float current = ImGui.GetCursorPosX();
         float badgeX = right - badgeWidth;
         if (badgeX > current + 8f)
