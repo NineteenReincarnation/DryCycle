@@ -143,15 +143,20 @@ public static class EditorInputRouter
         RainWorldGame self,
         float dt)
     {
-        // Only text ownership needs the expensive vanilla-shortcut bypass/manual DevUI update.
-        // A normal ImGui button/slider may want keyboard focus without consuming raw A/S/Q/etc.
-        if (!HasTextKeyboardOwner(self))
+        bool textKeyboardOwner = HasTextKeyboardOwner(self);
+        bool suppressVanillaFastForward = ShouldSuppressVanillaFastForward(self);
+
+        // Vanilla RainWorldGame.RawUpdate interprets any held S as the DevTools 400 FPS shortcut.
+        // Ctrl/Command+S belongs to the rebuilt UI's save command, so bypass only that vanilla
+        // DevTools shortcut path while keeping plain S fast-forward unchanged.
+        if (!textKeyboardOwner && !suppressVanillaFastForward)
         {
             orig(self, dt);
             return;
         }
 
-        MarkKeyboardCaptured(self);
+        if (textKeyboardOwner)
+            MarkKeyboardCaptured(self);
 
         bool devToolsWasActive = self.devToolsActive;
         DevInterface.DevUI focusedDevUi = self.devUI;
@@ -161,6 +166,9 @@ public static class EditorInputRouter
         self.pDown = global::UnityEngine.Input.GetKey(KeyCode.P);
         self.kDown = global::UnityEngine.Input.GetKey(KeyCode.K);
         self.oDown = global::UnityEngine.Input.GetKey(KeyCode.O);
+
+        if (suppressVanillaFastForward)
+            self.framesPerSecond = 40;
 
         self.devToolsActive = false;
         try
@@ -392,6 +400,20 @@ public static class EditorInputRouter
         if (game == null || game.devUI == null || !game.devToolsActive) return false;
         bool frontendVisible = frontendAttached && !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
         return HasLocalTextFocus(game) || (frontendVisible && wantsTextInput);
+    }
+
+    private static bool ShouldSuppressVanillaFastForward(RainWorldGame game)
+    {
+        if (game == null || game.devUI == null || !game.devToolsActive) return false;
+        if (!frontendAttached || EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden) return false;
+
+        bool ctrlOrCommand =
+            global::UnityEngine.Input.GetKey(KeyCode.LeftControl) ||
+            global::UnityEngine.Input.GetKey(KeyCode.RightControl) ||
+            global::UnityEngine.Input.GetKey(KeyCode.LeftCommand) ||
+            global::UnityEngine.Input.GetKey(KeyCode.RightCommand);
+
+        return ctrlOrCommand && global::UnityEngine.Input.GetKey(KeyCode.S);
     }
 
     private static bool HasKeyboardOwner(RainWorldGame game)
