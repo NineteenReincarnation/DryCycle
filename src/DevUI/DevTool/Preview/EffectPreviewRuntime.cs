@@ -245,6 +245,10 @@ internal static class EffectPreviewRuntime
     {
         if (!IsActive) return;
 
+        // DevToolRuntime calls this after the real game update. Capture the final value of any
+        // exclusively preview-owned RoomCamera fields before a possible safety abort rolls them back.
+        EffectPreviewRuntimeVisualOwnership.ObserveAfterGameUpdate(game);
+
         if (ownership?.RequiresAbort == true)
         {
             string detail = ownership.ContaminationReason;
