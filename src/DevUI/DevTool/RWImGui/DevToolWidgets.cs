@@ -1,3 +1,4 @@
+using System;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -183,6 +184,8 @@ internal static class DevToolWidgets
 
     internal static bool ActionButton(string label, string id, DevToolButtonTone tone = DevToolButtonTone.Normal, bool fullWidth = false)
     {
+        label = StripInlineShortcutHint(label);
+
         Num.Vector4 normal;
         Num.Vector4 hovered;
         Num.Vector4 active;
@@ -249,7 +252,7 @@ internal static class DevToolWidgets
     internal static float ButtonWidth(string label)
     {
         ImGuiStylePtr style = ImGui.GetStyle();
-        return ImGui.CalcTextSize(label).X + style.FramePadding.X * 2f;
+        return ImGui.CalcTextSize(StripInlineShortcutHint(label)).X + style.FramePadding.X * 2f;
     }
 
     internal static float RadioWidth(string label)
@@ -266,6 +269,36 @@ internal static class DevToolWidgets
         if (nextX + nextItemWidth > right) return false;
         ImGui.SameLine();
         return true;
+    }
+
+    private static string StripInlineShortcutHint(string label)
+    {
+        if (string.IsNullOrEmpty(label)) return label ?? string.Empty;
+
+        int idStart = label.IndexOf("##", StringComparison.Ordinal);
+        string visible = idStart >= 0 ? label.Substring(0, idStart) : label;
+        string idSuffix = idStart >= 0 ? label.Substring(idStart) : string.Empty;
+
+        string[] markers =
+        {
+            "  Ctrl+",
+            "  Cmd+",
+            "  Shift+",
+            "  Alt+",
+            "  Tab",
+            "  Esc",
+            "  Delete"
+        };
+
+        int cut = -1;
+        for (int i = 0; i < markers.Length; i++)
+        {
+            int index = visible.IndexOf(markers[i], StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 && (cut < 0 || index < cut)) cut = index;
+        }
+
+        if (cut < 0) return label;
+        return visible.Substring(0, cut).TrimEnd() + idSuffix;
     }
 
     private static float ResolvePaneBodyScale(float requestedRestoreScale)
