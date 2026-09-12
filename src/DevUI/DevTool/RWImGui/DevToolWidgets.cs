@@ -45,7 +45,11 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 TertiaryGoldRelief = new(0.25f, 0.16f, 0.06f, 0.64f);
 
     private const float PrimaryPaneTitleScale = 1.82f;
-    private const float InspectorPaneBodyScale = 1.15f;
+    // Inspector content used to fall back to 1.15, which made controls inside framed sections
+    // visibly smaller than the Browser and the surrounding editor chrome. Keep both language
+    // modes readable; Chinese gets the slightly larger body scale it needs for dense CJK glyphs.
+    private const float InspectorPaneBodyScaleEnglish = 1.22f;
+    private const float InspectorPaneBodyScaleChinese = 1.28f;
     private static float paneBodyScale = 1f;
 
     internal static void PaneTitle(string text, float restoreScale = 1f)
@@ -55,7 +59,7 @@ internal static class DevToolWidgets
 
         if (primary)
         {
-            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
+            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale() : restoreScale;
             DrawFlowingTitle(text, FlowTitleLevel.Primary, PrimaryPaneTitleScale * restoreScale, 2.0f, paneBodyScale);
             ImGui.Spacing();
             return;
@@ -89,7 +93,7 @@ internal static class DevToolWidgets
 
         if (primary)
         {
-            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale : restoreScale;
+            paneBodyScale = IsInspectorPaneTitle(text) ? InspectorPaneBodyScale() : restoreScale;
             titleRestoreScale = paneBodyScale;
             level = FlowTitleLevel.Primary;
             fontScale = PrimaryPaneTitleScale * restoreScale;
@@ -254,6 +258,9 @@ internal static class DevToolWidgets
     {
         return requestedRestoreScale == 1f ? paneBodyScale : requestedRestoreScale;
     }
+
+    private static float InspectorPaneBodyScale() =>
+        DevToolUiSettings.IsChinese ? InspectorPaneBodyScaleChinese : InspectorPaneBodyScaleEnglish;
 
     private static bool IsPrimaryPaneTitle(string text)
     {
