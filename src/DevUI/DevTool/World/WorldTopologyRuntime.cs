@@ -50,7 +50,7 @@ internal static class WorldTopologyRuntime
         On.ShortcutHandler.orig_SuckInCreature orig,
         ShortcutHandler self,
         Creature creature,
-        Room room,
+        global::Room room,
         ShortcutData shortcut)
     {
         CapturePendingRoute(creature, room, shortcut);
@@ -92,7 +92,7 @@ internal static class WorldTopologyRuntime
         orig(self, entrancePos, carriedByOther);
     }
 
-    private static void CapturePendingRoute(Creature creature, Room room, ShortcutData shortcut)
+    private static void CapturePendingRoute(Creature creature, global::Room room, ShortcutData shortcut)
     {
         AbstractCreature abstractCreature = creature?.abstractCreature;
         AbstractRoom source = room?.abstractRoom;
@@ -174,11 +174,11 @@ internal static class WorldTopologyRuntime
 
     private static bool ShouldBlockReverseTravel(Creature creature, IntVector2 entrancePos)
     {
-        Room room = creature?.room;
+        global::Room room = creature?.room;
         AbstractRoom abstractRoom = room?.abstractRoom;
         if (room == null || abstractRoom == null || room.world == null) return false;
         if (!room.IsPositionInsideBoundries(entrancePos)) return false;
-        if (room.GetTile(entrancePos).Terrain != Room.Tile.TerrainType.ShortcutEntrance) return false;
+        if (room.GetTile(entrancePos).Terrain != global::Room.Tile.TerrainType.ShortcutEntrance) return false;
 
         ShortcutData shortcut = room.shortcutData(entrancePos);
         if (shortcut.shortCutType != ShortcutData.Type.RoomExit || shortcut.destNode < 0) return false;
@@ -194,7 +194,7 @@ internal static class WorldTopologyRuntime
 
     private static void CancelBlockedShortcutEntry(Creature creature, IntVector2 entrancePos)
     {
-        Room room = creature?.room;
+        global::Room room = creature?.room;
         if (room == null) return;
 
         pendingRoutes.Remove(creature.abstractCreature);
