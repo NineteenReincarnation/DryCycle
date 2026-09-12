@@ -252,6 +252,27 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
+    /// Returns stable metadata for a font that DryCycle registered itself. ImGui normally stores
+    /// the full source path in ImFontConfig.Name; long paths can be truncated before the filename,
+    /// which would otherwise make family and weight selection fall back to the RWImGui primary font.
+    /// </summary>
+    internal static bool TryGetRegisteredFace(ImFontPtr font, out string name, out int weight)
+    {
+        for (int i = 0; i < RegisteredFaces.Count; i++)
+        {
+            RegisteredFace face = RegisteredFaces[i];
+            if (face.Font.NativePtr != font.NativePtr) continue;
+            name = face.FileName;
+            weight = face.Weight;
+            return true;
+        }
+
+        name = string.Empty;
+        weight = DevToolUiSettings.DefaultFontWeight;
+        return false;
+    }
+
+    /// <summary>
     /// Determines whether a face is allowed in the Chinese-interface selector. A normal face must
     /// expose representative Simplified-Chinese glyphs after the atlas is built. Ubuntu Mono is
     /// kept as an explicit developer option only when it is actually present in the atlas.
