@@ -199,6 +199,21 @@ internal static class DevToolWidgets
 
     internal static bool ActionButton(string label, string id, DevToolButtonTone tone = DevToolButtonTone.Normal, bool fullWidth = false)
     {
+        // Objects used to own its Scene list inside the Browser. Sound and Triggers can suppress
+        // their tab directly because their views are separate classes; Objects lives in the large
+        // legacy overlay. Keep the global Center placement truly exclusive here: hide the duplicate
+        // Scene button and force the Browser back to Library in the same frame that the placement
+        // switch changes. The zero-size dummy preserves ImGui's SameLine flow expected by the old
+        // caller without leaving a visible placeholder.
+        bool objectSceneInCenter = DevToolUiSettings.SceneInCenter;
+        if (objectSceneInCenter && string.Equals(id, "ObjectsSceneTab", StringComparison.Ordinal))
+        {
+            ImGui.Dummy(Num.Vector2.Zero);
+            return false;
+        }
+        bool forceObjectsLibrary = objectSceneInCenter &&
+                                   string.Equals(id, "ObjectsLibraryTab", StringComparison.Ordinal);
+
         label = StripInlineShortcutHint(label);
 
         Num.Vector4 normal;
@@ -246,7 +261,7 @@ internal static class DevToolWidgets
 
         ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(3);
-        return pressed;
+        return pressed || forceObjectsLibrary;
     }
 
     internal static void MutedText(string text, bool wrapped = false)
