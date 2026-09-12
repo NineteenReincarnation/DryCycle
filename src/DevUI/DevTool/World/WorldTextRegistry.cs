@@ -66,6 +66,7 @@ internal static class WorldTextRegistry
 
             LoadedPath = path;
             document = WorldDocument.Parse(File.ReadAllText(path), path);
+            WorldConnectionSyntax.SynchronizeRegion(normalized, document);
             return true;
         }
         catch (Exception error)
@@ -133,14 +134,24 @@ internal static class WorldTextRegistry
             roomName,
             exitIndex,
             destinationRoom);
-        document.TrySetConnection(roomName, exitIndex, storedDestination);
+        bool changed = document.TrySetConnection(roomName, exitIndex, storedDestination);
+
+        // The running World has already passed through WorldLoader. Keep its exact target-Exit
+        // routing table synchronized with the editable document so newly authored links can be
+        // tested immediately without leaving the region or restarting the game.
+        WorldConnectionSyntax.SynchronizeRoute(region, roomName, exitIndex, storedDestination);
+        if (changed) WorldTopologyRuntime.NotifyTopologyChanged();
         return true;
     }
 
     internal static bool Save()
     {
         if (document == null || string.IsNullOrWhiteSpace(LoadedPath)) return false;
-        if (!document.Dirty) return true;
+        if (!document.Dirty)
+        {
+            WorldConnectionSyntax.SynchronizeRegion(LoadedRegion, document);
+            return true;
+        }
 
         string temp = LoadedPath + ".tmp";
         try
@@ -153,6 +164,11 @@ internal static class WorldTextRegistry
             }
             File.Move(temp, LoadedPath);
             document.MarkSaved(LoadedPath);
+
+            // Save is also a synchronization boundary. Rebuild the exact-route table from the
+            // document and invalidate any creature route captured before the authoring change.
+            WorldConnectionSyntax.SynchronizeRegion(LoadedRegion, document);
+            WorldTopologyRuntime.NotifyTopologyChanged();
             LoadError = null;
             return true;
         }
