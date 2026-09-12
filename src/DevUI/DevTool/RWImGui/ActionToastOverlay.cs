@@ -28,6 +28,11 @@ internal static class ActionToastOverlay
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        // ActionToastOverlay is already part of the guaranteed per-frame frontend render chain.
+        // Pump the standalone universal DevUI mirror here so every active DevInterface page is
+        // testable through the same generic renderer without adding another frontend callback.
+        UniversalDevUiMirrorWindow.Draw(display);
+
         ObserveShortcuts(snapshot);
 
         double age = ImGui.GetTime() - shownAt;
