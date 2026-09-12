@@ -14,7 +14,8 @@ public enum LegacyControlKind
     Cycler,
     Integer,
     Select,
-    Text
+    Text,
+    Direction
 }
 
 /// <summary>
@@ -30,6 +31,8 @@ public sealed class LegacyControlSnapshot
     public LegacyControlKind Kind { get; init; }
     public string ValueText { get; init; } = string.Empty;
     public float Factor { get; init; }
+    public float X { get; init; }
+    public float Y { get; init; }
     public bool CanReset { get; init; }
     public int SelectedIndex { get; init; } = -1;
     public string[] Options { get; init; } = Array.Empty<string>();
@@ -75,6 +78,9 @@ public static class LegacyDevInterfaceBridge
 
     internal static bool CanAdaptText(DevUINode node) =>
         node != null && FindTextCommitMethod(node.GetType()) != null && TryReadTextValue(node, out _);
+
+    internal static bool CanAdaptDirection(DevUINode node) =>
+        node != null && TryReadDirection(node, out _) && FindDirectionSetter(node, out _, out _);
 
     internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
@@ -260,6 +266,35 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
+    internal static bool SetDirection(global::DevInterface.DevUI owner, PlacedObject target, string path, float x, float y)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        DevUINode node = ResolveNode(representation, path);
+        if (node == null || !FindDirectionSetter(node, out object directionTarget, out PropertyInfo directionProperty))
+            return false;
+
+        try
+        {
+            Vector2 direction = new Vector2(x, y);
+            direction = direction.sqrMagnitude > 0.000001f ? direction.normalized : Vector2.up;
+            directionProperty.SetValue(directionTarget, direction, null);
+            node.Refresh();
+
+            // RegionKit DirectionPicker consumers (for example GreenSparksDir) poll Dir from the
+            // containing representation during Update. Synchronize that parent immediately so the
+            // command/history transaction sees the real PlacedObject data change this frame.
+            SynchronizePollingParent(owner, node);
+            owner.activePage?.Refresh();
+            return TryReadDirection(node, out Vector2 actual) && Vector2.Dot(actual, direction) > 0.999f;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy direction mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
     private static void CaptureChildren(DevUINode parent, string parentPath, List<LegacyControlSnapshot> output)
     {
         if (parent?.subNodes == null) return;
@@ -332,6 +367,20 @@ public static class LegacyDevInterfaceBridge
                         Options = options
                     });
                 }
+                continue;
+            }
+
+            if (CanAdaptDirection(node) && TryReadDirection(node, out Vector2 direction))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = DirectionTitle(node),
+                    Kind = LegacyControlKind.Direction,
+                    X = direction.x,
+                    Y = direction.y
+                });
                 continue;
             }
 
@@ -499,10 +548,98 @@ public static class LegacyDevInterfaceBridge
         return false;
     }
 
+    private static bool TryReadDirection(object instance, out Vector2 direction)
+    {
+        direction = Vector2.up;
+        if (instance == null) return false;
+
+        PropertyInfo property = FindPropertyInHierarchy(instance.GetType(), "Dir");
+        if (property != null && property.PropertyType == typeof(Vector2) && property.CanRead)
+        {
+            object value = property.GetValue(instance, null);
+            if (value is Vector2 vector)
+            {
+                direction = vector.sqrMagnitude > 0.000001f ? vector.normalized : Vector2.up;
+                return true;
+            }
+        }
+
+        FieldInfo field = FindFieldInHierarchy(instance.GetType(), "Dir");
+        if (field != null && field.FieldType == typeof(Vector2) && field.GetValue(instance) is Vector2 fieldVector)
+        {
+            direction = fieldVector.sqrMagnitude > 0.000001f ? fieldVector.normalized : Vector2.up;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool FindDirectionSetter(DevUINode node, out object target, out PropertyInfo property)
+    {
+        target = null;
+        property = null;
+        if (node == null) return false;
+
+        PropertyInfo direct = FindPropertyInHierarchy(node.GetType(), "Dir");
+        if (direct != null && direct.PropertyType == typeof(Vector2) && direct.CanWrite)
+        {
+            target = node;
+            property = direct;
+            return true;
+        }
+
+        FieldInfo handleField = FindFieldInHierarchy(node.GetType(), "handle");
+        object handle = handleField?.GetValue(node);
+        if (handle == null) return false;
+
+        PropertyInfo handleDirection = FindPropertyInHierarchy(handle.GetType(), "Dir");
+        if (handleDirection == null || handleDirection.PropertyType != typeof(Vector2) || !handleDirection.CanWrite)
+            return false;
+
+        target = handle;
+        property = handleDirection;
+        return true;
+    }
+
+    private static PropertyInfo FindPropertyInHierarchy(Type type, string name)
+    {
+        Type current = type;
+        while (current != null)
+        {
+            PropertyInfo property = current.GetProperty(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property != null) return property;
+            current = current.BaseType;
+        }
+        return null;
+    }
+
+    private static FieldInfo FindFieldInHierarchy(Type type, string name)
+    {
+        Type current = type;
+        while (current != null)
+        {
+            FieldInfo field = current.GetField(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null) return field;
+            current = current.BaseType;
+        }
+        return null;
+    }
+
     private static string TextTitle(DevUINode node)
     {
         string id = node?.IDstring ?? string.Empty;
         if (string.IsNullOrWhiteSpace(id)) return "Text";
+        return id.Replace('_', ' ').Trim();
+    }
+
+    private static string DirectionTitle(DevUINode node)
+    {
+        string id = node?.IDstring ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(id)) return "Direction";
         return id.Replace('_', ' ').Trim();
     }
 
