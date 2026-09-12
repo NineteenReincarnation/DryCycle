@@ -36,12 +36,19 @@ internal static class SoundEditorView
 
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
+        bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
+        if (!sceneInBrowser && browserTab == BrowserTab.Scene)
+            browserTab = BrowserTab.Library;
+
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("声音", "SOUNDS"), BrowserBodyFontScale);
         DrawTabButton(BrowserTab.Library, DevToolUiSettings.T("资源库", "Library"), "SoundLibraryTab");
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("音效组", "Groups")));
         DrawTabButton(BrowserTab.Groups, DevToolUiSettings.T("音效组", "Groups"), "SoundGroupsTab");
-        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("场景", "Scene")));
-        DrawTabButton(BrowserTab.Scene, DevToolUiSettings.T("场景", "Scene"), "SoundSceneTab");
+        if (sceneInBrowser)
+        {
+            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("场景", "Scene")));
+            DrawTabButton(BrowserTab.Scene, DevToolUiSettings.T("场景", "Scene"), "SoundSceneTab");
+        }
         ImGui.Separator();
 
         SoundLibraryGroupsView.DrawWorkingGroupBar();
@@ -51,8 +58,8 @@ internal static class SoundEditorView
             case BrowserTab.Groups:
                 SoundLibraryGroupsView.DrawGroups();
                 break;
-            case BrowserTab.Scene:
-                DrawScene(snapshot);
+            case BrowserTab.Scene when sceneInBrowser:
+                DrawSceneWorkspace(snapshot);
                 break;
             default:
                 SoundLibraryGroupsView.DrawLibrary(snapshot);
@@ -165,8 +172,14 @@ internal static class SoundEditorView
             browserTab = tab;
     }
 
-    private static void DrawScene(EditorSoundPresentationSnapshot snapshot)
+    internal static void DrawSceneWorkspace(EditorSoundPresentationSnapshot snapshot)
     {
+        if (snapshot == null || !snapshot.Available)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("声音场景不可用。", "Sound scene unavailable."), true);
+            return;
+        }
+
         EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
