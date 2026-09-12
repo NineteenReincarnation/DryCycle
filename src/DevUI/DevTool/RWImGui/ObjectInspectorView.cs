@@ -281,71 +281,157 @@ internal static class ObjectInspectorView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("高级 / 兼容", "ADVANCED / COMPATIBILITY"));
         if (!ImGui.CollapsingHeader(DevToolUiSettings.T(
-                "原版 DevInterface 控件##ObjectLegacyControls",
-                "Legacy DevInterface Controls##ObjectLegacyControls")))
+                "DevInterface 兼容控件##ObjectLegacyControls",
+                "DevInterface Compatibility Controls##ObjectLegacyControls")))
         {
             DrawLegacyFallbackButton(inspector);
             return;
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "标准 Rain World Representation 暴露的兼容控件。未知 Mod 控件不会被猜测或重写。",
-            "Compatibility controls exposed by the original Rain World representation. Unknown mod controls are not guessed or rewritten."), true);
+            "通过原版虚方法/行为边界驱动 Button、Slider、Cycler 和 IntegerControl；未知复合控件仍保持未映射。",
+            "Buttons, sliders, cyclers and integer controls are delegated through the original virtual behavior boundaries; unknown composite controls remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
             LegacyControlSnapshot control = controls[i];
             string stateKey = inspector.ObjectIndex + ":legacy:" + control.Path;
             string visibleLabel = string.IsNullOrEmpty(control.Label) ? control.Id : control.Label;
-            string label = visibleLabel + "##DevToolLegacy_" + stateKey;
 
-            if (control.Kind == LegacyControlKind.Button)
+            switch (control.Kind)
             {
-                if (DevToolWidgets.ActionButton(visibleLabel, "LegacyButton_" + stateKey, DevToolButtonTone.Normal))
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.InvokeLegacyButton,
-                        inspector.ObjectIndex,
-                        text: control.Path));
-                continue;
-            }
-
-            float factor = Get(LegacySliderEdits, stateKey, control.Factor);
-            bool changed = ImGui.SliderFloat(label, ref factor, 0f, 1f, "%.3f");
-            LegacySliderEdits[stateKey] = factor;
-            if (ImGui.IsItemDeactivatedAfterEdit())
-            {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                    EditorUiCommandKind.SetLegacySlider,
-                    inspector.ObjectIndex,
-                    text: control.Path,
-                    x: factor));
-            }
-            else if (!changed && !ImGui.IsItemActive())
-            {
-                LegacySliderEdits[stateKey] = control.Factor;
-            }
-
-            if (!string.IsNullOrWhiteSpace(control.ValueText))
-            {
-                ImGui.SameLine();
-                DevToolWidgets.MutedText(control.ValueText);
-            }
-
-            if (control.CanReset)
-            {
-                ImGui.SameLine();
-                if (DevToolWidgets.ActionButton(
-                        DevToolUiSettings.T("重置", "Reset"),
-                        "LegacyReset_" + stateKey,
-                        DevToolButtonTone.Subtle))
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.ResetLegacySlider,
-                        inspector.ObjectIndex,
-                        text: control.Path));
+                case LegacyControlKind.Button:
+                    DrawLegacyButton(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Slider:
+                    DrawLegacySlider(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Cycler:
+                    DrawLegacyCycler(inspector, control, stateKey, visibleLabel);
+                    break;
+                case LegacyControlKind.Integer:
+                    DrawLegacyInteger(inspector, control, stateKey, visibleLabel);
+                    break;
             }
         }
 
         DrawLegacyFallbackButton(inspector);
+    }
+
+    private static void DrawLegacyButton(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        if (DevToolWidgets.ActionButton(visibleLabel, "LegacyButton_" + stateKey, DevToolButtonTone.Normal))
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.InvokeLegacyButton,
+                inspector.ObjectIndex,
+                text: control.Path));
+    }
+
+    private static void DrawLegacySlider(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string label = visibleLabel + "##DevToolLegacy_" + stateKey;
+        float factor = Get(LegacySliderEdits, stateKey, control.Factor);
+        bool changed = ImGui.SliderFloat(label, ref factor, 0f, 1f, "%.3f");
+        LegacySliderEdits[stateKey] = factor;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacySlider,
+                inspector.ObjectIndex,
+                text: control.Path,
+                x: factor));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            LegacySliderEdits[stateKey] = control.Factor;
+        }
+
+        if (!string.IsNullOrWhiteSpace(control.ValueText))
+        {
+            ImGui.SameLine();
+            DevToolWidgets.MutedText(control.ValueText);
+        }
+
+        if (control.CanReset)
+        {
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("重置", "Reset"),
+                    "LegacyReset_" + stateKey,
+                    DevToolButtonTone.Subtle))
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                    EditorUiCommandKind.ResetLegacySlider,
+                    inspector.ObjectIndex,
+                    text: control.Path));
+        }
+    }
+
+    private static void DrawLegacyCycler(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string[] options = control.Options ?? Array.Empty<string>();
+        string preview = control.SelectedIndex >= 0 && control.SelectedIndex < options.Length
+            ? options[control.SelectedIndex]
+            : control.ValueText ?? string.Empty;
+        string label = visibleLabel + "##DevToolLegacyCycler_" + stateKey;
+
+        if (!ImGui.BeginCombo(label, preview)) return;
+        for (int i = 0; i < options.Length; i++)
+        {
+            bool selected = i == control.SelectedIndex;
+            if (ImGui.Selectable(options[i] + "##LegacyCyclerOption_" + stateKey + "_" + i, selected))
+            {
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                    EditorUiCommandKind.InvokeLegacyButton,
+                    inspector.ObjectIndex,
+                    text: LegacyDevInterfaceBridge.CyclerAction(control.Path, i)));
+            }
+            if (selected) ImGui.SetItemDefaultFocus();
+        }
+        ImGui.EndCombo();
+    }
+
+    private static void DrawLegacyInteger(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        string value = string.IsNullOrWhiteSpace(control.ValueText) ? "-" : control.ValueText;
+        DevToolWidgets.MutedText(visibleLabel + ":  " + value);
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        int step = io.KeyCtrl
+            ? (io.KeyShift ? 1000 : 100)
+            : (io.KeyShift ? 10 : 1);
+
+        if (DevToolWidgets.ActionButton("-", "LegacyIntegerLess_" + stateKey, DevToolButtonTone.Subtle))
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.InvokeLegacyButton,
+                inspector.ObjectIndex,
+                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, -step)));
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton("+", "LegacyIntegerMore_" + stateKey, DevToolButtonTone.Normal))
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.InvokeLegacyButton,
+                inspector.ObjectIndex,
+                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, step)));
+
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "步长：默认 1，Shift=10，Ctrl=100，Ctrl+Shift=1000。",
+                "Step: 1 by default, Shift=10, Ctrl=100, Ctrl+Shift=1000."));
     }
 
     private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
@@ -361,8 +447,8 @@ internal static class ObjectInspectorView
 
         if (ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T(
-                "用于无法完整迁移到新检查器的自定义 DevInterface。切回完整原版 UI 时会恢复原始 Gizmo 和面板。",
-                "Fallback for custom DevInterface controls that cannot be fully represented here. The full original UI restores its original gizmos and panels."));
+                "仅作为迁移期诊断后门。Coverage 仍标记为未映射的复合控件必须继续迁移。",
+                "Migration-only diagnostic escape hatch. Composite controls still reported as unmapped by Coverage must continue to be migrated."));
     }
 
     private static void DrawActions(EditorInspectorSnapshot inspector)
