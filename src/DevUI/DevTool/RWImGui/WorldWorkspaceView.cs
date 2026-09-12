@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
@@ -526,21 +525,6 @@ internal static class WorldWorkspaceView
                 DrawRegionInspector(snapshot);
             }
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        if (ImGui.CollapsingHeader(DevToolUiSettings.T(
-                "开发者 / 兼容性##WorldWorkspaceCompatibility",
-                "DEVELOPER / COMPATIBILITY##WorldWorkspaceCompatibility")))
-        {
-            UniversalDevUiPresentationSnapshot generic = UniversalDevUiPresentationHub.Current;
-            DevToolWidgets.MutedText(DevToolUiSettings.T(
-                "通用 DevInterface 迁移与协议诊断。正常世界编辑流程不依赖此面板。",
-                "Generic DevInterface migration and protocol diagnostics. Normal world editing does not depend on this surface."), true);
-            DevUiCompatibilityGateView.Draw(generic);
-            DevUiSemanticConformanceView.Draw(generic);
-            UniversalDevUiMirrorView.Draw(generic);
-        }
     }
 
     private static void DrawRegionInspector(EditorMapPresentationSnapshot snapshot)
@@ -615,7 +599,7 @@ internal static class WorldWorkspaceView
                 MapEditorCommandKind.SetRoomSubregion,
                 roomIndex: room.RoomIndex,
                 text: subregion));
-        else if (!changed && !ImGui.IsItemActive())
+        else if (!changed && !ImGui.IsAnyItemActive())
             inspectorSubregion = room.Subregion ?? string.Empty;
 
         ImGui.Spacing();
