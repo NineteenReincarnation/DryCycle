@@ -160,33 +160,53 @@ public static class SoundEditorPresentationHub
 
 public enum SoundEditorCommandKind
 {
-    Select,
-    Create,
-    CreateFromLibrary,
-    Delete,
-    SetRoomValue,
-    SetSoundValue,
-    ReloadGroups,
-    SetGroupDirectory,
-    ResetGroupDirectory,
-    CreateGroup,
-    DeleteGroup,
-    AddSoundToGroup,
-    AddSoundsToGroup,
-    CreateGroupFromSounds,
-    ApplyGroup
+    Select = 0,
+    Create = 1,
+    Delete = 2,
+    SetRoomValue = 3,
+    SetSoundValue = 4,
+    ReloadGroups = 5,
+    SetGroupDirectory = 6,
+    ResetGroupDirectory = 7,
+    CreateGroup = 8,
+    DeleteGroup = 9,
+    AddSoundToGroup = 10,
+    ApplyGroup = 11,
+    CreateFromLibrary = 12,
+    AddSoundsToGroup = 13,
+    CreateGroupFromSounds = 14
 }
 
 public readonly struct SoundEditorCommand
 {
+    // Preserve the original constructor signature for the separately-built RWImGui frontend and
+    // any third-party integration already compiled against DryCycle.dll.
     public SoundEditorCommand(
         SoundEditorCommandKind kind,
         int index = -1,
         string key = null,
         string text = null,
         int secondaryIndex = -1,
-        EditorPropertyValue value = default,
-        int[] indices = null)
+        EditorPropertyValue value = default)
+    {
+        Kind = kind;
+        Index = index;
+        Key = key;
+        Text = text;
+        SecondaryIndex = secondaryIndex;
+        Value = value;
+        Indices = Array.Empty<int>();
+    }
+
+    // Batch commands use a distinct overload so the legacy constructor above remains binary-stable.
+    public SoundEditorCommand(
+        SoundEditorCommandKind kind,
+        int[] indices,
+        int index = -1,
+        string key = null,
+        string text = null,
+        int secondaryIndex = -1,
+        EditorPropertyValue value = default)
     {
         Kind = kind;
         Index = index;
