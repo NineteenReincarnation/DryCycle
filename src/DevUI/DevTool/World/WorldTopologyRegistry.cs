@@ -182,10 +182,6 @@ internal static class WorldTopologyRegistry
         return false;
     }
 
-    /// <summary>
-    /// Resolves the exact destination endpoint for one source room exit.
-    /// This is the runtime primitive that vanilla lacks for repeated room-to-room links.
-    /// </summary>
     internal static bool TryResolveOutgoing(
         string region,
         string sourceRoom,
@@ -341,8 +337,12 @@ internal static class WorldTopologyRegistry
                 List<WorldConnectionEdge> target = parsed.GetOrCreateRegion(region);
                 for (int i = 0; i < connections.Count; i++)
                 {
-                    if (connections[i] is not Dictionary<string, object> connectionObject ||
-                        !TryParseEdge(connectionObject, out WorldConnectionEdge edge, out string edgeError))
+                    if (connections[i] is not Dictionary<string, object> connectionObject)
+                    {
+                        warnings.Add(region + ": skipped connection #" + i + " (entry is not an object)." );
+                        continue;
+                    }
+                    if (!TryParseEdge(connectionObject, out WorldConnectionEdge edge, out string edgeError))
                     {
                         warnings.Add(region + ": skipped connection #" + i + " (" + edgeError + ").");
                         continue;
