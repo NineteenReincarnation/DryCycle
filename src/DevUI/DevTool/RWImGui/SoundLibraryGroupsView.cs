@@ -222,20 +222,15 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawSelectedResourceStatus(EditorSoundPresentationSnapshot snapshot, EditorSoundSnapshot selected)
     {
-        EditorSoundSampleSnapshot[] samples = snapshot.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
-        for (int i = 0; i < samples.Length; i++)
-        {
-            if (!string.Equals(samples[i].Sample, selected.Sample, StringComparison.OrdinalIgnoreCase)) continue;
-            ImGui.TextDisabled(
-                DevToolUiSettings.T("资源：", "Resource: ") +
-                SourceKindLabel(samples[i].SourceKind) + " · " + samples[i].SourceName);
-            return;
-        }
-
-        EditorSoundSampleSnapshot resolved = SoundSampleCatalog.Resolve(selected.Sample);
+        // Resource ownership is resolved on the Rain World/DevUI thread and copied into the
+        // immutable presentation snapshot. The RWImGui thread must not touch AssetManager or
+        // the live SoundPage merely to render this status line.
+        string sourceName = string.IsNullOrWhiteSpace(selected.ResourceSourceName)
+            ? (selected.ResourceAvailable ? "Vanilla" : "Missing")
+            : selected.ResourceSourceName;
         ImGui.TextDisabled(
             DevToolUiSettings.T("资源：", "Resource: ") +
-            SourceKindLabel(resolved.SourceKind) + " · " + resolved.SourceName);
+            SourceKindLabel(selected.ResourceSourceKind) + " · " + sourceName);
     }
 
     internal static void DrawProblemsOnce() => SoundGroupProblemsWindow.DrawOnce();
