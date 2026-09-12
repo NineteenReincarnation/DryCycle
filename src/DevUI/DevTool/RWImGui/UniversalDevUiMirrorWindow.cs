@@ -12,8 +12,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class UniversalDevUiMirrorWindow
 {
-    private static bool visible = true;
-
     internal static void Draw(Num.Vector2 display)
     {
         UniversalDevUiPresentationSnapshot snapshot = UniversalDevUiPresentationHub.Current;
@@ -34,19 +32,14 @@ internal static class UniversalDevUiMirrorWindow
             new Num.Vector2(Math.Max(320f, display.X - 16f), Math.Max(220f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
-        if (!visible) return;
-        bool open = visible;
         if (!ImGui.Begin(
                 DevToolUiSettings.T("通用 DevUI###UniversalDevUiMirrorWindow", "Universal DevUI###UniversalDevUiMirrorWindow"),
-                ref open,
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.None))
         {
-            visible = open;
             ImGui.End();
             return;
         }
 
-        visible = open;
         FloatingWindowSnap.TrackCurrentWindow("UniversalDevUiMirror");
         UniversalDevUiMirrorView.Draw(snapshot);
         ImGui.End();
