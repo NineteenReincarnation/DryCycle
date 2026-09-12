@@ -12,8 +12,8 @@ namespace DryCycle.DevUI.DevTool.Preview;
 ///
 /// The tracker never identifies a mod. It learns the exact runtime objects created during the
 /// synchronous preview bootstrap, then follows descendants created from those objects through the
-/// public Room.AddObject choke point. While one of those objects is actually executing, additions or
-/// reorders performed through FContainer.AddChild / AddChildAtIndex are journaled by identity.
+/// public Room.AddObject choke point. While one of those objects is actually executing, Futile
+/// add/reorder/remove operations are journaled by identity and reversed when hover ends.
 ///
 /// Runtime RoomCamera mutation is treated more conservatively. Direct camera field writes or
 /// non-trivial RoomCamera method calls discovered on preview-owned runtime types are rejected before
@@ -25,12 +25,18 @@ internal static class EffectPreviewRuntimeVisualOwnership
     private static bool enabled;
     private static Hook addChildHook;
     private static Hook addChildAtIndexHook;
+    private static Hook removeChildHook;
+    private static Hook removeAllChildrenHook;
     private static RuntimeSession active;
 
     private delegate void OrigAddChild(FContainer self, FNode node);
     private delegate void HookAddChild(OrigAddChild orig, FContainer self, FNode node);
     private delegate void OrigAddChildAtIndex(FContainer self, FNode node, int index);
     private delegate void HookAddChildAtIndex(OrigAddChildAtIndex orig, FContainer self, FNode node, int index);
+    private delegate void OrigRemoveChild(FContainer self, FNode node);
+    private delegate void HookRemoveChild(OrigRemoveChild orig, FContainer self, FNode node);
+    private delegate void OrigRemoveAllChildren(FContainer self);
+    private delegate void HookRemoveAllChildren(OrigRemoveAllChildren orig, FContainer self);
 
     internal static void Enable()
     {
@@ -50,23 +56,36 @@ internal static class EffectPreviewRuntimeVisualOwnership
                 null,
                 new[] { typeof(FNode), typeof(int) },
                 null);
+            MethodInfo removeChild = typeof(FContainer).GetMethod(
+                nameof(FContainer.RemoveChild),
+                BindingFlags.Instance | BindingFlags.Public,
+                null,
+                new[] { typeof(FNode) },
+                null);
+            MethodInfo removeAllChildren = typeof(FContainer).GetMethod(
+                nameof(FContainer.RemoveAllChildren),
+                BindingFlags.Instance | BindingFlags.Public,
+                null,
+                Type.EmptyTypes,
+                null);
 
             if (addChild != null)
                 addChildHook = new Hook(addChild, (HookAddChild)FContainer_AddChild);
             if (addChildAtIndex != null)
                 addChildAtIndexHook = new Hook(addChildAtIndex, (HookAddChildAtIndex)FContainer_AddChildAtIndex);
+            if (removeChild != null)
+                removeChildHook = new Hook(removeChild, (HookRemoveChild)FContainer_RemoveChild);
+            if (removeAllChildren != null)
+                removeAllChildrenHook = new Hook(
+                    removeAllChildren,
+                    (HookRemoveAllChildren)FContainer_RemoveAllChildren);
 
             On.Room.AddObject += Room_AddObject;
             enabled = true;
         }
         catch (Exception error)
         {
-            try { addChildHook?.Dispose(); }
-            catch { }
-            try { addChildAtIndexHook?.Dispose(); }
-            catch { }
-            addChildHook = null;
-            addChildAtIndexHook = null;
+            DisposeHooks();
             Plugin.Logger?.LogWarning(
                 "DevTool effect preview could not install runtime Futile ownership hooks: " + error.Message);
         }
@@ -82,12 +101,7 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         active = null;
         On.Room.AddObject -= Room_AddObject;
-        try { addChildHook?.Dispose(); }
-        catch { }
-        try { addChildAtIndexHook?.Dispose(); }
-        catch { }
-        addChildHook = null;
-        addChildAtIndexHook = null;
+        DisposeHooks();
         RuntimeCameraRiskScanner.Clear();
         enabled = false;
     }
@@ -203,6 +217,69 @@ internal static class EffectPreviewRuntimeVisualOwnership
         session.ObserveNodeMutation(node, before, NodePlacement.Capture(node));
     }
 
+    private static void FContainer_RemoveChild(OrigRemoveChild orig, FContainer self, FNode node)
+    {
+        RuntimeSession session = active;
+        if (session == null || self == null || node == null || !session.IsOwnedExecution(session.Room))
+        {
+            orig(self, node);
+            return;
+        }
+
+        NodePlacement before = NodePlacement.Capture(node);
+        orig(self, node);
+        session.ObserveNodeMutation(node, before, NodePlacement.Capture(node));
+    }
+
+    private static void FContainer_RemoveAllChildren(OrigRemoveAllChildren orig, FContainer self)
+    {
+        RuntimeSession session = active;
+        if (session == null || self == null || !session.IsOwnedExecution(session.Room))
+        {
+            orig(self);
+            return;
+        }
+
+        List<NodeMutationProbe> probes = new();
+        List<FNode> children = self._childNodes;
+        if (children != null)
+        {
+            for (int i = 0; i < children.Count; i++)
+            {
+                FNode node = children[i];
+                if (node != null)
+                    probes.Add(new NodeMutationProbe(node, NodePlacement.Capture(node)));
+            }
+        }
+
+        orig(self);
+
+        for (int i = 0; i < probes.Count; i++)
+        {
+            NodeMutationProbe probe = probes[i];
+            session.ObserveNodeMutation(
+                probe.Node,
+                probe.Before,
+                NodePlacement.Capture(probe.Node));
+        }
+    }
+
+    private static void DisposeHooks()
+    {
+        try { addChildHook?.Dispose(); }
+        catch { }
+        try { addChildAtIndexHook?.Dispose(); }
+        catch { }
+        try { removeChildHook?.Dispose(); }
+        catch { }
+        try { removeAllChildrenHook?.Dispose(); }
+        catch { }
+        addChildHook = null;
+        addChildAtIndexHook = null;
+        removeChildHook = null;
+        removeAllChildrenHook = null;
+    }
+
     private static bool ContainsReference(List<UpdatableAndDeletable> values, UpdatableAndDeletable target)
     {
         if (values == null || target == null) return false;
@@ -293,18 +370,21 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         internal void ObserveNodeMutation(FNode node, NodePlacement before, NodePlacement after)
         {
-            if (node == null || after.Container == null || before.Equals(after))
+            if (node == null || before.Equals(after))
                 return;
 
             if (ownedNodes.Contains(node))
                 return;
 
-            if (before.Container == null)
+            if (before.Container == null && after.Container != null)
             {
                 if (ownedNodes.Add(node))
                     ownedNodeOrder.Add(node);
                 return;
             }
+
+            if (before.Container == null)
+                return;
 
             if (!nodeMoves.TryGetValue(node, out NodeMoveMutation mutation))
             {
@@ -399,6 +479,18 @@ internal static class EffectPreviewRuntimeVisualOwnership
             ownedRuntimeObjects.Clear();
             return new EffectPreviewRuntimeVisualRollbackReport(leak, summary);
         }
+    }
+
+    private readonly struct NodeMutationProbe
+    {
+        internal NodeMutationProbe(FNode node, NodePlacement before)
+        {
+            Node = node;
+            Before = before;
+        }
+
+        internal FNode Node { get; }
+        internal NodePlacement Before { get; }
     }
 
     private readonly struct NodePlacement : IEquatable<NodePlacement>
