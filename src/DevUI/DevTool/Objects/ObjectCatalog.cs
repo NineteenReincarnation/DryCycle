@@ -86,6 +86,14 @@ public static class ObjectCatalog
     private static int cachedTypeCount = -1;
     private static long registrationOrder;
 
+    static ObjectCatalog()
+    {
+        // Objects workspace initialization is guaranteed to touch ObjectCatalog before an object
+        // inspector is rendered. Register the optional reflection-only POM adapter here so all
+        // RegionKit/POM ManagedData objects get first-class native fields without hard-linking POM.
+        PomManagedDataInspectorAdapter.EnsureRegistered();
+    }
+
     public static void RegisterDescriptor(ObjectDescriptor descriptor, int priority = 0)
     {
         if (descriptor?.Type?.value == null) throw new ArgumentNullException(nameof(descriptor));
