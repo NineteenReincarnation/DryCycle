@@ -28,7 +28,7 @@ internal static class DevToolRuntime
     // TEMPORARY: live RoomEffect hover preview is disabled while its visual rollback/runtime
     // behavior is being repaired. Keep the preview implementation intact so restoring it later is
     // a one-line gate change instead of another architectural rewrite.
-    private const bool EffectLivePreviewEnabled = false;
+    private static readonly bool EffectLivePreviewEnabled = false;
 
     // Compatibility accessor for infrastructure that needs the live editor session.
     // DevToolSessionHub remains the single source of truth.
