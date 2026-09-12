@@ -289,8 +289,8 @@ internal static class ObjectInspectorView
         }
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "通过原控件行为边界驱动 Button、Slider、Cycler、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
-            "Buttons, sliders, cyclers, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
+            "通过原控件行为边界驱动布尔、Button、Slider、Cycler、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
+            "Booleans, buttons, sliders, cyclers, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
         for (int i = 0; i < controls.Length; i++)
         {
@@ -300,6 +300,9 @@ internal static class ObjectInspectorView
 
             switch (control.Kind)
             {
+                case LegacyControlKind.Boolean:
+                    DrawLegacyBoolean(inspector, control, stateKey, visibleLabel);
+                    break;
                 case LegacyControlKind.Button:
                     DrawLegacyButton(inspector, control, stateKey, visibleLabel);
                     break;
@@ -331,6 +334,29 @@ internal static class ObjectInspectorView
         }
 
         DrawLegacyFallbackButton(inspector);
+    }
+
+    private static void DrawLegacyBoolean(
+        EditorInspectorSnapshot inspector,
+        LegacyControlSnapshot control,
+        string stateKey,
+        string visibleLabel)
+    {
+        bool value = control.BooleanValue;
+        string label = visibleLabel + "##DevToolLegacyBoolean_" + stateKey;
+        if (ImGui.Checkbox(label, ref value))
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.InvokeLegacyButton,
+                inspector.ObjectIndex,
+                text: control.Path));
+        }
+
+        if (!string.IsNullOrWhiteSpace(control.ValueText))
+        {
+            ImGui.SameLine();
+            DevToolWidgets.MutedText(control.ValueText);
+        }
     }
 
     private static void DrawLegacyButton(
