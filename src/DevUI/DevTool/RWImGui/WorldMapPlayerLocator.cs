@@ -27,6 +27,8 @@ public sealed class WorldMapPlayerLocatorPlugin : BaseUnityPlugin
 
     private void OnEnable() => WorldMapPlayerLocator.Enable(Logger);
 
+    private void Update() => WorldMapPlayerLocator.UpdateFromMainThread();
+
     private void OnDisable() => WorldMapPlayerLocator.Disable();
 }
 
@@ -87,6 +89,7 @@ internal static class WorldMapPlayerLocator
     private static object toolbarHook;
     private static bool enabled;
     private static bool showPlayers = true;
+    private static volatile Marker[] currentMarkers = EmptyMarkers;
 
     private static FieldInfo panField;
     private static FieldInfo zoomField;
@@ -150,6 +153,7 @@ internal static class WorldMapPlayerLocator
     {
         DisposeHook(ref canvasHook);
         DisposeHook(ref toolbarHook);
+        currentMarkers = EmptyMarkers;
         IconCache.Clear();
         panField = null;
         zoomField = null;
@@ -157,6 +161,30 @@ internal static class WorldMapPlayerLocator
         layerVisibleField = null;
         enabled = false;
         log = null;
+    }
+
+    /// <summary>
+    /// Reads Rain World objects and loads any icon files only from BepInEx/Unity Update. The DX11
+    /// ImGui render callback consumes the immutable array reference produced here and never touches
+    /// Texture2D creation, file IO, or live creature state.
+    /// </summary>
+    internal static void UpdateFromMainThread()
+    {
+        if (!enabled)
+        {
+            currentMarkers = EmptyMarkers;
+            return;
+        }
+
+        try
+        {
+            currentMarkers = CaptureMarkersFromMainThread();
+        }
+        catch (Exception error)
+        {
+            currentMarkers = EmptyMarkers;
+            log?.LogDebug("World Map player snapshot skipped: " + error.Message);
+        }
     }
 
     private static void DrawToolbarHook(OrigWorldMapMethod orig, EditorMapPresentationSnapshot snapshot)
@@ -176,14 +204,14 @@ internal static class WorldMapPlayerLocator
         if (!showPlayers || snapshot?.Available != true) return;
 
         // DrawCanvas creates one full-canvas InvisibleButton before issuing draw-list commands.
-        // No later map operation replaces that item, so its rectangle remains the exact clipped
-        // map viewport here without duplicating WorldMapView's window-layout calculations.
+        // No later map operation replaces that item, so its rectangle remains the exact map
+        // viewport here without duplicating WorldMapView's window-layout calculations.
         Num.Vector2 canvasMin = ImGui.GetItemRectMin();
         Num.Vector2 canvasMax = ImGui.GetItemRectMax();
         if (canvasMax.X <= canvasMin.X || canvasMax.Y <= canvasMin.Y) return;
 
-        Marker[] markers = CaptureMarkers();
-        if (markers.Length == 0) return;
+        Marker[] markers = currentMarkers;
+        if (markers == null || markers.Length == 0) return;
 
         Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
@@ -195,41 +223,49 @@ internal static class WorldMapPlayerLocator
         ImGuiIOPtr io = ImGui.GetIO();
         bool multiple = markers.Length > 1;
 
-        for (int i = 0; i < markers.Length; i++)
+        draw.PushClipRect(canvasMin, canvasMax, true);
+        try
         {
-            Marker marker = markers[i];
-            EditorMapRoomSnapshot room = FindRoom(snapshot, marker.RoomIndex);
-            if (room == null || !IsLayerVisible(room.Layer, layerVisible)) continue;
+            for (int i = 0; i < markers.Length; i++)
+            {
+                Marker marker = markers[i];
+                EditorMapRoomSnapshot room = FindRoom(snapshot, marker.RoomIndex);
+                if (room == null || !IsLayerVisible(room.Layer, layerVisible)) continue;
 
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
-            Num.Vector2 worldPosition = localPositions != null && localPositions.TryGetValue(room.RoomIndex, out Num.Vector2 local)
-                ? local
-                : new Num.Vector2(room.X, room.Y);
-            Num.Vector2 roomMin = canvasMin + pan + worldPosition * zoom;
+                EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+                Num.Vector2 worldPosition = localPositions != null && localPositions.TryGetValue(room.RoomIndex, out Num.Vector2 local)
+                    ? local
+                    : new Num.Vector2(room.X, room.Y);
+                Num.Vector2 roomMin = canvasMin + pan + worldPosition * zoom;
 
-            float tileX = marker.HasTilePosition
-                ? Clamp(marker.TileX, 0f, Math.Max(1f, visual.WidthTiles))
-                : Math.Max(1f, visual.WidthTiles) * 0.5f;
-            float tileY = marker.HasTilePosition
-                ? Clamp(marker.TileY, 0f, Math.Max(1f, visual.HeightTiles))
-                : Math.Max(1f, visual.HeightTiles) * 0.5f;
+                float tileX = marker.HasTilePosition
+                    ? Clamp(marker.TileX, 0f, Math.Max(1f, visual.WidthTiles))
+                    : Math.Max(1f, visual.WidthTiles) * 0.5f;
+                float tileY = marker.HasTilePosition
+                    ? Clamp(marker.TileY, 0f, Math.Max(1f, visual.HeightTiles))
+                    : Math.Max(1f, visual.HeightTiles) * 0.5f;
 
-            Num.Vector2 point = new(
-                roomMin.X + tileX * TileDisplaySize * zoom,
-                roomMin.Y + (visual.HeightTiles - tileY) * TileDisplaySize * zoom);
+                Num.Vector2 point = new(
+                    roomMin.X + tileX * TileDisplaySize * zoom,
+                    roomMin.Y + (visual.HeightTiles - tileY) * TileDisplaySize * zoom);
 
-            if (!PointNearCanvas(point, canvasMin, canvasMax, 28f)) continue;
+                if (!PointNearCanvas(point, canvasMin, canvasMax, 28f)) continue;
 
-            Num.Vector2 offset = multiple ? MultiplayerOffset(marker.PlayerNumber) : Num.Vector2.Zero;
-            Num.Vector2 markerCenter = point + offset;
-            DrawMarker(draw, marker, markerCenter, zoom, multiple);
+                Num.Vector2 offset = multiple ? MultiplayerOffset(marker.PlayerNumber) : Num.Vector2.Zero;
+                Num.Vector2 markerCenter = point + offset;
+                DrawMarker(draw, marker, markerCenter, zoom, multiple);
 
-            if (IsMarkerHovered(marker, markerCenter, io.MousePos, zoom))
-                DrawTooltip(marker, room);
+                if (IsMarkerHovered(marker, markerCenter, io.MousePos, zoom))
+                    DrawTooltip(marker, room);
+            }
+        }
+        finally
+        {
+            draw.PopClipRect();
         }
     }
 
-    private static Marker[] CaptureMarkers()
+    private static Marker[] CaptureMarkersFromMainThread()
     {
         EditorSession session = DevToolRuntime.ActiveSession;
         RainWorldGame game = session?.Owner?.game;
