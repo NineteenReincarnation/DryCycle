@@ -192,6 +192,14 @@ public static class EditorActions
             () => LegacyDevInterfaceBridge.ResetSlider(session.Owner, target, path));
     }
 
+    public static bool SetLegacyText(EditorSession session, PlacedObject target, string path, string value)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy text",
+            () => LegacyDevInterfaceBridge.SetText(session.Owner, target, path, value));
+    }
+
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
