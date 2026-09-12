@@ -29,7 +29,27 @@ public static class UniversalDevUiPresentationHub
     private static Page lastPage;
     private static int lastCaptureFrame = int.MinValue / 2;
 
-    public static UniversalDevUiPresentationSnapshot Current => current;
+    /// <summary>
+    /// The RWImGui frontend reads this once per frame. Use that read as the page-agnostic pump for
+    /// queued generic edits and snapshot refreshes, avoiding a second DevUI.Update hook and keeping
+    /// all third-party interaction behind the same semantic bridge.
+    /// </summary>
+    public static UniversalDevUiPresentationSnapshot Current
+    {
+        get
+        {
+            EditorSession session = DevToolSessionHub.Current;
+            if (session?.Owner == null || !DevToolSessionHub.IsCurrentSessionLive)
+            {
+                if (current.Available) Clear();
+                return current;
+            }
+
+            UniversalDevUiCommandQueue.Process(session);
+            Publish(session.Owner);
+            return current;
+        }
+    }
 
     internal static void Publish(global::DevInterface.DevUI owner)
     {
