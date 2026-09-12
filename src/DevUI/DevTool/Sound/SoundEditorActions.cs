@@ -37,8 +37,6 @@ internal static class SoundEditorActions
         if (session.Owner?.activePage is not SoundPage page) return false;
         if (soundType < 0 || soundType > 2) return false;
 
-        // Vanilla CreateSoundRep is a toggle for Omni/Directional sounds. New UI treats Add
-        // as idempotent: if a local sound already exists, select it instead of deleting it.
         if (soundType != AmbientSound.Type.Spot.Index)
         {
             for (int i = 0; i < session.RoomSettings.ambientSounds.Count; i++)
@@ -56,8 +54,6 @@ internal static class SoundEditorActions
         RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
         int beforeCount = session.RoomSettings.ambientSounds.Count;
 
-        // Keep the vanilla public creation path so mods that extend SoundPage through ordinary
-        // Rain World hooks remain compatible. The guard above removes its destructive toggle.
         page.soundType = soundType;
         page.CreateSoundRep(sample);
 
@@ -176,6 +172,148 @@ internal static class SoundEditorActions
                     return false;
             }
         });
+    }
+
+    internal static bool AddSoundToGroup(EditorSession session, int index, string groupId)
+    {
+        if (!TryGetSound(session, index, out AmbientSound sound) || string.IsNullOrWhiteSpace(groupId))
+            return false;
+
+        global::Room room = session.Room;
+        SoundGroupSoundDefinition definition = new()
+        {
+            Type = sound.type?.value ?? "Omnidirectional",
+            Sample = sound.sample ?? string.Empty,
+            Volume = sound.volume,
+            Pitch = sound.pitch
+        };
+
+        if (sound is DopplerAffectedSound doppler)
+            definition.Doppler = doppler.dopplerFac;
+
+        if (sound is DirectionalSound directional)
+        {
+            definition.DirectionX = directional.direction.x;
+            definition.DirectionY = directional.direction.y;
+        }
+        else if (sound is SpotSound spot)
+        {
+            definition.X = room != null && room.PixelWidth > 0.01f
+                ? Mathf.Clamp01(spot.pos.x / room.PixelWidth)
+                : 0.5f;
+            definition.Y = room != null && room.PixelHeight > 0.01f
+                ? Mathf.Clamp01(spot.pos.y / room.PixelHeight)
+                : 0.5f;
+            definition.Radius = spot.rad;
+            definition.Taper = spot.taper;
+        }
+
+        return SoundGroupLibrary.AddSoundToLocalGroup(groupId, definition);
+    }
+
+    internal static bool ApplyGroup(EditorSession session, string groupId)
+    {
+        if (session?.RoomSettings?.ambientSounds == null || session.Room == null ||
+            string.IsNullOrWhiteSpace(groupId) ||
+            !SoundGroupLibrary.TryGetGroup(groupId, out SoundGroupDefinition group))
+            return false;
+
+        RoomSettings settings = session.RoomSettings;
+        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(settings);
+        if (before == null) return false;
+
+        int changed = 0;
+        int lastIndex = -1;
+        for (int i = 0; i < group.Sounds.Count; i++)
+        {
+            SoundGroupSoundDefinition definition = group.Sounds[i];
+            if (!SoundSampleCatalog.Resolve(definition.Sample).Available)
+                continue;
+
+            AmbientSound sound = CreateFromDefinition(session.Room, definition, i);
+            if (sound == null) continue;
+
+            if (sound.type?.Index != AmbientSound.Type.Spot.Index)
+            {
+                bool overrideExisting = false;
+                for (int existingIndex = settings.ambientSounds.Count - 1; existingIndex >= 0; existingIndex--)
+                {
+                    AmbientSound existing = settings.ambientSounds[existingIndex];
+                    if (existing?.type == sound.type &&
+                        string.Equals(existing.sample, sound.sample, StringComparison.Ordinal))
+                    {
+                        settings.ambientSounds.RemoveAt(existingIndex);
+                        overrideExisting = true;
+                    }
+                }
+                sound.overWrite = overrideExisting;
+            }
+
+            settings.ambientSounds.Add(sound);
+            lastIndex = settings.ambientSounds.Count - 1;
+            changed++;
+        }
+
+        if (changed == 0) return false;
+
+        RefreshSoundPage(session);
+        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(settings);
+        if (SnapshotHistoryEntry.TryCreate(
+                "Apply sound group " + (group.Name ?? group.Id),
+                before,
+                after,
+                out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+
+        SoundEditorState state = SoundEditorStateHub.Get(session);
+        if (state != null) state.SelectedIndex = lastIndex;
+        return true;
+    }
+
+    private static AmbientSound CreateFromDefinition(
+        global::Room room,
+        SoundGroupSoundDefinition definition,
+        int ordinal)
+    {
+        AmbientSound sound;
+        if (string.Equals(definition.Type, "Directional", StringComparison.Ordinal))
+        {
+            DirectionalSound directional = new(definition.Sample, inherited: false)
+            {
+                direction = NormalizeDirection(definition.DirectionX, definition.DirectionY)
+            };
+            directional.dopplerFac = Mathf.Clamp01(definition.Doppler);
+            sound = directional;
+        }
+        else if (string.Equals(definition.Type, "Spot", StringComparison.Ordinal))
+        {
+            SpotSound spot = new(definition.Sample, inherited: false)
+            {
+                pos = new Vector2(
+                    Mathf.Clamp01(definition.X) * room.PixelWidth,
+                    Mathf.Clamp01(definition.Y) * room.PixelHeight),
+                rad = Mathf.Max(0f, definition.Radius),
+                taper = Mathf.Clamp01(definition.Taper)
+            };
+            spot.dopplerFac = Mathf.Clamp01(definition.Doppler);
+            spot.radHandlePosition = Vector2.right * spot.rad;
+            sound = spot;
+        }
+        else
+        {
+            sound = new OmniDirectionalSound(definition.Sample, inherited: false);
+        }
+
+        sound.volume = Mathf.Clamp01(definition.Volume);
+        sound.pitch = Mathf.Clamp(definition.Pitch, 0.1f, 1.9f);
+        sound.panelPosition = new Vector2(52f + (ordinal % 8) * 14f, 52f + (ordinal / 8) * 14f);
+        return sound;
+    }
+
+    private static Vector2 NormalizeDirection(float x, float y)
+    {
+        Vector2 value = new(x, y);
+        return value.sqrMagnitude > 0.0001f ? value.normalized : Vector2.down;
     }
 
     private static bool Mutate(
