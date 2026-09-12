@@ -36,6 +36,7 @@ public sealed class EditorSoundPresentationSnapshot
     public static readonly EditorSoundPresentationSnapshot Empty = new();
 
     public bool Available { get; init; }
+    public string RoomKey { get; init; } = string.Empty;
     public float BackgroundDroneVolume { get; init; }
     public float NoThreatDroneVolume { get; init; }
     public string[] Samples { get; init; } = Array.Empty<string>();
@@ -144,6 +145,7 @@ public static class SoundEditorPresentationHub
         current = new EditorSoundPresentationSnapshot
         {
             Available = true,
+            RoomKey = session.Room?.abstractRoom?.name ?? string.Empty,
             BackgroundDroneVolume = session.RoomSettings.BkgDroneVolume,
             NoThreatDroneVolume = session.RoomSettings.BkgDroneNoThreatVolume,
             Samples = samples,
@@ -160,6 +162,7 @@ public enum SoundEditorCommandKind
 {
     Select,
     Create,
+    CreateFromLibrary,
     Delete,
     SetRoomValue,
     SetSoundValue,
@@ -169,6 +172,8 @@ public enum SoundEditorCommandKind
     CreateGroup,
     DeleteGroup,
     AddSoundToGroup,
+    AddSoundsToGroup,
+    CreateGroupFromSounds,
     ApplyGroup
 }
 
@@ -180,7 +185,8 @@ public readonly struct SoundEditorCommand
         string key = null,
         string text = null,
         int secondaryIndex = -1,
-        EditorPropertyValue value = default)
+        EditorPropertyValue value = default,
+        int[] indices = null)
     {
         Kind = kind;
         Index = index;
@@ -188,6 +194,7 @@ public readonly struct SoundEditorCommand
         Text = text;
         SecondaryIndex = secondaryIndex;
         Value = value;
+        Indices = indices ?? Array.Empty<int>();
     }
 
     public SoundEditorCommandKind Kind { get; }
@@ -196,6 +203,7 @@ public readonly struct SoundEditorCommand
     public string Text { get; }
     public int SecondaryIndex { get; }
     public EditorPropertyValue Value { get; }
+    public int[] Indices { get; }
 }
 
 public static class SoundEditorCommandQueue
@@ -216,6 +224,14 @@ public static class SoundEditorCommandQueue
                         break;
                     case SoundEditorCommandKind.Create:
                         SoundEditorActions.Create(session, command.Text, command.SecondaryIndex);
+                        break;
+                    case SoundEditorCommandKind.CreateFromLibrary:
+                        SoundEditorActions.CreateFromLibrary(
+                            session,
+                            command.Text,
+                            command.SecondaryIndex,
+                            command.Key,
+                            command.Index);
                         break;
                     case SoundEditorCommandKind.Delete:
                         SoundEditorActions.Delete(session, command.Index);
@@ -243,6 +259,16 @@ public static class SoundEditorCommandQueue
                         break;
                     case SoundEditorCommandKind.AddSoundToGroup:
                         SoundEditorActions.AddSoundToGroup(session, command.Index, command.Key);
+                        break;
+                    case SoundEditorCommandKind.AddSoundsToGroup:
+                        SoundEditorActions.AddSoundsToGroup(session, command.Indices, command.Key);
+                        break;
+                    case SoundEditorCommandKind.CreateGroupFromSounds:
+                        SoundEditorActions.CreateGroupFromSounds(
+                            session,
+                            command.Indices,
+                            command.Key,
+                            command.Text);
                         break;
                     case SoundEditorCommandKind.ApplyGroup:
                         SoundEditorActions.ApplyGroup(session, command.Key);
