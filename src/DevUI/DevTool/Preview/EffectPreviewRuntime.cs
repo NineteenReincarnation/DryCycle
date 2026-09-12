@@ -24,9 +24,6 @@ public static class EffectPreviewIntentHub
 
         lock (Gate)
         {
-            // After a real click, keep this row suppressed until the pointer actually leaves it.
-            // This prevents the freshly-created real effect from immediately receiving another
-            // temporary preview overlay just because the mouse is still resting on the same row.
             if (!string.IsNullOrEmpty(suppressedType))
             {
                 if (string.Equals(suppressedType, typeName, StringComparison.Ordinal))
@@ -127,9 +124,12 @@ public static class EffectPreviewIntentHub
 ///
 /// Stage one inserts an ordinary temporary RoomEffect at the front of RoomSettings.effects so any
 /// vanilla or mod code that reads GetEffect/GetEffectAmount sees it without a compatibility API.
-/// Stage two may bootstrap load-time runtime objects through the generic HookGen A/B probe and the
-/// exact-name constructor convention. Every stage-two artifact is owned by one transaction and is
-/// rolled back by identity when hover ends.
+/// Stage two may bootstrap load-time runtime objects through generic IL/HookGen inference. Runtime
+/// objects and their synchronously spawned descendants are owned by one transaction and rolled back
+/// by identity when hover ends.
+///
+/// Advanced preview safety is learned at runtime per RoomEffect.Type. A failed/contaminating type is
+/// blocked only from stage two for the remainder of the plugin session; stage-one preview continues.
 /// </summary>
 internal static class EffectPreviewRuntime
 {
@@ -146,8 +146,6 @@ internal static class EffectPreviewRuntime
     private static string pendingType = string.Empty;
     private static long pendingSinceTicks;
     private static int baselineEffectCount;
-    private static int baselineUpdateCount = -1;
-    private static int baselineDrawableCount = -1;
 
     internal static bool IsActive => previewEffect != null;
     internal static string ActiveType => activeType ?? string.Empty;
@@ -166,6 +164,7 @@ internal static class EffectPreviewRuntime
     {
         if (!enabled) return;
         Reset();
+        EffectPreviewSafetyRegistry.Clear();
         EffectPreviewObjectCapture.Disable();
         enabled = false;
     }
@@ -237,6 +236,17 @@ internal static class EffectPreviewRuntime
     {
         if (!IsActive) return;
 
+        // A preview-owned runtime controller may synchronously spawn a PhysicalObject or hit another
+        // universally non-reversible path. Room.AddObject marks the transaction contaminated during
+        // that frame; abort as soon as the game update returns to this safe outer boundary.
+        if (ownership?.RequiresAbort == true)
+        {
+            string detail = ownership.ContaminationReason;
+            End(string.IsNullOrWhiteSpace(detail) ? "unsafe runtime propagation" : detail);
+            ClearPending();
+            return;
+        }
+
         // DevUI.Update is not guaranteed to run a final time when devtools are closed. The game
         // update hook is an emergency rollback path so a hover preview cannot leak into gameplay.
         if (!DevToolSessionHub.IsCurrentSessionLive ||
@@ -271,15 +281,11 @@ internal static class EffectPreviewRuntime
             RoomSettings.RoomEffect.Type type = new(typeName, false);
             RoomSettings.RoomEffect effect = new(type, PreviewAmount, false)
             {
-                // RoomSettings.Save honors this field, so even an unexpected save path has a
-                // persistence barrier in addition to explicit rollback before editor Save.
                 save = false,
                 overWrite = false
             };
 
             baselineEffectCount = settings.effects.Count;
-            baselineUpdateCount = room.updateList?.Count ?? -1;
-            baselineDrawableCount = room.drawableObjects?.Count ?? -1;
 
             // GetEffect/GetEffectAmount return the first matching entry. Front insertion means
             // preview also works when this room already inherits or locally contains the same type,
@@ -292,28 +298,55 @@ internal static class EffectPreviewRuntime
             activeType = typeName;
             ownership = new EffectPreviewOwnershipTransaction(room);
 
-            try
+            bool blocked = EffectPreviewSafetyRegistry.IsAdvancedPreviewBlocked(typeName, out _);
+            if (!blocked)
             {
-                EffectPreviewBootstrapper.Bootstrap(room, settings, effect, ownership);
-            }
-            catch (Exception error)
-            {
-                // Bootstrap is optional. A fault here must degrade to stage-one state reading, not
-                // cancel the hover preview or leave partially committed runtime objects behind.
-                Plugin.Logger?.LogWarning(
-                    "DevTool effect preview bootstrap failed for '" + typeName + "': " + error.Message);
-                ownership.Rollback("bootstrap failure");
-                ownership = new EffectPreviewOwnershipTransaction(room);
-                LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
+                try
+                {
+                    EffectPreviewBootstrapper.Bootstrap(room, settings, effect, ownership);
+
+                    if (ownership.RequiresAbort)
+                    {
+                        EffectPreviewRollbackReport report = ownership.Rollback("unsafe bootstrap result");
+                        EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                        ownership = new EffectPreviewOwnershipTransaction(room);
+                        LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
+                    }
+                    else
+                    {
+                        // Any descendants created later from preview-owned update code now inherit
+                        // the same transaction through the generic Room.AddObject choke point.
+                        ownership.ActivateRuntimePropagation();
+                    }
+                }
+                catch (Exception error)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "DevTool effect preview bootstrap failed for '" + typeName + "': " + error.Message);
+                    EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "bootstrap exception: " + error.Message);
+
+                    EffectPreviewRollbackReport report = ownership.Rollback("bootstrap failure");
+                    EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                    ownership = new EffectPreviewOwnershipTransaction(room);
+                    LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
+                }
             }
         }
         catch (Exception error)
         {
-            try { ownership?.Rollback("begin failure"); }
+            try
+            {
+                EffectPreviewRollbackReport report = ownership?.Rollback("begin failure") ??
+                                                     EffectPreviewRollbackReport.Clean;
+                EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+            }
             catch { }
+
             if (settings?.effects != null && previewEffect != null)
                 LoadedHookReplayProbe.RemoveExact(settings.effects, previewEffect);
+
             Plugin.Logger?.LogWarning("DevTool effect preview begin failed for '" + typeName + "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "preview begin exception: " + error.Message);
             ClearActiveState();
         }
     }
@@ -321,13 +354,17 @@ internal static class EffectPreviewRuntime
     private static void End(string reason)
     {
         RoomSettings settings = activeSettings;
-        global::Room room = activeRoom;
         string typeName = activeType;
         RoomSettings.RoomEffect target = previewEffect;
 
         if (target == null)
         {
-            try { ownership?.Rollback(reason); }
+            try
+            {
+                EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
+                                                     EffectPreviewRollbackReport.Clean;
+                EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+            }
             catch { }
             ClearActiveState();
             return;
@@ -338,7 +375,8 @@ internal static class EffectPreviewRuntime
         {
             // Runtime objects may need GetEffect/GetEffectAmount during Destroy(), so keep the
             // temporary effect visible until all owned objects and manager fields have rolled back.
-            ownership?.Rollback(reason);
+            EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
+                                                 EffectPreviewRollbackReport.Clean;
 
             List<RoomSettings.RoomEffect> effects = settings?.effects;
             if (effects != null)
@@ -350,14 +388,24 @@ internal static class EffectPreviewRuntime
                     removed = true;
                 }
 
-                // Never repair by type name. A third-party mod is allowed to mutate the list while
-                // preview is active; deleting by type could destroy a real document effect.
                 if (removed && effects.Count != baselineEffectCount)
                 {
                     Plugin.Logger?.LogDebug(
                         "DevTool effect preview list changed while active: " + typeName +
                         " (baseline=" + baselineEffectCount + ", now=" + effects.Count +
                         ", reason=" + reason + ")");
+                }
+
+                bool exactPreviewStillPresent = false;
+                for (int i = 0; i < effects.Count; i++)
+                {
+                    if (!ReferenceEquals(effects[i], target)) continue;
+                    exactPreviewStillPresent = true;
+                    break;
+                }
+                if (exactPreviewStillPresent)
+                {
+                    EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "temporary RoomEffect survived rollback");
                 }
             }
 
@@ -368,23 +416,12 @@ internal static class EffectPreviewRuntime
                     " (reason=" + reason + ")");
             }
 
-            // Counts are checked only after the ownership transaction has rolled back. A mismatch
-            // now is a real leak/surprising third-party mutation rather than an expected preview
-            // object that is still alive.
-            int updateNow = room?.updateList?.Count ?? -1;
-            int drawableNow = room?.drawableObjects?.Count ?? -1;
-            if ((baselineUpdateCount >= 0 && updateNow >= 0 && updateNow != baselineUpdateCount) ||
-                (baselineDrawableCount >= 0 && drawableNow >= 0 && drawableNow != baselineDrawableCount))
-            {
-                Plugin.Logger?.LogWarning(
-                    "DevTool effect preview rollback leak check changed for '" + typeName +
-                    "': update " + baselineUpdateCount + "->" + updateNow +
-                    ", drawable " + baselineDrawableCount + "->" + drawableNow + ".");
-            }
+            EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
         }
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool effect preview rollback failed for '" + typeName + "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "rollback exception: " + error.Message);
         }
         finally
         {
@@ -400,13 +437,13 @@ internal static class EffectPreviewRuntime
 
     private static void ClearActiveState()
     {
+        try { ownership?.DeactivateRuntimePropagation(); }
+        catch { }
         activeRoom = null;
         activeSettings = null;
         previewEffect = null;
         ownership = null;
         activeType = string.Empty;
         baselineEffectCount = 0;
-        baselineUpdateCount = -1;
-        baselineDrawableCount = -1;
     }
 }
