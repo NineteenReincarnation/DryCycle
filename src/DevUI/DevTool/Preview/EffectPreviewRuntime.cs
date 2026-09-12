@@ -245,14 +245,22 @@ internal static class EffectPreviewRuntime
     {
         if (!IsActive) return;
 
-        // DevToolRuntime calls this after the real game update. Capture the final value of any
-        // exclusively preview-owned RoomCamera fields before a possible safety abort rolls them back.
+        // Called after the real game update. Record the final reversible RoomCamera state before
+        // deciding whether either ownership layer discovered an unsafe descendant this frame.
         EffectPreviewRuntimeVisualOwnership.ObserveAfterGameUpdate(game);
 
         if (ownership?.RequiresAbort == true)
         {
             string detail = ownership.ContaminationReason;
             End(string.IsNullOrWhiteSpace(detail) ? "unsafe runtime propagation" : detail);
+            ClearPending();
+            return;
+        }
+
+        if (EffectPreviewRuntimeVisualOwnership.RequiresAbort)
+        {
+            string detail = EffectPreviewRuntimeVisualOwnership.AbortReason;
+            End(string.IsNullOrWhiteSpace(detail) ? "unsafe runtime visual propagation" : detail);
             ClearPending();
             return;
         }
@@ -342,9 +350,6 @@ internal static class EffectPreviewRuntime
                             ownership);
                     }
 
-                    // Seal only after all synchronous bootstrap paths have returned. Any direct
-                    // camera/Futile delta inside this window can be attributed to Preview; later
-                    // frame changes are intentionally handled by runtime ownership or rejected.
                     sceneState?.Seal();
 
                     bool noAdvancedArtifacts =
@@ -498,12 +503,9 @@ internal static class EffectPreviewRuntime
         }
         catch (Exception error)
         {
-            try { RollbackRuntimeVisualState(typeName, reason + " after rollback exception"); }
-            catch { }
-            try { RollbackSceneState(typeName, reason + " after rollback exception"); }
-            catch { }
-            try { RollbackVisualState(typeName, reason + " after rollback exception"); }
-            catch { }
+            try { RollbackRuntimeVisualState(typeName, reason + " after rollback exception"); } catch { }
+            try { RollbackSceneState(typeName, reason + " after rollback exception"); } catch { }
+            try { RollbackVisualState(typeName, reason + " after rollback exception"); } catch { }
 
             Plugin.Logger?.LogWarning("DevTool effect preview rollback failed for '" + typeName + "': " + error.Message);
             EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "rollback exception: " + error.Message);
