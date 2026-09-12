@@ -200,6 +200,14 @@ public static class EditorActions
             () => LegacyDevInterfaceBridge.SetText(session.Owner, target, path, value));
     }
 
+    public static bool SetLegacyDirection(EditorSession session, PlacedObject target, string path, float x, float y)
+    {
+        return ExecuteLegacyControl(
+            session,
+            "Legacy direction",
+            () => LegacyDevInterfaceBridge.SetDirection(session.Owner, target, path, x, y));
+    }
+
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
