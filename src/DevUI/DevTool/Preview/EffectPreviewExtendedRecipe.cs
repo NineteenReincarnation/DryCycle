@@ -429,7 +429,7 @@ internal static class EffectPreviewExtendedRecipeBootstrap
     private static bool TryEffectTypeValue(FieldInfo field, out string value)
     {
         value = string.Empty;
-        if (field == null || field.FieldType != typeof(RoomSettings.RoomEffect.Type))
+        if (field == null || !field.IsStatic || field.FieldType != typeof(RoomSettings.RoomEffect.Type))
             return false;
 
         try
