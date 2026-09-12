@@ -12,19 +12,26 @@ internal static class UiModeSwitch
         // Apply one shared visual language before any rebuilt editor window is drawn this frame.
         DevToolUiTheme.Apply();
 
+        Num.Vector2 display = ImGui.GetIO().DisplaySize;
+
         // In New UI mode the switch, language controls, commands and session status all live in
         // ControlCenterWindow. Vanilla keeps only this deliberately small return surface so the
         // original DevUI remains readable and the developer can always switch back.
         if (EditorUiModeState.UseVanilla)
         {
             DrawVanillaReturnPanel();
-            return;
+        }
+        else
+        {
+            // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
+            // no selection/group exists prevents an empty fourth panel from competing with the room.
+            if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
+                GroupStatusWindow.Draw(display);
         }
 
-        // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
-        // no selection/group exists prevents an empty fourth panel from competing with the room.
-        if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
-            GroupStatusWindow.Draw(ImGui.GetIO().DisplaySize);
+        // Draw last so shortcut feedback stays above normal editor windows in the fixed top-center
+        // acknowledgement area requested by the editor workflow.
+        ActionToastOverlay.Draw(EditorPresentationHub.Current, display);
     }
 
     private static void DrawVanillaReturnPanel()
