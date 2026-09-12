@@ -6,7 +6,7 @@ using DevInterface;
 
 namespace DryCycle.DevUI.DevTool.Sound;
 
-public static class SoundSampleCatalog
+internal static class SoundSampleCatalog
 {
     private static readonly Dictionary<string, EditorSoundSampleSnapshot> samples =
         new(StringComparer.OrdinalIgnoreCase);
@@ -39,7 +39,7 @@ public static class SoundSampleCatalog
         return result;
     }
 
-    public static EditorSoundSampleSnapshot Resolve(string sample)
+    internal static EditorSoundSampleSnapshot Resolve(string sample)
     {
         if (string.IsNullOrWhiteSpace(sample))
         {
