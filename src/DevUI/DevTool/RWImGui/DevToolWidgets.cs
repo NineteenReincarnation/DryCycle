@@ -145,12 +145,23 @@ internal static class DevToolWidgets
         ImGui.Spacing();
     }
 
+    /// <summary>
+    /// Compatibility overload for existing browsers. Source colour is now resolved centrally from
+    /// the source label so individual views can no longer drift into their own colour conventions.
+    /// </summary>
     internal static void SourceHeader(string text, Num.Vector4 color, float fontScale = 1.38f, float restoreScale = 1f)
     {
+        DevToolSourceMark source = DevToolSourcePresentation.FromLabel(text);
+        SourceHeader(source, fontScale, restoreScale);
+    }
+
+    /// <summary>
+    /// Preferred source-header API when a catalog has a stable source id/kind.
+    /// </summary>
+    internal static void SourceHeader(in DevToolSourceMark source, float fontScale = 1.38f, float restoreScale = 1f)
+    {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
-        ImGui.Spacing();
-        DrawOutlinedText(text, BrightenSourceColor(color), fontScale, 2f, bodyScale);
-        ImGui.Separator();
+        DevToolSourcePresentation.DrawHeader(source, fontScale, bodyScale);
     }
 
     internal static bool NavItem(string label, string id, bool active)
@@ -337,8 +348,8 @@ internal static class DevToolWidgets
 
     private static Num.Vector4 BrightenSourceColor(Num.Vector4 color)
     {
-        // Source headings are secondary hierarchy too. Preserve the source hue while lifting the
-        // floor so mod/DLC colours cannot become unreadably dark over the translucent editor.
+        // Kept for binary/source compatibility with older local experiments; the active source
+        // colour policy now lives in DevToolSourcePresentation.
         const float floor = 0.58f;
         const float lift = 0.20f;
         return new Num.Vector4(
