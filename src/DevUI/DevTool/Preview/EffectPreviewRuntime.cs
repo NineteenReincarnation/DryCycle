@@ -128,9 +128,9 @@ public static class EffectPreviewIntentHub
 /// objects and their synchronously spawned descendants are owned by one transaction and rolled back
 /// by identity when hover ends.
 ///
-/// Global shader values/keywords plus synchronous RoomCamera and direct Futile layer mutations are
-/// journaled before advanced bootstrap and restored on rollback. All discovery is based on the
-/// effect's observed Rain World/Unity behavior rather than a mod id, namespace or private registry.
+/// Global shader values/keywords, synchronous RoomCamera/Futile mutations and runtime Futile nodes
+/// created by preview-owned controllers are journaled and restored on rollback. Runtime camera
+/// behavior that cannot be proven reversible is rejected before live propagation begins.
 ///
 /// Advanced preview safety is learned at runtime per RoomEffect.Type. A failed/contaminating type is
 /// blocked only from stage two for the remainder of the plugin session; stage-one preview continues.
@@ -163,6 +163,7 @@ internal static class EffectPreviewRuntime
     {
         if (enabled) return;
         EffectPreviewObjectCapture.Enable();
+        EffectPreviewRuntimeVisualOwnership.Enable();
         enabled = true;
     }
 
@@ -171,6 +172,7 @@ internal static class EffectPreviewRuntime
         if (!enabled) return;
         Reset();
         EffectPreviewSafetyRegistry.Clear();
+        EffectPreviewRuntimeVisualOwnership.Disable();
         EffectPreviewObjectCapture.Disable();
         enabled = false;
     }
@@ -295,6 +297,9 @@ internal static class EffectPreviewRuntime
             activeType = typeName;
             ownership = new EffectPreviewOwnershipTransaction(room);
 
+            HashSet<UpdatableAndDeletable> runtimeVisualBaseline =
+                EffectPreviewRuntimeVisualOwnership.CaptureBaseline(room);
+
             bool blocked = EffectPreviewSafetyRegistry.IsAdvancedPreviewBlocked(typeName, out _);
             if (!blocked)
             {
@@ -330,15 +335,33 @@ internal static class EffectPreviewRuntime
 
                     // Seal only after all synchronous bootstrap paths have returned. Any direct
                     // camera/Futile delta inside this window can be attributed to Preview; later
-                    // frame changes are intentionally not guessed.
+                    // frame changes are intentionally handled by runtime ownership or rejected.
                     sceneState?.Seal();
 
                     if (ownership.RequiresAbort)
                     {
                         EffectPreviewRollbackReport report = ownership.Rollback("unsafe bootstrap result");
                         EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                        RollbackRuntimeVisualState(typeName, "unsafe bootstrap result");
                         RollbackSceneState(typeName, "unsafe bootstrap result");
                         RollbackVisualState(typeName, "unsafe bootstrap result");
+                        ownership = new EffectPreviewOwnershipTransaction(room);
+                        LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
+                    }
+                    else if (!EffectPreviewRuntimeVisualOwnership.TryAttach(
+                                 room,
+                                 runtimeVisualBaseline,
+                                 out string runtimeVisualFailure))
+                    {
+                        EffectPreviewSafetyRegistry.MarkUnsafe(
+                            typeName,
+                            "runtime visual state is not safely reversible: " + runtimeVisualFailure);
+
+                        EffectPreviewRollbackReport report = ownership.Rollback("unsafe runtime visual state");
+                        EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                        RollbackRuntimeVisualState(typeName, "unsafe runtime visual state");
+                        RollbackSceneState(typeName, "unsafe runtime visual state");
+                        RollbackVisualState(typeName, "unsafe runtime visual state");
                         ownership = new EffectPreviewOwnershipTransaction(room);
                         LoadedHookReplayProbe.EnsurePreviewFirst(settings.effects, effect);
                     }
@@ -355,6 +378,7 @@ internal static class EffectPreviewRuntime
 
                     EffectPreviewRollbackReport report = ownership.Rollback("bootstrap failure");
                     EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                    RollbackRuntimeVisualState(typeName, "bootstrap failure");
                     RollbackSceneState(typeName, "bootstrap failure");
                     RollbackVisualState(typeName, "bootstrap failure");
                     ownership = new EffectPreviewOwnershipTransaction(room);
@@ -369,6 +393,7 @@ internal static class EffectPreviewRuntime
                 EffectPreviewRollbackReport report = ownership?.Rollback("begin failure") ??
                                                      EffectPreviewRollbackReport.Clean;
                 EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                RollbackRuntimeVisualState(typeName, "begin failure");
                 RollbackSceneState(typeName, "begin failure");
                 RollbackVisualState(typeName, "begin failure");
             }
@@ -396,6 +421,7 @@ internal static class EffectPreviewRuntime
                 EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
                                                      EffectPreviewRollbackReport.Clean;
                 EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
+                RollbackRuntimeVisualState(typeName, reason);
                 RollbackSceneState(typeName, reason);
                 RollbackVisualState(typeName, reason);
             }
@@ -409,6 +435,7 @@ internal static class EffectPreviewRuntime
         {
             EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
                                                  EffectPreviewRollbackReport.Clean;
+            RollbackRuntimeVisualState(typeName, reason);
             RollbackSceneState(typeName, reason);
             RollbackVisualState(typeName, reason);
 
@@ -452,6 +479,13 @@ internal static class EffectPreviewRuntime
         }
         catch (Exception error)
         {
+            try { RollbackRuntimeVisualState(typeName, reason + " after rollback exception"); }
+            catch { }
+            try { RollbackSceneState(typeName, reason + " after rollback exception"); }
+            catch { }
+            try { RollbackVisualState(typeName, reason + " after rollback exception"); }
+            catch { }
+
             Plugin.Logger?.LogWarning("DevTool effect preview rollback failed for '" + typeName + "': " + error.Message);
             EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "rollback exception: " + error.Message);
         }
@@ -459,6 +493,17 @@ internal static class EffectPreviewRuntime
         {
             ClearActiveState();
         }
+    }
+
+    private static void RollbackRuntimeVisualState(string typeName, string reason)
+    {
+        EffectPreviewRuntimeVisualRollbackReport report =
+            EffectPreviewRuntimeVisualOwnership.Rollback(reason);
+        if (!report.HasLeak) return;
+
+        Plugin.Logger?.LogWarning(
+            "DevTool effect preview runtime visual rollback failed for '" + typeName + "': " + report.Summary);
+        EffectPreviewSafetyRegistry.MarkUnsafe(typeName, report.Summary);
     }
 
     private static void RollbackSceneState(string typeName, string reason)
@@ -499,6 +544,7 @@ internal static class EffectPreviewRuntime
     {
         try { ownership?.DeactivateRuntimePropagation(); }
         catch { }
+        EffectPreviewRuntimeVisualOwnership.DetachWithoutRollback();
         activeRoom = null;
         activeSettings = null;
         previewEffect = null;
