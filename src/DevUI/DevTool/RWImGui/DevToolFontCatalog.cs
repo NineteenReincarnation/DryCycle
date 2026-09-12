@@ -33,6 +33,12 @@ internal static unsafe class DevToolFontCatalog
     private static bool registrationSucceeded;
     private static string registrationMessage = "尚未尝试注册本地字体。";
 
+    // Font files and the ImGui atlas are stable after startup. The settings window is rendered every
+    // frame, so never repeat filesystem enumeration or glyph probing there.
+    private static string[] cachedChineseFamilies;
+    private static int cachedLocalFontFileCount = -1;
+    private static int cachedSelectableLocalChineseFaces = -1;
+
     internal static bool RegistrationAttempted => registrationAttempted;
     internal static bool RegistrationSucceeded => registrationSucceeded;
     internal static int RegisteredLocalFaceCount => RegisteredFaces.Count;
@@ -52,16 +58,12 @@ internal static unsafe class DevToolFontCatalog
     /// Registers local fonts only after RWImGui has created/configured its ImGui context and before
     /// the first frame/font texture upload. This is intentionally called from RainWorld.OnModsInit,
     /// never from RainWorld.Start, BepInEx load, or an active Render() call.
-    ///
-    /// The two hard safety gates are:
-    /// 1) no ImGui frame may have started yet;
-    /// 2) the renderer must not have assigned a texture ID to the font atlas.
-    /// If either gate fails, DryCycle refuses the mutation and continues with RWImGui's own fonts.
     /// </summary>
     internal static bool TryRegisterLocalFonts(ManualLogSource log)
     {
         if (registrationAttempted) return registrationSucceeded;
         registrationAttempted = true;
+        InvalidatePresentationCaches();
 
         try
         {
@@ -92,6 +94,7 @@ internal static unsafe class DevToolFontCatalog
             string directory = FontDirectory;
             if (!Directory.Exists(directory))
             {
+                cachedLocalFontFileCount = 0;
                 registrationMessage = "字体目录不存在：" + directory;
                 log?.LogWarning("DryCycle DevTool font directory not found: " + directory);
                 return false;
@@ -158,6 +161,9 @@ internal static unsafe class DevToolFontCatalog
                 added++;
             }
 
+            cachedLocalFontFileCount = eligibleFiles;
+            cachedSelectableLocalChineseFaces = -1;
+            cachedChineseFamilies = null;
             registrationSucceeded = added > 0;
             registrationMessage = registrationSucceeded
                 ? $"安全注册窗口内已加入 {added} 个本地字体面。"
@@ -185,12 +191,13 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Enumerates Chinese-capable families that are now present in the live shared atlas. Local
-    /// faces are identified by their real filenames first, so family/weight selection does not
-    /// depend on how a particular ImGui build formats ImFontConfig.Name.
+    /// Enumerates Chinese-capable families once per atlas lifetime. Glyph probing is deliberately
+    /// kept out of the frame loop because FindGlyphNoFallback crosses the managed/native boundary.
     /// </summary>
     internal static string[] GetAvailableChineseFamilies()
     {
+        if (cachedChineseFamilies != null) return cachedChineseFamilies;
+
         List<string> families = new();
 
         for (int i = 0; i < RegisteredFaces.Count; i++)
@@ -223,39 +230,41 @@ internal static unsafe class DevToolFontCatalog
             if (aDefault != bDefault) return aDefault ? -1 : 1;
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
         });
-        return families.ToArray();
+        cachedChineseFamilies = families.ToArray();
+        return cachedChineseFamilies;
     }
 
     internal static int CountLocalFontFiles()
     {
+        if (cachedLocalFontFileCount >= 0) return cachedLocalFontFileCount;
+
         try
         {
-            if (!Directory.Exists(FontDirectory)) return 0;
+            if (!Directory.Exists(FontDirectory)) return cachedLocalFontFileCount = 0;
             string[] files = Directory.GetFiles(FontDirectory, "*.*", SearchOption.TopDirectoryOnly);
             int count = 0;
             for (int i = 0; i < files.Length; i++)
                 if (IsFontExtension(Path.GetExtension(files[i]))) count++;
-            return count;
+            cachedLocalFontFileCount = count;
         }
         catch
         {
-            return 0;
+            cachedLocalFontFileCount = 0;
         }
+        return cachedLocalFontFileCount;
     }
 
     internal static int CountSelectableLocalChineseFaces()
     {
+        if (cachedSelectableLocalChineseFaces >= 0) return cachedSelectableLocalChineseFaces;
+
         int count = 0;
         for (int i = 0; i < RegisteredFaces.Count; i++)
             if (IsChineseUiSelectable(RegisteredFaces[i].Font, RegisteredFaces[i].FileName)) count++;
+        cachedSelectableLocalChineseFaces = count;
         return count;
     }
 
-    /// <summary>
-    /// Returns stable metadata for a font that DryCycle registered itself. ImGui normally stores
-    /// the full source path in ImFontConfig.Name; long paths can be truncated before the filename,
-    /// which would otherwise make family and weight selection fall back to the RWImGui primary font.
-    /// </summary>
     internal static bool TryGetRegisteredFace(ImFontPtr font, out string name, out int weight)
     {
         for (int i = 0; i < RegisteredFaces.Count; i++)
@@ -272,11 +281,6 @@ internal static unsafe class DevToolFontCatalog
         return false;
     }
 
-    /// <summary>
-    /// A face is offered by the Chinese-interface selector only when its built atlas actually
-    /// contains representative Simplified-Chinese glyphs. Merely finding a font file or matching
-    /// a family name is not sufficient.
-    /// </summary>
     internal static bool IsChineseUiSelectable(ImFontPtr font, string candidateName)
     {
         return SupportsChinese(font);
@@ -331,6 +335,12 @@ internal static unsafe class DevToolFontCatalog
         if (value.Contains("light")) return 300;
         if (value.Contains("thin")) return 100;
         return 400;
+    }
+
+    private static void InvalidatePresentationCaches()
+    {
+        cachedChineseFamilies = null;
+        cachedSelectableLocalChineseFaces = -1;
     }
 
     private static bool IsFontExtension(string extension)
