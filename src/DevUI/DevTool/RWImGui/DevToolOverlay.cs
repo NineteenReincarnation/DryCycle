@@ -118,7 +118,7 @@ internal static class DevToolOverlay
         }
 
         ImGui.SameLine(0f, 20f);
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("保存  Ctrl+S", "Save  Ctrl+S"), "TopSave", DevToolButtonTone.Primary))
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("保存", "Save"), "TopSave", DevToolButtonTone.Primary))
             Send(EditorUiCommandKind.Save);
 
         ImGui.SameLine();
@@ -136,7 +136,7 @@ internal static class DevToolOverlay
         if (redoDisabled) ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注  Tab", "Focus  Tab"), "TopFocus", DevToolButtonTone.Subtle))
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注", "Focus"), "TopFocus", DevToolButtonTone.Subtle))
             Send(EditorUiCommandKind.ToggleFocus);
         ImGui.End();
     }
@@ -185,15 +185,15 @@ internal static class DevToolOverlay
         ImGui.Spacing();
 
         string browserLabel = snapshot.BrowserOpen
-            ? DevToolUiSettings.T("隐藏浏览器  Ctrl+B", "Hide Browser  Ctrl+B")
-            : DevToolUiSettings.T("显示浏览器  Ctrl+B", "Show Browser  Ctrl+B");
+            ? DevToolUiSettings.T("隐藏浏览器", "Hide Browser")
+            : DevToolUiSettings.T("显示浏览器", "Show Browser");
         if (DevToolWidgets.ActionButton(browserLabel, "DevToolToggleBrowser", DevToolButtonTone.Subtle, true))
             Send(EditorUiCommandKind.ToggleBrowser);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏左栏浏览器", "Toggle left Browser pane"));
 
         string inspectorLabel = snapshot.InspectorOpen
-            ? DevToolUiSettings.T("隐藏检查器  Ctrl+I", "Hide Inspector  Ctrl+I")
-            : DevToolUiSettings.T("显示检查器  Ctrl+I", "Show Inspector  Ctrl+I");
+            ? DevToolUiSettings.T("隐藏检查器", "Hide Inspector")
+            : DevToolUiSettings.T("显示检查器", "Show Inspector");
         if (DevToolWidgets.ActionButton(inspectorLabel, "DevToolToggleInspector", DevToolButtonTone.Subtle, true))
             Send(EditorUiCommandKind.ToggleInspector);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器", "Toggle right Inspector pane"));
@@ -410,9 +410,6 @@ internal static class DevToolOverlay
             ImGui.Spacing();
             DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置", "PLACEMENT"), BrowserPaneFontScale);
             ImGui.Text(DevToolUiSettings.T("正在放置 ", "Placing ") + snapshot.PlacementType);
-            DevToolWidgets.MutedText(DevToolUiSettings.T(
-                "左键放置 · Shift 连续放置 · Esc/右键取消",
-                "Left click room · Shift = repeat · Esc/right click = cancel"), true);
             if (DevToolWidgets.ActionButton(
                     DevToolUiSettings.T("取消放置", "Cancel placement"),
                     "CancelObjectPlacement",
@@ -735,8 +732,8 @@ internal static class DevToolOverlay
         {
             ImGui.Text(DevToolUiSettings.T("放置 ", "Place ") + snapshot.PlacementType);
             ImGui.TextDisabled(io.KeyShift
-                ? DevToolUiSettings.T("点击 · 连续放置", "Click · continuous")
-                : DevToolUiSettings.T("点击 · 单次   Shift · 连续", "Click · once   Shift · continuous"));
+                ? DevToolUiSettings.T("连续放置", "Continuous placement")
+                : DevToolUiSettings.T("单次放置", "Single placement"));
         }
         ImGui.End();
     }
