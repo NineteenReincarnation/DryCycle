@@ -38,7 +38,14 @@ public static class DevUiProtocolInventory
     private static int lastAssemblyCount = -1;
     private static string lastFingerprint = string.Empty;
 
-    public static DevUiProtocolInventorySnapshot Current => current;
+    public static DevUiProtocolInventorySnapshot Current
+    {
+        get
+        {
+            ObserveLoadedTypes();
+            return current;
+        }
+    }
 
     internal static void ObserveLoadedTypes()
     {
