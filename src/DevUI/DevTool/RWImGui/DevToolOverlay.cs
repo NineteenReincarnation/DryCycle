@@ -30,8 +30,8 @@ internal static class DevToolOverlay
         if (display.Y < 1f) display.Y = 768f;
 
         // Map no longer opens an independent floating graph on top of the Browser/Inspector panel.
-        // In normal mode it gets one coherent Browser | Map | Inspector workspace below. Focus mode
-        // intentionally keeps only the graph itself.
+        // In normal mode it gets one coherent World Workspace below. Focus mode intentionally
+        // keeps only the graph itself.
         if (snapshot.FocusMode && snapshot.ToolMode == EditorToolMode.Map)
             DrawMapCanvas(snapshot, display);
         else if (snapshot.ToolMode == EditorToolMode.Dialog)
@@ -44,7 +44,7 @@ internal static class DevToolOverlay
         {
             DrawActivityBar(snapshot, display);
             if (snapshot.ToolMode == EditorToolMode.Map)
-                DrawMapWorkspacePanel(snapshot, display);
+                WorldWorkspaceView.Draw(snapshot, display);
             else if (snapshot.BrowserOpen || snapshot.InspectorOpen)
                 DrawBrowserInspectorPanel(snapshot, display);
         }
@@ -148,88 +148,9 @@ internal static class DevToolOverlay
 
     private static void DrawMapWorkspacePanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float defaultWidth = Math.Min(Math.Max(980f, display.X * 0.76f), Math.Max(620f, display.X - 210f));
-        float defaultHeight = Math.Min(Math.Max(560f, display.Y * 0.68f), Math.Max(360f, display.Y - 120f));
-        Num.Vector2 defaultPos = new(
-            Math.Max(178f, (display.X - defaultWidth) * 0.58f),
-            Math.Max(96f, (display.Y - defaultHeight) * 0.52f));
-
-        ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(620f, 360f),
-            new Num.Vector2(Math.Max(620f, display.X - 16f), Math.Max(360f, display.Y - 16f)));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-
-        if (!ImGui.Begin(DevToolUiSettings.T("地图工作区###DevToolMapWorkspace", "Map Workspace###DevToolMapWorkspace"), ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow("MapWorkspace");
-
-        bool browser = snapshot.BrowserOpen;
-        bool inspector = snapshot.InspectorOpen;
-        Num.Vector2 available = ImGui.GetContentRegionAvail();
-        if (available.X < 1f || available.Y < 1f)
-        {
-            ImGui.End();
-            return;
-        }
-
-        float gap = Math.Max(6f, ImGui.GetStyle().ItemSpacing.X);
-        float leftWidth = browser ? Math.Min(340f * Math.Min(1.15f, scale), Math.Max(210f, available.X * 0.20f)) : 0f;
-        float rightWidth = inspector ? Math.Min(390f * Math.Min(1.15f, scale), Math.Max(250f, available.X * 0.23f)) : 0f;
-        float usedGaps = (browser ? gap : 0f) + (inspector ? gap : 0f);
-        float centerWidth = available.X - leftWidth - rightWidth - usedGaps;
-
-        // Keep the graph as the dominant pane. On narrow windows, side panes yield space first.
-        const float minCenter = 360f;
-        if (centerWidth < minCenter && browser)
-        {
-            float take = Math.Min(leftWidth - 150f, minCenter - centerWidth);
-            if (take > 0f) { leftWidth -= take; centerWidth += take; }
-        }
-        if (centerWidth < minCenter && inspector)
-        {
-            float take = Math.Min(rightWidth - 180f, minCenter - centerWidth);
-            if (take > 0f) { rightWidth -= take; centerWidth += take; }
-        }
-        centerWidth = Math.Max(120f, centerWidth);
-
-        if (browser)
-        {
-            if (ImGui.BeginChild("##MapWorkspaceBrowser", new Num.Vector2(leftWidth, available.Y), ImGuiChildFlags.Borders))
-            {
-                ImGui.SetWindowFontScale(BrowserPaneFontScale);
-                DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
-                MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
-            }
-            ImGui.EndChild();
-            ImGui.SameLine(0f, gap);
-        }
-
-        if (ImGui.BeginChild("##MapWorkspaceCanvas", new Num.Vector2(centerWidth, available.Y), ImGuiChildFlags.Borders))
-        {
-            DevToolWidgets.PaneTitle(DevToolUiSettings.T("区域地图", "REGION MAP"));
-            MapEditorView.DrawEmbeddedCanvas(MapEditorPresentationHub.Current);
-        }
-        ImGui.EndChild();
-
-        if (inspector)
-        {
-            ImGui.SameLine(0f, gap);
-            if (ImGui.BeginChild("##MapWorkspaceInspector", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
-            {
-                DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
-                MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
-            }
-            ImGui.EndChild();
-        }
-
-        ImGui.End();
+        // Kept as a compatibility shim for older callers while the World Workspace becomes the
+        // single region-level editor surface.
+        WorldWorkspaceView.Draw(snapshot, display);
     }
 
     private static void DrawBrowserInspectorPanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -406,7 +327,7 @@ internal static class DevToolOverlay
         }
         else if (snapshot.ToolMode == EditorToolMode.Map)
         {
-            // MapPage extensions are exposed through MapEditorView's generic protocol mirror.
+            // MapPage extensions are exposed through the World Workspace compatibility surface.
             // Do not ask users to reopen the old DevUI for the Map workflow.
             MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
         }
