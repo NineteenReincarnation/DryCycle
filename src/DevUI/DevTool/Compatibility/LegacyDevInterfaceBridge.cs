@@ -33,6 +33,9 @@ public sealed class LegacyControlSnapshot
 
 internal static class LegacyDevInterfaceBridge
 {
+    private const string CyclerActionPrefix = "@cycler|";
+    private const string IntegerActionPrefix = "@integer|";
+
     internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
     {
         if (owner?.activePage is not ObjectsPage page || target == null)
@@ -46,8 +49,26 @@ internal static class LegacyDevInterfaceBridge
         return result.ToArray();
     }
 
+    /// <summary>
+    /// Encodes a cycler mutation so the optional ImGui assembly can reuse the existing
+    /// InvokeLegacyButton command path without adding a second cross-assembly command ABI.
+    /// </summary>
+    public static string CyclerAction(string path, int selectedIndex) =>
+        CyclerActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
+
+    /// <summary>
+    /// Encodes an IntegerControl increment through the existing legacy action command path.
+    /// </summary>
+    public static string IntegerAction(string path, int change) =>
+        IntegerActionPrefix + change + "|" + (path ?? string.Empty);
+
     internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
+        if (TryParseCompositeAction(path, CyclerActionPrefix, out int cyclerIndex, out string cyclerPath))
+            return SetCycler(owner, target, cyclerPath, cyclerIndex);
+        if (TryParseCompositeAction(path, IntegerActionPrefix, out int integerChange, out string integerPath))
+            return IncrementInteger(owner, target, integerPath, integerChange);
+
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         if (ResolveNode(representation, path) is not Button button || button is ButtonWithSelectPanel) return false;
@@ -117,11 +138,10 @@ internal static class LegacyDevInterfaceBridge
             cycler.currentAlternative = selectedIndex;
             cycler.Text = (cycler.baseName ?? string.Empty) + (cycler.alternatives[selectedIndex] ?? string.Empty);
 
-            // Vanilla Cycler is intentionally polling-based: parent panels generally copy
-            // currentAlternative into their data from Update(), rather than receiving a signal.
-            // Run that parent update immediately so the history snapshot taken by the new editor
-            // observes the same data mutation in this command, not one frame later. Suppress the
-            // legacy click edge while doing so, otherwise Cycler.Update could advance twice.
+            // Vanilla Cycler is polling-based: parent panels generally copy currentAlternative
+            // into their data from Update(), rather than receiving a signal. Run that parent
+            // update immediately so history captures the real data mutation in this command.
+            // Suppress the legacy click edge to prevent Cycler.Update from advancing twice.
             SynchronizePollingParent(owner, cycler);
             owner.activePage?.Refresh();
             return true;
@@ -309,6 +329,22 @@ internal static class LegacyDevInterfaceBridge
     {
         try { return control.NumberLabelText ?? string.Empty; }
         catch { return string.Empty; }
+    }
+
+    private static bool TryParseCompositeAction(string encoded, string prefix, out int argument, out string path)
+    {
+        argument = 0;
+        path = string.Empty;
+        if (string.IsNullOrEmpty(encoded) || string.IsNullOrEmpty(prefix) ||
+            !encoded.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        int separator = encoded.IndexOf('|', prefix.Length);
+        if (separator < 0) return false;
+        if (!int.TryParse(encoded.Substring(prefix.Length, separator - prefix.Length), out argument))
+            return false;
+        path = separator + 1 < encoded.Length ? encoded.Substring(separator + 1) : string.Empty;
+        return !string.IsNullOrWhiteSpace(path);
     }
 
     private static void SynchronizePollingParent(global::DevInterface.DevUI owner, DevUINode node)
