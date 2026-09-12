@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Preview;
 
 namespace DryCycle.DevUI.DevTool.Room;
 
@@ -85,19 +87,29 @@ public static class RoomEditorCommandQueue
                         RoomEditorActions.SetTerrainPaletteFade(session, command.Index, command.Value.X);
                         break;
                     case RoomEditorCommandKind.SetTemplate:
-                        RoomEditorActions.SetRoomTemplate(session, command.Key);
+                        if (RoomEditorActions.SetRoomTemplate(session, command.Key))
+                            RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.SaveAsTemplate:
                         RoomEditorActions.SaveRoomAsTemplate(session, command.Key);
                         break;
                     case RoomEditorCommandKind.AddEffect:
-                        RoomEditorActions.AddRoomEffect(session, command.Key);
+                        // A browser hover may currently own a temporary RoomEffect/controller.
+                        // Tear that transaction down before the persistent edit so its rollback can
+                        // never remove or overwrite the newly committed runtime state.
+                        EffectPreviewRuntime.EndForPersistentOperation("add room effect");
+                        if (RoomEditorActions.AddRoomEffect(session, command.Key))
+                            RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.DeleteEffect:
-                        RoomEditorActions.DeleteRoomEffect(session, command.Index);
+                        EffectPreviewRuntime.EndForPersistentOperation("delete room effect");
+                        if (RoomEditorActions.DeleteRoomEffect(session, command.Index))
+                            RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.SetEffectAmount:
-                        RoomEditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X);
+                        EffectPreviewRuntime.EndForPersistentOperation("change room effect");
+                        if (RoomEditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X))
+                            RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                 }
             }
