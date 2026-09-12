@@ -29,7 +29,10 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
-        if (snapshot.ToolMode == EditorToolMode.Map)
+        // Map no longer opens an independent floating graph on top of the Browser/Inspector panel.
+        // In normal mode it gets one coherent Browser | Map | Inspector workspace below. Focus mode
+        // intentionally keeps only the graph itself.
+        if (snapshot.FocusMode && snapshot.ToolMode == EditorToolMode.Map)
             DrawMapCanvas(snapshot, display);
         else if (snapshot.ToolMode == EditorToolMode.Dialog)
             DrawDialogPreview(snapshot, display);
@@ -40,7 +43,9 @@ internal static class DevToolOverlay
         if (!snapshot.FocusMode)
         {
             DrawActivityBar(snapshot, display);
-            if (snapshot.BrowserOpen || snapshot.InspectorOpen)
+            if (snapshot.ToolMode == EditorToolMode.Map)
+                DrawMapWorkspacePanel(snapshot, display);
+            else if (snapshot.BrowserOpen || snapshot.InspectorOpen)
                 DrawBrowserInspectorPanel(snapshot, display);
         }
 
@@ -73,72 +78,6 @@ internal static class DevToolOverlay
             Math.Max(180f, (display.X - width) * 0.5f),
             Math.Max(88f, (display.Y - height) * 0.5f));
         size = new Num.Vector2(width, height);
-    }
-
-    private static void DrawTopBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
-    {
-        string room = string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
-        string undo = string.IsNullOrEmpty(snapshot.UndoLabel)
-            ? DevToolUiSettings.T("撤销", "Undo")
-            : DevToolUiSettings.T("撤销 ", "Undo ") + snapshot.UndoLabel;
-        string redo = string.IsNullOrEmpty(snapshot.RedoLabel)
-            ? DevToolUiSettings.T("重做", "Redo")
-            : DevToolUiSettings.T("重做 ", "Redo ") + snapshot.RedoLabel;
-        float textWidth = ImGui.CalcTextSize(room + " · " + DevToolUiSettings.ToolMode(snapshot.ToolMode)).X;
-        float preferredWidth = Math.Min(
-            Math.Max(420f, display.X - 16f),
-            Math.Max(520f, textWidth + ImGui.CalcTextSize(undo + redo).X + 320f));
-
-        ImGui.SetNextWindowPos(new Num.Vector2(270f, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 62f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(380f, 54f),
-            new Num.Vector2(Math.Max(380f, display.X - 16f), 220f));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-                                 ImGuiWindowFlags.NoScrollWithMouse;
-        if (!ImGui.Begin(DevToolUiSettings.T("命令###DevToolTopBar", "Commands###DevToolTopBar"), flags))
-        {
-            ImGui.End();
-            return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow("Commands");
-
-        ImGui.TextDisabled(room);
-        ImGui.SameLine();
-        ImGui.TextDisabled("·");
-        ImGui.SameLine();
-        ImGui.Text(DevToolUiSettings.ToolMode(snapshot.ToolMode));
-
-        if (snapshot.PlacementActive)
-        {
-            ImGui.SameLine(0f, 16f);
-            ImGui.Text(DevToolUiSettings.T("放置：", "Place: ") + snapshot.PlacementType);
-        }
-
-        ImGui.SameLine(0f, 20f);
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("保存", "Save"), "TopSave", DevToolButtonTone.Primary))
-            Send(EditorUiCommandKind.Save);
-
-        ImGui.SameLine();
-        bool undoDisabled = !snapshot.CanUndo;
-        if (undoDisabled) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(undo, "DevToolUndo", DevToolButtonTone.Normal))
-            Send(EditorUiCommandKind.Undo);
-        if (undoDisabled) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        bool redoDisabled = !snapshot.CanRedo;
-        if (redoDisabled) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(redo, "DevToolRedo", DevToolButtonTone.Normal))
-            Send(EditorUiCommandKind.Redo);
-        if (redoDisabled) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注", "Focus"), "TopFocus", DevToolButtonTone.Subtle))
-            Send(EditorUiCommandKind.ToggleFocus);
-        ImGui.End();
     }
 
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -205,6 +144,92 @@ internal static class DevToolOverlay
         if (DevToolWidgets.NavItem(label, "DevToolMode" + mode, current == mode))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: mode));
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
+    }
+
+    private static void DrawMapWorkspacePanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        float defaultWidth = Math.Min(Math.Max(980f, display.X * 0.76f), Math.Max(620f, display.X - 210f));
+        float defaultHeight = Math.Min(Math.Max(560f, display.Y * 0.68f), Math.Max(360f, display.Y - 120f));
+        Num.Vector2 defaultPos = new(
+            Math.Max(178f, (display.X - defaultWidth) * 0.58f),
+            Math.Max(96f, (display.Y - defaultHeight) * 0.52f));
+
+        ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(620f, 360f),
+            new Num.Vector2(Math.Max(620f, display.X - 16f), Math.Max(360f, display.Y - 16f)));
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
+
+        if (!ImGui.Begin(DevToolUiSettings.T("地图工作区###DevToolMapWorkspace", "Map Workspace###DevToolMapWorkspace"), ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            return;
+        }
+
+        FloatingWindowSnap.TrackCurrentWindow("MapWorkspace");
+
+        bool browser = snapshot.BrowserOpen;
+        bool inspector = snapshot.InspectorOpen;
+        Num.Vector2 available = ImGui.GetContentRegionAvail();
+        if (available.X < 1f || available.Y < 1f)
+        {
+            ImGui.End();
+            return;
+        }
+
+        float gap = Math.Max(6f, ImGui.GetStyle().ItemSpacing.X);
+        float leftWidth = browser ? Math.Min(340f * Math.Min(1.15f, scale), Math.Max(210f, available.X * 0.20f)) : 0f;
+        float rightWidth = inspector ? Math.Min(390f * Math.Min(1.15f, scale), Math.Max(250f, available.X * 0.23f)) : 0f;
+        float usedGaps = (browser ? gap : 0f) + (inspector ? gap : 0f);
+        float centerWidth = available.X - leftWidth - rightWidth - usedGaps;
+
+        // Keep the graph as the dominant pane. On narrow windows, side panes yield space first.
+        const float minCenter = 360f;
+        if (centerWidth < minCenter && browser)
+        {
+            float take = Math.Min(leftWidth - 150f, minCenter - centerWidth);
+            if (take > 0f) { leftWidth -= take; centerWidth += take; }
+        }
+        if (centerWidth < minCenter && inspector)
+        {
+            float take = Math.Min(rightWidth - 180f, minCenter - centerWidth);
+            if (take > 0f) { rightWidth -= take; centerWidth += take; }
+        }
+        centerWidth = Math.Max(120f, centerWidth);
+
+        if (browser)
+        {
+            if (ImGui.BeginChild("##MapWorkspaceBrowser", new Num.Vector2(leftWidth, available.Y), ImGuiChildFlags.Borders))
+            {
+                ImGui.SetWindowFontScale(BrowserPaneFontScale);
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
+                MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
+            }
+            ImGui.EndChild();
+            ImGui.SameLine(0f, gap);
+        }
+
+        if (ImGui.BeginChild("##MapWorkspaceCanvas", new Num.Vector2(centerWidth, available.Y), ImGuiChildFlags.Borders))
+        {
+            DevToolWidgets.PaneTitle(DevToolUiSettings.T("区域地图", "REGION MAP"));
+            MapEditorView.DrawEmbeddedCanvas(MapEditorPresentationHub.Current);
+        }
+        ImGui.EndChild();
+
+        if (inspector)
+        {
+            ImGui.SameLine(0f, gap);
+            if (ImGui.BeginChild("##MapWorkspaceInspector", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
+            {
+                DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
+                MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
+            }
+            ImGui.EndChild();
+        }
+
+        ImGui.End();
     }
 
     private static void DrawBrowserInspectorPanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -381,8 +406,9 @@ internal static class DevToolOverlay
         }
         else if (snapshot.ToolMode == EditorToolMode.Map)
         {
+            // MapPage extensions are exposed through MapEditorView's generic protocol mirror.
+            // Do not ask users to reopen the old DevUI for the Map workflow.
             MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于图编辑器尚未表达的原版或 Mod 地图控件。", "Fallback for vanilla or mod-added MapPage controls not represented by the graph editor."));
         }
         else if (snapshot.ToolMode == EditorToolMode.Dialog)
             DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
@@ -632,78 +658,6 @@ internal static class DevToolOverlay
         if (DevToolWidgets.ActionButton(label, "LegacyDevUI", DevToolButtonTone.Primary))
             Send(EditorUiCommandKind.ToggleLegacyUi);
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
-    }
-
-    private static void DrawStatusBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
-    {
-        string text = BuildStatusText(snapshot);
-        float preferredWidth = Math.Min(
-            Math.Max(220f, display.X - 16f),
-            Math.Max(240f, ImGui.CalcTextSize(text).X + 32f));
-
-        ImGui.SetNextWindowPos(new Num.Vector2(270f, Math.Max(8f, display.Y - 82f)), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(preferredWidth, 58f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(200f, 52f),
-            new Num.Vector2(Math.Max(200f, display.X - 16f), 180f));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-                                 ImGuiWindowFlags.NoScrollWithMouse;
-        if (ImGui.Begin(DevToolUiSettings.T("状态###DevToolStatus", "Status###DevToolStatus"), flags))
-        {
-            FloatingWindowSnap.TrackCurrentWindow("Status");
-            ImGui.TextDisabled(text);
-        }
-        ImGui.End();
-    }
-
-    private static string BuildStatusText(EditorPresentationSnapshot snapshot)
-    {
-        if (snapshot.ToolMode == EditorToolMode.Objects)
-        {
-            int selected = snapshot.Inspector?.SelectionCount ?? 0;
-            string placement = snapshot.PlacementActive
-                ? DevToolUiSettings.T("   ·   放置 ", "   ·   Placing ") + snapshot.PlacementType
-                : string.Empty;
-            return DevToolUiSettings.T("物件 ", "Objects ") + (snapshot.SceneObjects?.Length ?? 0) +
-                   DevToolUiSettings.T("   ·   已选 ", "   ·   Selected ") + selected +
-                   "   ·   " + snapshot.Document + placement;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Sound)
-        {
-            EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
-            return DevToolUiSettings.T("声音 ", "Sounds ") + (sound.Sounds?.Length ?? 0) + "   ·   " + snapshot.Document;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Triggers)
-        {
-            EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
-            return DevToolUiSettings.T("触发器 ", "Triggers ") + (trigger.Triggers?.Length ?? 0) + "   ·   " + snapshot.Document;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Map)
-        {
-            EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
-            return DevToolUiSettings.T("地图 ", "Map ") + (map.Rooms?.Length ?? 0) +
-                   DevToolUiSettings.T(" 个房间   ·   ", " rooms   ·   ") + map.RegionName;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Dialog)
-        {
-            EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
-            return DevToolUiSettings.T("对话 ", "Dialog ") + dialog.SelectedFileName + "   ·   " +
-                   (dialog.Events?.Length ?? 0) + DevToolUiSettings.T(" 个事件", " events");
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Relationships)
-        {
-            EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
-            return DevToolUiSettings.T("关系   ·   主体 ", "Relationships   ·   Primary ") +
-                   rel.PrimaryCreature + "   ·   " + snapshot.Document;
-        }
-
-        return snapshot.Document + "   ·   " + DevToolUiSettings.ToolMode(snapshot.ToolMode);
     }
 
     private static void HandlePlacement(EditorPresentationSnapshot snapshot, Num.Vector2 display, ImGuiIOPtr io)
