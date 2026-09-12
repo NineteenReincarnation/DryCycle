@@ -17,10 +17,10 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// inactive instantiated pages are sampled periodically so a developer does not have to manually
 /// open every tab just to discover missing protocol families.
 ///
-/// The second half of the audit validates the generic mirror itself: every control that advertises
-/// a supported structural protocol must actually produce a <see cref="LegacyControlSnapshot"/> at
-/// the same tree path. This catches false-positive coverage where a protocol was classified as
-/// supported but silently disappeared from the rebuilt UI projection.
+/// The second half of the audit validates both the generic mirror and the page-agnostic action
+/// bridge. Every control classified as a supported structural protocol must produce a
+/// <see cref="LegacyControlSnapshot"/> at the same tree path and that snapshot must have a generic
+/// action route. This catches false-positive coverage without mutating room data during the audit.
 /// </summary>
 internal static class DevUiFullAudit
 {
@@ -268,8 +268,18 @@ internal static class DevUiFullAudit
             HashSet<string> mirroredPaths = new(StringComparer.Ordinal);
             for (int i = 0; i < mirrored.Length; i++)
             {
-                string path = mirrored[i]?.Path;
-                if (!string.IsNullOrWhiteSpace(path)) mirroredPaths.Add(path);
+                LegacyControlSnapshot snapshot = mirrored[i];
+                string path = snapshot?.Path;
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                mirroredPaths.Add(path);
+
+                if (!UniversalDevUiActionBridge.CanExecute(page, snapshot))
+                {
+                    failures.Add(
+                        (page.GetType().FullName ?? page.GetType().Name) + "|" + path + "|" +
+                        (snapshot.RuntimeType ?? string.Empty) + "|" + (snapshot.Id ?? string.Empty) +
+                        "|no generic action route for " + snapshot.Kind);
+                }
             }
 
             List<MirrorExpectation> expected = new();
@@ -280,7 +290,7 @@ internal static class DevUiFullAudit
                 if (mirroredPaths.Contains(item.Path)) continue;
                 failures.Add(
                     (page.GetType().FullName ?? page.GetType().Name) + "|" + item.Path + "|" +
-                    item.TypeName + "|" + item.Id);
+                    item.TypeName + "|" + item.Id + "|classified generic but missing from mirror");
             }
         }
 
@@ -352,7 +362,7 @@ internal static class DevUiFullAudit
         Plugin.Logger?.LogInfo(
             "DevTool full generic audit scanned " + pageCount + " instantiated page(s); " +
             snapshot.TotalTypeCount + " interactive obligations observed, " +
-            snapshot.UnmappedTypeCount + " protocol gap(s), " + mirrorGaps.Count + " mirror gap(s).");
+            snapshot.UnmappedTypeCount + " protocol gap(s), " + mirrorGaps.Count + " mirror/action gap(s).");
 
         int shown = Math.Min(LoggedGapLimit, gaps.Count);
         for (int i = 0; i < shown; i++)
@@ -363,9 +373,9 @@ internal static class DevUiFullAudit
 
         int mirrorShown = Math.Min(LoggedGapLimit, mirrorGaps.Count);
         for (int i = 0; i < mirrorShown; i++)
-            Plugin.Logger?.LogWarning("[DevUI mirror gap] " + mirrorGaps[i]);
+            Plugin.Logger?.LogWarning("[DevUI mirror/action gap] " + mirrorGaps[i]);
         if (mirrorGaps.Count > mirrorShown)
             Plugin.Logger?.LogWarning(
-                "[DevUI mirror gap] " + (mirrorGaps.Count - mirrorShown) + " additional gap(s) omitted from this log batch.");
+                "[DevUI mirror/action gap] " + (mirrorGaps.Count - mirrorShown) + " additional gap(s) omitted from this log batch.");
     }
 }
