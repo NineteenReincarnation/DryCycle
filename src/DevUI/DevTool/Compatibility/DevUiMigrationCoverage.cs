@@ -155,8 +155,6 @@ public static class DevUiMigrationCoverage
 
     static DevUiMigrationCoverage()
     {
-        // Top-level pages already have dedicated rebuilt workspaces. Their children still need
-        // independent coverage and are NOT made mapped by this registration.
         RegisterExact(typeof(RoomSettingsPage), DevUiMigrationState.NativeNewUi, "Rebuilt Room workspace");
         RegisterExact(typeof(ObjectsPage), DevUiMigrationState.NativeNewUi, "Rebuilt Objects workspace");
         RegisterExact(typeof(SoundPage), DevUiMigrationState.NativeNewUi, "Rebuilt Sound workspace");
@@ -166,16 +164,9 @@ public static class DevUiMigrationCoverage
         RegisterExact(typeof(RelationshipPage), DevUiMigrationState.NativeNewUi, "Rebuilt Relationships workspace");
     }
 
-    /// <summary>Coverage of the active legacy page from the latest DevUI update.</summary>
     public static DevUiMigrationCoverageSnapshot CurrentPage => currentPage;
-
-    /// <summary>
-    /// Cumulative set of page/context/type obligations seen since the DevTool runtime started.
-    /// Opening more legacy pages/modules expands this catalog; repeated frames do not inflate it.
-    /// </summary>
     public static DevUiMigrationCoverageSnapshot Observed => observed;
 
-    /// <summary>Register an exact legacy node type as handled by a known migration path.</summary>
     public static void RegisterExact(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
@@ -189,10 +180,6 @@ public static class DevUiMigrationCoverage
         });
     }
 
-    /// <summary>
-    /// Register a base node type and all derived types. Use this only when the adapter genuinely
-    /// handles arbitrary subclasses; otherwise prefer RegisterExact to avoid hiding migration gaps.
-    /// </summary>
     public static void RegisterAssignable(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
@@ -206,10 +193,6 @@ public static class DevUiMigrationCoverage
         });
     }
 
-    /// <summary>
-    /// Register an optional third-party node without referencing its assembly at compile time.
-    /// The full CLR type name is matched exactly.
-    /// </summary>
     public static void RegisterTypeName(string fullTypeName, DevUiMigrationState state, string note = null)
     {
         if (string.IsNullOrWhiteSpace(fullTypeName)) throw new ArgumentException("Type name is required.", nameof(fullTypeName));
@@ -310,16 +293,15 @@ public static class DevUiMigrationCoverage
         bool insideRepresentation = insidePlacedObjectRepresentation || node is PlacedObjectRepresentation;
         Type nodeType = node.GetType();
 
-        // Exact stock labels and known layout-only helper nodes are implementation fragments of
-        // their parent control, not independent editor capabilities.
         bool presentationFragment = nodeType == typeof(DevUILabel) || IsKnownPresentationFragment(nodeType);
         if (!presentationFragment)
             AddObservation(node, path, insideRepresentation, pageType, output);
 
-        // Composite controls are one migration obligation. Their internal presentation nodes do
-        // not represent separate user-facing capabilities and must not inflate coverage counts.
         if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
-            LegacyDevInterfaceBridge.CanAdaptText(node) || LegacyDevInterfaceBridge.CanAdaptDirection(node))
+            LegacyDevInterfaceBridge.CanAdaptText(node) ||
+            LegacyDevInterfaceBridge.CanAdaptDirection(node) ||
+            LegacyDevInterfaceBridge.CanAdaptPanelSelect(node) ||
+            LegacyDevInterfaceBridge.CanAdaptColorSelect(node))
             return;
         if (node.subNodes == null) return;
 
@@ -376,8 +358,6 @@ public static class DevUiMigrationCoverage
         out DevUiMigrationState state,
         out string note)
     {
-        // Page-level navigation/save infrastructure is already replaced by rebuilt navigation and
-        // the shared command row. Match by concrete role/ID rather than declaring every Button safe.
         if (IsRebuiltPageInfrastructure(node))
         {
             state = DevUiMigrationState.NativeNewUi;
@@ -400,9 +380,20 @@ public static class DevUiMigrationCoverage
             return;
         }
 
-        // RegionKit StringControl and compatible derivatives are identified structurally rather
-        // than by an assembly reference. The bridge commits through the original TrySetValue
-        // transaction boundary, preserving validators and StringFinish signaling.
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptPanelSelect(node))
+        {
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "RegionKit PanelSelectButton native combo adapter";
+            return;
+        }
+
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptColorSelect(node))
+        {
+            state = DevUiMigrationState.SpecializedAdapter;
+            note = "RegionKit RGBSelectButton native color adapter";
+            return;
+        }
+
         if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptText(node))
         {
             state = DevUiMigrationState.GenericAdapter;
@@ -410,8 +401,6 @@ public static class DevUiMigrationCoverage
             return;
         }
 
-        // RegionKit DirectionPicker is also recognized structurally. The adapter mutates the
-        // nested direction handle and immediately synchronizes the polling parent representation.
         if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptDirection(node))
         {
             state = DevUiMigrationState.GenericAdapter;
@@ -419,8 +408,6 @@ public static class DevUiMigrationCoverage
             return;
         }
 
-        // The object compatibility bridge exposes these stock semantic controls under the selected
-        // PlacedObjectRepresentation and delegates back through their original behavior boundaries.
         if (insideRepresentation && node is Slider)
         {
             state = DevUiMigrationState.GenericAdapter;
@@ -437,12 +424,6 @@ public static class DevUiMigrationCoverage
         {
             state = DevUiMigrationState.GenericAdapter;
             note = "PlacedObject legacy IntegerControl bridge";
-            return;
-        }
-        if (insideRepresentation && node is Button && IsKnownUnsafeCompositeButton(type))
-        {
-            state = DevUiMigrationState.Unmapped;
-            note = "Composite button opens a hidden legacy panel and needs a dedicated native adapter";
             return;
         }
         if (insideRepresentation && node is Button)
@@ -466,17 +447,6 @@ public static class DevUiMigrationCoverage
 
         state = DevUiMigrationState.Unmapped;
         note = string.Empty;
-    }
-
-    private static bool IsKnownUnsafeCompositeButton(Type type)
-    {
-        string fullName = type?.FullName ?? string.Empty;
-        return string.Equals(fullName,
-                   "RegionKit.Modules.DevUIMisc.GenericNodes.RGBSelectButton",
-                   StringComparison.Ordinal) ||
-               string.Equals(fullName,
-                   "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton",
-                   StringComparison.Ordinal);
     }
 
     private static bool IsKnownPresentationFragment(Type type)
@@ -515,8 +485,6 @@ public static class DevUiMigrationCoverage
         if (StartsWith(ns, "RegionKit") || Contains(assembly, "RegionKit"))
             return DevUiMigrationSource.RegionKit;
 
-        // At runtime vanilla DevInterface can live in Assembly-CSharp or a publicized variant.
-        // Comparing the declaring assembly of DevUINode also survives those packaging differences.
         if ((type != null && type.Assembly == typeof(DevUINode).Assembly && StartsWith(ns, "DevInterface")) ||
             (StartsWith(ns, "DevInterface") && Contains(assembly, "Assembly-CSharp")))
             return DevUiMigrationSource.Vanilla;
