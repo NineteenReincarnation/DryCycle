@@ -12,70 +12,58 @@ internal static class UiModeSwitch
         // Apply one shared visual language before any rebuilt editor window is drawn this frame.
         DevToolUiTheme.Apply();
 
+        // In New UI mode the switch, language controls, commands and session status all live in
+        // ControlCenterWindow. Vanilla keeps only this deliberately small return surface so the
+        // original DevUI remains readable and the developer can always switch back.
+        if (EditorUiModeState.UseVanilla)
+            DrawVanillaReturnPanel();
+        else
+            GroupStatusWindow.Draw(ImGui.GetIO().DisplaySize);
+    }
+
+    private static void DrawVanillaReturnPanel()
+    {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(250f * scale, 124f * scale), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(300f * Math.Min(1.25f, scale), 106f * Math.Min(1.20f, scale)), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(210f * Math.Min(1f, scale), 96f),
-            new Num.Vector2(760f, 560f));
+            new Num.Vector2(240f, 92f),
+            new Num.Vector2(520f, 220f));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
 
-        bool expanded = ImGui.Begin(
-            DevToolUiSettings.T("界面###DevToolUiModeSwitch", "UI###DevToolUiModeSwitch"),
-            flags);
-
-        if (expanded)
+        if (!ImGui.Begin(
+                DevToolUiSettings.T("界面###DevToolUiModeSwitch", "UI###DevToolUiModeSwitch"),
+                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
-            FloatingWindowSnap.TrackCurrentWindow("UI");
-
-            // Keep the original two-way mode switch visible in both modes. Vanilla hides the rebuilt
-            // editor panels, but never hides the control that lets the developer return to New UI.
-            ImGui.TextDisabled(DevToolUiSettings.T("模式", "Mode"));
-            bool vanilla = EditorUiModeState.UseVanilla;
-            if (!vanilla) ImGui.BeginDisabled();
-            if (ImGui.SmallButton(DevToolUiSettings.T("新 UI##DevToolUseNewUi", "New UI##DevToolUseNewUi")))
-                EditorUiModeState.SetVanilla(false);
-            if (!vanilla) ImGui.EndDisabled();
-
-            ImGui.SameLine();
-            if (vanilla) ImGui.BeginDisabled();
-            if (ImGui.SmallButton(DevToolUiSettings.T("原版##DevToolUseVanillaUi", "Vanilla##DevToolUseVanillaUi")))
-                EditorUiModeState.SetVanilla(true);
-            if (vanilla) ImGui.EndDisabled();
-
-            ImGui.Separator();
-            ImGui.TextDisabled(DevToolUiSettings.T("语言", "Language"));
-            bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
-            if (chinese) ImGui.BeginDisabled();
-            if (ImGui.SmallButton("中文##DevToolChinese"))
-                DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
-            if (chinese) ImGui.EndDisabled();
-
-            ImGui.SameLine();
-            bool english = DevToolUiSettings.Language == DevToolUiLanguage.English;
-            if (english) ImGui.BeginDisabled();
-            if (ImGui.SmallButton("English##DevToolEnglish"))
-                DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
-            if (english) ImGui.EndDisabled();
-
-            ImGui.Separator();
-            ImGui.TextDisabled(DevToolUiSettings.T(
-                "Shift + 左键拖框：多选窗口",
-                "Shift + left drag: multi-select windows"));
-            ImGui.TextDisabled(DevToolUiSettings.T(
-                "Ctrl+G：将当前选择编组",
-                "Ctrl+G: group current selection"));
-            ImGui.TextDisabled(DevToolUiSettings.T(
-                "拖动组内任一标题栏：整组移动",
-                "Drag any grouped title bar: move whole group"));
+            ImGui.End();
+            return;
         }
 
-        ImGui.End();
+        FloatingWindowSnap.TrackCurrentWindow("UI");
 
-        // The group inspector belongs to the rebuilt layout only; Vanilla mode keeps just the
-        // New UI / Vanilla switch so the original DevUI remains unobstructed.
-        if (!EditorUiModeState.UseVanilla)
-            GroupStatusWindow.Draw(ImGui.GetIO().DisplaySize);
+        DevToolWidgets.MutedText(DevToolUiSettings.T("显示模式", "Display mode"));
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("切换到新 UI", "Switch to New UI"),
+                "DevToolUseNewUi",
+                DevToolButtonTone.Primary))
+            EditorUiModeState.SetVanilla(false);
+
+        ImGui.Spacing();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("语言", "Language"));
+        ImGui.SameLine(92f);
+        bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
+        if (DevToolWidgets.ActionButton(
+                "中文",
+                "DevToolChinese",
+                chinese ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                "English",
+                "DevToolEnglish",
+                chinese ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+            DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
+
+        ImGui.End();
     }
 }
