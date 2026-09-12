@@ -34,7 +34,7 @@ internal sealed class WorldTopologyEditSnapshot
     }
 
     internal static WorldTopologyEditSnapshot Capture(
-        World world,
+        global::World world,
         string region,
         string roomA,
         int nodeA,
@@ -124,7 +124,7 @@ internal sealed class WorldTopologyEditSnapshot
     }
 
     private static EndpointState CaptureEndpoint(
-        World world,
+        global::World world,
         string region,
         string room,
         int node)
@@ -157,7 +157,7 @@ internal sealed class WorldTopologyEditSnapshot
     private static bool Touches(WorldConnectionEdge edge, WorldConnectionEndpoint endpoint) =>
         edge != null && (edge.A.Equals(endpoint) || edge.B.Equals(endpoint));
 
-    private static int ResolveDestinationIndex(World world, string destination)
+    private static int ResolveDestinationIndex(global::World world, string destination)
     {
         if (world == null ||
             string.IsNullOrWhiteSpace(destination) ||
