@@ -173,7 +173,7 @@ public static class MapEditorPresentationHub
     }
 
     private static List<EditorMapConnectionSnapshot> BuildConnections(
-        World world,
+        global::World world,
         List<EditorMapRoomSnapshot> rooms,
         HashSet<int> roomIndices,
         Dictionary<string, int> roomIndexByName)
