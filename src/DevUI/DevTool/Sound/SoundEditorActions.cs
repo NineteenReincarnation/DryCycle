@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
@@ -74,6 +75,32 @@ internal static class SoundEditorActions
                 state.SelectedIndex = FindLast(session, sample, soundType);
         }
         return true;
+    }
+
+    internal static bool CreateFromLibrary(
+        EditorSession session,
+        string sample,
+        int soundType,
+        string groupId,
+        int destination)
+    {
+        if (destination < 0 || destination > 2 || string.IsNullOrWhiteSpace(sample)) return false;
+
+        bool toScene = destination != 1;
+        bool toGroup = destination != 0;
+        if (toGroup && !TryGetWritableGroup(groupId, out _)) return false;
+
+        if (!toScene)
+        {
+            SoundGroupSoundDefinition definition = CreateDefaultDefinition(sample, soundType);
+            return definition != null && SoundGroupLibrary.AddSoundToLocalGroup(groupId, definition);
+        }
+
+        if (!Create(session, sample, soundType)) return false;
+        if (!toGroup) return true;
+
+        SoundEditorState state = SoundEditorStateHub.Get(session);
+        return state != null && state.SelectedIndex >= 0 && AddSoundToGroup(session, state.SelectedIndex, groupId);
     }
 
     internal static bool Delete(EditorSession session, int index)
@@ -176,39 +203,51 @@ internal static class SoundEditorActions
 
     internal static bool AddSoundToGroup(EditorSession session, int index, string groupId)
     {
-        if (!TryGetSound(session, index, out AmbientSound sound) || string.IsNullOrWhiteSpace(groupId))
+        if (!TryGetSound(session, index, out AmbientSound sound) ||
+            !TryGetWritableGroup(groupId, out _))
             return false;
 
-        global::Room room = session.Room;
-        SoundGroupSoundDefinition definition = new()
-        {
-            Type = sound.type?.value ?? "Omnidirectional",
-            Sample = sound.sample ?? string.Empty,
-            Volume = sound.volume,
-            Pitch = sound.pitch
-        };
+        SoundGroupSoundDefinition definition = CaptureDefinition(session, sound);
+        return definition != null && SoundGroupLibrary.AddSoundToLocalGroup(groupId, definition);
+    }
 
-        if (sound is DopplerAffectedSound doppler)
-            definition.Doppler = doppler.dopplerFac;
+    internal static bool AddSoundsToGroup(EditorSession session, int[] indices, string groupId)
+    {
+        if (indices == null || indices.Length == 0 || !TryGetWritableGroup(groupId, out _))
+            return false;
 
-        if (sound is DirectionalSound directional)
+        var unique = new HashSet<int>();
+        var definitions = new List<SoundGroupSoundDefinition>(indices.Length);
+        for (int i = 0; i < indices.Length; i++)
         {
-            definition.DirectionX = directional.direction.x;
-            definition.DirectionY = directional.direction.y;
+            int index = indices[i];
+            if (!unique.Add(index) || !TryGetSound(session, index, out AmbientSound sound)) continue;
+            SoundGroupSoundDefinition definition = CaptureDefinition(session, sound);
+            if (definition != null) definitions.Add(definition);
         }
-        else if (sound is SpotSound spot)
-        {
-            definition.X = room != null && room.PixelWidth > 0.01f
-                ? Mathf.Clamp01(spot.pos.x / room.PixelWidth)
-                : 0.5f;
-            definition.Y = room != null && room.PixelHeight > 0.01f
-                ? Mathf.Clamp01(spot.pos.y / room.PixelHeight)
-                : 0.5f;
-            definition.Radius = spot.rad;
-            definition.Taper = spot.taper;
-        }
+        if (definitions.Count == 0) return false;
 
-        return SoundGroupLibrary.AddSoundToLocalGroup(groupId, definition);
+        bool changed = false;
+        for (int i = 0; i < definitions.Count; i++)
+            changed |= SoundGroupLibrary.AddSoundToLocalGroup(groupId, definitions[i]);
+        return changed;
+    }
+
+    internal static bool CreateGroupFromSounds(
+        EditorSession session,
+        int[] indices,
+        string groupId,
+        string groupName)
+    {
+        if (indices == null || indices.Length == 0 ||
+            string.IsNullOrWhiteSpace(groupId) || string.IsNullOrWhiteSpace(groupName))
+            return false;
+
+        if (!SoundGroupLibrary.CreateLocalGroup(groupId, groupName)) return false;
+        if (AddSoundsToGroup(session, indices, groupId)) return true;
+
+        SoundGroupLibrary.DeleteLocalGroup(groupId);
+        return false;
     }
 
     internal static bool ApplyGroup(EditorSession session, string groupId)
@@ -268,6 +307,68 @@ internal static class SoundEditorActions
         SoundEditorState state = SoundEditorStateHub.Get(session);
         if (state != null) state.SelectedIndex = lastIndex;
         return true;
+    }
+
+    private static bool TryGetWritableGroup(string groupId, out SoundGroupDefinition group)
+    {
+        group = null;
+        return !string.IsNullOrWhiteSpace(groupId) &&
+               SoundGroupLibrary.TryGetGroup(groupId, out group) &&
+               group.IsLocal;
+    }
+
+    private static SoundGroupSoundDefinition CaptureDefinition(EditorSession session, AmbientSound sound)
+    {
+        if (sound == null || string.IsNullOrWhiteSpace(sound.sample)) return null;
+
+        global::Room room = session?.Room;
+        SoundGroupSoundDefinition definition = new()
+        {
+            Type = sound.type?.value ?? "Omnidirectional",
+            Sample = sound.sample ?? string.Empty,
+            Volume = sound.volume,
+            Pitch = sound.pitch
+        };
+
+        if (sound is DopplerAffectedSound doppler)
+            definition.Doppler = doppler.dopplerFac;
+
+        if (sound is DirectionalSound directional)
+        {
+            definition.DirectionX = directional.direction.x;
+            definition.DirectionY = directional.direction.y;
+        }
+        else if (sound is SpotSound spot)
+        {
+            definition.X = room != null && room.PixelWidth > 0.01f
+                ? Mathf.Clamp01(spot.pos.x / room.PixelWidth)
+                : 0.5f;
+            definition.Y = room != null && room.PixelHeight > 0.01f
+                ? Mathf.Clamp01(spot.pos.y / room.PixelHeight)
+                : 0.5f;
+            definition.Radius = spot.rad;
+            definition.Taper = spot.taper;
+        }
+
+        return definition;
+    }
+
+    private static SoundGroupSoundDefinition CreateDefaultDefinition(string sample, int soundType)
+    {
+        string type = soundType switch
+        {
+            0 => "Omnidirectional",
+            1 => "Directional",
+            2 => "Spot",
+            _ => null
+        };
+        if (type == null) return null;
+
+        return new SoundGroupSoundDefinition
+        {
+            Type = type,
+            Sample = sample ?? string.Empty
+        };
     }
 
     private static AmbientSound CreateFromDefinition(
