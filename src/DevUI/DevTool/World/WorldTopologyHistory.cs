@@ -160,11 +160,12 @@ internal sealed class WorldTopologyEditSnapshot
     private static int ResolveDestinationIndex(global::World world, string destination)
     {
         if (world == null ||
-            string.IsNullOrWhiteSpace(destination) ||
-            string.Equals(destination.Trim(), "DISCONNECTED", StringComparison.OrdinalIgnoreCase))
+            !WorldConnectionSyntax.TryParseDestination(destination, out string roomName, out _) ||
+            string.IsNullOrWhiteSpace(roomName) ||
+            string.Equals(roomName, "DISCONNECTED", StringComparison.OrdinalIgnoreCase))
             return -1;
 
-        return world.GetAbstractRoom(destination.Trim())?.index ?? -1;
+        return world.GetAbstractRoom(roomName)?.index ?? -1;
     }
 
     private static void SetLiveConnection(AbstractRoom room, int nodeIndex, int targetRoomIndex)
