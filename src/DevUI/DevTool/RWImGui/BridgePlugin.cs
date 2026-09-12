@@ -114,7 +114,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         TryRegisterCallback();
     }
 
-    private static bool TryRegisterLocalFontsDuringSafeStartup()
+    private static unsafe bool TryRegisterLocalFontsDuringSafeStartup()
     {
         if (DevToolFontCatalog.RegistrationSucceeded) return true;
 
