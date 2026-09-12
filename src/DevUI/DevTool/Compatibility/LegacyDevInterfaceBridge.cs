@@ -13,6 +13,7 @@ public enum LegacyControlKind
     Boolean,
     Slider,
     Cycler,
+    ExtEnum,
     Integer,
     Select,
     PanelSelect,
@@ -53,6 +54,7 @@ public static class LegacyDevInterfaceBridge
     }
 
     private const string CyclerActionPrefix = "@cycler|";
+    private const string ExtEnumActionPrefix = "@ext-enum|";
     private const string IntegerActionPrefix = "@integer|";
     private const string SelectActionPrefix = "@select|";
     private const string PanelSelectActionPrefix = "@panel-select|";
@@ -60,6 +62,7 @@ public static class LegacyDevInterfaceBridge
     private const string RegionKitPanelSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton";
     private const string RegionKitColorSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.RGBSelectButton";
     private const string RegionKitExtEnumCyclerDefinition = "RegionKit.Modules.DevUIMisc.GenericNodes.ExtEnumCycler`1";
+    private const string RegionKitAdvancedShaderPanelType = "RegionKit.Modules.Objects.AdvancedShaderController.AdvancedShaderRepresentation+AdvancedShaderPanel";
     private static readonly ConditionalWeakTable<ButtonWithSelectPanel, SelectOptionCache> SelectOptions = new();
 
     internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
@@ -78,6 +81,9 @@ public static class LegacyDevInterfaceBridge
     public static string CyclerAction(string path, int selectedIndex) =>
         CyclerActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
 
+    public static string ExtEnumAction(string path, int selectedIndex) =>
+        ExtEnumActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
+
     public static string IntegerAction(string path, int change) =>
         IntegerActionPrefix + change + "|" + (path ?? string.Empty);
 
@@ -91,14 +97,13 @@ public static class LegacyDevInterfaceBridge
         IsExactType(node, RegionKitBoolButtonType) && node is Button &&
         TryReadBoolMember(node, "actualValue", out _);
 
+    internal static bool CanAdaptExtEnum(DevUINode node) =>
+        TryReadExtEnum(node, out _, out _, out _);
+
     internal static bool IsTerminalSemanticButton(DevUINode node)
     {
         if (CanAdaptBoolean(node)) return true;
-        Type type = node?.GetType();
-        return type != null && type.IsGenericType &&
-               string.Equals(type.GetGenericTypeDefinition().FullName,
-                   RegionKitExtEnumCyclerDefinition,
-                   StringComparison.Ordinal);
+        return IsVerifiedAdvancedShaderImmediateButton(node);
     }
 
     internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
@@ -122,6 +127,8 @@ public static class LegacyDevInterfaceBridge
     {
         if (TryParseCompositeAction(path, CyclerActionPrefix, out int cyclerIndex, out string cyclerPath))
             return SetCycler(owner, target, cyclerPath, cyclerIndex);
+        if (TryParseCompositeAction(path, ExtEnumActionPrefix, out int extEnumIndex, out string extEnumPath))
+            return SetExtEnum(owner, target, extEnumPath, extEnumIndex);
         if (TryParseCompositeAction(path, IntegerActionPrefix, out int integerChange, out string integerPath))
             return IncrementInteger(owner, target, integerPath, integerChange);
         if (TryParseCompositeAction(path, SelectActionPrefix, out int selectedIndex, out string selectPath))
@@ -218,6 +225,34 @@ public static class LegacyDevInterfaceBridge
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool legacy cycler mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static bool SetExtEnum(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        DevUINode node = ResolveNode(representation, path);
+        if (!TryReadExtEnum(node, out Type enumType, out string[] options, out _)) return false;
+        if (selectedIndex < 0 || selectedIndex >= options.Length) return false;
+
+        try
+        {
+            object parsed = ExtEnumBase.Parse(enumType, options[selectedIndex], false);
+            if (!TryWriteMember(node, "Type", parsed)) return false;
+
+            node.Refresh();
+            if (node is Button button)
+                PropagateSignal(button, DevUISignalType.ButtonClick, string.Empty);
+            SynchronizePollingParent(owner, node);
+            owner.activePage?.Refresh();
+
+            return TryReadExtEnum(node, out _, out _, out int actualIndex) && actualIndex == selectedIndex;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool RegionKit ExtEnum mutation failed: " + error.Message);
             return false;
         }
     }
@@ -420,6 +455,21 @@ public static class LegacyDevInterfaceBridge
                 continue;
             }
 
+            if (TryReadExtEnum(node, out _, out string[] extEnumOptions, out int extEnumIndex))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = ChildLabelOrSemanticTitle(node, "Type"),
+                    Kind = LegacyControlKind.ExtEnum,
+                    ValueText = extEnumIndex >= 0 && extEnumIndex < extEnumOptions.Length ? extEnumOptions[extEnumIndex] : string.Empty,
+                    SelectedIndex = extEnumIndex,
+                    Options = extEnumOptions
+                });
+                continue;
+            }
+
             if (node is IntegerControl integerControl)
             {
                 output.Add(new LegacyControlSnapshot
@@ -549,6 +599,21 @@ public static class LegacyDevInterfaceBridge
                id == "Prev_Button" || id == "Next_Button" || id == "Export_Sandbox";
     }
 
+    private static bool IsVerifiedAdvancedShaderImmediateButton(DevUINode node)
+    {
+        if (node is not Button button) return false;
+        if (!string.Equals(button.parentNode?.GetType().FullName, RegionKitAdvancedShaderPanelType, StringComparison.Ordinal))
+            return false;
+
+        string id = button.IDstring ?? string.Empty;
+        return id == "AdvancedShader_Button_LockNone" ||
+               id == "AdvancedShader_Button_LockShape" ||
+               id == "AdvancedShader_Button_LockSquare" ||
+               id == "AdvancedShader_Button_LockRect" ||
+               id == "AdvancedShader_Arrow_ContainerLeft" ||
+               id == "AdvancedShader_Arrow_ContainerRight";
+    }
+
     private static string SliderTitle(Slider slider)
     {
         try
@@ -599,6 +664,38 @@ public static class LegacyDevInterfaceBridge
         if (method == null || method.ReturnType != typeof(void)) return false;
         method.Invoke(slider, new object[] { factor });
         return true;
+    }
+
+    private static bool TryReadExtEnum(DevUINode node, out Type enumType, out string[] options, out int selectedIndex)
+    {
+        enumType = null;
+        options = Array.Empty<string>();
+        selectedIndex = -1;
+        Type nodeType = node?.GetType();
+        if (nodeType == null || !nodeType.IsGenericType || node is not Button) return false;
+        if (!string.Equals(nodeType.GetGenericTypeDefinition().FullName, RegionKitExtEnumCyclerDefinition, StringComparison.Ordinal))
+            return false;
+
+        Type[] args = nodeType.GetGenericArguments();
+        if (args.Length != 1) return false;
+        enumType = args[0];
+        try
+        {
+            options = ExtEnumBase.GetNames(enumType) ?? Array.Empty<string>();
+            object current = ReadMember(node, "Type");
+            if (current is ExtEnumBase extEnum)
+                selectedIndex = extEnum.Index;
+            else if (current != null)
+                selectedIndex = FindOption(options, current.ToString());
+            return options.Length > 0;
+        }
+        catch
+        {
+            enumType = null;
+            options = Array.Empty<string>();
+            selectedIndex = -1;
+            return false;
+        }
     }
 
     private static bool TryReadNumericMember(object instance, string name, out float value)
@@ -797,6 +894,19 @@ public static class LegacyDevInterfaceBridge
         string id = node?.IDstring ?? string.Empty;
         if (string.IsNullOrWhiteSpace(id)) return fallback;
         return id.Replace('_', ' ').Trim();
+    }
+
+    private static string ChildLabelOrSemanticTitle(DevUINode node, string fallback)
+    {
+        if (node?.subNodes != null)
+        {
+            for (int i = 0; i < node.subNodes.Count; i++)
+            {
+                if (node.subNodes[i] is DevUILabel label && !string.IsNullOrWhiteSpace(label.Text))
+                    return label.Text.Trim().TrimEnd(':').Trim();
+            }
+        }
+        return SemanticTitle(node, fallback);
     }
 
     private static string CyclerTitle(Cycler cycler)
