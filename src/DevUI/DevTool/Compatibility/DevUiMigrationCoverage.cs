@@ -318,7 +318,8 @@ public static class DevUiMigrationCoverage
 
         // Composite controls are one migration obligation. Their internal presentation nodes do
         // not represent separate user-facing capabilities and must not inflate coverage counts.
-        if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel)
+        if (node is Slider || node is Cycler || node is IntegerControl || node is ButtonWithSelectPanel ||
+            LegacyDevInterfaceBridge.CanAdaptText(node))
             return;
         if (node.subNodes == null) return;
 
@@ -399,12 +400,22 @@ public static class DevUiMigrationCoverage
             return;
         }
 
+        // RegionKit StringControl and compatible derivatives are identified structurally rather
+        // than by an assembly reference. The bridge commits through the original TrySetValue
+        // transaction boundary, preserving validators and StringFinish signaling.
+        if (insideRepresentation && LegacyDevInterfaceBridge.CanAdaptText(node))
+        {
+            state = DevUiMigrationState.GenericAdapter;
+            note = "PlacedObject reflected text-control bridge";
+            return;
+        }
+
         // The object compatibility bridge exposes these stock semantic controls under the selected
         // PlacedObjectRepresentation and delegates back through their original behavior boundaries.
         if (insideRepresentation && node is Slider)
         {
             state = DevUiMigrationState.GenericAdapter;
-            note = "PlacedObject legacy Slider bridge";
+            note = "PlacedObject semantic Slider bridge";
             return;
         }
         if (insideRepresentation && node is Cycler)
@@ -417,6 +428,12 @@ public static class DevUiMigrationCoverage
         {
             state = DevUiMigrationState.GenericAdapter;
             note = "PlacedObject legacy IntegerControl bridge";
+            return;
+        }
+        if (insideRepresentation && node is Button && IsKnownUnsafeCompositeButton(type))
+        {
+            state = DevUiMigrationState.Unmapped;
+            note = "Composite button opens a hidden legacy panel and needs a dedicated native adapter";
             return;
         }
         if (insideRepresentation && node is Button)
@@ -440,6 +457,17 @@ public static class DevUiMigrationCoverage
 
         state = DevUiMigrationState.Unmapped;
         note = string.Empty;
+    }
+
+    private static bool IsKnownUnsafeCompositeButton(Type type)
+    {
+        string fullName = type?.FullName ?? string.Empty;
+        return string.Equals(fullName,
+                   "RegionKit.Modules.DevUIMisc.GenericNodes.RGBSelectButton",
+                   StringComparison.Ordinal) ||
+               string.Equals(fullName,
+                   "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton",
+                   StringComparison.Ordinal);
     }
 
     private static bool IsRebuiltPageInfrastructure(DevUINode node)
