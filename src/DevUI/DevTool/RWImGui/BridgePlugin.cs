@@ -34,6 +34,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
+
+        // Match the RWImGui font-loading pattern used by existing tooling: register mod-local
+        // font files during plugin startup, before the shared atlas starts serving editor frames.
+        // If RWImGui has not created its ImGui context yet, OnModsInit performs one safe retry.
+        DevToolFontCatalog.TryRegisterFonts(Logger);
         On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
@@ -82,6 +87,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         orig(self);
+        DevToolFontCatalog.TryRegisterFonts(log);
         TryRegisterCallback();
     }
 
@@ -338,9 +344,18 @@ internal static class DevToolFrontend
         {
             cjkFont = default;
             resolvedFontName = string.Empty;
-            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+            resolvedFontWeight = DevToolUiSettings.FontWeight;
             resolvedFontWeightVariantCount = 0;
             return;
+        }
+
+        string preferredFamily = DevToolUiSettings.ChineseFontFamily;
+        bool preferredAvailable = false;
+        for (int i = 0; i < CjkFonts.Count; i++)
+        {
+            if (!DevToolFontCatalog.IsFamilyMatch(CjkFonts[i].Name, preferredFamily)) continue;
+            preferredAvailable = true;
+            break;
         }
 
         FontCandidate best = null;
@@ -350,11 +365,14 @@ internal static class DevToolFrontend
         for (int i = 0; i < CjkFonts.Count; i++)
         {
             FontCandidate candidate = CjkFonts[i];
+            bool familyMatch = DevToolFontCatalog.IsFamilyMatch(candidate.Name, preferredFamily);
+            if (preferredAvailable && !familyMatch) continue;
             weights.Add(candidate.Weight);
 
             // Font size must never choose a different atlas font while the developer drags the
-            // size slider. Weight chooses the family variant; baked size only breaks equal-weight
-            // ties against the stable reference size. Visual size is handled exclusively by scale.
+            // size slider. Family selection is applied first, weight picks the nearest family
+            // variant, and baked size only breaks equal-weight ties against the stable reference
+            // size. Visual size is handled exclusively by scale.
             int weightDistance = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight);
             float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.ReferenceFontSize);
             if (weightDistance > bestWeightDistance ||
