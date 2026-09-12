@@ -13,6 +13,7 @@ internal static class UiModeSwitch
         DevToolUiTheme.Apply();
 
         Num.Vector2 display = ImGui.GetIO().DisplaySize;
+        EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
         // In New UI mode the switch, language controls, commands and session status all live in
         // ControlCenterWindow. Vanilla keeps only this deliberately small return surface so the
@@ -20,26 +21,25 @@ internal static class UiModeSwitch
         if (EditorUiModeState.UseVanilla)
         {
             DrawVanillaReturnPanel();
+            return;
         }
-        else
+
+        // Map needs the largest uninterrupted workspace. Its generic compatibility controls are
+        // embedded directly in the Map inspector, so permanent diagnostic/shortcut windows add no
+        // editing value there and merely cover the graph.
+        if (snapshot.ToolMode != EditorToolMode.Map)
         {
-            // Shortcut discovery has one permanent, shared surface instead of leaking temporary
-            // key hints into every editor panel. The window is itself part of the floating layout.
-            ShortcutWindow.Draw(EditorPresentationHub.Current, display);
-
-            // Migration coverage is compact by default and expands only on demand. It audits the
-            // real live DevInterface tree, including RegionKit/DryCycle nodes injected at runtime.
+            ShortcutWindow.Draw(snapshot, display);
             MigrationCoverageWindow.Draw(display);
-
-            // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
-            // no selection/group exists prevents an empty fourth panel from competing with the room.
-            if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
-                GroupStatusWindow.Draw(display);
         }
 
-        // Draw last so shortcut feedback stays above normal editor windows in the fixed top-center
-        // acknowledgement area requested by the editor workflow.
-        ActionToastOverlay.Draw(EditorPresentationHub.Current, display);
+        // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
+        // no selection/group exists prevents an empty fourth panel from competing with the room.
+        if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
+            GroupStatusWindow.Draw(display);
+
+        // ActionToastOverlay is drawn once, after the main editor windows, by BridgePlugin.
+        // Do not draw it here as well; duplicate pumping also duplicated the universal mirror.
     }
 
     private static void DrawVanillaReturnPanel()
