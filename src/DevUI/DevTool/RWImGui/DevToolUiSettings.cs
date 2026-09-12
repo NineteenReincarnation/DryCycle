@@ -25,7 +25,7 @@ internal static class DevToolUiSettings
     internal const float DefaultFontSize = 36f;
     internal const float DefaultChineseFontSize = 42f;
     internal const int DefaultFontWeight = 400;
-    internal const int DefaultChineseFontWeight = 700;
+    internal const int DefaultChineseFontWeight = 500;
     internal const float WindowOutlineWidth = 2f;
 
     private static readonly Num.Vector4 DefaultTextColor = new(0.94f, 0.94f, 0.94f, 1f);
