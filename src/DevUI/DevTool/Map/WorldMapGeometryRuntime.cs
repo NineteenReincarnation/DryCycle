@@ -4,7 +4,6 @@ using System.IO;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.TerrainExt.QuicksandZone;
-using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -90,18 +89,15 @@ public sealed class EditorMapRoomVisualSnapshot
 }
 
 /// <summary>
-/// Builds the geometry used by the unified World Map room thumbnails.
+/// Geometry cache for the unified World Map.
 ///
-/// Vanilla MapObject rasterises room terrain into a tile-sized texture. We keep that raster as a
-/// cheap base layer, but continuous terrain is reconstructed from the authored spline data instead
-/// of being reduced to coverage thresholds. DryCycle terrain such as QuicksandZone is sampled from
-/// the same data that drives its runtime surface, so the thumbnail can show geometry vanilla's
-/// coarse minimap cannot express cleanly.
+/// Vanilla's MapObject raster remains the cheap base layer, including its TerrainManager coverage
+/// sampling, but continuous terrain is also reconstructed from authored splines. This preserves
+/// LocalTerrain/CurvedSlope shape and lets DryCycle terrain such as QuicksandZone expose material
+/// identity that the coarse vanilla minimap texture cannot represent.
 ///
-/// Geometry is cached per room. Raster runs are rebuilt only when MapObject produces a new texture;
-/// curve data is rebuilt only when relevant placed-object settings change or the settings file is
-/// modified. The RWImGui frontend only consumes compact rectangles/polylines and never resamples a
-/// room every frame.
+/// The frontend receives compact horizontal raster runs and simplified polylines. No room tile map
+/// or spline is re-sampled every ImGui frame.
 /// </summary>
 internal static class MapRoomGeometryPresentationHub
 {
@@ -113,9 +109,10 @@ internal static class MapRoomGeometryPresentationHub
     {
         internal int RoomIndex;
         internal string RoomName = string.Empty;
-        internal int TextureId;
+        internal int RasterSourceKey;
         internal int RasterWidth;
         internal int RasterHeight;
+        internal bool RasterInitialized;
         internal int SettingsFingerprint;
         internal string SettingsPath = string.Empty;
         internal DateTime SettingsWriteTimeUtc;
@@ -131,12 +128,10 @@ internal static class MapRoomGeometryPresentationHub
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static string region = string.Empty;
 
-    internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
-    {
-        return cache.TryGetValue(roomIndex, out CacheEntry entry)
+    internal static EditorMapRoomVisualSnapshot Get(int roomIndex) =>
+        cache.TryGetValue(roomIndex, out CacheEntry entry)
             ? entry.Snapshot
             : EditorMapRoomVisualSnapshot.Empty;
-    }
 
     internal static void Prime(EditorSession session)
     {
@@ -177,19 +172,14 @@ internal static class MapRoomGeometryPresentationHub
             Publish(entry);
         }
 
-        if (cache.Count != alive.Count)
-        {
-            List<int> stale = new();
-            foreach (int key in cache.Keys)
-                if (!alive.Contains(key)) stale.Add(key);
-            for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
-        }
+        if (cache.Count == alive.Count) return;
+        List<int> stale = new();
+        foreach (int key in cache.Keys)
+            if (!alive.Contains(key)) stale.Add(key);
+        for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
     }
 
-    internal static void InvalidateRoom(int roomIndex)
-    {
-        cache.Remove(roomIndex);
-    }
+    internal static void InvalidateRoom(int roomIndex) => cache.Remove(roomIndex);
 
     internal static void Clear()
     {
@@ -215,73 +205,107 @@ internal static class MapRoomGeometryPresentationHub
 
     private static void RefreshRaster(CacheEntry entry, MapObject.RoomRepresentation roomRep)
     {
-        Texture2D texture = roomRep?.texture;
-        if (texture == null) return;
-
-        int textureId = texture.GetInstanceID();
-        if (entry.TextureId == textureId &&
-            entry.RasterWidth == texture.width &&
-            entry.RasterHeight == texture.height &&
-            entry.RasterRuns.Length > 0)
+        if (!TryReadMapPixels(roomRep, out Color[] pixels, out int width, out int height, out int sourceKey))
             return;
+
+        if (entry.RasterInitialized &&
+            entry.RasterSourceKey == sourceKey &&
+            entry.RasterWidth == width &&
+            entry.RasterHeight == height)
+            return;
+
+        List<EditorMapRectSnapshot> runs = new();
+        for (int y = 0; y < height; y++)
+        {
+            int x = 0;
+            while (x < width)
+            {
+                EditorMapGeometryKind? kind = ClassifyPixel(pixels[y * width + x]);
+                if (!kind.HasValue)
+                {
+                    x++;
+                    continue;
+                }
+
+                int start = x;
+                x++;
+                while (x < width && ClassifyPixel(pixels[y * width + x]) == kind)
+                    x++;
+
+                runs.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind.Value));
+            }
+        }
+
+        entry.RasterSourceKey = sourceKey;
+        entry.RasterWidth = width;
+        entry.RasterHeight = height;
+        entry.RasterInitialized = true;
+        entry.WidthTiles = Math.Max(1f, width);
+        entry.HeightTiles = Math.Max(1f, height);
+        entry.RasterRuns = runs.ToArray();
+    }
+
+    private static bool TryReadMapPixels(
+        MapObject.RoomRepresentation roomRep,
+        out Color[] pixels,
+        out int width,
+        out int height,
+        out int sourceKey)
+    {
+        pixels = null;
+        width = 0;
+        height = 0;
+        sourceKey = 0;
 
         try
         {
-            Color[] pixels = texture.GetPixels();
-            List<EditorMapRectSnapshot> runs = new();
-            int width = texture.width;
-            int height = texture.height;
-
-            for (int y = 0; y < height; y++)
+            if (roomRep?.texture != null)
             {
-                int x = 0;
-                while (x < width)
-                {
-                    EditorMapGeometryKind? kind = ClassifyPixel(pixels[y * width + x]);
-                    if (!kind.HasValue)
-                    {
-                        x++;
-                        continue;
-                    }
-
-                    int start = x;
-                    x++;
-                    while (x < width && ClassifyPixel(pixels[y * width + x]) == kind)
-                        x++;
-
-                    runs.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind.Value));
-                }
+                width = roomRep.texture.width;
+                height = roomRep.texture.height;
+                pixels = roomRep.texture.GetPixels();
+                sourceKey = roomRep.texture.GetInstanceID();
+                return pixels != null && pixels.Length == width * height;
             }
 
-            entry.TextureId = textureId;
-            entry.RasterWidth = width;
-            entry.RasterHeight = height;
-            entry.WidthTiles = Math.Max(1f, width);
-            entry.HeightTiles = Math.Max(1f, height);
-            entry.RasterRuns = runs.ToArray();
+            // MapObject may reuse a Futile atlas element without retaining RoomRepresentation.texture.
+            // Sample that atlas element instead so cached rooms still keep their real minimap shape.
+            FAtlasElement element = roomRep?.mapTex;
+            if (element?.atlas?.texture is not Texture2D atlasTexture) return false;
+
+            Rect uv = element.uvRect;
+            int atlasX = Mathf.Clamp(Mathf.RoundToInt(uv.x * atlasTexture.width), 0, Math.Max(0, atlasTexture.width - 1));
+            int atlasY = Mathf.Clamp(Mathf.RoundToInt(uv.y * atlasTexture.height), 0, Math.Max(0, atlasTexture.height - 1));
+            width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * atlasTexture.width), 1, atlasTexture.width - atlasX);
+            height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * atlasTexture.height), 1, atlasTexture.height - atlasY);
+            pixels = atlasTexture.GetPixels(atlasX, atlasY, width, height);
+            sourceKey = atlasTexture.GetInstanceID() ^ (element.name?.GetHashCode() ?? 0);
+            return pixels != null && pixels.Length == width * height;
         }
         catch (Exception error)
         {
             global::DryCycle.Plugin.Logger?.LogDebug(
-                "WorldMap thumbnail raster unavailable for " + entry.RoomName + ": " + error.Message);
+                "WorldMap minimap raster unavailable for " + (roomRep?.room?.name ?? "?") + ": " + error.Message);
+            pixels = null;
+            width = 0;
+            height = 0;
+            sourceKey = 0;
+            return false;
         }
     }
 
     private static EditorMapGeometryKind? ClassifyPixel(Color color)
     {
-        // MapObject colours are intentionally coarse. Treat them as semantic buckets and keep
-        // curved/custom geometry in the vector overlay rather than trying to recover it here.
+        // These colours come directly from MapObject.CreateMapTexture. Shortcut colours are not
+        // duplicated here because interactive node markers are drawn from real node coordinates.
         if (color.b > color.r + 0.12f && color.b > color.g + 0.12f)
             return EditorMapGeometryKind.Water;
-
         if (color.r < 0.40f && color.g < 0.40f && color.b < 0.40f)
             return EditorMapGeometryKind.Solid;
-
         if (color.r >= 0.42f && color.r <= 0.58f &&
             color.g >= 0.22f && color.g <= 0.42f &&
             color.b >= 0.22f && color.b <= 0.42f)
             return EditorMapGeometryKind.Detail;
-
         return null;
     }
 
@@ -296,59 +320,69 @@ internal static class MapRoomGeometryPresentationHub
         EditorMapNodeVisualSnapshot[] nodes = new EditorMapNodeVisualSnapshot[roomRep.nodePositions.Length];
         for (int i = 0; i < nodes.Length; i++)
         {
-            Vector2 p = roomRep.nodePositions[i];
-            nodes[i] = new EditorMapNodeVisualSnapshot(i, p.x, p.y);
+            Vector2 point = roomRep.nodePositions[i];
+            nodes[i] = new EditorMapNodeVisualSnapshot(i, point.x, point.y);
         }
         entry.Nodes = nodes;
     }
 
     private static void RefreshCurves(CacheEntry entry, global::World world, AbstractRoom room)
     {
-        RoomSettings settings = room?.realizedRoom?.roomSettings;
-        bool liveSettings = settings != null;
-
-        if (settings == null && !entry.CurvesInitialized)
+        RoomSettings liveSettings = room?.realizedRoom?.roomSettings;
+        if (liveSettings != null)
         {
-            try
-            {
-                string roomName = WorldLoader.RoomNameManipulator(room.FileName, world.game);
-                settings = new RoomSettings(
-                    roomName,
-                    world.region,
-                    template: false,
-                    firstTemplate: false,
-                    world.game?.TimelinePoint,
-                    world.game);
-            }
-            catch (Exception error)
-            {
-                global::DryCycle.Plugin.Logger?.LogDebug(
-                    "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
-            }
+            int liveFingerprint = GeometrySettingsFingerprint(liveSettings);
+            if (entry.CurvesInitialized && liveFingerprint == entry.SettingsFingerprint) return;
+            RebuildCurves(entry, liveSettings, liveFingerprint);
+            return;
+        }
+
+        // Unloaded rooms are only reparsed when their settings file timestamp changes. This keeps
+        // hundreds of-room regions cheap while still reflecting external editor/mod changes.
+        if (entry.CurvesInitialized && !string.IsNullOrWhiteSpace(entry.SettingsPath))
+        {
+            DateTime currentWriteTime = FileWriteTime(entry.SettingsPath);
+            if (currentWriteTime == entry.SettingsWriteTimeUtc) return;
+        }
+
+        RoomSettings settings = null;
+        try
+        {
+            string roomName = WorldLoader.RoomNameManipulator(room.FileName, world.game);
+            SlugcatStats.Timeline timeline = world.game != null ? world.game.TimelinePoint : null;
+            settings = new RoomSettings(
+                roomName,
+                world.region,
+                template: false,
+                firstTemplate: false,
+                timeline,
+                world.game);
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.Plugin.Logger?.LogDebug(
+                "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
         }
 
         if (settings == null) return;
+        RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
+    }
 
-        int fingerprint = GeometrySettingsFingerprint(settings);
-        DateTime writeTime = SettingsWriteTime(settings);
-        if (entry.CurvesInitialized &&
-            fingerprint == entry.SettingsFingerprint &&
-            (!liveSettings || writeTime == entry.SettingsWriteTimeUtc))
-            return;
-
+    private static void RebuildCurves(CacheEntry entry, RoomSettings settings, int fingerprint)
+    {
         entry.SettingsFingerprint = fingerprint;
         entry.SettingsPath = settings.filePath ?? string.Empty;
-        entry.SettingsWriteTimeUtc = writeTime;
+        entry.SettingsWriteTimeUtc = FileWriteTime(entry.SettingsPath);
         entry.Curves = BuildCurveGeometry(settings).ToArray();
         entry.CurvesInitialized = true;
     }
 
-    private static DateTime SettingsWriteTime(RoomSettings settings)
+    private static DateTime FileWriteTime(string path)
     {
         try
         {
-            return !string.IsNullOrWhiteSpace(settings?.filePath) && File.Exists(settings.filePath)
-                ? File.GetLastWriteTimeUtc(settings.filePath)
+            return !string.IsNullOrWhiteSpace(path) && File.Exists(path)
+                ? File.GetLastWriteTimeUtc(path)
                 : DateTime.MinValue;
         }
         catch
@@ -364,7 +398,6 @@ internal static class MapRoomGeometryPresentationHub
             int hash = 17;
             List<PlacedObject> objects = settings?.placedObjects;
             if (objects == null) return hash;
-
             for (int i = 0; i < objects.Count; i++)
             {
                 PlacedObject placed = objects[i];
@@ -400,15 +433,22 @@ internal static class MapRoomGeometryPresentationHub
             if ((placed.type == PlacedObject.Type.LocalTerrain || placed.type == PlacedObject.Type.CurvedSlope) &&
                 placed.data is PlacedObject.LocalTerrainData local)
             {
-                EditorMapGeometryKind kind = placed.type == PlacedObject.Type.CurvedSlope
-                    ? EditorMapGeometryKind.CurvedSlope
-                    : EditorMapGeometryKind.LocalTerrain;
-                AddSplineBand(result, local.spline, placed.pos, local.bottom, kind, 0f, 1f);
+                AddSplineBand(
+                    result,
+                    local.spline,
+                    placed.pos,
+                    local.bottom,
+                    placed.type == PlacedObject.Type.CurvedSlope
+                        ? EditorMapGeometryKind.CurvedSlope
+                        : EditorMapGeometryKind.LocalTerrain,
+                    0f,
+                    1f);
                 continue;
             }
 
             if (string.Equals(placed.type?.value, "QuicksandZone", StringComparison.Ordinal) &&
-                placed.data is QuicksandZoneData quicksand && quicksand.SurfaceSpline != null)
+                placed.data is QuicksandZoneData quicksand &&
+                quicksand.SurfaceSpline != null)
             {
                 AddSplineBand(
                     result,
@@ -450,10 +490,9 @@ internal static class MapRoomGeometryPresentationHub
     {
         if (spline == null || endU <= startU + 0.0001f) return;
 
-        float segmentLength = Math.Max(1f, spline.GetFullLength * (endU - startU));
-        int sampleCount = Mathf.Clamp(Mathf.CeilToInt(segmentLength / 10f) + 1, 8, MaxCurveSamples);
+        float sampledLength = Math.Max(1f, spline.GetFullLength * (endU - startU));
+        int sampleCount = Mathf.Clamp(Mathf.CeilToInt(sampledLength / 10f) + 1, 8, MaxCurveSamples);
         List<EditorMapPointSnapshot> surface = new(sampleCount);
-
         for (int i = 0; i < sampleCount; i++)
         {
             float t = sampleCount <= 1 ? 0f : (float)i / (sampleCount - 1);
@@ -470,7 +509,6 @@ internal static class MapRoomGeometryPresentationHub
         polygon.AddRange(surface);
         polygon.Add(new EditorMapPointSnapshot(surface[surface.Count - 1].X, bottomY));
         polygon.Add(new EditorMapPointSnapshot(surface[0].X, bottomY));
-
         output.Add(new EditorMapPolylineSnapshot
         {
             Kind = kind,
@@ -485,7 +523,6 @@ internal static class MapRoomGeometryPresentationHub
         u = Mathf.Clamp01(u);
         float total = Mathf.Max(0.001f, spline.GetFullLength);
         float remaining = total * u;
-
         for (int segment = 0; segment < spline.Segments; segment++)
         {
             float length = Mathf.Max(0.001f, spline.GetSegmentLength(segment));
@@ -499,9 +536,7 @@ internal static class MapRoomGeometryPresentationHub
     private static EditorMapPointSnapshot ToTilePoint(Vector2 pixelPoint) =>
         new(pixelPoint.x / PixelsPerTile, pixelPoint.y / PixelsPerTile);
 
-    private static List<EditorMapPointSnapshot> Simplify(
-        List<EditorMapPointSnapshot> points,
-        float tolerance)
+    private static List<EditorMapPointSnapshot> Simplify(List<EditorMapPointSnapshot> points, float tolerance)
     {
         if (points == null || points.Count <= 2) return points ?? new List<EditorMapPointSnapshot>();
         bool[] keep = new bool[points.Count];
@@ -527,7 +562,6 @@ internal static class MapRoomGeometryPresentationHub
         EditorMapPointSnapshot b = points[end];
         float best = -1f;
         int bestIndex = -1;
-
         for (int i = start + 1; i < end; i++)
         {
             float distance = DistanceToSegmentSquared(points[i], a, b);
@@ -570,7 +604,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.Snapshot = new EditorMapRoomVisualSnapshot
         {
             Available = entry.WidthTiles > 0f && entry.HeightTiles > 0f,
-            DetailedRasterAvailable = entry.RasterRuns.Length > 0,
+            DetailedRasterAvailable = entry.RasterInitialized,
             WidthTiles = Math.Max(1f, entry.WidthTiles),
             HeightTiles = Math.Max(1f, entry.HeightTiles),
             RasterRuns = entry.RasterRuns,
