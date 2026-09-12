@@ -244,6 +244,11 @@ internal static class ObjectInspectorView
             case EditorPropertyKind.Enum:
                 DrawEnum(inspector, property, label, mixed);
                 break;
+
+            case EditorPropertyKind.Action:
+                if (DevToolWidgets.ActionButton(displayName, "InspectorAction_" + stateKey, DevToolButtonTone.Normal, true))
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Action));
+                break;
         }
 
         if (ImGui.IsItemHovered())
