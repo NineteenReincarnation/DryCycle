@@ -132,7 +132,7 @@ public static class LegacyDevInterfaceBridge
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         if (ResolveNode(representation, path) is not Button button || button is ButtonWithSelectPanel) return false;
-        if (CanAdaptPanelSelect(button) || CanAdaptColorSelect(button)) return false;
+        if (!IsTerminalSemanticButton(button)) return false;
 
         try
         {
@@ -526,7 +526,7 @@ public static class LegacyDevInterfaceBridge
                 continue;
             }
 
-            if (node is Button button && !IsInfrastructureButton(button))
+            if (node is Button button && !IsInfrastructureButton(button) && IsTerminalSemanticButton(button))
             {
                 output.Add(new LegacyControlSnapshot
                 {
@@ -535,6 +535,7 @@ public static class LegacyDevInterfaceBridge
                     Label = string.IsNullOrWhiteSpace(button.Text) ? button.IDstring ?? "Button" : button.Text,
                     Kind = LegacyControlKind.Button
                 });
+                continue;
             }
 
             CaptureChildren(node, path, output);
