@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using DevInterface;
 using UnityEngine;
 
@@ -10,7 +11,8 @@ public enum LegacyControlKind
     Button,
     Slider,
     Cycler,
-    Integer
+    Integer,
+    Select
 }
 
 /// <summary>
@@ -33,8 +35,16 @@ public sealed class LegacyControlSnapshot
 
 public static class LegacyDevInterfaceBridge
 {
+    private sealed class SelectOptionCache
+    {
+        internal string DisplayText = string.Empty;
+        internal string[] Options = Array.Empty<string>();
+    }
+
     private const string CyclerActionPrefix = "@cycler|";
     private const string IntegerActionPrefix = "@integer|";
+    private const string SelectActionPrefix = "@select|";
+    private static readonly ConditionalWeakTable<ButtonWithSelectPanel, SelectOptionCache> SelectOptions = new();
 
     internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
     {
@@ -55,12 +65,20 @@ public static class LegacyDevInterfaceBridge
     public static string IntegerAction(string path, int change) =>
         IntegerActionPrefix + change + "|" + (path ?? string.Empty);
 
+    public static string SelectAction(string path, int selectedIndex) =>
+        SelectActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
+
+    internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
+        button != null && ReadSelectOptions(button).Length > 0;
+
     internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
     {
         if (TryParseCompositeAction(path, CyclerActionPrefix, out int cyclerIndex, out string cyclerPath))
             return SetCycler(owner, target, cyclerPath, cyclerIndex);
         if (TryParseCompositeAction(path, IntegerActionPrefix, out int integerChange, out string integerPath))
             return IncrementInteger(owner, target, integerPath, integerChange);
+        if (TryParseCompositeAction(path, SelectActionPrefix, out int selectedIndex, out string selectPath))
+            return SetSelect(owner, target, selectPath, selectedIndex);
 
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
@@ -169,6 +187,32 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
+    internal static bool SetSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    {
+        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
+        if (representation == null) return false;
+        if (ResolveNode(representation, path) is not ButtonWithSelectPanel button) return false;
+
+        string[] options = ReadSelectOptions(button);
+        if (selectedIndex < 0 || selectedIndex >= options.Length) return false;
+
+        try
+        {
+            // A real SelectPanel closes before ButtonWithSelectPanel.OnValueChange is invoked.
+            // Mirror that ordering when the hidden backend happens to have an open panel.
+            CloseSelectPanel(button);
+            button.OnValueChange(options[selectedIndex]);
+            SelectOptions.Remove(button);
+            owner.activePage?.Refresh();
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy select mutation failed: " + error.Message);
+            return false;
+        }
+    }
+
     private static void CaptureChildren(DevUINode parent, string parentPath, List<LegacyControlSnapshot> output)
     {
         if (parent?.subNodes == null) return;
@@ -224,11 +268,25 @@ public static class LegacyDevInterfaceBridge
                 continue;
             }
 
-            // ButtonWithSelectPanel is not a plain action button: choosing an item creates a
-            // SelectPanel and routes the chosen ID through OnValueChange/IDevUISignals. Until its
-            // option model is migrated explicitly, do not misrepresent it as a one-shot Button.
-            if (node is ButtonWithSelectPanel)
+            if (node is ButtonWithSelectPanel select)
+            {
+                string[] options = ReadSelectOptions(select);
+                if (options.Length > 0)
+                {
+                    string current = select.Text ?? string.Empty;
+                    output.Add(new LegacyControlSnapshot
+                    {
+                        Path = path,
+                        Id = select.IDstring ?? string.Empty,
+                        Label = SelectTitle(select),
+                        Kind = LegacyControlKind.Select,
+                        ValueText = current,
+                        SelectedIndex = FindOption(options, current),
+                        Options = options
+                    });
+                }
                 continue;
+            }
 
             if (node is Button button && !IsInfrastructureButton(button))
             {
@@ -322,6 +380,83 @@ public static class LegacyDevInterfaceBridge
     {
         try { return control.NumberLabelText ?? string.Empty; }
         catch { return string.Empty; }
+    }
+
+    private static string SelectTitle(ButtonWithSelectPanel button)
+    {
+        string id = button?.IDstring ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(id)) return "Select";
+        return id.Replace('_', ' ').Trim();
+    }
+
+    private static string[] ReadSelectOptions(ButtonWithSelectPanel button)
+    {
+        if (button == null) return Array.Empty<string>();
+        if (button.selectPanel?.items != null && button.selectPanel.items.Length > 0)
+            return CloneOptions(button.selectPanel.items);
+
+        string displayText = button.Text ?? string.Empty;
+        if (SelectOptions.TryGetValue(button, out SelectOptionCache cached) &&
+            string.Equals(cached.DisplayText, displayText, StringComparison.Ordinal))
+            return CloneOptions(cached.Options);
+
+        string[] discovered = DiscoverSelectOptions(button);
+        SelectOptions.Remove(button);
+        SelectOptions.Add(button, new SelectOptionCache
+        {
+            DisplayText = displayText,
+            Options = CloneOptions(discovered)
+        });
+        return discovered;
+    }
+
+    private static string[] DiscoverSelectOptions(ButtonWithSelectPanel button)
+    {
+        if (button?.makeSelectPanel == null) return Array.Empty<string>();
+        SelectPanel temporary = null;
+        try
+        {
+            temporary = button.makeSelectPanel(button);
+            return temporary?.items == null ? Array.Empty<string>() : CloneOptions(temporary.items);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy select option discovery failed: " + error.Message);
+            return Array.Empty<string>();
+        }
+        finally
+        {
+            if (temporary != null && !ReferenceEquals(temporary, button.selectPanel))
+            {
+                try { temporary.ClearSprites(); }
+                catch { }
+            }
+        }
+    }
+
+    private static void CloseSelectPanel(ButtonWithSelectPanel button)
+    {
+        SelectPanel panel = button?.selectPanel;
+        if (button == null || panel == null) return;
+        button.subNodes.Remove(panel);
+        panel.ClearSprites();
+        button.selectPanel = null;
+    }
+
+    private static string[] CloneOptions(string[] source)
+    {
+        if (source == null || source.Length == 0) return Array.Empty<string>();
+        string[] copy = new string[source.Length];
+        for (int i = 0; i < copy.Length; i++) copy[i] = source[i] ?? string.Empty;
+        return copy;
+    }
+
+    private static int FindOption(string[] options, string value)
+    {
+        if (options == null) return -1;
+        for (int i = 0; i < options.Length; i++)
+            if (string.Equals(options[i], value, StringComparison.Ordinal)) return i;
+        return -1;
     }
 
     private static bool TryParseCompositeAction(string encoded, string prefix, out int argument, out string path)
