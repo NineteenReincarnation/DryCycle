@@ -39,7 +39,11 @@ internal static class DevToolOverlay
         else if (snapshot.ToolMode == EditorToolMode.Relationships)
             DrawRelationshipMatrix(snapshot, display);
 
-        ControlCenterWindow.Draw(snapshot, display);
+        // Map/World owns its own command toolbar so the old Control Center does not sit behind the
+        // full-height workspace. Other tools keep the existing shared control surface.
+        if (snapshot.ToolMode != EditorToolMode.Map)
+            ControlCenterWindow.Draw(snapshot, display);
+
         if (!snapshot.FocusMode)
         {
             DrawActivityBar(snapshot, display);
