@@ -7,15 +7,13 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Small non-interactive confirmation surface for editor shortcuts. It intentionally lives at the
-/// top-center of the room instead of inside a movable editor window, so keyboard actions have an
-/// immediate visual acknowledgement without stealing room space or input focus.
+/// Small non-interactive confirmation surface for editor actions. Shortcut discovery itself lives
+/// exclusively in ShortcutWindow; this overlay only acknowledges an action after it has fired.
 /// </summary>
 internal static class ActionToastOverlay
 {
     private static readonly Num.Vector4 SuccessText = new(0.62f, 0.84f, 1.00f, 1f);
     private static readonly Num.Vector4 WarningText = new(1.00f, 0.74f, 0.36f, 1f);
-    private static readonly Num.Vector4 ShortcutText = new(0.68f, 0.75f, 0.84f, 1f);
     private static readonly Num.Vector4 Border = new(0.28f, 0.52f, 0.76f, 0.92f);
     private static readonly Num.Vector4 WarningBorder = new(0.72f, 0.48f, 0.20f, 0.95f);
     private static readonly Num.Vector4 Background = new(0.025f, 0.040f, 0.060f, 0.94f);
@@ -24,7 +22,6 @@ internal static class ActionToastOverlay
     private const double FadeSeconds = 0.32;
 
     private static string message = string.Empty;
-    private static string shortcut = string.Empty;
     private static bool warning;
     private static double shownAt = -1000d;
 
@@ -44,9 +41,7 @@ internal static class ActionToastOverlay
             ? DevToolUiSettings.T("已执行", "Done")
             : message;
         float messageWidth = ImGui.CalcTextSize(visibleMessage).X;
-        float shortcutWidth = string.IsNullOrEmpty(shortcut) ? 0f : ImGui.CalcTextSize(shortcut).X;
-        float gap = shortcutWidth > 0f ? 18f : 0f;
-        float width = Math.Max(168f, messageWidth + shortcutWidth + gap + 34f);
+        float width = Math.Max(168f, messageWidth + 34f);
         float height = Math.Max(34f, ImGui.GetFrameHeight() + 12f);
         float x = Math.Max(8f, (display.X - width) * 0.5f);
         float y = Math.Max(36f, Math.Min(64f, display.Y * 0.045f));
@@ -74,14 +69,6 @@ internal static class ActionToastOverlay
             main.W *= alpha;
             ImGui.TextColored(main, visibleMessage);
 
-            if (!string.IsNullOrEmpty(shortcut))
-            {
-                ImGui.SameLine(0f, gap);
-                Num.Vector4 key = ShortcutText;
-                key.W *= alpha;
-                ImGui.TextColored(key, shortcut);
-            }
-
             ImDrawListPtr draw = ImGui.GetWindowDrawList();
             Num.Vector2 min = ImGui.GetWindowPos();
             Num.Vector2 max = min + ImGui.GetWindowSize();
@@ -100,10 +87,11 @@ internal static class ActionToastOverlay
         ImGui.PopStyleVar(3);
     }
 
+    // Keep the optional keys parameter so existing callers and compatibility layers do not break.
+    // Key labels are intentionally not rendered here; ShortcutWindow is the single discovery UI.
     internal static void Notify(string chinese, string english, string keys = null, bool isWarning = false)
     {
         message = DevToolUiSettings.T(chinese, english);
-        shortcut = keys ?? string.Empty;
         warning = isWarning;
         shownAt = ImGui.GetTime();
     }
