@@ -42,7 +42,7 @@ internal static class WorldMapView
     private static bool fitRequested = true;
     private static bool showTerrain = true;
     private static bool showConnections = true;
-    private static bool showAllPorts;
+    private static bool showPortLabels = true;
     private static bool showSubregionLabels = true;
 
     private static int draggingRoom = -1;
@@ -107,7 +107,7 @@ internal static class WorldMapView
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
         ImGui.SameLine();
-        DrawCompactCheckbox(DevToolUiSettings.T("空闲出口", "Free exits"), "WorldMapPorts", ref showAllPorts);
+        DrawCompactCheckbox(DevToolUiSettings.T("出口编号", "Exit IDs"), "WorldMapPortLabels", ref showPortLabels);
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("子区域", "Subregions"), "WorldMapSubregions", ref showSubregionLabels);
 
@@ -126,7 +126,7 @@ internal static class WorldMapView
         }
 
         ImGui.SameLine(0f, 18f);
-        DevToolWidgets.MutedText(DevToolUiSettings.T("新连接", "New link"));
+        DevToolWidgets.MutedText(DevToolUiSettings.T("连接方向", "Link direction"));
         ImGui.SameLine();
         DrawDirectionButton(WorldConnectionDirection.Bidirectional, "Both", "Both");
         ImGui.SameLine();
@@ -349,6 +349,19 @@ internal static class WorldMapView
         };
     }
 
+    private static uint ShortcutGold(bool bright) =>
+        ImGui.GetColorU32(bright
+            ? new Num.Vector4(1.00f, 0.82f, 0.30f, 1.00f)
+            : new Num.Vector4(0.86f, 0.62f, 0.17f, 1.00f));
+
+    private static uint ShortcutGoldDark() =>
+        ImGui.GetColorU32(new Num.Vector4(0.34f, 0.22f, 0.055f, 1.00f));
+
+    private static uint ConnectionColor(WorldConnectionDirection direction) =>
+        ImGui.GetColorU32(direction == WorldConnectionDirection.Bidirectional
+            ? new Num.Vector4(0.80f, 0.83f, 0.86f, 1.00f)
+            : new Num.Vector4(0.96f, 0.69f, 0.25f, 1.00f));
+
     private static void DrawRoomLabel(
         ImDrawListPtr draw,
         EditorMapRoomSnapshot room,
@@ -389,14 +402,17 @@ internal static class WorldMapView
 
             bool selected = string.Equals(selectedConnectionId, connection.ConnectionId, StringComparison.Ordinal);
             bool hovered = string.Equals(hoveredConnectionId, connection.ConnectionId, StringComparison.Ordinal);
-            uint core = ImGui.GetColorU32(
-                selected ? ImGuiCol.ButtonActive :
-                hovered ? ImGuiCol.ButtonHovered :
-                connection.Ambiguous ? ImGuiCol.TextDisabled : ImGuiCol.Text);
+            uint core = selected
+                ? ImGui.GetColorU32(ImGuiCol.ButtonActive)
+                : hovered
+                    ? ImGui.GetColorU32(ImGuiCol.ButtonHovered)
+                    : connection.Ambiguous
+                        ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
+                        : ConnectionColor(connection.Direction);
             uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
 
-            float coreThickness = selected ? 4.4f : hovered ? 3.8f : connection.Explicit ? 3.0f : 2.6f;
-            float shadowThickness = coreThickness + (selected || hovered ? 5.2f : 4.2f);
+            float coreThickness = selected ? 4.8f : hovered ? 4.2f : connection.Direction == WorldConnectionDirection.Bidirectional ? 3.4f : 3.2f;
+            float shadowThickness = coreThickness + (selected || hovered ? 5.6f : 4.8f);
             DrawConnectionStroke(
                 draw,
                 a,
@@ -409,12 +425,12 @@ internal static class WorldMapView
                 connection.Ambiguous);
 
             if (!selected && !hovered && !connection.Ambiguous) continue;
-            string glyph = DirectionGlyph(connection.Direction) + (connection.Ambiguous ? " ?" : string.Empty);
+            string glyph = DirectionLabel(connection.Direction) + (connection.Ambiguous ? " ?" : string.Empty);
             Num.Vector2 size = ImGui.CalcTextSize(glyph);
             Num.Vector2 mid = (a + b) * 0.5f;
-            Num.Vector2 pad = new(5f, 3f);
-            draw.AddRectFilled(mid - size * 0.5f - pad, mid + size * 0.5f + pad, shadow, 4f);
-            draw.AddRect(mid - size * 0.5f - pad, mid + size * 0.5f + pad, core, 4f, ImDrawFlags.None, 1f);
+            Num.Vector2 pad = new(6f, 3f);
+            draw.AddRectFilled(mid - size * 0.5f - pad, mid + size * 0.5f + pad, shadow, 5f);
+            draw.AddRect(mid - size * 0.5f - pad, mid + size * 0.5f + pad, core, 5f, ImDrawFlags.None, 1.4f);
             draw.AddText(mid - size * 0.5f, core, glyph);
         }
     }
@@ -436,9 +452,8 @@ internal static class WorldMapView
 
             EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
-            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
+            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 42f)) continue;
 
-            bool roomContext = linking || showAllPorts || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
             EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
             for (int n = 0; n < nodes.Length; n++)
             {
@@ -448,8 +463,6 @@ internal static class WorldMapView
                 EditorMapConnectionSnapshot endpointConnection = FindConnectionAtEndpoint(snapshot, room.RoomIndex, node.NodeIndex);
                 bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
                 bool connected = endpointConnection != null || node.ConnectedRoomIndex >= 0;
-                bool persistent = showConnections && connected;
-                if (!persistent && !(roomContext && free)) continue;
 
                 Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
                 bool source = room.RoomIndex == linkingRoom && node.NodeIndex == linkingNode;
@@ -460,27 +473,23 @@ internal static class WorldMapView
                     endpointConnection.ConnectionId,
                     StringComparison.Ordinal);
 
-                uint color = ImGui.GetColorU32(
-                    source || selectedLink ? ImGuiCol.ButtonActive :
-                    hovered ? ImGuiCol.ButtonHovered :
-                    validTarget ? ImGuiCol.Text :
-                    connected ? ImGuiCol.Text :
-                    ImGuiCol.TextDisabled);
-                uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
                 bool emphasized = source || hovered || validTarget || selectedLink;
+                uint color = ShortcutGold(connected || emphasized);
+                uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
                 DrawShortcutSocket(draw, point, shadow, color, connected, emphasized);
 
-                if (zoom >= 0.58f || emphasized || room.RoomIndex == snapshot.SelectedRoomIndex)
+                if (showPortLabels && (zoom >= 0.48f || emphasized || room.RoomIndex == snapshot.SelectedRoomIndex))
                 {
                     string label = node.NodeIndex.ToString();
                     Num.Vector2 labelSize = ImGui.CalcTextSize(label);
                     bool left = point.X <= (min.X + max.X) * 0.5f;
-                    float offset = emphasized ? 12f : 10f;
+                    float offset = emphasized ? 15f : 13f;
                     float x = left ? point.X - labelSize.X - offset : point.X + offset;
                     Num.Vector2 labelPos = new(x, point.Y - labelSize.Y * 0.5f);
-                    Num.Vector2 pad = new(3f, 1f);
-                    draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 2f);
-                    draw.AddText(labelPos, color, label);
+                    Num.Vector2 pad = new(4f, 2f);
+                    draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 3f);
+                    draw.AddRect(labelPos - pad, labelPos + labelSize + pad, ShortcutGold(false), 3f, ImDrawFlags.None, 1f);
+                    draw.AddText(labelPos, ShortcutGold(true), label);
                 }
             }
         }
@@ -570,10 +579,10 @@ internal static class WorldMapView
         Num.Vector2 target = validTarget ? hoveredPort.Position : mouse;
         uint color = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
         uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
-        DrawConnectionStroke(draw, source, target, shadow, color, 8f, 3.4f, linkDirection, false);
-        DrawShortcutSocket(draw, source, shadow, ImGui.GetColorU32(ImGuiCol.ButtonActive), true, true);
+        DrawConnectionStroke(draw, source, target, shadow, color, 9f, 3.8f, linkDirection, false);
+        DrawShortcutSocket(draw, source, shadow, ShortcutGold(true), true, true);
         if (validTarget)
-            DrawShortcutSocket(draw, target, shadow, color, false, true);
+            DrawShortcutSocket(draw, target, shadow, ShortcutGold(true), false, true);
     }
 
     private static EditorMapRoomSnapshot FindHoveredRoom(
@@ -604,16 +613,15 @@ internal static class WorldMapView
     {
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         ExitPortHit best = null;
-        float bestDistanceSq = 196f;
+        float bestDistanceSq = 400f;
         for (int i = 0; i < rooms.Length; i++)
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
             EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
-            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 30f)) continue;
+            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
 
-            bool roomContext = linkingRoom >= 0 || showAllPorts || room.RoomIndex == snapshot.SelectedRoomIndex || ReferenceEquals(room, hoveredRoom);
             EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
             for (int n = 0; n < nodes.Length; n++)
             {
@@ -622,10 +630,6 @@ internal static class WorldMapView
 
                 EditorMapConnectionSnapshot endpointConnection = FindConnectionAtEndpoint(snapshot, room.RoomIndex, node.NodeIndex);
                 bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
-                bool connected = endpointConnection != null || node.ConnectedRoomIndex >= 0;
-                bool persistent = showConnections && connected;
-                if (!persistent && !(roomContext && free)) continue;
-
                 Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
                 float distanceSq = Num.Vector2.DistanceSquared(point, mouse);
                 if (distanceSq > bestDistanceSq) continue;
@@ -652,7 +656,7 @@ internal static class WorldMapView
         if (!showConnections) return null;
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
         EdgeHit best = null;
-        float thresholdSq = 144f;
+        float thresholdSq = 169f;
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
@@ -820,26 +824,29 @@ internal static class WorldMapView
         bool connected,
         bool emphasized)
     {
-        float iconScale = zoom < 0.35f ? 0.86f : 1f;
-        float half = (emphasized ? 7.6f : connected ? 6.7f : 5.9f) * iconScale;
-        float halo = half + 2.5f * iconScale;
-        float rounding = Math.Max(2f, 3f * iconScale);
+        float iconScale = zoom < 0.30f ? 0.92f : 1f;
+        float half = (emphasized ? 10.2f : connected ? 9.2f : 8.4f) * iconScale;
+        float halo = half + 3.3f * iconScale;
+        float rounding = Math.Max(2.5f, 3.6f * iconScale);
         Num.Vector2 haloSize = new(halo, halo);
         Num.Vector2 bodySize = new(half, half);
 
-        draw.AddRectFilled(point - haloSize, point + haloSize, shadow, rounding + 1f);
-        if (connected || emphasized)
-            draw.AddRectFilled(point - bodySize, point + bodySize, color, rounding);
-        else
-            draw.AddRect(point - bodySize, point + bodySize, color, rounding, ImDrawFlags.None, Math.Max(1.6f, 2f * iconScale));
+        draw.AddRectFilled(point - haloSize, point + haloSize, shadow, rounding + 1.5f);
+        uint fill = connected || emphasized ? color : ShortcutGoldDark();
+        draw.AddRectFilled(point - bodySize, point + bodySize, fill, rounding);
+        draw.AddRect(point - bodySize, point + bodySize, color, rounding, ImDrawFlags.None, Math.Max(2f, 2.4f * iconScale));
 
-        float holeHalf = (connected ? 3.15f : 2.7f) * iconScale;
+        float innerHalf = half - 2.7f * iconScale;
+        Num.Vector2 inner = new(innerHalf, innerHalf);
+        draw.AddRect(point - inner, point + inner, ShortcutGold(false), Math.Max(1.5f, rounding - 1f), ImDrawFlags.None, Math.Max(1f, 1.2f * iconScale));
+
+        float holeHalf = (connected ? 3.7f : 3.25f) * iconScale;
         Num.Vector2 hole = new(holeHalf, holeHalf);
-        draw.AddRectFilled(point - hole, point + hole, shadow, Math.Max(1f, 1.5f * iconScale));
+        draw.AddRectFilled(point - hole, point + hole, shadow, Math.Max(1f, 1.8f * iconScale));
 
-        // Four notches keep the marker readable as a shortcut socket instead of a generic node dot.
-        float notchHalf = Math.Max(0.8f, 1.15f * iconScale);
-        float notchDepth = Math.Max(2f, 2.8f * iconScale);
+        // Four notches make the marker read as a shortcut socket instead of a generic graph node.
+        float notchHalf = Math.Max(1f, 1.35f * iconScale);
+        float notchDepth = Math.Max(2.7f, 3.7f * iconScale);
         draw.AddRectFilled(
             new Num.Vector2(point.X - notchHalf, point.Y - half - 0.5f),
             new Num.Vector2(point.X + notchHalf, point.Y - half + notchDepth),
@@ -858,7 +865,7 @@ internal static class WorldMapView
             shadow);
 
         if (emphasized)
-            draw.AddRect(point - haloSize, point + haloSize, color, rounding + 1f, ImDrawFlags.None, Math.Max(1.2f, 1.6f * iconScale));
+            draw.AddRect(point - haloSize, point + haloSize, ShortcutGold(true), rounding + 1.5f, ImDrawFlags.None, Math.Max(1.6f, 2f * iconScale));
     }
 
     private static void DrawConnectionStroke(
@@ -872,19 +879,52 @@ internal static class WorldMapView
         WorldConnectionDirection direction,
         bool dashed)
     {
+        Num.Vector2 delta = b - a;
+        float length = delta.Length();
+        if (length <= 0.001f) return;
+
         if (dashed)
         {
             DrawDashedLine(draw, a, b, shadow, shadowThickness, 10f, 6f);
             DrawDashedLine(draw, a, b, core, coreThickness, 10f, 6f);
-        }
-        else
-        {
-            draw.AddLine(a, b, shadow, shadowThickness);
-            draw.AddLine(a, b, core, coreThickness);
+            if (length >= 25f) DrawDirectionArrows(draw, a, b, direction, shadow, core, coreThickness);
+            return;
         }
 
-        if (Num.Vector2.DistanceSquared(a, b) < 625f) return;
-        DrawDirectionArrows(draw, a, b, direction, shadow, core, coreThickness);
+        draw.AddLine(a, b, shadow, shadowThickness);
+
+        if (direction == WorldConnectionDirection.Bidirectional && length >= 20f)
+        {
+            Num.Vector2 forward = delta / length;
+            Num.Vector2 normal = new(-forward.Y, forward.X);
+            float railOffset = Math.Max(2f, coreThickness * 0.72f);
+            float railThickness = Math.Max(1.6f, coreThickness * 0.72f);
+            draw.AddLine(a + normal * railOffset, b + normal * railOffset, core, railThickness);
+            draw.AddLine(a - normal * railOffset, b - normal * railOffset, core, railThickness);
+
+            if (length >= 34f)
+            {
+                float arrowSize = Math.Max(6.2f, Math.Min(9.2f, 6.2f + coreThickness * 0.55f));
+                DrawArrowHead(
+                    draw,
+                    Num.Vector2.Lerp(a, b, 0.62f) + normal * railOffset,
+                    delta,
+                    shadow,
+                    core,
+                    arrowSize);
+                DrawArrowHead(
+                    draw,
+                    Num.Vector2.Lerp(a, b, 0.38f) - normal * railOffset,
+                    -delta,
+                    shadow,
+                    core,
+                    arrowSize);
+            }
+            return;
+        }
+
+        draw.AddLine(a, b, core, coreThickness);
+        if (length >= 25f) DrawDirectionArrows(draw, a, b, direction, shadow, core, coreThickness);
     }
 
     private static void DrawDashedLine(
@@ -918,14 +958,18 @@ internal static class WorldMapView
         float coreThickness)
     {
         Num.Vector2 forward = b - a;
-        float size = Math.Max(5.2f, Math.Min(8f, 5.2f + coreThickness * 0.55f));
+        float size = Math.Max(6.2f, Math.Min(9.4f, 6.2f + coreThickness * 0.55f));
         switch (direction)
         {
             case WorldConnectionDirection.AToB:
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.42f), forward, shadow, core, size);
                 DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.62f), forward, shadow, core, size);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.82f), forward, shadow, core, size);
                 break;
             case WorldConnectionDirection.BToA:
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.58f), -forward, shadow, core, size);
                 DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.38f), -forward, shadow, core, size);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.18f), -forward, shadow, core, size);
                 break;
             default:
                 DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.40f), forward, shadow, core, size * 0.92f);
@@ -946,7 +990,7 @@ internal static class WorldMapView
         if (length <= 0.001f) return;
         Num.Vector2 forward = direction / length;
         Num.Vector2 normal = new(-forward.Y, forward.X);
-        DrawArrowTriangle(draw, tip, forward, normal, shadow, size + 2.3f);
+        DrawArrowTriangle(draw, tip, forward, normal, shadow, size + 2.5f);
         DrawArrowTriangle(draw, tip, forward, normal, core, size);
     }
 
@@ -1103,6 +1147,13 @@ internal static class WorldMapView
         WorldConnectionDirection.AToB => "->",
         WorldConnectionDirection.BToA => "<-",
         _ => "<->"
+    };
+
+    private static string DirectionLabel(WorldConnectionDirection direction) => direction switch
+    {
+        WorldConnectionDirection.AToB => "A > B",
+        WorldConnectionDirection.BToA => "A < B",
+        _ => "BOTH"
     };
 
     private static string ExplicitEdgeId(string connectionId)
