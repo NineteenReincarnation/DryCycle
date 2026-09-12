@@ -14,6 +14,7 @@ internal static class UniversalDevUiMirrorWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
+        DevUiGenericProtocolBootstrap.Ensure();
         UniversalDevUiPresentationSnapshot snapshot = UniversalDevUiPresentationHub.Current;
         if (!snapshot.Available) return;
 
