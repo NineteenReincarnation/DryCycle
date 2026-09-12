@@ -10,6 +10,7 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 public enum LegacyControlKind
 {
     Button,
+    Boolean,
     Slider,
     Cycler,
     Integer,
@@ -21,9 +22,9 @@ public enum LegacyControlKind
 }
 
 /// <summary>
-/// Detached description of a standard Rain World DevInterface control belonging to the
-/// selected PlacedObjectRepresentation. The bridge knows only vanilla DevInterface types;
-/// it never checks the owning mod or a third-party framework at compile time.
+/// Detached description of a DevInterface control belonging to the selected
+/// PlacedObjectRepresentation. Optional third-party controls are recognized structurally or by
+/// runtime type name so the core assembly never acquires a hard RegionKit dependency.
 /// </summary>
 public sealed class LegacyControlSnapshot
 {
@@ -37,6 +38,7 @@ public sealed class LegacyControlSnapshot
     public float Y { get; init; }
     public float Z { get; init; }
     public float W { get; init; }
+    public bool BooleanValue { get; init; }
     public bool CanReset { get; init; }
     public int SelectedIndex { get; init; } = -1;
     public string[] Options { get; init; } = Array.Empty<string>();
@@ -54,8 +56,10 @@ public static class LegacyDevInterfaceBridge
     private const string IntegerActionPrefix = "@integer|";
     private const string SelectActionPrefix = "@select|";
     private const string PanelSelectActionPrefix = "@panel-select|";
+    private const string RegionKitBoolButtonType = "RegionKit.Modules.DevUIMisc.GenericNodes.BoolButton";
     private const string RegionKitPanelSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.PanelSelectButton";
     private const string RegionKitColorSelectType = "RegionKit.Modules.DevUIMisc.GenericNodes.RGBSelectButton";
+    private const string RegionKitExtEnumCyclerDefinition = "RegionKit.Modules.DevUIMisc.GenericNodes.ExtEnumCycler`1";
     private static readonly ConditionalWeakTable<ButtonWithSelectPanel, SelectOptionCache> SelectOptions = new();
 
     internal static LegacyControlSnapshot[] Capture(global::DevInterface.DevUI owner, PlacedObject target)
@@ -82,6 +86,20 @@ public static class LegacyDevInterfaceBridge
 
     public static string PanelSelectAction(string path, int selectedIndex) =>
         PanelSelectActionPrefix + selectedIndex + "|" + (path ?? string.Empty);
+
+    internal static bool CanAdaptBoolean(DevUINode node) =>
+        IsExactType(node, RegionKitBoolButtonType) && node is Button &&
+        TryReadBoolMember(node, "actualValue", out _);
+
+    internal static bool IsTerminalSemanticButton(DevUINode node)
+    {
+        if (CanAdaptBoolean(node)) return true;
+        Type type = node?.GetType();
+        return type != null && type.IsGenericType &&
+               string.Equals(type.GetGenericTypeDefinition().FullName,
+                   RegionKitExtEnumCyclerDefinition,
+                   StringComparison.Ordinal);
+    }
 
     internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
         button != null && ReadSelectOptions(button).Length > 0;
@@ -139,10 +157,9 @@ public static class LegacyDevInterfaceBridge
         {
             factor = Mathf.Clamp01(factor);
 
-            // RegionKit GenericSlider deliberately overrides vanilla NubDragged with a no-op and
-            // exposes NubDragged2 as its real semantic mutation boundary. Prefer that boundary when
-            // present instead of relying on the base Slider coordinate math. This is structural and
-            // reflection-based so RegionKit remains an optional dependency.
+            // RegionKit GenericSlider intentionally overrides vanilla NubDragged with a no-op and
+            // exposes NubDragged2 as its semantic mutation boundary. Prefer that boundary when it
+            // exists; this keeps RegionKit optional while preserving its events/signals.
             if (TryInvokeSemanticSliderDrag(slider, factor))
             {
                 slider.Refresh();
@@ -267,7 +284,7 @@ public static class LegacyDevInterfaceBridge
             button.Text = selected;
 
             // RegionKit PanelSelectButton normally receives a child-panel signal and forwards one
-            // ButtonClick to the nearest IDevUISignals parent. Reproduce exactly that final semantic
+            // ButtonClick to the nearest IDevUISignals parent. Reproduce that final semantic
             // boundary without creating the hidden ItemSelectPanel.
             PropagateSignal(button, DevUISignalType.ButtonClick, selected);
             owner.activePage?.Refresh();
@@ -350,8 +367,8 @@ public static class LegacyDevInterfaceBridge
             if (!TryWriteMember(node, "actualValue", color)) return false;
             button.Text = ColorUtility.ToHtmlStringRGB(color);
 
-            // RGBSelectButton forwards a ButtonClick after its RGBSelectPanel has committed the
-            // color. Emit that same final signal directly so its parent updates placed-object data.
+            // RGBSelectButton forwards ButtonClick only after its RGBSelectPanel commits a color.
+            // Emit that same final signal directly so the hidden panel is no longer required.
             PropagateSignal(button, DevUISignalType.ButtonClick, string.Empty);
             owner.activePage?.Refresh();
             return TryReadColor(node, out Color actual) && ColorDistanceSquared(actual, color) < 0.000001f;
@@ -433,6 +450,20 @@ public static class LegacyDevInterfaceBridge
                         Options = options
                     });
                 }
+                continue;
+            }
+
+            if (CanAdaptBoolean(node) && TryReadBoolMember(node, "actualValue", out bool booleanValue))
+            {
+                output.Add(new LegacyControlSnapshot
+                {
+                    Path = path,
+                    Id = node.IDstring ?? string.Empty,
+                    Label = SemanticTitle(node, "Enabled"),
+                    Kind = LegacyControlKind.Boolean,
+                    BooleanValue = booleanValue,
+                    ValueText = node is Button boolButton ? boolButton.Text ?? string.Empty : string.Empty
+                });
                 continue;
             }
 
@@ -627,6 +658,15 @@ public static class LegacyDevInterfaceBridge
         object raw = ReadMember(instance, name);
         if (raw is not string[] strings) return false;
         value = CloneOptions(strings);
+        return true;
+    }
+
+    private static bool TryReadBoolMember(object instance, string name, out bool value)
+    {
+        value = false;
+        object raw = ReadMember(instance, name);
+        if (raw is not bool boolean) return false;
+        value = boolean;
         return true;
     }
 
