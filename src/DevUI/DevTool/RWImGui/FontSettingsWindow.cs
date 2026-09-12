@@ -13,16 +13,16 @@ internal static class FontSettingsWindow
     internal static void Draw(Num.Vector2 display)
     {
         float uiScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float width = Math.Min(Math.Max(320f, display.X - 16f), 320f * uiScale);
-        float height = Math.Min(Math.Max(286f, display.Y - 16f), 286f * uiScale);
+        float width = Math.Min(Math.Max(350f, display.X - 16f), 350f * uiScale);
+        float height = Math.Min(Math.Max(318f, display.Y - 16f), 318f * uiScale);
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 8f), 8f),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(280f * uiScale, Math.Max(280f, display.X - 16f)), 230f),
-            new Num.Vector2(Math.Max(280f, display.X - 16f), Math.Max(230f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(310f * uiScale, Math.Max(310f, display.X - 16f)), 260f),
+            new Num.Vector2(Math.Max(310f, display.X - 16f), Math.Max(260f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"), ImGuiWindowFlags.NoCollapse))
@@ -32,6 +32,7 @@ internal static class FontSettingsWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("Font");
+        ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.18f : 1.12f);
 
         ImGui.TextDisabled(DevToolUiSettings.T("排版", "TYPOGRAPHY"));
 
@@ -49,8 +50,8 @@ internal static class FontSettingsWindow
             // keep their developer-authored sizes and can be batch-selected/repositioned.
             float nextScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
             ImGui.SetWindowSize(new Num.Vector2(
-                Math.Min(Math.Max(320f, display.X - 16f), 320f * nextScale),
-                Math.Min(Math.Max(286f, display.Y - 16f), 286f * nextScale)));
+                Math.Min(Math.Max(350f, display.X - 16f), 350f * nextScale),
+                Math.Min(Math.Max(318f, display.Y - 16f), 318f * nextScale)));
         }
 
         int weight = DevToolUiSettings.FontWeight;
