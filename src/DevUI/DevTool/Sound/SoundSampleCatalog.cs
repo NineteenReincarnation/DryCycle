@@ -151,8 +151,12 @@ public static class SoundSampleCatalog
             }
         }
 
-        // MergedMods can be the effective path. Recover the owning mod from the original roots
-        // using Rain World's same high-to-low active-mod priority.
+        // AssetManager may return mergedmods as the effective file. Only in that case do we
+        // recover provenance from the original mod roots. Do not use this fallback for a base-game
+        // file: a lower-priority loose mod file with the same name does not override the bundled
+        // ambient asset, and attributing it to that mod would be incorrect.
+        if (!IsMergedModsPath(filePath)) return false;
+
         string file = Path.GetFileName(filePath);
         if (string.IsNullOrEmpty(file)) return false;
         for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
@@ -181,6 +185,14 @@ public static class SoundSampleCatalog
                 return true;
         }
         return false;
+    }
+
+    private static bool IsMergedModsPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string normalized = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        string marker = Path.DirectorySeparatorChar + "mergedmods" + Path.DirectorySeparatorChar;
+        return normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool IsUnder(string filePath, string root)
