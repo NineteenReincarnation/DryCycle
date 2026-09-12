@@ -73,6 +73,10 @@ internal static class WorldWorkspaceView
     private static int mappingTargetNode = -1;
     private static WorldConnectionDirection mappingDirection = WorldConnectionDirection.Bidirectional;
 
+    private static int linkSourceRoom = -1;
+    private static int linkSourceNode = -1;
+    private static WorldConnectionDirection linkDirection = WorldConnectionDirection.Bidirectional;
+
     internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
     {
         EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
@@ -141,7 +145,7 @@ internal static class WorldWorkspaceView
         DrawWorkspaceModeButton(WorkspaceMode.Validation, DevToolUiSettings.T("验证", "Validation"));
 
         ImGui.SameLine(0f, 18f);
-        bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty;
+        bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty || WorldTextRegistry.Dirty;
         if (DevToolWidgets.ActionButton(
                 anyDirty ? DevToolUiSettings.T("保存修改", "Save Changes") : DevToolUiSettings.T("保存", "Save"),
                 "WorldWorkspaceSave",
@@ -150,6 +154,8 @@ internal static class WorldWorkspaceView
             Send(EditorUiCommandKind.Save);
             if (WorldWorkspaceDataView.HasDirtyData)
                 WorldWorkspaceDataView.SaveDirty();
+            if (WorldTextRegistry.Dirty)
+                WorldTextRegistry.Save();
             if (WorldTopologyRegistry.Dirty)
                 WorldTopologyRegistry.Save();
         }
@@ -389,14 +395,11 @@ internal static class WorldWorkspaceView
             WorldIssue issue = issues[i];
             if (!Matches(issue.Title, issue.Detail)) continue;
             visible++;
-            if (ImGui.Selectable("⚠ " + issue.Title + "##WorldIssue" + i, false))
+            if (ImGui.Selectable("⚠ " + issue.Title + "##WorldIssue" + i, false) && issue.RoomIndex >= 0)
             {
-                if (issue.RoomIndex >= 0)
-                {
-                    selectionKind = SelectionKind.Room;
-                    ClearConnectionSelection();
-                    SelectRoom(issue.RoomIndex);
-                }
+                selectionKind = SelectionKind.Room;
+                ClearConnectionSelection();
+                SelectRoom(issue.RoomIndex);
             }
             if (!string.IsNullOrEmpty(issue.Detail))
                 DevToolWidgets.MutedText(issue.Detail, true);
@@ -451,6 +454,11 @@ internal static class WorldWorkspaceView
         {
             ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), DevToolUiSettings.T("WorldTopology 加载异常", "WorldTopology load error"));
             DevToolWidgets.MutedText(WorldTopologyRegistry.LoadError, true);
+        }
+        if (!string.IsNullOrEmpty(WorldTextRegistry.LoadError))
+        {
+            ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), DevToolUiSettings.T("world.txt 编辑异常", "world.txt authoring error"));
+            DevToolWidgets.MutedText(WorldTextRegistry.LoadError, true);
         }
         ImGui.Spacing();
     }
@@ -540,6 +548,8 @@ internal static class WorldWorkspaceView
         DrawMetric(DevToolUiSettings.T("问题", "Issues"), BuildIssues(snapshot).Count.ToString());
         if (WorldTopologyRegistry.Dirty)
             DevToolWidgets.MutedText(DevToolUiSettings.T("WorldTopology.json 有未保存修改。", "WorldTopology.json has unsaved changes."), true);
+        if (WorldTextRegistry.Dirty)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("world.txt 有未保存修改。", "world.txt has unsaved changes."), true);
     }
 
     private static void DrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
@@ -611,7 +621,9 @@ internal static class WorldWorkspaceView
 
         ImGui.Spacing();
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("节点", "NODES"));
+        DrawLinkBuilderHeader(snapshot);
         DrawRoomNodes(snapshot, room);
+        DrawTopologyCommandStatus();
     }
 
     private static void DrawRoomConnections(EditorMapPresentationSnapshot snapshot, int roomIndex)
@@ -630,6 +642,45 @@ internal static class WorldWorkspaceView
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有区域内连接。", "No in-region connections."));
     }
 
+    private static void DrawLinkBuilderHeader(EditorMapPresentationSnapshot snapshot)
+    {
+        if (linkSourceRoom < 0 || linkSourceNode < 0)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
+                "在空闲 Exit 上点击“设为起点”，再选择另一个房间的空闲 Exit 完成连接。",
+                "Choose Set as Source on a free Exit, then select a free Exit in another room to complete the link."), true);
+            return;
+        }
+
+        EditorMapRoomSnapshot source = FindRoom(snapshot, linkSourceRoom);
+        if (source == null)
+        {
+            CancelLinkBuilder();
+            return;
+        }
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("连接起点：", "Link source: ") + source.Name + ":" + linkSourceNode);
+        DevToolWidgets.MutedText(DevToolUiSettings.T("方向", "Direction"));
+        if (LinkDirectionButton("↔", "LinkBoth", WorldConnectionDirection.Bidirectional))
+            linkDirection = WorldConnectionDirection.Bidirectional;
+        ImGui.SameLine();
+        if (LinkDirectionButton("→", "LinkAToB", WorldConnectionDirection.AToB))
+            linkDirection = WorldConnectionDirection.AToB;
+        ImGui.SameLine();
+        if (LinkDirectionButton("←", "LinkBToA", WorldConnectionDirection.BToA))
+            linkDirection = WorldConnectionDirection.BToA;
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("取消", "Cancel"), "CancelLinkBuilder", DevToolButtonTone.Subtle))
+            CancelLinkBuilder();
+        ImGui.Spacing();
+    }
+
+    private static bool LinkDirectionButton(string glyph, string id, WorldConnectionDirection direction) =>
+        DevToolWidgets.ActionButton(
+            glyph,
+            id,
+            linkDirection == direction ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle);
+
     private static void DrawRoomNodes(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
         EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
@@ -642,12 +693,73 @@ internal static class WorldWorkspaceView
         for (int i = 0; i < nodes.Length; i++)
         {
             EditorMapRoomNodeSnapshot node = nodes[i];
+            ImGui.PushID("WorldNode_" + node.NodeIndex);
+
             string target = node.ConnectedRoomIndex >= 0
                 ? FindRoom(snapshot, node.ConnectedRoomIndex)?.Name ?? node.ConnectedRoomIndex.ToString()
                 : DevToolUiSettings.T("未连接", "Disconnected");
             string line = node.NodeIndex + " · " + node.Type;
             if (node.Exit) line += "  →  " + target;
             ImGui.TextUnformatted(line);
+
+            if (node.Exit && node.ConnectedRoomIndex < 0 && !EndpointOwnedByExplicitEdge(snapshot, room.RoomIndex, node.NodeIndex))
+                DrawFreeExitAction(snapshot, room, node);
+
+            ImGui.PopID();
+        }
+    }
+
+    private static void DrawFreeExitAction(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapRoomSnapshot room,
+        EditorMapRoomNodeSnapshot node)
+    {
+        bool isSource = linkSourceRoom == room.RoomIndex && linkSourceNode == node.NodeIndex;
+        if (linkSourceRoom < 0)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("设为连接起点", "Set as Link Source"),
+                    "SetLinkSource",
+                    DevToolButtonTone.Subtle))
+            {
+                linkSourceRoom = room.RoomIndex;
+                linkSourceNode = node.NodeIndex;
+                linkDirection = WorldConnectionDirection.Bidirectional;
+            }
+            return;
+        }
+
+        if (isSource)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("当前连接起点", "Current link source"));
+            return;
+        }
+
+        if (linkSourceRoom == room.RoomIndex)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("连接目标必须位于另一个房间。", "The target must be in another room."));
+            return;
+        }
+
+        EditorMapRoomSnapshot source = FindRoom(snapshot, linkSourceRoom);
+        if (source == null) return;
+
+        string preview = source.Name + ":" + linkSourceNode + " " + DirectionGlyph(linkDirection) + " " + room.Name + ":" + node.NodeIndex;
+        DevToolWidgets.MutedText(preview, true);
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("连接到这里", "Connect Here"),
+                "CompleteLink",
+                DevToolButtonTone.Primary))
+        {
+            WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
+                WorldTopologyCommandKind.CreateConnection,
+                region: snapshot.RegionName,
+                roomA: source.Name,
+                nodeA: linkSourceNode,
+                roomB: room.Name,
+                nodeB: node.NodeIndex,
+                direction: linkDirection));
+            CancelLinkBuilder();
         }
     }
 
@@ -676,14 +788,9 @@ internal static class WorldWorkspaceView
         if (connection.Ambiguous)
             DrawAmbiguousConnectionEditor(snapshot, connection, a, b);
         else if (connection.Explicit)
-            DrawExplicitConnectionEditor(snapshot, connection);
+            DrawExplicitConnectionEditor(snapshot, connection, a, b);
         else
-        {
-            ImGui.Spacing();
-            DevToolWidgets.MutedText(DevToolUiSettings.T(
-                "这是可以由原版数据唯一解析的普通连接，不需要 sidecar 映射。",
-                "This vanilla connection is unambiguous and does not require a sidecar mapping."), true);
-        }
+            DrawVanillaConnectionEditor(snapshot, connection, a, b);
 
         DrawTopologyCommandStatus();
     }
@@ -742,9 +849,8 @@ internal static class WorldWorkspaceView
         DrawMappingDirectionButtons();
 
         ImGui.Spacing();
-        string relation = a.Name + ":" + connection.FromNodeIndex + " " +
-                          DirectionGlyph(mappingDirection) + " " + b.Name + ":" + mappingTargetNode;
-        ImGui.TextUnformatted(relation);
+        ImGui.TextUnformatted(a.Name + ":" + connection.FromNodeIndex + " " +
+                              DirectionGlyph(mappingDirection) + " " + b.Name + ":" + mappingTargetNode);
 
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("建立显式映射", "Create Explicit Mapping"),
@@ -776,7 +882,9 @@ internal static class WorldWorkspaceView
 
     private static void DrawExplicitConnectionEditor(
         EditorMapPresentationSnapshot snapshot,
-        EditorMapConnectionSnapshot connection)
+        EditorMapConnectionSnapshot connection,
+        EditorMapRoomSnapshot a,
+        EditorMapRoomSnapshot b)
     {
         ImGui.Spacing();
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("连接方向", "CONNECTION DIRECTION"));
@@ -793,19 +901,69 @@ internal static class WorldWorkspaceView
             QueueDirection(snapshot.RegionName, edgeId, WorldConnectionDirection.BToA);
 
         ImGui.Spacing();
+        if (a != null && b != null && connection.ToNodeIndex >= 0)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("断开连接", "Disconnect Link"),
+                    "DisconnectExplicitTopologyLink",
+                    DevToolButtonTone.Danger))
+            {
+                QueueDeleteConnection(snapshot.RegionName, connection, a, b, edgeId);
+            }
+        }
+
+        ImGui.Spacing();
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "删除映射只删除 WorldTopology.json 中的精确端点关系，不会改写 world.txt。",
-            "Removing the mapping only deletes the exact endpoint relation from WorldTopology.json; world.txt is not rewritten."), true);
+            "只删除显式映射会保留 world.txt 的原始房间连接；适合退回原版解析进行检查。",
+            "Removing only the explicit mapping keeps the original world.txt room link and is useful when falling back to vanilla parsing."), true);
         if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("删除显式映射", "Remove Explicit Mapping"),
-                "RemoveTopologyMapping",
-                DevToolButtonTone.Danger))
+                DevToolUiSettings.T("仅删除显式映射", "Remove Mapping Only"),
+                "RemoveTopologyMappingOnly",
+                DevToolButtonTone.Subtle))
         {
             WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
                 WorldTopologyCommandKind.RemoveExplicitMapping,
                 region: snapshot.RegionName,
                 edgeId: edgeId));
         }
+    }
+
+    private static void DrawVanillaConnectionEditor(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapConnectionSnapshot connection,
+        EditorMapRoomSnapshot a,
+        EditorMapRoomSnapshot b)
+    {
+        ImGui.Spacing();
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "这是可以由原版数据唯一解析的普通连接。断开操作会把两侧对应 Exit 写成 DISCONNECTED。",
+            "This vanilla link is unambiguous. Disconnecting it writes DISCONNECTED to both matching Exit entries."), true);
+
+        if (a == null || b == null || connection.ToNodeIndex < 0) return;
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("断开连接", "Disconnect Link"),
+                "DisconnectVanillaTopologyLink",
+                DevToolButtonTone.Danger))
+        {
+            QueueDeleteConnection(snapshot.RegionName, connection, a, b, string.Empty);
+        }
+    }
+
+    private static void QueueDeleteConnection(
+        string region,
+        EditorMapConnectionSnapshot connection,
+        EditorMapRoomSnapshot a,
+        EditorMapRoomSnapshot b,
+        string edgeId)
+    {
+        WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
+            WorldTopologyCommandKind.DeleteConnection,
+            region: region,
+            edgeId: edgeId,
+            roomA: a.Name,
+            nodeA: connection.FromNodeIndex,
+            roomB: b.Name,
+            nodeB: connection.ToNodeIndex));
     }
 
     private static bool DirectionButton(string glyph, string id, bool selected) =>
@@ -918,6 +1076,8 @@ internal static class WorldWorkspaceView
         };
 
         string dirty = string.Empty;
+        if (WorldTextRegistry.Dirty)
+            dirty += DevToolUiSettings.T(" · world.txt 未保存", " · world.txt dirty");
         if (WorldTopologyRegistry.Dirty)
             dirty += DevToolUiSettings.T(" · 拓扑未保存", " · topology dirty");
         if (WorldWorkspaceDataView.HasDirtyData)
@@ -1040,6 +1200,15 @@ internal static class WorldWorkspaceView
 
         if (selectionKind == SelectionKind.Room && FindRoom(snapshot, snapshot.SelectedRoomIndex) == null)
             selectionKind = SelectionKind.Region;
+
+        if (linkSourceRoom >= 0)
+        {
+            EditorMapRoomSnapshot source = FindRoom(snapshot, linkSourceRoom);
+            EditorMapRoomNodeSnapshot node = FindNode(source, linkSourceNode);
+            if (source == null || node?.Exit != true || node.ConnectedRoomIndex >= 0 ||
+                EndpointOwnedByExplicitEdge(snapshot, linkSourceRoom, linkSourceNode))
+                CancelLinkBuilder();
+        }
     }
 
     private static void SelectConnection(EditorMapConnectionSnapshot connection)
@@ -1071,6 +1240,13 @@ internal static class WorldWorkspaceView
         mappingConnectionId = string.Empty;
         mappingTargetNode = -1;
         mappingDirection = WorldConnectionDirection.Bidirectional;
+    }
+
+    private static void CancelLinkBuilder()
+    {
+        linkSourceRoom = -1;
+        linkSourceNode = -1;
+        linkDirection = WorldConnectionDirection.Bidirectional;
     }
 
     private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
