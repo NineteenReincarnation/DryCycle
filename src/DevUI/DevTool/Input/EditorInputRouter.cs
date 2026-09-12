@@ -200,10 +200,11 @@ public static class EditorInputRouter
     }
 
     /// <summary>
-    /// Prevents a click consumed by the overlay from also beginning a drag on a world-space
-    /// DevInterface handle underneath it. Existing handle drags are allowed to finish so a
-    /// drag does not get stuck merely because the cursor crosses an Inspector/Browser panel.
-    /// Placement mode reserves fresh clicks only while the rebuilt UI is active.
+    /// Prevents a click consumed by the overlay from also beginning an unrelated drag on a
+    /// world-space DevInterface handle underneath it. Existing drags are always allowed to finish.
+    /// Sound spatial handles are the deliberate exception: when the cursor is exactly over a
+    /// Spot/Directional sound handle, that precise world control wins over the broad ImGui window
+    /// capture so an overlapping editor window never requires a sacrificial first click.
     /// </summary>
     private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, DevInterface.Handle self)
     {
@@ -216,6 +217,24 @@ public static class EditorInputRouter
         EditorSession session = DevToolSessionHub.Current;
         bool ownsThisUi = session != null && ReferenceEquals(session.Owner, self.owner);
         bool newUiVisible = !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
+        bool soundHandleOwnsClick =
+            ownsThisUi &&
+            newUiVisible &&
+            session.ToolMode == EditorToolMode.Sound &&
+            self.owner.game?.devToolsActive == true &&
+            self.owner.mouseClick &&
+            self.MouseOver &&
+            IsSoundWorldHandle(self);
+
+        // Exact sound gizmo hit-testing is narrower than an ImGui window rectangle, so it gets
+        // first refusal. Once the handle becomes dragged, the early branch above keeps ownership
+        // even while the cursor subsequently crosses Browser/Inspector windows.
+        if (soundHandleOwnsClick)
+        {
+            orig(self);
+            return;
+        }
+
         bool newUiPlacementOwnsMouse = newUiVisible && session?.PlacementActive == true;
         bool frontendOwnsMouse = newUiVisible && frontendAttached && wantsMouse;
         bool blockNewDrag = ownsThisUi && self.owner.game?.devToolsActive == true &&
@@ -236,6 +255,27 @@ public static class EditorInputRouter
         {
             self.owner.mouseClick = mouseClick;
         }
+    }
+
+    private static bool IsSoundWorldHandle(DevInterface.Handle handle)
+    {
+        if (handle is DevInterface.SpotSoundHandle || handle is DevInterface.DirectionalSoundHandle)
+            return true;
+
+        // SpotSoundHandle owns a plain Handle for radius editing. Walk upward so that nested
+        // radius nub receives the same priority without granting click-through to every generic
+        // DevInterface Handle used by unrelated editors.
+        DevInterface.DevUINode current = handle?.parentNode;
+        while (current != null)
+        {
+            if (current is DevInterface.SpotSoundHandle || current is DevInterface.DirectionalSoundHandle)
+                return true;
+            if (current is DevInterface.AmbientSoundPanel)
+                return false;
+            current = current.parentNode;
+        }
+
+        return false;
     }
 
     /// <summary>
