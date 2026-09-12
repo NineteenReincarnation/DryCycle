@@ -14,16 +14,12 @@ internal static class GateUnlockRequirements
     private static string _loadedPath;
     private static DateTime _lastWriteUtc;
     private static int _lastPollFrame = int.MinValue;
-
     internal static int Revision { get; private set; }
-    internal static bool Dirty { get; private set; }
-    internal static string LoadedPath => _loadedPath ?? string.Empty;
 
     internal static void Reload()
     {
         Requirements.Clear();
         Revision++;
-        Dirty = false;
         _loadedPath = ResolvePath();
         _lastWriteUtc = DateTime.MinValue;
         if (string.IsNullOrEmpty(_loadedPath) || !File.Exists(_loadedPath))
@@ -42,17 +38,12 @@ internal static class GateUnlockRequirements
         catch (Exception ex)
         {
             Requirements.Clear();
-            Dirty = false;
             Plugin.Logger?.LogError($"WorldLink: failed to load GateUnlockRequirements.txt: {ex}");
         }
     }
 
     internal static void PollHotReload(int frame)
     {
-        // DevTool edits mutate the authoritative in-memory dictionary immediately.
-        // Never let the external file watcher overwrite unsaved authoring changes.
-        if (Dirty) return;
-
         if (_lastPollFrame != int.MinValue && frame >= _lastPollFrame && frame - _lastPollFrame < 120) return;
         _lastPollFrame = frame;
 
@@ -76,114 +67,6 @@ internal static class GateUnlockRequirements
         return Requirements.TryGetValue(address, out RegionGate.GateRequirement requirement)
             ? requirement
             : RegionGate.GateRequirement.DemoLock;
-    }
-
-    internal static bool TryGet(WorldLinkPortAddress address, out RegionGate.GateRequirement requirement) =>
-        Requirements.TryGetValue(address, out requirement);
-
-    internal static IReadOnlyList<KeyValuePair<WorldLinkPortAddress, RegionGate.GateRequirement>> SnapshotEntries()
-    {
-        List<KeyValuePair<WorldLinkPortAddress, RegionGate.GateRequirement>> entries = new(Requirements);
-        entries.Sort((a, b) => string.Compare(a.Key.ToString(), b.Key.ToString(), StringComparison.OrdinalIgnoreCase));
-        return entries;
-    }
-
-    internal static bool TrySet(
-        WorldLinkPortAddress address,
-        string requirementText,
-        out string error)
-    {
-        error = null;
-        if (!address.IsValid)
-        {
-            error = "Room, GateID and PortID are required.";
-            return false;
-        }
-
-        if (!TryNormalizeRequirement(requirementText, out string value))
-        {
-            error = $"Unknown gate requirement '{requirementText}'. Use 1..5, DemoLock, RoboLock, OELock, or a registered GateRequirement value.";
-            return false;
-        }
-
-        if (Requirements.TryGetValue(address, out RegionGate.GateRequirement current) &&
-            string.Equals(current?.value, value, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        Requirements[address] = new RegionGate.GateRequirement(value);
-        Dirty = true;
-        Revision++;
-        return true;
-    }
-
-    internal static bool Remove(WorldLinkPortAddress address)
-    {
-        if (!Requirements.Remove(address)) return false;
-        Dirty = true;
-        Revision++;
-        return true;
-    }
-
-    internal static bool Save()
-    {
-        string path = !string.IsNullOrEmpty(_loadedPath) ? _loadedPath : ResolvePath(forSave: true);
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            Plugin.Logger?.LogError("WorldLink: could not resolve a writable world/GateUnlockRequirements.txt path.");
-            return false;
-        }
-
-        string tempPath = path + ".tmp";
-        try
-        {
-            string directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-            IReadOnlyList<KeyValuePair<WorldLinkPortAddress, RegionGate.GateRequirement>> entries = SnapshotEntries();
-            using (StreamWriter writer = new(tempPath, append: false))
-            {
-                writer.WriteLine("# DryCycle WorldLink directed gate requirements");
-                writer.WriteLine("# Format: Room : GateID : PortID : Requirement");
-                writer.WriteLine("# Requirement: 1..5, DemoLock, RoboLock, OELock, or a registered GateRequirement value");
-                writer.WriteLine();
-                for (int i = 0; i < entries.Count; i++)
-                {
-                    WorldLinkPortAddress address = entries[i].Key;
-                    writer.Write(address.Room);
-                    writer.Write(" : ");
-                    writer.Write(address.Gate);
-                    writer.Write(" : ");
-                    writer.Write(address.Port);
-                    writer.Write(" : ");
-                    writer.WriteLine(FormatRequirement(entries[i].Value));
-                }
-            }
-
-            if (File.Exists(path))
-            {
-                File.Copy(path, path + ".bak", overwrite: true);
-                File.Delete(path);
-            }
-            File.Move(tempPath, path);
-
-            _loadedPath = path;
-            _lastWriteUtc = File.GetLastWriteTimeUtc(path);
-            Dirty = false;
-            Plugin.Logger?.LogInfo("WorldLink: GateUnlockRequirements saved: " + path);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Plugin.Logger?.LogError("WorldLink: GateUnlockRequirements save failed: " + ex);
-            try
-            {
-                if (File.Exists(tempPath)) File.Delete(tempPath);
-            }
-            catch { }
-            return false;
-        }
     }
 
     internal static bool IsUnlocked(RainWorldGame game, WorldLinkPortAddress address)
@@ -374,15 +257,6 @@ internal static class GateUnlockRequirements
         return false;
     }
 
-    private static string FormatRequirement(RegionGate.GateRequirement requirement)
-    {
-        if (requirement == null) return "DemoLock";
-        if (requirement == RegionGate.GateRequirement.DemoLock) return "DemoLock";
-        if (string.Equals(requirement.value, "R", StringComparison.OrdinalIgnoreCase)) return "RoboLock";
-        if (string.Equals(requirement.value, "L", StringComparison.OrdinalIgnoreCase)) return "OELock";
-        return requirement.value ?? "DemoLock";
-    }
-
     private static string StripComment(string text)
     {
         int hash = text.IndexOf('#');
@@ -393,9 +267,8 @@ internal static class GateUnlockRequirements
         return cut >= 0 ? text.Substring(0, cut) : text;
     }
 
-    private static string ResolvePath(bool forSave = false)
+    private static string ResolvePath()
     {
-        string saveCandidate = null;
         try
         {
             if (ModManager.ActiveMods != null)
@@ -414,9 +287,7 @@ internal static class GateUnlockRequirements
                     };
                     for (int j = 0; j < candidates.Length; j++)
                     {
-                        if (string.IsNullOrWhiteSpace(candidates[j])) continue;
-                        saveCandidate ??= candidates[j];
-                        if (File.Exists(candidates[j])) return candidates[j];
+                        if (!string.IsNullOrEmpty(candidates[j]) && File.Exists(candidates[j])) return candidates[j];
                     }
                 }
             }
@@ -426,17 +297,14 @@ internal static class GateUnlockRequirements
             Plugin.Logger?.LogWarning($"WorldLink: direct mod-path requirement lookup failed: {ex.Message}");
         }
 
-        if (forSave && !string.IsNullOrWhiteSpace(saveCandidate)) return saveCandidate;
-
         try
         {
             string resolved = AssetManager.ResolveFilePath(RelativePath);
-            if (string.IsNullOrEmpty(resolved)) return null;
-            return forSave || File.Exists(resolved) ? resolved : null;
+            return !string.IsNullOrEmpty(resolved) && File.Exists(resolved) ? resolved : null;
         }
         catch
         {
-            return forSave ? saveCandidate : null;
+            return null;
         }
     }
 }
