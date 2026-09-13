@@ -1,3 +1,4 @@
+using DryCycle.Framework.KarmicManipulation;
 using UnityEngine;
 
 namespace DryCycle.Items.KarmaSpear;
