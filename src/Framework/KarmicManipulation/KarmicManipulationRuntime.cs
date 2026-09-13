@@ -81,7 +81,11 @@ internal static class KarmicManipulationRuntime
 
         foreach (RoomCamera camera in game.cameras)
         {
-            HUD.KarmaMeter meter = camera?.hud?.karmaMeter;
+            // Do not spell this as HUD.KarmaMeter here. DryCycle owns a DryCycle.HUD
+            // namespace, so qualified lookup from this namespace can bind to the mod
+            // namespace instead of Rain World's global HUD namespace. Type inference
+            // keeps this independent from that namespace collision.
+            var meter = camera?.hud?.karmaMeter;
             if (meter == null)
             {
                 continue;
