@@ -164,8 +164,10 @@ internal static class WorldConnectionRouter
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
     private const float BendPenalty = 0.72f;
+    private const float BacktrackPenalty = 2.65f;
     private const float CrossingPenalty = 7.5f;
     private const float ParallelCongestionPenalty = 1.15f;
+    private const float ProximityPenalty = 0.22f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
     private const int MaxGridExtent = 112;
@@ -246,9 +248,6 @@ internal static class WorldConnectionRouter
         float bottom = Math.Abs(roomMax.Y - point.Y);
         float best = Math.Min(Math.Min(left, right), Math.Min(top, bottom));
 
-        // When the marker lies deep inside a large room, the nearest edge is still a better routing
-        // constraint than the room centre: it sends the neck toward the nearest free exterior rather
-        // than diagonally through the preview.
         if (best == left) return new Num.Vector2(-1f, 0f);
         if (best == right) return new Num.Vector2(1f, 0f);
         if (best == top) return new Num.Vector2(0f, -1f);
@@ -265,6 +264,24 @@ internal static class WorldConnectionRouter
         Num.Vector2 endDirection = Cardinalize(request.EndDirection, request.Start - request.End);
         Num.Vector2 startPerp = new(-startDirection.Y, startDirection.X);
         Num.Vector2 endPerp = new(-endDirection.Y, endDirection.X);
+
+        // Facing ports naturally produce opposite local normals. Align their lane normals before
+        // applying the lane offset, otherwise lane +1 leaves one room above the centreline and
+        // enters the other room below it, causing multi-links to cross each other in the middle.
+        float perpAgreement = Num.Vector2.Dot(startPerp, endPerp);
+        if (perpAgreement < -0.25f)
+        {
+            endPerp = -endPerp;
+        }
+        else if (Math.Abs(perpAgreement) <= 0.25f)
+        {
+            Num.Vector2 pairDelta = request.End - request.Start;
+            Num.Vector2 stableNormal = Math.Abs(pairDelta.X) >= Math.Abs(pairDelta.Y)
+                ? new Num.Vector2(0f, 1f)
+                : new Num.Vector2(1f, 0f);
+            if (Num.Vector2.Dot(startPerp, stableNormal) < 0f) startPerp = -startPerp;
+            if (Num.Vector2.Dot(endPerp, stableNormal) < 0f) endPerp = -endPerp;
+        }
 
         Num.Vector2 startBaseEscape = EscapeOutsideRoom(request.Start, startDirection, request.StartRoom, obstacles);
         Num.Vector2 endBaseEscape = EscapeOutsideRoom(request.End, endDirection, request.EndRoom, obstacles);
@@ -501,7 +518,6 @@ internal static class WorldConnectionRouter
             return true;
         }
 
-        // Deterministic tie-breaker keeps the route stable across frames.
         float hvShape = Math.Abs(start.Y - end.Y) + Math.Abs(start.X - end.X) * 0.001f;
         float vhShape = Math.Abs(start.X - end.X) + Math.Abs(start.Y - end.Y) * 0.001f;
         points = hvShape <= vhShape ? new[] { start, hv, end } : new[] { start, vh, end };
@@ -520,8 +536,6 @@ internal static class WorldConnectionRouter
         Num.Vector2 min = Num.Vector2.Min(start, end) - new Num.Vector2(SearchPadding, SearchPadding);
         Num.Vector2 max = Num.Vector2.Max(start, end) + new Num.Vector2(SearchPadding, SearchPadding);
 
-        // Include nearby obstacles so the search can see a useful corridor, but ignore remote rooms
-        // that cannot affect this connection.
         for (int i = 0; i < obstacles.Count; i++)
         {
             Obstacle obstacle = obstacles[i];
@@ -592,13 +606,18 @@ internal static class WorldConnectionRouter
                 if (blocked[ny * width + nx]) continue;
 
                 float step = 1f;
-                if (current.Direction < 4 && current.Direction != direction) step += BendPenalty;
+                if (current.Direction < 4)
+                {
+                    if (current.Direction != direction) step += BendPenalty;
+                    if (((current.Direction + 2) & 3) == direction) step += BacktrackPenalty;
+                }
+                if (IsNearBlockedCell(nx, ny, blocked, width, height))
+                    step += ProximityPenalty;
 
                 Num.Vector2 worldNeighbor = new(min.X + nx * cell, min.Y + ny * cell);
                 long occupancyKey = GridKey((int)Math.Round(worldNeighbor.X / 18f), (int)Math.Round(worldNeighbor.Y / 18f));
                 if (occupancy.TryGetValue(occupancyKey, out Occupancy occupied))
                 {
-                    byte directionBit = DirectionBit(direction);
                     byte perpendicular = (byte)(occupied.DirectionMask & PerpendicularMask(direction));
                     step += perpendicular != 0
                         ? CrossingPenalty * Math.Max(1, (int)occupied.Count)
@@ -683,6 +702,23 @@ internal static class WorldConnectionRouter
             }
         }
         return blocked;
+    }
+
+    private static bool IsNearBlockedCell(int x, int y, bool[] blocked, int width, int height)
+    {
+        for (int oy = -1; oy <= 1; oy++)
+        {
+            int py = y + oy;
+            if (py < 0 || py >= height) continue;
+            for (int ox = -1; ox <= 1; ox++)
+            {
+                if (ox == 0 && oy == 0) continue;
+                int px = x + ox;
+                if (px < 0 || px >= width) continue;
+                if (blocked[py * width + px]) return true;
+            }
+        }
+        return false;
     }
 
     private static HashSet<long> BuildStableCells(
@@ -818,8 +854,6 @@ internal static class WorldConnectionRouter
 
     private static bool SegmentIntersectsRect(Num.Vector2 a, Num.Vector2 b, Num.Vector2 min, Num.Vector2 max)
     {
-        // Router segments are orthogonal after simplification. Keep a generic fallback for the
-        // short endpoint necks so future port models can still provide arbitrary vectors.
         if (Math.Abs(a.X - b.X) < 0.01f)
         {
             if (a.X <= min.X || a.X >= max.X) return false;
