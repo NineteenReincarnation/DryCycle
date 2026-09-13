@@ -214,7 +214,9 @@ internal static class WorldCreatureSpawnInspector
                 if (WorldTextRegistry.TryDeleteCreatureSpawn(snapshot.RegionName, spawn.Id, out string error))
                 {
                     if (editingSpawnId == spawn.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T("已删除生成项并实时重载。", "Spawner deleted and live-reloaded."), true);
+                    SetStatus(DevToolUiSettings.T(
+                        "已删除生成项并刷新实时预览。",
+                        "Spawner deleted and live preview refreshed."), true);
                 }
                 else
                 {
@@ -227,15 +229,15 @@ internal static class WorldCreatureSpawnInspector
 
     private static void DrawEditor(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        List<EditorMapRoomNodeSnapshot> dens = CreatureDenNodes(room);
+        List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room, selectedDen);
         if (dens.Count == 0)
         {
             ImGui.TextColored(
                 new Num.Vector4(0.92f, 0.62f, 0.30f, 1f),
-                DevToolUiSettings.T("这个房间没有 Den / 生物管道节点。", "This room has no Den / creature-pipe nodes."));
+                DevToolUiSettings.T("这个房间没有可用的生物管道。", "This room has no available creature pipes."));
             return;
         }
-        if (!ContainsDen(dens, selectedDen)) selectedDen = dens[0].NodeIndex;
+        if (!WorldCreaturePipeCatalog.Contains(dens, selectedDen)) selectedDen = dens[0].NodeIndex;
 
         DevToolWidgets.MutedText(editingSpawnId >= 0
             ? DevToolUiSettings.T("编辑生成项", "Edit spawn")
@@ -244,14 +246,16 @@ internal static class WorldCreatureSpawnInspector
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
                 DevToolUiSettings.T("生物管道##CreatureSpawnDen", "Creature pipe##CreatureSpawnDen"),
-                DenLabel(dens, selectedDen)))
+                WorldCreaturePipeCatalog.Label(dens, selectedDen)))
         {
             for (int i = 0; i < dens.Count; i++)
             {
-                EditorMapRoomNodeSnapshot node = dens[i];
-                bool selected = selectedDen == node.NodeIndex;
-                if (ImGui.Selectable("#" + node.NodeIndex + " · " + node.Type + "##CreatureDen" + node.NodeIndex, selected))
-                    selectedDen = node.NodeIndex;
+                WorldCreaturePipeCatalog.Entry pipe = dens[i];
+                bool selected = selectedDen == pipe.NodeIndex;
+                if (ImGui.Selectable(
+                        WorldCreaturePipeCatalog.Label(pipe) + "##CreatureDen" + pipe.NodeIndex,
+                        selected))
+                    selectedDen = pipe.NodeIndex;
                 if (selected) ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
@@ -412,8 +416,8 @@ internal static class WorldCreatureSpawnInspector
 
         SetStatus(
             DevToolUiSettings.T(
-                "生成项已更新并实时重载；保存世界以写入 world.txt。",
-                "Spawner updated and live-reloaded; save the world to write world.txt."),
+                "生成项已更新并刷新实时预览；保存世界以写入 world.txt。",
+                "Spawner updated and live preview refreshed; save the world to write world.txt."),
             true);
     }
 
@@ -428,7 +432,7 @@ internal static class WorldCreatureSpawnInspector
     private static void ResetForm(EditorMapRoomSnapshot room)
     {
         editingSpawnId = -1;
-        List<EditorMapRoomNodeSnapshot> dens = CreatureDenNodes(room);
+        List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room);
         selectedDen = dens.Count > 0 ? dens[0].NodeIndex : -1;
         if (string.IsNullOrEmpty(creatureId)) creatureId = FirstRegisteredCreature();
         amount = 1;
@@ -458,35 +462,6 @@ internal static class WorldCreatureSpawnInspector
         for (int i = 0; i < values.Count; i++)
             if (!string.IsNullOrWhiteSpace(values[i])) return values[i];
         return string.Empty;
-    }
-
-    private static List<EditorMapRoomNodeSnapshot> CreatureDenNodes(EditorMapRoomSnapshot room)
-    {
-        List<EditorMapRoomNodeSnapshot> result = new();
-        EditorMapRoomNodeSnapshot[] nodes = room?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-        for (int i = 0; i < nodes.Length; i++)
-        {
-            EditorMapRoomNodeSnapshot node = nodes[i];
-            if (node == null || node.Exit) continue;
-            if (string.Equals(node.Type, "Den", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(node.Type, "GarbageHoles", StringComparison.OrdinalIgnoreCase))
-                result.Add(node);
-        }
-        return result;
-    }
-
-    private static bool ContainsDen(List<EditorMapRoomNodeSnapshot> dens, int nodeIndex)
-    {
-        for (int i = 0; i < dens.Count; i++)
-            if (dens[i].NodeIndex == nodeIndex) return true;
-        return false;
-    }
-
-    private static string DenLabel(List<EditorMapRoomNodeSnapshot> dens, int nodeIndex)
-    {
-        for (int i = 0; i < dens.Count; i++)
-            if (dens[i].NodeIndex == nodeIndex) return "#" + nodeIndex + " · " + dens[i].Type;
-        return "#" + nodeIndex;
     }
 
     private static string SpawnScope(WorldCreatureSpawnRecord spawn)
