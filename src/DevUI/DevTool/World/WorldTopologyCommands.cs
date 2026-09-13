@@ -48,8 +48,9 @@ internal readonly struct WorldTopologyCommand
 
 /// <summary>
 /// Main-thread mutation queue for endpoint-based world topology authoring.
-/// Every successful edit is captured as one history transaction spanning live AbstractRoom data,
-/// lossless world.txt edits and WorldTopology.json endpoint metadata.
+/// Every successful edit is captured as one history transaction spanning lossless world.txt edits,
+/// live runtime synchronization and explicit endpoint metadata. Runtime synchronization is owned by
+/// WorldConnectionSyntax so every mutation path has one authoritative writer.
 /// </summary>
 internal static class WorldTopologyCommandQueue
 {
@@ -290,9 +291,6 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        SetLiveConnection(roomA, command.NodeA, -1);
-        SetLiveConnection(roomB, command.NodeB, -1);
-
         if (!string.IsNullOrWhiteSpace(command.EdgeId) &&
             !WorldTopologyRegistry.RemoveEdge(region, command.EdgeId))
         {
@@ -467,9 +465,6 @@ internal static class WorldTopologyCommandQueue
 
         if (!SetWorldConnection(region, roomA, nodeA, targetFromA, out error)) return false;
         if (!SetWorldConnection(region, roomB, nodeB, targetFromB, out error)) return false;
-
-        SetLiveConnection(roomA, nodeA, targetFromA == null ? -1 : roomB.index);
-        SetLiveConnection(roomB, nodeB, targetFromB == null ? -1 : roomA.index);
         return true;
     }
 
@@ -584,21 +579,6 @@ internal static class WorldTopologyCommandQueue
         room?.connections != null && nodeIndex >= 0 && nodeIndex < room.connections.Length
             ? room.connections[nodeIndex]
             : -1;
-
-    private static void SetLiveConnection(AbstractRoom room, int nodeIndex, int targetRoomIndex)
-    {
-        if (room == null || nodeIndex < 0) return;
-        if (room.connections == null || nodeIndex >= room.connections.Length)
-        {
-            int oldLength = room.connections?.Length ?? 0;
-            int nextLength = Math.Max(nodeIndex + 1, oldLength);
-            int[] next = new int[nextLength];
-            for (int i = 0; i < next.Length; i++) next[i] = -1;
-            if (room.connections != null) Array.Copy(room.connections, next, room.connections.Length);
-            room.connections = next;
-        }
-        room.connections[nodeIndex] = targetRoomIndex;
-    }
 
     private static void Succeed(string message)
     {
