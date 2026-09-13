@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using ImGuiNET;
 using UnityEngine;
@@ -20,6 +21,10 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// pure canvas/map pan never rebuilds A* routes. At very small overview zooms the tile raster is
 /// below useful screen resolution, so non-focused rooms use a cheap overview card until the user
 /// zooms in or hovers/selects them.
+///
+/// The core map snapshot and background MapTex/RoomSettings scanners are also deliberately kept
+/// below render frequency. They are authoring data, not animation data: selection/region/current
+/// room changes still refresh immediately while steady-state rebuilds are spread over frames.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -39,6 +44,8 @@ internal static class WorldMapPerformance
 {
     private const float OverviewLodZoom = 0.42f;
     private const float CoordinateQuantization = 4f; // quarter-pixel fingerprint precision
+    private const int SnapshotIntervalFrames = 2;
+    private const int PreviewPrimeIntervalFrames = 2;
 
     private delegate WorldConnectionRouter.Route[] OrigBuildRoutes(
         IReadOnlyList<WorldConnectionRouter.Request> requests,
@@ -68,6 +75,13 @@ internal static class WorldMapPerformance
         Num.Vector2 roomMin,
         bool selected,
         bool hovered);
+
+    private delegate void OrigMapPublish(EditorSession session);
+    private delegate void HookMapPublish(OrigMapPublish orig, EditorSession session);
+    private delegate void OrigGeometryPrime(EditorSession session);
+    private delegate void HookGeometryPrime(OrigGeometryPrime orig, EditorSession session);
+    private delegate void OrigShortcutPrime(EditorSession session, int selectedRoomIndex);
+    private delegate void HookShortcutPrime(OrigShortcutPrime orig, EditorSession session, int selectedRoomIndex);
 
     private sealed class PolylineCache
     {
@@ -102,6 +116,9 @@ internal static class WorldMapPerformance
     private static readonly HookTrimEnds TrimHookDelegate = TrimEndsHook;
     private static readonly HookOffsetPolyline OffsetHookDelegate = OffsetPolylineHook;
     private static readonly HookDrawRoomGeometry RoomGeometryHookDelegate = DrawRoomGeometryHook;
+    private static readonly HookMapPublish MapPublishHookDelegate = MapPublishHook;
+    private static readonly HookGeometryPrime GeometryPrimeHookDelegate = GeometryPrimeHook;
+    private static readonly HookShortcutPrime ShortcutPrimeHookDelegate = ShortcutPrimeHook;
 
     private static readonly Dictionary<Num.Vector2[], PolylineCache> roundedCache = new();
     private static readonly Dictionary<Num.Vector2[], PolylineCache> trimmedCache = new();
@@ -113,6 +130,9 @@ internal static class WorldMapPerformance
     private static IDisposable trimHook;
     private static IDisposable offsetHook;
     private static IDisposable roomGeometryHook;
+    private static IDisposable mapPublishHook;
+    private static IDisposable geometryPrimeHook;
+    private static IDisposable shortcutPrimeHook;
     private static FieldInfo zoomField;
     private static bool enabled;
 
@@ -120,6 +140,21 @@ internal static class WorldMapPerformance
     private static int routeFingerprint;
     private static Num.Vector2 routeAnchor;
     private static WorldConnectionRouter.Route[] cachedRoutes = Array.Empty<WorldConnectionRouter.Route>();
+
+    private static int lastPublishFrame = -1000;
+    private static string lastPublishRegion = string.Empty;
+    private static int lastPublishSelection = int.MinValue;
+    private static int lastPublishCurrentRoom = int.MinValue;
+
+    private static int lastGeometryPrimeFrame = -1000;
+    private static string lastGeometryRegion = string.Empty;
+    private static int lastGeometrySelection = int.MinValue;
+    private static int lastGeometryCurrentRoom = int.MinValue;
+
+    private static int lastShortcutPrimeFrame = -1000;
+    private static string lastShortcutRegion = string.Empty;
+    private static int lastShortcutSelection = int.MinValue;
+    private static int lastShortcutCurrentRoom = int.MinValue;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -185,8 +220,28 @@ internal static class WorldMapPerformance
                 null);
             zoomField = mapType.GetField("zoom", flags);
 
+            MethodInfo mapPublish = typeof(MapEditorPresentationHub).GetMethod(
+                "Publish",
+                flags,
+                null,
+                new[] { typeof(EditorSession) },
+                null);
+            MethodInfo geometryPrime = typeof(MapRoomGeometryPresentationHub).GetMethod(
+                "Prime",
+                flags,
+                null,
+                new[] { typeof(EditorSession) },
+                null);
+            MethodInfo shortcutPrime = typeof(WorldMapShortcutPresentation).GetMethod(
+                "Prime",
+                flags,
+                null,
+                new[] { typeof(EditorSession), typeof(int) },
+                null);
+
             if (buildRoutes == null || buildRounded == null || trimEnds == null || offsetPolyline == null ||
-                drawRoomGeometry == null || zoomField == null)
+                drawRoomGeometry == null || zoomField == null || mapPublish == null ||
+                geometryPrime == null || shortcutPrime == null)
                 throw new MissingMemberException("World Map performance hook targets were not found.");
 
             routeHook = constructor.Invoke(new object[] { buildRoutes, BuildRoutesHookDelegate }) as IDisposable;
@@ -194,6 +249,9 @@ internal static class WorldMapPerformance
             trimHook = constructor.Invoke(new object[] { trimEnds, TrimHookDelegate }) as IDisposable;
             offsetHook = constructor.Invoke(new object[] { offsetPolyline, OffsetHookDelegate }) as IDisposable;
             roomGeometryHook = constructor.Invoke(new object[] { drawRoomGeometry, RoomGeometryHookDelegate }) as IDisposable;
+            mapPublishHook = constructor.Invoke(new object[] { mapPublish, MapPublishHookDelegate }) as IDisposable;
+            geometryPrimeHook = constructor.Invoke(new object[] { geometryPrime, GeometryPrimeHookDelegate }) as IDisposable;
+            shortcutPrimeHook = constructor.Invoke(new object[] { shortcutPrime, ShortcutPrimeHookDelegate }) as IDisposable;
 
             enabled = true;
             log?.LogInfo("World Map performance cache enabled.");
@@ -207,6 +265,9 @@ internal static class WorldMapPerformance
 
     internal static void Disable()
     {
+        DisposeHook(ref shortcutPrimeHook);
+        DisposeHook(ref geometryPrimeHook);
+        DisposeHook(ref mapPublishHook);
         DisposeHook(ref roomGeometryHook);
         DisposeHook(ref offsetHook);
         DisposeHook(ref trimHook);
@@ -214,8 +275,81 @@ internal static class WorldMapPerformance
         DisposeHook(ref routeHook);
         zoomField = null;
         ResetCaches();
+        ResetThrottles();
         enabled = false;
         log = null;
+    }
+
+    private static void MapPublishHook(OrigMapPublish orig, EditorSession session)
+    {
+        // Always let the core clear the Map snapshot when the author leaves the Map page. Keeping a
+        // stale region snapshot alive behind another tool is both incorrect and more expensive.
+        if (session?.ToolMode != EditorToolMode.Map)
+        {
+            orig(session);
+            lastPublishFrame = -1000;
+            lastPublishRegion = string.Empty;
+            lastPublishSelection = int.MinValue;
+            lastPublishCurrentRoom = int.MinValue;
+            return;
+        }
+
+        string region = session.World?.name ?? string.Empty;
+        int selected = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
+        int currentRoom = session.Room?.abstractRoom?.index ?? -1;
+        bool urgent = !MapEditorPresentationHub.Current.Available ||
+                      !string.Equals(region, lastPublishRegion, StringComparison.OrdinalIgnoreCase) ||
+                      selected != lastPublishSelection ||
+                      currentRoom != lastPublishCurrentRoom;
+
+        if (!urgent && Time.frameCount - lastPublishFrame < SnapshotIntervalFrames)
+            return;
+
+        orig(session);
+        lastPublishFrame = Time.frameCount;
+        lastPublishRegion = region;
+        lastPublishSelection = selected;
+        lastPublishCurrentRoom = currentRoom;
+    }
+
+    private static void GeometryPrimeHook(OrigGeometryPrime orig, EditorSession session)
+    {
+        string region = session?.World?.name ?? string.Empty;
+        int selected = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
+        int currentRoom = session?.Room?.abstractRoom?.index ?? -1;
+        bool urgent = !string.Equals(region, lastGeometryRegion, StringComparison.OrdinalIgnoreCase) ||
+                      selected != lastGeometrySelection ||
+                      currentRoom != lastGeometryCurrentRoom;
+
+        if (!urgent && Time.frameCount - lastGeometryPrimeFrame < PreviewPrimeIntervalFrames)
+            return;
+
+        orig(session);
+        lastGeometryPrimeFrame = Time.frameCount;
+        lastGeometryRegion = region;
+        lastGeometrySelection = selected;
+        lastGeometryCurrentRoom = currentRoom;
+    }
+
+    private static void ShortcutPrimeHook(
+        OrigShortcutPrime orig,
+        EditorSession session,
+        int selectedRoomIndex)
+    {
+        string region = session?.World?.name ?? string.Empty;
+        int currentRoom = session?.Room?.abstractRoom?.index ?? -1;
+        bool urgent = !string.Equals(region, lastShortcutRegion, StringComparison.OrdinalIgnoreCase) ||
+                      selectedRoomIndex != lastShortcutSelection ||
+                      currentRoom != lastShortcutCurrentRoom;
+
+        if (!urgent && Time.frameCount - lastShortcutPrimeFrame < PreviewPrimeIntervalFrames)
+            return;
+
+        orig(session, selectedRoomIndex);
+        lastShortcutPrimeFrame = Time.frameCount;
+        lastShortcutRegion = region;
+        lastShortcutSelection = selectedRoomIndex;
+        lastShortcutCurrentRoom = currentRoom;
     }
 
     private static WorldConnectionRouter.Route[] BuildRoutesHook(
@@ -484,6 +618,22 @@ internal static class WorldMapPerformance
         routeAnchor = Num.Vector2.Zero;
         cachedRoutes = Array.Empty<WorldConnectionRouter.Route>();
         ClearPolylineCaches();
+    }
+
+    private static void ResetThrottles()
+    {
+        lastPublishFrame = -1000;
+        lastPublishRegion = string.Empty;
+        lastPublishSelection = int.MinValue;
+        lastPublishCurrentRoom = int.MinValue;
+        lastGeometryPrimeFrame = -1000;
+        lastGeometryRegion = string.Empty;
+        lastGeometrySelection = int.MinValue;
+        lastGeometryCurrentRoom = int.MinValue;
+        lastShortcutPrimeFrame = -1000;
+        lastShortcutRegion = string.Empty;
+        lastShortcutSelection = int.MinValue;
+        lastShortcutCurrentRoom = int.MinValue;
     }
 
     private static void DisposeHook(ref IDisposable hook)
