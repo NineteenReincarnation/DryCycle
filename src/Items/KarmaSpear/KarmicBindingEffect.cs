@@ -18,6 +18,7 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
     private readonly bool _sourceMustRemainLodged;
     private readonly float _spring;
     private readonly float _velocityDamping;
+    private readonly int _chargeGeneration;
     private int _age;
 
     internal KarmicBindingEffect(
@@ -31,6 +32,7 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
         _target = target;
         _anchor = anchor;
         _sourceMustRemainLodged = sourceMustRemainLodged;
+        _chargeGeneration = source.ChargeGeneration;
         _duration = (largeTarget ? 128 : 88) + source.KarmaLevel * (largeTarget ? 7 : 5);
         _spring = largeTarget ? 0.012f : 0.024f;
         _velocityDamping = largeTarget ? 0.958f : 0.925f;
@@ -115,7 +117,9 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
     {
         if (!slatedForDeletetion)
         {
-            _source?.MarkSpent();
+            // Only the charge that created this binding may be consumed. If the spear
+            // has already been recharged, this old effect must not drain the new charge.
+            _source?.MarkSpent(_chargeGeneration);
             Destroy();
         }
     }
