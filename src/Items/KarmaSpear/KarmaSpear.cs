@@ -189,7 +189,7 @@ internal sealed class KarmaSpear : Spear
             shader = rCam.room.game.rainWorld.Shaders["VectorCircle"]
         };
         sLeaser.sprites[baseCount + 2] = new FSprite(
-            HUD.KarmaMeter.KarmaSymbolSprite(
+            global::HUD.KarmaMeter.KarmaSymbolSprite(
                 small: false,
                 new IntVector2(Mathf.Clamp(KarmaLevel - 1, 0, 9), Mathf.Clamp(KarmaLevel - 1, 0, 9))));
 
