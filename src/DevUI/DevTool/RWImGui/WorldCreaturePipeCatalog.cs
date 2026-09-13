@@ -36,6 +36,7 @@ internal static class WorldCreaturePipeCatalog
     {
         internal string RoomName = string.Empty;
         internal int NodeFingerprint;
+        internal bool HasExactMouth;
         internal WorldMapShortcutPresentation.ShortcutMarker[] ExactMouths =
             Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
         internal List<Entry> BaseEntries = new();
@@ -78,12 +79,11 @@ internal static class WorldCreaturePipeCatalog
         preserved.AddRange(cached.BaseEntries);
         EditorMapRoomNodeSnapshot node = FindNode(room, preserveNode);
         bool knownDen = IsCreatureDen(node);
-        bool hasExact = exact.Length > 0;
         preserved.Add(new Entry(
             preserveNode,
             knownDen ? node.Type : "Node",
             false,
-            !knownDen || hasExact));
+            !knownDen || cached.HasExactMouth));
         preserved.Sort(CompareEntries);
         cached.PreserveVariants[preserveNode] = preserved;
         return preserved;
@@ -152,6 +152,7 @@ internal static class WorldCreaturePipeCatalog
         {
             RoomName = room.Name ?? string.Empty,
             NodeFingerprint = nodeFingerprint,
+            HasExactMouth = hasExact,
             ExactMouths = exact,
             BaseEntries = result
         };
