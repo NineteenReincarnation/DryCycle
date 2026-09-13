@@ -12,22 +12,24 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Retained Unity/GPU scene for the region editor.
 ///
-/// The design deliberately follows Rain World's original MapTex + persistent FSprite model: room
-/// atlas pixels are never decomposed into thousands of immediate-mode rectangles. Room quads are
-/// grouped by atlas/layer/spatial cell into long-lived meshes. Connections are routed once in map
-/// space and also retained as a GPU line mesh. Pan and zoom therefore change only the orthographic
-/// camera transform; they do not rebuild room or connection geometry.
+/// Room meshes are persistent and chunked. Moving a room dirties only the source/destination
+/// chunks instead of rebuilding the whole region. Connections, crossing bridges and interaction
+/// highlights are retained GPU meshes as well. Spatial cells back both route hit-testing and room
+/// viewport queries so very large maps do not need every retained chunk enabled at once.
 /// </summary>
 internal static class WorldMapGpuScene
 {
     internal const float TileDisplaySize = 2f;
     private const int RenderLayer = 31;
     private const float SpatialChunkSize = 512f;
+    private const float RoomGridSize = 256f;
     private const float RouteGridSize = 256f;
     private const float LaneSpacing = 9f;
     private const float MaxLaneOffset = 27f;
     private const float ArrowSpacing = 72f;
     private const float ArrowSize = 7f;
+    private const float CrossingRadius = 7f;
+    private const float CrossingRise = 5.5f;
 
     internal readonly struct RoomPlacement
     {
@@ -55,6 +57,8 @@ internal static class WorldMapGpuScene
         internal int LayerMask = 7;
         internal int LayoutHash;
         internal bool ShowConnections = true;
+        internal int SelectedRoomIndex = -1;
+        internal int HoveredRoomIndex = -1;
         internal string SelectedConnectionId = string.Empty;
         internal string HoveredConnectionId = string.Empty;
         internal EditorMapPresentationSnapshot Snapshot = EditorMapPresentationSnapshot.Empty;
@@ -81,7 +85,9 @@ internal static class WorldMapGpuScene
         public bool Equals(ChunkKey other) =>
             TextureId == other.TextureId && Layer == other.Layer && CellX == other.CellX &&
             CellY == other.CellY && Overlay == other.Overlay;
+
         public override bool Equals(object obj) => obj is ChunkKey other && Equals(other);
+
         public override int GetHashCode()
         {
             unchecked
@@ -98,6 +104,7 @@ internal static class WorldMapGpuScene
     private sealed class RoomQuad
     {
         internal int RoomIndex;
+        internal int Order;
         internal int Layer;
         internal Texture2D Texture;
         internal Rect Uv;
@@ -126,7 +133,8 @@ internal static class WorldMapGpuScene
 
     private sealed class RouteSpatialIndex
     {
-        internal static readonly RouteSpatialIndex Empty = new(Array.Empty<RouteHit>(), new Dictionary<long, int[]>());
+        internal static readonly RouteSpatialIndex Empty =
+            new(Array.Empty<RouteHit>(), new Dictionary<long, int[]>());
 
         internal RouteSpatialIndex(RouteHit[] routes, Dictionary<long, int[]> cells)
         {
@@ -136,6 +144,44 @@ internal static class WorldMapGpuScene
 
         internal RouteHit[] Routes { get; }
         internal Dictionary<long, int[]> Cells { get; }
+    }
+
+    private sealed class RoomHit
+    {
+        internal int RoomIndex;
+        internal int Layer;
+        internal int Order;
+        internal Num.Vector2 Min;
+        internal Num.Vector2 Max;
+    }
+
+    private sealed class RoomSpatialIndex
+    {
+        internal static readonly RoomSpatialIndex Empty =
+            new(Array.Empty<RoomHit>(), new Dictionary<long, int[]>());
+
+        internal RoomSpatialIndex(RoomHit[] rooms, Dictionary<long, int[]> cells)
+        {
+            Rooms = rooms ?? Array.Empty<RoomHit>();
+            Cells = cells ?? new Dictionary<long, int[]>();
+        }
+
+        internal RoomHit[] Rooms { get; }
+        internal Dictionary<long, int[]> Cells { get; }
+    }
+
+    private readonly struct Crossing
+    {
+        internal Crossing(Num.Vector2 point, Num.Vector2 tangent, Color32 color)
+        {
+            Point = point;
+            Tangent = tangent;
+            Color = color;
+        }
+
+        internal Num.Vector2 Point { get; }
+        internal Num.Vector2 Tangent { get; }
+        internal Color32 Color { get; }
     }
 
     private sealed class RouteEntry
@@ -149,6 +195,7 @@ internal static class WorldMapGpuScene
         internal Num.Vector2 EndDirection;
         internal float LaneOffset;
         internal WorldConnectionRouter.Route Route;
+        internal readonly List<Crossing> Crossings = new();
     }
 
     private static GameObject root;
@@ -158,35 +205,55 @@ internal static class WorldMapGpuScene
     private static Material overlayMaterial;
     private static readonly Dictionary<int, Material> roomMaterials = new();
     private static readonly Dictionary<ChunkKey, ChunkRenderer> chunks = new();
+
+    // Retained membership tables. These are what make room dragging incremental: a changed room
+    // removes itself from its old chunk and adds itself to its new chunk, dirtying only those keys.
+    private static readonly Dictionary<int, RoomQuad> roomQuads = new();
+    private static readonly Dictionary<int, ChunkKey> roomBaseKeys = new();
+    private static readonly Dictionary<int, ChunkKey> roomOverlayKeys = new();
+    private static readonly Dictionary<ChunkKey, HashSet<int>> chunkMembers = new();
+
     private static ChunkRenderer connectionRenderer;
+    private static ChunkRenderer crossingRenderer;
+    private static ChunkRenderer dynamicOverlayRenderer;
     private static volatile RouteSpatialIndex routeIndex = RouteSpatialIndex.Empty;
+    private static volatile RoomSpatialIndex roomIndex = RoomSpatialIndex.Empty;
 
     private static string region = string.Empty;
     private static int lastLayoutHash = int.MinValue;
     private static int lastRoomSourceHash = int.MinValue;
     private static int lastTopologyHash = int.MinValue;
     private static int lastLayerMask = -1;
+    private static int lastDynamicOverlayHash = int.MinValue;
     private static bool lastShowConnections;
     private static bool ready;
     private static string error = string.Empty;
+    private static int visibleRoomCount;
 
     internal static bool Ready => ready;
     internal static string Error => error;
     internal static int RetainedChunkCount => chunks.Count;
     internal static int RetainedRouteCount => routeIndex.Routes.Length;
+    internal static int RetainedRoomCount => roomIndex.Rooms.Length;
+    internal static int VisibleRoomCount => visibleRoomCount;
 
     internal static void Disable()
     {
         ready = false;
         routeIndex = RouteSpatialIndex.Empty;
+        roomIndex = RoomSpatialIndex.Empty;
         region = string.Empty;
         lastLayoutHash = int.MinValue;
         lastRoomSourceHash = int.MinValue;
         lastTopologyHash = int.MinValue;
         lastLayerMask = -1;
+        lastDynamicOverlayHash = int.MinValue;
         lastShowConnections = false;
+        visibleRoomCount = 0;
         error = string.Empty;
 
+        DestroyChunk(ref dynamicOverlayRenderer);
+        DestroyChunk(ref crossingRenderer);
         DestroyChunk(ref connectionRenderer);
         foreach (ChunkRenderer chunk in chunks.Values)
         {
@@ -194,6 +261,10 @@ internal static class WorldMapGpuScene
             DestroyChunk(ref local);
         }
         chunks.Clear();
+        roomQuads.Clear();
+        roomBaseKeys.Clear();
+        roomOverlayKeys.Clear();
+        chunkMembers.Clear();
 
         foreach (Material material in roomMaterials.Values)
             if (material != null) UnityEngine.Object.Destroy(material);
@@ -238,19 +309,19 @@ internal static class WorldMapGpuScene
             lastLayoutHash = frame.LayoutHash;
             lastRoomSourceHash = sourceHash;
         }
-        else
-        {
-            ApplyLayerVisibility(frame.LayerMask);
-        }
+
+        ApplyRoomVisibility(frame);
 
         int topologyHash = ComputeTopologyHash(frame);
         if (frame.ShowConnections != lastShowConnections || frame.LayerMask != lastLayerMask ||
-            topologyHash != lastTopologyHash || frame.LayoutHash != lastLayoutHash)
+            topologyHash != lastTopologyHash)
         {
             RebuildConnections(frame);
             lastTopologyHash = topologyHash;
             lastShowConnections = frame.ShowConnections;
         }
+
+        UpdateDynamicOverlay(frame, topologyHash);
         lastLayerMask = frame.LayerMask;
     }
 
@@ -297,6 +368,70 @@ internal static class WorldMapGpuScene
         }
 
         return hit != null;
+    }
+
+    internal static bool TryHitRoom(Num.Vector2 mapPoint, int layerMask, out int roomIndexValue)
+    {
+        roomIndexValue = -1;
+        RoomSpatialIndex index = roomIndex;
+        if (index.Rooms.Length == 0) return false;
+
+        int cellX = FloorToInt(mapPoint.X / RoomGridSize);
+        int cellY = FloorToInt(mapPoint.Y / RoomGridSize);
+        if (!index.Cells.TryGetValue(CellKey(cellX, cellY), out int[] candidates)) return false;
+
+        int bestOrder = int.MinValue;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            int candidateIndex = candidates[i];
+            if (candidateIndex < 0 || candidateIndex >= index.Rooms.Length) continue;
+            RoomHit candidate = index.Rooms[candidateIndex];
+            if ((layerMask & (1 << candidate.Layer)) == 0 || candidate.Order < bestOrder) continue;
+            if (mapPoint.X < candidate.Min.X || mapPoint.X > candidate.Max.X ||
+                mapPoint.Y < candidate.Min.Y || mapPoint.Y > candidate.Max.Y)
+                continue;
+            bestOrder = candidate.Order;
+            roomIndexValue = candidate.RoomIndex;
+        }
+        return roomIndexValue >= 0;
+    }
+
+    internal static int[] QueryVisibleRooms(Num.Vector2 mapMin, Num.Vector2 mapMax, int layerMask)
+    {
+        RoomSpatialIndex index = roomIndex;
+        if (index.Rooms.Length == 0) return Array.Empty<int>();
+
+        int minCellX = FloorToInt(mapMin.X / RoomGridSize);
+        int maxCellX = FloorToInt(mapMax.X / RoomGridSize);
+        int minCellY = FloorToInt(mapMin.Y / RoomGridSize);
+        int maxCellY = FloorToInt(mapMax.Y / RoomGridSize);
+        HashSet<int> visited = new();
+        List<RoomHit> visible = new();
+
+        for (int y = minCellY; y <= maxCellY; y++)
+        {
+            for (int x = minCellX; x <= maxCellX; x++)
+            {
+                if (!index.Cells.TryGetValue(CellKey(x, y), out int[] candidates)) continue;
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    int candidateIndex = candidates[i];
+                    if (!visited.Add(candidateIndex) || candidateIndex < 0 || candidateIndex >= index.Rooms.Length)
+                        continue;
+                    RoomHit candidate = index.Rooms[candidateIndex];
+                    if ((layerMask & (1 << candidate.Layer)) == 0 ||
+                        candidate.Max.X < mapMin.X || candidate.Min.X > mapMax.X ||
+                        candidate.Max.Y < mapMin.Y || candidate.Min.Y > mapMax.Y)
+                        continue;
+                    visible.Add(candidate);
+                }
+            }
+        }
+
+        visible.Sort((a, b) => a.Order.CompareTo(b.Order));
+        int[] result = new int[visible.Count];
+        for (int i = 0; i < visible.Count; i++) result[i] = visible[i].RoomIndex;
+        return result;
     }
 
     private static bool EnsureRenderer()
@@ -435,65 +570,103 @@ internal static class WorldMapGpuScene
     private static void RebuildRoomBatches(MapPage page, FrameState frame)
     {
         Dictionary<int, RoomPlacement> placements = PlacementIndex(frame.Placements);
-        Dictionary<ChunkKey, List<RoomQuad>> desired = new();
         EditorMapRoomSnapshot[] rooms = frame.Snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        HashSet<int> alive = new();
+        HashSet<ChunkKey> dirty = new();
+        bool spatialDirty = false;
 
         for (int i = 0; i < rooms.Length; i++)
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (room == null || !placements.TryGetValue(room.RoomIndex, out RoomPlacement placement) ||
-                !TryGetRoomQuad(page, room, placement, out RoomQuad quad))
+                !TryGetRoomQuad(page, room, placement, i, out RoomQuad quad))
                 continue;
 
-            int cellX = FloorToInt(quad.X / SpatialChunkSize);
-            int cellY = FloorToInt(quad.Y / SpatialChunkSize);
-            ChunkKey key = new(quad.Texture.GetInstanceID(), room.Layer, cellX, cellY, false);
-            if (!desired.TryGetValue(key, out List<RoomQuad> list))
-            {
-                list = new List<RoomQuad>();
-                desired.Add(key, list);
-            }
-            list.Add(quad);
+            int roomId = room.RoomIndex;
+            alive.Add(roomId);
+            ChunkKey nextBase = BaseKey(quad);
+            bool nextHasOverlay = quad.Bake?.GeometryReady == true;
+            ChunkKey nextOverlay = OverlayKey(quad);
 
-            if (quad.Bake?.GeometryReady == true)
+            if (!roomQuads.TryGetValue(roomId, out RoomQuad previous))
             {
-                ChunkKey overlayKey = new(0, room.Layer, cellX, cellY, true);
-                if (!desired.TryGetValue(overlayKey, out List<RoomQuad> overlayList))
+                roomQuads[roomId] = quad;
+                roomBaseKeys[roomId] = nextBase;
+                AddMember(nextBase, roomId, dirty);
+                if (nextHasOverlay)
                 {
-                    overlayList = new List<RoomQuad>();
-                    desired.Add(overlayKey, overlayList);
+                    roomOverlayKeys[roomId] = nextOverlay;
+                    AddMember(nextOverlay, roomId, dirty);
                 }
-                overlayList.Add(quad);
+                spatialDirty = true;
+                continue;
             }
-        }
 
-        List<ChunkKey> stale = new();
-        foreach (ChunkKey key in chunks.Keys)
-            if (!desired.ContainsKey(key)) stale.Add(key);
-        for (int i = 0; i < stale.Count; i++)
-        {
-            ChunkRenderer chunk = chunks[stale[i]];
-            DestroyChunk(ref chunk);
-            chunks.Remove(stale[i]);
-        }
+            roomBaseKeys.TryGetValue(roomId, out ChunkKey previousBase);
+            bool previousHasOverlay = roomOverlayKeys.TryGetValue(roomId, out ChunkKey previousOverlay);
+            bool quadChanged = !SameRoomQuad(previous, quad);
+            bool baseMoved = !previousBase.Equals(nextBase);
+            bool overlayMoved = previousHasOverlay != nextHasOverlay ||
+                                previousHasOverlay && nextHasOverlay && !previousOverlay.Equals(nextOverlay);
 
-        foreach (KeyValuePair<ChunkKey, List<RoomQuad>> pair in desired)
-        {
-            if (!chunks.TryGetValue(pair.Key, out ChunkRenderer chunk))
+            if (baseMoved)
             {
-                chunk = CreateChunk(pair.Key, pair.Key.Overlay ? overlayMaterial : GetRoomMaterial(pair.Value[0].Texture));
-                chunks[pair.Key] = chunk;
+                RemoveMember(previousBase, roomId, dirty);
+                AddMember(nextBase, roomId, dirty);
+                roomBaseKeys[roomId] = nextBase;
             }
-            RebuildChunkMesh(chunk, pair.Value, pair.Key.Overlay);
+            else if (quadChanged)
+            {
+                dirty.Add(nextBase);
+            }
+
+            if (previousHasOverlay && (!nextHasOverlay || overlayMoved))
+            {
+                RemoveMember(previousOverlay, roomId, dirty);
+                roomOverlayKeys.Remove(roomId);
+            }
+            if (nextHasOverlay && (!previousHasOverlay || overlayMoved))
+            {
+                AddMember(nextOverlay, roomId, dirty);
+                roomOverlayKeys[roomId] = nextOverlay;
+            }
+            else if (nextHasOverlay && quadChanged)
+            {
+                dirty.Add(nextOverlay);
+            }
+
+            if (quadChanged || baseMoved || overlayMoved) spatialDirty = true;
+            roomQuads[roomId] = quad;
         }
 
-        ApplyLayerVisibility(frame.LayerMask);
+        if (roomQuads.Count != alive.Count)
+        {
+            List<int> stale = new();
+            foreach (int roomId in roomQuads.Keys)
+                if (!alive.Contains(roomId)) stale.Add(roomId);
+            for (int i = 0; i < stale.Count; i++)
+            {
+                int roomId = stale[i];
+                if (roomBaseKeys.TryGetValue(roomId, out ChunkKey baseKey))
+                    RemoveMember(baseKey, roomId, dirty);
+                if (roomOverlayKeys.TryGetValue(roomId, out ChunkKey overlayKey))
+                    RemoveMember(overlayKey, roomId, dirty);
+                roomBaseKeys.Remove(roomId);
+                roomOverlayKeys.Remove(roomId);
+                roomQuads.Remove(roomId);
+            }
+            if (stale.Count > 0) spatialDirty = true;
+        }
+
+        foreach (ChunkKey key in dirty) RebuildDirtyChunk(key);
+        if (spatialDirty || roomIndex.Rooms.Length != roomQuads.Count) BuildRoomSpatialIndex();
     }
 
     private static bool TryGetRoomQuad(
         MapPage page,
         EditorMapRoomSnapshot room,
         RoomPlacement placement,
+        int order,
         out RoomQuad quad)
     {
         quad = null;
@@ -529,6 +702,7 @@ internal static class WorldMapGpuScene
         quad = new RoomQuad
         {
             RoomIndex = room.RoomIndex,
+            Order = order,
             Layer = room.Layer,
             Texture = texture,
             Uv = uv,
@@ -539,6 +713,75 @@ internal static class WorldMapGpuScene
             Bake = bake
         };
         return true;
+    }
+
+    private static ChunkKey BaseKey(RoomQuad quad) =>
+        new(quad.Texture.GetInstanceID(), quad.Layer,
+            FloorToInt(quad.X / SpatialChunkSize), FloorToInt(quad.Y / SpatialChunkSize), false);
+
+    private static ChunkKey OverlayKey(RoomQuad quad) =>
+        new(0, quad.Layer,
+            FloorToInt(quad.X / SpatialChunkSize), FloorToInt(quad.Y / SpatialChunkSize), true);
+
+    private static bool SameRoomQuad(RoomQuad a, RoomQuad b)
+    {
+        if (a == null || b == null) return false;
+        int aTexture = a.Texture != null ? a.Texture.GetInstanceID() : 0;
+        int bTexture = b.Texture != null ? b.Texture.GetInstanceID() : 0;
+        ulong aSource = a.Bake?.SourceSignature ?? 0UL;
+        ulong bSource = b.Bake?.SourceSignature ?? 0UL;
+        bool aGeometry = a.Bake?.GeometryReady == true;
+        bool bGeometry = b.Bake?.GeometryReady == true;
+        return a.RoomIndex == b.RoomIndex && a.Order == b.Order && a.Layer == b.Layer &&
+               aTexture == bTexture && a.Uv.Equals(b.Uv) &&
+               NearlyEqual(a.X, b.X) && NearlyEqual(a.Y, b.Y) &&
+               NearlyEqual(a.Width, b.Width) && NearlyEqual(a.Height, b.Height) &&
+               aSource == bSource && aGeometry == bGeometry;
+    }
+
+    private static void AddMember(ChunkKey key, int roomId, HashSet<ChunkKey> dirty)
+    {
+        if (!chunkMembers.TryGetValue(key, out HashSet<int> members))
+        {
+            members = new HashSet<int>();
+            chunkMembers.Add(key, members);
+        }
+        members.Add(roomId);
+        dirty.Add(key);
+    }
+
+    private static void RemoveMember(ChunkKey key, int roomId, HashSet<ChunkKey> dirty)
+    {
+        if (!chunkMembers.TryGetValue(key, out HashSet<int> members)) return;
+        members.Remove(roomId);
+        if (members.Count == 0) chunkMembers.Remove(key);
+        dirty.Add(key);
+    }
+
+    private static void RebuildDirtyChunk(ChunkKey key)
+    {
+        if (!chunkMembers.TryGetValue(key, out HashSet<int> members) || members.Count == 0)
+        {
+            if (chunks.TryGetValue(key, out ChunkRenderer stale))
+            {
+                DestroyChunk(ref stale);
+                chunks.Remove(key);
+            }
+            return;
+        }
+
+        List<RoomQuad> roomList = new(members.Count);
+        foreach (int roomId in members)
+            if (roomQuads.TryGetValue(roomId, out RoomQuad room)) roomList.Add(room);
+        roomList.Sort((a, b) => a.Order.CompareTo(b.Order));
+        if (roomList.Count == 0) return;
+
+        if (!chunks.TryGetValue(key, out ChunkRenderer chunk))
+        {
+            chunk = CreateChunk(key, key.Overlay ? overlayMaterial : GetRoomMaterial(roomList[0].Texture));
+            chunks[key] = chunk;
+        }
+        RebuildChunkMesh(chunk, roomList, key.Overlay);
     }
 
     private static ChunkRenderer CreateChunk(ChunkKey key, Material material)
@@ -619,7 +862,6 @@ internal static class WorldMapGpuScene
         {
             RoomQuad room = rooms[r];
             EditorMapRectSnapshot[] runs = room.Bake?.Visual?.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
-            float widthTiles = Math.Max(1f, room.Bake?.Visual?.WidthTiles ?? room.Width / TileDisplaySize);
             float heightTiles = Math.Max(1f, room.Bake?.Visual?.HeightTiles ?? room.Height / TileDisplaySize);
             for (int i = 0; i < runs.Length; i++)
             {
@@ -667,12 +909,74 @@ internal static class WorldMapGpuScene
         };
     }
 
-    private static void ApplyLayerVisibility(int layerMask)
+    private static void BuildRoomSpatialIndex()
     {
-        foreach (ChunkRenderer chunk in chunks.Values)
+        List<RoomHit> hits = new(roomQuads.Count);
+        foreach (RoomQuad room in roomQuads.Values)
         {
+            hits.Add(new RoomHit
+            {
+                RoomIndex = room.RoomIndex,
+                Layer = room.Layer,
+                Order = room.Order,
+                Min = new Num.Vector2(room.X, room.Y),
+                Max = new Num.Vector2(room.X + room.Width, room.Y + room.Height)
+            });
+        }
+        hits.Sort((a, b) => a.Order.CompareTo(b.Order));
+
+        Dictionary<long, List<int>> cells = new();
+        for (int i = 0; i < hits.Count; i++)
+        {
+            RoomHit hit = hits[i];
+            int minX = FloorToInt(hit.Min.X / RoomGridSize);
+            int maxX = FloorToInt(hit.Max.X / RoomGridSize);
+            int minY = FloorToInt(hit.Min.Y / RoomGridSize);
+            int maxY = FloorToInt(hit.Max.Y / RoomGridSize);
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    long key = CellKey(x, y);
+                    if (!cells.TryGetValue(key, out List<int> list))
+                    {
+                        list = new List<int>();
+                        cells.Add(key, list);
+                    }
+                    list.Add(i);
+                }
+            }
+        }
+
+        Dictionary<long, int[]> frozen = new(cells.Count);
+        foreach (KeyValuePair<long, List<int>> pair in cells) frozen[pair.Key] = pair.Value.ToArray();
+        roomIndex = new RoomSpatialIndex(hits.ToArray(), frozen);
+    }
+
+    private static void ApplyRoomVisibility(FrameState frame)
+    {
+        float zoom = Math.Max(0.0001f, frame.Zoom);
+        Num.Vector2 mapMin = -frame.Pan / zoom;
+        Num.Vector2 mapMax = mapMin + frame.CanvasSize / zoom;
+        float margin = 72f / zoom;
+        Num.Vector2 pad = new(margin, margin);
+        int[] visibleRooms = QueryVisibleRooms(mapMin - pad, mapMax + pad, frame.LayerMask);
+        visibleRoomCount = visibleRooms.Length;
+
+        HashSet<ChunkKey> visibleChunks = new();
+        for (int i = 0; i < visibleRooms.Length; i++)
+        {
+            int roomId = visibleRooms[i];
+            if (roomBaseKeys.TryGetValue(roomId, out ChunkKey baseKey)) visibleChunks.Add(baseKey);
+            if (roomOverlayKeys.TryGetValue(roomId, out ChunkKey overlayKey)) visibleChunks.Add(overlayKey);
+        }
+
+        foreach (KeyValuePair<ChunkKey, ChunkRenderer> pair in chunks)
+        {
+            ChunkRenderer chunk = pair.Value;
             if (chunk?.Renderer == null) continue;
-            chunk.Renderer.enabled = (layerMask & (1 << chunk.Key.Layer)) != 0;
+            bool layer = (frame.LayerMask & (1 << pair.Key.Layer)) != 0;
+            chunk.Renderer.enabled = layer && visibleChunks.Contains(pair.Key);
         }
     }
 
@@ -680,6 +984,7 @@ internal static class WorldMapGpuScene
     {
         if (!frame.ShowConnections)
         {
+            DestroyChunk(ref crossingRenderer);
             DestroyChunk(ref connectionRenderer);
             routeIndex = RouteSpatialIndex.Empty;
             return;
@@ -761,7 +1066,9 @@ internal static class WorldMapGpuScene
 
         WorldConnectionRouter.Route[] routed = WorldConnectionRouter.BuildRoutes(requests, obstacles);
         for (int i = 0; i < entries.Count && i < routed.Length; i++) entries[i].Route = routed[i];
+        BuildCrossings(entries);
         BuildConnectionMesh(entries);
+        BuildCrossingMesh(entries);
         routeIndex = BuildRouteIndex(entries);
     }
 
@@ -798,6 +1105,43 @@ internal static class WorldMapGpuScene
             float center = (group.Count - 1) * 0.5f;
             for (int i = 0; i < group.Count; i++)
                 group[i].LaneOffset = Clamp((i - center) * LaneSpacing, -MaxLaneOffset, MaxLaneOffset);
+        }
+    }
+
+    private static void BuildCrossings(List<RouteEntry> entries)
+    {
+        for (int i = 0; i < entries.Count; i++) entries[i].Crossings.Clear();
+        for (int i = 0; i < entries.Count; i++)
+        {
+            Num.Vector2[] a = entries[i].Route?.Points;
+            if (a == null || a.Length < 2) continue;
+            for (int j = i + 1; j < entries.Count; j++)
+            {
+                Num.Vector2[] b = entries[j].Route?.Points;
+                if (b == null || b.Length < 2) continue;
+                FindCrossings(a, b, entries[j]);
+            }
+        }
+    }
+
+    private static void FindCrossings(Num.Vector2[] a, Num.Vector2[] b, RouteEntry bridgeEntry)
+    {
+        Color32 color = ConnectionColor(bridgeEntry.Connection);
+        for (int i = 0; i < a.Length - 1; i++)
+        {
+            Num.Vector2 ad = a[i + 1] - a[i];
+            if (ad.LengthSquared() < 1f) continue;
+            for (int j = 0; j < b.Length - 1; j++)
+            {
+                Num.Vector2 bd = b[j + 1] - b[j];
+                if (bd.LengthSquared() < 1f) continue;
+                if (!TrySegmentIntersection(a[i], a[i + 1], b[j], b[j + 1], out Num.Vector2 point)) continue;
+                if (NearAnyEndpoint(point, a) || NearAnyEndpoint(point, b)) continue;
+                Num.Vector2 na = SafeNormalize(ad);
+                Num.Vector2 nb = SafeNormalize(bd);
+                if (Math.Abs(Cross(na, nb)) < 0.35f) continue;
+                bridgeEntry.Crossings.Add(new Crossing(point, nb, color));
+            }
         }
     }
 
@@ -849,6 +1193,80 @@ internal static class WorldMapGpuScene
         mesh.RecalculateBounds();
     }
 
+    private static void BuildCrossingMesh(List<RouteEntry> entries)
+    {
+        int crossingCount = 0;
+        for (int i = 0; i < entries.Count; i++) crossingCount += entries[i].Crossings.Count;
+        if (crossingCount == 0)
+        {
+            DestroyChunk(ref crossingRenderer);
+            return;
+        }
+
+        if (crossingRenderer == null)
+        {
+            ChunkKey key = new(0, 0, 0, 0, true);
+            crossingRenderer = CreateChunk(key, lineMaterial);
+            crossingRenderer.Object.name = "DryCycle.WorldMapCrossingBridges";
+            crossingRenderer.Renderer.sortingOrder = 120;
+        }
+
+        List<Vector3> vertices = new();
+        List<Color32> colors = new();
+        List<int> indices = new();
+        Color32 mask = new(5, 5, 6, 255);
+        Color32 shadow = new(4, 5, 7, 245);
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            List<Crossing> crossings = entries[i].Crossings;
+            for (int c = 0; c < crossings.Count; c++)
+            {
+                Crossing crossing = crossings[c];
+                Num.Vector2 tangent = SafeNormalize(crossing.Tangent);
+                if (tangent.LengthSquared() < 0.5f) continue;
+                Num.Vector2 normal = new(-tangent.Y, tangent.X);
+                Num.Vector2 a = crossing.Point - tangent * CrossingRadius;
+                Num.Vector2 b = crossing.Point - tangent * 2.4f + normal * CrossingRise;
+                Num.Vector2 cc = crossing.Point + tangent * 2.4f + normal * CrossingRise;
+                Num.Vector2 d = crossing.Point + tangent * CrossingRadius;
+
+                AddThickSegment(vertices, colors, indices,
+                    crossing.Point - tangent * (CrossingRadius + 2f),
+                    crossing.Point + tangent * (CrossingRadius + 2f), mask, 8.2f, 2f);
+
+                Num.Vector2[] arc = BuildBridgeArc(a, b, cc, d);
+                AddThickPolyline(vertices, colors, indices, arc, shadow, 5.4f, 2.1f);
+                AddThickPolyline(vertices, colors, indices, arc, crossing.Color, 2.1f, 2.2f);
+            }
+        }
+
+        Mesh mesh = crossingRenderer.Mesh;
+        mesh.Clear();
+        mesh.vertices = vertices.ToArray();
+        mesh.colors32 = colors.ToArray();
+        mesh.SetIndices(indices.ToArray(), MeshTopology.Triangles, 0);
+        mesh.RecalculateBounds();
+    }
+
+    private static Num.Vector2[] BuildBridgeArc(Num.Vector2 a, Num.Vector2 b, Num.Vector2 c, Num.Vector2 d)
+    {
+        Num.Vector2 midpoint = (b + c) * 0.5f;
+        Num.Vector2[] result = new Num.Vector2[9];
+        result[0] = a;
+        for (int i = 1; i <= 4; i++)
+        {
+            float t = i / 4f;
+            result[i] = Quadratic(a, b, midpoint, t);
+        }
+        for (int i = 1; i <= 4; i++)
+        {
+            float t = i / 4f;
+            result[4 + i] = Quadratic(midpoint, c, d, t);
+        }
+        return result;
+    }
+
     private static RouteSpatialIndex BuildRouteIndex(List<RouteEntry> entries)
     {
         List<RouteHit> hits = new();
@@ -897,6 +1315,127 @@ internal static class WorldMapGpuScene
         return new RouteSpatialIndex(hits.ToArray(), frozen);
     }
 
+    private static void UpdateDynamicOverlay(FrameState frame, int topologyHash)
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 397 ^ frame.LayoutHash;
+            hash = hash * 397 ^ topologyHash;
+            hash = hash * 397 ^ frame.SelectedRoomIndex;
+            hash = hash * 397 ^ frame.HoveredRoomIndex;
+            hash = hash * 397 ^ StringComparer.Ordinal.GetHashCode(frame.SelectedConnectionId ?? string.Empty);
+            hash = hash * 397 ^ StringComparer.Ordinal.GetHashCode(frame.HoveredConnectionId ?? string.Empty);
+            hash = hash * 397 ^ (int)Math.Round(frame.Zoom * 64f);
+            if (hash == lastDynamicOverlayHash) return;
+            lastDynamicOverlayHash = hash;
+        }
+
+        bool any = frame.SelectedRoomIndex >= 0 || frame.HoveredRoomIndex >= 0 ||
+                   !string.IsNullOrEmpty(frame.SelectedConnectionId) ||
+                   !string.IsNullOrEmpty(frame.HoveredConnectionId);
+        if (!any)
+        {
+            DestroyChunk(ref dynamicOverlayRenderer);
+            return;
+        }
+
+        if (dynamicOverlayRenderer == null)
+        {
+            ChunkKey key = new(0, 0, 0, 0, true);
+            dynamicOverlayRenderer = CreateChunk(key, lineMaterial);
+            dynamicOverlayRenderer.Object.name = "DryCycle.WorldMapDynamicOverlay";
+            dynamicOverlayRenderer.Renderer.sortingOrder = 220;
+        }
+
+        List<Vector3> vertices = new();
+        List<Color32> colors = new();
+        List<int> indices = new();
+        float pixel = 1f / Math.Max(0.20f, frame.Zoom);
+
+        if (frame.HoveredRoomIndex >= 0 && frame.HoveredRoomIndex != frame.SelectedRoomIndex)
+            AddRoomFocus(vertices, colors, indices, frame.HoveredRoomIndex,
+                new Color32(72, 224, 255, 235), pixel, 1f);
+        if (frame.SelectedRoomIndex >= 0)
+            AddRoomFocus(vertices, colors, indices, frame.SelectedRoomIndex,
+                new Color32(92, 184, 255, 255), pixel, 2f);
+
+        string focusConnection = !string.IsNullOrEmpty(frame.HoveredConnectionId)
+            ? frame.HoveredConnectionId
+            : frame.SelectedConnectionId;
+        if (!string.IsNullOrEmpty(focusConnection) && TryFindRoute(focusConnection, out RouteHit route))
+        {
+            Color32 color = string.Equals(focusConnection, frame.SelectedConnectionId, StringComparison.Ordinal)
+                ? new Color32(92, 184, 255, 255)
+                : new Color32(72, 224, 255, 245);
+            Num.Vector2[] points = route.Points ?? Array.Empty<Num.Vector2>();
+            AddPolyline(vertices, colors, indices, points, color, false);
+            AddPolyline(vertices, colors, indices, OffsetPath(points, 1.25f * pixel), color, false);
+            AddPolyline(vertices, colors, indices, OffsetPath(points, -1.25f * pixel), color, false);
+        }
+
+        Mesh mesh = dynamicOverlayRenderer.Mesh;
+        mesh.Clear();
+        mesh.vertices = vertices.ToArray();
+        mesh.colors32 = colors.ToArray();
+        mesh.SetIndices(indices.ToArray(), MeshTopology.Lines, 0);
+        mesh.RecalculateBounds();
+        dynamicOverlayRenderer.Renderer.enabled = vertices.Count > 0;
+    }
+
+    private static void AddRoomFocus(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> indices,
+        int roomId,
+        Color32 color,
+        float pixel,
+        float strength)
+    {
+        if (!roomQuads.TryGetValue(roomId, out RoomQuad room)) return;
+        Num.Vector2 min = new(room.X, room.Y);
+        Num.Vector2 max = new(room.X + room.Width, room.Y + room.Height);
+        AddRectOutline(vertices, colors, indices, min, max, color);
+        float spread = pixel * Math.Max(0.75f, strength);
+        AddRectOutline(vertices, colors, indices, min - new Num.Vector2(spread, spread),
+            max + new Num.Vector2(spread, spread), color);
+        if (strength > 1.5f)
+            AddRectOutline(vertices, colors, indices,
+                min - new Num.Vector2(spread * 2f, spread * 2f),
+                max + new Num.Vector2(spread * 2f, spread * 2f), color);
+    }
+
+    private static bool TryFindRoute(string connectionId, out RouteHit hit)
+    {
+        RouteHit[] routes = routeIndex.Routes;
+        for (int i = 0; i < routes.Length; i++)
+        {
+            if (!string.Equals(routes[i].Connection?.ConnectionId, connectionId, StringComparison.Ordinal)) continue;
+            hit = routes[i];
+            return true;
+        }
+        hit = null;
+        return false;
+    }
+
+    private static void AddRectOutline(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> indices,
+        Num.Vector2 min,
+        Num.Vector2 max,
+        Color32 color)
+    {
+        Num.Vector2 a = min;
+        Num.Vector2 b = new(max.X, min.Y);
+        Num.Vector2 c = max;
+        Num.Vector2 d = new(min.X, max.Y);
+        AddLine(vertices, colors, indices, a, b, color);
+        AddLine(vertices, colors, indices, b, c, color);
+        AddLine(vertices, colors, indices, c, d, color);
+        AddLine(vertices, colors, indices, d, a, color);
+    }
+
     private static void AddPolyline(
         List<Vector3> vertices,
         List<Color32> colors,
@@ -905,6 +1444,7 @@ internal static class WorldMapGpuScene
         Color32 color,
         bool dashed)
     {
+        if (points == null) return;
         for (int i = 1; i < points.Length; i++)
         {
             Num.Vector2 a = points[i - 1];
@@ -960,6 +1500,45 @@ internal static class WorldMapGpuScene
         colors.Add(color);
         indices.Add(start);
         indices.Add(start + 1);
+    }
+
+    private static void AddThickPolyline(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> indices,
+        Num.Vector2[] points,
+        Color32 color,
+        float width,
+        float z)
+    {
+        if (points == null) return;
+        for (int i = 1; i < points.Length; i++)
+            AddThickSegment(vertices, colors, indices, points[i - 1], points[i], color, width, z);
+    }
+
+    private static void AddThickSegment(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> indices,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        Color32 color,
+        float width,
+        float z)
+    {
+        Num.Vector2 delta = b - a;
+        float length = delta.Length();
+        if (length < 0.001f) return;
+        Num.Vector2 normal = new(-delta.Y / length, delta.X / length);
+        Num.Vector2 half = normal * (width * 0.5f);
+        int start = vertices.Count;
+        vertices.Add(new Vector3(a.X + half.X, -(a.Y + half.Y), z));
+        vertices.Add(new Vector3(b.X + half.X, -(b.Y + half.Y), z));
+        vertices.Add(new Vector3(b.X - half.X, -(b.Y - half.Y), z));
+        vertices.Add(new Vector3(a.X - half.X, -(a.Y - half.Y), z));
+        colors.Add(color); colors.Add(color); colors.Add(color); colors.Add(color);
+        indices.Add(start); indices.Add(start + 1); indices.Add(start + 2);
+        indices.Add(start); indices.Add(start + 2); indices.Add(start + 3);
     }
 
     private static Num.Vector2[] OffsetPath(Num.Vector2[] points, float amount)
@@ -1029,20 +1608,20 @@ internal static class WorldMapGpuScene
     }
 
     private static Num.Vector2 EndpointPosition(
-        int roomIndex,
+        int roomIndexValue,
         int nodeIndex,
         Num.Vector2 roomMin,
         float roomWidth,
         float roomHeight)
     {
-        if (WorldMapGpuCache.TryGetExit(roomIndex, nodeIndex, out WorldMapShortcutPresentation.ShortcutMarker marker))
+        if (WorldMapGpuCache.TryGetExit(roomIndexValue, nodeIndex, out WorldMapShortcutPresentation.ShortcutMarker marker))
         {
             return roomMin + new Num.Vector2(
                 marker.X * TileDisplaySize,
                 roomHeight - marker.Y * TileDisplaySize);
         }
 
-        if (WorldMapGpuCache.TryGetRoom(roomIndex, out WorldMapGpuCache.RoomBake bake))
+        if (WorldMapGpuCache.TryGetRoom(roomIndexValue, out WorldMapGpuCache.RoomBake bake))
         {
             EditorMapNodeVisualSnapshot[] nodes = bake.Visual?.Nodes ?? Array.Empty<EditorMapNodeVisualSnapshot>();
             for (int i = 0; i < nodes.Length; i++)
@@ -1066,9 +1645,15 @@ internal static class WorldMapGpuScene
         return new Num.Vector2(center.X, direction.Y < 0f ? min.Y : max.Y);
     }
 
-    private static void RoomSize(int roomIndex, out float width, out float height)
+    private static void RoomSize(int roomIndexValue, out float width, out float height)
     {
-        if (WorldMapGpuCache.TryGetRoom(roomIndex, out WorldMapGpuCache.RoomBake bake) &&
+        if (roomQuads.TryGetValue(roomIndexValue, out RoomQuad quad))
+        {
+            width = quad.Width;
+            height = quad.Height;
+            return;
+        }
+        if (WorldMapGpuCache.TryGetRoom(roomIndexValue, out WorldMapGpuCache.RoomBake bake) &&
             bake.Visual?.Available == true)
         {
             width = Math.Max(1f, bake.Visual.WidthTiles) * TileDisplaySize;
@@ -1087,14 +1672,14 @@ internal static class WorldMapGpuScene
         return result;
     }
 
-    private static bool TryFindRoomPanel(MapPage page, int roomIndex, out RoomPanel panel)
+    private static bool TryFindRoomPanel(MapPage page, int roomIndexValue, out RoomPanel panel)
     {
         panel = null;
         if (page?.subNodes == null) return false;
         for (int i = 0; i < page.subNodes.Count; i++)
         {
             if (page.subNodes[i] is not RoomPanel candidate || candidate.roomRep?.room == null ||
-                candidate.roomRep.room.index != roomIndex)
+                candidate.roomRep.room.index != roomIndexValue)
                 continue;
             panel = candidate;
             return true;
@@ -1124,6 +1709,8 @@ internal static class WorldMapGpuScene
 
     private static void ClearRegionScene()
     {
+        DestroyChunk(ref dynamicOverlayRenderer);
+        DestroyChunk(ref crossingRenderer);
         DestroyChunk(ref connectionRenderer);
         foreach (ChunkRenderer chunk in chunks.Values)
         {
@@ -1131,12 +1718,19 @@ internal static class WorldMapGpuScene
             DestroyChunk(ref local);
         }
         chunks.Clear();
+        roomQuads.Clear();
+        roomBaseKeys.Clear();
+        roomOverlayKeys.Clear();
+        chunkMembers.Clear();
         routeIndex = RouteSpatialIndex.Empty;
+        roomIndex = RoomSpatialIndex.Empty;
+        visibleRoomCount = 0;
         WorldConnectionRouter.Clear();
         lastLayoutHash = int.MinValue;
         lastRoomSourceHash = int.MinValue;
         lastTopologyHash = int.MinValue;
         lastLayerMask = -1;
+        lastDynamicOverlayHash = int.MinValue;
         lastShowConnections = false;
     }
 
@@ -1148,9 +1742,52 @@ internal static class WorldMapGpuScene
         chunk = null;
     }
 
+    private static bool TrySegmentIntersection(
+        Num.Vector2 a0,
+        Num.Vector2 a1,
+        Num.Vector2 b0,
+        Num.Vector2 b1,
+        out Num.Vector2 point)
+    {
+        point = default;
+        Num.Vector2 r = a1 - a0;
+        Num.Vector2 s = b1 - b0;
+        float denominator = Cross(r, s);
+        if (Math.Abs(denominator) < 0.0001f) return false;
+        Num.Vector2 delta = b0 - a0;
+        float t = Cross(delta, s) / denominator;
+        float u = Cross(delta, r) / denominator;
+        if (t <= 0.02f || t >= 0.98f || u <= 0.02f || u >= 0.98f) return false;
+        point = a0 + r * t;
+        return true;
+    }
+
+    private static bool NearAnyEndpoint(Num.Vector2 point, Num.Vector2[] path)
+    {
+        if (path == null || path.Length == 0) return false;
+        const float radiusSq = 144f;
+        return Num.Vector2.DistanceSquared(point, path[0]) < radiusSq ||
+               Num.Vector2.DistanceSquared(point, path[path.Length - 1]) < radiusSq;
+    }
+
+    private static Num.Vector2 SafeNormalize(Num.Vector2 value)
+    {
+        float length = value.Length();
+        return length < 0.0001f ? Num.Vector2.Zero : value / length;
+    }
+
+    private static float Cross(Num.Vector2 a, Num.Vector2 b) => a.X * b.Y - a.Y * b.X;
+
+    private static Num.Vector2 Quadratic(Num.Vector2 a, Num.Vector2 b, Num.Vector2 c, float t)
+    {
+        float u = 1f - t;
+        return a * (u * u) + b * (2f * u * t) + c * (t * t);
+    }
+
     private static long CellKey(int x, int y) => ((long)(uint)x << 32) | (uint)y;
     private static int FloorToInt(float value) => (int)Math.Floor(value);
     private static float Clamp(float value, float min, float max) => Math.Max(min, Math.Min(max, value));
+    private static bool NearlyEqual(float a, float b) => Math.Abs(a - b) <= 0.0001f;
 
     private static float DistanceSqToSegment(Num.Vector2 point, Num.Vector2 a, Num.Vector2 b)
     {
