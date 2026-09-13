@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
@@ -8,13 +9,12 @@ using DryCycle.DevUI.DevTool.Map;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Lightweight source-revision guard for the retained GPU World Map.
+/// Lightweight CPU-side guards for the retained GPU World Map.
 ///
-/// Dirty chunk ownership now lives directly inside WorldMapGpuScene. This compatibility plugin keeps
-/// only the useful source-hash optimization from the earlier second-stage optimizer: source validity
-/// is driven by WorldMapGpuCache.Generation instead of repeatedly searching MapPage.subNodes for
-/// every room on every frame. Keeping a single owner for room meshes avoids double retained scenes,
-/// double hooks and conflicting visibility state.
+/// Dirty chunk ownership lives directly inside WorldMapGpuScene. This compatibility layer keeps two
+/// cheap lookup optimizations around that scene: source validity follows WorldMapGpuCache.Generation,
+/// and RoomPanel lookup is indexed once per MapPage instead of scanning MapPage.subNodes for every
+/// room on every drag frame. There is deliberately no second retained renderer here.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -36,10 +36,23 @@ internal static class WorldMapGpuRetainedOptimizer
         MapPage page,
         WorldMapGpuScene.FrameState frame);
 
+    private delegate bool OrigTryFindRoomPanel(MapPage page, int roomIndex, out RoomPanel panel);
+    private delegate bool HookTryFindRoomPanel(
+        OrigTryFindRoomPanel orig,
+        MapPage page,
+        int roomIndex,
+        out RoomPanel panel);
+
     private static readonly HookComputeRoomSourceHash SourceHashHookDelegate = ComputeRoomSourceHashHook;
+    private static readonly HookTryFindRoomPanel RoomPanelHookDelegate = TryFindRoomPanelHook;
+
+    private static readonly Dictionary<int, RoomPanel> panelIndex = new();
 
     private static ManualLogSource log;
     private static IDisposable sourceHashHook;
+    private static IDisposable roomPanelHook;
+    private static MapPage indexedPage;
+    private static int indexedSubNodeCount = -1;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -50,14 +63,21 @@ internal static class WorldMapGpuRetainedOptimizer
         try
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo sourceHash = typeof(WorldMapGpuScene).GetMethod(
+            Type sceneType = typeof(WorldMapGpuScene);
+            MethodInfo sourceHash = sceneType.GetMethod(
                 "ComputeRoomSourceHash",
                 flags,
                 null,
                 new[] { typeof(MapPage), typeof(WorldMapGpuScene.FrameState) },
                 null);
-            if (sourceHash == null)
-                throw new MissingMemberException("World Map source revision target was not found.");
+            MethodInfo findRoomPanel = sceneType.GetMethod(
+                "TryFindRoomPanel",
+                flags,
+                null,
+                new[] { typeof(MapPage), typeof(int), typeof(RoomPanel).MakeByRefType() },
+                null);
+            if (sourceHash == null || findRoomPanel == null)
+                throw new MissingMemberException("World Map retained CPU lookup targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             if (hookType == null)
@@ -67,21 +87,25 @@ internal static class WorldMapGpuRetainedOptimizer
                 throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
 
             sourceHashHook = constructor.Invoke(new object[] { sourceHash, SourceHashHookDelegate }) as IDisposable;
+            roomPanelHook = constructor.Invoke(new object[] { findRoomPanel, RoomPanelHookDelegate }) as IDisposable;
             enabled = true;
-            log?.LogInfo("GPU World Map source revision cache enabled.");
+            log?.LogInfo("GPU World Map retained CPU lookup cache enabled.");
         }
         catch (Exception error)
         {
+            string message = Unwrap(error).Message;
             Disable();
-            log?.LogWarning("GPU World Map source revision cache could not attach: " + Unwrap(error).Message);
+            logger?.LogWarning("GPU World Map retained CPU lookup cache could not attach: " + message);
         }
     }
 
     internal static void Disable()
     {
-        try { sourceHashHook?.Dispose(); }
-        catch { }
-        sourceHashHook = null;
+        DisposeHook(ref roomPanelHook);
+        DisposeHook(ref sourceHashHook);
+        panelIndex.Clear();
+        indexedPage = null;
+        indexedSubNodeCount = -1;
         enabled = false;
         log = null;
     }
@@ -94,8 +118,8 @@ internal static class WorldMapGpuRetainedOptimizer
         if (!enabled || frame?.Snapshot?.Available != true)
             return orig(page, frame);
 
-        // WorldMapGpuCache already owns source validation. Its generation changes only when cached
-        // room data is invalidated/replaced, so the renderer does not need an O(N²) MapPage search.
+        // WorldMapGpuCache already owns source validation. Its generation changes when cached room
+        // data is invalidated/replaced, so the renderer does not need a per-room MapPage scan here.
         unchecked
         {
             int hash = 17;
@@ -111,6 +135,50 @@ internal static class WorldMapGpuRetainedOptimizer
             }
             return hash;
         }
+    }
+
+    private static bool TryFindRoomPanelHook(
+        OrigTryFindRoomPanel orig,
+        MapPage page,
+        int roomIndex,
+        out RoomPanel panel)
+    {
+        panel = null;
+        if (!enabled || page == null)
+            return orig(page, roomIndex, out panel);
+
+        EnsurePanelIndex(page);
+        if (panelIndex.TryGetValue(roomIndex, out panel) && panel?.roomRep?.room?.index == roomIndex)
+            return true;
+
+        // Defensive slow-path for rare page mutations that replace a node without changing count.
+        if (!orig(page, roomIndex, out panel) || panel == null) return false;
+        panelIndex[roomIndex] = panel;
+        return true;
+    }
+
+    private static void EnsurePanelIndex(MapPage page)
+    {
+        int count = page?.subNodes?.Count ?? 0;
+        if (ReferenceEquals(indexedPage, page) && indexedSubNodeCount == count) return;
+
+        panelIndex.Clear();
+        indexedPage = page;
+        indexedSubNodeCount = count;
+        if (page?.subNodes == null) return;
+
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is RoomPanel panel && panel.roomRep?.room != null)
+                panelIndex[panel.roomRep.room.index] = panel;
+        }
+    }
+
+    private static void DisposeHook(ref IDisposable hook)
+    {
+        try { hook?.Dispose(); }
+        catch { }
+        hook = null;
     }
 
     private static Exception Unwrap(Exception error)
