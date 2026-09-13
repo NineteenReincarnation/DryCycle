@@ -4,6 +4,7 @@ using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -11,11 +12,11 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Keeps the vanilla MapPage alive as an authoring/data source without allowing its Futile visuals
 /// to leak through the rebuilt RWImGui world map.
 ///
-/// The retained renderer still needs RoomPanel/MapTex and the vanilla page must continue updating so
-/// room textures, node positions and map authoring state stay authoritative. Destroying or clearing
-/// those nodes would break that contract. Instead this guard runs in LateUpdate, after vanilla DevUI
-/// has refreshed for the frame, and only suppresses presentation objects. Switching back to Vanilla
-/// presentation restores the objects and asks MapPage to refresh its own visibility rules.
+/// The core compatibility layer already suppresses migrated legacy UI after DevUI.Update. The GPU
+/// map/cache pipeline can, however, refresh RoomPanel/MiniMap later in the same Unity frame and make
+/// those Futile nodes visible again. This guard runs in LateUpdate, after both update paths, and
+/// reapplies presentation-only suppression. MapPage data, positions and update logic stay untouched.
+/// Switching back to Vanilla or explicitly showing legacy UI restores the original presentation.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -27,8 +28,8 @@ public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
 
     private void OnEnable() => WorldMapLegacyVisualGuard.Enable(Logger);
 
-    // LateUpdate is deliberate. MapPage/MiniMap.Refresh can set isVisible=true during the normal
-    // Rain World update; suppressing before that would allow the old map to reappear for rendering.
+    // LateUpdate is deliberate. MapPage/MiniMap.Refresh can set isVisible=true after the core
+    // suppression pass; doing this immediately before rendering closes that same-frame leak.
     private void LateUpdate() => WorldMapLegacyVisualGuard.LateUpdate();
 
     private void OnDisable() => WorldMapLegacyVisualGuard.Disable();
@@ -65,7 +66,10 @@ internal static class WorldMapLegacyVisualGuard
         EditorSession session = DevToolRuntime.ActiveSession;
         bool rebuiltMapOwnsPresentation =
             !EditorUiModeState.UseVanilla &&
-            session?.ToolMode == EditorToolMode.Map &&
+            EditorInputRouter.FrontendAttached &&
+            session != null &&
+            !session.LegacyUiVisible &&
+            session.ToolMode == EditorToolMode.Map &&
             session.Owner?.activePage is MapPage;
 
         if (!rebuiltMapOwnsPresentation)
