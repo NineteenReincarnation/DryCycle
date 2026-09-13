@@ -1,13 +1,14 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using DryCycle.Framework.KarmicManipulation;
 using UnityEngine;
 
 namespace DryCycle.PlayerAbility.SlugCatKarmicArmor;
 
 /// <summary>
 /// Gives story-mode players the Watcher scavenger karmic shield when reinforced
-/// karma is consumed. All runtime state belongs to the realized Player instance,
-/// so split-screen and Jolly co-op players cannot overwrite one another.
+/// karma is consumed. Reinforced karma itself is owned by KarmicManipulationRuntime,
+/// so armor and active karmic abilities cannot double-spend the same protection.
 /// </summary>
 internal static class SlugCatKarmicArmorRuntime
 {
@@ -172,8 +173,7 @@ internal static class SlugCatKarmicArmorRuntime
 
     private static PlayerKarmicArmorState TryAcquireArmor(Player player)
     {
-        RainWorldGame game = player?.abstractCreature?.world?.game;
-        if (!ModManager.Watcher || game == null)
+        if (player == null || !ModManager.Watcher)
         {
             return null;
         }
@@ -193,49 +193,22 @@ internal static class SlugCatKarmicArmorRuntime
             }
         }
 
-        if (player.room == null || game.session is not StoryGameSession storySession)
-        {
-            return null;
-        }
-
-        DeathPersistentSaveData saveData = storySession.saveState.deathPersistentSaveData;
-        if (!saveData.reinforcedKarma)
+        if (!KarmicManipulationRuntime.TryConsumeProtection(
+                player,
+                KarmicManipulationUse.Armor,
+                out KarmicCharge charge))
         {
             return null;
         }
 
         PlayerKarmicArmorState state = existingState ?? _armorStates.GetOrCreateValue(player);
-        state.Reset(Mathf.Clamp(saveData.karma + 1, 1, 10));
-
-        // Reinforced karma is shared by the story save in co-op. The first player
-        // whose shield actually triggers consumes it and owns this shield instance.
-        saveData.reinforcedKarma = false;
-        UpdateKarmaMeters(game);
+        state.Reset(charge.KarmaLevel);
 
         Plugin.Logger?.LogInfo(
-            $"Player {player.playerState?.playerNumber.ToString() ?? "?"} acquired " +
-            $"karmic armor with {state.KarmaLevels} level(s).");
+            $"Player {charge.PlayerNumber} acquired karmic armor with " +
+            $"{state.KarmaLevels} level(s).");
 
         return state;
-    }
-
-    private static void UpdateKarmaMeters(RainWorldGame game)
-    {
-        if (game?.cameras == null)
-        {
-            return;
-        }
-
-        foreach (RoomCamera camera in game.cameras)
-        {
-            if (camera?.hud?.karmaMeter == null)
-            {
-                continue;
-            }
-
-            camera.hud.karmaMeter.blinkRedCounter = 30;
-            camera.hud.karmaMeter.showAsReinforced = false;
-        }
     }
 
     private static void TriggerArmor(PlayerKarmicArmorState state, int resetTime)

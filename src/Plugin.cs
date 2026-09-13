@@ -11,6 +11,7 @@ using DryCycle.Debugging.AI;
 using DryCycle.DevUI.DevTool.World;
 using DryCycle.HUD;
 using DryCycle.Items.DewPod;
+using DryCycle.Items.KarmaSpear;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Items.RopeSpear;
 using DryCycle.Misc;
@@ -43,7 +44,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.120";
+    public const string Version = "0.2.121";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -160,6 +161,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
             SlugCatKarmicArmorRuntime.Disable();
+            KarmaSpearHooks.Disable();
             DevFoodWaterRefillRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
@@ -210,6 +212,7 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearFeedback.Enable();
             ThirstHooks.Enable();
             DevFoodWaterRefillRuntime.Enable();
+            KarmaSpearHooks.Enable();
             SlugCatKarmicArmorRuntime.Enable();
             TemperatureSystemRuntime.Enable();
             DewPodHooks.Enable();
@@ -323,6 +326,7 @@ internal sealed class Plugin : BaseUnityPlugin
             DewPodHooks.Disable();
             TemperatureSystemRuntime.Disable();
             SlugCatKarmicArmorRuntime.Disable();
+            KarmaSpearHooks.Disable();
             DevFoodWaterRefillRuntime.Disable();
             ThirstHooks.Disable();
             KingVultureSpearFeedback.Disable();
