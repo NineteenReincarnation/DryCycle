@@ -116,7 +116,78 @@ internal static class WorldTextRegistry
         destinationRoom = string.Empty;
         destinationNode = -1;
         if (!TryGetConnection(region, roomName, exitIndex, out string token)) return false;
-        return WorldConnectionSyntax.TryParseDestination(token, out destinationRoom, out destinationNode);
+        if (!WorldConnectionSyntax.TryParseDestination(token, out destinationRoom, out destinationNode))
+            return false;
+
+        // Vanilla world.txt stores only the destination room for ordinary links. When the opposite
+        // room contains one and only one reciprocal route back to this source Exit, that reciprocal
+        // slot is the exact target node. Resolve it here so the editor never turns a perfectly
+        // deterministic old-format link into "Room:?" merely because it lacks the extended <n>
+        // prefix. Repeated room-to-room links intentionally remain unresolved for manual mapping.
+        if (destinationNode < 0 &&
+            !string.Equals(destinationRoom, "DISCONNECTED", StringComparison.OrdinalIgnoreCase))
+        {
+            int reciprocal = FindUniqueReciprocalNode(roomName, exitIndex, destinationRoom);
+            if (reciprocal >= 0) destinationNode = reciprocal;
+        }
+
+        return true;
+    }
+
+    private static int FindUniqueReciprocalNode(
+        string sourceRoom,
+        int sourceNode,
+        string destinationRoom)
+    {
+        if (document == null ||
+            string.IsNullOrWhiteSpace(sourceRoom) ||
+            string.IsNullOrWhiteSpace(destinationRoom) ||
+            !document.TryGetRoom(sourceRoom, out WorldRoomRecord source) ||
+            !document.TryGetRoom(destinationRoom, out WorldRoomRecord target))
+            return -1;
+
+        // A plain reciprocal token cannot identify which source Exit it points to if the source
+        // room itself has multiple links to the same destination room. In that case the mapping is
+        // genuinely ambiguous and must stay editable as such in the UI.
+        int sourceMultiplicity = 0;
+        for (int i = 0; i < source.Connections.Count; i++)
+        {
+            if (!WorldConnectionSyntax.TryParseDestination(
+                    source.Connections[i],
+                    out string sourceDestination,
+                    out _))
+                continue;
+            if (string.Equals(sourceDestination, destinationRoom, StringComparison.OrdinalIgnoreCase))
+                sourceMultiplicity++;
+        }
+
+        int match = -1;
+        for (int i = 0; i < target.Connections.Count; i++)
+        {
+            if (!WorldConnectionSyntax.TryParseDestination(
+                    target.Connections[i],
+                    out string backRoom,
+                    out int backTargetNode))
+                continue;
+            if (!string.Equals(backRoom, sourceRoom, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Extended syntax can disambiguate repeated links explicitly. Plain vanilla syntax is
+            // safe only when this source room has a single route to the destination room.
+            if (backTargetNode >= 0)
+            {
+                if (backTargetNode != sourceNode) continue;
+            }
+            else if (sourceMultiplicity != 1)
+            {
+                continue;
+            }
+
+            if (match >= 0) return -1;
+            match = i;
+        }
+
+        return match;
     }
 
     internal static bool TrySetConnection(
