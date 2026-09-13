@@ -9,6 +9,7 @@ namespace DryCycle.DevUI.DevTool.Map;
 internal static partial class MapRoomGeometryPresentationHub
 {
     private const float PersistentSaveDebounceSeconds = 4f;
+    private const int SettingsPathPollIntervalFrames = 300;
 
     private sealed class PersistentEntryState
     {
@@ -18,6 +19,7 @@ internal static partial class MapRoomGeometryPresentationHub
         internal MapViewFileStamp RoomSource;
         internal MapViewFileStamp SettingsSource;
         internal string RasterSignature = string.Empty;
+        internal int NextSettingsPathPollFrame;
     }
 
     private static readonly Dictionary<string, MapViewPersistentRoom> persistentRooms =
@@ -34,6 +36,11 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static bool PersistentContextChanged(global::World world)
     {
+        // Stable Map frames already point at the exact same World object. Avoid rebuilding the
+        // region/map/timeline key (and calling MapNameManipulator) on every DevUI update.
+        if (ReferenceEquals(persistentWorld, world) && !string.IsNullOrEmpty(persistentContextKey))
+            return false;
+
         string next = BuildPersistentContextKey(world);
         return !string.Equals(persistentContextKey, next, StringComparison.Ordinal);
     }
@@ -111,6 +118,9 @@ internal static partial class MapRoomGeometryPresentationHub
         state.RoomSource = roomSource;
         state.SettingsSource = settingsSource;
         state.RasterSignature = stored.RasterSignature ?? string.Empty;
+        state.NextSettingsPathPollFrame = Time.frameCount +
+                                          SettingsPathPollIntervalFrames +
+                                          Math.Abs(entry.RoomIndex % 61);
 
         if (roomValid)
         {
@@ -232,6 +242,16 @@ internal static partial class MapRoomGeometryPresentationHub
         AbstractRoom room)
     {
         if (entry == null || room == null || !entry.CurvesInitialized) return;
+
+        PersistentEntryState state = GetPersistentEntryState(entry.RoomIndex);
+        if (!string.IsNullOrWhiteSpace(entry.SettingsPath) &&
+            Time.frameCount < state.NextSettingsPathPollFrame)
+            return;
+
+        state.NextSettingsPathPollFrame = Time.frameCount +
+                                          SettingsPathPollIntervalFrames +
+                                          Math.Abs(entry.RoomIndex % 61);
+
         string resolved = ResolveRoomSettingsPath(world, room);
         if (string.Equals(entry.SettingsPath ?? string.Empty, resolved ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             return;
@@ -251,6 +271,9 @@ internal static partial class MapRoomGeometryPresentationHub
         if (entry == null) return;
         PersistentEntryState state = GetPersistentEntryState(entry.RoomIndex);
         state.SettingsSource = MapViewFileStamp.Capture(entry.SettingsPath);
+        state.NextSettingsPathPollFrame = Time.frameCount +
+                                          SettingsPathPollIntervalFrames +
+                                          Math.Abs(entry.RoomIndex % 61);
         PersistentMarkDirty();
     }
 
@@ -261,6 +284,7 @@ internal static partial class MapRoomGeometryPresentationHub
             PersistentEntryState state = GetPersistentEntryState(entry.RoomIndex);
             state.RasterRestored = false;
             state.NodesRestored = false;
+            state.NextSettingsPathPollFrame = 0;
         }
         PersistentMarkDirty();
     }
@@ -313,7 +337,9 @@ internal static partial class MapRoomGeometryPresentationHub
                         ? entry.SettingsPath
                         : ResolveRoomSettingsPath(persistentWorld, entry.Room));
 
-            string resolvedSettings = ResolveRoomSettingsPath(persistentWorld, entry.Room);
+            string resolvedSettings = !string.IsNullOrWhiteSpace(entry.SettingsPath)
+                ? entry.SettingsPath
+                : ResolveRoomSettingsPath(persistentWorld, entry.Room);
             bool curvesCurrent = entry.CurvesInitialized &&
                                  string.Equals(
                                      entry.SettingsPath ?? string.Empty,
