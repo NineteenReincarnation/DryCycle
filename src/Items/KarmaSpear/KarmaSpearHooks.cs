@@ -101,8 +101,8 @@ internal static class KarmaSpearHooks
             state.Progress = 0;
         }
 
-        // Hold pickup to channel reinforced karma into the spear. Suppress vanilla grab
-        // processing while charging so the held weapon remains stable in the hand.
+        // Hold pickup to channel reinforced karma into either an ordinary spear or a
+        // spent Karma Spear. Suppress vanilla grab processing while the charge is active.
         self.wantToThrow = 0;
         self.wantToPickUp = 0;
         state.Progress++;
@@ -164,8 +164,28 @@ internal static class KarmaSpearHooks
 
         for (int i = 0; i < player.grasps.Length; i++)
         {
-            if (player.grasps[i]?.grabbed is not Spear candidate ||
-                candidate.GetType() != typeof(Spear) ||
+            if (player.grasps[i]?.grabbed is not Spear candidate)
+            {
+                continue;
+            }
+
+            // A spent Karma Spear can be recharged in place. Active Karma Spears are
+            // intentionally ignored so holding pickup can never waste reinforced karma.
+            if (candidate is KarmaSpear karmaCandidate)
+            {
+                if (karmaCandidate.IsSpent &&
+                    karmaCandidate.abstractPhysicalObject is AbstractKarmaSpear abstractKarma &&
+                    abstractKarma.Spent)
+                {
+                    spear = karmaCandidate;
+                    hand = i;
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (candidate.GetType() != typeof(Spear) ||
                 candidate.abstractPhysicalObject is not AbstractSpear abstractSpear)
             {
                 continue;
@@ -206,6 +226,31 @@ internal static class KarmaSpearHooks
             !KarmicManipulationRuntime.HasProtection(player))
         {
             return false;
+        }
+
+        // Recharging keeps the same physical spear, entity ID and save object. Validate
+        // the persistent spent state before spending reinforced karma so this path cannot
+        // consume protection on an already-active or malformed Karma Spear.
+        if (source is KarmaSpear spentKarmaSpear)
+        {
+            if (!spentKarmaSpear.IsSpent ||
+                spentKarmaSpear.abstractPhysicalObject is not AbstractKarmaSpear spentAbstract ||
+                !spentAbstract.Spent)
+            {
+                return false;
+            }
+
+            if (!KarmicManipulationRuntime.TryConsumeProtection(
+                    player,
+                    KarmicManipulationUse.KarmaSpear,
+                    out charge))
+            {
+                return false;
+            }
+
+            spentKarmaSpear.Recharge(charge.KarmaLevel);
+            karmaSpear = spentKarmaSpear;
+            return true;
         }
 
         Room room = player.room;
