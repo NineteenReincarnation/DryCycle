@@ -333,16 +333,11 @@ internal static class LegacyUiPresentationController
                 pair.Key.isVisible = pair.Value;
         }
 
-        foreach (KeyValuePair<DevUINode, NodeState> pair in hidden)
-        {
-            if (!pair.Value.HasPosition || pair.Key is not PositionedDevUINode positioned) continue;
-            try { positioned.Refresh(); }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning("DevTool legacy UI restore refresh failed: " + error.Message);
-            }
-        }
-
+        // Do not call Refresh() here. A page switch / room transition can rebuild the legacy
+        // DevUI tree between suppression and restoration. Refreshing an old PositionedDevUINode
+        // then lets its implementation index newly-shaped sub-node/sprite lists and can throw
+        // IndexOutOfRangeException repeatedly. Position/visibility are already restored above;
+        // the currently active vanilla page refreshes itself during its next normal DevUI update.
         hidden.Clear();
         hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
