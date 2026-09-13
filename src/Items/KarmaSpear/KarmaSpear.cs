@@ -39,7 +39,7 @@ internal sealed class KarmaSpear : Spear
     };
 
     private KarmaSpearField _wallField;
-    private bool _bindingStarted;
+    private bool _creatureEffectStarted;
     private int _trailCounter;
     private int _chargeGeneration;
 
@@ -122,12 +122,12 @@ internal sealed class KarmaSpear : Spear
     {
         bool hit = base.HitSomething(result, eu);
 
-        if (!hit || IsSpent || _bindingStarted || result.obj is not Creature creature)
+        if (!hit || IsSpent || _creatureEffectStarted || result.obj is not Creature creature)
         {
             return hit;
         }
 
-        ActivateCreatureBinding(creature, result.chunk?.pos ?? firstChunk.pos);
+        ActivateCreatureResponse(creature, result.chunk?.pos ?? firstChunk.pos);
         return hit;
     }
 
@@ -152,17 +152,20 @@ internal sealed class KarmaSpear : Spear
         }
     }
 
-    private void ActivateCreatureBinding(Creature creature, Vector2 hitPosition)
+    private void ActivateCreatureResponse(Creature creature, Vector2 hitPosition)
     {
-        _bindingStarted = true;
+        _creatureEffectStarted = true;
         StopWallField();
-        KarmicVisualEffects.SpawnImpactPulse(this, hitPosition, KarmaLevel, 82f + KarmaLevel * 3f);
+
+        KarmicTargetProfile profile = KarmicTargetClassifier.Classify(creature);
+        float pulseRadius = profile.ResponseClass == KarmicResponseClass.Colossal
+            ? 118f + KarmaLevel * 4f
+            : 82f + KarmaLevel * 3f;
+
+        KarmicVisualEffects.SpawnImpactPulse(this, hitPosition, KarmaLevel, pulseRadius);
         room?.PlaySound(WatcherEnums.WatcherSoundID.Templar_Shield_Deflect, firstChunk);
 
-        bool small = IsSmallTarget(creature);
-        bool large = IsLargeTarget(creature);
-
-        if (small)
+        if (profile.IsFragile)
         {
             creature.Die();
             MarkSpent();
@@ -170,27 +173,28 @@ internal sealed class KarmaSpear : Spear
         }
 
         bool lodged = mode == Mode.StuckInCreature && ReferenceEquals(stuckInObject, creature);
-        KarmicBindingEffect binding = new(this, creature, creature.mainBodyChunk.pos, large, lodged);
-        room.AddObject(binding);
 
-        if (!lodged)
+        if (profile.UsesBodyBinding)
         {
-            MarkSpent();
+            room?.AddObject(new KarmicBindingEffect(
+                this,
+                creature,
+                hitPosition,
+                profile,
+                lodged));
         }
-    }
+        else
+        {
+            room?.AddObject(new KarmicDisruptionEffect(
+                this,
+                creature,
+                profile,
+                lodged));
+        }
 
-    private static bool IsSmallTarget(Creature creature)
-    {
-        return creature.TotalMass <= 0.34f;
-    }
-
-    private static bool IsLargeTarget(Creature creature)
-    {
-        return creature.TotalMass >= 3.4f ||
-               creature is Vulture ||
-               creature is MirosBird ||
-               creature is DaddyLongLegs ||
-               creature is BigEel;
+        // Do not immediately spend a charge just because armor or impact physics made the
+        // spear bounce. _creatureEffectStarted already prevents a second karmic trigger;
+        // the active response now owns the countdown and consumes this charge when it ends.
     }
 
     private void StartWallField()
@@ -250,7 +254,7 @@ internal sealed class KarmaSpear : Spear
         MarkSpent();
     }
 
-    internal void SetBindingKarmaLevel(int expectedChargeGeneration, int karmaLevel)
+    internal void SetActiveEffectKarmaLevel(int expectedChargeGeneration, int karmaLevel)
     {
         if (expectedChargeGeneration != _chargeGeneration ||
             KarmaAbstract == null ||
@@ -272,7 +276,7 @@ internal sealed class KarmaSpear : Spear
         StopWallField();
         KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
         KarmaAbstract.Spent = false;
-        _bindingStarted = false;
+        _creatureEffectStarted = false;
         _trailCounter = 0;
         _chargeGeneration++;
         return true;
