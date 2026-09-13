@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -11,9 +10,8 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Ordinary world creature-spawner authoring. The editor hooks only the room-connection draw point
-/// in WorldWorkspaceView, so creature authoring is inserted immediately before WORLD LINKS without
-/// detouring every SectionHeader call in the whole DevTool.
+/// Ordinary world creature-spawner authoring. WorldWorkspaceView calls this panel directly, so the
+/// creature authoring path owns no RuntimeDetour hooks and cannot affect unrelated DevTool widgets.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -36,13 +34,6 @@ internal static class WorldCreatureSpawnInspector
         Exclude
     }
 
-    private delegate void OrigDrawRoomConnections(EditorMapPresentationSnapshot snapshot, int roomIndex);
-    private delegate void HookDrawRoomConnections(
-        OrigDrawRoomConnections orig,
-        EditorMapPresentationSnapshot snapshot,
-        int roomIndex);
-
-    private static readonly HookDrawRoomConnections DrawRoomConnectionsHookDelegate = DrawRoomConnectionsHook;
     private static readonly string[] KnownSpawnTags =
     {
         "Night", "PreCycle", "Winter", "Ignorecycle", "AlternateForm", "Lavasafe",
@@ -50,7 +41,6 @@ internal static class WorldCreatureSpawnInspector
     };
 
     private static ManualLogSource log;
-    private static IDisposable roomConnectionsHook;
     private static bool enabled;
 
     private static int stateRoom = -1;
@@ -70,46 +60,13 @@ internal static class WorldCreatureSpawnInspector
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
-            MethodInfo drawRoomConnections = typeof(WorldWorkspaceView).GetMethod(
-                "DrawRoomConnections",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot), typeof(int) },
-                null);
-            if (drawRoomConnections == null)
-                throw new MissingMethodException("WorldWorkspaceView.DrawRoomConnections was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            roomConnectionsHook = constructor.Invoke(
-                new object[] { drawRoomConnections, DrawRoomConnectionsHookDelegate }) as IDisposable;
-            if (roomConnectionsHook == null)
-                throw new InvalidOperationException("Creature-authoring inspector hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("World creature authoring attached at room-connection inspector boundary.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World creature-spawn inspector could not attach: " + Unwrap(error).Message);
-        }
+        log?.LogInfo("World creature-spawn inspector enabled with direct WorldWorkspace integration.");
     }
 
     internal static void Disable()
     {
-        try { roomConnectionsHook?.Dispose(); }
-        catch { }
-        roomConnectionsHook = null;
         enabled = false;
         stateRoom = -1;
         editingSpawnId = -1;
@@ -118,23 +75,9 @@ internal static class WorldCreatureSpawnInspector
         log = null;
     }
 
-    private static void DrawRoomConnectionsHook(
-        OrigDrawRoomConnections orig,
-        EditorMapPresentationSnapshot snapshot,
-        int roomIndex)
+    internal static void DrawIntegrated(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        if (enabled && snapshot?.Available == true)
-        {
-            EditorMapRoomSnapshot room = FindRoom(snapshot, roomIndex);
-            if (room != null)
-                Draw(snapshot, room);
-        }
-
-        orig(snapshot, roomIndex);
-    }
-
-    private static void Draw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
-    {
+        if (!enabled || snapshot?.Available != true || room == null) return;
         if (stateRoom != room.RoomIndex)
             ResetForRoom(room);
 
@@ -146,7 +89,6 @@ internal static class WorldCreatureSpawnInspector
         ImGui.Spacing();
         DrawEditor(snapshot, room);
 
-        // Lineage is integrated directly instead of detouring this Draw method again.
         WorldLineageInspector.DrawIntegrated(snapshot, room);
     }
 
@@ -511,24 +453,9 @@ internal static class WorldCreatureSpawnInspector
         list.Add(value);
     }
 
-    private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
-            if (rooms[i]?.RoomIndex == roomIndex) return rooms[i];
-        return null;
-    }
-
     private static void SetStatus(string message, bool success)
     {
         lastStatus = message ?? string.Empty;
         lastStatusSuccess = success;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
     }
 }
