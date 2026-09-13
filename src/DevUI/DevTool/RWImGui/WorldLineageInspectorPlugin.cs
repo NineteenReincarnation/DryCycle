@@ -167,7 +167,9 @@ internal static class WorldLineageInspector
                 if (WorldLineageRegistry.TryDelete(snapshot.RegionName, lineage.Id, out string error))
                 {
                     if (editingId == lineage.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T("Lineage 已删除并实时重载。", "Lineage deleted and live-reloaded."), true);
+                    SetStatus(DevToolUiSettings.T(
+                        "Lineage 已删除并刷新实时预览。",
+                        "Lineage deleted and live preview refreshed."), true);
                 }
                 else SetStatus(error, false);
             }
@@ -177,15 +179,15 @@ internal static class WorldLineageInspector
 
     private static void DrawEditor(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        List<EditorMapRoomNodeSnapshot> dens = DenNodes(room);
+        List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room, selectedDen);
         if (dens.Count == 0)
         {
             ImGui.TextColored(
                 new Num.Vector4(0.92f, 0.62f, 0.30f, 1f),
-                DevToolUiSettings.T("这个房间没有 Den / 生物管道节点。", "This room has no Den / creature-pipe nodes."));
+                DevToolUiSettings.T("这个房间没有可用的生物管道。", "This room has no available creature pipes."));
             return;
         }
-        if (!ContainsDen(dens, selectedDen)) selectedDen = dens[0].NodeIndex;
+        if (!WorldCreaturePipeCatalog.Contains(dens, selectedDen)) selectedDen = dens[0].NodeIndex;
 
         DevToolWidgets.MutedText(editingId >= 0
             ? DevToolUiSettings.T("编辑 Lineage", "Edit lineage")
@@ -194,14 +196,16 @@ internal static class WorldLineageInspector
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
                 DevToolUiSettings.T("生物管道##LineageDen", "Creature pipe##LineageDen"),
-                DenLabel(dens, selectedDen)))
+                WorldCreaturePipeCatalog.Label(dens, selectedDen)))
         {
             for (int i = 0; i < dens.Count; i++)
             {
-                EditorMapRoomNodeSnapshot node = dens[i];
-                bool selected = selectedDen == node.NodeIndex;
-                if (ImGui.Selectable("#" + node.NodeIndex + " · " + node.Type + "##LineageDen" + node.NodeIndex, selected))
-                    selectedDen = node.NodeIndex;
+                WorldCreaturePipeCatalog.Entry pipe = dens[i];
+                bool selected = selectedDen == pipe.NodeIndex;
+                if (ImGui.Selectable(
+                        WorldCreaturePipeCatalog.Label(pipe) + "##LineageDen" + pipe.NodeIndex,
+                        selected))
+                    selectedDen = pipe.NodeIndex;
                 if (selected) ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
@@ -395,8 +399,8 @@ internal static class WorldLineageInspector
             return;
         }
         SetStatus(DevToolUiSettings.T(
-            "Lineage 已更新并实时重载；保存世界以写入 world.txt。",
-            "Lineage updated and live-reloaded; save the world to write world.txt."), true);
+            "Lineage 已更新并刷新实时预览；保存世界以写入 world.txt。",
+            "Lineage updated and live preview refreshed; save the world to write world.txt."), true);
     }
 
     private static void Load(WorldLineageRecord lineage)
@@ -431,7 +435,7 @@ internal static class WorldLineageInspector
     private static void ResetForm(EditorMapRoomSnapshot room)
     {
         editingId = -1;
-        List<EditorMapRoomNodeSnapshot> dens = DenNodes(room);
+        List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room);
         selectedDen = dens.Count > 0 ? dens[0].NodeIndex : -1;
         nightCreature = false;
         timelineMode = TimelineMode.All;
@@ -453,34 +457,6 @@ internal static class WorldLineageInspector
         for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.entries.Count; i++)
             AddUnique(timelines, ExtEnum<SlugcatStats.Name>.values.entries[i]);
         timelines.Sort(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static List<EditorMapRoomNodeSnapshot> DenNodes(EditorMapRoomSnapshot room)
-    {
-        List<EditorMapRoomNodeSnapshot> result = new();
-        EditorMapRoomNodeSnapshot[] nodes = room?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-        for (int i = 0; i < nodes.Length; i++)
-        {
-            EditorMapRoomNodeSnapshot node = nodes[i];
-            if (node == null || node.Exit) continue;
-            if (string.Equals(node.Type, "Den", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(node.Type, "GarbageHoles", StringComparison.OrdinalIgnoreCase))
-                result.Add(node);
-        }
-        return result;
-    }
-
-    private static bool ContainsDen(List<EditorMapRoomNodeSnapshot> dens, int node)
-    {
-        for (int i = 0; i < dens.Count; i++) if (dens[i].NodeIndex == node) return true;
-        return false;
-    }
-
-    private static string DenLabel(List<EditorMapRoomNodeSnapshot> dens, int node)
-    {
-        for (int i = 0; i < dens.Count; i++)
-            if (dens[i].NodeIndex == node) return "#" + node + " · " + dens[i].Type;
-        return "#" + node;
     }
 
     private static string StageSummary(WorldLineageRecord lineage)
