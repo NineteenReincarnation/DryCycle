@@ -10,24 +10,31 @@ namespace DryCycle.DevUI.DevTool.World;
 ///
 /// Vanilla ShortcutHandler resolves the target entrance with AbstractRoom.ExitIndex(sourceRoom),
 /// which uses Array.IndexOf and therefore cannot distinguish repeated A <-> B room links.
-/// We capture the exact route when the creature enters the source exit, then apply the recorded
-/// target node when the vessel reaches the destination room or is abstractized on the way there.
+/// We capture the exact source endpoint when the creature enters the shortcut, then resolve that
+/// endpoint against the latest live topology before the vessel exits. This is deliberately revision
+/// aware so Save/Undo/Redo can happen while a creature is already inside a shortcut without losing
+/// or applying a stale target Exit.
 /// </summary>
 internal static class WorldTopologyRuntime
 {
     private sealed class PendingRoute
     {
+        internal string SourceRoom = string.Empty;
+        internal int SourceNode = -1;
         internal string TargetRoom = string.Empty;
         internal int TargetNode = -1;
+        internal int Revision;
     }
 
     private static ConditionalWeakTable<AbstractCreature, PendingRoute> pendingRoutes = new();
+    private static int topologyRevision;
     private static bool enabled;
 
     internal static void Enable()
     {
         if (enabled) return;
         enabled = true;
+        topologyRevision = 0;
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
         WorldConnectionSyntax.Enable();
         On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
@@ -46,16 +53,21 @@ internal static class WorldTopologyRuntime
         On.Creature.SuckedIntoShortCut -= Creature_SuckedIntoShortCut;
         WorldConnectionSyntax.Disable();
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+        topologyRevision = 0;
     }
 
     /// <summary>
-    /// Called by the world.txt editor whenever topology changes in the already loaded World.
-    /// Creatures that entered a shortcut before the edit must not carry a stale target Exit into
-    /// the new topology, so discard only those transient route captures; the World itself stays live.
+    /// Called whenever the editable topology changes. Do not clear pending routes here: doing so
+    /// strands or misroutes creatures that are already inside a shortcut. Pending routes remember
+    /// their source endpoint and are re-resolved lazily against this new revision before exit.
     /// </summary>
     internal static void NotifyTopologyChanged()
     {
-        pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
+        unchecked
+        {
+            topologyRevision++;
+            if (topologyRevision == int.MinValue) topologyRevision = 1;
+        }
     }
 
     private static void ShortcutHandler_SuckInCreature(
@@ -83,8 +95,11 @@ internal static class WorldTopologyRuntime
         AbstractCreature self,
         WorldCoordinate coord)
     {
-        if (TryConsumePendingRoute(self, coord.room, out int targetNode))
-            coord.abstractNode = targetNode;
+        if (TryConsumePendingRoute(self, ref coord))
+        {
+            // coord now carries both the current target room and its exact entrance node. This also
+            // repairs an in-flight route if live authoring changed the destination room mid-shortcut.
+        }
 
         orig(self, coord);
     }
@@ -141,47 +156,84 @@ internal static class WorldTopologyRuntime
         pendingRoutes.Remove(abstractCreature);
         pendingRoutes.Add(abstractCreature, new PendingRoute
         {
+            SourceRoom = source.name,
+            SourceNode = shortcut.destNode,
             TargetRoom = destination.Room,
-            TargetNode = destination.NodeIndex
+            TargetNode = destination.NodeIndex,
+            Revision = topologyRevision
         });
     }
 
     private static void ApplyPendingRouteToVessel(ShortcutHandler.Vessel vessel)
     {
         AbstractCreature creature = vessel?.creature?.abstractCreature;
-        AbstractRoom target = vessel?.room;
-        if (creature == null || target == null) return;
-        if (!pendingRoutes.TryGetValue(creature, out PendingRoute pending)) return;
-        if (!string.Equals(pending.TargetRoom, target.name, StringComparison.OrdinalIgnoreCase)) return;
-        if (!IsValidTargetExit(target, pending.TargetNode))
+        if (creature == null || !pendingRoutes.TryGetValue(creature, out PendingRoute pending)) return;
+
+        if (!TryRefreshPendingRoute(creature, pending, out AbstractRoom target))
         {
             pendingRoutes.Remove(creature);
             return;
         }
 
+        // Vanilla may already have selected another duplicate room exit with ExitIndex(), or may
+        // even hold -1 for the reverse side of a one-way link. The exact route is authoritative.
+        vessel.room = target;
         vessel.entranceNode = pending.TargetNode;
         pendingRoutes.Remove(creature);
     }
 
     private static bool TryConsumePendingRoute(
         AbstractCreature creature,
-        int targetRoomIndex,
-        out int targetNode)
+        ref WorldCoordinate coord)
     {
-        targetNode = -1;
-        if (creature?.world == null || targetRoomIndex < 0 ||
-            !pendingRoutes.TryGetValue(creature, out PendingRoute pending))
+        if (creature?.world == null || !pendingRoutes.TryGetValue(creature, out PendingRoute pending))
             return false;
 
-        AbstractRoom target = creature.world.GetAbstractRoom(targetRoomIndex);
-        if (target == null ||
-            !string.Equals(pending.TargetRoom, target.name, StringComparison.OrdinalIgnoreCase) ||
-            !IsValidTargetExit(target, pending.TargetNode))
+        if (!TryRefreshPendingRoute(creature, pending, out AbstractRoom target))
+        {
+            pendingRoutes.Remove(creature);
             return false;
+        }
 
-        targetNode = pending.TargetNode;
+        coord.room = target.index;
+        coord.abstractNode = pending.TargetNode;
         pendingRoutes.Remove(creature);
         return true;
+    }
+
+    private static bool TryRefreshPendingRoute(
+        AbstractCreature creature,
+        PendingRoute pending,
+        out AbstractRoom target)
+    {
+        target = null;
+        global::World world = creature?.world;
+        if (world == null || pending == null ||
+            string.IsNullOrWhiteSpace(pending.SourceRoom) || pending.SourceNode < 0)
+            return false;
+
+        if (pending.Revision != topologyRevision)
+        {
+            if (!TryGetExplicitRoute(
+                    world.name,
+                    pending.SourceRoom,
+                    pending.SourceNode,
+                    out WorldConnectionEndpoint destination,
+                    out bool allowsTravel) ||
+                !allowsTravel)
+                return false;
+
+            AbstractRoom refreshedTarget = world.GetAbstractRoom(destination.Room);
+            if (!IsValidTargetExit(refreshedTarget, destination.NodeIndex))
+                return false;
+
+            pending.TargetRoom = destination.Room;
+            pending.TargetNode = destination.NodeIndex;
+            pending.Revision = topologyRevision;
+        }
+
+        target = world.GetAbstractRoom(pending.TargetRoom);
+        return IsValidTargetExit(target, pending.TargetNode);
     }
 
     private static bool ShouldBlockReverseTravel(Creature creature, IntVector2 entrancePos)
