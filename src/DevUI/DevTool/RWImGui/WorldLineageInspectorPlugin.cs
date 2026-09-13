@@ -60,6 +60,8 @@ internal static class WorldLineageInspector
     private static readonly List<StageState> stages = new();
     private static readonly List<string> timelines = new();
     private static int timelineFingerprint = -1;
+    private static WorldLineageRecord[] presentedEntries = Array.Empty<WorldLineageRecord>();
+    private static string[] presentedLabels = Array.Empty<string>();
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -77,6 +79,8 @@ internal static class WorldLineageInspector
         stateRoom = -1;
         editingId = -1;
         timelineFingerprint = -1;
+        presentedEntries = Array.Empty<WorldLineageRecord>();
+        presentedLabels = Array.Empty<string>();
         log = null;
     }
 
@@ -116,16 +120,12 @@ internal static class WorldLineageInspector
             return;
         }
 
+        EnsurePresentation(existing);
         for (int i = 0; i < existing.Length; i++)
         {
             WorldLineageRecord lineage = existing[i];
             ImGui.PushID(lineage.Id);
-            string label = "#" + lineage.DenNode + "  " + StageSummary(lineage);
-            if (!string.IsNullOrEmpty(lineage.TimelineFilter))
-                label += "  ·  " + (lineage.ExcludeTimeline ? "X-" : string.Empty) + lineage.TimelineFilter;
-            if (lineage.NightCreature) label += "  ·  Night";
-
-            if (ImGui.Selectable(label + "##LineageEntry", editingId == lineage.Id)) Load(lineage);
+            if (ImGui.Selectable(presentedLabels[i], editingId == lineage.Id)) Load(lineage);
             ImGui.SameLine();
             if (DevToolWidgets.ActionButton(
                     DevToolUiSettings.T("删除", "Delete"),
@@ -144,6 +144,22 @@ internal static class WorldLineageInspector
                 else SetStatus(error, false);
             }
             ImGui.PopID();
+        }
+    }
+
+    private static void EnsurePresentation(WorldLineageRecord[] existing)
+    {
+        if (ReferenceEquals(existing, presentedEntries) && presentedLabels.Length == existing.Length) return;
+        presentedEntries = existing;
+        presentedLabels = new string[existing.Length];
+        for (int i = 0; i < existing.Length; i++)
+        {
+            WorldLineageRecord lineage = existing[i];
+            string label = "#" + lineage.DenNode + "  " + StageSummary(lineage);
+            if (!string.IsNullOrEmpty(lineage.TimelineFilter))
+                label += "  ·  " + (lineage.ExcludeTimeline ? "X-" : string.Empty) + lineage.TimelineFilter;
+            if (lineage.NightCreature) label += "  ·  Night";
+            presentedLabels[i] = label + "##LineageEntry";
         }
     }
 
