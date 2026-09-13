@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DryCycle.Framework.KarmicManipulation;
 using UnityEngine;
 using Watcher;
@@ -14,20 +15,21 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
     private readonly KarmaSpear _source;
     private readonly float _radius;
     private readonly StaticSoundLoop _soundLoop;
+    private readonly Dictionary<Weapon, ProjectileTimeState> _projectileStates = new();
+    private readonly HashSet<Weapon> _projectilesInside = new();
+    private readonly List<Weapon> _projectileCleanup = new();
     private int _age;
 
     internal KarmaSpearField(KarmaSpear source)
     {
         _source = source;
 
-        // The previous wall field already used a 3x radius. Increase that deployed
-        // radius by another 50%, for a total multiplier of 4.5x over the original field.
+        // The deployed radius is 4.5x the original Karma Field design.
         _radius = (58f + source.KarmaLevel * 4f) * 4.5f;
 
         // This is a stationary world-space field after the spear has entered StuckInWall.
         // Watcher's own warp-point ambience uses StaticSoundLoop for this exact style of
-        // persistent positional loop. It also recreates its emitter automatically if the
-        // emitter is lost while the field remains alive.
+        // persistent positional loop.
         _soundLoop = new StaticSoundLoop(
             WatcherEnums.WatcherSoundID.Warp_Point_Ripple_Idle_LOOP,
             source.firstChunk.pos,
@@ -73,16 +75,13 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
 
     public override void Destroy()
     {
+        RestoreAllProjectiles();
         StopSound();
         base.Destroy();
     }
 
     private void UpdateSound(Vector2 center)
     {
-        // StaticSoundLoop owns a PositionedSoundEmitter and must be updated continuously.
-        // Keep its position synced anyway so tiny spear/pivot corrections never leave the
-        // ambience behind. A clearly audible floor avoids the old 9-14% volume range being
-        // effectively lost after positional attenuation.
         float breath = 0.5f + 0.5f * Mathf.Sin(_age * 0.025f);
         _soundLoop.pos = center;
         _soundLoop.volume = Mathf.Lerp(0.28f, 0.42f, breath);
@@ -97,9 +96,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
             return;
         }
 
-        // StaticSoundLoop stops and releases its maintained emitter when volume reaches zero.
-        // Calling Update here makes pull-out/destruction stop on the same frame instead of
-        // leaving a requireActiveUpkeep emitter alive until its own timeout.
         _soundLoop.volume = 0f;
         _soundLoop.Update();
     }
@@ -108,8 +104,11 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
     {
         if (room?.physicalObjects == null)
         {
+            RestoreAllProjectiles();
             return;
         }
+
+        _projectilesInside.Clear();
 
         for (int layer = 0; layer < room.physicalObjects.Length; layer++)
         {
@@ -132,11 +131,7 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
 
                 if (obj is Weapon weapon && weapon.mode == Weapon.Mode.Thrown)
                 {
-                    float factor = Mathf.Lerp(1f, 0.84f, influence);
-                    for (int c = 0; c < weapon.bodyChunks.Length; c++)
-                    {
-                        weapon.bodyChunks[c].vel *= factor;
-                    }
+                    ApplyProjectileBulletTime(weapon, influence);
                     continue;
                 }
 
@@ -150,6 +145,75 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
                 }
             }
         }
+
+        RestoreProjectilesThatLeftField();
+    }
+
+    private void ApplyProjectileBulletTime(Weapon weapon, float influence)
+    {
+        _projectilesInside.Add(weapon);
+
+        if (!_projectileStates.TryGetValue(weapon, out ProjectileTimeState state))
+        {
+            state = new ProjectileTimeState(weapon);
+            _projectileStates.Add(weapon, state);
+        }
+
+        // This is temporal slowdown, not drag. Velocity direction is frozen to the entry
+        // trajectory and speed is derived from the stored entry speed every frame, so the
+        // field never bends a projectile and never compounds it toward zero. Deeper inside
+        // the field time runs slower; leaving restores the stored speed along the same path.
+        float shapedInfluence = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(influence));
+        float timeScale = Mathf.Lerp(0.72f, 0.18f, shapedInfluence);
+        state.Apply(weapon, timeScale);
+    }
+
+    private void RestoreProjectilesThatLeftField()
+    {
+        _projectileCleanup.Clear();
+
+        foreach (KeyValuePair<Weapon, ProjectileTimeState> pair in _projectileStates)
+        {
+            Weapon weapon = pair.Key;
+            if (weapon == null || weapon.slatedForDeletetion || weapon.mode != Weapon.Mode.Thrown)
+            {
+                _projectileCleanup.Add(weapon);
+                continue;
+            }
+
+            if (_projectilesInside.Contains(weapon))
+            {
+                continue;
+            }
+
+            pair.Value.Restore(weapon);
+            _projectileCleanup.Add(weapon);
+        }
+
+        for (int i = 0; i < _projectileCleanup.Count; i++)
+        {
+            Weapon weapon = _projectileCleanup[i];
+            if (weapon != null)
+            {
+                _projectileStates.Remove(weapon);
+            }
+        }
+    }
+
+    private void RestoreAllProjectiles()
+    {
+        foreach (KeyValuePair<Weapon, ProjectileTimeState> pair in _projectileStates)
+        {
+            Weapon weapon = pair.Key;
+            if (weapon != null && !weapon.slatedForDeletetion && weapon.mode == Weapon.Mode.Thrown)
+            {
+                pair.Value.Restore(weapon);
+            }
+        }
+
+        _projectileStates.Clear();
+        _projectilesInside.Clear();
+        _projectileCleanup.Clear();
     }
 
     private void TryHelpDangerGrasps(Vector2 center)
@@ -176,6 +240,44 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
                 player.mainBodyChunk.pos,
                 _source.KarmaLevel,
                 52f);
+        }
+    }
+
+    private sealed class ProjectileTimeState
+    {
+        private readonly Vector2[] _entryDirections;
+        private readonly float[] _entrySpeeds;
+
+        internal ProjectileTimeState(Weapon weapon)
+        {
+            _entryDirections = new Vector2[weapon.bodyChunks.Length];
+            _entrySpeeds = new float[weapon.bodyChunks.Length];
+
+            for (int i = 0; i < weapon.bodyChunks.Length; i++)
+            {
+                Vector2 velocity = weapon.bodyChunks[i].vel;
+                float speed = velocity.magnitude;
+                _entrySpeeds[i] = speed;
+                _entryDirections[i] = speed > 0.001f ? velocity / speed : Vector2.zero;
+            }
+        }
+
+        internal void Apply(Weapon weapon, float timeScale)
+        {
+            int count = Mathf.Min(weapon.bodyChunks.Length, _entrySpeeds.Length);
+            for (int i = 0; i < count; i++)
+            {
+                weapon.bodyChunks[i].vel = _entryDirections[i] * (_entrySpeeds[i] * timeScale);
+            }
+        }
+
+        internal void Restore(Weapon weapon)
+        {
+            int count = Mathf.Min(weapon.bodyChunks.Length, _entrySpeeds.Length);
+            for (int i = 0; i < count; i++)
+            {
+                weapon.bodyChunks[i].vel = _entryDirections[i] * _entrySpeeds[i];
+            }
         }
     }
 }
