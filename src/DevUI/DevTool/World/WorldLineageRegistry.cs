@@ -66,6 +66,8 @@ internal sealed class WorldLineageRecord
 internal static class WorldLineageRegistry
 {
     private static readonly List<WorldLineageRecord> records = new();
+    private static readonly Dictionary<string, WorldLineageRecord[]> roomSnapshots =
+        new(StringComparer.OrdinalIgnoreCase);
     private static string loadedRegion = string.Empty;
     private static string loadedPath = string.Empty;
     private static int nextId = 1;
@@ -96,17 +98,30 @@ internal static class WorldLineageRegistry
         return LoadFromPath(normalized, path);
     }
 
+    /// <summary>
+    /// Returns a cached defensive snapshot for the room. Lineage records and their stage lists are
+    /// deep-cloned only when that room changes, not once per immediate-mode inspector frame.
+    /// </summary>
     internal static WorldLineageRecord[] GetLineages(string region, string roomName)
     {
         if (!EnsureLoaded(region)) return Array.Empty<WorldLineageRecord>();
+        string normalizedRoom = NormalizeRoom(roomName);
+        if (roomSnapshots.TryGetValue(normalizedRoom, out WorldLineageRecord[] cached))
+            return cached;
+
         List<WorldLineageRecord> result = new();
         for (int i = 0; i < records.Count; i++)
         {
             WorldLineageRecord record = records[i];
-            if (!record.Removed && string.Equals(record.RoomName, roomName, StringComparison.OrdinalIgnoreCase))
+            if (!record.Removed && string.Equals(record.RoomName, normalizedRoom, StringComparison.OrdinalIgnoreCase))
                 result.Add(record.Clone());
         }
-        return result.ToArray();
+
+        WorldLineageRecord[] snapshot = result.Count == 0
+            ? Array.Empty<WorldLineageRecord>()
+            : result.ToArray();
+        roomSnapshots[normalizedRoom] = snapshot;
+        return snapshot;
     }
 
     internal static bool TryAdd(
@@ -146,6 +161,7 @@ internal static class WorldLineageRegistry
         };
         if (!CopyStages(stages, record.Stages, out error)) return false;
         records.Add(record);
+        InvalidateRoomSnapshot(record.RoomName);
         Dirty = true;
         id = record.Id;
         WorldCreatureLiveReload.ReloadRoom(region, record.RoomName);
@@ -184,6 +200,7 @@ internal static class WorldLineageRegistry
         record.ExcludeTimeline = excludeTimeline;
         record.NightCreature = nightCreature;
         record.Changed = true;
+        InvalidateRoomSnapshot(record.RoomName);
         Dirty = true;
         WorldCreatureLiveReload.ReloadRoom(region, record.RoomName);
         return true;
@@ -205,6 +222,7 @@ internal static class WorldLineageRegistry
         }
         record.Removed = true;
         record.Changed = true;
+        InvalidateRoomSnapshot(record.RoomName);
         Dirty = true;
         WorldCreatureLiveReload.ReloadRoom(region, record.RoomName);
         return true;
@@ -296,6 +314,7 @@ internal static class WorldLineageRegistry
     {
         if (Dirty) return;
         records.Clear();
+        roomSnapshots.Clear();
         loadedRegion = string.Empty;
         loadedPath = string.Empty;
         nextId = 1;
@@ -305,6 +324,7 @@ internal static class WorldLineageRegistry
     private static bool LoadFromPath(string region, string path)
     {
         records.Clear();
+        roomSnapshots.Clear();
         nextId = 1;
         loadedRegion = region;
         loadedPath = path ?? string.Empty;
@@ -336,6 +356,7 @@ internal static class WorldLineageRegistry
         {
             LoadError = ex.Message;
             records.Clear();
+            roomSnapshots.Clear();
             return false;
         }
     }
@@ -344,6 +365,12 @@ internal static class WorldLineageRegistry
     {
         for (int i = 0; i < records.Count; i++)
             if (records[i].IsNew && !records[i].Removed) output.Add(BuildLine(records[i]));
+    }
+
+    private static void InvalidateRoomSnapshot(string roomName)
+    {
+        string normalized = NormalizeRoom(roomName);
+        if (normalized.Length > 0) roomSnapshots.Remove(normalized);
     }
 
     private static WorldLineageRecord Find(int id)
@@ -521,6 +548,9 @@ internal static class WorldLineageRegistry
         }
         return string.Join(",", result);
     }
+
+    private static string NormalizeRoom(string roomName) =>
+        string.IsNullOrWhiteSpace(roomName) ? string.Empty : roomName.Trim();
 
     private static string NormalizeRegion(string region) => string.IsNullOrWhiteSpace(region) ? string.Empty : region.Trim().ToUpperInvariant();
     private static string AnchorKey(string raw, int occurrence) => raw + "\u001F" + occurrence.ToString(CultureInfo.InvariantCulture);
