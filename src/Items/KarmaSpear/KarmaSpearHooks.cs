@@ -72,9 +72,8 @@ internal static class KarmaSpearHooks
     {
         TransmutationState state = _states.GetOrCreateValue(self);
         bool pickupHeld = self.input != null && self.input.Length > 0 && self.input[0].pckp;
-        bool throwHeld = self.input != null && self.input.Length > 0 && self.input[0].thrw;
 
-        if (!pickupHeld || !throwHeld)
+        if (!pickupHeld)
         {
             state.Reset(clearReleaseLatch: true);
             orig(self, eu);
@@ -102,8 +101,8 @@ internal static class KarmaSpearHooks
             state.Progress = 0;
         }
 
-        // Suppress vanilla throw/pickup processing while both buttons are held so
-        // the spear is not thrown on frame one of the conversion gesture.
+        // Hold pickup to channel reinforced karma into the spear. Suppress vanilla grab
+        // processing while charging so the held weapon remains stable in the hand.
         self.wantToThrow = 0;
         self.wantToPickUp = 0;
         state.Progress++;
@@ -113,11 +112,17 @@ internal static class KarmaSpearHooks
             self.room?.PlaySound(WatcherEnums.WatcherSoundID.Templar_Shield_Tick_1, spear.firstChunk);
         }
 
-        if (state.Progress % 8 == 0)
+        float progress01 = Mathf.Clamp01((float)state.Progress / ChargeFramesRequired);
+        if (state.Progress % 5 == 0)
         {
-            KarmicVisualEffects.SpawnChargePulse(
-                spear,
-                Mathf.Clamp01((float)state.Progress / ChargeFramesRequired));
+            int karmaLevel = KarmicManipulationRuntime.CurrentKarmaLevel(self);
+            KarmicVisualEffects.SpawnChargePulse(self, progress01 * 0.8f);
+            KarmicVisualEffects.SpawnChargingConvergence(self, spear, karmaLevel, progress01);
+        }
+
+        if (state.Progress % 10 == 0)
+        {
+            KarmicVisualEffects.SpawnChargePulse(spear, progress01);
         }
 
         if (state.Progress < ChargeFramesRequired)
@@ -137,7 +142,6 @@ internal static class KarmaSpearHooks
         }
 
         state.RequiresRelease = true;
-
         state.Source = null;
         state.Hand = -1;
         state.Progress = 0;
@@ -211,9 +215,6 @@ internal static class KarmaSpearHooks
             ? source.rotation.normalized
             : Vector2.right;
 
-        // Realize the replacement before spending the save-level resource. If custom
-        // realization ever fails because another mod interferes with object parsing, the
-        // player keeps reinforced karma and the ordinary spear is left untouched.
         int previewKarmaLevel = KarmicManipulationRuntime.CurrentKarmaLevel(player);
         AbstractKarmaSpear abstractSpear = new(
             room.world,
@@ -242,8 +243,6 @@ internal static class KarmaSpearHooks
             return false;
         }
 
-        // The preview and consumed levels should match in the same frame, but make the
-        // consumed charge authoritative so future resource providers can change safely.
         abstractSpear.KarmaLevel = charge.KarmaLevel;
         realized.firstChunk.HardSetPosition(position);
         realized.firstChunk.lastPos = position;
