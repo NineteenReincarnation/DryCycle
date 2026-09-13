@@ -13,7 +13,7 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
 {
     private readonly KarmaSpear _source;
     private readonly float _radius;
-    private readonly ChunkDynamicSoundLoop _soundLoop;
+    private readonly StaticSoundLoop _soundLoop;
     private int _age;
 
     internal KarmaSpearField(KarmaSpear source)
@@ -24,13 +24,19 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
         // radius by another 50%, for a total multiplier of 4.5x over the original field.
         _radius = (58f + source.KarmaLevel * 4f) * 4.5f;
 
-        // Keep the ambience spatially attached to the spear so distance attenuation,
-        // room transitions and split-camera audio continue to use Rain World's normal path.
-        _soundLoop = new ChunkDynamicSoundLoop(source.firstChunk)
+        // This is a stationary world-space field after the spear has entered StuckInWall.
+        // Watcher's own warp-point ambience uses StaticSoundLoop for this exact style of
+        // persistent positional loop. It also recreates its emitter automatically if the
+        // emitter is lost while the field remains alive.
+        _soundLoop = new StaticSoundLoop(
+            WatcherEnums.WatcherSoundID.Warp_Point_Ripple_Idle_LOOP,
+            source.firstChunk.pos,
+            source.room,
+            0.34f,
+            0.88f)
         {
-            sound = WatcherEnums.WatcherSoundID.Warp_Point_Ripple_Idle_LOOP,
-            Volume = 0.11f,
-            Pitch = 0.9f
+            fadeOutOnDestroyFrames = 10,
+            randomStartPosition = true
         };
     }
 
@@ -51,7 +57,7 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
 
         Vector2 center = _source.firstChunk.pos;
         SuppressMotion(center);
-        UpdateSound();
+        UpdateSound(center);
 
         // The field is permanent while anchored, so keep the large presentation pulse sparse.
         if (_age == 1 || _age % 28 == 0)
@@ -67,17 +73,34 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
 
     public override void Destroy()
     {
-        _soundLoop?.Stop();
+        StopSound();
         base.Destroy();
     }
 
-    private void UpdateSound()
+    private void UpdateSound(Vector2 center)
     {
-        // A very slow breathing modulation keeps the field alive without becoming a loud,
-        // repetitive alarm. The loop remains anchored to the spear and stops on pull-out.
+        // StaticSoundLoop owns a PositionedSoundEmitter and must be updated continuously.
+        // Keep its position synced anyway so tiny spear/pivot corrections never leave the
+        // ambience behind. A clearly audible floor avoids the old 9-14% volume range being
+        // effectively lost after positional attenuation.
         float breath = 0.5f + 0.5f * Mathf.Sin(_age * 0.025f);
-        _soundLoop.Volume = Mathf.Lerp(0.09f, 0.14f, breath);
-        _soundLoop.Pitch = Mathf.Lerp(0.87f, 0.94f, breath);
+        _soundLoop.pos = center;
+        _soundLoop.volume = Mathf.Lerp(0.28f, 0.42f, breath);
+        _soundLoop.pitch = Mathf.Lerp(0.84f, 0.92f, breath);
+        _soundLoop.Update();
+    }
+
+    private void StopSound()
+    {
+        if (_soundLoop == null)
+        {
+            return;
+        }
+
+        // StaticSoundLoop stops and releases its maintained emitter when volume reaches zero.
+        // Calling Update here makes pull-out/destruction stop on the same frame instead of
+        // leaving a requireActiveUpkeep emitter alive until its own timeout.
+        _soundLoop.volume = 0f;
         _soundLoop.Update();
     }
 
