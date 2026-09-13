@@ -6,38 +6,42 @@ using Watcher;
 namespace DryCycle.Items.KarmaSpear;
 
 /// <summary>
-/// Persistent control volume created while an active Karma Spear is nailed into terrain.
-/// Wall use does not consume the spear. The field exists for as long as the spear remains
-/// stuck in the wall and disappears immediately when the spear is pulled free.
+/// Persistent one-way karmic barrier created while an active Karma Spear is nailed into terrain.
+/// The barrier keeps the original deployed radius, renders only the circular arcs that are not
+/// occluded by terrain, reflects outside projectiles, and prevents outside creatures from entering.
+/// Objects already inside are never trapped and may leave freely. Wall use does not consume the spear.
 /// </summary>
-internal sealed class KarmaSpearField : UpdatableAndDeletable
+internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 {
+    private const int ArcSegments = 96;
+    private const int VisibilityRefreshFrames = 12;
+
     private readonly KarmaSpear _source;
     private readonly float _radius;
     private readonly StaticSoundLoop _soundLoop;
-    private readonly Dictionary<Weapon, ProjectileTimeState> _projectileStates = new();
-    private readonly HashSet<Weapon> _projectilesInside = new();
-    private readonly List<Weapon> _projectileCleanup = new();
+    private readonly bool[] _arcVisible = new bool[ArcSegments];
+    private readonly Dictionary<Creature, int> _creatureSoundAges = new();
+
+    private Vector2 _visibilityOrigin;
     private int _age;
 
     internal KarmaSpearField(KarmaSpear source)
     {
         _source = source;
 
-        // The deployed radius is 4.5x the original Karma Field design.
+        // Keep the current deployed size: 4.5x the original Karma Field design.
         _radius = (58f + source.KarmaLevel * 4f) * 4.5f;
 
-        // This is a stationary world-space field after the spear has entered StuckInWall.
-        // Watcher's own warp-point ambience uses StaticSoundLoop for this exact style of
-        // persistent positional loop.
+        // Keep the reliable Watcher positional loop, but move it upward in pitch and lower
+        // the muddy low-frequency weight. Short Templar ticks add the crisp crystalline edge.
         _soundLoop = new StaticSoundLoop(
             WatcherEnums.WatcherSoundID.Warp_Point_Ripple_Idle_LOOP,
             source.firstChunk.pos,
             source.room,
-            0.34f,
-            0.88f)
+            0.25f,
+            1.10f)
         {
-            fadeOutOnDestroyFrames = 10,
+            fadeOutOnDestroyFrames = 8,
             randomStartPosition = true
         };
     }
@@ -58,34 +62,45 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
         }
 
         Vector2 center = _source.firstChunk.pos;
-        SuppressMotion(center);
-        UpdateSound(center);
 
-        // The field is permanent while anchored, so keep the large presentation pulse sparse.
+        if (_age == 1 || _age % VisibilityRefreshFrames == 0)
+        {
+            RefreshArcVisibility(center);
+        }
+
+        EnforceBarrier(center);
+        UpdateSound(center);
+        CleanupCreatureSoundAges();
+
+        // Preserve the old outward-spreading karmic pulse language.
         if (_age == 1 || _age % 28 == 0)
         {
             KarmicVisualEffects.SpawnFieldPulse(_source, _radius);
         }
 
-        if (_age % 30 == 0)
+        // A sparse high chime keeps the continuous ambience clear rather than droning.
+        if (_age % 96 == 0)
         {
-            TryHelpDangerGrasps(center);
+            room.PlaySound(
+                WatcherEnums.WatcherSoundID.Templar_Shield_Tick_6,
+                center,
+                0.28f,
+                1.16f);
         }
     }
 
     public override void Destroy()
     {
-        RestoreAllProjectiles();
         StopSound();
         base.Destroy();
     }
 
     private void UpdateSound(Vector2 center)
     {
-        float breath = 0.5f + 0.5f * Mathf.Sin(_age * 0.025f);
+        float breath = 0.5f + 0.5f * Mathf.Sin(_age * 0.030f);
         _soundLoop.pos = center;
-        _soundLoop.volume = Mathf.Lerp(0.28f, 0.42f, breath);
-        _soundLoop.pitch = Mathf.Lerp(0.84f, 0.92f, breath);
+        _soundLoop.volume = Mathf.Lerp(0.20f, 0.30f, breath);
+        _soundLoop.pitch = Mathf.Lerp(1.06f, 1.14f, breath);
         _soundLoop.Update();
     }
 
@@ -100,15 +115,12 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
         _soundLoop.Update();
     }
 
-    private void SuppressMotion(Vector2 center)
+    private void EnforceBarrier(Vector2 center)
     {
         if (room?.physicalObjects == null)
         {
-            RestoreAllProjectiles();
             return;
         }
-
-        _projectilesInside.Clear();
 
         for (int layer = 0; layer < room.physicalObjects.Length; layer++)
         {
@@ -121,163 +133,372 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
                     continue;
                 }
 
-                float distance = Vector2.Distance(center, obj.firstChunk.pos);
-                if (distance >= _radius)
-                {
-                    continue;
-                }
-
-                float influence = 1f - distance / _radius;
-
                 if (obj is Weapon weapon && weapon.mode == Weapon.Mode.Thrown)
                 {
-                    ApplyProjectileBulletTime(weapon, influence);
+                    TryReflectProjectile(weapon, center);
                     continue;
                 }
 
-                if (obj is Creature creature && !object.ReferenceEquals(creature, _source.thrownBy))
+                if (obj is Creature creature &&
+                    !object.ReferenceEquals(creature, _source.thrownBy))
                 {
-                    float factor = Mathf.Lerp(1f, 0.955f, influence);
-                    for (int c = 0; c < creature.bodyChunks.Length; c++)
-                    {
-                        creature.bodyChunks[c].vel *= factor;
-                    }
+                    TryBlockCreature(creature, center);
                 }
             }
         }
-
-        RestoreProjectilesThatLeftField();
     }
 
-    private void ApplyProjectileBulletTime(Weapon weapon, float influence)
+    private void TryReflectProjectile(Weapon weapon, Vector2 center)
     {
-        _projectilesInside.Add(weapon);
+        BodyChunk chunk = weapon.firstChunk;
+        float collisionRadius = _radius + Mathf.Max(1f, chunk.rad);
+        Vector2 from = chunk.lastPos;
+        Vector2 to = chunk.pos;
 
-        if (!_projectileStates.TryGetValue(weapon, out ProjectileTimeState state))
-        {
-            state = new ProjectileTimeState(weapon);
-            _projectileStates.Add(weapon, state);
-        }
-
-        // This is temporal slowdown, not drag. Velocity direction is frozen to the entry
-        // trajectory and speed is derived from the stored entry speed every frame, so the
-        // field never bends a projectile and never compounds it toward zero. Deeper inside
-        // the field time runs slower; leaving restores the stored speed along the same path.
-        float shapedInfluence = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(influence));
-        float timeScale = Mathf.Lerp(0.72f, 0.18f, shapedInfluence);
-        state.Apply(weapon, timeScale);
-    }
-
-    private void RestoreProjectilesThatLeftField()
-    {
-        _projectileCleanup.Clear();
-
-        foreach (KeyValuePair<Weapon, ProjectileTimeState> pair in _projectileStates)
-        {
-            Weapon weapon = pair.Key;
-            if (weapon == null || weapon.slatedForDeletetion || weapon.mode != Weapon.Mode.Thrown)
-            {
-                _projectileCleanup.Add(weapon);
-                continue;
-            }
-
-            if (_projectilesInside.Contains(weapon))
-            {
-                continue;
-            }
-
-            pair.Value.Restore(weapon);
-            _projectileCleanup.Add(weapon);
-        }
-
-        for (int i = 0; i < _projectileCleanup.Count; i++)
-        {
-            Weapon weapon = _projectileCleanup[i];
-            if (weapon != null)
-            {
-                _projectileStates.Remove(weapon);
-            }
-        }
-    }
-
-    private void RestoreAllProjectiles()
-    {
-        foreach (KeyValuePair<Weapon, ProjectileTimeState> pair in _projectileStates)
-        {
-            Weapon weapon = pair.Key;
-            if (weapon != null && !weapon.slatedForDeletetion && weapon.mode == Weapon.Mode.Thrown)
-            {
-                pair.Value.Restore(weapon);
-            }
-        }
-
-        _projectileStates.Clear();
-        _projectilesInside.Clear();
-        _projectileCleanup.Clear();
-    }
-
-    private void TryHelpDangerGrasps(Vector2 center)
-    {
-        if (room?.abstractRoom?.creatures == null)
+        // A projectile that started this frame inside the barrier is allowed to leave.
+        if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
         {
             return;
         }
 
-        float releaseChance = Mathf.Lerp(0.11f, 0.24f, (_source.KarmaLevel - 1) / 9f);
-        foreach (AbstractCreature abstractCreature in room.abstractRoom.creatures)
+        if (!TryGetCircleEntry(from, to, center, collisionRadius, out Vector2 hitPoint, out Vector2 normal))
         {
-            if (abstractCreature?.realizedCreature is not Player player ||
-                player.dangerGrasp == null ||
-                Vector2.Distance(center, player.mainBodyChunk.pos) > _radius ||
-                Random.value >= releaseChance)
-            {
-                continue;
-            }
+            return;
+        }
 
-            player.dangerGrasp.Release();
-            KarmicVisualEffects.SpawnImpactPulse(
-                _source,
-                player.mainBodyChunk.pos,
-                _source.KarmaLevel,
-                52f);
+        // Hidden wall-side arcs are not invisible force fields. Visual and physical boundary
+        // agree, so a terrain-occluded section does not block something on the other side.
+        if (!BarrierDirectionVisible(center, normal))
+        {
+            return;
+        }
+
+        Vector2 travel = to - from;
+        if (Vector2.Dot(travel, normal) >= 0f)
+        {
+            return;
+        }
+
+        Vector2 targetPos = hitPoint + normal * (chunk.rad + 2.5f);
+        ShiftPhysicalObject(weapon, targetPos - chunk.pos);
+
+        for (int i = 0; i < weapon.bodyChunks.Length; i++)
+        {
+            BodyChunk bodyChunk = weapon.bodyChunks[i];
+            float inwardSpeed = Vector2.Dot(bodyChunk.vel, normal);
+            if (inwardSpeed < 0f)
+            {
+                // Reflect only the inward normal component. Tangential motion survives, so the
+                // result reads as a real shield deflection instead of an arbitrary direction flip.
+                bodyChunk.vel -= normal * (2f * inwardSpeed);
+                bodyChunk.vel *= 0.84f;
+                bodyChunk.vel += normal * 0.75f;
+            }
+        }
+
+        room.PlaySound(
+            WatcherEnums.WatcherSoundID.Templar_Shield_Tick_9,
+            hitPoint,
+            0.72f,
+            1.14f);
+        KarmicVisualEffects.SpawnSparks(room, hitPoint, 4, 3.8f);
+    }
+
+    private void TryBlockCreature(Creature creature, Vector2 center)
+    {
+        if (creature?.mainBodyChunk == null || creature.bodyChunks == null || creature.bodyChunks.Length == 0)
+        {
+            return;
+        }
+
+        BodyChunk main = creature.mainBodyChunk;
+        float collisionRadius = _radius + Mathf.Max(3f, main.rad);
+        Vector2 from = main.lastPos;
+        Vector2 to = main.pos;
+
+        // Creatures already inside may remain inside and may leave. The barrier only rejects
+        // an outside -> inside crossing.
+        if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
+        {
+            return;
+        }
+
+        if (!TryGetCircleEntry(from, to, center, collisionRadius, out Vector2 hitPoint, out Vector2 normal))
+        {
+            return;
+        }
+
+        if (!BarrierDirectionVisible(center, normal) || Vector2.Dot(to - from, normal) >= 0f)
+        {
+            return;
+        }
+
+        Vector2 targetMainPos = hitPoint + normal * (main.rad + 1.5f);
+        ShiftPhysicalObject(creature, targetMainPos - main.pos);
+
+        // Apply one common collision normal to the whole body. This preserves the creature's
+        // internal pose and connections and only removes velocity trying to cross inward.
+        for (int i = 0; i < creature.bodyChunks.Length; i++)
+        {
+            BodyChunk bodyChunk = creature.bodyChunks[i];
+            float inwardSpeed = Vector2.Dot(bodyChunk.vel, normal);
+            if (inwardSpeed < 0f)
+            {
+                bodyChunk.vel -= normal * inwardSpeed;
+            }
+        }
+
+        if (!_creatureSoundAges.TryGetValue(creature, out int lastSoundAge) || _age - lastSoundAge >= 12)
+        {
+            _creatureSoundAges[creature] = _age;
+            room.PlaySound(
+                WatcherEnums.WatcherSoundID.Templar_Shield_Tick_8,
+                hitPoint,
+                0.48f,
+                1.10f);
+            KarmicVisualEffects.SpawnSparks(room, hitPoint, 3, 2.8f);
         }
     }
 
-    private sealed class ProjectileTimeState
+    private void RefreshArcVisibility(Vector2 center)
     {
-        private readonly Vector2[] _entryDirections;
-        private readonly float[] _entrySpeeds;
+        _visibilityOrigin = FindOpenVisibilityOrigin(center);
 
-        internal ProjectileTimeState(Weapon weapon)
+        for (int i = 0; i < ArcSegments; i++)
         {
-            _entryDirections = new Vector2[weapon.bodyChunks.Length];
-            _entrySpeeds = new float[weapon.bodyChunks.Length];
+            float angle = ((i + 0.5f) / ArcSegments) * Mathf.PI * 2f;
+            Vector2 direction = new(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 point = center + direction * _radius;
+            _arcVisible[i] = room != null && room.VisualContact(_visibilityOrigin, point);
+        }
+    }
 
-            for (int i = 0; i < weapon.bodyChunks.Length; i++)
+    private Vector2 FindOpenVisibilityOrigin(Vector2 center)
+    {
+        if (room == null)
+        {
+            return center;
+        }
+
+        Vector2 spearDirection = _source.rotation.sqrMagnitude > 0.001f
+            ? _source.rotation.normalized
+            : Vector2.right;
+
+        // The shaft side (-rotation) is normally the open side of a spear stuck by its tip.
+        Vector2 openSide = -spearDirection;
+        Vector2 perpendicular = new(-openSide.y, openSide.x);
+        Vector2[] directions =
+        {
+            openSide,
+            perpendicular,
+            -perpendicular,
+            spearDirection
+        };
+        float[] distances = { 18f, 28f, 38f, 52f };
+
+        for (int d = 0; d < distances.Length; d++)
+        {
+            for (int i = 0; i < directions.Length; i++)
             {
-                Vector2 velocity = weapon.bodyChunks[i].vel;
-                float speed = velocity.magnitude;
-                _entrySpeeds[i] = speed;
-                _entryDirections[i] = speed > 0.001f ? velocity / speed : Vector2.zero;
+                Vector2 candidate = center + directions[i] * distances[d];
+                if (!room.GetTile(candidate).Solid)
+                {
+                    return candidate;
+                }
             }
         }
 
-        internal void Apply(Weapon weapon, float timeScale)
+        return center;
+    }
+
+    private bool BarrierDirectionVisible(Vector2 center, Vector2 normal)
+    {
+        if (room == null)
         {
-            int count = Mathf.Min(weapon.bodyChunks.Length, _entrySpeeds.Length);
-            for (int i = 0; i < count; i++)
+            return false;
+        }
+
+        Vector2 point = center + normal * _radius;
+        return room.VisualContact(_visibilityOrigin, point);
+    }
+
+    private static bool TryGetCircleEntry(
+        Vector2 from,
+        Vector2 to,
+        Vector2 center,
+        float radius,
+        out Vector2 hitPoint,
+        out Vector2 normal)
+    {
+        hitPoint = Vector2.zero;
+        normal = Vector2.zero;
+
+        Vector2 delta = to - from;
+        float a = Vector2.Dot(delta, delta);
+        if (a <= 0.000001f)
+        {
+            return false;
+        }
+
+        Vector2 offset = from - center;
+        float b = 2f * Vector2.Dot(offset, delta);
+        float c = Vector2.Dot(offset, offset) - radius * radius;
+        float discriminant = b * b - 4f * a * c;
+        if (discriminant < 0f)
+        {
+            return false;
+        }
+
+        float sqrt = Mathf.Sqrt(discriminant);
+        float inv = 1f / (2f * a);
+        float t0 = (-b - sqrt) * inv;
+        float t1 = (-b + sqrt) * inv;
+        float t = float.PositiveInfinity;
+
+        if (t0 >= 0f && t0 <= 1f)
+        {
+            t = t0;
+        }
+        else if (t1 >= 0f && t1 <= 1f)
+        {
+            t = t1;
+        }
+
+        if (float.IsPositiveInfinity(t))
+        {
+            return false;
+        }
+
+        hitPoint = from + delta * t;
+        Vector2 radial = hitPoint - center;
+        if (radial.sqrMagnitude <= 0.000001f)
+        {
+            return false;
+        }
+
+        normal = radial.normalized;
+        return true;
+    }
+
+    private static void ShiftPhysicalObject(PhysicalObject obj, Vector2 delta)
+    {
+        if (obj?.bodyChunks == null || delta.sqrMagnitude <= 0.000001f)
+        {
+            return;
+        }
+
+        for (int i = 0; i < obj.bodyChunks.Length; i++)
+        {
+            BodyChunk chunk = obj.bodyChunks[i];
+            chunk.pos += delta;
+            chunk.lastPos += delta;
+        }
+    }
+
+    private void CleanupCreatureSoundAges()
+    {
+        if (_creatureSoundAges.Count == 0 || _age % 120 != 0)
+        {
+            return;
+        }
+
+        List<Creature> remove = new();
+        foreach (KeyValuePair<Creature, int> pair in _creatureSoundAges)
+        {
+            if (pair.Key == null || pair.Key.slatedForDeletetion || pair.Key.room != room || _age - pair.Value > 240)
             {
-                weapon.bodyChunks[i].vel = _entryDirections[i] * (_entrySpeeds[i] * timeScale);
+                remove.Add(pair.Key);
             }
         }
 
-        internal void Restore(Weapon weapon)
+        for (int i = 0; i < remove.Count; i++)
         {
-            int count = Mathf.Min(weapon.bodyChunks.Length, _entrySpeeds.Length);
-            for (int i = 0; i < count; i++)
+            if (remove[i] != null)
             {
-                weapon.bodyChunks[i].vel = _entryDirections[i] * _entrySpeeds[i];
+                _creatureSoundAges.Remove(remove[i]);
             }
+        }
+    }
+
+    public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
+    {
+        sLeaser.sprites = new FSprite[ArcSegments];
+        for (int i = 0; i < ArcSegments; i++)
+        {
+            sLeaser.sprites[i] = new FSprite("pixel")
+            {
+                anchorX = 0.5f,
+                anchorY = 0.5f
+            };
+        }
+
+        AddToContainer(sLeaser, rCam, rCam.ReturnFContainer("Foreground"));
+    }
+
+    public void DrawSprites(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        float timeStacker,
+        Vector2 camPos)
+    {
+        if (_source == null || _source.slatedForDeletetion || slatedForDeletetion || room != rCam.room)
+        {
+            sLeaser.CleanSpritesAndRemove();
+            return;
+        }
+
+        Vector2 center = Vector2.Lerp(
+            _source.firstChunk.lastPos,
+            _source.firstChunk.pos,
+            timeStacker);
+        float pulse = 0.5f + 0.5f * Mathf.Sin((_age + timeStacker) * 0.065f);
+        float thickness = Mathf.Lerp(1.05f, 1.45f, pulse);
+        float alpha = Mathf.Lerp(0.42f, 0.66f, pulse);
+        float angleStep = Mathf.PI * 2f / ArcSegments;
+        float chordLength = 2f * _radius * Mathf.Sin(angleStep * 0.5f) + 1.25f;
+        Color color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.18f + pulse * 0.12f);
+
+        for (int i = 0; i < ArcSegments; i++)
+        {
+            FSprite segment = sLeaser.sprites[i];
+            if (!_arcVisible[i])
+            {
+                segment.isVisible = false;
+                continue;
+            }
+
+            segment.isVisible = true;
+            float angle = ((i + 0.5f) / ArcSegments) * Mathf.PI * 2f;
+            Vector2 radial = new(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 tangent = new(-radial.y, radial.x);
+            Vector2 midpoint = center + radial * _radius - camPos;
+
+            segment.x = midpoint.x;
+            segment.y = midpoint.y;
+            segment.rotation = Mathf.Atan2(tangent.y, tangent.x) * Mathf.Rad2Deg;
+            segment.scaleX = chordLength;
+            segment.scaleY = thickness;
+            segment.alpha = alpha;
+            segment.color = color;
+        }
+    }
+
+    public void ApplyPalette(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        RoomPalette palette)
+    {
+    }
+
+    public void AddToContainer(
+        RoomCamera.SpriteLeaser sLeaser,
+        RoomCamera rCam,
+        FContainer newContainer)
+    {
+        newContainer ??= rCam.ReturnFContainer("Foreground");
+        for (int i = 0; i < sLeaser.sprites.Length; i++)
+        {
+            newContainer.AddChild(sLeaser.sprites[i]);
         }
     }
 }
