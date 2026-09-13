@@ -434,7 +434,7 @@ internal static class WorldCreatureSpawnInspector
         editingSpawnId = -1;
         List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room);
         selectedDen = dens.Count > 0 ? dens[0].NodeIndex : -1;
-        if (string.IsNullOrEmpty(creatureId)) creatureId = FirstRegisteredCreature();
+        creatureId = string.Empty;
         amount = 1;
         spawnTags = string.Empty;
         timelineMode = TimelineMode.All;
@@ -454,14 +454,6 @@ internal static class WorldCreatureSpawnInspector
             ? TimelineMode.All
             : spawn.ExcludeTimeline ? TimelineMode.Exclude : TimelineMode.Only;
         lastStatus = string.Empty;
-    }
-
-    private static string FirstRegisteredCreature()
-    {
-        List<string> values = ExtEnum<CreatureTemplate.Type>.values.entries;
-        for (int i = 0; i < values.Count; i++)
-            if (!string.IsNullOrWhiteSpace(values[i])) return values[i];
-        return string.Empty;
     }
 
     private static string SpawnScope(WorldCreatureSpawnRecord spawn)
