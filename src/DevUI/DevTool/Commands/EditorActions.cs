@@ -106,7 +106,7 @@ public static class EditorActions
 
         string typeName = session.PlacementType;
         Vector2 worldPosition = camera.pos + session.Owner.mousePos;
-        PlacedObject created = CreateObject(session, new PlacedObject.Type(typeName, false), new Vector2(worldPosition.x, worldPosition.y));
+        PlacedObject created = CreateObject(session, new PlacedObject.Type(typeName, false), worldPosition);
         if (created == null) return false;
 
         if (!keepPlacementMode)
