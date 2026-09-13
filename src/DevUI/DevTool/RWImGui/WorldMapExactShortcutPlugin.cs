@@ -251,9 +251,9 @@ internal static class WorldMapExactShortcuts
 
         int budget = RoomsPerFrame;
         int currentRoom = session.Room?.abstractRoom?.index ?? -1;
-        if (RefreshRoom(currentRoom, page.world, force: true)) budget--;
+        if (RefreshRoom(currentRoom, page.world, force: false)) budget--;
         if (selectedRoomIndex != currentRoom && budget > 0 &&
-            RefreshRoom(selectedRoomIndex, page.world, force: true))
+            RefreshRoom(selectedRoomIndex, page.world, force: false))
             budget--;
 
         int count = roomOrder.Count;
@@ -313,7 +313,7 @@ internal static class WorldMapExactShortcuts
         {
             if (!entry.Ready || !entry.FromRealizedRoom || force)
                 BuildFromRealized(entry, realized);
-            return true;
+            return !entry.Ready || !entry.FromRealizedRoom;
         }
 
         if (entry.FromRealizedRoom)
@@ -327,7 +327,11 @@ internal static class WorldMapExactShortcuts
             return false;
 
         string roomName = WorldLoader.RoomNameManipulator(entry.Room.FileName, world?.game);
-        string path = WorldLoader.FindRoomFile(roomName, includeRootDirectory: false, ".txt", showWarning: false);
+        string path = WorldLoader.FindRoomFile(
+            roomName,
+            includeRootDirectory: false,
+            additionalAppend: ".txt",
+            showWarning: false);
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             entry.NextPollFrame = Time.frameCount + FilePollFrames;
@@ -422,7 +426,7 @@ internal static class WorldMapExactShortcuts
         {
             for (int y = height - 1; y >= 0; y--)
             {
-                if (tileIndex >= encodedTiles.Length - 1) return false;
+                if (tileIndex >= encodedTiles.Length) return false;
                 string token = encodedTiles[tileIndex++];
                 if (string.IsNullOrEmpty(token)) continue;
                 string[] parts = token.Split(',');
@@ -525,7 +529,7 @@ internal static class WorldMapExactShortcuts
 
             if (tile.Shortcut <= 1) continue;
             terminalType = tile.Shortcut;
-            nodeByTile.TryGetValue(TileKey(pos), out nodeIndex);
+            if (!nodeByTile.TryGetValue(TileKey(pos), out nodeIndex)) nodeIndex = -1;
             return true;
         }
 
