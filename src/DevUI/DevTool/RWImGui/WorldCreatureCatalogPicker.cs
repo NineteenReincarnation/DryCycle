@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
+using BepInEx;
 using BepInEx.Bootstrap;
+using BepInEx.Logging;
 using ImGuiNET;
 using UnityEngine;
 using Num = System.Numerics;
@@ -9,29 +12,92 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Shared creature picker for world spawners and lineage stages.
+/// Pumps the expensive half of the creature catalog on Unity's normal main-thread Update.
+/// The RWImGui render callback is presentation-only: it never touches Unity render targets,
+/// never performs texture readback and never scans third-party assemblies.
+/// </summary>
+[BepInPlugin(PluginId, PluginName, PluginVersion)]
+[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+public sealed class WorldCreatureCatalogRuntimePlugin : BaseUnityPlugin
+{
+    public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMap.CreatureCatalogRuntime";
+    public const string PluginName = "DryCycle DevTool Creature Catalog Runtime";
+    public const string PluginVersion = BridgePlugin.PluginVersion;
+
+    private void OnEnable() => WorldCreatureCatalogPicker.Initialize(Logger);
+    private void Update() => WorldCreatureCatalogPicker.PumpMainThread();
+    private void OnDisable() => WorldCreatureCatalogPicker.Shutdown();
+}
+
+/// <summary>
+/// Shared visual creature picker for ordinary world spawners and Lineage stages.
 ///
-/// The picker deliberately uses Rain World's own CreatureSymbol/Sandbox artwork instead of a
-/// parallel DryCycle icon set. Futile atlas pixels are read once (CPU path first, tiny GPU readback
-/// fallback second), converted into cached horizontal runs, and then emitted through ImGui's draw
-/// list. This avoids depending on RWImGui's DX11 texture binding internals while preserving the
-/// actual Sandbox icon and mod hooks into CreatureSymbol.
+/// Important threading/lifetime rule:
+/// - DrawSelector may only read immutable catalog snapshots and immutable icon rasters.
+/// - Creature source discovery, CreatureSymbol resolution and Unity texture reads happen in
+///   PumpMainThread(), outside RWImGui's DX11 render callback.
+/// - The visible grid requests only visible icons. Missing icons show a placeholder until a later
+///   Update prepares them. No popup-open frame is allowed to synchronously build the whole catalog.
 /// </summary>
 internal static class WorldCreatureCatalogPicker
 {
+    private enum IconState
+    {
+        Pending,
+        Ready,
+        Failed
+    }
+
+    private enum IconBuildResult
+    {
+        Ready,
+        Failed,
+        DeferredForGpu
+    }
+
     private sealed class CreatureEntry
     {
         internal string Id = string.Empty;
         internal CreatureTemplate.Type Type;
         internal string SourceKey = string.Empty;
         internal string SourceLabel = string.Empty;
+        internal IconSymbol.IconSymbolData Symbol;
     }
 
     private sealed class SourceGroup
     {
         internal string Key = string.Empty;
         internal string Label = string.Empty;
-        internal readonly List<CreatureEntry> Entries = new();
+        internal CreatureEntry[] Entries = Array.Empty<CreatureEntry>();
+    }
+
+    private sealed class CatalogSnapshot
+    {
+        internal static readonly CatalogSnapshot Empty = new();
+        internal SourceGroup[] Groups = Array.Empty<SourceGroup>();
+        internal Dictionary<string, CreatureEntry> ById = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class PluginSource
+    {
+        internal Assembly Assembly;
+        internal string Key = string.Empty;
+        internal string Label = string.Empty;
+    }
+
+    private sealed class IconSlot
+    {
+        internal IconState State;
+        internal IconRaster Raster = new();
+    }
+
+    private sealed class AtlasPixels
+    {
+        internal int Width;
+        internal int Height;
+        internal Color32[] Pixels = Array.Empty<Color32>();
+        internal int LastUseFrame;
+        internal int Bytes;
     }
 
     private readonly struct PixelRun
@@ -60,15 +126,112 @@ internal static class WorldCreatureCatalogPicker
         internal bool Available;
     }
 
-    private static readonly List<CreatureEntry> entries = new();
-    private static readonly List<SourceGroup> groups = new();
-    private static readonly Dictionary<string, IconRaster> iconCache = new(StringComparer.Ordinal);
+    private const int MaxPreparedIconsPerFrame = 4;
+    private const int MaxGpuReadbacksPerFrame = 1;
+    private const double MainThreadBudgetMs = 1.75;
+    private const int MaxIconRasterDimension = 40;
+    private const int MaxAtlasCacheBytes = 32 * 1024 * 1024;
+
+    private static readonly object iconSync = new();
+    private static readonly Dictionary<string, IconSlot> iconSlots = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Queue<string> iconRequests = new();
+    private static readonly HashSet<string> queuedIcons = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<int, AtlasPixels> atlasPixels = new();
+    private static readonly HashSet<int> unreadableAtlases = new();
     private static readonly Dictionary<string, string> searchByPicker = new(StringComparer.Ordinal);
+
+    // Main-thread catalog construction state. It is deliberately incremental: official sources are
+    // published immediately and third-party assemblies are scanned one assembly per Update.
     private static readonly Dictionary<string, string> sourceByCreature = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> sourceLabelByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, IconSymbol.IconSymbolData> sandboxSymbols = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<string> registeredIds = new();
+    private static readonly List<PluginSource> pluginSources = new();
 
-    private static int catalogCount = -1;
-    private static int pluginCount = -1;
+    private static volatile CatalogSnapshot catalog = CatalogSnapshot.Empty;
+    private static volatile bool catalogRequested;
+    private static ManualLogSource log;
+    private static bool initialized;
+    private static int observedCreatureCount = -1;
+    private static int observedPluginCount = -1;
+    private static int pluginScanIndex;
+    private static int atlasCacheBytes;
+    private static bool gpuFallbackLogged;
+
+    internal static void Initialize(ManualLogSource logger)
+    {
+        log = logger;
+        initialized = true;
+    }
+
+    internal static void Shutdown()
+    {
+        initialized = false;
+        catalogRequested = false;
+        catalog = CatalogSnapshot.Empty;
+        observedCreatureCount = -1;
+        observedPluginCount = -1;
+        pluginScanIndex = 0;
+        registeredIds.Clear();
+        pluginSources.Clear();
+        sourceByCreature.Clear();
+        sourceLabelByKey.Clear();
+        sandboxSymbols.Clear();
+        searchByPicker.Clear();
+        atlasPixels.Clear();
+        unreadableAtlases.Clear();
+        atlasCacheBytes = 0;
+        gpuFallbackLogged = false;
+        lock (iconSync)
+        {
+            iconSlots.Clear();
+            iconRequests.Clear();
+            queuedIcons.Clear();
+        }
+        log = null;
+    }
+
+    /// <summary>
+    /// Unity-main-thread work pump. Nothing in this method is called from the ImGui render callback.
+    /// </summary>
+    internal static void PumpMainThread()
+    {
+        if (!initialized || !catalogRequested) return;
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        EnsureCatalogMainThread();
+
+        // Source attribution is cosmetic. Scan at most one plugin assembly in a frame so a large
+        // mod pack cannot turn the first popup click into a long reflection stall.
+        if (pluginScanIndex < pluginSources.Count && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
+            ScanNextPluginSource();
+
+        int prepared = 0;
+        int gpuReadbacks = 0;
+        while (prepared < MaxPreparedIconsPerFrame && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
+        {
+            if (!TryDequeueIcon(out string creatureId)) break;
+            CatalogSnapshot snapshot = catalog;
+            if (!snapshot.ById.TryGetValue(creatureId, out CreatureEntry entry))
+            {
+                SetIconFailed(creatureId);
+                continue;
+            }
+
+            bool allowGpu = gpuReadbacks < MaxGpuReadbacksPerFrame;
+            IconBuildResult result = BuildIconMainThread(entry, allowGpu, out IconRaster raster, out bool usedGpu);
+            if (result == IconBuildResult.DeferredForGpu)
+            {
+                RequeueIcon(creatureId);
+                break;
+            }
+
+            if (usedGpu) gpuReadbacks++;
+            prepared++;
+            if (result == IconBuildResult.Ready) SetIconReady(creatureId, raster);
+            else SetIconFailed(creatureId);
+        }
+    }
 
     internal static bool DrawSelector(
         string widgetId,
@@ -76,7 +239,8 @@ internal static class WorldCreatureCatalogPicker
         bool allowNone = false,
         string label = null)
     {
-        RefreshCatalog();
+        catalogRequested = true;
+        CatalogSnapshot snapshot = catalog;
 
         string popupId = "##CreatureCatalogPicker_" + widgetId;
         string current = string.IsNullOrWhiteSpace(creatureId)
@@ -99,7 +263,7 @@ internal static class WorldCreatureCatalogPicker
             Math.Min(720f, Math.Max(430f, io.DisplaySize.Y * 0.72f)));
         ImGui.SetNextWindowSize(desired, ImGuiCond.Appearing);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(520f, io.DisplaySize.X - 24f), Math.Min(360f, io.DisplaySize.Y - 24f)),
+            new Num.Vector2(Math.Min(520f, Math.Max(280f, io.DisplaySize.X - 24f)), Math.Min(360f, Math.Max(220f, io.DisplaySize.Y - 24f))),
             new Num.Vector2(Math.Max(520f, io.DisplaySize.X - 20f), Math.Max(360f, io.DisplaySize.Y - 20f)));
 
         if (!ImGui.BeginPopup(popupId)) return false;
@@ -107,8 +271,8 @@ internal static class WorldCreatureCatalogPicker
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("生物图鉴", "CREATURE CATALOG"));
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "点击 Sandbox 图标选择生物；按来源分组。",
-                "Choose a creature by its Sandbox icon; entries are grouped by source."),
+                "图标按需分帧加载；打开图鉴不会阻塞游戏。",
+                "Icons are prepared lazily across frames; opening the catalog never blocks the game."),
             true);
 
         if (!searchByPicker.TryGetValue(popupId, out string search)) search = string.Empty;
@@ -137,35 +301,41 @@ internal static class WorldCreatureCatalogPicker
                 ImGui.Spacing();
             }
 
-            int visibleCount = 0;
-            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            if (snapshot.Groups.Length == 0)
             {
-                SourceGroup group = groups[groupIndex];
-                int matching = CountMatching(group, search);
-                if (matching == 0) continue;
-                visibleCount += matching;
-
-                DevToolSourceMark mark = DevToolSourcePresentation.FromLabel(group.Label);
-                DevToolSourcePresentation.DrawHeader(mark, 1.36f, 1f);
-                if (DrawGroupGrid(group, search, widgetId, creatureId, out string selected))
+                DevToolWidgets.MutedText(
+                    DevToolUiSettings.T("正在准备生物目录…", "Preparing creature catalog…"),
+                    true);
+            }
+            else
+            {
+                int visibleCount = 0;
+                for (int groupIndex = 0; groupIndex < snapshot.Groups.Length; groupIndex++)
                 {
-                    creatureId = selected;
-                    changed = true;
-                    ImGui.CloseCurrentPopup();
-                    break;
+                    SourceGroup group = snapshot.Groups[groupIndex];
+                    int matching = CountMatching(group, search);
+                    if (matching == 0) continue;
+                    visibleCount += matching;
+
+                    DevToolSourceMark mark = DevToolSourcePresentation.FromLabel(group.Label);
+                    DevToolSourcePresentation.DrawHeader(mark, 1.36f, 1f);
+                    if (DrawGroupGrid(group, search, widgetId, creatureId, out string selected))
+                    {
+                        creatureId = selected;
+                        changed = true;
+                        ImGui.CloseCurrentPopup();
+                        break;
+                    }
+                    ImGui.Spacing();
                 }
-                ImGui.Spacing();
+
+                if (visibleCount == 0)
+                    DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."), true);
             }
 
-            if (visibleCount == 0)
-                DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."), true);
-
-            // Lossless world editing: an entry from a disabled/missing mod must remain selectable as
-            // the current value instead of silently being replaced merely because its ExtEnum is no
-            // longer registered in this run.
             if (!string.IsNullOrWhiteSpace(creatureId) &&
                 !string.Equals(creatureId, "NONE", StringComparison.OrdinalIgnoreCase) &&
-                FindEntry(creatureId) == null)
+                !snapshot.ById.ContainsKey(creatureId))
             {
                 DevToolSourcePresentation.DrawHeader(
                     DevToolSourcePresentation.FromLabel(DevToolUiSettings.T("缺失 Mod", "MISSING MOD")),
@@ -173,8 +343,8 @@ internal static class WorldCreatureCatalogPicker
                     1f);
                 DevToolWidgets.MutedText(
                     DevToolUiSettings.T(
-                        "当前 world.txt 使用的生物未在本次运行注册；保留原值，直到你选择替代项。",
-                        "The creature stored in world.txt is not registered in this run; it is preserved until you choose a replacement."),
+                        "当前 world.txt 使用的生物未在本次运行注册；原值会保持不变。",
+                        "The creature stored in world.txt is not registered in this run; its value is preserved."),
                     true);
                 DrawMissingCard(creatureId);
             }
@@ -192,28 +362,43 @@ internal static class WorldCreatureCatalogPicker
         out string selected)
     {
         selected = null;
-        float cardWidth = 112f;
-        float cardHeight = 102f;
+        const float cardWidth = 112f;
+        const float cardHeight = 102f;
         float spacing = Math.Max(6f, ImGui.GetStyle().ItemSpacing.X);
         float available = Math.Max(cardWidth, ImGui.GetContentRegionAvail().X);
         int columns = Math.Max(1, (int)Math.Floor((available + spacing) / (cardWidth + spacing)));
-        int column = 0;
 
-        for (int i = 0; i < group.Entries.Count; i++)
+        List<CreatureEntry> filtered = new();
+        for (int i = 0; i < group.Entries.Length; i++)
+            if (Matches(group.Entries[i], group, search)) filtered.Add(group.Entries[i]);
+        if (filtered.Count == 0) return false;
+
+        int rows = (filtered.Count + columns - 1) / columns;
+        float clipTop = ImGui.GetWindowPos().Y - cardHeight;
+        float clipBottom = ImGui.GetWindowPos().Y + ImGui.GetWindowHeight() + cardHeight;
+
+        for (int row = 0; row < rows; row++)
         {
-            CreatureEntry entry = group.Entries[i];
-            if (!Matches(entry, group, search)) continue;
-            if (column > 0) ImGui.SameLine(0f, spacing);
-
-            bool isSelected = string.Equals(current, entry.Id, StringComparison.Ordinal);
-            if (DrawCreatureCard(entry, widgetId + "_" + group.Key + "_" + i, cardWidth, cardHeight, isSelected))
+            float rowScreenY = ImGui.GetCursorScreenPos().Y;
+            if (rowScreenY + cardHeight < clipTop || rowScreenY > clipBottom)
             {
-                selected = entry.Id;
-                return true;
+                ImGui.Dummy(new Num.Vector2(1f, cardHeight));
+                continue;
             }
 
-            column++;
-            if (column >= columns) column = 0;
+            int start = row * columns;
+            int end = Math.Min(filtered.Count, start + columns);
+            for (int i = start; i < end; i++)
+            {
+                if (i > start) ImGui.SameLine(0f, spacing);
+                CreatureEntry entry = filtered[i];
+                bool isSelected = string.Equals(current, entry.Id, StringComparison.Ordinal);
+                if (DrawCreatureCard(entry, widgetId + "_" + group.Key + "_" + i, cardWidth, cardHeight, isSelected))
+                {
+                    selected = entry.Id;
+                    return true;
+                }
+            }
         }
         return false;
     }
@@ -245,12 +430,19 @@ internal static class WorldCreatureCatalogPicker
         draw.AddRectFilled(pos, max, ImGui.GetColorU32(bg), 5f);
         draw.AddRect(pos, max, ImGui.GetColorU32(border), 5f, ImDrawFlags.None, selected ? 2.0f : 1f);
 
-        IconRaster icon = GetIcon(entry);
-        DrawIcon(draw, icon, pos + new Num.Vector2(8f, 7f), new Num.Vector2(width - 16f, 65f));
+        TryGetIconForRender(entry.Id, out IconRaster icon, out IconState state);
+        DrawIcon(draw, icon, state, pos + new Num.Vector2(8f, 7f), new Num.Vector2(width - 16f, 65f));
         DrawCenteredId(draw, entry.Id, pos, width, height - 26f);
 
         if (hovered)
-            DevToolTooltip.Show(entry.SourceLabel + "\n" + entry.Id + "\n" + (icon.Available ? icon.SpriteName : DevToolUiSettings.T("Sandbox 图标缺失", "Sandbox icon unavailable")));
+        {
+            string iconState = state == IconState.Ready && icon.Available
+                ? icon.SpriteName
+                : state == IconState.Pending
+                    ? DevToolUiSettings.T("图标载入中", "Icon pending")
+                    : DevToolUiSettings.T("Sandbox 图标不可用", "Sandbox icon unavailable");
+            DevToolTooltip.Show(entry.SourceLabel + "\n" + entry.Id + "\n" + iconState);
+        }
         return clicked;
     }
 
@@ -291,14 +483,30 @@ internal static class WorldCreatureCatalogPicker
         DrawCenteredId(draw, id, pos, width, height - 27f);
     }
 
-    private static void DrawIcon(ImDrawListPtr draw, IconRaster icon, Num.Vector2 areaPos, Num.Vector2 areaSize)
+    private static void DrawIcon(
+        ImDrawListPtr draw,
+        IconRaster icon,
+        IconState state,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize)
     {
-        if (icon == null || !icon.Available || icon.Runs.Length == 0)
+        if (state != IconState.Ready || icon == null || !icon.Available || icon.Runs.Length == 0)
         {
             Num.Vector2 c = areaPos + areaSize * 0.5f;
-            uint color = ImGui.GetColorU32(new Num.Vector4(0.55f, 0.58f, 0.64f, 0.85f));
+            uint color = ImGui.GetColorU32(state == IconState.Pending
+                ? new Num.Vector4(0.46f, 0.64f, 0.82f, 0.90f)
+                : new Num.Vector4(0.55f, 0.58f, 0.64f, 0.85f));
             draw.AddCircle(c, Math.Min(areaSize.X, areaSize.Y) * 0.24f, color, 24, 1.6f);
-            draw.AddText(c - new Num.Vector2(3.5f, 8f), color, "?");
+            if (state == IconState.Pending)
+            {
+                draw.AddCircleFilled(c + new Num.Vector2(-8f, 0f), 2f, color);
+                draw.AddCircleFilled(c, 2f, color);
+                draw.AddCircleFilled(c + new Num.Vector2(8f, 0f), 2f, color);
+            }
+            else
+            {
+                draw.AddText(c - new Num.Vector2(3.5f, 8f), color, "?");
+            }
             return;
         }
 
@@ -313,13 +521,10 @@ internal static class WorldCreatureCatalogPicker
             PixelRun run = icon.Runs[i];
             float alpha = run.Color.a / 255f;
             if (alpha <= 0.02f) continue;
-            float sourceR = run.Color.r / 255f;
-            float sourceG = run.Color.g / 255f;
-            float sourceB = run.Color.b / 255f;
             Num.Vector4 color = new(
-                icon.Tint.r * sourceR,
-                icon.Tint.g * sourceG,
-                icon.Tint.b * sourceB,
+                icon.Tint.r * run.Color.r / 255f,
+                icon.Tint.g * run.Color.g / 255f,
+                icon.Tint.b * run.Color.b / 255f,
                 icon.Tint.a * alpha);
             float y = icon.Height - 1 - run.Y;
             Num.Vector2 a = origin + new Num.Vector2(run.X * scale, y * scale);
@@ -351,80 +556,209 @@ internal static class WorldCreatureCatalogPicker
         return ellipsis;
     }
 
-    private static IconRaster GetIcon(CreatureEntry entry)
+    private static void TryGetIconForRender(string creatureId, out IconRaster raster, out IconState state)
     {
-        if (entry == null || entry.Type == null) return new IconRaster();
-        if (iconCache.TryGetValue(entry.Id, out IconRaster cached)) return cached;
+        lock (iconSync)
+        {
+            if (iconSlots.TryGetValue(creatureId, out IconSlot slot))
+            {
+                raster = slot.Raster;
+                state = slot.State;
+                return;
+            }
 
-        IconRaster raster = new();
+            iconSlots[creatureId] = new IconSlot { State = IconState.Pending };
+            if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
+            raster = new IconRaster();
+            state = IconState.Pending;
+        }
+    }
+
+    private static bool TryDequeueIcon(out string creatureId)
+    {
+        lock (iconSync)
+        {
+            if (iconRequests.Count == 0)
+            {
+                creatureId = null;
+                return false;
+            }
+            creatureId = iconRequests.Dequeue();
+            queuedIcons.Remove(creatureId);
+            return true;
+        }
+    }
+
+    private static void RequeueIcon(string creatureId)
+    {
+        lock (iconSync)
+        {
+            if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
+        }
+    }
+
+    private static void SetIconReady(string creatureId, IconRaster raster)
+    {
+        lock (iconSync)
+            iconSlots[creatureId] = new IconSlot { State = IconState.Ready, Raster = raster ?? new IconRaster() };
+    }
+
+    private static void SetIconFailed(string creatureId)
+    {
+        lock (iconSync)
+            iconSlots[creatureId] = new IconSlot { State = IconState.Failed, Raster = new IconRaster() };
+    }
+
+    private static IconBuildResult BuildIconMainThread(
+        CreatureEntry entry,
+        bool allowGpuReadback,
+        out IconRaster raster,
+        out bool usedGpuReadback)
+    {
+        raster = new IconRaster();
+        usedGpuReadback = false;
+        if (entry?.Type == null) return IconBuildResult.Failed;
+
         try
         {
-            IconSymbol.IconSymbolData data = ResolveSandboxSymbol(entry.Type);
-            raster.SpriteName = CreatureSymbol.SpriteNameOfCreature(data) ?? string.Empty;
-            raster.Tint = CreatureSymbol.ColorOfCreature(data);
+            raster.SpriteName = CreatureSymbol.SpriteNameOfCreature(entry.Symbol) ?? string.Empty;
+            raster.Tint = CreatureSymbol.ColorOfCreature(entry.Symbol);
             if (string.IsNullOrEmpty(raster.SpriteName) ||
                 string.Equals(raster.SpriteName, "Futile_White", StringComparison.Ordinal) ||
                 Futile.atlasManager == null ||
                 !Futile.atlasManager.DoesContainElementWithName(raster.SpriteName))
-            {
-                iconCache[entry.Id] = raster;
-                return raster;
-            }
+                return IconBuildResult.Ready;
 
             FAtlasElement element = Futile.atlasManager.GetElementWithName(raster.SpriteName);
-            if (element?.atlas?.texture is not Texture2D atlas)
-            {
-                iconCache[entry.Id] = raster;
-                return raster;
-            }
+            if (element?.atlas?.texture is not Texture2D texture) return IconBuildResult.Ready;
 
             Rect uv = element.uvRect;
-            int x = Mathf.Clamp(Mathf.RoundToInt(uv.x * atlas.width), 0, Math.Max(0, atlas.width - 1));
-            int y = Mathf.Clamp(Mathf.RoundToInt(uv.y * atlas.height), 0, Math.Max(0, atlas.height - 1));
-            int width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * atlas.width), 1, Math.Max(1, atlas.width - x));
-            int height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * atlas.height), 1, Math.Max(1, atlas.height - y));
-            if (!TryReadPixels(atlas, x, y, width, height, out Color32[] pixels))
+            int x = Mathf.Clamp(Mathf.RoundToInt(uv.x * texture.width), 0, Math.Max(0, texture.width - 1));
+            int y = Mathf.Clamp(Mathf.RoundToInt(uv.y * texture.height), 0, Math.Max(0, texture.height - 1));
+            int width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * texture.width), 1, Math.Max(1, texture.width - x));
+            int height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * texture.height), 1, Math.Max(1, texture.height - y));
+
+            Color32[] pixels;
+            if (!TryReadCpuRegion(texture, x, y, width, height, out pixels))
             {
-                iconCache[entry.Id] = raster;
-                return raster;
+                if (!allowGpuReadback) return IconBuildResult.DeferredForGpu;
+                if (!TryReadGpuRegion(texture, x, y, width, height, out pixels)) return IconBuildResult.Failed;
+                usedGpuReadback = true;
+                if (!gpuFallbackLogged)
+                {
+                    gpuFallbackLogged = true;
+                    log?.LogInfo("Creature catalog is using budgeted Unity-main-thread GPU readback for non-readable Futile atlases.");
+                }
             }
 
+            Downsample(ref pixels, ref width, ref height);
             raster.Width = width;
             raster.Height = height;
             raster.Runs = BuildRuns(pixels, width, height);
             raster.Available = raster.Runs.Length > 0;
+            return IconBuildResult.Ready;
         }
-        catch
+        catch (Exception error)
         {
-            raster.Available = false;
+            log?.LogWarning("Creature catalog icon failed for '" + entry.Id + "': " + error.Message);
+            return IconBuildResult.Failed;
         }
-
-        iconCache[entry.Id] = raster;
-        return raster;
     }
 
-    private static IconSymbol.IconSymbolData ResolveSandboxSymbol(CreatureTemplate.Type type)
+    private static bool TryReadCpuRegion(
+        Texture2D texture,
+        int x,
+        int y,
+        int width,
+        int height,
+        out Color32[] region)
     {
-        try
+        region = null;
+        if (texture == null) return false;
+        int key = texture.GetInstanceID();
+        if (unreadableAtlases.Contains(key)) return false;
+
+        if (!atlasPixels.TryGetValue(key, out AtlasPixels snapshot) ||
+            snapshot.Width != texture.width || snapshot.Height != texture.height)
         {
-            List<string> unlocks = ExtEnum<MultiplayerUnlocks.SandboxUnlockID>.values.entries;
-            for (int i = 0; i < unlocks.Count; i++)
+            Color32[] all;
+            try
             {
-                MultiplayerUnlocks.SandboxUnlockID unlock = new(unlocks[i]);
-                IconSymbol.IconSymbolData data = MultiplayerUnlocks.SymbolDataForSandboxUnlock(unlock);
-                if (data.itemType == AbstractPhysicalObject.AbstractObjectType.Creature && data.critType == type)
-                    return data;
+                all = texture.GetPixels32();
             }
+            catch
+            {
+                unreadableAtlases.Add(key);
+                return false;
+            }
+
+            if (all == null || all.Length != texture.width * texture.height)
+            {
+                unreadableAtlases.Add(key);
+                return false;
+            }
+
+            snapshot = new AtlasPixels
+            {
+                Width = texture.width,
+                Height = texture.height,
+                Pixels = all,
+                LastUseFrame = Time.frameCount,
+                Bytes = all.Length * 4
+            };
+            CacheAtlas(key, snapshot);
         }
-        catch
+        else
         {
-            // Some mods expose malformed/late sandbox ids. Falling back to intData=0 is exactly
-            // what CreatureSymbol expects for the standard form of most creature templates.
+            snapshot.LastUseFrame = Time.frameCount;
         }
-        return new IconSymbol.IconSymbolData(type, AbstractPhysicalObject.AbstractObjectType.Creature, 0);
+
+        if (snapshot.Pixels == null || snapshot.Pixels.Length != snapshot.Width * snapshot.Height) return false;
+        region = CopyRegion(snapshot.Pixels, snapshot.Width, snapshot.Height, x, y, width, height);
+        return region != null;
     }
 
-    private static bool TryReadPixels(
+    private static void CacheAtlas(int key, AtlasPixels snapshot)
+    {
+        if (snapshot.Bytes > MaxAtlasCacheBytes) return;
+        while (atlasCacheBytes + snapshot.Bytes > MaxAtlasCacheBytes && atlasPixels.Count > 0)
+        {
+            int oldestKey = 0;
+            int oldestFrame = int.MaxValue;
+            foreach (KeyValuePair<int, AtlasPixels> pair in atlasPixels)
+            {
+                if (pair.Value.LastUseFrame >= oldestFrame) continue;
+                oldestFrame = pair.Value.LastUseFrame;
+                oldestKey = pair.Key;
+            }
+            if (!atlasPixels.TryGetValue(oldestKey, out AtlasPixels oldest)) break;
+            atlasCacheBytes -= oldest.Bytes;
+            atlasPixels.Remove(oldestKey);
+        }
+
+        if (atlasPixels.TryGetValue(key, out AtlasPixels previous)) atlasCacheBytes -= previous.Bytes;
+        atlasPixels[key] = snapshot;
+        atlasCacheBytes += snapshot.Bytes;
+    }
+
+    private static Color32[] CopyRegion(
+        Color32[] source,
+        int sourceWidth,
+        int sourceHeight,
+        int x,
+        int y,
+        int width,
+        int height)
+    {
+        if (source == null || sourceWidth <= 0 || sourceHeight <= 0 || width <= 0 || height <= 0) return null;
+        if (x < 0 || y < 0 || x + width > sourceWidth || y + height > sourceHeight) return null;
+        Color32[] result = new Color32[width * height];
+        for (int row = 0; row < height; row++)
+            Array.Copy(source, (y + row) * sourceWidth + x, result, row * width, width);
+        return result;
+    }
+
+    private static bool TryReadGpuRegion(
         Texture2D texture,
         int x,
         int y,
@@ -433,21 +767,6 @@ internal static class WorldCreatureCatalogPicker
         out Color32[] pixels)
     {
         pixels = null;
-        try
-        {
-            Color[] colors = texture.GetPixels(x, y, width, height);
-            if (colors != null && colors.Length == width * height)
-            {
-                pixels = new Color32[colors.Length];
-                for (int i = 0; i < colors.Length; i++) pixels[i] = colors[i];
-                return true;
-            }
-        }
-        catch
-        {
-            // Continue through a tiny GPU readback; most Futile atlas textures are not CPU-readable.
-        }
-
         RenderTexture previous = RenderTexture.active;
         RenderTexture target = null;
         Texture2D readable = null;
@@ -478,8 +797,32 @@ internal static class WorldCreatureCatalogPicker
         }
     }
 
+    private static void Downsample(ref Color32[] pixels, ref int width, ref int height)
+    {
+        int max = Math.Max(width, height);
+        if (pixels == null || max <= MaxIconRasterDimension) return;
+
+        float scale = (float)MaxIconRasterDimension / max;
+        int nextWidth = Math.Max(1, Mathf.RoundToInt(width * scale));
+        int nextHeight = Math.Max(1, Mathf.RoundToInt(height * scale));
+        Color32[] next = new Color32[nextWidth * nextHeight];
+        for (int yy = 0; yy < nextHeight; yy++)
+        {
+            int sourceY = Math.Min(height - 1, (int)((long)yy * height / nextHeight));
+            for (int xx = 0; xx < nextWidth; xx++)
+            {
+                int sourceX = Math.Min(width - 1, (int)((long)xx * width / nextWidth));
+                next[yy * nextWidth + xx] = pixels[sourceY * width + sourceX];
+            }
+        }
+        pixels = next;
+        width = nextWidth;
+        height = nextHeight;
+    }
+
     private static PixelRun[] BuildRuns(Color32[] pixels, int width, int height)
     {
+        if (pixels == null || pixels.Length != width * height) return Array.Empty<PixelRun>();
         List<PixelRun> runs = new();
         for (int y = 0; y < height; y++)
         {
@@ -512,83 +855,168 @@ internal static class WorldCreatureCatalogPicker
         Math.Abs(a.b - b.b) <= 10 &&
         Math.Abs(a.a - b.a) <= 14;
 
-    private static void RefreshCatalog()
+    private static void EnsureCatalogMainThread()
     {
-        int currentCount = ExtEnum<CreatureTemplate.Type>.values.entries.Count;
-        int currentPlugins = Chainloader.PluginInfos.Count;
-        if (currentCount == catalogCount && currentPlugins == pluginCount && entries.Count > 0) return;
+        int creatureCount = ExtEnum<CreatureTemplate.Type>.values.entries.Count;
+        int pluginCount = Chainloader.PluginInfos.Count;
+        if (creatureCount == observedCreatureCount && pluginCount == observedPluginCount && catalog.Groups.Length > 0)
+            return;
 
-        catalogCount = currentCount;
-        pluginCount = currentPlugins;
-        entries.Clear();
-        groups.Clear();
+        observedCreatureCount = creatureCount;
+        observedPluginCount = pluginCount;
+        BeginCatalogRebuild();
+    }
+
+    private static void BeginCatalogRebuild()
+    {
         sourceByCreature.Clear();
         sourceLabelByKey.Clear();
-        iconCache.Clear();
+        sandboxSymbols.Clear();
+        registeredIds.Clear();
+        pluginSources.Clear();
+        pluginScanIndex = 0;
 
         CollectOfficialSources();
-        CollectPluginSources();
+        BuildSandboxSymbolMap();
 
         List<string> ids = ExtEnum<CreatureTemplate.Type>.values.entries;
         for (int i = 0; i < ids.Count; i++)
-        {
-            string id = ids[i];
-            if (string.IsNullOrWhiteSpace(id)) continue;
-            CreatureTemplate.Type type = new(id);
-            ResolveSource(id, out string sourceKey, out string sourceLabel);
-            CreatureEntry entry = new()
-            {
-                Id = id,
-                Type = type,
-                SourceKey = sourceKey,
-                SourceLabel = sourceLabel
-            };
-            entries.Add(entry);
-            SourceGroup group = FindOrCreateGroup(sourceKey, sourceLabel);
-            group.Entries.Add(entry);
-        }
+            if (!string.IsNullOrWhiteSpace(ids[i])) registeredIds.Add(ids[i]);
 
-        entries.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
-        for (int i = 0; i < groups.Count; i++)
-            groups[i].Entries.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
-        groups.Sort(CompareGroups);
-    }
-
-    private static void CollectOfficialSources()
-    {
-        CollectStaticCreatureIds(typeof(CreatureTemplate.Type), "official:vanilla", "Vanilla", overwrite: true);
-        Type downpour = FindLoadedType("MoreSlugcats.MoreSlugcatsEnums+CreatureTemplateType");
-        Type shared = FindLoadedType("DLCSharedEnums+CreatureTemplateType");
-        Type watcher = FindLoadedType("Watcher.WatcherEnums+CreatureTemplateType");
-        CollectStaticCreatureIds(downpour, "official:moreslugcats", "Downpour", overwrite: true);
-        CollectStaticCreatureIds(shared, "official:moreslugcats", "Downpour", overwrite: true);
-        CollectStaticCreatureIds(watcher, "official:watcher", "Watcher", overwrite: true);
-    }
-
-    private static void CollectPluginSources()
-    {
+        HashSet<Assembly> seenAssemblies = new();
         foreach (var pair in Chainloader.PluginInfos)
         {
             try
             {
                 var info = pair.Value;
                 Assembly assembly = info?.Instance?.GetType().Assembly;
-                if (assembly == null) continue;
+                if (assembly == null || !seenAssemblies.Add(assembly)) continue;
                 string label = info.Metadata?.Name;
                 if (string.IsNullOrWhiteSpace(label)) label = info.Metadata?.GUID;
                 if (string.IsNullOrWhiteSpace(label)) label = assembly.GetName().Name;
                 string key = "mod:" + (info.Metadata?.GUID ?? assembly.GetName().Name ?? label).Trim().ToLowerInvariant();
-                CollectAssemblyCreatureIds(assembly, key, label);
+                pluginSources.Add(new PluginSource { Assembly = assembly, Key = key, Label = label });
             }
             catch
             {
-                // A broken optional plugin must not remove the rest of the catalog.
             }
+        }
+
+        ResetIconsForCatalogChange();
+        PublishCatalogSnapshot();
+    }
+
+    private static void ScanNextPluginSource()
+    {
+        if (pluginScanIndex >= pluginSources.Count) return;
+        PluginSource source = pluginSources[pluginScanIndex++];
+        if (source?.Assembly == null) return;
+        if (CollectAssemblyCreatureIds(source.Assembly, source.Key, source.Label))
+            PublishCatalogSnapshot();
+    }
+
+    private static void BuildSandboxSymbolMap()
+    {
+        try
+        {
+            List<string> unlocks = ExtEnum<MultiplayerUnlocks.SandboxUnlockID>.values.entries;
+            for (int i = 0; i < unlocks.Count; i++)
+            {
+                try
+                {
+                    MultiplayerUnlocks.SandboxUnlockID unlock = new(unlocks[i]);
+                    IconSymbol.IconSymbolData data = MultiplayerUnlocks.SymbolDataForSandboxUnlock(unlock);
+                    if (data.itemType != AbstractPhysicalObject.AbstractObjectType.Creature || data.critType == null || string.IsNullOrWhiteSpace(data.critType.value))
+                        continue;
+                    if (!sandboxSymbols.ContainsKey(data.critType.value)) sandboxSymbols[data.critType.value] = data;
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
         }
     }
 
-    private static void CollectAssemblyCreatureIds(Assembly assembly, string sourceKey, string sourceLabel)
+    private static void PublishCatalogSnapshot()
     {
+        Dictionary<string, List<CreatureEntry>> grouped = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> groupLabels = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, CreatureEntry> byId = new(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < registeredIds.Count; i++)
+        {
+            string id = registeredIds[i];
+            CreatureTemplate.Type type = new(id);
+            ResolveSource(id, out string sourceKey, out string sourceLabel);
+            if (IsInternalCreatureId(id))
+            {
+                sourceKey = "internal:advanced";
+                sourceLabel = DevToolUiSettings.T("内部 / 高级", "INTERNAL / ADVANCED");
+            }
+
+            IconSymbol.IconSymbolData symbol = sandboxSymbols.TryGetValue(id, out IconSymbol.IconSymbolData mapped)
+                ? mapped
+                : new IconSymbol.IconSymbolData(type, AbstractPhysicalObject.AbstractObjectType.Creature, 0);
+            CreatureEntry entry = new()
+            {
+                Id = id,
+                Type = type,
+                SourceKey = sourceKey,
+                SourceLabel = sourceLabel,
+                Symbol = symbol
+            };
+            byId[id] = entry;
+            if (!grouped.TryGetValue(sourceKey, out List<CreatureEntry> list))
+            {
+                list = new List<CreatureEntry>();
+                grouped[sourceKey] = list;
+                groupLabels[sourceKey] = sourceLabel;
+            }
+            list.Add(entry);
+        }
+
+        List<SourceGroup> result = new();
+        foreach (KeyValuePair<string, List<CreatureEntry>> pair in grouped)
+        {
+            pair.Value.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+            result.Add(new SourceGroup
+            {
+                Key = pair.Key,
+                Label = groupLabels.TryGetValue(pair.Key, out string label) ? label : pair.Key,
+                Entries = pair.Value.ToArray()
+            });
+        }
+        result.Sort(CompareGroups);
+        catalog = new CatalogSnapshot { Groups = result.ToArray(), ById = byId };
+    }
+
+    private static void ResetIconsForCatalogChange()
+    {
+        lock (iconSync)
+        {
+            iconSlots.Clear();
+            iconRequests.Clear();
+            queuedIcons.Clear();
+        }
+        atlasPixels.Clear();
+        unreadableAtlases.Clear();
+        atlasCacheBytes = 0;
+    }
+
+    private static void CollectOfficialSources()
+    {
+        CollectStaticCreatureIds(typeof(CreatureTemplate.Type), "official:vanilla", "Vanilla", overwrite: true);
+        CollectStaticCreatureIds(FindLoadedType("MoreSlugcats.MoreSlugcatsEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true);
+        CollectStaticCreatureIds(FindLoadedType("DLCSharedEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true);
+        CollectStaticCreatureIds(FindLoadedType("Watcher.WatcherEnums+CreatureTemplateType"), "official:watcher", "Watcher", overwrite: true);
+    }
+
+    private static bool CollectAssemblyCreatureIds(Assembly assembly, string sourceKey, string sourceLabel)
+    {
+        bool changed = false;
         Type[] types;
         try
         {
@@ -600,20 +1028,27 @@ internal static class WorldCreatureCatalogPicker
         }
         catch
         {
-            return;
+            return false;
         }
 
         for (int i = 0; i < types.Length; i++)
         {
             Type type = types[i];
             if (type == null) continue;
-            CollectStaticCreatureIds(type, sourceKey, sourceLabel, overwrite: false);
+            if (CollectStaticCreatureIds(type, sourceKey, sourceLabel, overwrite: false)) changed = true;
         }
+        return changed;
     }
 
-    private static void CollectStaticCreatureIds(Type owner, string sourceKey, string sourceLabel, bool overwrite)
+    /// <summary>
+    /// Only static fields are inspected. Static properties are intentionally not invoked because a
+    /// property getter is executable mod code and opening an editor should never trigger arbitrary
+    /// third-party side effects merely to color a catalog header.
+    /// </summary>
+    private static bool CollectStaticCreatureIds(Type owner, string sourceKey, string sourceLabel, bool overwrite)
     {
-        if (owner == null) return;
+        if (owner == null) return false;
+        bool changed = false;
         const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
         try
         {
@@ -621,32 +1056,25 @@ internal static class WorldCreatureCatalogPicker
             for (int i = 0; i < fields.Length; i++)
             {
                 if (!typeof(CreatureTemplate.Type).IsAssignableFrom(fields[i].FieldType)) continue;
-                if (fields[i].GetValue(null) is CreatureTemplate.Type creature && !string.IsNullOrWhiteSpace(creature.value))
-                    AssignSource(creature.value, sourceKey, sourceLabel, overwrite);
-            }
-
-            PropertyInfo[] properties = owner.GetProperties(flags);
-            for (int i = 0; i < properties.Length; i++)
-            {
-                PropertyInfo property = properties[i];
-                if (!property.CanRead || property.GetIndexParameters().Length != 0 ||
-                    !typeof(CreatureTemplate.Type).IsAssignableFrom(property.PropertyType))
-                    continue;
-                if (property.GetValue(null, null) is CreatureTemplate.Type creature && !string.IsNullOrWhiteSpace(creature.value))
-                    AssignSource(creature.value, sourceKey, sourceLabel, overwrite);
+                if (fields[i].GetValue(null) is not CreatureTemplate.Type creature || string.IsNullOrWhiteSpace(creature.value)) continue;
+                if (AssignSource(creature.value, sourceKey, sourceLabel, overwrite)) changed = true;
             }
         }
         catch
         {
         }
+        return changed;
     }
 
-    private static void AssignSource(string creatureId, string key, string label, bool overwrite)
+    private static bool AssignSource(string creatureId, string key, string label, bool overwrite)
     {
-        if (string.IsNullOrWhiteSpace(creatureId)) return;
-        if (!overwrite && sourceByCreature.ContainsKey(creatureId)) return;
+        if (string.IsNullOrWhiteSpace(creatureId)) return false;
+        if (!overwrite && sourceByCreature.ContainsKey(creatureId)) return false;
+        bool changed = !sourceByCreature.TryGetValue(creatureId, out string oldKey) ||
+                       !string.Equals(oldKey, key, StringComparison.OrdinalIgnoreCase);
         sourceByCreature[creatureId] = key;
         sourceLabelByKey[key] = label;
+        return changed;
     }
 
     private static void ResolveSource(string creatureId, out string key, out string label)
@@ -660,14 +1088,10 @@ internal static class WorldCreatureCatalogPicker
         label = DevToolUiSettings.T("其他 Mod", "OTHER MODS");
     }
 
-    private static SourceGroup FindOrCreateGroup(string key, string label)
-    {
-        for (int i = 0; i < groups.Count; i++)
-            if (string.Equals(groups[i].Key, key, StringComparison.OrdinalIgnoreCase)) return groups[i];
-        SourceGroup created = new() { Key = key, Label = label };
-        groups.Add(created);
-        return created;
-    }
+    private static bool IsInternalCreatureId(string id) =>
+        string.Equals(id, "StandardGroundCreature", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(id, "StandardFly", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(id, "StandardPather", StringComparison.OrdinalIgnoreCase);
 
     private static int CompareGroups(SourceGroup a, SourceGroup b)
     {
@@ -682,6 +1106,8 @@ internal static class WorldCreatureCatalogPicker
         if (string.Equals(key, "official:vanilla", StringComparison.OrdinalIgnoreCase)) return 0;
         if (string.Equals(key, "official:moreslugcats", StringComparison.OrdinalIgnoreCase)) return 1;
         if (string.Equals(key, "official:watcher", StringComparison.OrdinalIgnoreCase)) return 2;
+        if (string.Equals(key, "mod:unknown", StringComparison.OrdinalIgnoreCase)) return 90;
+        if (string.Equals(key, "internal:advanced", StringComparison.OrdinalIgnoreCase)) return 100;
         return 10;
     }
 
@@ -705,7 +1131,7 @@ internal static class WorldCreatureCatalogPicker
     private static int CountMatching(SourceGroup group, string search)
     {
         int count = 0;
-        for (int i = 0; i < group.Entries.Count; i++)
+        for (int i = 0; i < group.Entries.Length; i++)
             if (Matches(group.Entries[i], group, search)) count++;
         return count;
     }
@@ -727,12 +1153,5 @@ internal static class WorldCreatureCatalogPicker
         for (int i = 0; i < value.Length && q < query.Length; i++)
             if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
         return q == query.Length;
-    }
-
-    private static CreatureEntry FindEntry(string creatureId)
-    {
-        for (int i = 0; i < entries.Count; i++)
-            if (string.Equals(entries[i].Id, creatureId, StringComparison.OrdinalIgnoreCase)) return entries[i];
-        return null;
     }
 }
