@@ -82,6 +82,11 @@ public static class MapEditorPresentationHub
     }
 
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
+    private static MapPage observedPage;
+    private static global::World observedWorld;
+    private static ulong observedFingerprint;
+    private static int observedWorldTextRevision = int.MinValue;
+    private static bool retainedValid;
 
     public static EditorMapPresentationSnapshot Current => current;
 
@@ -89,11 +94,25 @@ public static class MapEditorPresentationHub
     {
         if (session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page || page.world == null)
         {
-            current = EditorMapPresentationSnapshot.Empty;
+            if (retainedValid || !ReferenceEquals(current, EditorMapPresentationSnapshot.Empty))
+            {
+                current = EditorMapPresentationSnapshot.Empty;
+                ResetRetainedState();
+            }
             return;
         }
 
         MapEditorState state = MapEditorStateHub.Get(session);
+        ulong fingerprint = ComputePresentationFingerprint(session, page, state);
+        int worldTextRevision = WorldTextRegistry.Revision;
+        if (retainedValid &&
+            ReferenceEquals(observedPage, page) &&
+            ReferenceEquals(observedWorld, page.world) &&
+            observedFingerprint == fingerprint &&
+            observedWorldTextRevision == worldTextRevision &&
+            current.Available)
+            return;
+
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
         Dictionary<string, int> roomIndexByName = new(StringComparer.OrdinalIgnoreCase);
@@ -131,8 +150,12 @@ public static class MapEditorPresentationHub
             });
         }
 
+        bool correctedSelection = false;
         if (state.SelectedRoomIndex >= 0 && !roomIndices.Contains(state.SelectedRoomIndex))
+        {
             state.SelectedRoomIndex = -1;
+            correctedSelection = true;
+        }
 
         List<EditorMapConnectionSnapshot> connections = BuildConnections(
             page.world,
@@ -148,6 +171,90 @@ public static class MapEditorPresentationHub
             Rooms = rooms.ToArray(),
             Connections = connections.ToArray()
         };
+
+        observedPage = page;
+        observedWorld = page.world;
+        observedFingerprint = correctedSelection
+            ? ComputePresentationFingerprint(session, page, state)
+            : fingerprint;
+        // BuildConnections may lazily load world.txt for exact target-node resolution. Capture the
+        // post-build revision so that first load does not cause an unnecessary second rebuild.
+        observedWorldTextRevision = WorldTextRegistry.Revision;
+        retainedValid = true;
+    }
+
+    /// <summary>
+    /// Stable Map frames only execute this allocation-free signature scan. It deliberately hashes
+    /// every source value used by the presentation snapshot so the expensive room/node/connection
+    /// object graph is rebuilt only after a semantic or visual change.
+    /// </summary>
+    private static ulong ComputePresentationFingerprint(
+        EditorSession session,
+        MapPage page,
+        MapEditorState state)
+    {
+        unchecked
+        {
+            ulong hash = 1469598103934665603UL;
+            hash = Mix(hash, StringHash(page.world?.name));
+            hash = Mix(hash, state?.SelectedRoomIndex ?? -1);
+            hash = Mix(hash, session?.Room?.abstractRoom?.index ?? -1);
+
+            var disabled = page.world?.DisabledMapRooms;
+            hash = Mix(hash, disabled?.Count ?? 0);
+            if (disabled != null)
+            {
+                for (int i = 0; i < disabled.Count; i++)
+                    hash = Mix(hash, StringHash(disabled[i]));
+            }
+
+            hash = Mix(hash, page.subNodes?.Count ?? 0);
+            if (page.subNodes == null) return hash;
+            for (int i = 0; i < page.subNodes.Count; i++)
+            {
+                if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
+                AbstractRoom room = panel.roomRep.room;
+                hash = Mix(hash, room.index);
+                hash = Mix(hash, StringHash(room.name));
+                hash = Mix(hash, panel.devPos.x.GetHashCode());
+                hash = Mix(hash, panel.devPos.y.GetHashCode());
+                hash = Mix(hash, panel.layer);
+                hash = Mix(hash, StringHash(room.subregionName));
+                hash = Mix(hash, room.offScreenDen ? 1 : 0);
+
+                AbstractRoomNode[] nodes = room.nodes;
+                hash = Mix(hash, nodes?.Length ?? 0);
+                if (nodes != null)
+                {
+                    for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
+                        hash = Mix(hash, StringHash(nodes[nodeIndex].type?.value));
+                }
+
+                int[] connections = room.connections;
+                hash = Mix(hash, connections?.Length ?? 0);
+                if (connections != null)
+                {
+                    for (int connectionIndex = 0; connectionIndex < connections.Length; connectionIndex++)
+                        hash = Mix(hash, connections[connectionIndex]);
+                }
+            }
+            return hash;
+        }
+    }
+
+    private static ulong Mix(ulong hash, int value) =>
+        unchecked((hash ^ (uint)value) * 1099511628211UL);
+
+    private static int StringHash(string value) =>
+        string.IsNullOrEmpty(value) ? 0 : StringComparer.Ordinal.GetHashCode(value);
+
+    private static void ResetRetainedState()
+    {
+        observedPage = null;
+        observedWorld = null;
+        observedFingerprint = 0UL;
+        observedWorldTextRevision = int.MinValue;
+        retainedValid = false;
     }
 
     private static EditorMapRoomNodeSnapshot[] BuildNodes(AbstractRoom room)
@@ -386,7 +493,11 @@ public static class MapEditorPresentationHub
         "legacy:" + aRoom + ":" + aNode + ":" + bRoom + ":" + bNode + ":" +
         (bidirectional ? "both" : "oneway");
 
-    internal static void Clear() => current = EditorMapPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorMapPresentationSnapshot.Empty;
+        ResetRetainedState();
+    }
 }
 
 public enum MapEditorCommandKind
