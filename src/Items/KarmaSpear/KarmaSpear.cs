@@ -8,6 +8,9 @@ namespace DryCycle.Items.KarmaSpear;
 
 internal sealed class KarmaSpear : Spear
 {
+    internal const int SimulationTicksPerSecond = 40;
+    private const int SecondsPerStoredKarmaUse = 5;
+
     private const int ExtraSpriteCount = 12;
     private const int HaloMeshOffset = 0;
     private const int BodyMeshOffset = 1;
@@ -20,9 +23,6 @@ internal sealed class KarmaSpear : Spear
     private const int RuneStartOffset = 8;
     private const float TipAxial = 31f;
 
-    // The visible weapon is not the vanilla SmallSpear with effects layered on top.
-    // This profile defines a complete karmic relic silhouette: sealed tail, narrow shaft,
-    // expanded ritual collar, broad crown and long faceted spearhead.
     private static readonly float[] BodyAxial =
     {
         -29f, -25f, -21f, -15f, -10f, -6f, 5f, 10f, 14f, 18f, 24f, TipAxial
@@ -39,6 +39,7 @@ internal sealed class KarmaSpear : Spear
     };
 
     private KarmaSpearField _wallField;
+    private bool _wallDeploymentConsumed;
     private bool _creatureEffectStarted;
     private int _trailCounter;
     private int _chargeGeneration;
@@ -50,9 +51,16 @@ internal sealed class KarmaSpear : Spear
 
     private AbstractKarmaSpear KarmaAbstract => abstractPhysicalObject as AbstractKarmaSpear;
 
-    internal int KarmaLevel => KarmaAbstract?.KarmaLevel ?? 1;
-    internal bool IsSpent => KarmaAbstract?.Spent != false;
+    internal int KarmaLevel => Mathf.Clamp(KarmaAbstract?.KarmaLevel ?? 0, 0, 10);
+    internal bool IsSpent => KarmaAbstract == null || KarmaAbstract.Spent || KarmaLevel <= 0;
     internal int ChargeGeneration => _chargeGeneration;
+
+    internal static int DurationTicksForStoredKarma(int activationKarmaLevel)
+    {
+        return Mathf.Clamp(activationKarmaLevel, 1, 10) *
+               SecondsPerStoredKarmaUse *
+               SimulationTicksPerSecond;
+    }
 
     public override void Update(bool eu)
     {
@@ -64,9 +72,31 @@ internal sealed class KarmaSpear : Spear
             return;
         }
 
-        if (IsSpent)
+        if (mode == Mode.StuckInWall)
+        {
+            if (_wallField != null && _wallField.slatedForDeletetion)
+            {
+                _wallField = null;
+            }
+
+            if (!_wallDeploymentConsumed && !IsSpent)
+            {
+                StartWallField();
+            }
+
+            _trailCounter = 0;
+            return;
+        }
+
+        if (_wallField != null)
         {
             StopWallField();
+        }
+        _wallDeploymentConsumed = false;
+
+        if (IsSpent)
+        {
+            _trailCounter = 0;
             return;
         }
 
@@ -88,15 +118,6 @@ internal sealed class KarmaSpear : Spear
         else
         {
             _trailCounter = 0;
-        }
-
-        if (mode == Mode.StuckInWall)
-        {
-            StartWallField();
-        }
-        else if (_wallField != null)
-        {
-            StopWallField();
         }
     }
 
@@ -136,69 +157,86 @@ internal sealed class KarmaSpear : Spear
         Mode oldMode = mode;
         base.ChangeMode(newMode);
 
-        if (IsSpent)
+        if (newMode == Mode.StuckInWall)
         {
-            StopWallField();
+            if (oldMode != Mode.StuckInWall)
+            {
+                _wallDeploymentConsumed = false;
+            }
+
+            if (!IsSpent)
+            {
+                StartWallField();
+            }
             return;
         }
 
-        if (newMode == Mode.StuckInWall)
-        {
-            StartWallField();
-        }
-        else if (oldMode == Mode.StuckInWall && newMode != Mode.StuckInWall)
+        if (oldMode == Mode.StuckInWall)
         {
             StopWallField();
+            _wallDeploymentConsumed = false;
         }
     }
 
     private void ActivateCreatureResponse(Creature creature, Vector2 hitPosition)
     {
+        if (!TryConsumeStoredKarma(out int activationKarmaLevel))
+        {
+            return;
+        }
+
         _creatureEffectStarted = true;
         StopWallField();
 
+        int activationGeneration = _chargeGeneration;
         KarmicTargetProfile profile = KarmicTargetClassifier.Classify(creature);
         float pulseRadius = profile.ResponseClass == KarmicResponseClass.Colossal
-            ? 118f + KarmaLevel * 4f
-            : 82f + KarmaLevel * 3f;
+            ? 118f + activationKarmaLevel * 4f
+            : 82f + activationKarmaLevel * 3f;
 
-        KarmicVisualEffects.SpawnImpactPulse(this, hitPosition, KarmaLevel, pulseRadius);
+        KarmicVisualEffects.SpawnImpactPulse(this, hitPosition, activationKarmaLevel, pulseRadius);
         room?.PlaySound(WatcherEnums.WatcherSoundID.Templar_Shield_Deflect, firstChunk);
 
         if (profile.IsFragile)
         {
             creature.Die();
-            MarkSpent();
+            CompleteCreatureEffect(activationGeneration, creature, dropFromCreature: true);
             return;
         }
 
-        // All surviving creature targets now share one karmic rule: local time stop.
-        // The target profile remains useful for duration and safe release tuning, but no
-        // creature is pushed around by springs, leashes or repeated directional impulses.
-        room?.AddObject(new KarmicTimeStopEffect(this, creature, profile));
-
-        // The time-stop effect owns the karma countdown and consumes this charge when the
-        // stopped interval ends. Bouncing or pulling the physical spear out does not cancel
-        // an already established temporal intervention.
+        room?.AddObject(new KarmicTimeStopEffect(
+            this,
+            creature,
+            profile,
+            activationKarmaLevel,
+            activationGeneration));
     }
 
     private void StartWallField()
     {
-        if (IsSpent || room == null || mode != Mode.StuckInWall)
+        if (room == null ||
+            mode != Mode.StuckInWall ||
+            _wallDeploymentConsumed ||
+            (_wallField != null && !_wallField.slatedForDeletetion))
         {
             return;
         }
 
-        if (_wallField != null && !_wallField.slatedForDeletetion)
+        if (!TryConsumeStoredKarma(out int activationKarmaLevel))
         {
             return;
         }
+
+        _wallDeploymentConsumed = true;
 
         room.PlaySound(WatcherEnums.WatcherSoundID.Templar_Shield_Deflect, firstChunk);
-        KarmicVisualEffects.SpawnImpactPulse(this, firstChunk.pos, KarmaLevel, 96f);
+        KarmicVisualEffects.SpawnImpactPulse(this, firstChunk.pos, activationKarmaLevel, 96f);
         KarmicVisualEffects.SpawnSparks(room, firstChunk.pos, 12, 4.2f);
 
-        _wallField = new KarmaSpearField(this);
+        _wallField = new KarmaSpearField(
+            this,
+            activationKarmaLevel,
+            DurationTicksForStoredKarma(activationKarmaLevel));
         room.AddObject(_wallField);
     }
 
@@ -216,22 +254,60 @@ internal sealed class KarmaSpear : Spear
         _wallField = null;
     }
 
+    internal bool TryConsumeStoredKarma(out int activationKarmaLevel)
+    {
+        activationKarmaLevel = 0;
+        if (KarmaAbstract == null || KarmaAbstract.Spent || KarmaAbstract.KarmaLevel <= 0)
+        {
+            return false;
+        }
+
+        activationKarmaLevel = Mathf.Clamp(KarmaAbstract.KarmaLevel, 1, 10);
+        KarmaAbstract.KarmaLevel = activationKarmaLevel - 1;
+        KarmaAbstract.Spent = KarmaAbstract.KarmaLevel <= 0;
+        _chargeGeneration++;
+        return true;
+    }
+
+    internal void CompleteCreatureEffect(
+        int expectedChargeGeneration,
+        PhysicalObject expectedTarget,
+        bool dropFromCreature)
+    {
+        if (expectedChargeGeneration != _chargeGeneration)
+        {
+            return;
+        }
+
+        if (dropFromCreature &&
+            mode == Mode.StuckInCreature &&
+            (expectedTarget == null || ReferenceEquals(stuckInObject, expectedTarget)))
+        {
+            ChangeMode(Mode.Free);
+            firstChunk.vel *= 0.35f;
+            firstChunk.vel.y = Mathf.Min(firstChunk.vel.y, -1.2f);
+        }
+
+        _creatureEffectStarted = false;
+    }
+
     internal void MarkSpent()
     {
-        if (KarmaAbstract == null || KarmaAbstract.Spent)
+        if (KarmaAbstract == null)
         {
             return;
         }
 
         StopWallField();
+        KarmaAbstract.KarmaLevel = 0;
         KarmaAbstract.Spent = true;
-        KarmicVisualEffects.SpawnImpactPulse(this, firstChunk.pos, KarmaLevel, 54f);
+        KarmicVisualEffects.SpawnImpactPulse(this, firstChunk.pos, 1, 54f);
         KarmicVisualEffects.SpawnSparks(room, firstChunk.pos, 8, 4f);
     }
 
     internal void MarkSpent(int expectedChargeGeneration)
     {
-        if (expectedChargeGeneration != _chargeGeneration)
+        if (expectedChargeGeneration != _chargeGeneration || KarmaLevel > 0)
         {
             return;
         }
@@ -239,21 +315,16 @@ internal sealed class KarmaSpear : Spear
         MarkSpent();
     }
 
+    // Kept for source compatibility with the retired binding/disruption effects. Active
+    // effects no longer rewrite the spear's stored charge over time; one point is consumed
+    // atomically when an activation begins.
     internal void SetActiveEffectKarmaLevel(int expectedChargeGeneration, int karmaLevel)
     {
-        if (expectedChargeGeneration != _chargeGeneration ||
-            KarmaAbstract == null ||
-            KarmaAbstract.Spent)
-        {
-            return;
-        }
-
-        KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
     }
 
     internal bool Recharge(int karmaLevel)
     {
-        if (KarmaAbstract == null || !KarmaAbstract.Spent)
+        if (KarmaAbstract == null || !IsSpent)
         {
             return false;
         }
@@ -261,6 +332,7 @@ internal sealed class KarmaSpear : Spear
         StopWallField();
         KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
         KarmaAbstract.Spent = false;
+        _wallDeploymentConsumed = false;
         _creatureEffectStarted = false;
         _trailCounter = 0;
         _chargeGeneration++;
@@ -276,8 +348,6 @@ internal sealed class KarmaSpear : Spear
         Array.Copy(sLeaser.sprites, sprites, baseCount);
         sLeaser.sprites = sprites;
 
-        // Three complete geometry layers form the actual weapon. The vanilla spear sprite
-        // stays only as a hidden compatibility sprite for inherited rendering code.
         sLeaser.sprites[baseCount + HaloMeshOffset] = MakeStripMesh(BodyAxial.Length);
         sLeaser.sprites[baseCount + BodyMeshOffset] = MakeStripMesh(BodyAxial.Length);
         sLeaser.sprites[baseCount + CoreMeshOffset] = MakeStripMesh(BodyAxial.Length);
@@ -364,10 +434,10 @@ internal sealed class KarmaSpear : Spear
         float pulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.12f + KarmaLevel * 0.71f);
         float slowPulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.055f + 1.35f);
         bool active = !IsSpent;
-        bool wallAnchored = active && mode == Mode.StuckInWall;
+        bool wallAnchored = active && _wallField != null && !_wallField.slatedForDeletetion;
+        float storedFraction = Mathf.Clamp01(KarmaLevel / 10f);
+        float lightStrength = active ? Mathf.Lerp(0.22f, 1f, storedFraction) : 0f;
 
-        // The inherited SmallSpear is deliberately invisible. All visible mass below is
-        // custom geometry, so the design still reads as Karma Spear with every effect off.
         sLeaser.sprites[0].alpha = 0f;
 
         TriangleMesh halo = (TriangleMesh)sLeaser.sprites[baseCount + HaloMeshOffset];
@@ -393,27 +463,31 @@ internal sealed class KarmaSpear : Spear
             float seal = 1f - Mathf.Clamp01(Mathf.Abs(BodyAxial[i] - 14f) / 18f);
 
             Color bodyColor = active
-                ? Color.Lerp(deepGold, Color.Lerp(gold, paleGold, blade * 0.62f), 0.30f + seal * 0.28f)
+                ? Color.Lerp(deepGold, Color.Lerp(gold, paleGold, blade * 0.62f),
+                    (0.30f + seal * 0.28f) * Mathf.Lerp(0.55f, 1f, lightStrength))
                 : Color.Lerp(deadMetal, deadEdge, blade * 0.45f + seal * 0.18f);
             SetSectionColor(body, i, bodyColor, 1f);
 
             Color coreColor = active
                 ? Color.Lerp(gold, Color.white, 0.42f + blade * 0.38f)
                 : Color.Lerp(deadMetal, deadEdge, 0.28f);
-            SetSectionColor(core, i, coreColor, active ? Mathf.Lerp(0.52f, 0.92f, pulse) : 0.22f);
+            SetSectionColor(
+                core,
+                i,
+                coreColor,
+                active ? Mathf.Lerp(0.52f, 0.92f, pulse) * lightStrength : 0.22f);
 
             SetSectionColor(
                 halo,
                 i,
                 active ? paleGold : deadMetal,
-                active ? Mathf.Lerp(0.035f, wallAnchored ? 0.16f : 0.10f, pulse) : 0f);
+                active
+                    ? Mathf.Lerp(0.035f, wallAnchored ? 0.16f : 0.10f, pulse) * lightStrength
+                    : 0f);
         }
 
-        SetCrownColors(crown, active, wallAnchored, pulse, gold, paleGold, deadEdge);
+        SetCrownColors(crown, active, wallAnchored, pulse, lightStrength, gold, paleGold, deadEdge);
 
-        // Move the front seal toward the blade instead of letting it sit on the collar.
-        // Its two vector rings are intentionally faint and separated so they read as a
-        // thin karmic aperture rather than one thick glowing disc.
         Vector2 sealCenter = visualCenter + direction * 19.5f;
         FSprite outerSeal = sLeaser.sprites[baseCount + SealOuterOffset];
         FSprite innerSeal = sLeaser.sprites[baseCount + SealInnerOffset];
@@ -422,12 +496,16 @@ internal sealed class KarmaSpear : Spear
 
         SetSpritePosition(outerSeal, sealCenter, camPos);
         outerSeal.scale = Mathf.Lerp(1.18f, wallAnchored ? 1.72f : 1.48f, pulse);
-        outerSeal.alpha = active ? Mathf.Lerp(0.065f, wallAnchored ? 0.22f : 0.145f, pulse) : 0.035f;
+        outerSeal.alpha = active
+            ? Mathf.Lerp(0.065f, wallAnchored ? 0.22f : 0.145f, pulse) * lightStrength
+            : 0.035f;
         outerSeal.color = active ? gold : deadEdge;
 
         SetSpritePosition(innerSeal, sealCenter, camPos);
         innerSeal.scale = Mathf.Lerp(0.40f, wallAnchored ? 0.70f : 0.58f, slowPulse);
-        innerSeal.alpha = active ? Mathf.Lerp(0.12f, wallAnchored ? 0.34f : 0.25f, slowPulse) : 0.04f;
+        innerSeal.alpha = active
+            ? Mathf.Lerp(0.12f, wallAnchored ? 0.34f : 0.25f, slowPulse) * lightStrength
+            : 0.04f;
         innerSeal.color = active ? paleGold : deadEdge;
 
         string karmaGlyphName = CurrentKarmaGlyphName();
@@ -438,17 +516,19 @@ internal sealed class KarmaSpear : Spear
         SetSpritePosition(glyph, sealCenter, camPos);
         glyph.rotation = -clock * (wallAnchored ? 0.18f : 0.30f);
         glyph.scale = Mathf.Lerp(0.18f, wallAnchored ? 0.28f : 0.24f, pulse);
-        glyph.alpha = active ? Mathf.Lerp(0.50f, wallAnchored ? 0.92f : 0.78f, pulse) : 0.10f;
+        glyph.alpha = active
+            ? Mathf.Lerp(0.50f, wallAnchored ? 0.92f : 0.78f, pulse) * lightStrength
+            : 0.10f;
         glyph.color = active ? Color.Lerp(Color.white, gold, 0.48f) : deadEdge;
 
         Vector2 tailCenter = visualCenter + direction * -25f;
         SetSpritePosition(tailSeal, tailCenter, camPos);
         tailSeal.scale = Mathf.Lerp(0.42f, active ? 0.68f : 0.52f, slowPulse);
-        tailSeal.alpha = active ? Mathf.Lerp(0.12f, 0.26f, slowPulse) : 0.07f;
+        tailSeal.alpha = active
+            ? Mathf.Lerp(0.12f, 0.26f, slowPulse) * lightStrength
+            : 0.07f;
         tailSeal.color = active ? gold : deadEdge;
 
-        // These are engraved cross-strokes in the shaft, not free particles. They remain
-        // visible on a spent spear as dark ritual cuts, preserving the relic identity.
         float[] runeAxial = { -16.5f, -8.8f, -0.5f, 7.2f };
         float rotationDeg = Custom.AimFromOneVectorToAnother(Vector2.zero, direction);
         for (int i = 0; i < 4; i++)
@@ -461,7 +541,10 @@ internal sealed class KarmaSpear : Spear
             rune.scaleY = 4.8f + i * 0.45f;
             rune.color = active ? Color.Lerp(gold, Color.white, 0.24f + i * 0.06f) : deadEdge;
             rune.alpha = active
-                ? Mathf.Lerp(0.50f, wallAnchored ? 0.90f : 0.72f, 0.5f + 0.5f * Mathf.Sin(clock * 0.10f + i))
+                ? Mathf.Lerp(
+                    0.50f,
+                    wallAnchored ? 0.90f : 0.72f,
+                    0.5f + 0.5f * Mathf.Sin(clock * 0.10f + i)) * lightStrength
                 : 0.42f;
         }
     }
@@ -512,8 +595,6 @@ internal sealed class KarmaSpear : Spear
         Vector2 perpendicular,
         Vector2 camPos)
     {
-        // Four angular plates wrap the central Karma seal. Their mirrored shape echoes
-        // the rotational symmetry of Karma glyphs instead of conventional spear guards.
         SetCrownTriangle(mesh, 0, center, direction, perpendicular, camPos,
             8.5f, 1.6f, 9.4f, 7.4f, 14.0f, 4.7f);
         SetCrownTriangle(mesh, 3, center, direction, perpendicular, camPos,
@@ -559,6 +640,7 @@ internal sealed class KarmaSpear : Spear
         bool active,
         bool wallAnchored,
         float pulse,
+        float lightStrength,
         Color gold,
         Color paleGold,
         Color deadEdge)
@@ -568,7 +650,10 @@ internal sealed class KarmaSpear : Spear
             int start = triangle * 3;
             Color root = active ? Color.Lerp(gold, paleGold, 0.16f) : deadEdge;
             Color edge = active ? Color.Lerp(gold, paleGold, 0.62f) : deadEdge;
-            float alpha = active ? Mathf.Lerp(0.78f, wallAnchored ? 1f : 0.94f, pulse) : 0.52f;
+            float alpha = active
+                ? Mathf.Lerp(0.78f, wallAnchored ? 1f : 0.94f, pulse) *
+                  Mathf.Lerp(0.48f, 1f, lightStrength)
+                : 0.52f;
             root.a = alpha;
             edge.a = alpha;
             mesh.verticeColors[start] = root;
