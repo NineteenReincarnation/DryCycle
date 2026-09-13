@@ -8,7 +8,35 @@ namespace DryCycle.Items.KarmaSpear;
 
 internal sealed class KarmaSpear : Spear
 {
-    private const int ExtraSpriteCount = 14;
+    private const int ExtraSpriteCount = 12;
+    private const int HaloMeshOffset = 0;
+    private const int BodyMeshOffset = 1;
+    private const int CoreMeshOffset = 2;
+    private const int CrownMeshOffset = 3;
+    private const int SealOuterOffset = 4;
+    private const int SealInnerOffset = 5;
+    private const int GlyphOffset = 6;
+    private const int TailSealOffset = 7;
+    private const int RuneStartOffset = 8;
+    private const float TipAxial = 31f;
+
+    // The visible weapon is not the vanilla SmallSpear with effects layered on top.
+    // This profile defines a complete karmic relic silhouette: sealed tail, narrow shaft,
+    // expanded ritual collar, broad crown and long faceted spearhead.
+    private static readonly float[] BodyAxial =
+    {
+        -29f, -25f, -21f, -15f, -10f, -6f, 5f, 10f, 14f, 18f, 24f, TipAxial
+    };
+
+    private static readonly float[] BodyHalfWidth =
+    {
+        0.25f, 2.8f, 1.15f, 1.30f, 3.05f, 1.35f, 1.45f, 2.75f, 5.15f, 3.75f, 2.35f, 0.10f
+    };
+
+    private static readonly float[] CoreHalfWidth =
+    {
+        0.05f, 0.75f, 0.42f, 0.48f, 0.88f, 0.48f, 0.52f, 0.82f, 1.28f, 1.02f, 0.62f, 0.04f
+    };
 
     private KarmaSpearField _wallField;
     private bool _bindingStarted;
@@ -120,8 +148,6 @@ internal sealed class KarmaSpear : Spear
         }
         else if (oldMode == Mode.StuckInWall && newMode != Mode.StuckInWall)
         {
-            // Pulling the spear back out is free. Wall anchoring is a reusable stance,
-            // not the one-shot karmic discharge.
             StopWallField();
         }
     }
@@ -149,8 +175,6 @@ internal sealed class KarmaSpear : Spear
 
         if (!lodged)
         {
-            // The target still receives the short pin, but a spear that bounced or was
-            // rejected by armor cannot remain charged and strike a second target.
             MarkSpent();
         }
     }
@@ -236,9 +260,6 @@ internal sealed class KarmaSpear : Spear
         StopWallField();
         KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
         KarmaAbstract.Spent = false;
-
-        // A spent spear may still carry runtime flags from its previous discharge.
-        // Recharging starts a genuinely new charge cycle rather than merely relighting it.
         _bindingStarted = false;
         _trailCounter = 0;
         _chargeGeneration++;
@@ -254,24 +275,49 @@ internal sealed class KarmaSpear : Spear
         Array.Copy(sLeaser.sprites, sprites, baseCount);
         sLeaser.sprites = sprites;
 
-        // Layered silhouette: dark vanilla body + gold shell + pale inner core.
-        sLeaser.sprites[baseCount] = new FSprite("SmallSpear");
-        sLeaser.sprites[baseCount + 1] = new FSprite("SmallSpear");
+        // Three complete geometry layers form the actual weapon. The vanilla spear sprite
+        // stays only as a hidden compatibility sprite for inherited rendering code.
+        sLeaser.sprites[baseCount + HaloMeshOffset] = MakeStripMesh(BodyAxial.Length);
+        sLeaser.sprites[baseCount + BodyMeshOffset] = MakeStripMesh(BodyAxial.Length);
+        sLeaser.sprites[baseCount + CoreMeshOffset] = MakeStripMesh(BodyAxial.Length);
+        sLeaser.sprites[baseCount + CrownMeshOffset] = MakeCrownMesh();
 
-        sLeaser.sprites[baseCount + 2] = MakeVectorCircle(rCam);
-        sLeaser.sprites[baseCount + 3] = MakeVectorCircle(rCam);
-        sLeaser.sprites[baseCount + 4] = new FSprite(
-            global::HUD.KarmaMeter.KarmaSymbolSprite(
-                small: false,
-                new IntVector2(Mathf.Clamp(KarmaLevel - 1, 0, 9), Mathf.Clamp(KarmaLevel - 1, 0, 9))));
+        sLeaser.sprites[baseCount + SealOuterOffset] = MakeVectorCircle(rCam);
+        sLeaser.sprites[baseCount + SealInnerOffset] = MakeVectorCircle(rCam);
+        sLeaser.sprites[baseCount + GlyphOffset] = new FSprite(CurrentKarmaGlyphName());
+        sLeaser.sprites[baseCount + TailSealOffset] = MakeVectorCircle(rCam);
 
-        for (int i = 5; i <= 12; i++)
+        for (int i = 0; i < 4; i++)
         {
-            sLeaser.sprites[baseCount + i] = new FSprite("pixel");
+            sLeaser.sprites[baseCount + RuneStartOffset + i] = new FSprite("pixel");
         }
 
-        sLeaser.sprites[baseCount + 13] = MakeVectorCircle(rCam);
         AddToContainer(sLeaser, rCam, null);
+    }
+
+    private static TriangleMesh MakeStripMesh(int sections)
+    {
+        TriangleMesh.Triangle[] triangles = new TriangleMesh.Triangle[(sections - 1) * 2];
+        for (int i = 0; i < sections - 1; i++)
+        {
+            int vertex = i * 2;
+            triangles[i * 2] = new TriangleMesh.Triangle(vertex, vertex + 1, vertex + 2);
+            triangles[i * 2 + 1] = new TriangleMesh.Triangle(vertex + 1, vertex + 3, vertex + 2);
+        }
+
+        return new TriangleMesh("Futile_White", triangles, customColor: true);
+    }
+
+    private static TriangleMesh MakeCrownMesh()
+    {
+        TriangleMesh.Triangle[] triangles =
+        {
+            new(0, 1, 2),
+            new(3, 4, 5),
+            new(6, 7, 8),
+            new(9, 10, 11)
+        };
+        return new TriangleMesh("Futile_White", triangles, customColor: true);
     }
 
     private static FSprite MakeVectorCircle(RoomCamera rCam)
@@ -296,7 +342,12 @@ internal sealed class KarmaSpear : Spear
             return;
         }
 
-        Vector2 center = Vector2.Lerp(firstChunk.lastPos, firstChunk.pos, timeStacker);
+        Vector2 chunkCenter = Vector2.Lerp(firstChunk.lastPos, firstChunk.pos, timeStacker);
+        if (vibrate > 0)
+        {
+            chunkCenter += Custom.DegToVec(UnityEngine.Random.value * 360f) * (2f * UnityEngine.Random.value);
+        }
+
         Vector3 slerped = Vector3.Slerp(lastRotation, rotation, timeStacker);
         Vector2 direction = new(slerped.x, slerped.y);
         if (direction.sqrMagnitude < 0.001f)
@@ -306,130 +357,220 @@ internal sealed class KarmaSpear : Spear
         direction.Normalize();
         Vector2 perpendicular = new(-direction.y, direction.x);
 
-        FSprite baseSprite = sLeaser.sprites[0];
-        float rotationDeg = baseSprite.rotation;
-        float clock = room?.game?.clock ?? 0;
-        float pulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.13f + KarmaLevel * 0.73f);
-        float secondaryPulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.075f + 1.7f);
-        bool wallAnchored = !IsSpent && mode == Mode.StuckInWall;
-
         float tipDistance = Mathf.Lerp(lastPivotAtTip ? 7f : 26f, pivotAtTip ? 7f : 26f, timeStacker);
-        Vector2 tip = center + direction * tipDistance;
-        Vector2 tail = center - direction * 18f;
+        Vector2 visualCenter = chunkCenter + direction * (tipDistance - TipAxial);
+        float clock = room?.game?.clock ?? 0;
+        float pulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.12f + KarmaLevel * 0.71f);
+        float slowPulse = 0.5f + 0.5f * Mathf.Sin(clock * 0.055f + 1.35f);
+        bool active = !IsSpent;
+        bool wallAnchored = active && mode == Mode.StuckInWall;
 
-        FSprite shell = sLeaser.sprites[baseCount];
-        FSprite core = sLeaser.sprites[baseCount + 1];
-        CopySpearTransform(baseSprite, shell);
-        CopySpearTransform(baseSprite, core);
+        // The inherited SmallSpear is deliberately invisible. All visible mass below is
+        // custom geometry, so the design still reads as Karma Spear with every effect off.
+        sLeaser.sprites[0].alpha = 0f;
 
-        if (!IsSpent)
+        TriangleMesh halo = (TriangleMesh)sLeaser.sprites[baseCount + HaloMeshOffset];
+        TriangleMesh body = (TriangleMesh)sLeaser.sprites[baseCount + BodyMeshOffset];
+        TriangleMesh core = (TriangleMesh)sLeaser.sprites[baseCount + CoreMeshOffset];
+        TriangleMesh crown = (TriangleMesh)sLeaser.sprites[baseCount + CrownMeshOffset];
+
+        SetStripGeometry(halo, visualCenter, direction, perpendicular, camPos, BodyHalfWidth, 1.18f, 0.65f);
+        SetStripGeometry(body, visualCenter, direction, perpendicular, camPos, BodyHalfWidth, 1f, 0f);
+        SetStripGeometry(core, visualCenter, direction, perpendicular, camPos, CoreHalfWidth, 1f, 0f);
+        SetCrownGeometry(crown, visualCenter, direction, perpendicular, camPos);
+
+        Color gold = KarmicVisualEffects.Gold;
+        Color paleGold = Color.Lerp(gold, Color.white, 0.72f);
+        Color deepGold = Color.Lerp(new Color(0.12f, 0.09f, 0.035f), gold, 0.38f);
+        Color deadMetal = Color.Lerp(new Color(0.055f, 0.052f, 0.045f), gold, 0.12f);
+        Color deadEdge = Color.Lerp(new Color(0.12f, 0.10f, 0.07f), gold, 0.20f);
+
+        for (int i = 0; i < BodyAxial.Length; i++)
         {
-            baseSprite.color = Color.Lerp(baseSprite.color, KarmicVisualEffects.Gold, 0.12f + pulse * 0.05f);
+            float along = (float)i / (BodyAxial.Length - 1);
+            float blade = Mathf.InverseLerp(0.48f, 1f, along);
+            float seal = 1f - Mathf.Clamp01(Mathf.Abs(BodyAxial[i] - 14f) / 18f);
+
+            Color bodyColor = active
+                ? Color.Lerp(deepGold, Color.Lerp(gold, paleGold, blade * 0.62f), 0.30f + seal * 0.28f)
+                : Color.Lerp(deadMetal, deadEdge, blade * 0.45f + seal * 0.18f);
+            SetSectionColor(body, i, bodyColor, 1f);
+
+            Color coreColor = active
+                ? Color.Lerp(gold, Color.white, 0.42f + blade * 0.38f)
+                : Color.Lerp(deadMetal, deadEdge, 0.28f);
+            SetSectionColor(core, i, coreColor, active ? Mathf.Lerp(0.52f, 0.92f, pulse) : 0.22f);
+
+            SetSectionColor(
+                halo,
+                i,
+                active ? paleGold : deadMetal,
+                active ? Mathf.Lerp(0.035f, wallAnchored ? 0.16f : 0.10f, pulse) : 0f);
         }
 
-        shell.scaleX = 1.08f;
-        shell.scaleY = 1.025f;
-        shell.color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.12f);
-        shell.alpha = IsSpent ? 0f : Mathf.Lerp(0.24f, wallAnchored ? 0.46f : 0.36f, pulse);
+        SetCrownColors(crown, active, wallAnchored, pulse, gold, paleGold, deadEdge);
 
-        core.scaleX = 0.62f;
-        core.scaleY = 0.98f;
-        core.color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.72f);
-        core.alpha = IsSpent ? 0f : Mathf.Lerp(0.07f, 0.17f, secondaryPulse);
+        Vector2 sealCenter = visualCenter + direction * 13.5f;
+        FSprite outerSeal = sLeaser.sprites[baseCount + SealOuterOffset];
+        FSprite innerSeal = sLeaser.sprites[baseCount + SealInnerOffset];
+        FSprite glyph = sLeaser.sprites[baseCount + GlyphOffset];
+        FSprite tailSeal = sLeaser.sprites[baseCount + TailSealOffset];
 
-        FSprite outerRing = sLeaser.sprites[baseCount + 2];
-        SetSpritePosition(outerRing, tip, camPos);
-        outerRing.scale = Mathf.Lerp(1.65f, wallAnchored ? 2.85f : 2.35f, pulse);
-        outerRing.alpha = IsSpent ? 0f : Mathf.Lerp(0.07f, wallAnchored ? 0.22f : 0.15f, pulse);
-        outerRing.color = KarmicVisualEffects.Gold;
+        SetSpritePosition(outerSeal, sealCenter, camPos);
+        outerSeal.scale = Mathf.Lerp(1.35f, wallAnchored ? 2.20f : 1.78f, pulse);
+        outerSeal.alpha = active ? Mathf.Lerp(0.14f, wallAnchored ? 0.35f : 0.24f, pulse) : 0.06f;
+        outerSeal.color = active ? gold : deadEdge;
 
-        FSprite innerRing = sLeaser.sprites[baseCount + 3];
-        SetSpritePosition(innerRing, tip, camPos);
-        innerRing.scale = Mathf.Lerp(0.68f, wallAnchored ? 1.18f : 0.96f, secondaryPulse);
-        innerRing.alpha = IsSpent ? 0f : Mathf.Lerp(0.13f, wallAnchored ? 0.31f : 0.24f, secondaryPulse);
-        innerRing.color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.38f);
+        SetSpritePosition(innerSeal, sealCenter, camPos);
+        innerSeal.scale = Mathf.Lerp(0.58f, wallAnchored ? 0.98f : 0.82f, slowPulse);
+        innerSeal.alpha = active ? Mathf.Lerp(0.28f, wallAnchored ? 0.58f : 0.47f, slowPulse) : 0.08f;
+        innerSeal.color = active ? paleGold : deadEdge;
 
-        FSprite glyph = sLeaser.sprites[baseCount + 4];
-        int karmaGlyphValue = Mathf.Clamp(KarmaLevel - 1, 0, 9);
-        string karmaGlyphName = global::HUD.KarmaMeter.KarmaSymbolSprite(
-            small: false,
-            new IntVector2(karmaGlyphValue, karmaGlyphValue));
+        string karmaGlyphName = CurrentKarmaGlyphName();
         if (glyph.element == null || glyph.element.name != karmaGlyphName)
         {
             glyph.SetElementByName(karmaGlyphName);
         }
-        SetSpritePosition(glyph, tip - direction * 2.5f, camPos);
-        glyph.rotation = -clock * (wallAnchored ? 0.22f : 0.38f);
-        glyph.scale = Mathf.Lerp(0.21f, wallAnchored ? 0.34f : 0.29f, pulse);
-        glyph.alpha = IsSpent ? 0f : Mathf.Lerp(0.50f, wallAnchored ? 0.92f : 0.80f, pulse);
-        glyph.color = Color.Lerp(Color.white, KarmicVisualEffects.Gold, 0.58f);
+        SetSpritePosition(glyph, sealCenter, camPos);
+        glyph.rotation = -clock * (wallAnchored ? 0.18f : 0.30f);
+        glyph.scale = Mathf.Lerp(0.20f, wallAnchored ? 0.32f : 0.27f, pulse);
+        glyph.alpha = active ? Mathf.Lerp(0.58f, wallAnchored ? 0.98f : 0.88f, pulse) : 0.13f;
+        glyph.color = active ? Color.Lerp(Color.white, gold, 0.48f) : deadEdge;
 
-        FSprite spine = sLeaser.sprites[baseCount + 5];
-        SetSpritePosition(spine, center - direction * 1.5f, camPos);
-        spine.rotation = rotationDeg;
-        spine.scaleX = 1.15f;
-        spine.scaleY = 31f;
-        spine.color = KarmicVisualEffects.Gold;
-        spine.alpha = IsSpent ? 0f : Mathf.Lerp(0.055f, 0.12f, pulse);
+        Vector2 tailCenter = visualCenter + direction * -25f;
+        SetSpritePosition(tailSeal, tailCenter, camPos);
+        tailSeal.scale = Mathf.Lerp(0.42f, active ? 0.68f : 0.52f, slowPulse);
+        tailSeal.alpha = active ? Mathf.Lerp(0.12f, 0.26f, slowPulse) : 0.07f;
+        tailSeal.color = active ? gold : deadEdge;
 
-        float[] runeOffsets = { -12f, -4f, 4f, 12f };
+        // These are engraved cross-strokes in the shaft, not free particles. They remain
+        // visible on a spent spear as dark ritual cuts, preserving the relic identity.
+        float[] runeAxial = { -16.5f, -8.8f, -0.5f, 7.2f };
+        float rotationDeg = Custom.AimFromOneVectorToAnother(Vector2.zero, direction);
         for (int i = 0; i < 4; i++)
         {
-            FSprite rune = sLeaser.sprites[baseCount + 6 + i];
-            Vector2 runePos = center + direction * runeOffsets[i];
+            FSprite rune = sLeaser.sprites[baseCount + RuneStartOffset + i];
+            Vector2 runePos = visualCenter + direction * runeAxial[i];
             SetSpritePosition(rune, runePos, camPos);
-            rune.rotation = rotationDeg + (i % 2 == 0 ? 54f : -54f);
+            rune.rotation = rotationDeg + (i % 2 == 0 ? 52f : -52f);
             rune.scaleX = 1.05f;
-            rune.scaleY = 4.0f + i * 0.55f;
-            rune.color = IsSpent
-                ? Color.Lerp(Color.black, baseSprite.color, 0.30f)
-                : Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.24f + i * 0.05f);
-            rune.alpha = IsSpent
-                ? 0.34f
-                : Mathf.Lerp(0.30f, wallAnchored ? 0.72f : 0.57f, 0.5f + 0.5f * Mathf.Sin(clock * 0.11f + i));
+            rune.scaleY = 4.8f + i * 0.45f;
+            rune.color = active ? Color.Lerp(gold, Color.white, 0.24f + i * 0.06f) : deadEdge;
+            rune.alpha = active
+                ? Mathf.Lerp(0.50f, wallAnchored ? 0.90f : 0.72f, 0.5f + 0.5f * Mathf.Sin(clock * 0.10f + i))
+                : 0.42f;
         }
-
-        // Two small side prongs make the powered spearhead read as a distinct relic
-        // without replacing the recognizable vanilla spear silhouette.
-        for (int i = 0; i < 2; i++)
-        {
-            float side = i == 0 ? -1f : 1f;
-            FSprite prong = sLeaser.sprites[baseCount + 10 + i];
-            Vector2 prongPos = tip - direction * 5.5f + perpendicular * side * 1.8f;
-            SetSpritePosition(prong, prongPos, camPos);
-            prong.rotation = rotationDeg + side * 27f;
-            prong.scaleX = 1.1f;
-            prong.scaleY = 8.2f;
-            prong.color = IsSpent
-                ? Color.Lerp(Color.black, baseSprite.color, 0.35f)
-                : Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.34f);
-            prong.alpha = IsSpent ? 0.48f : Mathf.Lerp(0.50f, 0.82f, pulse);
-        }
-
-        FSprite collar = sLeaser.sprites[baseCount + 12];
-        SetSpritePosition(collar, center - direction * 9.5f, camPos);
-        collar.rotation = rotationDeg + 90f;
-        collar.scaleX = 1.15f;
-        collar.scaleY = 7f;
-        collar.color = IsSpent
-            ? Color.Lerp(Color.black, baseSprite.color, 0.32f)
-            : Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.18f);
-        collar.alpha = IsSpent ? 0.30f : Mathf.Lerp(0.32f, wallAnchored ? 0.68f : 0.52f, secondaryPulse);
-
-        FSprite tailSeal = sLeaser.sprites[baseCount + 13];
-        SetSpritePosition(tailSeal, tail, camPos);
-        tailSeal.scale = Mathf.Lerp(0.48f, wallAnchored ? 0.90f : 0.72f, secondaryPulse);
-        tailSeal.alpha = IsSpent ? 0f : Mathf.Lerp(0.04f, wallAnchored ? 0.16f : 0.10f, secondaryPulse);
-        tailSeal.color = KarmicVisualEffects.Gold;
     }
 
-    private static void CopySpearTransform(FSprite source, FSprite target)
+    private string CurrentKarmaGlyphName()
     {
-        target.x = source.x;
-        target.y = source.y;
-        target.rotation = source.rotation;
-        target.anchorX = source.anchorX;
-        target.anchorY = source.anchorY;
+        int value = Mathf.Clamp(KarmaLevel - 1, 0, 9);
+        return global::HUD.KarmaMeter.KarmaSymbolSprite(
+            small: false,
+            new IntVector2(value, value));
+    }
+
+    private static void SetStripGeometry(
+        TriangleMesh mesh,
+        Vector2 center,
+        Vector2 direction,
+        Vector2 perpendicular,
+        Vector2 camPos,
+        float[] halfWidths,
+        float widthScale,
+        float widthExtra)
+    {
+        for (int i = 0; i < BodyAxial.Length; i++)
+        {
+            float width = halfWidths[i] * widthScale;
+            if (halfWidths[i] > 0.2f)
+            {
+                width += widthExtra;
+            }
+
+            Vector2 sectionCenter = center + direction * BodyAxial[i];
+            mesh.MoveVertice(i * 2, sectionCenter - perpendicular * width - camPos);
+            mesh.MoveVertice(i * 2 + 1, sectionCenter + perpendicular * width - camPos);
+        }
+    }
+
+    private static void SetSectionColor(TriangleMesh mesh, int section, Color color, float alpha)
+    {
+        color.a = alpha;
+        mesh.verticeColors[section * 2] = color;
+        mesh.verticeColors[section * 2 + 1] = color;
+    }
+
+    private static void SetCrownGeometry(
+        TriangleMesh mesh,
+        Vector2 center,
+        Vector2 direction,
+        Vector2 perpendicular,
+        Vector2 camPos)
+    {
+        // Four angular plates wrap the central Karma seal. Their mirrored shape echoes
+        // the rotational symmetry of Karma glyphs instead of conventional spear guards.
+        SetCrownTriangle(mesh, 0, center, direction, perpendicular, camPos,
+            8.5f, 1.6f, 9.4f, 7.4f, 14.0f, 4.7f);
+        SetCrownTriangle(mesh, 3, center, direction, perpendicular, camPos,
+            8.5f, -1.6f, 9.4f, -7.4f, 14.0f, -4.7f);
+        SetCrownTriangle(mesh, 6, center, direction, perpendicular, camPos,
+            14.4f, 4.2f, 19.2f, 6.2f, 17.3f, 1.8f);
+        SetCrownTriangle(mesh, 9, center, direction, perpendicular, camPos,
+            14.4f, -4.2f, 19.2f, -6.2f, 17.3f, -1.8f);
+    }
+
+    private static void SetCrownTriangle(
+        TriangleMesh mesh,
+        int startVertex,
+        Vector2 center,
+        Vector2 direction,
+        Vector2 perpendicular,
+        Vector2 camPos,
+        float aAxial,
+        float aLateral,
+        float bAxial,
+        float bLateral,
+        float cAxial,
+        float cLateral)
+    {
+        mesh.MoveVertice(startVertex, CrownPoint(center, direction, perpendicular, camPos, aAxial, aLateral));
+        mesh.MoveVertice(startVertex + 1, CrownPoint(center, direction, perpendicular, camPos, bAxial, bLateral));
+        mesh.MoveVertice(startVertex + 2, CrownPoint(center, direction, perpendicular, camPos, cAxial, cLateral));
+    }
+
+    private static Vector2 CrownPoint(
+        Vector2 center,
+        Vector2 direction,
+        Vector2 perpendicular,
+        Vector2 camPos,
+        float axial,
+        float lateral)
+    {
+        return center + direction * axial + perpendicular * lateral - camPos;
+    }
+
+    private static void SetCrownColors(
+        TriangleMesh mesh,
+        bool active,
+        bool wallAnchored,
+        float pulse,
+        Color gold,
+        Color paleGold,
+        Color deadEdge)
+    {
+        for (int triangle = 0; triangle < 4; triangle++)
+        {
+            int start = triangle * 3;
+            Color root = active ? Color.Lerp(gold, paleGold, 0.16f) : deadEdge;
+            Color edge = active ? Color.Lerp(gold, paleGold, 0.62f) : deadEdge;
+            float alpha = active ? Mathf.Lerp(0.78f, wallAnchored ? 1f : 0.94f, pulse) : 0.52f;
+            root.a = alpha;
+            edge.a = alpha;
+            mesh.verticeColors[start] = root;
+            mesh.verticeColors[start + 1] = edge;
+            mesh.verticeColors[start + 2] = edge;
+        }
     }
 
     private static void SetSpritePosition(FSprite sprite, Vector2 worldPos, Vector2 camPos)
