@@ -3,6 +3,7 @@ using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -10,11 +11,11 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Correctness bridge for the retained World Map renderer.
 ///
 /// WorldMapGpuScene currently renders its retained room/route meshes through a standalone Unity
-/// Camera. Rain World's final presentation path and RWImGui are not guaranteed to composite that
-/// camera into the ImGui workspace, which can leave the canvas with only immediate-mode grid and
-/// shortcut markers. Keep the retained scene/cache alive for future integration, but force the
-/// WorldMapView draw pass to use its complete ImGui room/connection fallback until the retained
-/// output is explicitly presented through an ImGui-owned render target.
+/// Camera. Rain World's final presentation path and RWImGui do not reliably composite that camera
+/// into the ImGui workspace: the retained map can be drawn over the gameplay viewport while the
+/// actual ImGui canvas receives only grid/labels/shortcut markers. Until the retained scene is
+/// presented through an ImGui-owned RenderTexture, keep its caches and spatial indices alive but
+/// use WorldMapView's complete immediate presentation as the authoritative visible map.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -26,6 +27,12 @@ public sealed class WorldMapImGuiPresentationFallbackPlugin : BaseUnityPlugin
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
     private void OnEnable() => WorldMapImGuiPresentationFallback.Enable(Logger);
+
+    // WorldMapGpuRuntime.UpdateMainThread runs in Update and can enable the retained screen camera
+    // again every frame. Disable it in LateUpdate, immediately before Unity renders cameras, so it
+    // can never leak retained routes/rooms over the gameplay viewport while fallback is active.
+    private void LateUpdate() => WorldMapImGuiPresentationFallback.SuppressStandaloneCamera();
+
     private void OnDisable() => WorldMapImGuiPresentationFallback.Disable();
 }
 
@@ -39,6 +46,7 @@ internal static class WorldMapImGuiPresentationFallback
     private static ManualLogSource log;
     private static IDisposable canvasHook;
     private static FieldInfo sceneReadyField;
+    private static FieldInfo sceneCameraField;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -56,8 +64,9 @@ internal static class WorldMapImGuiPresentationFallback
                 new[] { typeof(EditorMapPresentationSnapshot) },
                 null);
             sceneReadyField = typeof(WorldMapGpuScene).GetField("ready", flags);
+            sceneCameraField = typeof(WorldMapGpuScene).GetField("mapCamera", flags);
 
-            if (drawCanvas == null || sceneReadyField == null)
+            if (drawCanvas == null || sceneReadyField == null || sceneCameraField == null)
                 throw new MissingMemberException("World Map ImGui fallback targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
@@ -73,7 +82,8 @@ internal static class WorldMapImGuiPresentationFallback
                 throw new InvalidOperationException("World Map ImGui fallback hook was not created.");
 
             enabled = true;
-            log?.LogInfo("World Map ImGui presentation fallback enabled; retained screen-camera replacement is bypassed.");
+            SuppressStandaloneCamera();
+            log?.LogInfo("World Map ImGui presentation fallback enabled; retained screen camera is suppressed.");
         }
         catch (Exception error)
         {
@@ -88,8 +98,24 @@ internal static class WorldMapImGuiPresentationFallback
         catch { }
         canvasHook = null;
         sceneReadyField = null;
+        sceneCameraField = null;
         enabled = false;
         log = null;
+    }
+
+    internal static void SuppressStandaloneCamera()
+    {
+        if (!enabled || sceneCameraField == null) return;
+        try
+        {
+            if (sceneCameraField.GetValue(null) is Camera camera && camera != null && camera.enabled)
+                camera.enabled = false;
+        }
+        catch
+        {
+            // The retained scene may be torn down during a process/page transition. There is
+            // nothing to suppress in that frame, and Apply() will rebuild it if needed later.
+        }
     }
 
     private static void DrawCanvasHook(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot)
@@ -117,10 +143,10 @@ internal static class WorldMapImGuiPresentationFallback
             return;
         }
 
-        // Both WorldMapGpuRuntime.DrawCanvasHook and DrawRoomGeometryHook consult the same ready
-        // field. Mask it only for this ImGui draw stack so neither hook suppresses the complete
-        // immediate fallback. The retained scene itself remains built and can still be evolved into
-        // a RenderTexture-backed presentation path without throwing away its caches/batches.
+        // WorldMapGpuRuntime.DrawCanvasHook and DrawRoomGeometryHook both use Ready as their signal
+        // that retained output is already visible. It is not visible in the ImGui canvas on this
+        // presentation path, so mask Ready only while WorldMapView emits the current frame. This
+        // restores complete immediate rooms and links without discarding retained caches/indices.
         sceneReadyField.SetValue(null, false);
         try
         {
