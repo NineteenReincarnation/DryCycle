@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Logging;
@@ -12,9 +14,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Pumps the expensive half of the creature catalog on Unity's normal main-thread Update.
-/// The RWImGui render callback is presentation-only: it never touches Unity render targets,
-/// never performs texture readback and never scans third-party assemblies.
+/// Main-thread runtime for the visual creature catalog. Expensive Unity work never runs inside the
+/// RWImGui DX11 render callback. A persistent cache makes subsequent game sessions immediately
+/// usable and only changed plugin sources are rescanned.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -29,16 +31,6 @@ public sealed class WorldCreatureCatalogRuntimePlugin : BaseUnityPlugin
     private void OnDisable() => WorldCreatureCatalogPicker.Shutdown();
 }
 
-/// <summary>
-/// Shared visual creature picker for ordinary world spawners and Lineage stages.
-///
-/// Important threading/lifetime rule:
-/// - DrawSelector may only read immutable catalog snapshots and immutable icon rasters.
-/// - Creature source discovery, CreatureSymbol resolution and Unity texture reads happen in
-///   PumpMainThread(), outside RWImGui's DX11 render callback.
-/// - The visible grid requests only visible icons. Missing icons show a placeholder until a later
-///   Update prepares them. No popup-open frame is allowed to synchronously build the whole catalog.
-/// </summary>
 internal static class WorldCreatureCatalogPicker
 {
     private enum IconState
@@ -52,7 +44,7 @@ internal static class WorldCreatureCatalogPicker
     {
         Ready,
         Failed,
-        DeferredForGpu
+        Deferred
     }
 
     private sealed class CreatureEntry
@@ -61,7 +53,7 @@ internal static class WorldCreatureCatalogPicker
         internal CreatureTemplate.Type Type;
         internal string SourceKey = string.Empty;
         internal string SourceLabel = string.Empty;
-        internal IconSymbol.IconSymbolData Symbol;
+        internal string SourceFingerprint = string.Empty;
     }
 
     private sealed class SourceGroup
@@ -83,12 +75,26 @@ internal static class WorldCreatureCatalogPicker
         internal Assembly Assembly;
         internal string Key = string.Empty;
         internal string Label = string.Empty;
+        internal string Fingerprint = string.Empty;
+        internal bool NeedsScan;
+        internal readonly List<string> CreatureIds = new();
+    }
+
+    private sealed class PersistentSource
+    {
+        internal string Key = string.Empty;
+        internal string Label = string.Empty;
+        internal string Fingerprint = string.Empty;
+        internal string[] CreatureIds = Array.Empty<string>();
     }
 
     private sealed class IconSlot
     {
         internal IconState State;
         internal IconRaster Raster = new();
+        internal string SourceFingerprint = string.Empty;
+        internal bool Validated;
+        internal bool ValidationQueued;
     }
 
     private sealed class AtlasPixels
@@ -119,6 +125,7 @@ internal static class WorldCreatureCatalogPicker
     private sealed class IconRaster
     {
         internal string SpriteName = string.Empty;
+        internal string AtlasSignature = string.Empty;
         internal int Width = 1;
         internal int Height = 1;
         internal Color Tint = Color.white;
@@ -126,11 +133,29 @@ internal static class WorldCreatureCatalogPicker
         internal bool Available;
     }
 
+    private sealed class PersistentIcon
+    {
+        internal string CreatureId = string.Empty;
+        internal string SourceFingerprint = string.Empty;
+        internal IconState State;
+        internal IconRaster Raster = new();
+    }
+
+    private sealed class PersistentSnapshot
+    {
+        internal readonly List<PersistentSource> Sources = new();
+        internal readonly List<PersistentIcon> Icons = new();
+    }
+
+    private const int CacheMagic = 0x44434343; // DCCC
+    private const int CacheVersion = 4;
     private const int MaxPreparedIconsPerFrame = 4;
     private const int MaxGpuReadbacksPerFrame = 1;
+    private const int MaxSandboxSymbolsPerFrame = 48;
     private const double MainThreadBudgetMs = 1.75;
     private const int MaxIconRasterDimension = 40;
     private const int MaxAtlasCacheBytes = 32 * 1024 * 1024;
+    private const float SaveDebounceSeconds = 2.0f;
 
     private static readonly object iconSync = new();
     private static readonly Dictionary<string, IconSlot> iconSlots = new(StringComparer.OrdinalIgnoreCase);
@@ -140,48 +165,84 @@ internal static class WorldCreatureCatalogPicker
     private static readonly HashSet<int> unreadableAtlases = new();
     private static readonly Dictionary<string, string> searchByPicker = new(StringComparer.Ordinal);
 
-    // Main-thread catalog construction state. It is deliberately incremental: official sources are
-    // published immediately and third-party assemblies are scanned one assembly per Update.
     private static readonly Dictionary<string, string> sourceByCreature = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> sourceLabelByKey = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, string> sourceFingerprintByKey = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, IconSymbol.IconSymbolData> sandboxSymbols = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, PersistentSource> persistentSources = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<string> registeredIds = new();
+    private static readonly HashSet<string> registeredIdSet = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<PluginSource> pluginSources = new();
+    private static readonly List<PluginSource> pluginScanQueue = new();
+    private static readonly List<string> sandboxUnlockIds = new();
 
     private static volatile CatalogSnapshot catalog = CatalogSnapshot.Empty;
     private static volatile bool catalogRequested;
     private static ManualLogSource log;
     private static bool initialized;
+    private static bool currentCatalogValidated;
     private static int observedCreatureCount = -1;
     private static int observedPluginCount = -1;
     private static int pluginScanIndex;
+    private static int sandboxScanIndex;
+    private static bool sandboxScanComplete;
     private static int atlasCacheBytes;
     private static bool gpuFallbackLogged;
+
+    private static string cacheFilePath = string.Empty;
+    private static bool cacheDirty;
+    private static float cacheDirtyAt;
+    private static volatile bool cacheSaveInFlight;
+    private static volatile string backgroundSaveError;
 
     internal static void Initialize(ManualLogSource logger)
     {
         log = logger;
         initialized = true;
+        cacheFilePath = ResolveCachePath();
+        LoadPersistentCache();
     }
 
     internal static void Shutdown()
     {
+        if (cacheDirty && !cacheSaveInFlight)
+        {
+            try
+            {
+                WritePersistentCache(CapturePersistentSnapshot());
+            }
+            catch
+            {
+            }
+        }
+
         initialized = false;
         catalogRequested = false;
         catalog = CatalogSnapshot.Empty;
+        currentCatalogValidated = false;
         observedCreatureCount = -1;
         observedPluginCount = -1;
         pluginScanIndex = 0;
+        sandboxScanIndex = 0;
+        sandboxScanComplete = false;
         registeredIds.Clear();
+        registeredIdSet.Clear();
         pluginSources.Clear();
+        pluginScanQueue.Clear();
+        sandboxUnlockIds.Clear();
+        persistentSources.Clear();
         sourceByCreature.Clear();
         sourceLabelByKey.Clear();
+        sourceFingerprintByKey.Clear();
         sandboxSymbols.Clear();
         searchByPicker.Clear();
         atlasPixels.Clear();
         unreadableAtlases.Clear();
         atlasCacheBytes = 0;
         gpuFallbackLogged = false;
+        cacheDirty = false;
+        cacheSaveInFlight = false;
+        backgroundSaveError = null;
         lock (iconSync)
         {
             iconSlots.Clear();
@@ -192,35 +253,53 @@ internal static class WorldCreatureCatalogPicker
     }
 
     /// <summary>
-    /// Unity-main-thread work pump. Nothing in this method is called from the ImGui render callback.
+    /// Unity-main-thread work pump. The render callback only consumes already prepared data.
     /// </summary>
     internal static void PumpMainThread()
     {
-        if (!initialized || !catalogRequested) return;
+        if (!initialized) return;
+
+        if (!string.IsNullOrEmpty(backgroundSaveError))
+        {
+            string error = backgroundSaveError;
+            backgroundSaveError = null;
+            log?.LogWarning("Creature catalog cache save failed: " + error);
+        }
+
+        if (!catalogRequested)
+        {
+            TrySchedulePersistentSave();
+            return;
+        }
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         EnsureCatalogMainThread();
 
-        // Source attribution is cosmetic. Scan at most one plugin assembly in a frame so a large
-        // mod pack cannot turn the first popup click into a long reflection stall.
-        if (pluginScanIndex < pluginSources.Count && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
+        while (!sandboxScanComplete && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
+        {
+            int processed = PumpSandboxSymbols(MaxSandboxSymbolsPerFrame);
+            if (processed == 0) break;
+        }
+
+        if (pluginScanIndex < pluginScanQueue.Count && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
             ScanNextPluginSource();
 
         int prepared = 0;
         int gpuReadbacks = 0;
         while (prepared < MaxPreparedIconsPerFrame && stopwatch.Elapsed.TotalMilliseconds < MainThreadBudgetMs)
         {
+            if (!sandboxScanComplete) break;
             if (!TryDequeueIcon(out string creatureId)) break;
             CatalogSnapshot snapshot = catalog;
-            if (!snapshot.ById.TryGetValue(creatureId, out CreatureEntry entry))
+            if (!snapshot.ById.TryGetValue(creatureId, out CreatureEntry entry) || entry.Type == null)
             {
-                SetIconFailed(creatureId);
+                SetIconFailed(creatureId, string.Empty);
                 continue;
             }
 
             bool allowGpu = gpuReadbacks < MaxGpuReadbacksPerFrame;
             IconBuildResult result = BuildIconMainThread(entry, allowGpu, out IconRaster raster, out bool usedGpu);
-            if (result == IconBuildResult.DeferredForGpu)
+            if (result == IconBuildResult.Deferred)
             {
                 RequeueIcon(creatureId);
                 break;
@@ -228,9 +307,14 @@ internal static class WorldCreatureCatalogPicker
 
             if (usedGpu) gpuReadbacks++;
             prepared++;
-            if (result == IconBuildResult.Ready) SetIconReady(creatureId, raster);
-            else SetIconFailed(creatureId);
+            if (result == IconBuildResult.Ready) SetIconReady(creatureId, entry.SourceFingerprint, raster);
+            else SetIconFailed(creatureId, entry.SourceFingerprint);
         }
+
+        if (currentCatalogValidated && pluginScanIndex >= pluginScanQueue.Count)
+            FinalizePersistentSources();
+
+        TrySchedulePersistentSave();
     }
 
     internal static bool DrawSelector(
@@ -271,8 +355,8 @@ internal static class WorldCreatureCatalogPicker
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("生物图鉴", "CREATURE CATALOG"));
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "图标按需分帧加载；打开图鉴不会阻塞游戏。",
-                "Icons are prepared lazily across frames; opening the catalog never blocks the game."),
+                "已缓存内容立即显示；只有新增或变化的 Mod / 图标会在后台增量刷新。",
+                "Cached content is immediate; only new or changed mods/icons are refreshed incrementally."),
             true);
 
         if (!searchByPicker.TryGetValue(popupId, out string search)) search = string.Empty;
@@ -304,7 +388,7 @@ internal static class WorldCreatureCatalogPicker
             if (snapshot.Groups.Length == 0)
             {
                 DevToolWidgets.MutedText(
-                    DevToolUiSettings.T("正在准备生物目录…", "Preparing creature catalog…"),
+                    DevToolUiSettings.T("首次建立生物目录缓存…", "Building the creature catalog cache for the first time…"),
                     true);
             }
             else
@@ -564,10 +648,19 @@ internal static class WorldCreatureCatalogPicker
             {
                 raster = slot.Raster;
                 state = slot.State;
+                if (slot.State == IconState.Ready && !slot.Validated && !slot.ValidationQueued && currentCatalogValidated)
+                {
+                    slot.ValidationQueued = true;
+                    if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
+                }
                 return;
             }
 
-            iconSlots[creatureId] = new IconSlot { State = IconState.Pending };
+            iconSlots[creatureId] = new IconSlot
+            {
+                State = IconState.Pending,
+                ValidationQueued = true
+            };
             if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
             raster = new IconRaster();
             state = IconState.Pending;
@@ -585,6 +678,7 @@ internal static class WorldCreatureCatalogPicker
             }
             creatureId = iconRequests.Dequeue();
             queuedIcons.Remove(creatureId);
+            if (iconSlots.TryGetValue(creatureId, out IconSlot slot)) slot.ValidationQueued = false;
             return true;
         }
     }
@@ -593,20 +687,39 @@ internal static class WorldCreatureCatalogPicker
     {
         lock (iconSync)
         {
+            if (iconSlots.TryGetValue(creatureId, out IconSlot slot)) slot.ValidationQueued = true;
             if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
         }
     }
 
-    private static void SetIconReady(string creatureId, IconRaster raster)
+    private static void SetIconReady(string creatureId, string sourceFingerprint, IconRaster raster)
     {
         lock (iconSync)
-            iconSlots[creatureId] = new IconSlot { State = IconState.Ready, Raster = raster ?? new IconRaster() };
+        {
+            iconSlots[creatureId] = new IconSlot
+            {
+                State = IconState.Ready,
+                Raster = raster ?? new IconRaster(),
+                SourceFingerprint = sourceFingerprint ?? string.Empty,
+                Validated = true
+            };
+        }
+        MarkCacheDirty();
     }
 
-    private static void SetIconFailed(string creatureId)
+    private static void SetIconFailed(string creatureId, string sourceFingerprint)
     {
         lock (iconSync)
-            iconSlots[creatureId] = new IconSlot { State = IconState.Failed, Raster = new IconRaster() };
+        {
+            iconSlots[creatureId] = new IconSlot
+            {
+                State = IconState.Failed,
+                Raster = new IconRaster(),
+                SourceFingerprint = sourceFingerprint ?? string.Empty,
+                Validated = true
+            };
+        }
+        MarkCacheDirty();
     }
 
     private static IconBuildResult BuildIconMainThread(
@@ -621,16 +734,48 @@ internal static class WorldCreatureCatalogPicker
 
         try
         {
-            raster.SpriteName = CreatureSymbol.SpriteNameOfCreature(entry.Symbol) ?? string.Empty;
-            raster.Tint = CreatureSymbol.ColorOfCreature(entry.Symbol);
-            if (string.IsNullOrEmpty(raster.SpriteName) ||
-                string.Equals(raster.SpriteName, "Futile_White", StringComparison.Ordinal) ||
-                Futile.atlasManager == null ||
-                !Futile.atlasManager.DoesContainElementWithName(raster.SpriteName))
-                return IconBuildResult.Ready;
+            IconSymbol.IconSymbolData symbol = sandboxSymbols.TryGetValue(entry.Id, out IconSymbol.IconSymbolData mapped)
+                ? mapped
+                : new IconSymbol.IconSymbolData(entry.Type, AbstractPhysicalObject.AbstractObjectType.Creature, 0);
+            string spriteName = CreatureSymbol.SpriteNameOfCreature(symbol) ?? string.Empty;
+            Color tint = CreatureSymbol.ColorOfCreature(symbol);
 
-            FAtlasElement element = Futile.atlasManager.GetElementWithName(raster.SpriteName);
-            if (element?.atlas?.texture is not Texture2D texture) return IconBuildResult.Ready;
+            FAtlasElement element = null;
+            Texture2D texture = null;
+            string atlasSignature = string.Empty;
+            if (!string.IsNullOrEmpty(spriteName) &&
+                !string.Equals(spriteName, "Futile_White", StringComparison.Ordinal) &&
+                Futile.atlasManager != null &&
+                Futile.atlasManager.DoesContainElementWithName(spriteName))
+            {
+                element = Futile.atlasManager.GetElementWithName(spriteName);
+                texture = element?.atlas?.texture as Texture2D;
+                if (texture != null)
+                    atlasSignature = BuildAtlasSignature(texture, element.uvRect);
+            }
+
+            lock (iconSync)
+            {
+                if (iconSlots.TryGetValue(entry.Id, out IconSlot cached) &&
+                    cached.State == IconState.Ready &&
+                    !cached.Validated &&
+                    string.Equals(cached.SourceFingerprint, entry.SourceFingerprint, StringComparison.Ordinal) &&
+                    string.Equals(cached.Raster.SpriteName, spriteName, StringComparison.Ordinal) &&
+                    string.Equals(cached.Raster.AtlasSignature, atlasSignature, StringComparison.Ordinal) &&
+                    SimilarTint(cached.Raster.Tint, tint))
+                {
+                    cached.Validated = true;
+                    cached.ValidationQueued = false;
+                    raster = cached.Raster;
+                    return IconBuildResult.Ready;
+                }
+            }
+
+            raster.SpriteName = spriteName;
+            raster.AtlasSignature = atlasSignature;
+            raster.Tint = tint;
+            if (texture == null || element == null)
+                return IconBuildResult.Ready;
 
             Rect uv = element.uvRect;
             int x = Mathf.Clamp(Mathf.RoundToInt(uv.x * texture.width), 0, Math.Max(0, texture.width - 1));
@@ -641,13 +786,13 @@ internal static class WorldCreatureCatalogPicker
             Color32[] pixels;
             if (!TryReadCpuRegion(texture, x, y, width, height, out pixels))
             {
-                if (!allowGpuReadback) return IconBuildResult.DeferredForGpu;
+                if (!allowGpuReadback) return IconBuildResult.Deferred;
                 if (!TryReadGpuRegion(texture, x, y, width, height, out pixels)) return IconBuildResult.Failed;
                 usedGpuReadback = true;
                 if (!gpuFallbackLogged)
                 {
                     gpuFallbackLogged = true;
-                    log?.LogInfo("Creature catalog is using budgeted Unity-main-thread GPU readback for non-readable Futile atlases.");
+                    log?.LogInfo("Creature catalog uses budgeted main-thread GPU readback only for changed non-readable atlas entries.");
                 }
             }
 
@@ -664,6 +809,19 @@ internal static class WorldCreatureCatalogPicker
             return IconBuildResult.Failed;
         }
     }
+
+    private static string BuildAtlasSignature(Texture2D texture, Rect uv)
+    {
+        if (texture == null) return string.Empty;
+        return (texture.name ?? string.Empty) + "|" + texture.width + "x" + texture.height + "|" +
+               uv.x.ToString("R") + "," + uv.y.ToString("R") + "," + uv.width.ToString("R") + "," + uv.height.ToString("R");
+    }
+
+    private static bool SimilarTint(Color a, Color b) =>
+        Math.Abs(a.r - b.r) < 0.001f &&
+        Math.Abs(a.g - b.g) < 0.001f &&
+        Math.Abs(a.b - b.b) < 0.001f &&
+        Math.Abs(a.a - b.a) < 0.001f;
 
     private static bool TryReadCpuRegion(
         Texture2D texture,
@@ -859,7 +1017,7 @@ internal static class WorldCreatureCatalogPicker
     {
         int creatureCount = ExtEnum<CreatureTemplate.Type>.values.entries.Count;
         int pluginCount = Chainloader.PluginInfos.Count;
-        if (creatureCount == observedCreatureCount && pluginCount == observedPluginCount && catalog.Groups.Length > 0)
+        if (currentCatalogValidated && creatureCount == observedCreatureCount && pluginCount == observedPluginCount)
             return;
 
         observedCreatureCount = creatureCount;
@@ -871,17 +1029,35 @@ internal static class WorldCreatureCatalogPicker
     {
         sourceByCreature.Clear();
         sourceLabelByKey.Clear();
+        sourceFingerprintByKey.Clear();
         sandboxSymbols.Clear();
         registeredIds.Clear();
+        registeredIdSet.Clear();
         pluginSources.Clear();
+        pluginScanQueue.Clear();
+        sandboxUnlockIds.Clear();
         pluginScanIndex = 0;
-
-        CollectOfficialSources();
-        BuildSandboxSymbolMap();
+        sandboxScanIndex = 0;
+        sandboxScanComplete = false;
 
         List<string> ids = ExtEnum<CreatureTemplate.Type>.values.entries;
         for (int i = 0; i < ids.Count; i++)
-            if (!string.IsNullOrWhiteSpace(ids[i])) registeredIds.Add(ids[i]);
+        {
+            string id = ids[i];
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            registeredIds.Add(id);
+            registeredIdSet.Add(id);
+        }
+
+        CollectOfficialSources();
+        string officialFingerprint = AssemblyFingerprint(typeof(CreatureTemplate.Type).Assembly, "rainworld");
+        sourceFingerprintByKey["official:vanilla"] = officialFingerprint;
+        sourceFingerprintByKey["official:moreslugcats"] = officialFingerprint;
+        sourceFingerprintByKey["official:watcher"] = officialFingerprint;
+        sourceFingerprintByKey["internal:advanced"] = officialFingerprint;
+
+        sandboxUnlockIds.AddRange(ExtEnum<MultiplayerUnlocks.SandboxUnlockID>.values.entries);
+        sandboxScanComplete = sandboxUnlockIds.Count == 0;
 
         HashSet<Assembly> seenAssemblies = new();
         foreach (var pair in Chainloader.PluginInfos)
@@ -895,49 +1071,81 @@ internal static class WorldCreatureCatalogPicker
                 if (string.IsNullOrWhiteSpace(label)) label = info.Metadata?.GUID;
                 if (string.IsNullOrWhiteSpace(label)) label = assembly.GetName().Name;
                 string key = "mod:" + (info.Metadata?.GUID ?? assembly.GetName().Name ?? label).Trim().ToLowerInvariant();
-                pluginSources.Add(new PluginSource { Assembly = assembly, Key = key, Label = label });
+                string fingerprint = PluginFingerprint(assembly, info.Metadata?.Version?.ToString() ?? string.Empty);
+                PluginSource source = new()
+                {
+                    Assembly = assembly,
+                    Key = key,
+                    Label = label,
+                    Fingerprint = fingerprint
+                };
+                pluginSources.Add(source);
+                sourceFingerprintByKey[key] = fingerprint;
+
+                if (persistentSources.TryGetValue(key, out PersistentSource cached) &&
+                    string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+                {
+                    source.NeedsScan = false;
+                    source.CreatureIds.AddRange(cached.CreatureIds ?? Array.Empty<string>());
+                    for (int i = 0; i < source.CreatureIds.Count; i++)
+                    {
+                        string creature = source.CreatureIds[i];
+                        if (registeredIdSet.Contains(creature)) AssignSource(creature, key, label, overwrite: false);
+                    }
+                }
+                else
+                {
+                    source.NeedsScan = true;
+                    pluginScanQueue.Add(source);
+                    if (cached != null) InvalidateSourceIcons(cached.CreatureIds);
+                }
             }
             catch
             {
             }
         }
 
-        ResetIconsForCatalogChange();
+        currentCatalogValidated = true;
         PublishCatalogSnapshot();
+        if (pluginScanQueue.Count == 0) FinalizePersistentSources();
+    }
+
+    private static int PumpSandboxSymbols(int maxItems)
+    {
+        if (sandboxScanComplete) return 0;
+        int processed = 0;
+        while (sandboxScanIndex < sandboxUnlockIds.Count && processed < maxItems)
+        {
+            string id = sandboxUnlockIds[sandboxScanIndex++];
+            processed++;
+            try
+            {
+                MultiplayerUnlocks.SandboxUnlockID unlock = new(id);
+                IconSymbol.IconSymbolData data = MultiplayerUnlocks.SymbolDataForSandboxUnlock(unlock);
+                if (data.itemType == AbstractPhysicalObject.AbstractObjectType.Creature &&
+                    data.critType != null &&
+                    !string.IsNullOrWhiteSpace(data.critType.value) &&
+                    !sandboxSymbols.ContainsKey(data.critType.value))
+                    sandboxSymbols[data.critType.value] = data;
+            }
+            catch
+            {
+            }
+        }
+
+        if (sandboxScanIndex >= sandboxUnlockIds.Count) sandboxScanComplete = true;
+        return processed;
     }
 
     private static void ScanNextPluginSource()
     {
-        if (pluginScanIndex >= pluginSources.Count) return;
-        PluginSource source = pluginSources[pluginScanIndex++];
-        if (source?.Assembly == null) return;
-        if (CollectAssemblyCreatureIds(source.Assembly, source.Key, source.Label))
-            PublishCatalogSnapshot();
-    }
-
-    private static void BuildSandboxSymbolMap()
-    {
-        try
-        {
-            List<string> unlocks = ExtEnum<MultiplayerUnlocks.SandboxUnlockID>.values.entries;
-            for (int i = 0; i < unlocks.Count; i++)
-            {
-                try
-                {
-                    MultiplayerUnlocks.SandboxUnlockID unlock = new(unlocks[i]);
-                    IconSymbol.IconSymbolData data = MultiplayerUnlocks.SymbolDataForSandboxUnlock(unlock);
-                    if (data.itemType != AbstractPhysicalObject.AbstractObjectType.Creature || data.critType == null || string.IsNullOrWhiteSpace(data.critType.value))
-                        continue;
-                    if (!sandboxSymbols.ContainsKey(data.critType.value)) sandboxSymbols[data.critType.value] = data;
-                }
-                catch
-                {
-                }
-            }
-        }
-        catch
-        {
-        }
+        if (pluginScanIndex >= pluginScanQueue.Count) return;
+        PluginSource source = pluginScanQueue[pluginScanIndex++];
+        source.CreatureIds.Clear();
+        if (source?.Assembly != null)
+            CollectAssemblyCreatureIds(source.Assembly, source.Key, source.Label, source.CreatureIds);
+        PublishCatalogSnapshot();
+        if (pluginScanIndex >= pluginScanQueue.Count) FinalizePersistentSources();
     }
 
     private static void PublishCatalogSnapshot()
@@ -957,16 +1165,16 @@ internal static class WorldCreatureCatalogPicker
                 sourceLabel = DevToolUiSettings.T("内部 / 高级", "INTERNAL / ADVANCED");
             }
 
-            IconSymbol.IconSymbolData symbol = sandboxSymbols.TryGetValue(id, out IconSymbol.IconSymbolData mapped)
-                ? mapped
-                : new IconSymbol.IconSymbolData(type, AbstractPhysicalObject.AbstractObjectType.Creature, 0);
+            string fingerprint = sourceFingerprintByKey.TryGetValue(sourceKey, out string knownFingerprint)
+                ? knownFingerprint
+                : "unknown:" + observedCreatureCount;
             CreatureEntry entry = new()
             {
                 Id = id,
                 Type = type,
                 SourceKey = sourceKey,
                 SourceLabel = sourceLabel,
-                Symbol = symbol
+                SourceFingerprint = fingerprint
             };
             byId[id] = entry;
             if (!grouped.TryGetValue(sourceKey, out List<CreatureEntry> list))
@@ -993,30 +1201,96 @@ internal static class WorldCreatureCatalogPicker
         catalog = new CatalogSnapshot { Groups = result.ToArray(), ById = byId };
     }
 
-    private static void ResetIconsForCatalogChange()
+    private static void PublishCachedCatalogSnapshot()
     {
+        Dictionary<string, CreatureEntry> byId = new(StringComparer.OrdinalIgnoreCase);
+        List<SourceGroup> groups = new();
+        foreach (PersistentSource source in persistentSources.Values)
+        {
+            List<CreatureEntry> list = new();
+            string[] ids = source.CreatureIds ?? Array.Empty<string>();
+            for (int i = 0; i < ids.Length; i++)
+            {
+                if (string.IsNullOrWhiteSpace(ids[i]) || byId.ContainsKey(ids[i])) continue;
+                CreatureEntry entry = new()
+                {
+                    Id = ids[i],
+                    Type = null,
+                    SourceKey = source.Key,
+                    SourceLabel = source.Label,
+                    SourceFingerprint = source.Fingerprint
+                };
+                list.Add(entry);
+                byId[entry.Id] = entry;
+            }
+            if (list.Count == 0) continue;
+            list.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+            groups.Add(new SourceGroup { Key = source.Key, Label = source.Label, Entries = list.ToArray() });
+        }
+        groups.Sort(CompareGroups);
+        catalog = new CatalogSnapshot { Groups = groups.ToArray(), ById = byId };
+    }
+
+    private static void FinalizePersistentSources()
+    {
+        Dictionary<string, List<string>> grouped = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> labels = new(StringComparer.OrdinalIgnoreCase);
+        CatalogSnapshot snapshot = catalog;
+        for (int i = 0; i < snapshot.Groups.Length; i++)
+        {
+            SourceGroup group = snapshot.Groups[i];
+            List<string> ids = new();
+            for (int j = 0; j < group.Entries.Length; j++) ids.Add(group.Entries[j].Id);
+            grouped[group.Key] = ids;
+            labels[group.Key] = group.Label;
+        }
+
+        persistentSources.Clear();
+        foreach (KeyValuePair<string, List<string>> pair in grouped)
+        {
+            string fingerprint = sourceFingerprintByKey.TryGetValue(pair.Key, out string value)
+                ? value
+                : "unknown:" + observedCreatureCount;
+            persistentSources[pair.Key] = new PersistentSource
+            {
+                Key = pair.Key,
+                Label = labels.TryGetValue(pair.Key, out string label) ? label : pair.Key,
+                Fingerprint = fingerprint,
+                CreatureIds = pair.Value.ToArray()
+            };
+        }
+        MarkCacheDirty();
+    }
+
+    private static void InvalidateSourceIcons(IEnumerable<string> ids)
+    {
+        if (ids == null) return;
         lock (iconSync)
         {
-            iconSlots.Clear();
-            iconRequests.Clear();
-            queuedIcons.Clear();
+            foreach (string id in ids)
+            {
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                iconSlots.Remove(id);
+                queuedIcons.Remove(id);
+            }
         }
-        atlasPixels.Clear();
-        unreadableAtlases.Clear();
-        atlasCacheBytes = 0;
+        MarkCacheDirty();
     }
 
     private static void CollectOfficialSources()
     {
-        CollectStaticCreatureIds(typeof(CreatureTemplate.Type), "official:vanilla", "Vanilla", overwrite: true);
-        CollectStaticCreatureIds(FindLoadedType("MoreSlugcats.MoreSlugcatsEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true);
-        CollectStaticCreatureIds(FindLoadedType("DLCSharedEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true);
-        CollectStaticCreatureIds(FindLoadedType("Watcher.WatcherEnums+CreatureTemplateType"), "official:watcher", "Watcher", overwrite: true);
+        CollectStaticCreatureIds(typeof(CreatureTemplate.Type), "official:vanilla", "Vanilla", overwrite: true, null);
+        CollectStaticCreatureIds(FindLoadedType("MoreSlugcats.MoreSlugcatsEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true, null);
+        CollectStaticCreatureIds(FindLoadedType("DLCSharedEnums+CreatureTemplateType"), "official:moreslugcats", "Downpour", overwrite: true, null);
+        CollectStaticCreatureIds(FindLoadedType("Watcher.WatcherEnums+CreatureTemplateType"), "official:watcher", "Watcher", overwrite: true, null);
     }
 
-    private static bool CollectAssemblyCreatureIds(Assembly assembly, string sourceKey, string sourceLabel)
+    private static void CollectAssemblyCreatureIds(
+        Assembly assembly,
+        string sourceKey,
+        string sourceLabel,
+        List<string> collected)
     {
-        bool changed = false;
         Type[] types;
         try
         {
@@ -1028,27 +1302,29 @@ internal static class WorldCreatureCatalogPicker
         }
         catch
         {
-            return false;
+            return;
         }
 
         for (int i = 0; i < types.Length; i++)
         {
             Type type = types[i];
             if (type == null) continue;
-            if (CollectStaticCreatureIds(type, sourceKey, sourceLabel, overwrite: false)) changed = true;
+            CollectStaticCreatureIds(type, sourceKey, sourceLabel, overwrite: false, collected);
         }
-        return changed;
     }
 
     /// <summary>
-    /// Only static fields are inspected. Static properties are intentionally not invoked because a
-    /// property getter is executable mod code and opening an editor should never trigger arbitrary
-    /// third-party side effects merely to color a catalog header.
+    /// Static properties are intentionally not invoked: a getter is arbitrary third-party code and
+    /// opening an editor must not execute it simply to classify a catalog item.
     /// </summary>
-    private static bool CollectStaticCreatureIds(Type owner, string sourceKey, string sourceLabel, bool overwrite)
+    private static void CollectStaticCreatureIds(
+        Type owner,
+        string sourceKey,
+        string sourceLabel,
+        bool overwrite,
+        List<string> collected)
     {
-        if (owner == null) return false;
-        bool changed = false;
+        if (owner == null) return;
         const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
         try
         {
@@ -1057,13 +1333,16 @@ internal static class WorldCreatureCatalogPicker
             {
                 if (!typeof(CreatureTemplate.Type).IsAssignableFrom(fields[i].FieldType)) continue;
                 if (fields[i].GetValue(null) is not CreatureTemplate.Type creature || string.IsNullOrWhiteSpace(creature.value)) continue;
-                if (AssignSource(creature.value, sourceKey, sourceLabel, overwrite)) changed = true;
+                if (AssignSource(creature.value, sourceKey, sourceLabel, overwrite) && collected != null)
+                    AddUnique(collected, creature.value);
+                else if (collected != null && sourceByCreature.TryGetValue(creature.value, out string assigned) &&
+                         string.Equals(assigned, sourceKey, StringComparison.OrdinalIgnoreCase))
+                    AddUnique(collected, creature.value);
             }
         }
         catch
         {
         }
-        return changed;
     }
 
     private static bool AssignSource(string creatureId, string key, string label, bool overwrite)
@@ -1128,6 +1407,45 @@ internal static class WorldCreatureCatalogPicker
         return null;
     }
 
+    private static string PluginFingerprint(Assembly assembly, string version)
+    {
+        string baseFingerprint = AssemblyFingerprint(assembly, version);
+        try
+        {
+            string location = assembly?.Location;
+            if (!string.IsNullOrEmpty(location) && File.Exists(location))
+            {
+                FileInfo info = new(location);
+                return baseFingerprint + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks;
+            }
+        }
+        catch
+        {
+        }
+        return baseFingerprint;
+    }
+
+    private static string AssemblyFingerprint(Assembly assembly, string suffix)
+    {
+        try
+        {
+            return (assembly?.GetName().Name ?? string.Empty) + "|" +
+                   assembly?.ManifestModule?.ModuleVersionId.ToString("N") + "|" + suffix;
+        }
+        catch
+        {
+            return (assembly?.FullName ?? string.Empty) + "|" + suffix;
+        }
+    }
+
+    private static void AddUnique(List<string> list, string value)
+    {
+        if (list == null || string.IsNullOrWhiteSpace(value)) return;
+        for (int i = 0; i < list.Count; i++)
+            if (string.Equals(list[i], value, StringComparison.OrdinalIgnoreCase)) return;
+        list.Add(value);
+    }
+
     private static int CountMatching(SourceGroup group, string search)
     {
         int count = 0;
@@ -1153,5 +1471,261 @@ internal static class WorldCreatureCatalogPicker
         for (int i = 0; i < value.Length && q < query.Length; i++)
             if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
         return q == query.Length;
+    }
+
+    private static string ResolveCachePath()
+    {
+        try
+        {
+            return Path.Combine(Paths.CachePath, "DryCycle", "DevTool", "creature-catalog-v" + CacheVersion + ".bin");
+        }
+        catch
+        {
+            return Path.Combine(Application.persistentDataPath, "DryCycle", "creature-catalog-v" + CacheVersion + ".bin");
+        }
+    }
+
+    private static void LoadPersistentCache()
+    {
+        if (string.IsNullOrEmpty(cacheFilePath) || !File.Exists(cacheFilePath)) return;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        try
+        {
+            using FileStream stream = new(cacheFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using BinaryReader reader = new(stream);
+            if (reader.ReadInt32() != CacheMagic || reader.ReadInt32() != CacheVersion) return;
+
+            int sourceCount = ReadSafeCount(reader, 4096);
+            for (int i = 0; i < sourceCount; i++)
+            {
+                PersistentSource source = new()
+                {
+                    Key = reader.ReadString(),
+                    Label = reader.ReadString(),
+                    Fingerprint = reader.ReadString()
+                };
+                int idCount = ReadSafeCount(reader, 20000);
+                string[] ids = new string[idCount];
+                for (int j = 0; j < idCount; j++) ids[j] = reader.ReadString();
+                source.CreatureIds = ids;
+                if (!string.IsNullOrWhiteSpace(source.Key)) persistentSources[source.Key] = source;
+            }
+
+            int iconCount = ReadSafeCount(reader, 50000);
+            lock (iconSync)
+            {
+                for (int i = 0; i < iconCount; i++)
+                {
+                    string id = reader.ReadString();
+                    string sourceFingerprint = reader.ReadString();
+                    IconState state = (IconState)reader.ReadByte();
+                    IconRaster raster = ReadRaster(reader);
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    iconSlots[id] = new IconSlot
+                    {
+                        State = state,
+                        Raster = raster,
+                        SourceFingerprint = sourceFingerprint,
+                        Validated = false,
+                        ValidationQueued = false
+                    };
+                }
+            }
+
+            PublishCachedCatalogSnapshot();
+            log?.LogInfo("Creature catalog persistent cache loaded in " + stopwatch.Elapsed.TotalMilliseconds.ToString("0.0") + " ms (" +
+                         persistentSources.Count + " source groups, " + iconSlots.Count + " icons).");
+        }
+        catch (Exception error)
+        {
+            persistentSources.Clear();
+            lock (iconSync) iconSlots.Clear();
+            catalog = CatalogSnapshot.Empty;
+            log?.LogWarning("Creature catalog cache ignored because it is invalid: " + error.Message);
+        }
+    }
+
+    private static int ReadSafeCount(BinaryReader reader, int max)
+    {
+        int value = reader.ReadInt32();
+        if (value < 0 || value > max) throw new InvalidDataException("Invalid cache item count: " + value);
+        return value;
+    }
+
+    private static IconRaster ReadRaster(BinaryReader reader)
+    {
+        IconRaster raster = new()
+        {
+            SpriteName = reader.ReadString(),
+            AtlasSignature = reader.ReadString(),
+            Width = reader.ReadInt32(),
+            Height = reader.ReadInt32(),
+            Tint = new Color(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+            Available = reader.ReadBoolean()
+        };
+        int runCount = ReadSafeCount(reader, 200000);
+        PixelRun[] runs = new PixelRun[runCount];
+        for (int i = 0; i < runCount; i++)
+        {
+            int x = reader.ReadInt32();
+            int y = reader.ReadInt32();
+            int width = reader.ReadInt32();
+            Color32 color = new(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte());
+            runs[i] = new PixelRun(x, y, width, color);
+        }
+        raster.Runs = runs;
+        return raster;
+    }
+
+    private static void MarkCacheDirty()
+    {
+        cacheDirty = true;
+        cacheDirtyAt = Time.realtimeSinceStartup;
+    }
+
+    private static void TrySchedulePersistentSave()
+    {
+        if (!cacheDirty || cacheSaveInFlight || string.IsNullOrEmpty(cacheFilePath)) return;
+        if (Time.realtimeSinceStartup - cacheDirtyAt < SaveDebounceSeconds) return;
+
+        PersistentSnapshot snapshot = CapturePersistentSnapshot();
+        cacheDirty = false;
+        cacheSaveInFlight = true;
+        Task.Run(() =>
+        {
+            try
+            {
+                WritePersistentCache(snapshot);
+            }
+            catch (Exception error)
+            {
+                backgroundSaveError = error.Message;
+            }
+            finally
+            {
+                cacheSaveInFlight = false;
+            }
+        });
+    }
+
+    private static PersistentSnapshot CapturePersistentSnapshot()
+    {
+        PersistentSnapshot snapshot = new();
+        foreach (PersistentSource source in persistentSources.Values)
+        {
+            snapshot.Sources.Add(new PersistentSource
+            {
+                Key = source.Key,
+                Label = source.Label,
+                Fingerprint = source.Fingerprint,
+                CreatureIds = (string[])(source.CreatureIds ?? Array.Empty<string>()).Clone()
+            });
+        }
+
+        lock (iconSync)
+        {
+            foreach (KeyValuePair<string, IconSlot> pair in iconSlots)
+            {
+                IconSlot slot = pair.Value;
+                if (slot == null || slot.State == IconState.Pending) continue;
+                snapshot.Icons.Add(new PersistentIcon
+                {
+                    CreatureId = pair.Key,
+                    SourceFingerprint = slot.SourceFingerprint,
+                    State = slot.State,
+                    Raster = CloneRaster(slot.Raster)
+                });
+            }
+        }
+        return snapshot;
+    }
+
+    private static IconRaster CloneRaster(IconRaster source)
+    {
+        if (source == null) return new IconRaster();
+        return new IconRaster
+        {
+            SpriteName = source.SpriteName,
+            AtlasSignature = source.AtlasSignature,
+            Width = source.Width,
+            Height = source.Height,
+            Tint = source.Tint,
+            Runs = (PixelRun[])(source.Runs ?? Array.Empty<PixelRun>()).Clone(),
+            Available = source.Available
+        };
+    }
+
+    private static void WritePersistentCache(PersistentSnapshot snapshot)
+    {
+        string directory = Path.GetDirectoryName(cacheFilePath);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        string temp = cacheFilePath + ".tmp";
+
+        using (FileStream stream = new(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (BinaryWriter writer = new(stream))
+        {
+            writer.Write(CacheMagic);
+            writer.Write(CacheVersion);
+            writer.Write(snapshot.Sources.Count);
+            for (int i = 0; i < snapshot.Sources.Count; i++)
+            {
+                PersistentSource source = snapshot.Sources[i];
+                writer.Write(source.Key ?? string.Empty);
+                writer.Write(source.Label ?? string.Empty);
+                writer.Write(source.Fingerprint ?? string.Empty);
+                string[] ids = source.CreatureIds ?? Array.Empty<string>();
+                writer.Write(ids.Length);
+                for (int j = 0; j < ids.Length; j++) writer.Write(ids[j] ?? string.Empty);
+            }
+
+            writer.Write(snapshot.Icons.Count);
+            for (int i = 0; i < snapshot.Icons.Count; i++)
+            {
+                PersistentIcon icon = snapshot.Icons[i];
+                writer.Write(icon.CreatureId ?? string.Empty);
+                writer.Write(icon.SourceFingerprint ?? string.Empty);
+                writer.Write((byte)icon.State);
+                WriteRaster(writer, icon.Raster);
+            }
+            writer.Flush();
+        }
+
+        try
+        {
+            if (File.Exists(cacheFilePath)) File.Replace(temp, cacheFilePath, null);
+            else File.Move(temp, cacheFilePath);
+        }
+        catch
+        {
+            File.Copy(temp, cacheFilePath, true);
+            File.Delete(temp);
+        }
+    }
+
+    private static void WriteRaster(BinaryWriter writer, IconRaster raster)
+    {
+        raster ??= new IconRaster();
+        writer.Write(raster.SpriteName ?? string.Empty);
+        writer.Write(raster.AtlasSignature ?? string.Empty);
+        writer.Write(raster.Width);
+        writer.Write(raster.Height);
+        writer.Write(raster.Tint.r);
+        writer.Write(raster.Tint.g);
+        writer.Write(raster.Tint.b);
+        writer.Write(raster.Tint.a);
+        writer.Write(raster.Available);
+        PixelRun[] runs = raster.Runs ?? Array.Empty<PixelRun>();
+        writer.Write(runs.Length);
+        for (int i = 0; i < runs.Length; i++)
+        {
+            PixelRun run = runs[i];
+            writer.Write(run.X);
+            writer.Write(run.Y);
+            writer.Write(run.Width);
+            writer.Write(run.Color.r);
+            writer.Write(run.Color.g);
+            writer.Write(run.Color.b);
+            writer.Write(run.Color.a);
+        }
     }
 }
