@@ -167,6 +167,14 @@ Output path on the current development machine:
 D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins/DryCycle.dll
 ```
 
+## Iterator Framework
+
+The first development phase provides immutable iterator definitions, fluent registration,
+ID/room/Oracle ID lookup, safe unregister/re-register handling, validation, and scoped logging.
+It does not yet spawn Oracle entities or install room/runtime hooks.
+See the [Iterator Framework documentation](src/Iterators/Documentation/README.md) and
+[phase progress and validation](src/Iterators/Documentation/PROGRESS.md).
+
 ## Source layout
 
 ```text

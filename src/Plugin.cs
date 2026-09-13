@@ -53,6 +53,8 @@ internal sealed class Plugin : BaseUnityPlugin
     public void OnEnable()
     {
         Logger = base.Logger;
+        Iterators.IteratorLogBridge.Enable(Logger);
+        Iterators.IteratorHooks.Install();
 
         if (!_contentRegistered)
         {
@@ -89,6 +91,8 @@ internal sealed class Plugin : BaseUnityPlugin
 
     public void OnDisable()
     {
+        Iterators.IteratorHooks.Uninstall();
+        Iterators.IteratorLogBridge.Disable();
         AIDebuggerRuntime.Uninstall();
         On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
         On.RainWorld.OnModsInit -= RainWorld_OnModsInit;

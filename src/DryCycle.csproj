@@ -41,6 +41,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="MantleCrab.Tests" />
+    <InternalsVisibleTo Include="IteratorFramework.Tests" />
     <InternalsVisibleTo Include="DryCycle.MantleCrab.Preview" />
     <InternalsVisibleTo Include="DryCycle.DevTool.RWImGui" />
   </ItemGroup>
@@ -56,6 +57,14 @@
          Shipping another NuGet copy could create a version conflict in Mono. -->
     <Reference Include="MonoMod.RuntimeDetour">
       <HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.Utils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Mono.Cecil">
+      <HintPath>$(RainWorldDir)/BepInEx/core/Mono.Cecil.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="PUBLIC-Assembly-CSharp">
@@ -106,6 +115,8 @@
   <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
     <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Application/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.Utils.dll')" Text="Iterator Framework requires the MonoMod.Utils.dll shipped in RainWorldDir/BepInEx/core." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/Mono.Cecil.dll')" Text="Iterator Framework requires the Mono.Cecil.dll shipped in RainWorldDir/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll')" Text="MonoMod.RuntimeDetour.dll not found under $(RainWorldDir)/BepInEx/core. AI Observatory Pause/Step and input isolation require the RuntimeDetour version shipped with Rain World/BepInEx." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll')" Text="PUBLIC-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/utils." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll')" Text="HOOKS-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/plugins." />

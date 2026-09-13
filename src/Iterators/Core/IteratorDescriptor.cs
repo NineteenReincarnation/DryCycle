@@ -1,0 +1,86 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+
+namespace DryCycle.Iterators;
+
+/// <summary>
+/// 一份创建后即不可变的定义，包含注册数据与可替换的 Runtime 工厂。
+/// 输入集合会复制，Metadata 使用不可变字符串，避免外部引用改变已注册定义。
+/// </summary>
+public sealed class IteratorDescriptor
+{
+    /// <summary>直接构造定义，无须使用 Fluent API。displayName 为 null 时使用 ID，metadata 可省略。</summary>
+    public IteratorDescriptor(
+        IteratorID id,
+        IEnumerable<string> rooms,
+        string displayName = null,
+        IReadOnlyDictionary<string, string> metadata = null)
+        : this(id, rooms, displayName, metadata, null)
+    {
+    }
+
+    /// <summary>指定 Runtime 工厂的完整构造入口；null 使用安全默认 Runtime，保留原四参数构造的兼容性。</summary>
+    public IteratorDescriptor(
+        IteratorID id,
+        IEnumerable<string> rooms,
+        string displayName,
+        IReadOnlyDictionary<string, string> metadata,
+        Func<IteratorContext, IteratorRuntime> runtimeFactory)
+    {
+        ID = id ?? throw new ArgumentNullException(nameof(id));
+        if (rooms == null)
+            throw new ArgumentNullException(nameof(rooms));
+
+        DisplayName = displayName ?? id.Value;
+        RuntimeFactory = runtimeFactory ?? CreateDefaultRuntime;
+        Rooms = new ReadOnlyCollection<string>(new List<string>(rooms));
+        var metadataCopy = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (metadata != null)
+        {
+            foreach (KeyValuePair<string, string> pair in metadata)
+            {
+                IteratorValidation.RequireText(pair.Key, "metadataKey");
+                if (pair.Value == null)
+                    throw new ArgumentException($"IteratorFramework: metadata '{pair.Key}' for '{ID}' cannot be null.", nameof(metadata));
+                metadataCopy.Add(pair.Key, pair.Value);
+            }
+        }
+
+        Metadata = new ReadOnlyDictionary<string, string>(metadataCopy);
+        Validate();
+    }
+
+    /// <summary>稳定的迭代器 ID。</summary>
+    public IteratorID ID { get; }
+
+    /// <summary>显示名称，缺省为 ID。</summary>
+    public string DisplayName { get; }
+
+    /// <summary>按声明顺序保存的精确房间名。房间查询和冲突检查忽略大小写，不要求 _AI 后缀。</summary>
+    public IReadOnlyList<string> Rooms { get; }
+
+    /// <summary>区分大小写的只读字符串元数据；建议扩展使用所属 Mod 的键前缀。</summary>
+    public IReadOnlyDictionary<string, string> Metadata { get; }
+
+    /// <summary>每次生成调用一次，必须返回使用所传 Context 创建的全新 Runtime。</summary>
+    public Func<IteratorContext, IteratorRuntime> RuntimeFactory { get; }
+
+    private static IteratorRuntime CreateDefaultRuntime(IteratorContext context) => new(context);
+
+    /// <summary>验证定义本身。不会注册或检查全局冲突；全局冲突由 Registry.Register 检查。</summary>
+    public void Validate()
+    {
+        IteratorValidation.RequireText(DisplayName, nameof(DisplayName));
+        if (Rooms.Count == 0)
+            throw new ArgumentException($"IteratorFramework: iterator '{ID}' must declare at least one room.", nameof(Rooms));
+
+        var seenRooms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string room in Rooms)
+        {
+            IteratorValidation.RequireToken(room, "roomName");
+            if (!seenRooms.Add(room))
+                throw new ArgumentException($"IteratorFramework: iterator '{ID}' declares room '{room}' more than once.", nameof(Rooms));
+        }
+    }
+}
