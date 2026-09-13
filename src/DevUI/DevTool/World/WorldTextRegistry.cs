@@ -19,6 +19,13 @@ internal static class WorldTextRegistry
 
     internal static bool EnsureLoaded(string region)
     {
+        // This method sits on several immediate-mode and map-topology hot paths. In the stable case
+        // the caller already passes the active region id, so avoid Trim/ToUpperInvariant entirely.
+        if (document != null &&
+            !string.IsNullOrWhiteSpace(region) &&
+            string.Equals(LoadedRegion, region, StringComparison.OrdinalIgnoreCase))
+            return true;
+
         string normalized = NormalizeRegion(region);
         if (normalized.Length == 0) return false;
 
