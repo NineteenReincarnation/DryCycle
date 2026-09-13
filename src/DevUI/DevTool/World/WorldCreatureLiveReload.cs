@@ -8,7 +8,6 @@ using DryCycle.DevUI.DevTool.Core;
 using RWWorld = global::World;
 using RWCreatureSpawner = global::World.CreatureSpawner;
 using RWSimpleSpawner = global::World.SimpleSpawner;
-using RWLineage = global::World.Lineage;
 
 namespace DryCycle.DevUI.DevTool.World;
 
@@ -16,6 +15,11 @@ namespace DryCycle.DevUI.DevTool.World;
 /// Room-local live preview for world creature authoring. Existing unrelated spawner indices are
 /// never shifted. The selected room's vanilla SimpleSpawner/Lineage slots are reused and additional
 /// preview slots are appended only when necessary.
+///
+/// IMPORTANT: some Rain World PUBLIC-Assembly-CSharp builds do not expose World.Lineage as a
+/// compile-time nested type even though the runtime Assembly-CSharp contains World+Lineage.
+/// Therefore this file never references World.Lineage directly. Lineage construction/access is
+/// adapted through reflection while the common World.CreatureSpawner base remains strongly typed.
 /// </summary>
 internal static class WorldCreatureLiveReload
 {
@@ -35,7 +39,17 @@ internal static class WorldCreatureLiveReload
         internal int Amount;
     }
 
+    private const BindingFlags AnyInstance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    private const BindingFlags AnyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
     private static ConditionalWeakTable<RWWorld, Dictionary<string, RoomState>> states = new();
+    private static Type lineageRuntimeType;
+    private static FieldInfo worldLineagesField;
+    private static FieldInfo lineageDenStringField;
+    private static FieldInfo lineageCreatureTypesField;
+    private static MethodInfo lineageCurrentTypeMethod;
+    private static MethodInfo lineageCurrentSpawnDataMethod;
+    private static bool lineageReflectionResolved;
 
     internal static string LastStatus { get; private set; } = string.Empty;
     internal static bool LastSucceeded { get; private set; } = true;
@@ -94,7 +108,7 @@ internal static class WorldCreatureLiveReload
         {
             RWCreatureSpawner spawner = current[i];
             if (spawner == null || spawner.den.room != room.index) continue;
-            if (spawner is not RWSimpleSpawner && spawner is not RWLineage) continue;
+            if (spawner is not RWSimpleSpawner && !IsLineage(spawner)) continue;
             state.Slots.Add(i);
             state.SpawnerIds.Add(spawner.SpawnerID);
 
@@ -199,14 +213,14 @@ internal static class WorldCreatureLiveReload
                 spawnData[s] = string.IsNullOrWhiteSpace(stage.SpawnData) ? null : "{" + stage.SpawnData + "}";
             }
 
-            RWLineage lineage = new(
+            RWCreatureSpawner lineage = CreateLineageSpawner(
                 world.region.regionNumber,
-                -1,
                 new WorldCoordinate(room.index, -1, -1, record.DenNode),
                 types,
                 chances,
                 spawnData,
                 conflict);
+            if (lineage == null) continue;
             lineage.nightCreature = record.NightCreature;
             result.Add(lineage);
         }
@@ -257,18 +271,32 @@ internal static class WorldCreatureLiveReload
 
     private static void RefreshWorldLineages(RWWorld world, AbstractRoom room, RoomState state)
     {
-        List<RWLineage> lineages = new();
-        RWLineage[] current = world.lineages ?? Array.Empty<RWLineage>();
-        for (int i = 0; i < current.Length; i++)
-            if (current[i] != null && current[i].den.room != room.index) lineages.Add(current[i]);
+        ResolveLineageReflection();
+        if (lineageRuntimeType == null || worldLineagesField == null) return;
+
+        List<object> lineages = new();
+        if (worldLineagesField.GetValue(world) is Array current)
+        {
+            for (int i = 0; i < current.Length; i++)
+            {
+                object item = current.GetValue(i);
+                if (item is not RWCreatureSpawner spawner || spawner.den.room == room.index) continue;
+                lineages.Add(item);
+            }
+        }
 
         for (int i = 0; i < state.Slots.Count; i++)
         {
             int slot = state.Slots[i];
-            if (slot >= 0 && slot < world.spawners.Length && world.spawners[slot] is RWLineage lineage)
-                lineages.Add(lineage);
+            if (slot < 0 || slot >= world.spawners.Length) continue;
+            RWCreatureSpawner spawner = world.spawners[slot];
+            if (IsLineage(spawner)) lineages.Add(spawner);
         }
-        world.lineages = lineages.ToArray();
+
+        Type elementType = worldLineagesField.FieldType.GetElementType() ?? lineageRuntimeType;
+        Array next = Array.CreateInstance(elementType, lineages.Count);
+        for (int i = 0; i < lineages.Count; i++) next.SetValue(lineages[i], i);
+        worldLineagesField.SetValue(world, next);
     }
 
     private static void SpawnDefinitions(
@@ -305,30 +333,106 @@ internal static class WorldCreatureLiveReload
                 for (int n = 0; n < simple.amount; n++)
                     SpawnAbstract(world, room, simple.den, simple.creatureType, simple.spawnDataString, simple.nightCreature, simple.SpawnerID);
             }
-            else if (spawner is RWLineage lineage)
+            else if (IsLineage(spawner))
             {
-                SpawnLineage(world, room, lineage);
+                SpawnLineage(world, room, spawner);
             }
         }
     }
 
-    private static void SpawnLineage(RWWorld world, AbstractRoom room, RWLineage lineage)
+    private static void SpawnLineage(RWWorld world, AbstractRoom room, RWCreatureSpawner lineage)
     {
         if (world.game.session is not StoryGameSession story || world.region == null) return;
         SaveState save = story.saveState;
         if (save == null) return;
+
+        ResolveLineageReflection();
+        if (!IsLineage(lineage) || lineageDenStringField == null || lineageCreatureTypesField == null ||
+            lineageCurrentTypeMethod == null || lineageCurrentSpawnDataMethod == null)
+            return;
+
         if (save.regionStates[world.region.regionNumber] == null)
             save.regionStates[world.region.regionNumber] = new RegionState(save, world);
 
-        RegionState regionState = save.regionStates[world.region.regionNumber];
-        if (!regionState.lineageCounters.ContainsKey(lineage.denString))
-            regionState.lineageCounters[lineage.denString] = 0;
-        int max = Math.Max(0, lineage.creatureTypes.Length - 1);
-        regionState.lineageCounters[lineage.denString] = Math.Max(0, Math.Min(max, regionState.lineageCounters[lineage.denString]));
+        string denString = lineageDenStringField.GetValue(lineage) as string;
+        int[] creatureTypes = lineageCreatureTypesField.GetValue(lineage) as int[] ?? Array.Empty<int>();
+        if (string.IsNullOrEmpty(denString)) return;
 
-        CreatureTemplate.Type type = lineage.CurrentType(save);
-        if (type != null)
-            SpawnAbstract(world, room, lineage.den, type, lineage.CurrentSpawnData(save), lineage.nightCreature, lineage.SpawnerID);
+        RegionState regionState = save.regionStates[world.region.regionNumber];
+        if (!regionState.lineageCounters.ContainsKey(denString))
+            regionState.lineageCounters[denString] = 0;
+        int max = Math.Max(0, creatureTypes.Length - 1);
+        regionState.lineageCounters[denString] = Math.Max(0, Math.Min(max, regionState.lineageCounters[denString]));
+
+        CreatureTemplate.Type type = lineageCurrentTypeMethod.Invoke(lineage, new object[] { save }) as CreatureTemplate.Type;
+        if (type == null) return;
+        string spawnData = lineageCurrentSpawnDataMethod.Invoke(lineage, new object[] { save }) as string;
+        SpawnAbstract(world, room, lineage.den, type, spawnData, lineage.nightCreature, lineage.SpawnerID);
+    }
+
+    private static RWCreatureSpawner CreateLineageSpawner(
+        int region,
+        WorldCoordinate den,
+        int[] types,
+        float[] chances,
+        string[] spawnData,
+        int conflict)
+    {
+        ResolveLineageReflection();
+        if (lineageRuntimeType == null || !typeof(RWCreatureSpawner).IsAssignableFrom(lineageRuntimeType)) return null;
+
+        try
+        {
+            ConstructorInfo ctor = lineageRuntimeType.GetConstructor(
+                AnyInstance,
+                null,
+                new[]
+                {
+                    typeof(int), typeof(int), typeof(WorldCoordinate), typeof(int[]), typeof(float[]), typeof(string[]), typeof(int)
+                },
+                null);
+            if (ctor == null) return null;
+            return ctor.Invoke(new object[] { region, -1, den, types, chances, spawnData, conflict }) as RWCreatureSpawner;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning("Could not construct runtime World+Lineage: " + Unwrap(error).Message);
+            return null;
+        }
+    }
+
+    private static bool IsLineage(RWCreatureSpawner spawner)
+    {
+        if (spawner == null) return false;
+        ResolveLineageReflection();
+        return lineageRuntimeType != null && lineageRuntimeType.IsInstanceOfType(spawner);
+    }
+
+    private static void ResolveLineageReflection()
+    {
+        if (lineageReflectionResolved) return;
+        lineageReflectionResolved = true;
+
+        try
+        {
+            Type worldType = typeof(RWWorld);
+            lineageRuntimeType = worldType.GetNestedType("Lineage", BindingFlags.Public | BindingFlags.NonPublic);
+            worldLineagesField = worldType.GetField("lineages", AnyInstance);
+            if (lineageRuntimeType == null) return;
+
+            lineageDenStringField = lineageRuntimeType.GetField("denString", AnyInstance);
+            lineageCreatureTypesField = lineageRuntimeType.GetField("creatureTypes", AnyInstance);
+            lineageCurrentTypeMethod = lineageRuntimeType.GetMethod(
+                "CurrentType", AnyInstance, null, new[] { typeof(SaveState) }, null);
+            lineageCurrentSpawnDataMethod = lineageRuntimeType.GetMethod(
+                "CurrentSpawnData", AnyInstance, null, new[] { typeof(SaveState) }, null);
+        }
+        catch (Exception error)
+        {
+            lineageRuntimeType = null;
+            worldLineagesField = null;
+            global::DryCycle.Plugin.Logger?.LogWarning("World lineage reflection setup failed: " + Unwrap(error).Message);
+        }
     }
 
     private static void SpawnAbstract(
@@ -352,13 +456,20 @@ internal static class WorldCreatureLiveReload
     private static SlugcatStats.Timeline CurrentTimeline(RWWorld world)
     {
         if (world?.game?.IsStorySession != true) return null;
-        return SlugcatStats.SlugcatToTimeline(world.game.StoryCharacter);
+        return world.game.TimelinePoint ?? SlugcatStats.SlugcatToTimeline(world.game.StoryCharacter);
     }
 
     private static bool TimelineMatches(string filter, bool exclude, SlugcatStats.Timeline timeline)
     {
         if (string.IsNullOrWhiteSpace(filter)) return true;
         return WorldLoader.Preprocessing.TimelineMatch((exclude ? "X-" : string.Empty) + filter, timeline);
+    }
+
+    private static Exception Unwrap(Exception error)
+    {
+        while (error is TargetInvocationException invocation && invocation.InnerException != null)
+            error = invocation.InnerException;
+        return error;
     }
 }
 
