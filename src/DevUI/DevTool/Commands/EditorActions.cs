@@ -6,6 +6,9 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Preview;
+using DryCycle.DevUI.DevTool.World;
+using DryCycle.TemperatureSystem;
+using DryCycle.Weather.Spatial;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Commands;
@@ -19,10 +22,7 @@ public static class EditorActions
         try
         {
             if (session.Owner.activePage is MapPage map)
-            {
-                map.SaveMapConfig();
-                return true;
-            }
+                return SaveMapWorkspace(map);
 
             if (session.Owner.activePage is RelationshipPage)
             {
@@ -40,6 +40,46 @@ public static class EditorActions
             Plugin.Logger?.LogWarning("DevTool save failed: " + error.Message);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Map is one workspace even though its editable state is backed by several files. Keep every
+    /// save entry point (toolbar button, Ctrl/Cmd+S, future automation) on this same core path so a
+    /// successful map-config save can never leave world.txt or DryCycle-owned world data dirty.
+    /// </summary>
+    private static bool SaveMapWorkspace(MapPage map)
+    {
+        if (map == null) return false;
+
+        bool ok = true;
+        map.SaveMapConfig();
+
+        string region = map.world?.name ?? string.Empty;
+
+        if (WorldTextRegistry.Dirty)
+        {
+            if (WorldTextRegistry.EnsureLoaded(region))
+                ok &= WorldTextRegistry.Save();
+            else
+            {
+                ok = false;
+                Plugin.Logger?.LogWarning(
+                    "DevTool Map save could not persist world.txt: " +
+                    (WorldTextRegistry.LoadError ?? "world.txt is unavailable."));
+            }
+        }
+
+        WorldTopologyRegistry.EnsureLoaded();
+        if (WorldTopologyRegistry.Dirty)
+            ok &= WorldTopologyRegistry.Save();
+
+        if (TemperatureSetsLoader.Dirty)
+            ok &= TemperatureSetsLoader.Save();
+
+        if (WeatherSpatialRegistry.Dirty)
+            ok &= WeatherSpatialRegistry.Save();
+
+        return ok;
     }
 
     public static bool Undo(EditorSession session)
@@ -66,7 +106,7 @@ public static class EditorActions
 
         string typeName = session.PlacementType;
         Vector2 worldPosition = camera.pos + session.Owner.mousePos;
-        PlacedObject created = CreateObject(session, new PlacedObject.Type(typeName, false), worldPosition);
+        PlacedObject created = CreateObject(session, new PlacedObject.Type(typeName, false), new Vector2(worldPosition.x, worldPosition.y));
         if (created == null) return false;
 
         if (!keepPlacementMode)
