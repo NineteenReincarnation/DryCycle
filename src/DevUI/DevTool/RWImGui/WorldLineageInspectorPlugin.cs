@@ -11,7 +11,7 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency("DryCycle.DevTool.RWImGui.WorldMap.CreatureSpawns", BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(WorldCreatureSpawnInspectorPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldLineageInspectorPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMap.Lineages";
@@ -36,7 +36,6 @@ internal static class WorldLineageInspector
         internal string Creature = "NONE";
         internal float Chance;
         internal string SpawnData = string.Empty;
-        internal string Search = string.Empty;
     }
 
     private delegate void OrigDraw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale);
@@ -60,9 +59,7 @@ internal static class WorldLineageInspector
     private static string status = string.Empty;
     private static bool statusSuccess = true;
     private static readonly List<StageState> stages = new();
-    private static readonly List<string> creatures = new();
     private static readonly List<string> timelines = new();
-    private static int creatureCount = -1;
     private static int timelineFingerprint = -1;
 
     internal static void Enable(ManualLogSource logger)
@@ -100,10 +97,10 @@ internal static class WorldLineageInspector
         try { hook?.Dispose(); } catch { }
         hook = null;
         stages.Clear();
-        creatures.Clear();
         timelines.Clear();
         stateRoom = -1;
         editingId = -1;
+        timelineFingerprint = -1;
         log = null;
     }
 
@@ -121,7 +118,7 @@ internal static class WorldLineageInspector
     {
         if (snapshot?.Available != true || room == null) return;
         if (stateRoom != room.RoomIndex) ResetRoom(room);
-        RefreshCatalogs();
+        RefreshTimelines();
         WorldLineageRegistry.EnsureLoaded(snapshot.RegionName);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("族谱 / Lineage", "LINEAGE"), restoreScale);
@@ -170,7 +167,7 @@ internal static class WorldLineageInspector
                 if (WorldLineageRegistry.TryDelete(snapshot.RegionName, lineage.Id, out string error))
                 {
                     if (editingId == lineage.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T("Lineage 已删除。", "Lineage deleted."), true);
+                    SetStatus(DevToolUiSettings.T("Lineage 已删除并实时重载。", "Lineage deleted and live-reloaded."), true);
                 }
                 else SetStatus(error, false);
             }
@@ -282,35 +279,31 @@ internal static class WorldLineageInspector
             return;
         }
 
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("生物 ID##LineageCreature", "Creature ID##LineageCreature"), ref stage.Creature, 128);
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("筛选##LineageCreatureSearch", "Filter##LineageCreatureSearch"), ref stage.Search, 96);
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo(
-                DevToolUiSettings.T("已注册生物##LineageCreatureCatalog", "Registered creatures##LineageCreatureCatalog"),
-                stage.Creature))
-        {
-            if (ImGui.Selectable("NONE##LineageNone", string.Equals(stage.Creature, "NONE", StringComparison.OrdinalIgnoreCase)))
-                stage.Creature = "NONE";
-            for (int i = 0; i < creatures.Count; i++)
-            {
-                string id = creatures[i];
-                if (!Matches(id, stage.Search)) continue;
-                bool selected = string.Equals(stage.Creature, id, StringComparison.Ordinal);
-                if (ImGui.Selectable(id + "##LineageCreature" + i, selected)) stage.Creature = id;
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
+        // Lineage uses the exact same catalog as ordinary spawners. NONE is an explicit special
+        // tile at the top of the picker instead of a magic text ID field.
+        string selectedCreature = stage.Creature;
+        if (WorldCreatureCatalogPicker.DrawSelector(
+                "LineageStage_" + index,
+                ref selectedCreature,
+                allowNone: true,
+                label: DevToolUiSettings.T("生物", "Creature")))
+            stage.Creature = selectedCreature;
 
         float chance = stage.Chance;
         ImGui.SetNextItemWidth(-1f);
-        if (ImGui.InputFloat(DevToolUiSettings.T("进化概率##LineageChance", "Progress chance##LineageChance"), ref chance, 0.05f, 0.1f, "%.3f"))
+        if (ImGui.InputFloat(
+                DevToolUiSettings.T("进化概率##LineageChance", "Progress chance##LineageChance"),
+                ref chance,
+                0.05f,
+                0.1f,
+                "%.3f"))
             stage.Chance = Math.Max(0f, Math.Min(1f, chance));
 
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("Spawn 标签##LineageSpawnData", "Spawn tags##LineageSpawnData"), ref stage.SpawnData, 512);
+        ImGui.InputText(
+            DevToolUiSettings.T("Spawn 标签##LineageSpawnData", "Spawn tags##LineageSpawnData"),
+            ref stage.SpawnData,
+            512);
         if (ImGui.BeginCombo(
                 DevToolUiSettings.T("快速添加标签##LineageTagPreset", "Add tag preset##LineageTagPreset"),
                 DevToolUiSettings.T("选择…", "Select…")))
@@ -376,7 +369,7 @@ internal static class WorldLineageInspector
         {
             if (string.IsNullOrWhiteSpace(stages[i].Creature))
             {
-                SetStatus(DevToolUiSettings.T("每个阶段都要有生物 ID 或 NONE。", "Every stage needs a creature id or NONE."), false);
+                SetStatus(DevToolUiSettings.T("每个阶段都要选择生物或 NONE。", "Every stage needs a creature or NONE."), false);
                 return;
             }
             data.Add(new WorldLineageStageRecord
@@ -448,29 +441,18 @@ internal static class WorldLineageInspector
         status = string.Empty;
     }
 
-    private static void RefreshCatalogs()
+    private static void RefreshTimelines()
     {
-        int cc = ExtEnum<CreatureTemplate.Type>.values.entries.Count;
-        if (cc != creatureCount || creatures.Count == 0)
-        {
-            creatureCount = cc;
-            creatures.Clear();
-            for (int i = 0; i < ExtEnum<CreatureTemplate.Type>.values.entries.Count; i++)
-                AddUnique(creatures, ExtEnum<CreatureTemplate.Type>.values.entries[i]);
-            creatures.Sort(StringComparer.OrdinalIgnoreCase);
-        }
-
-        int tf = ExtEnum<SlugcatStats.Timeline>.values.entries.Count * 397 ^ ExtEnum<SlugcatStats.Name>.values.entries.Count;
-        if (tf != timelineFingerprint || timelines.Count == 0)
-        {
-            timelineFingerprint = tf;
-            timelines.Clear();
-            for (int i = 0; i < ExtEnum<SlugcatStats.Timeline>.values.entries.Count; i++)
-                AddUnique(timelines, ExtEnum<SlugcatStats.Timeline>.values.entries[i]);
-            for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.entries.Count; i++)
-                AddUnique(timelines, ExtEnum<SlugcatStats.Name>.values.entries[i]);
-            timelines.Sort(StringComparer.OrdinalIgnoreCase);
-        }
+        int fingerprint = ExtEnum<SlugcatStats.Timeline>.values.entries.Count * 397 ^
+                          ExtEnum<SlugcatStats.Name>.values.entries.Count;
+        if (fingerprint == timelineFingerprint && timelines.Count > 0) return;
+        timelineFingerprint = fingerprint;
+        timelines.Clear();
+        for (int i = 0; i < ExtEnum<SlugcatStats.Timeline>.values.entries.Count; i++)
+            AddUnique(timelines, ExtEnum<SlugcatStats.Timeline>.values.entries[i]);
+        for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.entries.Count; i++)
+            AddUnique(timelines, ExtEnum<SlugcatStats.Name>.values.entries[i]);
+        timelines.Sort(StringComparer.OrdinalIgnoreCase);
     }
 
     private static List<EditorMapRoomNodeSnapshot> DenNodes(EditorMapRoomSnapshot room)
@@ -541,16 +523,6 @@ internal static class WorldLineageInspector
         for (int i = 0; i < list.Count; i++)
             if (string.Equals(list[i], value, StringComparison.OrdinalIgnoreCase)) return;
         list.Add(value);
-    }
-
-    private static bool Matches(string value, string query)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        if (!string.IsNullOrEmpty(value) && value.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0) return true;
-        int q = 0;
-        for (int i = 0; i < value.Length && q < query.Length; i++)
-            if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
-        return q == query.Length;
     }
 
     private static void SetStatus(string message, bool success)
