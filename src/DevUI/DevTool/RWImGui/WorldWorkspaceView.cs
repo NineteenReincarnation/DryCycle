@@ -532,6 +532,11 @@ internal static class WorldWorkspaceView
             " · " + (visual.Curves?.Length ?? 0) + DevToolUiSettings.T(" 条曲面层", " curve layer(s)"),
             true);
 
+        // Creature spawner + Lineage authoring belongs to the selected room inspector itself.
+        // Calling it directly keeps the requested ordering (before WORLD LINKS) and removes the
+        // last RuntimeDetour from this UI path.
+        WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
+
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
         DrawRoomConnections(snapshot, room.RoomIndex);
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("节点", "NODES"));
