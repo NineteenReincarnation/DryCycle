@@ -398,7 +398,43 @@ internal static class WorldConnectionSyntax
             sourceRoom.connections = next;
         }
 
+        int previousTarget = sourceRoom.connections[source.NodeIndex];
         sourceRoom.connections[source.NodeIndex] = targetRoomIndex;
+
+        // ShortcutGraphics decides whether a RoomExit should show dots, a shelter/gate symbol, or
+        // nothing at all when GenerateSprites() runs. Updating AbstractRoom.connections alone fixes
+        // traversal but leaves an already realized/current room displaying the stale entrance symbol.
+        // Rebuild only cameras that are actually showing the edited source room, and only when the
+        // room-level target changed. NewRoom() is the vanilla lightweight presentation refresh: it
+        // does not reload room geometry, shortcut paths, creatures, physics or AI.
+        if (previousTarget != targetRoomIndex)
+            RefreshRealizedShortcutGraphics(sourceRoom);
+    }
+
+    private static void RefreshRealizedShortcutGraphics(AbstractRoom sourceRoom)
+    {
+        global::Room realizedRoom = sourceRoom?.realizedRoom;
+        if (realizedRoom?.game?.cameras == null) return;
+
+        for (int i = 0; i < realizedRoom.game.cameras.Length; i++)
+        {
+            RoomCamera camera = realizedRoom.game.cameras[i];
+            if (camera?.room != realizedRoom || camera.shortcutGraphics == null) continue;
+
+            try
+            {
+                camera.shortcutGraphics.NewRoom();
+            }
+            catch (Exception error)
+            {
+                // A live authoring refresh must never destabilize the room if another mod has
+                // temporarily replaced shortcut presentation state. Gameplay topology is already
+                // synchronized above, so log and let the next normal camera-room refresh recover.
+                global::DryCycle.Plugin.Logger?.LogWarning(
+                    "WorldTopology could not refresh shortcut graphics for " +
+                    (sourceRoom.name ?? "?") + ": " + error.Message);
+            }
+        }
     }
 
     private static string NormalizeRegion(string region) =>
