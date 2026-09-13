@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
-using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.World;
 using ImGuiNET;
@@ -12,9 +11,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Ordinary world creature-spawner authoring. Creature choice is intentionally visual: the shared
-/// catalog groups registered CreatureTemplate.Type values by source and renders Rain World's own
-/// Sandbox icon for each entry. No free-form creature ID field is exposed by this view.
+/// Ordinary world creature-spawner authoring. The editor hooks only the room-connection draw point
+/// in WorldWorkspaceView, so creature authoring is inserted immediately before WORLD LINKS without
+/// detouring every SectionHeader call in the whole DevTool.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -37,10 +36,13 @@ internal static class WorldCreatureSpawnInspector
         Exclude
     }
 
-    private delegate void OrigSectionHeader(string text, float restoreScale);
-    private delegate void HookSectionHeader(OrigSectionHeader orig, string text, float restoreScale);
+    private delegate void OrigDrawRoomConnections(EditorMapPresentationSnapshot snapshot, int roomIndex);
+    private delegate void HookDrawRoomConnections(
+        OrigDrawRoomConnections orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex);
 
-    private static readonly HookSectionHeader SectionHeaderHookDelegate = SectionHeaderHook;
+    private static readonly HookDrawRoomConnections DrawRoomConnectionsHookDelegate = DrawRoomConnectionsHook;
     private static readonly string[] KnownSpawnTags =
     {
         "Night", "PreCycle", "Winter", "Ignorecycle", "AlternateForm", "Lavasafe",
@@ -48,9 +50,8 @@ internal static class WorldCreatureSpawnInspector
     };
 
     private static ManualLogSource log;
-    private static IDisposable sectionHeaderHook;
+    private static IDisposable roomConnectionsHook;
     private static bool enabled;
-    private static bool injecting;
 
     private static int stateRoom = -1;
     private static int editingSpawnId = -1;
@@ -72,15 +73,15 @@ internal static class WorldCreatureSpawnInspector
         log = logger;
         try
         {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo sectionHeader = typeof(DevToolWidgets).GetMethod(
-                "SectionHeader",
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+            MethodInfo drawRoomConnections = typeof(WorldWorkspaceView).GetMethod(
+                "DrawRoomConnections",
                 flags,
                 null,
-                new[] { typeof(string), typeof(float) },
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(int) },
                 null);
-            if (sectionHeader == null)
-                throw new MissingMethodException("DevToolWidgets.SectionHeader was not found.");
+            if (drawRoomConnections == null)
+                throw new MissingMethodException("WorldWorkspaceView.DrawRoomConnections was not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             if (hookType == null)
@@ -89,12 +90,13 @@ internal static class WorldCreatureSpawnInspector
             if (constructor == null)
                 throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
 
-            sectionHeaderHook = constructor.Invoke(new object[] { sectionHeader, SectionHeaderHookDelegate }) as IDisposable;
-            if (sectionHeaderHook == null)
-                throw new InvalidOperationException("Creature-spawn inspector hook was not created.");
+            roomConnectionsHook = constructor.Invoke(
+                new object[] { drawRoomConnections, DrawRoomConnectionsHookDelegate }) as IDisposable;
+            if (roomConnectionsHook == null)
+                throw new InvalidOperationException("Creature-authoring inspector hook was not created.");
 
             enabled = true;
-            log?.LogInfo("World creature-spawn inspector enabled.");
+            log?.LogInfo("World creature authoring attached at room-connection inspector boundary.");
         }
         catch (Exception error)
         {
@@ -105,11 +107,10 @@ internal static class WorldCreatureSpawnInspector
 
     internal static void Disable()
     {
-        try { sectionHeaderHook?.Dispose(); }
+        try { roomConnectionsHook?.Dispose(); }
         catch { }
-        sectionHeaderHook = null;
+        roomConnectionsHook = null;
         enabled = false;
-        injecting = false;
         stateRoom = -1;
         editingSpawnId = -1;
         timelineCatalog.Clear();
@@ -117,52 +118,36 @@ internal static class WorldCreatureSpawnInspector
         log = null;
     }
 
-    private static void SectionHeaderHook(OrigSectionHeader orig, string text, float restoreScale)
+    private static void DrawRoomConnectionsHook(
+        OrigDrawRoomConnections orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex)
     {
-        if (enabled && !injecting && IsWorldLinksHeader(text))
+        if (enabled && snapshot?.Available == true)
         {
-            EditorSession session = DevToolRuntime.ActiveSession;
-            EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
-            if (session?.ToolMode == EditorToolMode.Map && snapshot?.Available == true)
-            {
-                EditorMapRoomSnapshot room = FindRoom(snapshot, snapshot.SelectedRoomIndex);
-                if (room != null)
-                {
-                    injecting = true;
-                    try
-                    {
-                        Draw(snapshot, room, restoreScale);
-                    }
-                    finally
-                    {
-                        injecting = false;
-                    }
-                }
-            }
+            EditorMapRoomSnapshot room = FindRoom(snapshot, roomIndex);
+            if (room != null)
+                Draw(snapshot, room);
         }
 
-        orig(text, restoreScale);
+        orig(snapshot, roomIndex);
     }
 
-    private static bool IsWorldLinksHeader(string text) =>
-        string.Equals(text, "世界连接", StringComparison.Ordinal) ||
-        string.Equals(text, "WORLD LINKS", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(text, DevToolUiSettings.T("世界连接", "WORLD LINKS"), StringComparison.Ordinal);
-
-    // Keep this exact signature: WorldLineageInspector attaches after the ordinary editor so both
-    // authoring surfaces occupy the same selected-room inspector before WORLD LINKS.
-    private static void Draw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale)
+    private static void Draw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
         if (stateRoom != room.RoomIndex)
             ResetForRoom(room);
 
         RefreshTimelineCatalog();
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置生物", "CREATURE SPAWNS"), restoreScale);
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置生物", "CREATURE SPAWNS"));
         WorldCreatureSpawnRecord[] existing = WorldTextRegistry.GetCreatureSpawns(snapshot.RegionName, room.Name);
         DrawExistingSpawns(snapshot, room, existing);
         ImGui.Spacing();
         DrawEditor(snapshot, room);
+
+        // Lineage is integrated directly instead of detouring this Draw method again.
+        WorldLineageInspector.DrawIntegrated(snapshot, room);
     }
 
     private static void DrawExistingSpawns(
@@ -261,7 +246,6 @@ internal static class WorldCreatureSpawnInspector
             ImGui.EndCombo();
         }
 
-        // No raw Creature ID textbox here. Selection always goes through the shared large catalog.
         WorldCreatureCatalogPicker.DrawSelector(
             "OrdinarySpawn",
             ref creatureId,
