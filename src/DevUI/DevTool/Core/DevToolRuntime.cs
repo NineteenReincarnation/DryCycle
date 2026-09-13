@@ -252,6 +252,29 @@ public sealed class EditorSession
         Selection.RemoveMissing(RoomSettings?.placedObjects);
     }
 
+    /// <summary>
+    /// Restores only stable presentation/workspace state after vanilla H recreated DevUI.
+    /// Transient interaction state such as an active placement or drag is intentionally not
+    /// carried across the destroyed DevUI instance.
+    /// </summary>
+    internal void RestoreViewStateFrom(EditorSession previous)
+    {
+        if (previous == null) return;
+
+        EditorToolMode previousMode = previous.ToolMode;
+        bool previousLegacyUiVisible = previous.LegacyUiVisible;
+        FocusMode = previous.FocusMode;
+        BrowserOpen = previous.BrowserOpen;
+        InspectorOpen = previous.InspectorOpen;
+        ObjectSearch = previous.ObjectSearch ?? string.Empty;
+        CancelPlacement();
+
+        SetToolMode(previousMode);
+        LegacyUiVisible = previousLegacyUiVisible;
+        if (LegacyUiVisible)
+            LegacyUiPresentationController.Restore(Owner?.activePage);
+    }
+
     public void SetToolMode(EditorToolMode mode)
     {
         if (mode != EditorToolMode.Objects) CancelPlacement();
@@ -455,9 +478,46 @@ public static class DevToolSessionHub
 
     internal static void Synchronize(global::DevInterface.DevUI ui)
     {
-        EditorSession session = sessions.GetValue(ui, key => new EditorSession(key));
+        if (ui == null) return;
+
+        if (!sessions.TryGetValue(ui, out EditorSession session))
+        {
+            current.TryGetTarget(out EditorSession previous);
+            bool restoreViewState = CanRestoreViewState(previous, ui);
+            int previousMapRoom = -1;
+            if (restoreViewState)
+                previousMapRoom = MapEditorStateHub.Get(previous)?.SelectedRoomIndex ?? -1;
+
+            session = new EditorSession(ui);
+            sessions.Add(ui, session);
+
+            if (restoreViewState)
+            {
+                session.RestoreViewStateFrom(previous);
+                MapEditorState mapState = MapEditorStateHub.Get(session);
+                if (mapState != null)
+                    mapState.SelectedRoomIndex = previousMapRoom;
+            }
+        }
+
         session.Synchronize(ui);
         current.SetTarget(session);
+    }
+
+    private static bool CanRestoreViewState(EditorSession previous, global::DevInterface.DevUI ui)
+    {
+        if (previous == null || ui == null || ReferenceEquals(previous.Owner, ui)) return false;
+
+        RainWorldGame previousGame = previous.Owner?.game;
+        RainWorldGame nextGame = ui.game;
+        if (previousGame == null || nextGame == null || !ReferenceEquals(previousGame, nextGame))
+            return false;
+        if (!nextGame.processActive || !nextGame.devToolsActive || !ReferenceEquals(nextGame.devUI, ui))
+            return false;
+        if (nextGame.manager?.currentMainLoop != null && !ReferenceEquals(nextGame.manager.currentMainLoop, nextGame))
+            return false;
+
+        return true;
     }
 
     internal static void Reset()
