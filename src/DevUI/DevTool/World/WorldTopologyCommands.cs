@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.World;
 
@@ -102,19 +103,15 @@ internal static class WorldTopologyCommandQueue
             case WorldTopologyCommandKind.AddExplicitMapping:
                 AddExplicitMapping(session, page.world, region, command);
                 break;
-
             case WorldTopologyCommandKind.CreateConnection:
                 CreateConnection(session, page.world, region, command);
                 break;
-
             case WorldTopologyCommandKind.DeleteConnection:
                 DeleteConnection(session, page.world, region, command);
                 break;
-
             case WorldTopologyCommandKind.RemoveExplicitMapping:
                 RemoveExplicitMapping(session, page.world, region, command.EdgeId);
                 break;
-
             case WorldTopologyCommandKind.SetDirection:
                 SetDirection(session, page.world, region, command.EdgeId, command.Direction);
                 break;
@@ -133,15 +130,19 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        if (!PointsTo(roomA, command.NodeA, roomB.index))
+        // Manual mapping is also the recovery path for an unresolved parser result. Do not require
+        // both endpoints to already point at each other: an empty Exit may be selected and repaired
+        // by the editor. We only reject stealing an endpoint that belongs to a third room.
+        int oldA = ConnectionTarget(roomA, command.NodeA);
+        int oldB = ConnectionTarget(roomB, command.NodeB);
+        if (oldA >= 0 && oldA != roomB.index)
         {
-            Fail(roomA.name + ":" + command.NodeA + " does not point to " + roomB.name + " in world.txt.");
+            Fail(roomA.name + ":" + command.NodeA + " is already connected to another room.");
             return;
         }
-
-        if (!PointsTo(roomB, command.NodeB, roomA.index))
+        if (oldB >= 0 && oldB != roomA.index)
         {
-            Fail(roomB.name + ":" + command.NodeB + " does not point back to " + roomA.name + " in world.txt.");
+            Fail(roomB.name + ":" + command.NodeB + " is already connected to another room.");
             return;
         }
 
@@ -389,11 +390,24 @@ internal static class WorldTopologyCommandQueue
 
         AbstractRoom roomA = world.GetAbstractRoom(edge.A.Room);
         AbstractRoom roomB = world.GetAbstractRoom(edge.B.Room);
-        if (roomA == null || roomB == null ||
-            !IsExit(roomA, edge.A.NodeIndex) ||
-            !IsExit(roomB, edge.B.NodeIndex))
+        bool validA = roomA != null && IsExit(roomA, edge.A.NodeIndex);
+        bool validB = roomB != null && IsExit(roomB, edge.B.NodeIndex);
+
+        // A malformed sidecar mapping must never trap the editor in an uneditable state. If its
+        // endpoint identity is already invalid, discard only the broken sidecar record and leave
+        // world.txt untouched; the presentation layer can immediately fall back to the authoritative
+        // room connection text and re-resolve it.
+        if (!validA || !validB)
         {
-            Fail("The connection endpoints are no longer valid in the loaded world.");
+            if (!WorldTopologyRegistry.RemoveEdge(region, edgeId))
+            {
+                Fail("The broken explicit connection mapping could not be removed.");
+                return;
+            }
+
+            WorldTopologyRuntime.NotifyTopologyChanged();
+            MapEditorPresentationHub.Clear();
+            Succeed("Removed the invalid explicit mapping; the connection will be rebuilt from world.txt.");
             return;
         }
 
@@ -571,9 +585,6 @@ internal static class WorldTopologyCommandQueue
         nodeIndex >= 0 &&
         nodeIndex < room.nodes.Length &&
         room.nodes[nodeIndex].type == AbstractRoomNode.Type.Exit;
-
-    private static bool PointsTo(AbstractRoom room, int nodeIndex, int targetRoomIndex) =>
-        ConnectionTarget(room, nodeIndex) == targetRoomIndex;
 
     private static int ConnectionTarget(AbstractRoom room, int nodeIndex) =>
         room?.connections != null && nodeIndex >= 0 && nodeIndex < room.connections.Length
