@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -102,7 +103,8 @@ internal static class KarmaSpearHooks
         }
 
         // Hold pickup to channel reinforced karma into either an ordinary spear or a
-        // spent Karma Spear. Suppress vanilla grab processing while the charge is active.
+        // depleted Karma Spear. The level stored in the finished weapon is read from the
+        // player's current karma at the moment reinforced karma is consumed.
         self.wantToThrow = 0;
         self.wantToPickUp = 0;
         state.Progress++;
@@ -169,13 +171,13 @@ internal static class KarmaSpearHooks
                 continue;
             }
 
-            // A spent Karma Spear can be recharged in place. Active Karma Spears are
-            // intentionally ignored so holding pickup can never waste reinforced karma.
+            // Only a depleted Karma Spear accepts a new reinforced charge. When it does,
+            // Recharge replaces the stored value with the player's current karma level.
             if (candidate is KarmaSpear karmaCandidate)
             {
                 if (karmaCandidate.IsSpent &&
                     karmaCandidate.abstractPhysicalObject is AbstractKarmaSpear abstractKarma &&
-                    abstractKarma.Spent)
+                    (abstractKarma.Spent || abstractKarma.KarmaLevel <= 0))
                 {
                     spear = karmaCandidate;
                     hand = i;
@@ -228,14 +230,11 @@ internal static class KarmaSpearHooks
             return false;
         }
 
-        // Recharging keeps the same physical spear, entity ID and save object. Validate
-        // the persistent spent state before spending reinforced karma so this path cannot
-        // consume protection on an already-active or malformed Karma Spear.
         if (source is KarmaSpear spentKarmaSpear)
         {
             if (!spentKarmaSpear.IsSpent ||
                 spentKarmaSpear.abstractPhysicalObject is not AbstractKarmaSpear spentAbstract ||
-                !spentAbstract.Spent)
+                (!spentAbstract.Spent && spentAbstract.KarmaLevel > 0))
             {
                 return false;
             }
@@ -288,7 +287,10 @@ internal static class KarmaSpearHooks
             return false;
         }
 
+        // This is the actual stored-energy assignment. It intentionally copies the player's
+        // current karma level once; subsequent spear uses only decrement this stored value.
         abstractSpear.KarmaLevel = charge.KarmaLevel;
+        abstractSpear.Spent = abstractSpear.KarmaLevel <= 0;
         realized.firstChunk.HardSetPosition(position);
         realized.firstChunk.lastPos = position;
         realized.firstChunk.vel = velocity;
@@ -371,7 +373,7 @@ internal static class KarmaSpearHooks
                         CultureInfo.InvariantCulture,
                         out int level))
                 {
-                    result.KarmaLevel = Mathf.Clamp(level, 1, 10);
+                    result.KarmaLevel = Mathf.Clamp(level, 0, 10);
                 }
                 else if (attr.StartsWith(SpentPrefix, StringComparison.Ordinal) &&
                          int.TryParse(
@@ -386,6 +388,19 @@ internal static class KarmaSpearHooks
                 {
                     unrecognized.Add(attr);
                 }
+            }
+
+            // Normalize old saves and malformed combinations. Zero always means depleted;
+            // an old `spent=true` spear is migrated to the new zero-level representation.
+            if (result.Spent || result.KarmaLevel <= 0)
+            {
+                result.KarmaLevel = 0;
+                result.Spent = true;
+            }
+            else
+            {
+                result.KarmaLevel = Mathf.Clamp(result.KarmaLevel, 1, 10);
+                result.Spent = false;
             }
 
             result.unrecognizedAttributes = unrecognized.Count > 0
