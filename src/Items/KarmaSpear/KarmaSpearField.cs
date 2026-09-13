@@ -179,7 +179,9 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        Vector2 targetPos = hitPoint + normal * (chunk.rad + 2.5f);
+        // collisionRadius already includes the projectile radius, so only a small separation
+        // offset is required here. Adding the radius a second time would visibly over-eject it.
+        Vector2 targetPos = hitPoint + normal * 2.5f;
         ShiftPhysicalObject(weapon, targetPos - chunk.pos);
 
         for (int i = 0; i < weapon.bodyChunks.Length; i++)
@@ -233,7 +235,8 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        Vector2 targetMainPos = hitPoint + normal * (main.rad + 1.5f);
+        // As above, the expanded collision circle already accounts for main.rad.
+        Vector2 targetMainPos = hitPoint + normal * 1.5f;
         ShiftPhysicalObject(creature, targetMainPos - main.pos);
 
         // Apply one common collision normal to the whole body. This preserves the creature's
