@@ -140,12 +140,19 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
                 }
 
                 if (obj is Creature creature &&
-                    !object.ReferenceEquals(creature, _source.thrownBy))
+                    !object.ReferenceEquals(creature, _source.thrownBy) &&
+                    !IsWatcherScavengerBarrierExempt(creature))
                 {
                     TryBlockCreature(creature, center);
                 }
             }
         }
+    }
+
+    private static bool IsWatcherScavengerBarrierExempt(Creature creature)
+    {
+        string typeName = creature?.Template?.type?.value ?? string.Empty;
+        return typeName == "ScavengerTemplar" || typeName == "ScavengerDisciple";
     }
 
     private void TryReflectProjectile(Weapon weapon, Vector2 center)
