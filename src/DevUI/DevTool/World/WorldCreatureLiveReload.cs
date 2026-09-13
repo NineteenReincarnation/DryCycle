@@ -58,7 +58,7 @@ internal static class WorldCreatureLiveReload
             RemoveManagedCreatures(world, state.SpawnerIds);
             RemoveQuantified(world, state);
 
-            List<World.CreatureSpawner> definitions = BuildDefinitions(world, room);
+            List<global::World.CreatureSpawner> definitions = BuildDefinitions(world, room);
             ApplySlots(world, room, state, definitions);
             RefreshWorldLineages(world, room, state);
             SpawnDefinitions(world, room, state, definitions);
@@ -85,18 +85,18 @@ internal static class WorldCreatureLiveReload
     {
         if (state.Claimed) return;
         state.Claimed = true;
-        World.CreatureSpawner[] current = world.spawners ?? Array.Empty<World.CreatureSpawner>();
+        global::World.CreatureSpawner[] current = world.spawners ?? Array.Empty<global::World.CreatureSpawner>();
         for (int i = 0; i < current.Length; i++)
         {
-            World.CreatureSpawner spawner = current[i];
+            global::World.CreatureSpawner spawner = current[i];
             if (spawner == null || spawner.den.room != room.index) continue;
-            if (spawner is not World.SimpleSpawner && spawner is not World.Lineage) continue;
+            if (spawner is not global::World.SimpleSpawner && spawner is not global::World.Lineage) continue;
             state.Slots.Add(i);
             state.SpawnerIds.Add(spawner.SpawnerID);
 
             // Quantified creatures do not carry the source spawner ID, so remove the original
             // contribution once when this room is first claimed for live authoring.
-            if (spawner is World.SimpleSpawner simple)
+            if (spawner is global::World.SimpleSpawner simple)
             {
                 CreatureTemplate template = StaticWorld.GetCreatureTemplate(simple.creatureType);
                 if (template?.quantified == true && room.realizedRoom == null)
@@ -144,9 +144,9 @@ internal static class WorldCreatureLiveReload
         state.Quantified.Clear();
     }
 
-    private static List<World.CreatureSpawner> BuildDefinitions(global::World world, AbstractRoom room)
+    private static List<global::World.CreatureSpawner> BuildDefinitions(global::World world, AbstractRoom room)
     {
-        List<World.CreatureSpawner> result = new();
+        List<global::World.CreatureSpawner> result = new();
         SlugcatStats.Timeline timeline = CurrentTimeline(world);
 
         WorldCreatureSpawnRecord[] ordinary = WorldTextRegistry.GetCreatureSpawns(world.name, room.name);
@@ -157,7 +157,7 @@ internal static class WorldCreatureLiveReload
             CreatureTemplate.Type type = WorldLoader.CreatureTypeFromString(record.Creature);
             if (type == null) continue;
             string spawnData = string.IsNullOrWhiteSpace(record.SpawnData) ? null : "{" + record.SpawnData + "}";
-            result.Add(new World.SimpleSpawner(
+            result.Add(new global::World.SimpleSpawner(
                 world.region.regionNumber,
                 -1,
                 new WorldCoordinate(room.index, -1, -1, record.DenNode),
@@ -195,7 +195,7 @@ internal static class WorldCreatureLiveReload
                 spawnData[s] = string.IsNullOrWhiteSpace(stage.SpawnData) ? null : "{" + stage.SpawnData + "}";
             }
 
-            World.Lineage lineage = new(
+            global::World.Lineage lineage = new(
                 world.region.regionNumber,
                 -1,
                 new WorldCoordinate(room.index, -1, -1, record.DenNode),
@@ -213,9 +213,9 @@ internal static class WorldCreatureLiveReload
         global::World world,
         AbstractRoom room,
         RoomState state,
-        List<World.CreatureSpawner> definitions)
+        List<global::World.CreatureSpawner> definitions)
     {
-        List<World.CreatureSpawner> array = new(world.spawners ?? Array.Empty<World.CreatureSpawner>());
+        List<global::World.CreatureSpawner> array = new(world.spawners ?? Array.Empty<global::World.CreatureSpawner>());
         while (state.Slots.Count < definitions.Count)
         {
             state.Slots.Add(array.Count);
@@ -228,7 +228,7 @@ internal static class WorldCreatureLiveReload
             int slot = state.Slots[i];
             if (i < definitions.Count)
             {
-                World.CreatureSpawner spawner = definitions[i];
+                global::World.CreatureSpawner spawner = definitions[i];
                 spawner.inRegionSpawnerIndex = slot;
                 spawner.region = world.region.regionNumber;
                 array[slot] = spawner;
@@ -237,7 +237,7 @@ internal static class WorldCreatureLiveReload
             else
             {
                 // Tombstone rather than remove the array element: all unrelated spawner IDs stay stable.
-                World.SimpleSpawner disabled = new(
+                global::World.SimpleSpawner disabled = new(
                     world.region.regionNumber,
                     slot,
                     new WorldCoordinate(room.index, -1, -1, 0),
@@ -253,15 +253,15 @@ internal static class WorldCreatureLiveReload
 
     private static void RefreshWorldLineages(global::World world, AbstractRoom room, RoomState state)
     {
-        List<World.Lineage> lineages = new();
-        World.Lineage[] current = world.lineages ?? Array.Empty<World.Lineage>();
+        List<global::World.Lineage> lineages = new();
+        global::World.Lineage[] current = world.lineages ?? Array.Empty<global::World.Lineage>();
         for (int i = 0; i < current.Length; i++)
             if (current[i] != null && current[i].den.room != room.index) lineages.Add(current[i]);
 
         for (int i = 0; i < state.Slots.Count; i++)
         {
             int slot = state.Slots[i];
-            if (slot >= 0 && slot < world.spawners.Length && world.spawners[slot] is World.Lineage lineage)
+            if (slot >= 0 && slot < world.spawners.Length && world.spawners[slot] is global::World.Lineage lineage)
                 lineages.Add(lineage);
         }
         world.lineages = lineages.ToArray();
@@ -271,18 +271,18 @@ internal static class WorldCreatureLiveReload
         global::World world,
         AbstractRoom room,
         RoomState state,
-        List<World.CreatureSpawner> definitions)
+        List<global::World.CreatureSpawner> definitions)
     {
         if (world.game == null) return;
         for (int i = 0; i < definitions.Count; i++)
         {
-            World.CreatureSpawner spawner = definitions[i];
+            global::World.CreatureSpawner spawner = definitions[i];
             int node = spawner.den.abstractNode;
             if (node < 0 || node >= room.nodes.Length) continue;
             AbstractRoomNode.Type nodeType = room.nodes[node].type;
             if (nodeType != AbstractRoomNode.Type.Den && nodeType != AbstractRoomNode.Type.GarbageHoles) continue;
 
-            if (spawner is World.SimpleSpawner simple)
+            if (spawner is global::World.SimpleSpawner simple)
             {
                 CreatureTemplate template = StaticWorld.GetCreatureTemplate(simple.creatureType);
                 if (template == null) continue;
@@ -301,14 +301,14 @@ internal static class WorldCreatureLiveReload
                 for (int n = 0; n < simple.amount; n++)
                     SpawnAbstract(world, room, simple.den, simple.creatureType, simple.spawnDataString, simple.nightCreature, simple.SpawnerID);
             }
-            else if (spawner is World.Lineage lineage)
+            else if (spawner is global::World.Lineage lineage)
             {
                 SpawnLineage(world, room, lineage);
             }
         }
     }
 
-    private static void SpawnLineage(global::World world, AbstractRoom room, World.Lineage lineage)
+    private static void SpawnLineage(global::World world, AbstractRoom room, global::World.Lineage lineage)
     {
         if (world.game.session is not StoryGameSession story || world.region == null) return;
         SaveState save = story.saveState;
