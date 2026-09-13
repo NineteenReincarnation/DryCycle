@@ -2,13 +2,17 @@ using System;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
+using RWWorld = global::World;
+using RWCreatureSpawner = global::World.CreatureSpawner;
 
 namespace DryCycle.DevUI.DevTool.World;
 
 /// <summary>
-/// Small parity layer for the DevTool population preview. Keep the live-reload implementation
-/// aligned with Rain World's WorldLoader.GeneratePopulation semantics for timeline position and
-/// NONE lineage stages without coupling the main editor code to another copy of WorldLoader.
+/// Keeps the DevTool live population preview aligned with vanilla handling of NONE lineage stages.
+///
+/// PUBLIC-Assembly-CSharp does not consistently expose World.Lineage as a compile-time nested type,
+/// so this compatibility layer intentionally works through World.CreatureSpawner and reflects the
+/// runtime World+Lineage members only after the game has loaded them.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldCreatureAuthoringRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -24,86 +28,86 @@ public sealed class WorldCreatureLiveReloadParityPlugin : BaseUnityPlugin
 
 internal static class WorldCreatureLiveReloadParity
 {
-    private delegate SlugcatStats.Timeline OrigCurrentTimeline(global::World world);
-    private delegate SlugcatStats.Timeline HookCurrentTimeline(OrigCurrentTimeline orig, global::World world);
-    private delegate void OrigSpawnLineage(global::World world, AbstractRoom room, World.Lineage lineage);
-    private delegate void HookSpawnLineage(OrigSpawnLineage orig, global::World world, AbstractRoom room, World.Lineage lineage);
+    private delegate void OrigSpawnLineage(RWWorld world, AbstractRoom room, RWCreatureSpawner lineage);
+    private delegate void HookSpawnLineage(OrigSpawnLineage orig, RWWorld world, AbstractRoom room, RWCreatureSpawner lineage);
 
-    private static IDisposable timelineHook;
+    private const BindingFlags AnyInstance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
     private static IDisposable lineageHook;
     private static ManualLogSource log;
+    private static Type lineageRuntimeType;
+    private static FieldInfo denStringField;
+    private static MethodInfo currentTypeMethod;
+    private static MethodInfo chanceToProgressMethod;
+    private static bool reflectionResolved;
 
     internal static void Enable(ManualLogSource logger)
     {
-        if (timelineHook != null || lineageHook != null) return;
+        if (lineageHook != null) return;
         log = logger;
         try
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
-            MethodInfo currentTimeline = typeof(WorldCreatureLiveReload).GetMethod(
-                "CurrentTimeline", flags, null, new[] { typeof(global::World) }, null);
             MethodInfo spawnLineage = typeof(WorldCreatureLiveReload).GetMethod(
-                "SpawnLineage", flags, null,
-                new[] { typeof(global::World), typeof(AbstractRoom), typeof(World.Lineage) }, null);
-            if (currentTimeline == null) throw new MissingMethodException("WorldCreatureLiveReload.CurrentTimeline was not found.");
-            if (spawnLineage == null) throw new MissingMethodException("WorldCreatureLiveReload.SpawnLineage was not found.");
+                "SpawnLineage",
+                flags,
+                null,
+                new[] { typeof(RWWorld), typeof(AbstractRoom), typeof(RWCreatureSpawner) },
+                null);
+            if (spawnLineage == null)
+                throw new MissingMethodException("WorldCreatureLiveReload.SpawnLineage(World, AbstractRoom, CreatureSpawner) was not found.");
 
-            timelineHook = CreateHook(currentTimeline, new HookCurrentTimeline(CurrentTimelineHook));
             lineageHook = CreateHook(spawnLineage, new HookSpawnLineage(SpawnLineageHook));
         }
         catch (Exception error)
         {
             Disable();
-            logger?.LogWarning("Creature live-reload parity hooks could not attach: " + error.Message);
+            logger?.LogWarning("Creature live-reload parity hook could not attach: " + Unwrap(error).Message);
         }
     }
 
     internal static void Disable()
     {
         try { lineageHook?.Dispose(); } catch { }
-        try { timelineHook?.Dispose(); } catch { }
         lineageHook = null;
-        timelineHook = null;
+        lineageRuntimeType = null;
+        denStringField = null;
+        currentTypeMethod = null;
+        chanceToProgressMethod = null;
+        reflectionResolved = false;
         log = null;
-    }
-
-    private static SlugcatStats.Timeline CurrentTimelineHook(OrigCurrentTimeline orig, global::World world)
-    {
-        if (world?.game?.IsStorySession == true)
-            return world.game.TimelinePoint;
-        return orig(world);
     }
 
     private static void SpawnLineageHook(
         OrigSpawnLineage orig,
-        global::World world,
+        RWWorld world,
         AbstractRoom room,
-        World.Lineage lineage)
+        RWCreatureSpawner lineage)
     {
-        if (world?.game?.session is not StoryGameSession story || lineage == null)
+        if (world?.game?.session is not StoryGameSession story || lineage == null || !IsLineage(lineage))
         {
             orig(world, room, lineage);
             return;
         }
 
         SaveState save = story.saveState;
-        if (save == null || world.region == null)
+        if (save == null || world.region == null || currentTypeMethod == null)
         {
             orig(world, room, lineage);
             return;
         }
 
-        // Let the normal preview path create the current creature first when the current lineage
-        // stage is not NONE. This exactly preserves the existing live-reload path for normal stages.
+        // Determine whether the current authored lineage stage is NONE before the normal preview
+        // path runs. Normal stages are left completely to WorldCreatureLiveReload.
         CreatureTemplate.Type before = null;
         try
         {
-            if (save.regionStates[world.region.regionNumber] != null &&
-                save.regionStates[world.region.regionNumber].lineageCounters.ContainsKey(lineage.denString))
-                before = lineage.CurrentType(save);
+            EnsureCounterExists(save, world, lineage);
+            before = currentTypeMethod.Invoke(lineage, new object[] { save }) as CreatureTemplate.Type;
         }
-        catch
+        catch (Exception error)
         {
+            log?.LogDebug("Could not inspect live lineage stage: " + Unwrap(error).Message);
         }
 
         orig(world, room, lineage);
@@ -111,20 +115,76 @@ internal static class WorldCreatureLiveReloadParity
 
         try
         {
-            RegionState regionState = save.regionStates[world.region.regionNumber];
-            if (regionState == null) return;
-            if (!regionState.lineageCounters.ContainsKey(lineage.denString))
-                regionState.lineageCounters[lineage.denString] = 0;
+            if (chanceToProgressMethod == null) return;
 
-            // Vanilla WorldLoader.GeneratePopulation progresses a NONE stage once and marks that
-            // spawner for a future respawn. It does not spawn the newly advanced type in this pass.
-            lineage.ChanceToProgress(world);
+            // Vanilla WorldLoader.GeneratePopulation gives a NONE stage one ChanceToProgress roll
+            // and queues the lineage for a future respawn. It does not immediately spawn the newly
+            // advanced type in the same population pass.
+            chanceToProgressMethod.Invoke(lineage, new object[] { world });
             if (!save.respawnCreatures.Contains(lineage.SpawnerID))
                 save.respawnCreatures.Add(lineage.SpawnerID);
         }
         catch (Exception error)
         {
-            log?.LogWarning("Live lineage NONE-stage parity failed: " + error.Message);
+            log?.LogWarning("Live lineage NONE-stage parity failed: " + Unwrap(error).Message);
+        }
+    }
+
+    private static void EnsureCounterExists(SaveState save, RWWorld world, RWCreatureSpawner lineage)
+    {
+        if (save == null || world?.region == null) return;
+        ResolveReflection();
+        if (denStringField == null) return;
+
+        if (save.regionStates[world.region.regionNumber] == null)
+            save.regionStates[world.region.regionNumber] = new RegionState(save, world);
+
+        RegionState state = save.regionStates[world.region.regionNumber];
+        string denString = denStringField.GetValue(lineage) as string;
+        if (!string.IsNullOrEmpty(denString) && !state.lineageCounters.ContainsKey(denString))
+            state.lineageCounters[denString] = 0;
+    }
+
+    private static bool IsLineage(RWCreatureSpawner spawner)
+    {
+        if (spawner == null) return false;
+        ResolveReflection();
+        return lineageRuntimeType != null && lineageRuntimeType.IsInstanceOfType(spawner);
+    }
+
+    private static void ResolveReflection()
+    {
+        if (reflectionResolved) return;
+        reflectionResolved = true;
+
+        try
+        {
+            lineageRuntimeType = typeof(RWWorld).GetNestedType(
+                "Lineage",
+                BindingFlags.Public | BindingFlags.NonPublic);
+            if (lineageRuntimeType == null) return;
+
+            denStringField = lineageRuntimeType.GetField("denString", AnyInstance);
+            currentTypeMethod = lineageRuntimeType.GetMethod(
+                "CurrentType",
+                AnyInstance,
+                null,
+                new[] { typeof(SaveState) },
+                null);
+            chanceToProgressMethod = lineageRuntimeType.GetMethod(
+                "ChanceToProgress",
+                AnyInstance,
+                null,
+                new[] { typeof(RWWorld) },
+                null);
+        }
+        catch (Exception error)
+        {
+            lineageRuntimeType = null;
+            denStringField = null;
+            currentTypeMethod = null;
+            chanceToProgressMethod = null;
+            log?.LogWarning("Lineage parity reflection setup failed: " + Unwrap(error).Message);
         }
     }
 
@@ -135,7 +195,15 @@ internal static class WorldCreatureLiveReloadParity
         if (constructor == null)
             throw new MissingMethodException("RuntimeDetour Hook(MethodBase, Delegate) is unavailable.");
         IDisposable hook = constructor.Invoke(new object[] { target, detour }) as IDisposable;
-        if (hook == null) throw new InvalidOperationException("RuntimeDetour hook creation failed for " + target.Name + ".");
+        if (hook == null)
+            throw new InvalidOperationException("RuntimeDetour hook creation failed for " + target.Name + ".");
         return hook;
+    }
+
+    private static Exception Unwrap(Exception error)
+    {
+        while (error is TargetInvocationException invocation && invocation.InnerException != null)
+            error = invocation.InnerException;
+        return error;
     }
 }
