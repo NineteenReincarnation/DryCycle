@@ -13,14 +13,19 @@ namespace DryCycle.DevUI.DevTool.World;
 /// to record exact endpoints and present a stripped vanilla-compatible line to the original loader.
 /// The source world.txt remains authoritative and human-readable.
 ///
-/// DevTool edits also update LoadedRoutes immediately. This is important because the currently
-/// running World has already passed through WorldLoader; requiring a region reload just to test an
-/// edited pipe would make live authoring unnecessarily slow.
+/// The currently loaded World is also kept in lockstep with editor mutations. This is deliberately
+/// owned here rather than by individual UI commands: world.txt parsing, exact-route state and the
+/// live AbstractRoom.connections array must advance as one transaction or the map can display a
+/// connection that gameplay still cannot traverse.
 /// </summary>
 internal static class WorldConnectionSyntax
 {
     private static readonly object Sync = new();
     private static readonly Dictionary<string, Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint>> LoadedRoutes =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HashSet<WorldConnectionEndpoint>> LiveAuthoredEndpoints =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, WeakReference<global::World>> LoadedWorlds =
         new(StringComparer.OrdinalIgnoreCase);
 
     private static bool enabled;
@@ -37,7 +42,12 @@ internal static class WorldConnectionSyntax
         if (!enabled) return;
         enabled = false;
         On.WorldLoader.MappingRooms -= WorldLoader_MappingRooms;
-        lock (Sync) LoadedRoutes.Clear();
+        lock (Sync)
+        {
+            LoadedRoutes.Clear();
+            LiveAuthoredEndpoints.Clear();
+            LoadedWorlds.Clear();
+        }
     }
 
     internal static bool TryParseDestination(
@@ -119,9 +129,35 @@ internal static class WorldConnectionSyntax
         }
     }
 
+    internal static bool TryGetLoadedWorld(string region, out global::World world)
+    {
+        world = null;
+        string regionKey = NormalizeRegion(region);
+        if (regionKey.Length == 0) return false;
+
+        lock (Sync)
+        {
+            if (!LoadedWorlds.TryGetValue(regionKey, out WeakReference<global::World> weak) ||
+                !weak.TryGetTarget(out global::World candidate) ||
+                candidate == null)
+            {
+                LoadedWorlds.Remove(regionKey);
+                return false;
+            }
+
+            if (!string.Equals(candidate.name, regionKey, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            world = candidate;
+            return true;
+        }
+    }
+
     /// <summary>
     /// Synchronizes one source Exit after a live editor mutation. Plain room names deliberately
     /// remove an exact-route override and therefore fall back to vanilla target-exit resolution.
+    /// The same mutation is applied to the currently loaded AbstractRoom.connections slot here so
+    /// gameplay and the editable world document can never drift apart.
     /// </summary>
     internal static void SynchronizeRoute(
         string region,
@@ -142,6 +178,13 @@ internal static class WorldConnectionSyntax
 
         lock (Sync)
         {
+            if (!LiveAuthoredEndpoints.TryGetValue(regionKey, out HashSet<WorldConnectionEndpoint> authored))
+            {
+                authored = new HashSet<WorldConnectionEndpoint>();
+                LiveAuthoredEndpoints.Add(regionKey, authored);
+            }
+            authored.Add(source);
+
             if (exact && destination.IsValid)
             {
                 if (!LoadedRoutes.TryGetValue(regionKey, out Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint> routes))
@@ -150,20 +193,22 @@ internal static class WorldConnectionSyntax
                     LoadedRoutes.Add(regionKey, routes);
                 }
                 routes[source] = destination;
-                return;
             }
-
-            if (!LoadedRoutes.TryGetValue(regionKey, out Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint> existing))
-                return;
-            existing.Remove(source);
-            if (existing.Count == 0) LoadedRoutes.Remove(regionKey);
+            else if (LoadedRoutes.TryGetValue(regionKey, out Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint> existing))
+            {
+                existing.Remove(source);
+                if (existing.Count == 0) LoadedRoutes.Remove(regionKey);
+            }
         }
+
+        SynchronizeLoadedWorldEndpoint(regionKey, source, destinationToken);
     }
 
     /// <summary>
-    /// Rebuilds one region's exact-route table from the editable world.txt document. This makes
-    /// world.txt the authoritative topology source even when the region was loaded before DevTool
-    /// opened or when Undo/Redo restored an older document state.
+    /// Rebuilds one region's exact-route table from the editable world.txt document. Save/Reload is
+    /// also a reconciliation boundary for endpoints touched by live authoring: if an older command
+    /// path failed to update AbstractRoom.connections, this pass repairs it before the developer
+    /// tests the pipe in the same running game.
     /// </summary>
     internal static void SynchronizeRegion(string region, WorldDocument document)
     {
@@ -171,6 +216,7 @@ internal static class WorldConnectionSyntax
         if (regionKey.Length == 0 || document == null) return;
 
         Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint> rebuilt = new();
+        HashSet<WorldConnectionEndpoint> reconcile = new();
         foreach (KeyValuePair<string, WorldRoomRecord> roomPair in document.Rooms)
         {
             WorldRoomRecord room = roomPair.Value;
@@ -184,14 +230,35 @@ internal static class WorldConnectionSyntax
                 WorldConnectionEndpoint source = new(room.Name, sourceNode);
                 WorldConnectionEndpoint destination = new(targetRoom, targetNode);
                 if (source.IsValid && destination.IsValid)
+                {
                     rebuilt[source] = destination;
+                    reconcile.Add(source);
+                }
             }
         }
 
         lock (Sync)
         {
+            if (LoadedRoutes.TryGetValue(regionKey, out Dictionary<WorldConnectionEndpoint, WorldConnectionEndpoint> previous))
+            {
+                foreach (WorldConnectionEndpoint source in previous.Keys)
+                    reconcile.Add(source);
+            }
+            if (LiveAuthoredEndpoints.TryGetValue(regionKey, out HashSet<WorldConnectionEndpoint> authored))
+            {
+                foreach (WorldConnectionEndpoint source in authored)
+                    reconcile.Add(source);
+            }
+
             if (rebuilt.Count == 0) LoadedRoutes.Remove(regionKey);
             else LoadedRoutes[regionKey] = rebuilt;
+        }
+
+        foreach (WorldConnectionEndpoint source in reconcile)
+        {
+            if (!document.TryGetConnection(source.Room, source.NodeIndex, out string token))
+                token = "DISCONNECTED";
+            SynchronizeLoadedWorldEndpoint(regionKey, source, token);
         }
     }
 
@@ -206,11 +273,16 @@ internal static class WorldConnectionSyntax
         }
 
         string region = NormalizeRegion(self.worldName ?? self.world?.name);
+        RegisterLoadedWorld(region, self.world);
         if (self.cntr == self.startOfWorldDefinition)
         {
             lock (Sync)
             {
-                if (region.Length > 0) LoadedRoutes.Remove(region);
+                if (region.Length > 0)
+                {
+                    LoadedRoutes.Remove(region);
+                    LiveAuthoredEndpoints.Remove(region);
+                }
             }
         }
 
@@ -264,6 +336,14 @@ internal static class WorldConnectionSyntax
         return true;
     }
 
+    private static void RegisterLoadedWorld(string region, global::World world)
+    {
+        string regionKey = NormalizeRegion(region);
+        if (regionKey.Length == 0 || world == null) return;
+        lock (Sync)
+            LoadedWorlds[regionKey] = new WeakReference<global::World>(world);
+    }
+
     private static void RegisterLoadedRoute(
         string region,
         WorldConnectionEndpoint source,
@@ -280,6 +360,45 @@ internal static class WorldConnectionSyntax
             }
             routes[source] = destination;
         }
+    }
+
+    private static void SynchronizeLoadedWorldEndpoint(
+        string region,
+        WorldConnectionEndpoint source,
+        string destinationToken)
+    {
+        if (!TryGetLoadedWorld(region, out global::World world)) return;
+
+        AbstractRoom sourceRoom = world.GetAbstractRoom(source.Room);
+        if (sourceRoom == null || source.NodeIndex < 0) return;
+
+        int targetRoomIndex = -1;
+        if (TryParseDestination(destinationToken, out string targetRoomName, out _) &&
+            !string.IsNullOrWhiteSpace(targetRoomName) &&
+            !string.Equals(targetRoomName, "DISCONNECTED", StringComparison.OrdinalIgnoreCase))
+        {
+            AbstractRoom targetRoom = world.GetAbstractRoom(targetRoomName);
+            if (targetRoom == null)
+            {
+                global::DryCycle.Plugin.Logger?.LogWarning(
+                    "WorldTopology live sync could not resolve room '" + targetRoomName + "'.");
+                return;
+            }
+            targetRoomIndex = targetRoom.index;
+        }
+
+        if (sourceRoom.connections == null || source.NodeIndex >= sourceRoom.connections.Length)
+        {
+            int oldLength = sourceRoom.connections?.Length ?? 0;
+            int nextLength = Math.Max(source.NodeIndex + 1, oldLength);
+            int[] next = new int[nextLength];
+            for (int i = 0; i < next.Length; i++) next[i] = -1;
+            if (sourceRoom.connections != null)
+                Array.Copy(sourceRoom.connections, next, sourceRoom.connections.Length);
+            sourceRoom.connections = next;
+        }
+
+        sourceRoom.connections[source.NodeIndex] = targetRoomIndex;
     }
 
     private static string NormalizeRegion(string region) =>
