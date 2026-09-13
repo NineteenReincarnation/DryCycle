@@ -4,22 +4,20 @@ using UnityEngine;
 namespace DryCycle.Items.KarmaSpear;
 
 /// <summary>
-/// Temporary control volume created when an active Karma Spear is nailed into terrain.
-/// It does not deal damage: it suppresses momentum, slows incoming thrown weapons and
-/// occasionally helps a grabbed player break a dangerous grasp.
+/// Persistent control volume created while an active Karma Spear is nailed into terrain.
+/// Wall use does not consume the spear. The field exists for as long as the spear remains
+/// stuck in the wall and disappears immediately when the spear is pulled free.
 /// </summary>
 internal sealed class KarmaSpearField : UpdatableAndDeletable
 {
     private readonly KarmaSpear _source;
     private readonly float _radius;
-    private readonly int _duration;
     private int _age;
 
     internal KarmaSpearField(KarmaSpear source)
     {
         _source = source;
-        _radius = 58f + source.KarmaLevel * 4f;
-        _duration = 145 + source.KarmaLevel * 7;
+        _radius = (58f + source.KarmaLevel * 4f) * 3f;
     }
 
     public override void Update(bool eu)
@@ -33,14 +31,15 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
             _source.IsSpent ||
             _source.mode != Weapon.Mode.StuckInWall)
         {
-            Finish();
+            Destroy();
             return;
         }
 
         Vector2 center = _source.firstChunk.pos;
         SuppressMotion(center);
 
-        if (_age == 1 || _age % 18 == 0)
+        // The field is permanent while anchored, so keep the large presentation pulse sparse.
+        if (_age == 1 || _age % 28 == 0)
         {
             KarmicVisualEffects.SpawnFieldPulse(_source, _radius);
         }
@@ -48,11 +47,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
         if (_age % 30 == 0)
         {
             TryHelpDangerGrasps(center);
-        }
-
-        if (_age >= _duration)
-        {
-            Finish();
         }
     }
 
@@ -128,15 +122,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable
                 player.mainBodyChunk.pos,
                 _source.KarmaLevel,
                 52f);
-        }
-    }
-
-    private void Finish()
-    {
-        if (!slatedForDeletetion)
-        {
-            _source?.MarkSpent();
-            Destroy();
         }
     }
 }
