@@ -15,11 +15,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Integration boundary between RWImGui and the retained Unity World Map renderer.
 ///
-/// ImGui remains responsible for layout, toolbar, inspector, labels and direct manipulation. The
-/// expensive static room raster and routed topology are removed from the immediate draw list and
-/// rendered by WorldMapGpuScene underneath the transparent canvas. This plugin is intentionally
-/// loaded after the older compatibility overlays so it can retire their hot paths without deleting
-/// fallback code: if GPU setup fails, the original ImGui map remains usable.
+/// ImGui remains responsible for layout, toolbar, inspector, labels and direct manipulation. Static
+/// room raster/topology and the high-frequency selection/hover highlights live in retained GPU
+/// layers. If GPU setup fails, the original ImGui map remains usable.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -113,6 +111,7 @@ internal static class WorldMapGpuRuntime
     private static int mainThreadId;
     private static bool enabled;
     private static int requestRebuild;
+    private static int frameHoveredRoomIndex = -1;
     private static WorldMapGpuScene.RoomPlacement[] cachedPlacements = Array.Empty<WorldMapGpuScene.RoomPlacement>();
     private static int cachedLayoutHash = int.MinValue;
 
@@ -124,9 +123,8 @@ internal static class WorldMapGpuRuntime
 
         try
         {
-            // The old routed overlay was a necessary migration step but routes in screen space and
-            // therefore has an unavoidable zoom-time CPU cost. Keep its code as fallback/reference,
-            // but remove its DrawCanvas detour before installing the retained map integration.
+            // The old routed overlay routes in screen space and therefore has an unavoidable
+            // zoom-time CPU cost. Keep it only as fallback/reference while retained mode is active.
             WorldConnectionOverlay.Disable();
 
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
@@ -223,6 +221,7 @@ internal static class WorldMapGpuRuntime
         latestFrame = null;
         cachedPlacements = Array.Empty<WorldMapGpuScene.RoomPlacement>();
         cachedLayoutHash = int.MinValue;
+        frameHoveredRoomIndex = -1;
         requestRebuild = 0;
         panField = null;
         zoomField = null;
@@ -254,9 +253,6 @@ internal static class WorldMapGpuRuntime
 
         if (session?.ToolMode == EditorToolMode.Map && snapshot?.Available == true)
         {
-            // Load the persistent cache first. If it is complete, the expensive legacy scanners are
-            // never entered for this region. Missing/stale records are rebuilt progressively on the
-            // Unity thread, then captured and persisted for future sessions.
             WorldMapGpuCache.Update(session, snapshot);
             if (!WorldMapGpuCache.HasCompleteCachedData(snapshot))
             {
@@ -294,17 +290,21 @@ internal static class WorldMapGpuRuntime
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
         bool showConnections = showConnectionsField?.GetValue(null) is bool links && links;
+        int layerMask = CurrentLayerMask();
 
-        // Hit the retained route before the base canvas can interpret the same click as a room drag.
-        // The route spatial grid makes this independent of total connection count.
         bool mouseInside = PointInside(io.MousePos, canvasMin, canvasMin + canvasSize);
         WorldMapGpuScene.RouteHit preHit = null;
-        if (gpuReady && showConnections && mouseInside)
+        frameHoveredRoomIndex = -1;
+        if (gpuReady && mouseInside)
         {
             Num.Vector2 mapPoint = ScreenToMap(io.MousePos, canvasMin, pan, zoom);
-            WorldMapGpuScene.TryHitConnection(mapPoint, 12f / Math.Max(0.20f, zoom), out preHit);
+            WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out frameHoveredRoomIndex);
+            if (showConnections)
+                WorldMapGpuScene.TryHitConnection(mapPoint, 12f / Math.Max(0.20f, zoom), out preHit);
         }
 
+        // The base canvas keeps input, labels and shortcut authoring, but static routes and room
+        // focus outlines are now supplied by retained GPU meshes.
         bool suppressImmediateConnections = gpuReady && showConnections;
         if (suppressImmediateConnections) showConnectionsField.SetValue(null, false);
         if (gpuReady) ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
@@ -329,17 +329,20 @@ internal static class WorldMapGpuRuntime
 
             string hovered = hit?.Connection?.ConnectionId ?? string.Empty;
             hoveredConnectionIdField.SetValue(null, hovered);
-            if (hit != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            if (hit != null)
             {
-                draggingRoomField.SetValue(null, -1);
-                WorldMapView.SelectConnection(hovered);
+                // A focused route owns the interaction layer above a room at the same pixel.
+                frameHoveredRoomIndex = -1;
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    draggingRoomField.SetValue(null, -1);
+                    WorldMapView.SelectConnection(hovered);
+                }
+                if (mouseInside) DrawRouteTooltip(hit.Connection);
             }
-
-            if (hit != null && mouseInside)
-                DrawRouteTooltip(hit.Connection);
         }
 
-        PublishFrame(snapshot, canvasMin, canvasSize, io.DisplaySize, pan, zoom, showConnections);
+        PublishFrame(snapshot, canvasMin, canvasSize, io.DisplaySize, pan, zoom, showConnections, layerMask);
     }
 
     private static void DrawRoomGeometryHook(
@@ -357,19 +360,21 @@ internal static class WorldMapGpuRuntime
             return;
         }
 
-        // The room image and custom terrain already live in persistent GPU meshes. Immediate mode
-        // keeps only a cheap interactive outline; this preserves current/selection/hover semantics
-        // without regenerating the room raster every frame.
+        if (hovered && room != null) frameHoveredRoomIndex = room.RoomIndex;
+
+        // Selection/hover have moved to a separate dynamic retained mesh. Keeping them out of the
+        // ImGui room pass prevents the whole interaction effect from being regenerated as immediate
+        // draw commands every frame.
+        if (selected || hovered) return;
+
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         float width = Math.Max(1f, visual?.WidthTiles ?? 12f) * WorldMapGpuScene.TileDisplaySize * zoom;
         float height = Math.Max(1f, visual?.HeightTiles ?? 6f) * WorldMapGpuScene.TileDisplaySize * zoom;
         Num.Vector2 max = roomMin + new Num.Vector2(width, height);
         uint color = ImGui.GetColorU32(
-            selected ? ImGuiCol.ButtonActive :
             room?.CurrentRoom == true ? ImGuiCol.Header :
-            hovered ? ImGuiCol.ButtonHovered :
             room?.Disabled == true ? ImGuiCol.TextDisabled : ImGuiCol.Border);
-        draw.AddRect(roomMin, max, color, Math.Max(1f, 3f * zoom), ImDrawFlags.None, selected ? 2.2f : 1f);
+        draw.AddRect(roomMin, max, color, Math.Max(1f, 3f * zoom), ImDrawFlags.None, 1f);
     }
 
     private static void DrawToolbarHook(OrigDrawToolbar orig, EditorMapPresentationSnapshot snapshot)
@@ -377,10 +382,11 @@ internal static class WorldMapGpuRuntime
         orig(snapshot);
         if (snapshot?.Available != true) return;
 
-        if (DevToolWidgets.SameLineIfFits(230f, 8f))
+        if (DevToolWidgets.SameLineIfFits(285f, 8f))
         {
             string state = WorldMapGpuScene.Ready
-                ? "GPU " + WorldMapGpuScene.RetainedChunkCount + "/" + WorldMapGpuScene.RetainedRouteCount
+                ? "GPU " + WorldMapGpuScene.RetainedChunkCount + "/" + WorldMapGpuScene.RetainedRouteCount +
+                  " · view " + WorldMapGpuScene.VisibleRoomCount + "/" + WorldMapGpuScene.RetainedRoomCount
                 : DevToolUiSettings.T("GPU 初始化", "GPU init");
             ImGui.TextDisabled("· " + state + " · " + DevToolUiSettings.T("缓存 ", "cache ") + WorldMapGpuCache.CachedRoomCount);
             ImGui.SameLine();
@@ -397,8 +403,6 @@ internal static class WorldMapGpuRuntime
 
     private static void GeometryPrimeHook(OrigGeometryPrime orig, EditorSession session)
     {
-        // Texture2D.GetPixels and RoomSettings parsing belong to the Unity thread. The old map called
-        // Prime from the RWImGui render callback; retained mode moves all baking into Update().
         if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
         if (MapEditorPresentationHub.Current.Available &&
             WorldMapGpuCache.HasCompleteCachedData(MapEditorPresentationHub.Current))
@@ -449,7 +453,8 @@ internal static class WorldMapGpuRuntime
         Num.Vector2 displaySize,
         Num.Vector2 pan,
         float zoom,
-        bool showConnections)
+        bool showConnections,
+        int layerMask)
     {
         Dictionary<int, Num.Vector2> positions = localPositionsField?.GetValue(null) as Dictionary<int, Num.Vector2>;
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
@@ -470,11 +475,6 @@ internal static class WorldMapGpuRuntime
             cachedLayoutHash = layoutHash;
         }
 
-        bool[] layers = layerVisibleField?.GetValue(null) as bool[];
-        int layerMask = 0;
-        for (int i = 0; i < 3; i++)
-            if (layers == null || i >= layers.Length || layers[i]) layerMask |= 1 << i;
-
         latestFrame = new WorldMapGpuScene.FrameState
         {
             Visible = true,
@@ -487,11 +487,22 @@ internal static class WorldMapGpuRuntime
             LayerMask = layerMask,
             LayoutHash = layoutHash,
             ShowConnections = showConnections,
+            SelectedRoomIndex = snapshot.SelectedRoomIndex,
+            HoveredRoomIndex = frameHoveredRoomIndex,
             SelectedConnectionId = selectedConnectionIdField?.GetValue(null) as string ?? string.Empty,
             HoveredConnectionId = hoveredConnectionIdField?.GetValue(null) as string ?? string.Empty,
             Snapshot = snapshot,
             Placements = cachedPlacements
         };
+    }
+
+    private static int CurrentLayerMask()
+    {
+        bool[] layers = layerVisibleField?.GetValue(null) as bool[];
+        int layerMask = 0;
+        for (int i = 0; i < 3; i++)
+            if (layers == null || i >= layers.Length || layers[i]) layerMask |= 1 << i;
+        return layerMask;
     }
 
     private static int ComputeLayoutHash(EditorMapRoomSnapshot[] rooms, Dictionary<int, Num.Vector2> positions)
