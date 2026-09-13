@@ -13,6 +13,7 @@ internal sealed class KarmaSpear : Spear
     private KarmaSpearField _wallField;
     private bool _bindingStarted;
     private int _trailCounter;
+    private int _chargeGeneration;
 
     internal KarmaSpear(AbstractPhysicalObject abstractPhysicalObject, World world)
         : base(abstractPhysicalObject, world)
@@ -23,6 +24,7 @@ internal sealed class KarmaSpear : Spear
 
     internal int KarmaLevel => KarmaAbstract?.KarmaLevel ?? 1;
     internal bool IsSpent => KarmaAbstract?.Spent != false;
+    internal int ChargeGeneration => _chargeGeneration;
 
     public override void Update(bool eu)
     {
@@ -214,6 +216,35 @@ internal sealed class KarmaSpear : Spear
         KarmicVisualEffects.SpawnSparks(room, firstChunk.pos, 8, 4f);
     }
 
+    internal void MarkSpent(int expectedChargeGeneration)
+    {
+        if (expectedChargeGeneration != _chargeGeneration)
+        {
+            return;
+        }
+
+        MarkSpent();
+    }
+
+    internal bool Recharge(int karmaLevel)
+    {
+        if (KarmaAbstract == null || !KarmaAbstract.Spent)
+        {
+            return false;
+        }
+
+        StopWallField();
+        KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
+        KarmaAbstract.Spent = false;
+
+        // A spent spear may still carry runtime flags from its previous discharge.
+        // Recharging starts a genuinely new charge cycle rather than merely relighting it.
+        _bindingStarted = false;
+        _trailCounter = 0;
+        _chargeGeneration++;
+        return true;
+    }
+
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         base.InitiateSprites(sLeaser, rCam);
@@ -319,6 +350,14 @@ internal sealed class KarmaSpear : Spear
         innerRing.color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.38f);
 
         FSprite glyph = sLeaser.sprites[baseCount + 4];
+        int karmaGlyphValue = Mathf.Clamp(KarmaLevel - 1, 0, 9);
+        string karmaGlyphName = global::HUD.KarmaMeter.KarmaSymbolSprite(
+            small: false,
+            new IntVector2(karmaGlyphValue, karmaGlyphValue));
+        if (glyph.element == null || glyph.element.name != karmaGlyphName)
+        {
+            glyph.SetElementByName(karmaGlyphName);
+        }
         SetSpritePosition(glyph, tip - direction * 2.5f, camPos);
         glyph.rotation = -clock * (wallAnchored ? 0.22f : 0.38f);
         glyph.scale = Mathf.Lerp(0.21f, wallAnchored ? 0.34f : 0.29f, pulse);
