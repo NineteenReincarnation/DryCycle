@@ -11,11 +11,13 @@ namespace DryCycle.DevUI.DevTool.World;
 internal static class WorldTextRegistry
 {
     private static WorldDocument document;
+    private static int revision;
 
     internal static string LoadedRegion { get; private set; } = string.Empty;
     internal static string LoadedPath { get; private set; } = string.Empty;
     internal static string LoadError { get; private set; }
     internal static bool Dirty => document?.Dirty == true;
+    internal static int Revision => revision;
 
     internal static bool EnsureLoaded(string region)
     {
@@ -51,6 +53,7 @@ internal static class WorldTextRegistry
         LoadedPath = string.Empty;
         LoadError = null;
         document = null;
+        BumpRevision();
 
         if (normalized.Length == 0)
         {
@@ -144,7 +147,11 @@ internal static class WorldTextRegistry
         bool changed = document.TrySetConnection(roomName, exitIndex, storedDestination);
 
         WorldConnectionSyntax.SynchronizeRoute(region, roomName, exitIndex, storedDestination);
-        if (changed) WorldTopologyRuntime.NotifyTopologyChanged();
+        if (changed)
+        {
+            BumpRevision();
+            WorldTopologyRuntime.NotifyTopologyChanged();
+        }
         return true;
     }
 
@@ -292,10 +299,21 @@ internal static class WorldTextRegistry
     internal static void Clear()
     {
         if (Dirty) return;
+        if (document != null || LoadedRegion.Length > 0 || LoadedPath.Length > 0)
+            BumpRevision();
         document = null;
         LoadedRegion = string.Empty;
         LoadedPath = string.Empty;
         LoadError = null;
+    }
+
+    private static void BumpRevision()
+    {
+        unchecked
+        {
+            revision++;
+            if (revision == int.MinValue) revision = 1;
+        }
     }
 
     private static string NormalizeRegion(string region) =>
