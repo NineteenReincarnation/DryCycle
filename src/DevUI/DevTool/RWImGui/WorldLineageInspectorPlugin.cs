@@ -86,7 +86,9 @@ internal static class WorldLineageInspector
 
     internal static void DrawIntegrated(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        if (!enabled || snapshot?.Available != true || room == null) return;
+        // Lineage is part of the room inspector's direct composition. Its visibility must follow
+        // the workspace, not a separate helper-plugin enable flag.
+        if (snapshot?.Available != true || room == null) return;
         if (stateRoom != room.RoomIndex) ResetRoom(room);
         RefreshTimelines();
         WorldLineageRegistry.EnsureLoaded(snapshot.RegionName);
@@ -217,7 +219,6 @@ internal static class WorldLineageInspector
                 DevToolButtonTone.Subtle,
                 true))
             stages.Add(new StageState { Creature = "NONE", Chance = 0f });
-
         ImGui.Spacing();
         string action = editingId >= 0
             ? DevToolUiSettings.T("应用 Lineage 修改", "Apply Lineage Changes")
