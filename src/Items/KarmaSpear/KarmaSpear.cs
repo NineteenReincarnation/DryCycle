@@ -172,29 +172,14 @@ internal sealed class KarmaSpear : Spear
             return;
         }
 
-        bool lodged = mode == Mode.StuckInCreature && ReferenceEquals(stuckInObject, creature);
+        // All surviving creature targets now share one karmic rule: local time stop.
+        // The target profile remains useful for duration and safe release tuning, but no
+        // creature is pushed around by springs, leashes or repeated directional impulses.
+        room?.AddObject(new KarmicTimeStopEffect(this, creature, profile));
 
-        if (profile.UsesBodyBinding)
-        {
-            room?.AddObject(new KarmicBindingEffect(
-                this,
-                creature,
-                hitPosition,
-                profile,
-                lodged));
-        }
-        else
-        {
-            room?.AddObject(new KarmicDisruptionEffect(
-                this,
-                creature,
-                profile,
-                lodged));
-        }
-
-        // Do not immediately spend a charge just because armor or impact physics made the
-        // spear bounce. _creatureEffectStarted already prevents a second karmic trigger;
-        // the active response now owns the countdown and consumes this charge when it ends.
+        // The time-stop effect owns the karma countdown and consumes this charge when the
+        // stopped interval ends. Bouncing or pulling the physical spear out does not cancel
+        // an already established temporal intervention.
     }
 
     private void StartWallField()
