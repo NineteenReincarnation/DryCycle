@@ -125,7 +125,7 @@ internal static class KarmicVisualEffects
     private static string KarmaGlyph(int karmaLevel)
     {
         int value = Mathf.Clamp(karmaLevel - 1, 0, 9);
-        return HUD.KarmaMeter.KarmaSymbolSprite(
+        return global::HUD.KarmaMeter.KarmaSymbolSprite(
             small: false,
             new IntVector2(value, value));
     }
