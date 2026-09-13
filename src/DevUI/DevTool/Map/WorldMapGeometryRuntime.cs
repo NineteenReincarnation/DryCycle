@@ -104,7 +104,7 @@ public sealed class EditorMapRoomVisualSnapshot
 /// Curve bodies are converted to narrow cached fill runs. This keeps the frontend draw path cheap
 /// while still producing a visually continuous filled terrain band at normal map zoom levels.
 /// </summary>
-internal static class MapRoomGeometryPresentationHub
+internal static partial class MapRoomGeometryPresentationHub
 {
     private const float PixelsPerTile = 20f;
     private const float CurveSimplifyToleranceTiles = 0.075f;
@@ -189,10 +189,13 @@ internal static class MapRoomGeometryPresentationHub
         }
 
         string nextRegion = page.world.name ?? string.Empty;
-        bool regionChanged = !string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase);
+        bool regionChanged = !string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase) ||
+                             PersistentContextChanged(page.world);
         if (regionChanged)
         {
+            PersistentBeforeRegionReset();
             ResetRegion(nextRegion);
+            PersistentAfterRegionReset(page.world);
         }
 
         if (lastPrimeFrame == Time.frameCount) return;
@@ -215,6 +218,7 @@ internal static class MapRoomGeometryPresentationHub
         if (selectedRoom != currentRoom) RefreshPriorityRoom(selectedRoom, page.world);
 
         ProcessBackground(page.world, currentRoom, selectedRoom);
+        PersistentTryScheduleSave(force: false);
     }
 
     internal static void InvalidateRoom(int roomIndex)
@@ -228,10 +232,12 @@ internal static class MapRoomGeometryPresentationHub
         entry.NextSettingsPollFrame = 0;
         entry.NextLiveSettingsPollFrame = 0;
         entry.Revision++;
+        PersistentOnRoomInvalidated(entry);
     }
 
     internal static void Clear()
     {
+        PersistentBeforeClear();
         cache.Clear();
         roomOrder.Clear();
         region = string.Empty;
@@ -280,6 +286,7 @@ internal static class MapRoomGeometryPresentationHub
             entry.RoomRep = panel.roomRep;
             entry.RoomName = room.name ?? entry.RoomName;
 
+            PersistentTryRestore(entry, page.world, room, panel.roomRep);
             RefreshDimensions(entry, panel.roomRep);
             RefreshNodes(entry, panel.roomRep, force: !entry.NodesInitialized);
             Publish(entry);
@@ -290,7 +297,11 @@ internal static class MapRoomGeometryPresentationHub
             List<int> stale = new();
             foreach (int key in cache.Keys)
                 if (!alive.Contains(key)) stale.Add(key);
-            for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
+            for (int i = 0; i < stale.Count; i++)
+            {
+                cache.Remove(stale[i]);
+                PersistentOnRoomRemoved(stale[i]);
+            }
         }
 
         if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
@@ -360,6 +371,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.HeightTiles = height;
         entry.CurvesInitialized = false;
         entry.Revision++;
+        PersistentMarkDirty();
     }
 
     private readonly struct RasterSourceInfo
@@ -392,6 +404,9 @@ internal static class MapRoomGeometryPresentationHub
             return false;
 
         if (!TryGetRasterSourceInfo(roomRep, out RasterSourceInfo source))
+            return false;
+
+        if (PersistentTryBindRestoredRaster(entry, roomRep, source))
             return false;
 
         if (entry.RasterInitialized &&
@@ -450,6 +465,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.HeightTiles = Math.Max(1f, source.Height);
         entry.BaseRasterRuns = baseRuns.ToArray();
         entry.Revision++;
+        PersistentOnRasterRebuilt(entry, roomRep, source);
         return true;
     }
 
@@ -610,6 +626,8 @@ internal static class MapRoomGeometryPresentationHub
         if (entry.NodesInitialized && !force && Time.frameCount < entry.NextNodePollFrame) return;
 
         Vector2[] positions = roomRep?.nodePositions;
+        if (PersistentShouldKeepRestoredNodes(entry, positions)) return;
+
         if (positions == null || positions.Length == 0)
         {
             entry.NextNodePollFrame = Time.frameCount + (entry.NodesInitialized ? NodePollIntervalFrames : 1);
@@ -618,6 +636,7 @@ internal static class MapRoomGeometryPresentationHub
             entry.NodesInitialized = true;
             entry.NodeFingerprint = 0;
             entry.Revision++;
+            PersistentOnNodesObserved(entry, changed: true);
             return;
         }
 
@@ -631,7 +650,11 @@ internal static class MapRoomGeometryPresentationHub
             }
 
             entry.NextNodePollFrame = Time.frameCount + NodePollIntervalFrames + Math.Abs(entry.RoomIndex % 11);
-            if (entry.NodesInitialized && fingerprint == entry.NodeFingerprint) return;
+            if (entry.NodesInitialized && fingerprint == entry.NodeFingerprint)
+            {
+                PersistentOnNodesObserved(entry, changed: false);
+                return;
+            }
 
             List<EditorMapNodeVisualSnapshot> nodes = new(positions.Length);
             for (int i = 0; i < positions.Length; i++)
@@ -645,6 +668,7 @@ internal static class MapRoomGeometryPresentationHub
             entry.NodesInitialized = true;
             entry.NodeFingerprint = fingerprint;
             entry.Revision++;
+            PersistentOnNodesObserved(entry, changed: true);
         }
     }
 
@@ -655,6 +679,8 @@ internal static class MapRoomGeometryPresentationHub
         bool allowDiskLoad,
         bool forceLivePoll)
     {
+        PersistentPrepareSettingsPath(entry, world, room);
+
         RoomSettings liveSettings = room?.realizedRoom?.roomSettings;
         if (liveSettings != null)
         {
@@ -716,6 +742,7 @@ internal static class MapRoomGeometryPresentationHub
         entry.TerrainFillRuns = fills.ToArray();
         entry.CurvesInitialized = true;
         entry.Revision++;
+        PersistentOnCurvesRebuilt(entry);
     }
 
     private static DateTime FileWriteTime(string path)
