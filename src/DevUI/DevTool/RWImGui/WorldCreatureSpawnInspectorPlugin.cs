@@ -12,9 +12,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Inserts world creature-spawner authoring into the selected-room inspector immediately before
-/// WORLD LINKS. Creature ids and timeline ids come from live ExtEnum registries so mod-added values
-/// appear without DryCycle maintaining a hard-coded compatibility list.
+/// Ordinary world creature-spawner authoring. Creature choice is intentionally visual: the shared
+/// catalog groups registered CreatureTemplate.Type values by source and renders Rain World's own
+/// Sandbox icon for each entry. No free-form creature ID field is exposed by this view.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -43,18 +43,8 @@ internal static class WorldCreatureSpawnInspector
     private static readonly HookSectionHeader SectionHeaderHookDelegate = SectionHeaderHook;
     private static readonly string[] KnownSpawnTags =
     {
-        "Night",
-        "PreCycle",
-        "Winter",
-        "Ignorecycle",
-        "AlternateForm",
-        "Lavasafe",
-        "TentacleImmune",
-        "Voidsea",
-        "Ripple",
-        "Seed:0",
-        "RotType:0",
-        "NamedAttr:"
+        "Night", "PreCycle", "Winter", "Ignorecycle", "AlternateForm", "Lavasafe",
+        "TentacleImmune", "Voidsea", "Ripple", "Slayer", "Seed:0", "RotType:0", "NamedAttr:"
     };
 
     private static ManualLogSource log;
@@ -66,7 +56,6 @@ internal static class WorldCreatureSpawnInspector
     private static int editingSpawnId = -1;
     private static int selectedDen = -1;
     private static string creatureId = string.Empty;
-    private static string creatureSearch = string.Empty;
     private static int amount = 1;
     private static string spawnTags = string.Empty;
     private static TimelineMode timelineMode = TimelineMode.All;
@@ -74,9 +63,7 @@ internal static class WorldCreatureSpawnInspector
     private static string lastStatus = string.Empty;
     private static bool lastStatusSuccess = true;
 
-    private static readonly List<string> creatureCatalog = new();
     private static readonly List<string> timelineCatalog = new();
-    private static int creatureCatalogCount = -1;
     private static int timelineCatalogFingerprint = -1;
 
     internal static void Enable(ManualLogSource logger)
@@ -125,9 +112,7 @@ internal static class WorldCreatureSpawnInspector
         injecting = false;
         stateRoom = -1;
         editingSpawnId = -1;
-        creatureCatalog.Clear();
         timelineCatalog.Clear();
-        creatureCatalogCount = -1;
         timelineCatalogFingerprint = -1;
         log = null;
     }
@@ -164,12 +149,13 @@ internal static class WorldCreatureSpawnInspector
         string.Equals(text, "WORLD LINKS", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(text, DevToolUiSettings.T("世界连接", "WORLD LINKS"), StringComparison.Ordinal);
 
+    // Keep this exact signature: WorldLineageInspector attaches after the ordinary editor so both
+    // authoring surfaces occupy the same selected-room inspector before WORLD LINKS.
     private static void Draw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale)
     {
         if (stateRoom != room.RoomIndex)
             ResetForRoom(room);
 
-        RefreshCreatureCatalog();
         RefreshTimelineCatalog();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置生物", "CREATURE SPAWNS"), restoreScale);
@@ -186,12 +172,15 @@ internal static class WorldCreatureSpawnInspector
     {
         if (existing == null || existing.Length == 0)
         {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("这个房间还没有普通生物生成器。", "No ordinary creature spawners in this room."), true);
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T("这个房间还没有普通生物生成器。", "No ordinary creature spawners in this room."),
+                true);
             return;
         }
 
         DevToolWidgets.MutedText(
-            DevToolUiSettings.T("已放置 ", "Placed ") + existing.Length + DevToolUiSettings.T(" 个生成项", " spawn entrie(s)"));
+            DevToolUiSettings.T("已放置 ", "Placed ") + existing.Length +
+            DevToolUiSettings.T(" 个生成项", " spawn entrie(s)"));
 
         for (int i = 0; i < existing.Length; i++)
         {
@@ -225,7 +214,7 @@ internal static class WorldCreatureSpawnInspector
                 if (WorldTextRegistry.TryDeleteCreatureSpawn(snapshot.RegionName, spawn.Id, out string error))
                 {
                     if (editingSpawnId == spawn.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T("已删除生成项。", "Spawner deleted."), true);
+                    SetStatus(DevToolUiSettings.T("已删除生成项并实时重载。", "Spawner deleted and live-reloaded."), true);
                 }
                 else
                 {
@@ -248,10 +237,9 @@ internal static class WorldCreatureSpawnInspector
         }
         if (!ContainsDen(dens, selectedDen)) selectedDen = dens[0].NodeIndex;
 
-        string editorTitle = editingSpawnId >= 0
+        DevToolWidgets.MutedText(editingSpawnId >= 0
             ? DevToolUiSettings.T("编辑生成项", "Edit spawn")
-            : DevToolUiSettings.T("新建生成项", "New spawn");
-        DevToolWidgets.MutedText(editorTitle);
+            : DevToolUiSettings.T("新建生成项", "New spawn"));
 
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
@@ -269,46 +257,44 @@ internal static class WorldCreatureSpawnInspector
             ImGui.EndCombo();
         }
 
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(
-            DevToolUiSettings.T("生物 ID##CreatureSpawnId", "Creature ID##CreatureSpawnId"),
+        // No raw Creature ID textbox here. Selection always goes through the shared large catalog.
+        WorldCreatureCatalogPicker.DrawSelector(
+            "OrdinarySpawn",
             ref creatureId,
-            128);
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T(
-                "可以直接输入 Mod 注册的 CreatureTemplate.Type 名称。",
-                "You can type any mod-registered CreatureTemplate.Type id directly."));
-
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(
-            DevToolUiSettings.T("筛选生物列表##CreatureSpawnSearch", "Filter creatures##CreatureSpawnSearch"),
-            ref creatureSearch,
-            128);
-
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo(
-                DevToolUiSettings.T("已注册生物##CreatureSpawnCatalog", "Registered creatures##CreatureSpawnCatalog"),
-                string.IsNullOrEmpty(creatureId) ? DevToolUiSettings.T("选择…", "Select…") : creatureId))
-        {
-            int visible = 0;
-            for (int i = 0; i < creatureCatalog.Count; i++)
-            {
-                string id = creatureCatalog[i];
-                if (!Matches(id, creatureSearch)) continue;
-                visible++;
-                bool selected = string.Equals(creatureId, id, StringComparison.Ordinal);
-                if (ImGui.Selectable(id + "##CreatureType" + i, selected)) creatureId = id;
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-            if (visible == 0)
-                DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配项；仍可直接输入 ID。", "No matches; a raw id can still be used."));
-            ImGui.EndCombo();
-        }
+            allowNone: false,
+            label: DevToolUiSettings.T("生物", "Creature"));
 
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputInt(DevToolUiSettings.T("数量##CreatureSpawnAmount", "Amount##CreatureSpawnAmount"), ref amount);
         if (amount < 1) amount = 1;
 
+        DrawSpawnTags();
+        DrawTimelineEditor();
+
+        ImGui.Spacing();
+        string action = editingSpawnId >= 0
+            ? DevToolUiSettings.T("应用修改", "Apply Changes")
+            : DevToolUiSettings.T("放置生物", "Add Creature");
+        if (DevToolWidgets.ActionButton(action, "ApplyCreatureSpawn", DevToolButtonTone.Primary, true))
+            Apply(snapshot, room);
+
+        if (editingSpawnId >= 0 && DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("取消编辑", "Cancel Edit"),
+                "CancelCreatureSpawnEdit",
+                DevToolButtonTone.Subtle,
+                true))
+            ResetForm(room);
+
+        if (!string.IsNullOrEmpty(lastStatus))
+        {
+            ImGui.Spacing();
+            if (lastStatusSuccess) DevToolWidgets.MutedText(lastStatus, true);
+            else ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), lastStatus);
+        }
+    }
+
+    private static void DrawSpawnTags()
+    {
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText(
             DevToolUiSettings.T("Spawn 标签##CreatureSpawnTags", "Spawn tags##CreatureSpawnTags"),
@@ -316,8 +302,8 @@ internal static class WorldCreatureSpawnInspector
             512);
         if (ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T(
-                "写花括号内部内容，例如 Night,PreCycle,Seed:12。未知标签会原样保留给 Mod。",
-                "Enter the contents inside {...}, e.g. Night,PreCycle,Seed:12. Unknown tags are preserved for mods."));
+                "花括号内部内容，例如 Night,PreCycle,Seed:12。未知标签原样保留给 Mod。",
+                "Contents inside {...}, e.g. Night,PreCycle,Seed:12. Unknown tags are preserved for mods."));
 
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
@@ -331,7 +317,10 @@ internal static class WorldCreatureSpawnInspector
             }
             ImGui.EndCombo();
         }
+    }
 
+    private static void DrawTimelineEditor()
+    {
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
                 DevToolUiSettings.T("时间线范围##CreatureTimelineMode", "Timeline scope##CreatureTimelineMode"),
@@ -343,54 +332,29 @@ internal static class WorldCreatureSpawnInspector
             ImGui.EndCombo();
         }
 
-        if (timelineMode != TimelineMode.All)
-        {
-            ImGui.SetNextItemWidth(-1f);
-            ImGui.InputText(
-                DevToolUiSettings.T("时间线 / 角色标签##CreatureTimelineFilter", "Timeline / character tags##CreatureTimelineFilter"),
-                ref timelineFilter,
-                256);
-            if (ImGui.IsItemHovered())
-                DevToolTooltip.Show(DevToolUiSettings.T(
-                    "world.txt 行首条件；支持逗号分隔，也允许输入 Mod 自定义标签。",
-                    "world.txt line-prefix condition; comma-separated and mod-defined tags are accepted."));
+        if (timelineMode == TimelineMode.All) return;
 
-            ImGui.SetNextItemWidth(-1f);
-            if (ImGui.BeginCombo(
-                    DevToolUiSettings.T("添加已注册标签##CreatureTimelinePreset", "Add registered tag##CreatureTimelinePreset"),
-                    DevToolUiSettings.T("选择…", "Select…")))
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputText(
+            DevToolUiSettings.T("时间线 / 角色标签##CreatureTimelineFilter", "Timeline / character tags##CreatureTimelineFilter"),
+            ref timelineFilter,
+            256);
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "world.txt 行首条件；逗号分隔，Mod 自定义时间线标签也会原样保留。",
+                "world.txt line-prefix condition; comma-separated mod timeline tags are preserved."));
+
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo(
+                DevToolUiSettings.T("添加已注册标签##CreatureTimelinePreset", "Add registered tag##CreatureTimelinePreset"),
+                DevToolUiSettings.T("选择…", "Select…")))
+        {
+            for (int i = 0; i < timelineCatalog.Count; i++)
             {
-                for (int i = 0; i < timelineCatalog.Count; i++)
-                {
-                    string value = timelineCatalog[i];
-                    if (ImGui.Selectable(value + "##TimelinePreset" + i)) AddTimeline(value);
-                }
-                ImGui.EndCombo();
+                string value = timelineCatalog[i];
+                if (ImGui.Selectable(value + "##TimelinePreset" + i)) AddTimeline(value);
             }
-        }
-
-        ImGui.Spacing();
-        string action = editingSpawnId >= 0
-            ? DevToolUiSettings.T("应用修改", "Apply Changes")
-            : DevToolUiSettings.T("放置生物", "Add Creature");
-        if (DevToolWidgets.ActionButton(action, "ApplyCreatureSpawn", DevToolButtonTone.Primary, true))
-            Apply(snapshot, room);
-
-        if (editingSpawnId >= 0)
-        {
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("取消编辑", "Cancel Edit"),
-                    "CancelCreatureSpawnEdit",
-                    DevToolButtonTone.Subtle,
-                    true))
-                ResetForm(room);
-        }
-
-        if (!string.IsNullOrEmpty(lastStatus))
-        {
-            ImGui.Spacing();
-            if (lastStatusSuccess) DevToolWidgets.MutedText(lastStatus, true);
-            else ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), lastStatus);
+            ImGui.EndCombo();
         }
     }
 
@@ -400,7 +364,7 @@ internal static class WorldCreatureSpawnInspector
         bool exclude = timelineMode == TimelineMode.Exclude;
         if (string.IsNullOrWhiteSpace(creatureId))
         {
-            SetStatus(DevToolUiSettings.T("请选择或输入生物 ID。", "Choose or enter a creature id."), false);
+            SetStatus(DevToolUiSettings.T("请从生物图鉴选择一个生物。", "Choose a creature from the catalog."), false);
             return;
         }
         if (timelineMode != TimelineMode.All && string.IsNullOrWhiteSpace(effectiveTimeline))
@@ -409,30 +373,25 @@ internal static class WorldCreatureSpawnInspector
             return;
         }
 
+        bool ok;
+        string error;
         if (editingSpawnId >= 0)
         {
-            if (WorldTextRegistry.TryUpdateCreatureSpawn(
-                    snapshot.RegionName,
-                    editingSpawnId,
-                    selectedDen,
-                    creatureId,
-                    amount,
-                    spawnTags,
-                    effectiveTimeline,
-                    exclude,
-                    out string updateError))
-            {
-                SetStatus(DevToolUiSettings.T("生成项已更新；保存世界以写入 world.txt。", "Spawner updated; save the world to write world.txt."), true);
-                editingSpawnId = -1;
-            }
-            else
-            {
-                SetStatus(updateError, false);
-            }
-            return;
+            ok = WorldTextRegistry.TryUpdateCreatureSpawn(
+                snapshot.RegionName,
+                editingSpawnId,
+                selectedDen,
+                creatureId,
+                amount,
+                spawnTags,
+                effectiveTimeline,
+                exclude,
+                out error);
+            if (ok) editingSpawnId = -1;
         }
-
-        if (WorldTextRegistry.TryAddCreatureSpawn(
+        else
+        {
+            ok = WorldTextRegistry.TryAddCreatureSpawn(
                 snapshot.RegionName,
                 room.Name,
                 selectedDen,
@@ -442,21 +401,26 @@ internal static class WorldCreatureSpawnInspector
                 effectiveTimeline,
                 exclude,
                 out _,
-                out string addError))
-        {
-            SetStatus(DevToolUiSettings.T("已添加生成项；保存世界以写入 world.txt。", "Spawner added; save the world to write world.txt."), true);
+                out error);
         }
-        else
+
+        if (!ok)
         {
-            SetStatus(addError, false);
+            SetStatus(error, false);
+            return;
         }
+
+        SetStatus(
+            DevToolUiSettings.T(
+                "生成项已更新并实时重载；保存世界以写入 world.txt。",
+                "Spawner updated and live-reloaded; save the world to write world.txt."),
+            true);
     }
 
     private static void ResetForRoom(EditorMapRoomSnapshot room)
     {
         stateRoom = room?.RoomIndex ?? -1;
         editingSpawnId = -1;
-        creatureSearch = string.Empty;
         lastStatus = string.Empty;
         ResetForm(room);
     }
@@ -466,11 +430,7 @@ internal static class WorldCreatureSpawnInspector
         editingSpawnId = -1;
         List<EditorMapRoomNodeSnapshot> dens = CreatureDenNodes(room);
         selectedDen = dens.Count > 0 ? dens[0].NodeIndex : -1;
-        if (string.IsNullOrEmpty(creatureId))
-        {
-            RefreshCreatureCatalog();
-            creatureId = creatureCatalog.Count > 0 ? creatureCatalog[0] : string.Empty;
-        }
+        if (string.IsNullOrEmpty(creatureId)) creatureId = FirstRegisteredCreature();
         amount = 1;
         spawnTags = string.Empty;
         timelineMode = TimelineMode.All;
@@ -490,6 +450,14 @@ internal static class WorldCreatureSpawnInspector
             ? TimelineMode.All
             : spawn.ExcludeTimeline ? TimelineMode.Exclude : TimelineMode.Only;
         lastStatus = string.Empty;
+    }
+
+    private static string FirstRegisteredCreature()
+    {
+        List<string> values = ExtEnum<CreatureTemplate.Type>.values.entries;
+        for (int i = 0; i < values.Count; i++)
+            if (!string.IsNullOrWhiteSpace(values[i])) return values[i];
+        return string.Empty;
     }
 
     private static List<EditorMapRoomNodeSnapshot> CreatureDenNodes(EditorMapRoomSnapshot room)
@@ -527,21 +495,6 @@ internal static class WorldCreatureSpawnInspector
         return (spawn.ExcludeTimeline ? "X-" : string.Empty) + spawn.TimelineFilter;
     }
 
-    private static void RefreshCreatureCatalog()
-    {
-        int count = ExtEnum<CreatureTemplate.Type>.values.entries.Count;
-        if (count == creatureCatalogCount && creatureCatalog.Count > 0) return;
-        creatureCatalogCount = count;
-        creatureCatalog.Clear();
-        for (int i = 0; i < ExtEnum<CreatureTemplate.Type>.values.entries.Count; i++)
-        {
-            string value = ExtEnum<CreatureTemplate.Type>.values.entries[i];
-            if (!string.IsNullOrWhiteSpace(value) && !ContainsExact(creatureCatalog, value))
-                creatureCatalog.Add(value);
-        }
-        creatureCatalog.Sort(StringComparer.OrdinalIgnoreCase);
-    }
-
     private static void RefreshTimelineCatalog()
     {
         int timelineCount = ExtEnum<SlugcatStats.Timeline>.values.entries.Count;
@@ -555,7 +508,6 @@ internal static class WorldCreatureSpawnInspector
             AddUnique(timelineCatalog, ExtEnum<SlugcatStats.Timeline>.values.entries[i]);
         for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.entries.Count; i++)
             AddUnique(timelineCatalog, ExtEnum<SlugcatStats.Name>.values.entries[i]);
-
         timelineCatalog.Sort(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -570,20 +522,16 @@ internal static class WorldCreatureSpawnInspector
         if (selected) ImGui.SetItemDefaultFocus();
     }
 
-    private static string TimelineModeText(TimelineMode mode)
+    private static string TimelineModeText(TimelineMode mode) => mode switch
     {
-        return mode switch
-        {
-            TimelineMode.Only => DevToolUiSettings.T("仅指定", "Only selected"),
-            TimelineMode.Exclude => DevToolUiSettings.T("排除指定", "Exclude selected"),
-            _ => DevToolUiSettings.T("全部", "All")
-        };
-    }
+        TimelineMode.Only => DevToolUiSettings.T("仅指定", "Only selected"),
+        TimelineMode.Exclude => DevToolUiSettings.T("排除指定", "Exclude selected"),
+        _ => DevToolUiSettings.T("全部", "All")
+    };
 
     private static void AddTag(string tag)
     {
-        if (string.IsNullOrWhiteSpace(tag)) return;
-        if (CsvContains(spawnTags, tag)) return;
+        if (string.IsNullOrWhiteSpace(tag) || CsvContains(spawnTags, tag)) return;
         spawnTags = string.IsNullOrWhiteSpace(spawnTags) ? tag : spawnTags.Trim().TrimEnd(',') + "," + tag;
     }
 
@@ -604,30 +552,11 @@ internal static class WorldCreatureSpawnInspector
         return false;
     }
 
-    private static bool Matches(string value, string query) =>
-        string.IsNullOrWhiteSpace(query) ||
-        (!string.IsNullOrEmpty(value) && value.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0) ||
-        Fuzzy(value, query.Trim());
-
-    private static bool Fuzzy(string value, string query)
-    {
-        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(query)) return false;
-        int q = 0;
-        for (int i = 0; i < value.Length && q < query.Length; i++)
-            if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
-        return q == query.Length;
-    }
-
-    private static bool ContainsExact(List<string> list, string value)
-    {
-        for (int i = 0; i < list.Count; i++)
-            if (string.Equals(list[i], value, StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
-    }
-
     private static void AddUnique(List<string> list, string value)
     {
-        if (string.IsNullOrWhiteSpace(value) || ContainsExact(list, value)) return;
+        if (string.IsNullOrWhiteSpace(value)) return;
+        for (int i = 0; i < list.Count; i++)
+            if (string.Equals(list[i], value, StringComparison.OrdinalIgnoreCase)) return;
         list.Add(value);
     }
 
