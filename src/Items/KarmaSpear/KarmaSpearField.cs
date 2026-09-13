@@ -13,6 +13,8 @@ namespace DryCycle.Items.KarmaSpear;
 internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 {
     private const int ArcSegments = 96;
+    private const int InitialGlyphSpriteIndex = ArcSegments;
+    private const int InitialFormationFrames = 28;
     private const int VisibilityRefreshFrames = 12;
 
     private readonly KarmaSpear _source;
@@ -429,7 +431,7 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        sLeaser.sprites = new FSprite[ArcSegments];
+        sLeaser.sprites = new FSprite[ArcSegments + 1];
         for (int i = 0; i < ArcSegments; i++)
         {
             sLeaser.sprites[i] = new FSprite("pixel")
@@ -438,6 +440,12 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
                 anchorY = 0.5f
             };
         }
+
+        int glyphValue = Mathf.Clamp(_activationKarmaLevel - 1, 0, 9);
+        sLeaser.sprites[InitialGlyphSpriteIndex] = new FSprite(
+            global::HUD.KarmaMeter.KarmaSymbolSprite(
+                small: false,
+                new IntVector2(glyphValue, glyphValue)));
 
         AddToContainer(sLeaser, rCam, rCam.ReturnFContainer("Foreground"));
     }
@@ -488,6 +496,23 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             segment.scaleY = thickness;
             segment.alpha = alpha;
             segment.color = color;
+        }
+
+        // Only the first formation pulse carries the activation Karma glyph. Repeating field
+        // pulses remain ring-only so the level is communicated once, not spammed continuously.
+        FSprite glyph = sLeaser.sprites[InitialGlyphSpriteIndex];
+        float formationT = Mathf.Clamp01((_age + timeStacker) / InitialFormationFrames);
+        bool showInitialGlyph = _age < InitialFormationFrames;
+        glyph.isVisible = showInitialGlyph;
+        if (showInitialGlyph)
+        {
+            Vector2 drawPos = center - camPos;
+            float envelope = Mathf.Sin(formationT * Mathf.PI);
+            glyph.x = drawPos.x;
+            glyph.y = drawPos.y;
+            glyph.scale = Mathf.Lerp(0.58f, 1.05f, formationT);
+            glyph.alpha = envelope * Mathf.Lerp(0.72f, 0.96f, levelStrength);
+            glyph.color = Color.Lerp(Color.white, KarmicVisualEffects.Gold, 0.58f);
         }
     }
 
