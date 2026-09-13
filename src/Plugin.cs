@@ -44,7 +44,7 @@ internal sealed class Plugin : BaseUnityPlugin
     public const string ModId = "Anno";
     public const string RainWorldModId = "NR.B5";
     public const string ModName = "DryCycle";
-    public const string Version = "0.2.121";
+    public const string Version = "0.2.122";
 
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
@@ -99,6 +99,7 @@ internal sealed class Plugin : BaseUnityPlugin
         DryCycleContent.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
+        KarmaSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardHooks.Disable();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
 
@@ -177,6 +178,7 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
+        KarmaSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
@@ -345,6 +347,7 @@ internal sealed class Plugin : BaseUnityPlugin
         orig(self);
         CreatureDevConsoleSupport.TryRegisterAll();
         RopeSpearDevConsoleSupport.TryRegister();
+        KarmaSpearDevConsoleSupport.TryRegister();
         SpinebackLizardDevConsoleSupport.TryRegister();
     }
 }
