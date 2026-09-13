@@ -9,6 +9,8 @@ namespace DryCycle.DevUI.DevTool.World;
 /// <summary>
 /// Small transactional snapshot for one topology edit. Only the two edited endpoints and
 /// explicit edges touching them are captured, so Undo/Redo does not replace unrelated region data.
+/// Runtime synchronization is intentionally delegated to WorldTextRegistry/WorldConnectionSyntax,
+/// the same path used by normal edits and Save.
 /// </summary>
 internal sealed class WorldTopologyEditSnapshot
 {
@@ -91,6 +93,7 @@ internal sealed class WorldTopologyEditSnapshot
         for (int i = 0; i < endpoints.Length; i++)
         {
             EndpointState endpoint = endpoints[i];
+            if (page.world.GetAbstractRoom(endpoint.Room) == null) return false;
             if (!WorldTextRegistry.TrySetConnection(
                     region,
                     endpoint.Room,
@@ -98,13 +101,6 @@ internal sealed class WorldTopologyEditSnapshot
                     endpoint.Destination,
                     out _))
                 return false;
-
-            AbstractRoom room = page.world.GetAbstractRoom(endpoint.Room);
-            if (room == null) return false;
-            SetLiveConnection(
-                room,
-                endpoint.Node,
-                ResolveDestinationIndex(page.world, endpoint.Destination));
         }
 
         for (int i = 0; i < explicitEdges.Length; i++)
@@ -156,31 +152,6 @@ internal sealed class WorldTopologyEditSnapshot
 
     private static bool Touches(WorldConnectionEdge edge, WorldConnectionEndpoint endpoint) =>
         edge != null && (edge.A.Equals(endpoint) || edge.B.Equals(endpoint));
-
-    private static int ResolveDestinationIndex(global::World world, string destination)
-    {
-        if (world == null ||
-            !WorldConnectionSyntax.TryParseDestination(destination, out string roomName, out _) ||
-            string.IsNullOrWhiteSpace(roomName) ||
-            string.Equals(roomName, "DISCONNECTED", StringComparison.OrdinalIgnoreCase))
-            return -1;
-
-        return world.GetAbstractRoom(roomName)?.index ?? -1;
-    }
-
-    private static void SetLiveConnection(AbstractRoom room, int nodeIndex, int targetRoomIndex)
-    {
-        if (room == null || nodeIndex < 0) return;
-        if (room.connections == null || nodeIndex >= room.connections.Length)
-        {
-            int oldLength = room.connections?.Length ?? 0;
-            int[] next = new int[Math.Max(nodeIndex + 1, oldLength)];
-            for (int i = 0; i < next.Length; i++) next[i] = -1;
-            if (room.connections != null) Array.Copy(room.connections, next, room.connections.Length);
-            room.connections = next;
-        }
-        room.connections[nodeIndex] = targetRoomIndex;
-    }
 }
 
 internal sealed class WorldTopologyHistoryEntry : IEditorHistoryEntry
