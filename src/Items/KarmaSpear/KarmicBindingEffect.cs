@@ -4,18 +4,18 @@ using UnityEngine;
 namespace DryCycle.Items.KarmaSpear;
 
 /// <summary>
-/// Holds a creature near the point where the karmic charge caught it without pinning
-/// every BodyChunk to an absolute world-space pose. The creature may still writhe,
-/// rotate and animate, while whole-body translation is constrained in a bounded way.
+/// Stable whole-body bind for Light, Standard and Heavy targets. The effect constrains
+/// centre-of-mass translation rather than pinning every BodyChunk to an absolute pose, so
+/// native creature animation and body connections can continue without spring feedback.
 /// </summary>
 internal sealed class KarmicBindingEffect : UpdatableAndDeletable
 {
     private readonly KarmaSpear _source;
     private readonly Creature _target;
+    private readonly KarmicTargetProfile _profile;
     private readonly Vector2 _anchor;
     private readonly int _duration;
     private readonly bool _sourceMustRemainLodged;
-    private readonly bool _largeTarget;
     private readonly int _chargeGeneration;
     private readonly int _initialKarmaLevel;
     private int _displayedKarmaLevel;
@@ -25,47 +25,33 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
         KarmaSpear source,
         Creature target,
         Vector2 anchor,
-        bool largeTarget,
+        KarmicTargetProfile profile,
         bool sourceMustRemainLodged)
     {
         _source = source;
         _target = target;
+        _profile = profile;
         _sourceMustRemainLodged = sourceMustRemainLodged;
         _chargeGeneration = source.ChargeGeneration;
         _initialKarmaLevel = Mathf.Clamp(source.KarmaLevel, 1, 10);
         _displayedKarmaLevel = _initialKarmaLevel;
 
-        // TotalMass is not a reliable proxy for lizard threat class. Green Lizards are
-        // extremely heavy (7.5 total body mass) while Red Lizards are lighter (~3.1), so
-        // the previous >= 3.4 rule accidentally treated Green as "large" and Red as
-        // "medium". Ordinary lizards use the medium binding; Red Lizard keeps the large
-        // crisis-interruption behavior.
-        _largeTarget = target is Lizard lizard
-            ? lizard.Template.type == CreatureTemplate.Type.RedLizard
-            : largeTarget;
-
-        // Anchor the whole body's mass centre at impact. The old implementation anchored
-        // each chunk independently, which fought creature locomotion and body connections.
-        // Keep the caller-supplied anchor only as a safe fallback for unusual zero-chunk
-        // objects.
         _anchor = TryGetBodyState(target, out Vector2 bodyCenter, out _)
             ? bodyCenter
             : anchor;
 
-        _duration = (_largeTarget ? 128 : 88) +
-                    _initialKarmaLevel * (_largeTarget ? 7 : 5);
+        _duration = DurationFor(profile.ResponseClass, _initialKarmaLevel);
+        target.Stun(InitialStunFor(profile.ResponseClass));
 
-        target.Stun(_largeTarget ? 24 : 34);
-
-        // Large fliers/runners lose the action they were performing at impact, but this
-        // is only a one-time interruption. The persistent controller below never injects
-        // an unbounded impulse.
-        if (_largeTarget)
+        // Signature burst movement is cancelled once at impact. Persistent restraint is
+        // still handled by the bounded centre-of-mass controller below.
+        if (profile.Special == KarmicSpecialResponse.RedLizardCrisis)
         {
-            for (int i = 0; i < target.bodyChunks.Length; i++)
-            {
-                target.bodyChunks[i].vel.y -= 1.2f;
-            }
+            ScaleAllVelocity(0.30f);
+        }
+        else if (profile.Special == KarmicSpecialResponse.CyanLeapInterrupt)
+        {
+            ScaleAllVelocity(0.42f);
         }
     }
 
@@ -115,26 +101,22 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
             return;
         }
 
-        // 1 = freshly bound / strongest level, 0 = final remaining level. A spear that
-        // started at Karma 1 remains at full restraint for its shorter lifetime.
+        BindingTuning tuning = BindingTuning.For(_profile.ResponseClass);
+
+        // 1 = fresh/full charge, 0 = final remaining karma level.
         float strength = _initialKarmaLevel <= 1
             ? 1f
             : Mathf.InverseLerp(1f, _initialKarmaLevel, _displayedKarmaLevel);
 
-        // Give the body a small cage in which it can visibly struggle. The cage opens as
-        // karma drains instead of weakening a spring toward an unstable low-damping state.
-        float leashRadius = _largeTarget
-            ? Mathf.Lerp(36f, 16f, strength)
-            : Mathf.Lerp(24f, 9f, strength);
+        float leashRadius = Mathf.Lerp(tuning.LooseLeash, tuning.TightLeash, strength);
+        float translationDamping = Mathf.Lerp(tuning.LooseDamping, tuning.TightDamping, strength);
+        float maxTranslationRemoval = Mathf.Lerp(
+            tuning.LooseTranslationCap,
+            tuning.TightTranslationCap,
+            strength);
 
-        // Remove only whole-body translation. The same velocity delta is applied to every
-        // chunk, so head/tail/limb-relative motion is preserved and body connections are not
-        // forced to fight a separate spring for every chunk.
-        float translationDamping = _largeTarget
-            ? Mathf.Lerp(0.055f, 0.17f, strength)
-            : Mathf.Lerp(0.08f, 0.24f, strength);
-        float maxTranslationRemoval = _largeTarget ? 0.42f : 0.62f;
-
+        // First remove a bounded amount of whole-body translation. Applying one identical
+        // delta to every chunk preserves relative head/tail/limb motion.
         Vector2 translationRemoval = Vector2.ClampMagnitude(
             bodyVelocity * translationDamping,
             maxTranslationRemoval);
@@ -149,15 +131,17 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
             Vector2 outward = fromAnchor / distance;
             float overshoot = distance - leashRadius;
 
-            // Outside the cage, first remove excessive radial escape velocity. This is an
-            // energy-removing brake only; it cannot reverse the projectile-like direction
-            // into an ever-growing spring oscillation.
-            float outwardSpeedLimit = _largeTarget
-                ? Mathf.Lerp(5.8f, 2.8f, strength)
-                : Mathf.Lerp(4.4f, 1.8f, strength);
-            float inwardSpeedLimit = _largeTarget
-                ? Mathf.Lerp(7.0f, 4.6f, strength)
-                : Mathf.Lerp(5.8f, 3.6f, strength);
+            // Only remove excess radial escape speed. This brake cannot create an
+            // oscillation because it never accelerates an already-inward moving creature
+            // farther outward.
+            float outwardSpeedLimit = Mathf.Lerp(
+                tuning.LooseOutwardSpeed,
+                tuning.TightOutwardSpeed,
+                strength);
+            float inwardSpeedLimit = Mathf.Lerp(
+                tuning.LooseInwardSpeed,
+                tuning.TightInwardSpeed,
+                strength);
 
             float radialSpeed = Vector2.Dot(estimatedVelocity, outward);
             float clampedRadialSpeed = Mathf.Clamp(
@@ -165,22 +149,25 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
                 -inwardSpeedLimit,
                 outwardSpeedLimit);
             float radialCorrectionAmount = radialSpeed - clampedRadialSpeed;
+            float radialCap = Mathf.Lerp(tuning.LooseRadialCap, tuning.TightRadialCap, strength);
             Vector2 radialBrake = outward * Mathf.Clamp(
                 radialCorrectionAmount,
-                -(_largeTarget ? 0.72f : 0.95f),
-                _largeTarget ? 0.72f : 0.95f);
+                -radialCap,
+                radialCap);
 
             ApplyUniformVelocityDelta(-radialBrake);
             estimatedVelocity -= radialBrake;
 
-            // Then add a small bounded inward pull based only on overshoot. Unlike the old
-            // per-chunk spring, this never grows beyond the explicit acceleration cap.
-            float tetherStiffness = _largeTarget
-                ? Mathf.Lerp(0.010f, 0.023f, strength)
-                : Mathf.Lerp(0.015f, 0.034f, strength);
-            float maxInwardAcceleration = _largeTarget
-                ? Mathf.Lerp(0.10f, 0.27f, strength)
-                : Mathf.Lerp(0.14f, 0.40f, strength);
+            // A very small bounded inward pull handles positional overshoot. Unlike the
+            // old per-chunk spring, this term has an explicit acceleration ceiling.
+            float tetherStiffness = Mathf.Lerp(
+                tuning.LooseTetherStiffness,
+                tuning.TightTetherStiffness,
+                strength);
+            float maxInwardAcceleration = Mathf.Lerp(
+                tuning.LooseInwardAcceleration,
+                tuning.TightInwardAcceleration,
+                strength);
             float inwardAcceleration = Mathf.Min(
                 maxInwardAcceleration,
                 overshoot * tetherStiffness);
@@ -190,12 +177,12 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
             estimatedVelocity += tetherDelta;
         }
 
-        // Final safety net for creatures whose own locomotion can add very large impulses
-        // in one frame (notably lizard lunges). This clamps only centre-of-mass translation;
-        // it does not cap individual chunk motion, so visual struggling remains intact.
-        float maxCenterSpeed = _largeTarget
-            ? Mathf.Lerp(8.0f, 4.8f, strength)
-            : Mathf.Lerp(6.2f, 3.6f, strength);
+        // Final guard against a creature adding a large locomotion impulse in one frame.
+        // Only centre-of-mass speed is limited; individual chunks remain free to animate.
+        float maxCenterSpeed = Mathf.Lerp(
+            tuning.LooseCenterSpeed,
+            tuning.TightCenterSpeed,
+            strength);
 
         if (estimatedVelocity.magnitude > maxCenterSpeed)
         {
@@ -203,7 +190,7 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
                              estimatedVelocity.normalized * maxCenterSpeed;
             Vector2 safetyRemoval = Vector2.ClampMagnitude(
                 excess,
-                _largeTarget ? 0.80f : 1.05f);
+                Mathf.Lerp(tuning.LooseSafetyCap, tuning.TightSafetyCap, strength));
             ApplyUniformVelocityDelta(-safetyRemoval);
         }
     }
@@ -218,6 +205,19 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
         for (int i = 0; i < _target.bodyChunks.Length; i++)
         {
             _target.bodyChunks[i].vel += delta;
+        }
+    }
+
+    private void ScaleAllVelocity(float factor)
+    {
+        if (_target?.bodyChunks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _target.bodyChunks.Length; i++)
+        {
+            _target.bodyChunks[i].vel *= factor;
         }
     }
 
@@ -268,7 +268,7 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
         }
 
         _displayedKarmaLevel = remainingLevel;
-        _source.SetBindingKarmaLevel(_chargeGeneration, remainingLevel);
+        _source.SetActiveEffectKarmaLevel(_chargeGeneration, remainingLevel);
 
         KarmicVisualEffects.SpawnImpactPulse(
             _source,
@@ -279,12 +279,174 @@ internal sealed class KarmicBindingEffect : UpdatableAndDeletable
 
     private void Finish()
     {
-        if (!slatedForDeletetion)
+        if (slatedForDeletetion)
         {
-            // Only the charge that created this binding may be consumed. If the spear
-            // has already been recharged, this old effect must not drain the new charge.
-            _source?.MarkSpent(_chargeGeneration);
-            Destroy();
+            return;
+        }
+
+        _source?.MarkSpent(_chargeGeneration);
+        Destroy();
+    }
+
+    private static int DurationFor(KarmicResponseClass responseClass, int karmaLevel)
+    {
+        return responseClass switch
+        {
+            KarmicResponseClass.Light => 82 + karmaLevel * 5,
+            KarmicResponseClass.Standard => 92 + karmaLevel * 5,
+            KarmicResponseClass.Heavy => 118 + karmaLevel * 7,
+            _ => 92 + karmaLevel * 5
+        };
+    }
+
+    private static int InitialStunFor(KarmicResponseClass responseClass)
+    {
+        return responseClass switch
+        {
+            KarmicResponseClass.Light => 38,
+            KarmicResponseClass.Standard => 34,
+            KarmicResponseClass.Heavy => 24,
+            _ => 30
+        };
+    }
+
+    private readonly struct BindingTuning
+    {
+        internal readonly float TightLeash;
+        internal readonly float LooseLeash;
+        internal readonly float TightDamping;
+        internal readonly float LooseDamping;
+        internal readonly float TightTranslationCap;
+        internal readonly float LooseTranslationCap;
+        internal readonly float TightOutwardSpeed;
+        internal readonly float LooseOutwardSpeed;
+        internal readonly float TightInwardSpeed;
+        internal readonly float LooseInwardSpeed;
+        internal readonly float TightRadialCap;
+        internal readonly float LooseRadialCap;
+        internal readonly float TightTetherStiffness;
+        internal readonly float LooseTetherStiffness;
+        internal readonly float TightInwardAcceleration;
+        internal readonly float LooseInwardAcceleration;
+        internal readonly float TightCenterSpeed;
+        internal readonly float LooseCenterSpeed;
+        internal readonly float TightSafetyCap;
+        internal readonly float LooseSafetyCap;
+
+        private BindingTuning(
+            float tightLeash,
+            float looseLeash,
+            float tightDamping,
+            float looseDamping,
+            float tightTranslationCap,
+            float looseTranslationCap,
+            float tightOutwardSpeed,
+            float looseOutwardSpeed,
+            float tightInwardSpeed,
+            float looseInwardSpeed,
+            float tightRadialCap,
+            float looseRadialCap,
+            float tightTetherStiffness,
+            float looseTetherStiffness,
+            float tightInwardAcceleration,
+            float looseInwardAcceleration,
+            float tightCenterSpeed,
+            float looseCenterSpeed,
+            float tightSafetyCap,
+            float looseSafetyCap)
+        {
+            TightLeash = tightLeash;
+            LooseLeash = looseLeash;
+            TightDamping = tightDamping;
+            LooseDamping = looseDamping;
+            TightTranslationCap = tightTranslationCap;
+            LooseTranslationCap = looseTranslationCap;
+            TightOutwardSpeed = tightOutwardSpeed;
+            LooseOutwardSpeed = looseOutwardSpeed;
+            TightInwardSpeed = tightInwardSpeed;
+            LooseInwardSpeed = looseInwardSpeed;
+            TightRadialCap = tightRadialCap;
+            LooseRadialCap = looseRadialCap;
+            TightTetherStiffness = tightTetherStiffness;
+            LooseTetherStiffness = looseTetherStiffness;
+            TightInwardAcceleration = tightInwardAcceleration;
+            LooseInwardAcceleration = looseInwardAcceleration;
+            TightCenterSpeed = tightCenterSpeed;
+            LooseCenterSpeed = looseCenterSpeed;
+            TightSafetyCap = tightSafetyCap;
+            LooseSafetyCap = looseSafetyCap;
+        }
+
+        internal static BindingTuning For(KarmicResponseClass responseClass)
+        {
+            return responseClass switch
+            {
+                KarmicResponseClass.Light => new BindingTuning(
+                    tightLeash: 7f,
+                    looseLeash: 20f,
+                    tightDamping: 0.30f,
+                    looseDamping: 0.08f,
+                    tightTranslationCap: 0.78f,
+                    looseTranslationCap: 0.34f,
+                    tightOutwardSpeed: 1.45f,
+                    looseOutwardSpeed: 4.2f,
+                    tightInwardSpeed: 3.0f,
+                    looseInwardSpeed: 5.6f,
+                    tightRadialCap: 1.00f,
+                    looseRadialCap: 0.42f,
+                    tightTetherStiffness: 0.038f,
+                    looseTetherStiffness: 0.012f,
+                    tightInwardAcceleration: 0.42f,
+                    looseInwardAcceleration: 0.10f,
+                    tightCenterSpeed: 3.0f,
+                    looseCenterSpeed: 5.8f,
+                    tightSafetyCap: 1.12f,
+                    looseSafetyCap: 0.55f),
+
+                KarmicResponseClass.Heavy => new BindingTuning(
+                    tightLeash: 17f,
+                    looseLeash: 44f,
+                    tightDamping: 0.16f,
+                    looseDamping: 0.05f,
+                    tightTranslationCap: 0.48f,
+                    looseTranslationCap: 0.24f,
+                    tightOutwardSpeed: 2.8f,
+                    looseOutwardSpeed: 6.2f,
+                    tightInwardSpeed: 4.6f,
+                    looseInwardSpeed: 7.5f,
+                    tightRadialCap: 0.72f,
+                    looseRadialCap: 0.32f,
+                    tightTetherStiffness: 0.023f,
+                    looseTetherStiffness: 0.008f,
+                    tightInwardAcceleration: 0.27f,
+                    looseInwardAcceleration: 0.08f,
+                    tightCenterSpeed: 4.8f,
+                    looseCenterSpeed: 8.2f,
+                    tightSafetyCap: 0.82f,
+                    looseSafetyCap: 0.44f),
+
+                _ => new BindingTuning(
+                    tightLeash: 10f,
+                    looseLeash: 28f,
+                    tightDamping: 0.24f,
+                    looseDamping: 0.07f,
+                    tightTranslationCap: 0.64f,
+                    looseTranslationCap: 0.30f,
+                    tightOutwardSpeed: 1.8f,
+                    looseOutwardSpeed: 4.8f,
+                    tightInwardSpeed: 3.6f,
+                    looseInwardSpeed: 6.2f,
+                    tightRadialCap: 0.95f,
+                    looseRadialCap: 0.38f,
+                    tightTetherStiffness: 0.034f,
+                    looseTetherStiffness: 0.010f,
+                    tightInwardAcceleration: 0.40f,
+                    looseInwardAcceleration: 0.10f,
+                    tightCenterSpeed: 3.6f,
+                    looseCenterSpeed: 6.4f,
+                    tightSafetyCap: 1.05f,
+                    looseSafetyCap: 0.50f)
+            };
         }
     }
 }
