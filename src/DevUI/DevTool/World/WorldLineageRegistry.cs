@@ -77,15 +77,20 @@ internal static class WorldLineageRegistry
 
     internal static bool EnsureLoaded(string region)
     {
-        string normalized = NormalizeRegion(region);
-        if (normalized.Length == 0) return false;
-        if (!WorldTextRegistry.EnsureLoaded(normalized))
+        if (string.IsNullOrWhiteSpace(region)) return false;
+        if (!WorldTextRegistry.EnsureLoaded(region))
         {
             LoadError = WorldTextRegistry.LoadError;
             return false;
         }
 
         string path = WorldTextRegistry.LoadedPath ?? string.Empty;
+        if (string.Equals(loadedRegion, region, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(loadedPath, path, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string normalized = NormalizeRegion(region);
+        if (normalized.Length == 0) return false;
         if (string.Equals(loadedRegion, normalized, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(loadedPath, path, StringComparison.OrdinalIgnoreCase))
             return true;
