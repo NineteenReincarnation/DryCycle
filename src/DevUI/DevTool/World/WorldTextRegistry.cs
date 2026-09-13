@@ -6,7 +6,7 @@ namespace DryCycle.DevUI.DevTool.World;
 /// <summary>
 /// Owns the editable lossless world.txt document for the region currently being authored.
 /// Unknown sections and mod directives remain untouched because WorldDocument only regenerates
-/// room lines that were actually changed by the editor.
+/// room/spawner lines that were actually changed by the editor.
 /// </summary>
 internal static class WorldTextRegistry
 {
@@ -136,11 +136,114 @@ internal static class WorldTextRegistry
             destinationRoom);
         bool changed = document.TrySetConnection(roomName, exitIndex, storedDestination);
 
-        // The running World has already passed through WorldLoader. Keep its exact target-Exit
-        // routing table synchronized with the editable document so newly authored links can be
-        // tested immediately without leaving the region or restarting the game.
         WorldConnectionSyntax.SynchronizeRoute(region, roomName, exitIndex, storedDestination);
         if (changed) WorldTopologyRuntime.NotifyTopologyChanged();
+        return true;
+    }
+
+    internal static WorldCreatureSpawnRecord[] GetCreatureSpawns(string region, string roomName)
+    {
+        if (!EnsureLoaded(region) || document == null)
+            return Array.Empty<WorldCreatureSpawnRecord>();
+        return document.GetCreatureSpawns(roomName);
+    }
+
+    internal static bool TryAddCreatureSpawn(
+        string region,
+        string roomName,
+        int denNode,
+        string creature,
+        int amount,
+        string spawnData,
+        string timelineFilter,
+        bool excludeTimeline,
+        out int spawnId,
+        out string error)
+    {
+        spawnId = -1;
+        error = null;
+        if (!EnsureLoaded(region) || document == null)
+        {
+            error = LoadError ?? "world.txt is unavailable.";
+            return false;
+        }
+        if (!document.TryGetRoom(roomName, out _))
+        {
+            error = "Room '" + roomName + "' does not exist in the editable ROOMS section.";
+            return false;
+        }
+        if (denNode < 0)
+        {
+            error = "A valid creature den node is required.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(creature))
+        {
+            error = "Creature id is empty.";
+            return false;
+        }
+
+        if (!document.TryAddCreatureSpawn(
+                roomName,
+                denNode,
+                creature,
+                amount,
+                spawnData,
+                timelineFilter,
+                excludeTimeline,
+                out spawnId))
+        {
+            error = "Could not add the creature spawner to world.txt.";
+            return false;
+        }
+        return true;
+    }
+
+    internal static bool TryUpdateCreatureSpawn(
+        string region,
+        int spawnId,
+        int denNode,
+        string creature,
+        int amount,
+        string spawnData,
+        string timelineFilter,
+        bool excludeTimeline,
+        out string error)
+    {
+        error = null;
+        if (!EnsureLoaded(region) || document == null)
+        {
+            error = LoadError ?? "world.txt is unavailable.";
+            return false;
+        }
+        if (!document.TryUpdateCreatureSpawn(
+                spawnId,
+                denNode,
+                creature,
+                amount,
+                spawnData,
+                timelineFilter,
+                excludeTimeline))
+        {
+            error = "Could not update the creature spawner.";
+            return false;
+        }
+        return true;
+    }
+
+    internal static bool TryDeleteCreatureSpawn(string region, int spawnId, out string error)
+    {
+        error = null;
+        if (!EnsureLoaded(region) || document == null)
+        {
+            error = LoadError ?? "world.txt is unavailable.";
+            return false;
+        }
+        if (!document.TryDeleteCreatureSpawn(spawnId))
+        {
+            error = "Could not find the creature spawner to delete.";
+            return false;
+        }
         return true;
     }
 
@@ -165,8 +268,6 @@ internal static class WorldTextRegistry
             File.Move(temp, LoadedPath);
             document.MarkSaved(LoadedPath);
 
-            // Save is also a synchronization boundary. Rebuild the exact-route table from the
-            // document and invalidate any creature route captured before the authoring change.
             WorldConnectionSyntax.SynchronizeRegion(LoadedRegion, document);
             WorldTopologyRuntime.NotifyTopologyChanged();
             LoadError = null;
