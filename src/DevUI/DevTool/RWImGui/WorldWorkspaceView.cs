@@ -532,9 +532,6 @@ internal static class WorldWorkspaceView
             " · " + (visual.Curves?.Length ?? 0) + DevToolUiSettings.T(" 条曲面层", " curve layer(s)"),
             true);
 
-        // Creature spawner + Lineage authoring belongs to the selected room inspector itself.
-        // Calling it directly keeps the requested ordering (before WORLD LINKS) and removes the
-        // last RuntimeDetour from this UI path.
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
@@ -584,12 +581,16 @@ internal static class WorldWorkspaceView
         EditorMapRoomSnapshot b = FindRoom(snapshot, connection.ToRoomIndex);
         ImGui.TextUnformatted(ConnectionLabel(snapshot, connection));
         ImGui.Separator();
-        DrawMetric(DevToolUiSettings.T("端点 A", "Endpoint A"), (a?.Name ?? connection.FromRoomIndex.ToString()) + ":" + connection.FromNodeIndex);
+        DrawMetric(DevToolUiSettings.T("端点 A", "Endpoint A"), (a?.Name ?? connection.FromRoomIndex.ToString()) + ":" + NodeText(connection.FromNodeIndex));
         DrawMetric(DevToolUiSettings.T("端点 B", "Endpoint B"), (b?.Name ?? connection.ToRoomIndex.ToString()) + ":" + NodeText(connection.ToNodeIndex));
         DrawMetric(DevToolUiSettings.T("方向", "Direction"), DirectionGlyph(connection.Direction));
         DrawMetric(DevToolUiSettings.T("来源", "Source"), connection.Explicit ? "WorldTopology.json" : "world.txt");
 
-        if (connection.Ambiguous)
+        bool validA = FindNode(a, connection.FromNodeIndex)?.Exit == true;
+        bool validB = FindNode(b, connection.ToNodeIndex)?.Exit == true;
+        if (connection.Explicit && (!validA || !validB))
+            DrawBrokenExplicitConnectionEditor(snapshot, connection);
+        else if (connection.Ambiguous)
             DrawAmbiguousConnectionEditor(snapshot, connection, a, b);
         else if (connection.Explicit)
             DrawExplicitConnectionEditor(snapshot, connection, a, b);
@@ -597,6 +598,32 @@ internal static class WorldWorkspaceView
             DrawVanillaConnectionEditor(snapshot, connection, a, b);
 
         DrawTopologyCommandStatus();
+    }
+
+    private static void DrawBrokenExplicitConnectionEditor(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapConnectionSnapshot connection)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("损坏的精确映射", "BROKEN EXACT MAPPING"));
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T(
+                "WorldTopology.json 中保存的节点已经不存在或不是 Exit。可以移除这条损坏映射，让编辑器重新以 world.txt 为准解析连接。",
+                "The saved WorldTopology.json endpoint no longer exists or is not an Exit. Remove the broken mapping to rebuild the link from world.txt."),
+            true);
+
+        string edgeId = ExplicitEdgeId(connection.ConnectionId);
+        if (string.IsNullOrEmpty(edgeId)) return;
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("移除损坏映射并重新解析", "Remove Broken Mapping and Re-resolve"),
+                "RemoveBrokenTopologyMapping",
+                DevToolButtonTone.Danger))
+        {
+            WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
+                WorldTopologyCommandKind.RemoveExplicitMapping,
+                region: snapshot.RegionName,
+                edgeId: edgeId));
+            ClearConnectionSelection();
+        }
     }
 
     private static void DrawAmbiguousConnectionEditor(
@@ -608,10 +635,10 @@ internal static class WorldWorkspaceView
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("指定目标 Exit", "RESOLVE TARGET EXIT"));
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "重复房间链接时，原版数据只知道目标房间。选择对侧 Exit 后建立精确端点映射。",
-                "For repeated room links vanilla only knows the target room. Choose the opposite Exit to create an exact endpoint mapping."),
+                "无法自动确定目标出口时仍可手动修复。优先列出已经指回源房间的 Exit，同时也允许选择当前空闲的 Exit；不会覆盖已经连接到第三个房间的出口。",
+                "If the target Exit cannot be resolved automatically, repair it manually. Exits already pointing back are listed first, followed by free Exits; endpoints connected to a third room are never overwritten."),
             true);
-        if (a == null || b == null) return;
+        if (a == null || b == null || connection.FromNodeIndex < 0) return;
 
         if (!string.Equals(mappingConnectionId, connection.ConnectionId, StringComparison.Ordinal))
         {
@@ -623,19 +650,29 @@ internal static class WorldWorkspaceView
         List<int> candidates = CandidateTargetNodes(snapshot, connection, b);
         if (candidates.Count == 0)
         {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("没有可用的目标 Exit。", "No target Exit is available."), true);
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "目标房间没有可安全使用的 Exit。请先断开冲突出口，再回来修复这条连接。",
+                    "The target room has no safe Exit available. Disconnect a conflicting endpoint first, then repair this link."),
+                true);
             return;
         }
         if (!candidates.Contains(mappingTargetNode)) mappingTargetNode = candidates[0];
 
         ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo(DevToolUiSettings.T("目标出口##TopologyTargetExit", "Target Exit##TopologyTargetExit"), "Exit " + mappingTargetNode))
+        string preview = "Exit " + mappingTargetNode;
+        EditorMapRoomNodeSnapshot selectedNode = FindNode(b, mappingTargetNode);
+        if (selectedNode?.ConnectedRoomIndex < 0) preview += DevToolUiSettings.T("（空闲）", " (free)");
+        if (ImGui.BeginCombo(DevToolUiSettings.T("目标出口##TopologyTargetExit", "Target Exit##TopologyTargetExit"), preview))
         {
             for (int i = 0; i < candidates.Count; i++)
             {
                 int node = candidates[i];
+                EditorMapRoomNodeSnapshot candidate = FindNode(b, node);
+                bool free = candidate?.ConnectedRoomIndex < 0;
+                string label = "Exit " + node + (free ? DevToolUiSettings.T("（空闲）", " (free)") : string.Empty);
                 bool selected = mappingTargetNode == node;
-                if (ImGui.Selectable("Exit " + node + "##TargetExit" + node, selected)) mappingTargetNode = node;
+                if (ImGui.Selectable(label + "##TargetExit" + node, selected)) mappingTargetNode = node;
                 if (selected) ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
@@ -644,7 +681,7 @@ internal static class WorldWorkspaceView
         DrawMappingDirectionButtons();
         ImGui.Spacing();
         ImGui.TextUnformatted(a.Name + ":" + connection.FromNodeIndex + " " + DirectionGlyph(mappingDirection) + " " + b.Name + ":" + mappingTargetNode);
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("建立精确映射", "Create Exact Mapping"), "CreateTopologyMapping", DevToolButtonTone.Primary))
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("修复并建立精确映射", "Repair Exact Mapping"), "CreateTopologyMapping", DevToolButtonTone.Primary))
         {
             WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
                 WorldTopologyCommandKind.AddExplicitMapping,
@@ -931,16 +968,23 @@ internal static class WorldWorkspaceView
 
     private static List<int> CandidateTargetNodes(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection, EditorMapRoomSnapshot targetRoom)
     {
-        List<int> result = new();
+        List<int> preferred = new();
+        List<int> free = new();
         EditorMapRoomNodeSnapshot[] nodes = targetRoom?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
         for (int i = 0; i < nodes.Length; i++)
         {
             EditorMapRoomNodeSnapshot node = nodes[i];
-            if (!node.Exit || node.ConnectedRoomIndex != connection.FromRoomIndex) continue;
+            if (!node.Exit) continue;
             if (EndpointOwnedByExplicitEdge(snapshot, targetRoom.RoomIndex, node.NodeIndex)) continue;
-            result.Add(node.NodeIndex);
+
+            if (node.ConnectedRoomIndex == connection.FromRoomIndex)
+                preferred.Add(node.NodeIndex);
+            else if (node.ConnectedRoomIndex < 0)
+                free.Add(node.NodeIndex);
         }
-        return result;
+
+        preferred.AddRange(free);
+        return preferred;
     }
 
     private static int FirstCandidateTargetNode(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection, EditorMapRoomSnapshot targetRoom)
@@ -1077,7 +1121,7 @@ internal static class WorldWorkspaceView
 
     private static string ConnectionLabel(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection)
     {
-        string a = (FindRoom(snapshot, connection.FromRoomIndex)?.Name ?? connection.FromRoomIndex.ToString()) + ":" + connection.FromNodeIndex;
+        string a = (FindRoom(snapshot, connection.FromRoomIndex)?.Name ?? connection.FromRoomIndex.ToString()) + ":" + NodeText(connection.FromNodeIndex);
         string b = (FindRoom(snapshot, connection.ToRoomIndex)?.Name ?? connection.ToRoomIndex.ToString()) + ":" + NodeText(connection.ToNodeIndex);
         return a + " " + DirectionGlyph(connection.Direction) + " " + b;
     }
