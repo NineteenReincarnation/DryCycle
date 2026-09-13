@@ -66,7 +66,7 @@ internal static class WorldCreaturePipeCatalog
             bool knownDen = IsCreatureDen(node);
             result.Add(new Entry(
                 preserveNode,
-                knownDen ? node.Type : DevToolUiSettings.T("未定位", "Unresolved"),
+                knownDen ? node.Type : "Node",
                 false,
                 !knownDen || hasExact));
         }
