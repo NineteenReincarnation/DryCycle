@@ -98,17 +98,23 @@ public static class EditorInputRouter
             return;
         }
 
-        if (HasLocalTextFocus(session.Owner?.game) || wantsTextInput ||
-            session.LegacyTransactions.HasPendingTransaction)
-            return;
-
-        // Save/Undo/Redo belong to the rebuilt core, not to one visual frontend. They remain
-        // available in Vanilla presentation mode because the old shortcut runtime was removed.
+        // Save is an application-level command, not a text-editing command. It must remain available
+        // while an ImGui search/input field owns keyboard focus; otherwise World Map appears to lose
+        // Ctrl+S simply because the Explorer search box or an inspector text field is still active.
+        // Ctrl/Command is held, so the S keystroke is not valid text input and does not need to be
+        // forwarded to the focused field before saving.
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S))
         {
             EditorActions.Save(session);
             return;
         }
+
+        if (HasLocalTextFocus(session.Owner?.game) || wantsTextInput ||
+            session.LegacyTransactions.HasPendingTransaction)
+            return;
+
+        // Undo/Redo remain below the text-focus guard because Ctrl+Z/Ctrl+Y should continue to edit
+        // the focused text field instead of unexpectedly rewinding the whole editor document.
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Z))
         {
             if (shift) EditorActions.Redo(session);
