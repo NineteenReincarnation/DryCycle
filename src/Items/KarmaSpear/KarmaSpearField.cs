@@ -6,10 +6,9 @@ using Watcher;
 namespace DryCycle.Items.KarmaSpear;
 
 /// <summary>
-/// Persistent one-way karmic barrier created while an active Karma Spear is nailed into terrain.
-/// The barrier keeps the original deployed radius, renders only the circular arcs that are not
-/// occluded by terrain, reflects outside projectiles, and prevents outside creatures from entering.
-/// Objects already inside are never trapped and may leave freely. Wall use does not consume the spear.
+/// Timed one-way karmic barrier created when an active Karma Spear is nailed into terrain.
+/// Deployment consumes one stored Karma point immediately. Its radius uses the pre-consumption
+/// level and its lifetime is that level multiplied by five seconds.
 /// </summary>
 internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 {
@@ -17,6 +16,8 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
     private const int VisibilityRefreshFrames = 12;
 
     private readonly KarmaSpear _source;
+    private readonly int _activationKarmaLevel;
+    private readonly int _duration;
     private readonly float _radius;
     private readonly StaticSoundLoop _soundLoop;
     private readonly bool[] _arcVisible = new bool[ArcSegments];
@@ -25,15 +26,19 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
     private Vector2 _visibilityOrigin;
     private int _age;
 
-    internal KarmaSpearField(KarmaSpear source)
+    internal KarmaSpearField(
+        KarmaSpear source,
+        int activationKarmaLevel,
+        int duration)
     {
         _source = source;
+        _activationKarmaLevel = Mathf.Clamp(activationKarmaLevel, 1, 10);
+        _duration = Mathf.Max(1, duration);
 
-        // Keep the current deployed size: 4.5x the original Karma Field design.
-        _radius = (58f + source.KarmaLevel * 4f) * 4.5f;
+        // Preserve the existing deployed-size formula, evaluated with the level that was
+        // present immediately before this deployment consumed one stored point.
+        _radius = (58f + _activationKarmaLevel * 4f) * 4.5f;
 
-        // Keep the reliable Watcher positional loop, but move it upward in pitch and lower
-        // the muddy low-frequency weight. Short Templar ticks add the crisp crystalline edge.
         _soundLoop = new StaticSoundLoop(
             WatcherEnums.WatcherSoundID.Warp_Point_Ripple_Idle_LOOP,
             source.firstChunk.pos,
@@ -51,10 +56,11 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         base.Update(eu);
         _age++;
 
+        // A last stored point is allowed to power the whole deployment even though the spear
+        // itself becomes spent as soon as that point is consumed.
         if (_source == null ||
             _source.slatedForDeletetion ||
             _source.room != room ||
-            _source.IsSpent ||
             _source.mode != Weapon.Mode.StuckInWall)
         {
             Destroy();
@@ -72,13 +78,11 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         UpdateSound(center);
         CleanupCreatureSoundAges();
 
-        // Preserve the old outward-spreading karmic pulse language.
         if (_age == 1 || _age % 28 == 0)
         {
             KarmicVisualEffects.SpawnFieldPulse(_source, _radius);
         }
 
-        // A sparse high chime keeps the continuous ambience clear rather than droning.
         if (_age % 96 == 0)
         {
             room.PlaySound(
@@ -86,6 +90,11 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
                 center,
                 0.28f,
                 1.16f);
+        }
+
+        if (_age >= _duration)
+        {
+            Destroy();
         }
     }
 
@@ -98,8 +107,9 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
     private void UpdateSound(Vector2 center)
     {
         float breath = 0.5f + 0.5f * Mathf.Sin(_age * 0.030f);
+        float levelStrength = Mathf.Lerp(0.72f, 1f, _activationKarmaLevel / 10f);
         _soundLoop.pos = center;
-        _soundLoop.volume = Mathf.Lerp(0.20f, 0.30f, breath);
+        _soundLoop.volume = Mathf.Lerp(0.20f, 0.30f, breath) * levelStrength;
         _soundLoop.pitch = Mathf.Lerp(1.06f, 1.14f, breath);
         _soundLoop.Update();
     }
@@ -162,7 +172,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         Vector2 from = chunk.lastPos;
         Vector2 to = chunk.pos;
 
-        // A projectile that started this frame inside the barrier is allowed to leave.
         if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
         {
             return;
@@ -173,8 +182,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        // Hidden wall-side arcs are not invisible force fields. Visual and physical boundary
-        // agree, so a terrain-occluded section does not block something on the other side.
         if (!BarrierDirectionVisible(center, normal))
         {
             return;
@@ -186,8 +193,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        // collisionRadius already includes the projectile radius, so only a small separation
-        // offset is required here. Adding the radius a second time would visibly over-eject it.
         Vector2 targetPos = hitPoint + normal * 2.5f;
         ShiftPhysicalObject(weapon, targetPos - chunk.pos);
 
@@ -197,8 +202,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             float inwardSpeed = Vector2.Dot(bodyChunk.vel, normal);
             if (inwardSpeed < 0f)
             {
-                // Reflect only the inward normal component. Tangential motion survives, so the
-                // result reads as a real shield deflection instead of an arbitrary direction flip.
                 bodyChunk.vel -= normal * (2f * inwardSpeed);
                 bodyChunk.vel *= 0.84f;
                 bodyChunk.vel += normal * 0.75f;
@@ -225,8 +228,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         Vector2 from = main.lastPos;
         Vector2 to = main.pos;
 
-        // Creatures already inside may remain inside and may leave. The barrier only rejects
-        // an outside -> inside crossing.
         if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
         {
             return;
@@ -242,12 +243,9 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        // As above, the expanded collision circle already accounts for main.rad.
         Vector2 targetMainPos = hitPoint + normal * 1.5f;
         ShiftPhysicalObject(creature, targetMainPos - main.pos);
 
-        // Apply one common collision normal to the whole body. This preserves the creature's
-        // internal pose and connections and only removes velocity trying to cross inward.
         for (int i = 0; i < creature.bodyChunks.Length; i++)
         {
             BodyChunk bodyChunk = creature.bodyChunks[i];
@@ -294,7 +292,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             ? _source.rotation.normalized
             : Vector2.right;
 
-        // The shaft side (-rotation) is normally the open side of a spear stuck by its tip.
         Vector2 openSide = -spearDirection;
         Vector2 perpendicular = new(-openSide.y, openSide.x);
         Vector2[] directions =
@@ -462,8 +459,9 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             _source.firstChunk.pos,
             timeStacker);
         float pulse = 0.5f + 0.5f * Mathf.Sin((_age + timeStacker) * 0.065f);
+        float levelStrength = Mathf.Lerp(0.45f, 1f, _activationKarmaLevel / 10f);
         float thickness = Mathf.Lerp(1.05f, 1.45f, pulse);
-        float alpha = Mathf.Lerp(0.42f, 0.66f, pulse);
+        float alpha = Mathf.Lerp(0.42f, 0.66f, pulse) * levelStrength;
         float angleStep = Mathf.PI * 2f / ArcSegments;
         float chordLength = 2f * _radius * Mathf.Sin(angleStep * 0.5f) + 1.25f;
         Color color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.18f + pulse * 0.12f);
