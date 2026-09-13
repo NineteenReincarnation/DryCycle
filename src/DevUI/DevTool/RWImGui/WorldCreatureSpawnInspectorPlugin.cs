@@ -83,7 +83,10 @@ internal static class WorldCreatureSpawnInspector
 
     internal static void DrawIntegrated(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        if (!enabled || snapshot?.Available != true || room == null) return;
+        // This panel is composed directly by WorldWorkspaceView. Rendering must therefore not be
+        // gated by a separate BepInEx plugin lifecycle flag; otherwise the whole section can vanish
+        // even though the workspace itself is alive.
+        if (snapshot?.Available != true || room == null) return;
         if (stateRoom != room.RoomIndex)
             ResetForRoom(room);
 
@@ -437,7 +440,6 @@ internal static class WorldCreatureSpawnInspector
         }
         if (selected) ImGui.SetItemDefaultFocus();
     }
-
     private static string TimelineModeText(TimelineMode mode) => mode switch
     {
         TimelineMode.Only => DevToolUiSettings.T("仅指定", "Only selected"),
