@@ -98,22 +98,26 @@ public static class EditorInputRouter
             return;
         }
 
-        // Save is an application-level command, not a text-editing command. It must remain available
-        // while an ImGui search/input field owns keyboard focus; otherwise World Map appears to lose
-        // Ctrl+S simply because the Explorer search box or an inspector text field is still active.
-        // Ctrl/Command is held, so the S keystroke is not valid text input and does not need to be
-        // forwarded to the focused field before saving.
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S))
+        bool textEditing = HasLocalTextFocus(session.Owner?.game) ||
+                           wantsTextInput ||
+                           session.LegacyTransactions.HasPendingTransaction;
+
+        // World Map contains persistent search/inspector InputText controls. Dear ImGui can keep
+        // those controls focused after the developer stops typing, so gating Ctrl+S on text focus
+        // makes Map saving appear randomly broken. Save is an application-level Map command and
+        // Ctrl/Command+S is not meaningful text input, therefore Map may save while a text field is
+        // focused. Other tools retain the old transaction guard to avoid changing their semantics.
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S) &&
+            (session.ToolMode == EditorToolMode.Map || !textEditing))
         {
             EditorActions.Save(session);
             return;
         }
 
-        if (HasLocalTextFocus(session.Owner?.game) || wantsTextInput ||
-            session.LegacyTransactions.HasPendingTransaction)
+        if (textEditing)
             return;
 
-        // Undo/Redo remain below the text-focus guard because Ctrl+Z/Ctrl+Y should continue to edit
+        // Undo/Redo stay below the text-focus guard because Ctrl+Z/Ctrl+Y should continue to edit
         // the focused text field instead of unexpectedly rewinding the whole editor document.
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Z))
         {
