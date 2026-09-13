@@ -26,6 +26,8 @@ internal sealed class WorldDocument
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<WorldCreatureSpawnRecord> creatureSpawns = new();
     private readonly Dictionary<int, LineRecord> creatureOwners = new();
+    private readonly Dictionary<string, WorldCreatureSpawnRecord[]> creatureSpawnSnapshots =
+        new(StringComparer.OrdinalIgnoreCase);
     private int nextCreatureSpawnId = 1;
 
     internal string SourcePath { get; private set; } = string.Empty;
@@ -149,9 +151,16 @@ internal sealed class WorldDocument
         return true;
     }
 
+    /// <summary>
+    /// Returns a cached defensive snapshot for the room. The editor treats the returned records as
+    /// read-only; the snapshot is rebuilt only after a creature spawn in that room is mutated.
+    /// </summary>
     internal WorldCreatureSpawnRecord[] GetCreatureSpawns(string roomName)
     {
         string normalized = NormalizeRoom(roomName);
+        if (creatureSpawnSnapshots.TryGetValue(normalized, out WorldCreatureSpawnRecord[] cached))
+            return cached;
+
         List<WorldCreatureSpawnRecord> result = new();
         for (int i = 0; i < creatureSpawns.Count; i++)
         {
@@ -159,7 +168,12 @@ internal sealed class WorldDocument
             if (string.Equals(spawn.RoomName, normalized, StringComparison.OrdinalIgnoreCase))
                 result.Add(spawn.Clone());
         }
-        return result.ToArray();
+
+        WorldCreatureSpawnRecord[] snapshot = result.Count == 0
+            ? Array.Empty<WorldCreatureSpawnRecord>()
+            : result.ToArray();
+        creatureSpawnSnapshots[normalized] = snapshot;
+        return snapshot;
     }
 
     internal bool TryAddCreatureSpawn(
@@ -203,6 +217,7 @@ internal sealed class WorldDocument
         ownerRecord.Removed = false;
         creatureSpawns.Add(record);
         creatureOwners[record.Id] = ownerRecord;
+        InvalidateCreatureSpawnSnapshot(normalizedRoom);
         Dirty = true;
         spawnId = record.Id;
         return true;
@@ -261,6 +276,7 @@ internal sealed class WorldDocument
         record.TimelineFilter = normalizedTimeline;
         record.ExcludeTimeline = excludeTimeline;
         creatureOwners[spawnId].CreatureLine.Changed = true;
+        InvalidateCreatureSpawnSnapshot(record.RoomName);
         Dirty = true;
         return true;
     }
@@ -279,6 +295,7 @@ internal sealed class WorldDocument
         if (owner.CreatureLine.Spawns.Count == 0) owner.Removed = true;
         creatureOwners.Remove(spawnId);
         creatureSpawns.Remove(record);
+        InvalidateCreatureSpawnSnapshot(record.RoomName);
         Dirty = true;
         return true;
     }
@@ -343,6 +360,12 @@ internal sealed class WorldDocument
             creatureSpawns.Add(spawn);
             creatureOwners[spawn.Id] = owner;
         }
+    }
+
+    private void InvalidateCreatureSpawnSnapshot(string roomName)
+    {
+        string normalized = NormalizeRoom(roomName);
+        if (normalized.Length > 0) creatureSpawnSnapshots.Remove(normalized);
     }
 
     private WorldCreatureSpawnRecord FindCreatureSpawn(int spawnId)
