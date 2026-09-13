@@ -18,14 +18,16 @@ internal static class WorldMapShortcutPresentation
 {
     internal readonly struct ShortcutMarker
     {
-        internal ShortcutMarker(float x, float y)
+        internal ShortcutMarker(float x, float y, int nodeIndex = -1)
         {
             X = x;
             Y = y;
+            NodeIndex = nodeIndex;
         }
 
         internal float X { get; }
         internal float Y { get; }
+        internal int NodeIndex { get; }
     }
 
     private sealed class CacheEntry
@@ -241,7 +243,10 @@ internal static class WorldMapShortcutPresentation
         for (int i = 0; i < shortcuts.Length; i++)
         {
             ShortcutData shortcut = shortcuts[i];
-            ShortcutMarker marker = new(shortcut.StartTile.x + 0.5f, shortcut.StartTile.y + 0.5f);
+            ShortcutMarker marker = new(
+                shortcut.StartTile.x + 0.5f,
+                shortcut.StartTile.y + 0.5f,
+                shortcut.destNode);
             if (shortcut.shortCutType == ShortcutData.Type.RoomExit && shortcut.destNode >= 0)
             {
                 entry.ExitMouths[shortcut.destNode] = marker;
@@ -278,15 +283,30 @@ internal static class WorldMapShortcutPresentation
 
         exits.Sort(CompareShortcutScanOrder);
         List<int> exitNodes = new();
+        List<int> denNodes = new();
         AbstractRoomNode[] nodes = entry.Room.nodes ?? Array.Empty<AbstractRoomNode>();
         for (int i = 0; i < nodes.Length; i++)
-            if (nodes[i].type == AbstractRoomNode.Type.Exit) exitNodes.Add(i);
+        {
+            if (nodes[i].type == AbstractRoomNode.Type.Exit)
+                exitNodes.Add(i);
+            else if (nodes[i].type == AbstractRoomNode.Type.Den)
+                denNodes.Add(i);
+        }
 
         int pairCount = Math.Min(exitNodes.Count, exits.Count);
         for (int i = 0; i < pairCount; i++)
-            entry.ExitMouths[exitNodes[i]] = exits[i];
+        {
+            ShortcutMarker marker = exits[i];
+            entry.ExitMouths[exitNodes[i]] = new ShortcutMarker(marker.X, marker.Y, exitNodes[i]);
+        }
 
         creatureHoles.Sort(CompareShortcutScanOrder);
+        int creaturePairCount = Math.Min(denNodes.Count, creatureHoles.Count);
+        for (int i = 0; i < creaturePairCount; i++)
+        {
+            ShortcutMarker marker = creatureHoles[i];
+            creatureHoles[i] = new ShortcutMarker(marker.X, marker.Y, denNodes[i]);
+        }
         entry.CreatureHoles = creatureHoles.ToArray();
     }
 
