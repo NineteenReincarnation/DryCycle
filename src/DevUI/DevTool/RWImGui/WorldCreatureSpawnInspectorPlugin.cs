@@ -56,6 +56,9 @@ internal static class WorldCreatureSpawnInspector
 
     private static readonly List<string> timelineCatalog = new();
     private static int timelineCatalogFingerprint = -1;
+    private static WorldCreatureSpawnRecord[] presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
+    private static string[] presentedLabels = Array.Empty<string>();
+    private static string[] presentedSpawnData = Array.Empty<string>();
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -72,6 +75,9 @@ internal static class WorldCreatureSpawnInspector
         editingSpawnId = -1;
         timelineCatalog.Clear();
         timelineCatalogFingerprint = -1;
+        presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
+        presentedLabels = Array.Empty<string>();
+        presentedSpawnData = Array.Empty<string>();
         log = null;
     }
 
@@ -105,32 +111,29 @@ internal static class WorldCreatureSpawnInspector
             return;
         }
 
+        EnsurePresentation(existing);
         DevToolWidgets.MutedText(
             DevToolUiSettings.T("已放置 ", "Placed ") + existing.Length +
             DevToolUiSettings.T(" 个生成项", " spawn entrie(s)"));
 
+        float deleteWidth = ImGui.CalcTextSize(DevToolUiSettings.T("删除", "Delete")).X + 22f;
         for (int i = 0; i < existing.Length; i++)
         {
             WorldCreatureSpawnRecord spawn = existing[i];
             ImGui.PushID(spawn.Id);
-            string scope = SpawnScope(spawn);
-            string label = "#" + spawn.DenNode + "  " + spawn.Creature;
-            if (spawn.Amount > 1) label += " ×" + spawn.Amount;
-            if (scope.Length > 0) label += "  ·  " + scope;
 
             bool editing = editingSpawnId == spawn.Id;
-            if (ImGui.Selectable(label + "##CreatureSpawn", editing))
+            if (ImGui.Selectable(presentedLabels[i], editing))
                 LoadSpawn(spawn);
 
-            if (!string.IsNullOrEmpty(spawn.SpawnData))
+            if (presentedSpawnData[i].Length > 0)
             {
                 ImGui.Indent();
-                DevToolWidgets.MutedText("{" + spawn.SpawnData + "}", true);
+                DevToolWidgets.MutedText(presentedSpawnData[i], true);
                 ImGui.Unindent();
             }
 
             ImGui.SameLine();
-            float deleteWidth = ImGui.CalcTextSize(DevToolUiSettings.T("删除", "Delete")).X + 22f;
             float targetX = ImGui.GetCursorPosX() + Math.Max(0f, ImGui.GetContentRegionAvail().X - deleteWidth);
             ImGui.SetCursorPosX(targetX);
             if (DevToolWidgets.ActionButton(
@@ -151,6 +154,26 @@ internal static class WorldCreatureSpawnInspector
                 }
             }
             ImGui.PopID();
+        }
+    }
+
+    private static void EnsurePresentation(WorldCreatureSpawnRecord[] existing)
+    {
+        if (ReferenceEquals(existing, presentedSpawns) && presentedLabels.Length == existing.Length) return;
+        presentedSpawns = existing;
+        presentedLabels = new string[existing.Length];
+        presentedSpawnData = new string[existing.Length];
+        for (int i = 0; i < existing.Length; i++)
+        {
+            WorldCreatureSpawnRecord spawn = existing[i];
+            string scope = SpawnScope(spawn);
+            string label = "#" + spawn.DenNode + "  " + spawn.Creature;
+            if (spawn.Amount > 1) label += " ×" + spawn.Amount;
+            if (scope.Length > 0) label += "  ·  " + scope;
+            presentedLabels[i] = label + "##CreatureSpawn";
+            presentedSpawnData[i] = string.IsNullOrEmpty(spawn.SpawnData)
+                ? string.Empty
+                : "{" + spawn.SpawnData + "}";
         }
     }
 
