@@ -43,4 +43,8 @@ internal static class DevToolTooltip
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
     }
+
+    // Compatibility alias used by retained renderer extensions. Keep a single implementation so
+    // tooltip positioning remains consistent across old and new editor layers.
+    internal static void Draw(string text) => Show(text);
 }
