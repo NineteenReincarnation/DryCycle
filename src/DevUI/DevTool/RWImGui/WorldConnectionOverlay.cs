@@ -12,8 +12,8 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
 /// Replaces the old straight-line World Map connection presentation with routed, layered links.
-/// The existing WorldMapView remains authoritative for room/shortcut interaction and topology
-/// commands; this overlay only owns connection geometry, connection hit-testing and presentation.
+/// WorldMapView remains authoritative for room/shortcut interaction and topology commands; this
+/// overlay owns connection geometry, connection hit-testing and link presentation only.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -161,9 +161,16 @@ internal static class WorldConnectionOverlay
             return;
         }
 
-        // Suppress the legacy straight links and their invisible straight-line hit targets while the
-        // original canvas draws rooms/shortcuts. The field is restored immediately after orig, so
-        // toolbar state and subsequent frames still see the developer's actual Links setting.
+        // Capture the canvas before orig creates its InvisibleButton. Do not derive it from the
+        // "last item" afterwards: another DrawCanvas detour (for example the player locator) may
+        // legitimately submit a tooltip after the canvas and change ImGui's last-item rectangle.
+        Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
+        Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
+        Num.Vector2 canvasMax = canvasMin + canvasSize;
+        bool mapWindowHovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.None);
+
+        // Suppress both the legacy straight rendering and its straight-line hit target while the
+        // original canvas draws rooms/shortcuts. The real Links setting is restored immediately.
         showConnectionsField.SetValue(null, false);
         try
         {
@@ -174,16 +181,16 @@ internal static class WorldConnectionOverlay
             showConnectionsField.SetValue(null, true);
         }
 
-        if (snapshot?.Available != true) return;
-        DrawRoutedLayer(snapshot);
+        if (snapshot?.Available != true || canvasSize.X < 80f || canvasSize.Y < 80f) return;
+        DrawRoutedLayer(snapshot, canvasMin, canvasMax, mapWindowHovered);
     }
 
-    private static void DrawRoutedLayer(EditorMapPresentationSnapshot snapshot)
+    private static void DrawRoutedLayer(
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasMax,
+        bool mapWindowHovered)
     {
-        Num.Vector2 canvasMin = ImGui.GetItemRectMin();
-        Num.Vector2 canvasMax = ImGui.GetItemRectMax();
-        if (canvasMax.X <= canvasMin.X || canvasMax.Y <= canvasMin.Y) return;
-
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
         Dictionary<int, Num.Vector2> localPositions =
@@ -215,9 +222,14 @@ internal static class WorldConnectionOverlay
         BuildCrossings(entries);
 
         ImGuiIOPtr io = ImGui.GetIO();
+        bool mouseInsideCanvas =
+            io.MousePos.X >= canvasMin.X && io.MousePos.X <= canvasMax.X &&
+            io.MousePos.Y >= canvasMin.Y && io.MousePos.Y <= canvasMax.Y;
+        bool canInteract = mapWindowHovered && mouseInsideCanvas;
+
         string selectedId = selectedConnectionIdField?.GetValue(null) as string ?? string.Empty;
-        Entry endpointHover = FindEndpointHover(entries, io.MousePos);
-        Entry routeHover = endpointHover == null ? FindRouteHover(entries, io.MousePos) : null;
+        Entry endpointHover = canInteract ? FindEndpointHover(entries, io.MousePos) : null;
+        Entry routeHover = canInteract && endpointHover == null ? FindRouteHover(entries, io.MousePos) : null;
         Entry hovered = endpointHover ?? routeHover;
         string hoveredId = hovered?.Connection?.ConnectionId ?? string.Empty;
         hoveredConnectionIdField.SetValue(null, hoveredId);
@@ -230,8 +242,8 @@ internal static class WorldConnectionOverlay
         draw.PushClipRect(canvasMin, canvasMax, true);
         try
         {
-            // First pass: normal routed topology. It is intentionally after the room preview, so
-            // topology can never disappear underneath raster/terrain/curves.
+            // Normal topology is intentionally drawn after the room preview, so raster/terrain can
+            // never hide a connection. Focused links get a second last-pass draw below.
             for (int i = 0; i < entries.Count; i++)
             {
                 Entry entry = entries[i];
@@ -241,13 +253,11 @@ internal static class WorldConnectionOverlay
                 DrawEntry(draw, entry, dimmed: hasFocus || linkCreationActive, focused: false, selected: false);
             }
 
-            // Every connected Exit receives a restrained connection-colour ring. The gold socket
-            // remains the type marker while this outer ring communicates connected state even when
-            // the routed line is very short or partly hidden by a nearby label.
+            // Gold remains the Exit type colour. A separate connection-colour ring tells the author
+            // the socket is bound even when two rooms are so close that the bridge itself is tiny.
             for (int i = 0; i < entries.Count; i++)
                 DrawConnectedEndpointMarks(draw, entries[i], hasFocus || linkCreationActive ? 0.24f : 0.58f);
 
-            // Focused links are redrawn last, above every normal connection and above room preview.
             for (int i = 0; i < entries.Count; i++)
             {
                 Entry entry = entries[i];
@@ -263,10 +273,11 @@ internal static class WorldConnectionOverlay
             draw.PopClipRect();
         }
 
-        if (hovered != null)
+        if (canInteract && hovered != null)
             DrawConnectionTooltip(snapshot.RegionName, hovered);
 
-        HandleRouteClick(snapshot, hovered, io);
+        if (canInteract)
+            HandleRouteClick(snapshot, hovered, io);
         HandleDelete(snapshot, selectedId, io);
     }
 
