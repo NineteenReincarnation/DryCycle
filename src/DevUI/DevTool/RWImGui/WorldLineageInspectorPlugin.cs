@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -22,6 +21,10 @@ public sealed class WorldLineageInspectorPlugin : BaseUnityPlugin
     private void OnDisable() => WorldLineageInspector.Disable();
 }
 
+/// <summary>
+/// Lineage authoring is drawn directly by WorldCreatureSpawnInspector. It deliberately owns no
+/// RuntimeDetour hook of its own, avoiding the old hook-inside-hook inspector chain.
+/// </summary>
 internal static class WorldLineageInspector
 {
     private enum TimelineMode
@@ -38,17 +41,13 @@ internal static class WorldLineageInspector
         internal string SpawnData = string.Empty;
     }
 
-    private delegate void OrigDraw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale);
-    private delegate void HookDraw(OrigDraw orig, EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale);
-
-    private static readonly HookDraw DrawHookDelegate = DrawHook;
     private static readonly string[] SpawnTagPresets =
     {
         "Night", "PreCycle", "Winter", "Ignorecycle", "AlternateForm", "Lavasafe",
         "TentacleImmune", "Voidsea", "Ripple", "Slayer", "Seed:0", "RotType:0", "NamedAttr:"
     };
 
-    private static IDisposable hook;
+    private static bool enabled;
     private static ManualLogSource log;
     private static int stateRoom = -1;
     private static int editingId = -1;
@@ -64,38 +63,15 @@ internal static class WorldLineageInspector
 
     internal static void Enable(ManualLogSource logger)
     {
-        if (hook != null) return;
+        if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            Type owner = typeof(WorldCreatureSpawnInspectorPlugin).Assembly.GetType(
-                "DryCycle.DevUI.DevTool.RWImGui.WorldCreatureSpawnInspector",
-                throwOnError: true);
-            MethodInfo draw = owner.GetMethod(
-                "Draw",
-                BindingFlags.Static | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot), typeof(EditorMapRoomSnapshot), typeof(float) },
-                null);
-            if (draw == null) throw new MissingMethodException("WorldCreatureSpawnInspector.Draw was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: true);
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null) throw new MissingMethodException("RuntimeDetour Hook(MethodBase, Delegate) is unavailable.");
-            hook = constructor.Invoke(new object[] { draw, DrawHookDelegate }) as IDisposable;
-            if (hook == null) throw new InvalidOperationException("Lineage inspector hook was not created.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World lineage inspector could not attach: " + error.Message);
-        }
+        log?.LogInfo("World lineage inspector enabled without nested RuntimeDetour hooks.");
     }
 
     internal static void Disable()
     {
-        try { hook?.Dispose(); } catch { }
-        hook = null;
+        enabled = false;
         stages.Clear();
         timelines.Clear();
         stateRoom = -1;
@@ -104,24 +80,14 @@ internal static class WorldLineageInspector
         log = null;
     }
 
-    private static void DrawHook(
-        OrigDraw orig,
-        EditorMapPresentationSnapshot snapshot,
-        EditorMapRoomSnapshot room,
-        float restoreScale)
+    internal static void DrawIntegrated(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        orig(snapshot, room, restoreScale);
-        DrawLineages(snapshot, room, restoreScale);
-    }
-
-    private static void DrawLineages(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room, float restoreScale)
-    {
-        if (snapshot?.Available != true || room == null) return;
+        if (!enabled || snapshot?.Available != true || room == null) return;
         if (stateRoom != room.RoomIndex) ResetRoom(room);
         RefreshTimelines();
         WorldLineageRegistry.EnsureLoaded(snapshot.RegionName);
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("族谱 / Lineage", "LINEAGE"), restoreScale);
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("族谱 / Lineage", "LINEAGE"));
         WorldLineageRecord[] existing = WorldLineageRegistry.GetLineages(snapshot.RegionName, room.Name);
         DrawExisting(snapshot, room, existing);
         ImGui.Spacing();
@@ -142,9 +108,11 @@ internal static class WorldLineageInspector
         EditorMapRoomSnapshot room,
         WorldLineageRecord[] existing)
     {
-        if (existing.Length == 0)
+        if (existing == null || existing.Length == 0)
         {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("这个房间还没有 Lineage。", "No lineage entries in this room."), true);
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T("这个房间还没有 Lineage。", "No lineage entries in this room."),
+                true);
             return;
         }
 
@@ -167,9 +135,11 @@ internal static class WorldLineageInspector
                 if (WorldLineageRegistry.TryDelete(snapshot.RegionName, lineage.Id, out string error))
                 {
                     if (editingId == lineage.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T(
-                        "Lineage 已删除并刷新实时预览。",
-                        "Lineage deleted and live preview refreshed."), true);
+                    SetStatus(
+                        DevToolUiSettings.T(
+                            "Lineage 已删除并刷新实时预览。",
+                            "Lineage deleted and live preview refreshed."),
+                        true);
                 }
                 else SetStatus(error, false);
             }
@@ -217,9 +187,11 @@ internal static class WorldLineageInspector
 
         DrawTimelineEditor();
         ImGui.Spacing();
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "阶段顺序就是 Lineage 的进化顺序；概率为进入下一阶段的 ChanceToProgress 概率。",
-            "Stage order is lineage progression order; chance is the ChanceToProgress probability for advancing."), true);
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T(
+                "阶段顺序就是 Lineage 的进化顺序；概率为进入下一阶段的 ChanceToProgress 概率。",
+                "Stage order is lineage progression order; chance is the ChanceToProgress probability for advancing."),
+            true);
 
         for (int i = 0; i < stages.Count; i++) DrawStage(i);
 
@@ -283,8 +255,6 @@ internal static class WorldLineageInspector
             return;
         }
 
-        // Lineage uses the exact same catalog as ordinary spawners. NONE is an explicit special
-        // tile at the top of the picker instead of a magic text ID field.
         string selectedCreature = stage.Creature;
         if (WorldCreatureCatalogPicker.DrawSelector(
                 "LineageStage_" + index,
@@ -389,18 +359,37 @@ internal static class WorldLineageInspector
         bool ok;
         string error;
         if (editingId >= 0)
-            ok = WorldLineageRegistry.TryUpdate(snapshot.RegionName, editingId, selectedDen, data, scope, exclude, nightCreature, out error);
+            ok = WorldLineageRegistry.TryUpdate(
+                snapshot.RegionName,
+                editingId,
+                selectedDen,
+                data,
+                scope,
+                exclude,
+                nightCreature,
+                out error);
         else
-            ok = WorldLineageRegistry.TryAdd(snapshot.RegionName, room.Name, selectedDen, data, scope, exclude, nightCreature, out editingId, out error);
+            ok = WorldLineageRegistry.TryAdd(
+                snapshot.RegionName,
+                room.Name,
+                selectedDen,
+                data,
+                scope,
+                exclude,
+                nightCreature,
+                out editingId,
+                out error);
 
         if (!ok)
         {
             SetStatus(error, false);
             return;
         }
-        SetStatus(DevToolUiSettings.T(
-            "Lineage 已更新并刷新实时预览；保存世界以写入 world.txt。",
-            "Lineage updated and live preview refreshed; save the world to write world.txt."), true);
+        SetStatus(
+            DevToolUiSettings.T(
+                "Lineage 已更新并刷新实时预览；保存世界以写入 world.txt。",
+                "Lineage updated and live preview refreshed; save the world to write world.txt."),
+            true);
     }
 
     private static void Load(WorldLineageRecord lineage)
