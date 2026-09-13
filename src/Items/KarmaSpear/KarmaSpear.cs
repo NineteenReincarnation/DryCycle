@@ -250,6 +250,18 @@ internal sealed class KarmaSpear : Spear
         MarkSpent();
     }
 
+    internal void SetBindingKarmaLevel(int expectedChargeGeneration, int karmaLevel)
+    {
+        if (expectedChargeGeneration != _chargeGeneration ||
+            KarmaAbstract == null ||
+            KarmaAbstract.Spent)
+        {
+            return;
+        }
+
+        KarmaAbstract.KarmaLevel = Mathf.Clamp(karmaLevel, 1, 10);
+    }
+
     internal bool Recharge(int karmaLevel)
     {
         if (KarmaAbstract == null || !KarmaAbstract.Spent)
@@ -410,20 +422,23 @@ internal sealed class KarmaSpear : Spear
 
         SetCrownColors(crown, active, wallAnchored, pulse, gold, paleGold, deadEdge);
 
-        Vector2 sealCenter = visualCenter + direction * 13.5f;
+        // Move the front seal toward the blade instead of letting it sit on the collar.
+        // Its two vector rings are intentionally faint and separated so they read as a
+        // thin karmic aperture rather than one thick glowing disc.
+        Vector2 sealCenter = visualCenter + direction * 19.5f;
         FSprite outerSeal = sLeaser.sprites[baseCount + SealOuterOffset];
         FSprite innerSeal = sLeaser.sprites[baseCount + SealInnerOffset];
         FSprite glyph = sLeaser.sprites[baseCount + GlyphOffset];
         FSprite tailSeal = sLeaser.sprites[baseCount + TailSealOffset];
 
         SetSpritePosition(outerSeal, sealCenter, camPos);
-        outerSeal.scale = Mathf.Lerp(1.35f, wallAnchored ? 2.20f : 1.78f, pulse);
-        outerSeal.alpha = active ? Mathf.Lerp(0.14f, wallAnchored ? 0.35f : 0.24f, pulse) : 0.06f;
+        outerSeal.scale = Mathf.Lerp(1.18f, wallAnchored ? 1.72f : 1.48f, pulse);
+        outerSeal.alpha = active ? Mathf.Lerp(0.065f, wallAnchored ? 0.22f : 0.145f, pulse) : 0.035f;
         outerSeal.color = active ? gold : deadEdge;
 
         SetSpritePosition(innerSeal, sealCenter, camPos);
-        innerSeal.scale = Mathf.Lerp(0.58f, wallAnchored ? 0.98f : 0.82f, slowPulse);
-        innerSeal.alpha = active ? Mathf.Lerp(0.28f, wallAnchored ? 0.58f : 0.47f, slowPulse) : 0.08f;
+        innerSeal.scale = Mathf.Lerp(0.40f, wallAnchored ? 0.70f : 0.58f, slowPulse);
+        innerSeal.alpha = active ? Mathf.Lerp(0.12f, wallAnchored ? 0.34f : 0.25f, slowPulse) : 0.04f;
         innerSeal.color = active ? paleGold : deadEdge;
 
         string karmaGlyphName = CurrentKarmaGlyphName();
@@ -433,8 +448,8 @@ internal sealed class KarmaSpear : Spear
         }
         SetSpritePosition(glyph, sealCenter, camPos);
         glyph.rotation = -clock * (wallAnchored ? 0.18f : 0.30f);
-        glyph.scale = Mathf.Lerp(0.20f, wallAnchored ? 0.32f : 0.27f, pulse);
-        glyph.alpha = active ? Mathf.Lerp(0.58f, wallAnchored ? 0.98f : 0.88f, pulse) : 0.13f;
+        glyph.scale = Mathf.Lerp(0.18f, wallAnchored ? 0.28f : 0.24f, pulse);
+        glyph.alpha = active ? Mathf.Lerp(0.50f, wallAnchored ? 0.92f : 0.78f, pulse) : 0.10f;
         glyph.color = active ? Color.Lerp(Color.white, gold, 0.48f) : deadEdge;
 
         Vector2 tailCenter = visualCenter + direction * -25f;
