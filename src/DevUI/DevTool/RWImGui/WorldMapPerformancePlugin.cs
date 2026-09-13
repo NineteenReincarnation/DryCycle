@@ -25,6 +25,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// The core map snapshot and background MapTex/RoomSettings scanners are also deliberately kept
 /// below render frequency. They are authoring data, not animation data: selection/region/current
 /// room changes still refresh immediately while steady-state rebuilds are spread over frames.
+///
+/// Finally, hot room/connection/endpoint queries are indexed once per immutable presentation
+/// snapshot. This removes the old N x M scans performed by every Exit and every routed link.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -83,6 +86,35 @@ internal static class WorldMapPerformance
     private delegate void OrigShortcutPrime(EditorSession session, int selectedRoomIndex);
     private delegate void HookShortcutPrime(OrigShortcutPrime orig, EditorSession session, int selectedRoomIndex);
 
+    private delegate EditorMapRoomSnapshot OrigFindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex);
+    private delegate EditorMapRoomSnapshot HookFindRoom(
+        OrigFindRoom orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex);
+    private delegate EditorMapConnectionSnapshot OrigFindConnection(EditorMapPresentationSnapshot snapshot, string id);
+    private delegate EditorMapConnectionSnapshot HookFindConnection(
+        OrigFindConnection orig,
+        EditorMapPresentationSnapshot snapshot,
+        string id);
+    private delegate EditorMapConnectionSnapshot OrigFindConnectionAtEndpoint(
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        int nodeIndex);
+    private delegate EditorMapConnectionSnapshot HookFindConnectionAtEndpoint(
+        OrigFindConnectionAtEndpoint orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        int nodeIndex);
+    private delegate bool OrigIsEndpointFree(
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        EditorMapRoomNodeSnapshot node);
+    private delegate bool HookIsEndpointFree(
+        OrigIsEndpointFree orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        EditorMapRoomNodeSnapshot node);
+
     private sealed class PolylineCache
     {
         internal int SourceLength;
@@ -119,10 +151,18 @@ internal static class WorldMapPerformance
     private static readonly HookMapPublish MapPublishHookDelegate = MapPublishHook;
     private static readonly HookGeometryPrime GeometryPrimeHookDelegate = GeometryPrimeHook;
     private static readonly HookShortcutPrime ShortcutPrimeHookDelegate = ShortcutPrimeHook;
+    private static readonly HookFindRoom FindRoomHookDelegate = FindRoomHook;
+    private static readonly HookFindConnection FindConnectionHookDelegate = FindConnectionHook;
+    private static readonly HookFindConnectionAtEndpoint FindConnectionAtEndpointHookDelegate = FindConnectionAtEndpointHook;
+    private static readonly HookIsEndpointFree IsEndpointFreeHookDelegate = IsEndpointFreeHook;
 
     private static readonly Dictionary<Num.Vector2[], PolylineCache> roundedCache = new();
     private static readonly Dictionary<Num.Vector2[], PolylineCache> trimmedCache = new();
     private static readonly Dictionary<OffsetKey, PolylineCache> offsetCache = new();
+    private static readonly Dictionary<int, EditorMapRoomSnapshot> roomsByIndex = new();
+    private static readonly Dictionary<string, EditorMapConnectionSnapshot> connectionsById =
+        new(StringComparer.Ordinal);
+    private static readonly Dictionary<long, EditorMapConnectionSnapshot> connectionsByEndpoint = new();
 
     private static ManualLogSource log;
     private static IDisposable routeHook;
@@ -133,6 +173,12 @@ internal static class WorldMapPerformance
     private static IDisposable mapPublishHook;
     private static IDisposable geometryPrimeHook;
     private static IDisposable shortcutPrimeHook;
+    private static IDisposable mapFindRoomHook;
+    private static IDisposable overlayFindRoomHook;
+    private static IDisposable mapFindConnectionHook;
+    private static IDisposable overlayFindConnectionHook;
+    private static IDisposable findConnectionAtEndpointHook;
+    private static IDisposable isEndpointFreeHook;
     private static FieldInfo zoomField;
     private static bool enabled;
 
@@ -140,6 +186,7 @@ internal static class WorldMapPerformance
     private static int routeFingerprint;
     private static Num.Vector2 routeAnchor;
     private static WorldConnectionRouter.Route[] cachedRoutes = Array.Empty<WorldConnectionRouter.Route>();
+    private static EditorMapPresentationSnapshot indexedSnapshot;
 
     private static int lastPublishFrame = -1000;
     private static string lastPublishRegion = string.Empty;
@@ -202,6 +249,18 @@ internal static class WorldMapPerformance
                 null,
                 new[] { typeof(Num.Vector2[]), typeof(float) },
                 null);
+            MethodInfo overlayFindRoom = overlayType.GetMethod(
+                "FindRoom",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(int) },
+                null);
+            MethodInfo overlayFindConnection = overlayType.GetMethod(
+                "FindConnection",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(string) },
+                null);
 
             Type mapType = typeof(WorldMapView);
             MethodInfo drawRoomGeometry = mapType.GetMethod(
@@ -217,6 +276,30 @@ internal static class WorldMapPerformance
                     typeof(bool),
                     typeof(bool)
                 },
+                null);
+            MethodInfo mapFindRoom = mapType.GetMethod(
+                "FindRoom",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(int) },
+                null);
+            MethodInfo mapFindConnection = mapType.GetMethod(
+                "FindConnection",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(string) },
+                null);
+            MethodInfo findConnectionAtEndpoint = mapType.GetMethod(
+                "FindConnectionAtEndpoint",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(int), typeof(int) },
+                null);
+            MethodInfo isEndpointFree = mapType.GetMethod(
+                "IsEndpointFree",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot), typeof(int), typeof(EditorMapRoomNodeSnapshot) },
                 null);
             zoomField = mapType.GetField("zoom", flags);
 
@@ -241,7 +324,9 @@ internal static class WorldMapPerformance
 
             if (buildRoutes == null || buildRounded == null || trimEnds == null || offsetPolyline == null ||
                 drawRoomGeometry == null || zoomField == null || mapPublish == null ||
-                geometryPrime == null || shortcutPrime == null)
+                geometryPrime == null || shortcutPrime == null || mapFindRoom == null ||
+                overlayFindRoom == null || mapFindConnection == null || overlayFindConnection == null ||
+                findConnectionAtEndpoint == null || isEndpointFree == null)
                 throw new MissingMemberException("World Map performance hook targets were not found.");
 
             routeHook = constructor.Invoke(new object[] { buildRoutes, BuildRoutesHookDelegate }) as IDisposable;
@@ -252,6 +337,13 @@ internal static class WorldMapPerformance
             mapPublishHook = constructor.Invoke(new object[] { mapPublish, MapPublishHookDelegate }) as IDisposable;
             geometryPrimeHook = constructor.Invoke(new object[] { geometryPrime, GeometryPrimeHookDelegate }) as IDisposable;
             shortcutPrimeHook = constructor.Invoke(new object[] { shortcutPrime, ShortcutPrimeHookDelegate }) as IDisposable;
+            mapFindRoomHook = constructor.Invoke(new object[] { mapFindRoom, FindRoomHookDelegate }) as IDisposable;
+            overlayFindRoomHook = constructor.Invoke(new object[] { overlayFindRoom, FindRoomHookDelegate }) as IDisposable;
+            mapFindConnectionHook = constructor.Invoke(new object[] { mapFindConnection, FindConnectionHookDelegate }) as IDisposable;
+            overlayFindConnectionHook = constructor.Invoke(new object[] { overlayFindConnection, FindConnectionHookDelegate }) as IDisposable;
+            findConnectionAtEndpointHook = constructor.Invoke(
+                new object[] { findConnectionAtEndpoint, FindConnectionAtEndpointHookDelegate }) as IDisposable;
+            isEndpointFreeHook = constructor.Invoke(new object[] { isEndpointFree, IsEndpointFreeHookDelegate }) as IDisposable;
 
             enabled = true;
             log?.LogInfo("World Map performance cache enabled.");
@@ -265,6 +357,12 @@ internal static class WorldMapPerformance
 
     internal static void Disable()
     {
+        DisposeHook(ref isEndpointFreeHook);
+        DisposeHook(ref findConnectionAtEndpointHook);
+        DisposeHook(ref overlayFindConnectionHook);
+        DisposeHook(ref mapFindConnectionHook);
+        DisposeHook(ref overlayFindRoomHook);
+        DisposeHook(ref mapFindRoomHook);
         DisposeHook(ref shortcutPrimeHook);
         DisposeHook(ref geometryPrimeHook);
         DisposeHook(ref mapPublishHook);
@@ -276,6 +374,7 @@ internal static class WorldMapPerformance
         zoomField = null;
         ResetCaches();
         ResetThrottles();
+        ClearLookupIndex();
         enabled = false;
         log = null;
     }
@@ -291,6 +390,7 @@ internal static class WorldMapPerformance
             lastPublishRegion = string.Empty;
             lastPublishSelection = int.MinValue;
             lastPublishCurrentRoom = int.MinValue;
+            ClearLookupIndex();
             return;
         }
 
@@ -350,6 +450,48 @@ internal static class WorldMapPerformance
         lastShortcutRegion = region;
         lastShortcutSelection = selectedRoomIndex;
         lastShortcutCurrentRoom = currentRoom;
+    }
+
+    private static EditorMapRoomSnapshot FindRoomHook(
+        OrigFindRoom orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex)
+    {
+        EnsureLookupIndex(snapshot);
+        return roomsByIndex.TryGetValue(roomIndex, out EditorMapRoomSnapshot room) ? room : null;
+    }
+
+    private static EditorMapConnectionSnapshot FindConnectionHook(
+        OrigFindConnection orig,
+        EditorMapPresentationSnapshot snapshot,
+        string id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        EnsureLookupIndex(snapshot);
+        return connectionsById.TryGetValue(id, out EditorMapConnectionSnapshot connection) ? connection : null;
+    }
+
+    private static EditorMapConnectionSnapshot FindConnectionAtEndpointHook(
+        OrigFindConnectionAtEndpoint orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        int nodeIndex)
+    {
+        EnsureLookupIndex(snapshot);
+        return connectionsByEndpoint.TryGetValue(EndpointKey(roomIndex, nodeIndex), out EditorMapConnectionSnapshot connection)
+            ? connection
+            : null;
+    }
+
+    private static bool IsEndpointFreeHook(
+        OrigIsEndpointFree orig,
+        EditorMapPresentationSnapshot snapshot,
+        int roomIndex,
+        EditorMapRoomNodeSnapshot node)
+    {
+        if (node == null || !node.Exit || node.ConnectedRoomIndex >= 0) return false;
+        EnsureLookupIndex(snapshot);
+        return !connectionsByEndpoint.ContainsKey(EndpointKey(roomIndex, node.NodeIndex));
     }
 
     private static WorldConnectionRouter.Route[] BuildRoutesHook(
@@ -460,6 +602,54 @@ internal static class WorldMapPerformance
         draw.AddRectFilled(roomMin, roomMax, fill, rounding);
         draw.AddRect(roomMin, roomMax, outline, rounding, ImDrawFlags.None, 1f);
     }
+
+    private static void EnsureLookupIndex(EditorMapPresentationSnapshot snapshot)
+    {
+        if (ReferenceEquals(indexedSnapshot, snapshot)) return;
+
+        roomsByIndex.Clear();
+        connectionsById.Clear();
+        connectionsByEndpoint.Clear();
+        indexedSnapshot = snapshot;
+
+        EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            EditorMapRoomSnapshot room = rooms[i];
+            if (room != null) roomsByIndex[room.RoomIndex] = room;
+        }
+
+        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        for (int i = 0; i < connections.Length; i++)
+        {
+            EditorMapConnectionSnapshot connection = connections[i];
+            if (connection == null) continue;
+            if (!string.IsNullOrEmpty(connection.ConnectionId))
+                connectionsById[connection.ConnectionId] = connection;
+
+            long fromKey = EndpointKey(connection.FromRoomIndex, connection.FromNodeIndex);
+            if (!connectionsByEndpoint.ContainsKey(fromKey))
+                connectionsByEndpoint[fromKey] = connection;
+
+            if (connection.ToNodeIndex >= 0)
+            {
+                long toKey = EndpointKey(connection.ToRoomIndex, connection.ToNodeIndex);
+                if (!connectionsByEndpoint.ContainsKey(toKey))
+                    connectionsByEndpoint[toKey] = connection;
+            }
+        }
+    }
+
+    private static void ClearLookupIndex()
+    {
+        indexedSnapshot = null;
+        roomsByIndex.Clear();
+        connectionsById.Clear();
+        connectionsByEndpoint.Clear();
+    }
+
+    private static long EndpointKey(int roomIndex, int nodeIndex) =>
+        ((long)(uint)roomIndex << 32) | (uint)nodeIndex;
 
     private static Num.Vector2 ResolveAnchor(
         IReadOnlyList<WorldConnectionRouter.Request> requests,
