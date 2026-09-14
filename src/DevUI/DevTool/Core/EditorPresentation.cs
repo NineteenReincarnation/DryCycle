@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Objects;
@@ -131,9 +132,6 @@ public static class EditorPresentationHub
         bool libraryStale = objectWorkspace && (libraryTypeCount != typeCount || libraryCache.Length == 0);
         string placementType = session.PlacementType ?? string.Empty;
 
-        // Session/page identity protects reopen and workspace transitions. Revisions cover model
-        // writes; direct shell-state comparisons cover keyboard paths such as Ctrl+B, Ctrl+I, Tab
-        // and Escape without requiring every caller to remember an invalidation API.
         if (!libraryStale &&
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedRoom, session.Room) &&
@@ -161,11 +159,9 @@ public static class EditorPresentationHub
 
         if (objectWorkspace)
         {
-            // Shell state (Browser/Inspector visibility, focus mode, undo labels, placement chrome)
-            // changes much more often than the object model. Reuse the immutable heavy payload when
-            // only shell data changed instead of re-walking every PlacedObject and recapturing all
-            // inspector adapters/legacy controls. Object-library invalidation is independent so a
-            // newly registered type can rebuild just the catalog while scene/inspector stay retained.
+            // Shell state changes much more often than the object model. Reuse the immutable heavy
+            // payload when only chrome/history state changed instead of walking every PlacedObject
+            // and recapturing reflection/legacy inspector controls.
             bool objectPayloadStable =
                 current.Available &&
                 current.Hydrated &&
@@ -408,18 +404,41 @@ public static class EditorUiCommandQueue
     internal static void Process(EditorSession session)
     {
         if (session == null) return;
+
+        long historyBeforeBatch = session.History.Revision;
+        bool nonHistoryObjectDirty = false;
+
         while (queue.TryDequeue(out EditorUiCommand command))
         {
             try
             {
-                Execute(session, command);
-                InvalidateAfterCommand(session, command.Kind);
+                long historyBeforeCommand = session.History.Revision;
+                int selectionBefore = SelectionSignature(session.Selection);
+                int objectCountBefore = session.RoomSettings?.placedObjects?.Count ?? 0;
+                bool objectCommandSucceeded = Execute(session, command);
+                int selectionAfter = SelectionSignature(session.Selection);
+                int objectCountAfter = session.RoomSettings?.placedObjects?.Count ?? 0;
+
+                bool visibleObjectStateChanged =
+                    selectionBefore != selectionAfter ||
+                    objectCountBefore != objectCountAfter ||
+                    (objectCommandSucceeded && IsObjectModelCommand(command.Kind));
+
+                if (visibleObjectStateChanged && session.History.Revision == historyBeforeCommand)
+                    nonHistoryObjectDirty = true;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool UI command failed: " + error.Message);
             }
         }
+
+        // History mutations are converted into Shell + active-workspace invalidation by the core
+        // presentation hub. Direct shell state (focus/browser/inspector/placement/tool mode) is part
+        // of the core cache key and needs no revision at all. Only object/selection changes that did
+        // not create history require one explicit Objects edge here.
+        if (nonHistoryObjectDirty && session.History.Revision == historyBeforeBatch)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
     }
 
     internal static void Clear()
@@ -427,129 +446,83 @@ public static class EditorUiCommandQueue
         while (queue.TryDequeue(out _)) { }
     }
 
-    private static void InvalidateAfterCommand(EditorSession session, EditorUiCommandKind kind)
-    {
-        switch (kind)
-        {
-            case EditorUiCommandKind.Save:
-                return;
-
-            case EditorUiCommandKind.ToggleFocus:
-            case EditorUiCommandKind.ToggleBrowser:
-            case EditorUiCommandKind.ToggleInspector:
-            case EditorUiCommandKind.BeginPlacement:
-            case EditorUiCommandKind.CancelPlacement:
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
-                return;
-
-            case EditorUiCommandKind.SelectObject:
-            case EditorUiCommandKind.ToggleObjectSelection:
-            case EditorUiCommandKind.SelectObjectRange:
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
-                return;
-
-            case EditorUiCommandKind.SetToolMode:
-            case EditorUiCommandKind.ToggleLegacyUi:
-            case EditorUiCommandKind.Undo:
-            case EditorUiCommandKind.Redo:
-                EditorRevisionHub.MarkShellAndWorkspace(session);
-                return;
-
-            default:
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
-                return;
-        }
-    }
-
-    private static void Execute(EditorSession session, EditorUiCommand command)
+    private static bool Execute(EditorSession session, EditorUiCommand command)
     {
         switch (command.Kind)
         {
             case EditorUiCommandKind.Save:
                 EditorActions.Save(session);
-                break;
+                return false;
             case EditorUiCommandKind.Undo:
                 EditorActions.Undo(session);
-                break;
+                return false;
             case EditorUiCommandKind.Redo:
                 EditorActions.Redo(session);
-                break;
+                return false;
             case EditorUiCommandKind.ToggleFocus:
                 session.ToggleFocusMode();
-                break;
+                return false;
             case EditorUiCommandKind.ToggleBrowser:
                 session.ToggleBrowser();
-                break;
+                return false;
             case EditorUiCommandKind.ToggleInspector:
                 session.ToggleInspector();
-                break;
+                return false;
             case EditorUiCommandKind.ToggleLegacyUi:
                 session.ToggleLegacyUi();
-                break;
+                return false;
             case EditorUiCommandKind.SetToolMode:
                 session.SetToolMode(command.Mode);
-                break;
+                return false;
             case EditorUiCommandKind.SelectObject:
                 session.Selection.SelectOnly(ResolveObject(session, command.Index));
-                break;
+                return false;
             case EditorUiCommandKind.ToggleObjectSelection:
                 session.Selection.Toggle(ResolveObject(session, command.Index));
-                break;
+                return false;
             case EditorUiCommandKind.SelectObjectRange:
                 session.Selection.SelectRange(session.RoomSettings?.placedObjects, command.SecondaryIndex, command.Index, command.Flag);
-                break;
+                return false;
             case EditorUiCommandKind.DeleteObject:
-                EditorActions.DeleteObject(session, ResolveObject(session, command.Index));
-                break;
+                return EditorActions.DeleteObject(session, ResolveObject(session, command.Index));
             case EditorUiCommandKind.DeleteSelection:
-                EditorActions.DeleteSelection(session);
-                break;
+                return EditorActions.DeleteSelection(session);
             case EditorUiCommandKind.DuplicateSelection:
-                EditorActions.DuplicateSelection(session);
-                break;
+                return EditorActions.DuplicateSelection(session);
             case EditorUiCommandKind.CreateObject:
-                if (!string.IsNullOrEmpty(command.Text))
-                    EditorActions.CreateObject(session, new PlacedObject.Type(command.Text, false), new Vector2(command.X, command.Y));
-                break;
+                return !string.IsNullOrEmpty(command.Text) &&
+                       EditorActions.CreateObject(
+                           session,
+                           new PlacedObject.Type(command.Text, false),
+                           new Vector2(command.X, command.Y)) != null;
             case EditorUiCommandKind.BeginPlacement:
                 session.BeginPlacement(command.Text);
-                break;
+                return false;
             case EditorUiCommandKind.PlaceObjectAtCursor:
-                EditorActions.PlaceObjectAtCursor(session, command.Flag);
-                break;
+                return EditorActions.PlaceObjectAtCursor(session, command.Flag);
             case EditorUiCommandKind.CancelPlacement:
                 session.CancelPlacement();
-                break;
+                return false;
             case EditorUiCommandKind.SetObjectPosition:
-                EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
-                break;
+                return EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
             case EditorUiCommandKind.SetSelectionPosition:
-                EditorActions.SetSelectionPrimaryPosition(session, new Vector2(command.X, command.Y));
-                break;
+                return EditorActions.SetSelectionPrimaryPosition(session, new Vector2(command.X, command.Y));
             case EditorUiCommandKind.SetObjectProperty:
-                EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
-                break;
+                return EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
             case EditorUiCommandKind.SetSelectionProperty:
-                EditorActions.SetSelectionProperty(session, command.Text, command.PropertyValue);
-                break;
+                return EditorActions.SetSelectionProperty(session, command.Text, command.PropertyValue);
             case EditorUiCommandKind.InvokeLegacyButton:
-                EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index), command.Text);
-                break;
+                return EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index), command.Text);
             case EditorUiCommandKind.SetLegacySlider:
-                EditorActions.SetLegacySlider(session, ResolveObject(session, command.Index), command.Text, command.X);
-                break;
+                return EditorActions.SetLegacySlider(session, ResolveObject(session, command.Index), command.Text, command.X);
             case EditorUiCommandKind.ResetLegacySlider:
-                EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index), command.Text);
-                break;
+                return EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index), command.Text);
             case EditorUiCommandKind.SetLegacyText:
-                EditorActions.SetLegacyText(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue.Text);
-                break;
+                return EditorActions.SetLegacyText(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue.Text);
             case EditorUiCommandKind.SetLegacyDirection:
-                EditorActions.SetLegacyDirection(session, ResolveObject(session, command.Index), command.Text, command.X, command.Y);
-                break;
+                return EditorActions.SetLegacyDirection(session, ResolveObject(session, command.Index), command.Text, command.X, command.Y);
             case EditorUiCommandKind.SetLegacyColor:
-                EditorActions.SetLegacyColor(
+                return EditorActions.SetLegacyColor(
                     session,
                     ResolveObject(session, command.Index),
                     command.Text,
@@ -557,7 +530,39 @@ public static class EditorUiCommandQueue
                     command.PropertyValue.Y,
                     command.PropertyValue.Z,
                     command.PropertyValue.W);
-                break;
+            default:
+                return false;
+        }
+    }
+
+    private static bool IsObjectModelCommand(EditorUiCommandKind kind) => kind is
+        EditorUiCommandKind.DeleteObject or
+        EditorUiCommandKind.DeleteSelection or
+        EditorUiCommandKind.DuplicateSelection or
+        EditorUiCommandKind.CreateObject or
+        EditorUiCommandKind.PlaceObjectAtCursor or
+        EditorUiCommandKind.SetObjectPosition or
+        EditorUiCommandKind.SetSelectionPosition or
+        EditorUiCommandKind.SetObjectProperty or
+        EditorUiCommandKind.SetSelectionProperty or
+        EditorUiCommandKind.InvokeLegacyButton or
+        EditorUiCommandKind.SetLegacySlider or
+        EditorUiCommandKind.ResetLegacySlider or
+        EditorUiCommandKind.SetLegacyText or
+        EditorUiCommandKind.SetLegacyDirection or
+        EditorUiCommandKind.SetLegacyColor;
+
+    private static int SelectionSignature(EditorSelection selection)
+    {
+        if (selection == null || selection.Count == 0) return 0;
+        unchecked
+        {
+            int hash = 17;
+            IReadOnlyList<PlacedObject> values = selection.PlacedObjects;
+            hash = hash * 31 + values.Count;
+            for (int i = 0; i < values.Count; i++)
+                hash = hash * 31 + (values[i] == null ? 0 : RuntimeHelpers.GetHashCode(values[i]));
+            return hash;
         }
     }
 
