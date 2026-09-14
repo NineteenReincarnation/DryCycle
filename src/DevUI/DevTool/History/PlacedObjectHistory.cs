@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.History;
@@ -65,6 +66,9 @@ public sealed class PlacedObjectState
 
         try
         {
+            int previousIndex = current.placedObjects.IndexOf(target);
+            bool previouslyPresent = previousIndex >= 0;
+
             for (int i = current.placedObjects.Count - 1; i >= 0; i--)
             {
                 if (ReferenceEquals(current.placedObjects[i], target))
@@ -76,6 +80,17 @@ public sealed class PlacedObjectState
                 if (!RestoreDetachedFields(current)) return false;
                 current.placedObjects.Insert(Mathf.Clamp(index, 0, current.placedObjects.Count), target);
             }
+
+            int finalIndex = current.placedObjects.IndexOf(target);
+            bool shouldBePresent = index >= 0;
+            bool membershipOrOrderChanged =
+                previouslyPresent != shouldBePresent ||
+                (shouldBePresent && previousIndex != finalIndex);
+
+            if (membershipOrOrderChanged)
+                ObjectPresentationChangeHintHub.MarkCollection(session);
+            else if (shouldBePresent && finalIndex >= 0)
+                ObjectPresentationChangeHintHub.MarkMember(session, target);
 
             session.Owner?.activePage?.Refresh();
             return true;
