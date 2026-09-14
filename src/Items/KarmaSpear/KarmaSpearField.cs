@@ -9,11 +9,10 @@ namespace DryCycle.Items.KarmaSpear;
 /// Timed one-way karmic barrier created when an active Karma Spear is nailed into terrain.
 /// Deployment consumes one stored Karma point immediately. Its radius uses the pre-consumption
 /// level and its lifetime is that level multiplied by five seconds.
+/// The boundary is communicated by expanding pulses rather than a persistent fixed circle.
 /// </summary>
 internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 {
-    private const int ArcSegments = 96;
-    private const int InitialGlyphSpriteIndex = ArcSegments;
     private const int InitialFormationFrames = 28;
     private const int VisibilityRefreshFrames = 12;
 
@@ -22,7 +21,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
     private readonly int _duration;
     private readonly float _radius;
     private readonly StaticSoundLoop _soundLoop;
-    private readonly bool[] _arcVisible = new bool[ArcSegments];
     private readonly Dictionary<Creature, int> _creatureSoundAges = new();
 
     private Vector2 _visibilityOrigin;
@@ -73,13 +71,15 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 
         if (_age == 1 || _age % VisibilityRefreshFrames == 0)
         {
-            RefreshArcVisibility(center);
+            _visibilityOrigin = FindOpenVisibilityOrigin(center);
         }
 
         EnforceBarrier(center);
         UpdateSound(center);
         CleanupCreatureSoundAges();
 
+        // The expanding pulse is now the only range visualization. There is intentionally
+        // no persistent ring left on screen between pulses.
         if (_age == 1 || _age % 28 == 0)
         {
             KarmicVisualEffects.SpawnFieldPulse(_source, _radius);
@@ -270,19 +270,6 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         }
     }
 
-    private void RefreshArcVisibility(Vector2 center)
-    {
-        _visibilityOrigin = FindOpenVisibilityOrigin(center);
-
-        for (int i = 0; i < ArcSegments; i++)
-        {
-            float angle = ((i + 0.5f) / ArcSegments) * Mathf.PI * 2f;
-            Vector2 direction = new(Mathf.Cos(angle), Mathf.Sin(angle));
-            Vector2 point = center + direction * _radius;
-            _arcVisible[i] = room != null && room.VisualContact(_visibilityOrigin, point);
-        }
-    }
-
     private Vector2 FindOpenVisibilityOrigin(Vector2 center)
     {
         if (room == null)
@@ -431,21 +418,14 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 
     public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        sLeaser.sprites = new FSprite[ArcSegments + 1];
-        for (int i = 0; i < ArcSegments; i++)
-        {
-            sLeaser.sprites[i] = new FSprite("pixel")
-            {
-                anchorX = 0.5f,
-                anchorY = 0.5f
-            };
-        }
-
         int glyphValue = Mathf.Clamp(_activationKarmaLevel - 1, 0, 9);
-        sLeaser.sprites[InitialGlyphSpriteIndex] = new FSprite(
-            global::HUD.KarmaMeter.KarmaSymbolSprite(
-                small: false,
-                new IntVector2(glyphValue, glyphValue)));
+        sLeaser.sprites = new[]
+        {
+            new FSprite(
+                global::HUD.KarmaMeter.KarmaSymbolSprite(
+                    small: false,
+                    new IntVector2(glyphValue, glyphValue)))
+        };
 
         AddToContainer(sLeaser, rCam, rCam.ReturnFContainer("Foreground"));
     }
@@ -462,58 +442,30 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
+        // The barrier itself has no persistent sprite. Only the first formation pulse carries
+        // the activation Karma glyph; all later range information comes from expanding pulses.
+        FSprite glyph = sLeaser.sprites[0];
+        float formationT = Mathf.Clamp01((_age + timeStacker) / InitialFormationFrames);
+        bool showInitialGlyph = _age < InitialFormationFrames;
+        glyph.isVisible = showInitialGlyph;
+        if (!showInitialGlyph)
+        {
+            return;
+        }
+
         Vector2 center = Vector2.Lerp(
             _source.firstChunk.lastPos,
             _source.firstChunk.pos,
             timeStacker);
-        float pulse = 0.5f + 0.5f * Mathf.Sin((_age + timeStacker) * 0.065f);
+        Vector2 drawPos = center - camPos;
+        float envelope = Mathf.Sin(formationT * Mathf.PI);
         float levelStrength = Mathf.Lerp(0.45f, 1f, _activationKarmaLevel / 10f);
-        float thickness = Mathf.Lerp(1.05f, 1.45f, pulse);
-        float alpha = Mathf.Lerp(0.42f, 0.66f, pulse) * levelStrength;
-        float angleStep = Mathf.PI * 2f / ArcSegments;
-        float chordLength = 2f * _radius * Mathf.Sin(angleStep * 0.5f) + 1.25f;
-        Color color = Color.Lerp(KarmicVisualEffects.Gold, Color.white, 0.18f + pulse * 0.12f);
 
-        for (int i = 0; i < ArcSegments; i++)
-        {
-            FSprite segment = sLeaser.sprites[i];
-            if (!_arcVisible[i])
-            {
-                segment.isVisible = false;
-                continue;
-            }
-
-            segment.isVisible = true;
-            float angle = ((i + 0.5f) / ArcSegments) * Mathf.PI * 2f;
-            Vector2 radial = new(Mathf.Cos(angle), Mathf.Sin(angle));
-            Vector2 tangent = new(-radial.y, radial.x);
-            Vector2 midpoint = center + radial * _radius - camPos;
-
-            segment.x = midpoint.x;
-            segment.y = midpoint.y;
-            segment.rotation = Mathf.Atan2(tangent.y, tangent.x) * Mathf.Rad2Deg;
-            segment.scaleX = chordLength;
-            segment.scaleY = thickness;
-            segment.alpha = alpha;
-            segment.color = color;
-        }
-
-        // Only the first formation pulse carries the activation Karma glyph. Repeating field
-        // pulses remain ring-only so the level is communicated once, not spammed continuously.
-        FSprite glyph = sLeaser.sprites[InitialGlyphSpriteIndex];
-        float formationT = Mathf.Clamp01((_age + timeStacker) / InitialFormationFrames);
-        bool showInitialGlyph = _age < InitialFormationFrames;
-        glyph.isVisible = showInitialGlyph;
-        if (showInitialGlyph)
-        {
-            Vector2 drawPos = center - camPos;
-            float envelope = Mathf.Sin(formationT * Mathf.PI);
-            glyph.x = drawPos.x;
-            glyph.y = drawPos.y;
-            glyph.scale = Mathf.Lerp(0.58f, 1.05f, formationT);
-            glyph.alpha = envelope * Mathf.Lerp(0.72f, 0.96f, levelStrength);
-            glyph.color = Color.Lerp(Color.white, KarmicVisualEffects.Gold, 0.58f);
-        }
+        glyph.x = drawPos.x;
+        glyph.y = drawPos.y;
+        glyph.scale = Mathf.Lerp(0.58f, 1.05f, formationT);
+        glyph.alpha = envelope * Mathf.Lerp(0.72f, 0.96f, levelStrength);
+        glyph.color = Color.Lerp(Color.white, KarmicVisualEffects.Gold, 0.58f);
     }
 
     public void ApplyPalette(
