@@ -15,8 +15,36 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class SceneWorkspaceWindow
 {
+    private sealed class ObjectSceneRow
+    {
+        internal EditorObjectSnapshot Item;
+        internal EditorObjectTypeSnapshot Metadata;
+        internal string Source;
+        internal string Category;
+        internal string DisplayName;
+    }
+
+    private sealed class ObjectSceneGroup
+    {
+        internal string Source;
+        internal readonly List<ObjectSceneRow> Rows = new();
+    }
+
     private static string objectSceneSearch = string.Empty;
     private static int objectSelectionAnchor = -1;
+
+    // The object presentation hub already publishes immutable array snapshots and keeps their
+    // references stable on cache-hit/shell-only frames. Retain the expensive search/group projection
+    // against those array identities so a stable Scene window pays only for ImGui rows, not repeated
+    // metadata lookups, fuzzy matching and N x source regrouping every frame.
+    private static EditorObjectSnapshot[] projectedObjects;
+    private static EditorObjectTypeSnapshot[] projectedLibrary;
+    private static string projectedSearch = string.Empty;
+    private static bool projectedChinese;
+    private static readonly Dictionary<string, EditorObjectTypeSnapshot> metadataByType =
+        new(StringComparer.Ordinal);
+    private static readonly List<ObjectSceneGroup> projectedGroups = new();
+    private static int projectedMatchCount;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -73,6 +101,9 @@ internal static class SceneWorkspaceWindow
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
 
+        if (objectSelectionAnchor >= objects.Length)
+            objectSelectionAnchor = -1;
+
         DevToolWidgets.MutedText(DevToolUiSettings.T(
             $"已放置 {objects.Length} 个物件 · 已选 {selectedCount}",
             $"{objects.Length} placed · {selectedCount} selected"));
@@ -106,56 +137,33 @@ internal static class SceneWorkspaceWindow
         ImGui.Separator();
         ImGui.Spacing();
 
-        List<string> sources = new();
-        int matches = 0;
-        for (int i = 0; i < objects.Length; i++)
-        {
-            EditorObjectSnapshot item = objects[i];
-            EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
-            if (!MatchesObject(item, metadata, objectSceneSearch)) continue;
-            matches++;
-
-            string source = string.IsNullOrWhiteSpace(metadata?.Source)
-                ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                : metadata.Source;
-            if (!ContainsExact(sources, source)) sources.Add(source);
-        }
+        EnsureObjectProjection(snapshot, objects);
 
         ImGuiIOPtr io = ImGui.GetIO();
-        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+        for (int sourceIndex = 0; sourceIndex < projectedGroups.Count; sourceIndex++)
         {
-            string source = sources[sourceIndex];
-            DevToolWidgets.SourceHeader(source, ObjectSourceColor(source), 1.34f, 1f);
+            ObjectSceneGroup group = projectedGroups[sourceIndex];
+            DevToolWidgets.SourceHeader(group.Source, ObjectSourceColor(group.Source), 1.34f, 1f);
 
             string lastCategory = null;
-            for (int i = 0; i < objects.Length; i++)
+            List<ObjectSceneRow> rows = group.Rows;
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
-                EditorObjectSnapshot item = objects[i];
-                EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
-                if (!MatchesObject(item, metadata, objectSceneSearch)) continue;
+                ObjectSceneRow row = rows[rowIndex];
+                EditorObjectSnapshot item = row.Item;
 
-                string itemSource = string.IsNullOrWhiteSpace(metadata?.Source)
-                    ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                    : metadata.Source;
-                if (!string.Equals(itemSource, source, StringComparison.OrdinalIgnoreCase)) continue;
-
-                string category = string.IsNullOrWhiteSpace(metadata?.Category)
-                    ? DevToolUiSettings.T("未分类", "Unsorted")
-                    : metadata.Category;
-                if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
                 {
-                    lastCategory = category;
-                    DevToolWidgets.MutedText(category);
+                    lastCategory = row.Category;
+                    DevToolWidgets.MutedText(row.Category);
                 }
 
-                string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
-                    ? item.Type
-                    : metadata.DisplayName;
-                string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##CenterSceneObject" + item.Index;
+                string label = row.DisplayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") +
+                               ")##CenterSceneObject" + item.Index;
                 if (!ImGui.Selectable(label, item.Selected))
                 {
                     if (ImGui.IsItemHovered())
-                        DevToolTooltip.Show(source + " · " + item.Type + " · " + category);
+                        DevToolTooltip.Show(group.Source + " · " + item.Type + " · " + row.Category);
                     continue;
                 }
 
@@ -180,35 +188,89 @@ internal static class SceneWorkspaceWindow
             }
         }
 
-        if (matches == 0)
+        if (projectedMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
     }
 
-    private static EditorObjectTypeSnapshot FindObjectMetadata(EditorPresentationSnapshot snapshot, string type)
+    private static void EnsureObjectProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        for (int i = 0; i < library.Length; i++)
-            if (string.Equals(library[i].Type, type, StringComparison.Ordinal)) return library[i];
-        return null;
+        string normalizedSearch = objectSceneSearch?.Trim() ?? string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+
+        bool libraryChanged = !ReferenceEquals(projectedLibrary, library);
+        if (!libraryChanged &&
+            ReferenceEquals(projectedObjects, objects) &&
+            string.Equals(projectedSearch, normalizedSearch, StringComparison.Ordinal) &&
+            projectedChinese == chinese)
+            return;
+
+        if (libraryChanged)
+        {
+            metadataByType.Clear();
+            for (int i = 0; i < library.Length; i++)
+            {
+                EditorObjectTypeSnapshot metadata = library[i];
+                if (metadata == null || string.IsNullOrEmpty(metadata.Type)) continue;
+                metadataByType[metadata.Type] = metadata;
+            }
+        }
+
+        projectedGroups.Clear();
+        projectedMatchCount = 0;
+        Dictionary<string, ObjectSceneGroup> groupsBySource =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < objects.Length; i++)
+        {
+            EditorObjectSnapshot item = objects[i];
+            if (item == null) continue;
+            metadataByType.TryGetValue(item.Type ?? string.Empty, out EditorObjectTypeSnapshot metadata);
+            if (!MatchesObject(item, metadata, normalizedSearch)) continue;
+
+            string source = string.IsNullOrWhiteSpace(metadata?.Source)
+                ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                : metadata.Source;
+            string category = string.IsNullOrWhiteSpace(metadata?.Category)
+                ? DevToolUiSettings.T("未分类", "Unsorted")
+                : metadata.Category;
+            string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
+                ? item.Type
+                : metadata.DisplayName;
+
+            if (!groupsBySource.TryGetValue(source, out ObjectSceneGroup group))
+            {
+                group = new ObjectSceneGroup { Source = source };
+                groupsBySource.Add(source, group);
+                projectedGroups.Add(group);
+            }
+
+            group.Rows.Add(new ObjectSceneRow
+            {
+                Item = item,
+                Metadata = metadata,
+                Source = source,
+                Category = category,
+                DisplayName = displayName
+            });
+            projectedMatchCount++;
+        }
+
+        projectedObjects = objects;
+        projectedLibrary = library;
+        projectedSearch = normalizedSearch;
+        projectedChinese = chinese;
     }
 
     private static bool MatchesObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
     {
         if (string.IsNullOrWhiteSpace(query)) return true;
-        string value = query.Trim();
-        return Contains(item.Type, value) ||
-               Contains(metadata?.DisplayName, value) ||
-               Contains(metadata?.Source, value) ||
-               Contains(metadata?.Category, value) ||
-               Fuzzy(item.Type, value) ||
-               Fuzzy(metadata?.DisplayName, value);
-    }
-
-    private static bool ContainsExact(List<string> values, string value)
-    {
-        for (int i = 0; i < values.Count; i++)
-            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
+        return Contains(item.Type, query) ||
+               Contains(metadata?.DisplayName, query) ||
+               Contains(metadata?.Source, query) ||
+               Contains(metadata?.Category, query) ||
+               Fuzzy(item.Type, query) ||
+               Fuzzy(metadata?.DisplayName, query);
     }
 
     private static bool Contains(string value, string query) =>
