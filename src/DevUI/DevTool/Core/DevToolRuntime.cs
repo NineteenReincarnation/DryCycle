@@ -76,6 +76,7 @@ internal static class DevToolRuntime
         MapEditorStateHub.Reset();
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
+        EditorRevisionHub.Reset();
         DevToolSessionHub.Reset();
         DevToolPerformanceMonitor.SetEnabled(false);
         DevToolPerformanceMonitor.Reset();
@@ -181,10 +182,29 @@ internal static class DevToolRuntime
 
     private static void PublishPresentations(EditorSession session, bool shellOnly)
     {
+        // RWImGui can flip the volatile presentation mode from its render callback. Observe that
+        // ownership edge here, on Rain World's DevUI thread, before any hub reads a revision. When
+        // control returns from full vanilla presentation the tracker invalidates all channels once.
+        EditorRevisionHub.ObservePresentationMode(session);
+
+        if (session == null)
+        {
+            EditorPresentationHub.Clear();
+            ClearDetailPresentations();
+            return;
+        }
+
+        // Full vanilla mode owns presentation and can freely mutate its authoritative model. The
+        // rebuilt snapshots are intentionally dormant here; ObservePresentationMode performs one
+        // complete invalidation when New UI takes ownership again, so background snapshot work is
+        // unnecessary while none of those snapshots are visible.
+        if (EditorUiModeState.UseVanilla)
+            return;
+
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
             EditorPresentationHub.Publish(session, shellOnly);
 
-        if (shellOnly || session == null)
+        if (shellOnly)
         {
             ClearDetailPresentations();
             return;
