@@ -62,6 +62,10 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (enabled) return;
 
+        // DevUINode.Update is the generic fallback for pages that do not provide their own Update
+        // override. Known derived vanilla pages are intercepted separately so their now-redundant
+        // page-specific work (trash bins, threat sliders, layout, hidden map loading, etc.) never
+        // runs while the rebuilt UI owns that workspace.
         On.DevInterface.DevUINode.Update += DevUINode_Update;
         On.DevInterface.ObjectsPage.Update += ObjectsPage_Update;
         On.DevInterface.SoundPage.Update += SoundPage_Update;
@@ -150,12 +154,17 @@ internal static class LegacyDevUiQuiescenceController
             return;
         }
 
+        // A third-party compatibility subtree deliberately receives the ordinary recursive update.
+        // Do not let the selective base-hook intercept its own base.Update() calls.
         if (fullCompatibilityDepth > 0)
         {
             orig(self);
             return;
         }
 
+        // World-space gizmos are invoked explicitly by the selective page traversal. Their derived
+        // Update implementations still run, but their base DevUINode recursion is filtered here so
+        // hidden panels/buttons beneath a representation do not wake back up every frame.
         if (selectiveTraversalDepth > 0 && activeProfile != null && IsWorldBackendNode(self))
         {
             PumpChildren(self, activeProfile);
@@ -171,6 +180,9 @@ internal static class LegacyDevUiQuiescenceController
                 return;
             }
 
+            // Map can intentionally skip its first legacy Refresh while the new UI owns it. If the
+            // developer switches back to vanilla/legacy mode, restore that initialization contract
+            // before normal DevUINode.Update resumes.
             if (SuppressedInitialRefreshPages.Remove(page))
                 page.initRefresh = true;
         }
@@ -194,6 +206,9 @@ internal static class LegacyDevUiQuiescenceController
 
             if (profile.MaterializeInitialRefresh)
             {
+                // Materialize once so vanilla and third-party world representations still exist as
+                // a compatibility backend. Their screen-space controls become dormant immediately
+                // after construction unless explicitly needed by a bridge transaction.
                 fullCompatibilityDepth++;
                 try
                 {
@@ -206,6 +221,9 @@ internal static class LegacyDevUiQuiescenceController
             }
             else
             {
+                // Map is fully represented by World Workspace. Its hidden legacy Refresh creates a
+                // MapObject and begins its own room-texture preparation pipeline, so skip it while
+                // ImGui owns presentation. Returning to vanilla restores initRefresh losslessly.
                 SuppressedInitialRefreshPages.Add(page);
             }
 
@@ -222,6 +240,8 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (parent?.subNodes == null) return;
 
+        // Preserve vanilla's reverse child order. Some gizmo hierarchies rely on the last-created
+        // handle getting first refusal on dragging.
         for (int i = parent.subNodes.Count - 1; i >= 0; i--)
             PumpBranch(parent.subNodes[i], profile);
     }
@@ -257,6 +277,8 @@ internal static class LegacyDevUiQuiescenceController
             return;
         }
 
+        // Vanilla and DryCycle-owned screen-space nodes are dormant. Keep walking structure only to
+        // discover a nested world-space handle or truly external compatibility node.
         if (node.subNodes == null) return;
         for (int i = node.subNodes.Count - 1; i >= 0; i--)
             PumpBranch(node.subNodes[i], profile);
@@ -266,6 +288,9 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (!node.initRefresh) return;
 
+        // Refresh is allowed once for a live world-space gizmo so derived representations can place
+        // their sprites and synchronize handle geometry. The expensive recurring Update tree is
+        // still pruned on every subsequent frame.
         fullCompatibilityDepth++;
         try
         {
@@ -280,6 +305,9 @@ internal static class LegacyDevUiQuiescenceController
 
     private static bool IsWorldBackendNode(DevUINode node)
     {
+        // Handle covers PlacedObjectRepresentation, Spot/DirectionalSoundHandle,
+        // SpotTriggerHandle and their nested radius/vector handles. BezierControl is the other
+        // vanilla world-space editor primitive used by spline/terrain representations.
         return node is Handle || node is BezierControl;
     }
 
@@ -290,6 +318,10 @@ internal static class LegacyDevUiQuiescenceController
 
         System.Reflection.Assembly assembly = type.Assembly;
         if (assembly == VanillaDevUiAssembly) return false;
+
+        // DryCycle's own old DevUI controls (DryCycleTextField/NumericSlider/etc.) are already
+        // represented by the rebuilt frontend and should sleep just like vanilla screen controls.
+        // Unknown foreign assemblies remain conservative compatibility backends.
         return assembly != DryCycleAssembly;
     }
 
@@ -302,6 +334,8 @@ internal static class LegacyDevUiQuiescenceController
         if (session == null || !ReferenceEquals(session.Owner, page.owner)) return false;
         if (page.owner.game?.devToolsActive != true) return false;
 
+        // Quiescence is a New-UI optimization only. Explicit legacy/vanilla presentation and
+        // in-flight legacy transactions retain the complete original lifecycle.
         if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
             return false;
         if (session.LegacyTransactions.HasPendingTransaction)
@@ -313,6 +347,9 @@ internal static class LegacyDevUiQuiescenceController
         for (int i = 0; i < Profiles.Length; i++)
         {
             PageProfile candidate = Profiles[i];
+            // Exact type is intentional. A third-party custom Page subclass is an unknown contract
+            // and therefore falls back to the complete vanilla update instead of being partially
+            // suspended by a heuristic.
             if (runtimePageType != candidate.PageType || session.ToolMode != candidate.ToolMode)
                 continue;
 
