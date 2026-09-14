@@ -13,7 +13,6 @@ public sealed class EditorTriggeredEventSnapshot
     public bool HasEvent { get; init; }
     public string Type { get; init; } = string.Empty;
 
-    // MusicEvent
     public string SongName { get; init; } = string.Empty;
     public float Priority { get; init; }
     public float MaxThreatLevel { get; init; }
@@ -27,11 +26,9 @@ public sealed class EditorTriggeredEventSnapshot
     public int RoomsRange { get; init; } = -1;
     public int CyclesRest { get; init; } = -1;
 
-    // StopMusicEvent
     public string StopMode { get; init; } = string.Empty;
     public float FadeOutSeconds { get; init; }
 
-    // ShowProjectedImageEvent
     public bool AfterEncounter { get; init; }
     public bool OnlyWhenShowingDirection { get; init; }
     public int FromCycle { get; init; }
@@ -75,6 +72,15 @@ public sealed class EditorTriggerPresentationSnapshot
 internal sealed class TriggerEditorState
 {
     internal int SelectedIndex = -1;
+    internal long Revision = 1L;
+
+    internal bool SetSelectedIndex(int value)
+    {
+        if (SelectedIndex == value) return false;
+        SelectedIndex = value;
+        Revision = Revision >= long.MaxValue ? 1L : Revision + 1L;
+        return true;
+    }
 }
 
 internal static class TriggerEditorStateHub
@@ -95,7 +101,7 @@ internal static class TriggerEditorStateHub
             if (current is TriggerPanel panel && panel.trigger != null)
             {
                 int index = session.RoomSettings.triggers.IndexOf(panel.trigger);
-                if (index >= 0) Get(session).SelectedIndex = index;
+                if (index >= 0) Get(session)?.SetSelectedIndex(index);
                 return;
             }
             current = current.parentNode;
@@ -120,6 +126,7 @@ public static class TriggerEditorPresentationHub
     private static TriggersPage observedPage;
     private static string[] observedSongNames;
     private static long observedRevision;
+    private static long observedSelectionRevision;
     private static int observedTriggerCount = -1;
     private static int observedSelectedIndex = int.MinValue;
     private static int observedEntranceCount = int.MinValue;
@@ -138,14 +145,17 @@ public static class TriggerEditorPresentationHub
         TriggerEditorStateHub.SynchronizeFromLegacyNode(session, session.Owner.draggedNode ?? page.draggedObject);
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
         int count = session.RoomSettings.triggers.Count;
-        if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
-        if (state.SelectedIndex < -1) state.SelectedIndex = -1;
+        if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
+        if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
+        // World-space trigger handles can still write the model outside our command queues. Pure
+        // selection is tracked separately and therefore does not dirty the Trigger model revision.
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
             session.Owner.draggedNode != null || page.draggedObject != null)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Triggers);
+        long selectionRevision = state.Revision;
         string[] songNames = page.songNames ?? Array.Empty<string>();
         int entranceCount = session.Room?.abstractRoom?.connections?.Length ?? 0;
         bool staticListsStale =
@@ -153,17 +163,37 @@ public static class TriggerEditorPresentationHub
             eventTypeCount != ExtEnum<TriggeredEvent.EventType>.values.Count ||
             slugcatCount != ExtEnum<SlugcatStats.Name>.values.Count;
 
-        if (!staticListsStale &&
+        bool sameIdentity =
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedSettings, session.RoomSettings) &&
             ReferenceEquals(observedPage, page) &&
+            current.Available;
+        bool modelStable =
+            sameIdentity &&
+            !staticListsStale &&
             ReferenceEquals(observedSongNames, songNames) &&
             observedRevision == revision &&
             observedTriggerCount == count &&
-            observedSelectedIndex == state.SelectedIndex &&
-            observedEntranceCount == entranceCount &&
-            current.Available)
+            observedEntranceCount == entranceCount;
+
+        if (modelStable &&
+            observedSelectionRevision == selectionRevision &&
+            observedSelectedIndex == state.SelectedIndex)
+        {
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Triggers,
+                DevToolPresentationOutcome.CacheHit);
             return;
+        }
+
+        if (modelStable)
+        {
+            PublishSelectionOnly(state.SelectedIndex, selectionRevision);
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Triggers,
+                DevToolPresentationOutcome.PartialRebuild);
+            return;
+        }
 
         EditorTriggerSnapshot[] triggers = new EditorTriggerSnapshot[count];
         for (int i = 0; i < count; i++)
@@ -171,7 +201,8 @@ public static class TriggerEditorPresentationHub
             EventTrigger trigger = session.RoomSettings.triggers[i];
             SpotTrigger spot = trigger as SpotTrigger;
             string[] allowed = new string[trigger?.slugcats?.Count ?? 0];
-            for (int s = 0; s < allowed.Length; s++) allowed[s] = trigger.slugcats[s]?.value ?? string.Empty;
+            for (int s = 0; s < allowed.Length; s++)
+                allowed[s] = trigger.slugcats[s]?.value ?? string.Empty;
 
             triggers[i] = new EditorTriggerSnapshot
             {
@@ -196,8 +227,20 @@ public static class TriggerEditorPresentationHub
         }
 
         RebuildStaticListsIfNeeded();
-        string[] songs = songNames.Length == 0 ? Array.Empty<string>() : (string[])songNames.Clone();
-        Array.Sort(songs, StringComparer.OrdinalIgnoreCase);
+
+        // Song names are page/catalog metadata, not Trigger model data. Reuse the sorted immutable
+        // array across ordinary trigger edits and only sort again when the authoritative source array
+        // is replaced.
+        string[] songs;
+        if (sameIdentity && ReferenceEquals(observedSongNames, songNames) && current.SongNames != null)
+        {
+            songs = current.SongNames;
+        }
+        else
+        {
+            songs = songNames.Length == 0 ? Array.Empty<string>() : (string[])songNames.Clone();
+            Array.Sort(songs, StringComparer.OrdinalIgnoreCase);
+        }
 
         current = new EditorTriggerPresentationSnapshot
         {
@@ -216,10 +259,67 @@ public static class TriggerEditorPresentationHub
         observedPage = page;
         observedSongNames = songNames;
         observedRevision = revision;
+        observedSelectionRevision = selectionRevision;
         observedTriggerCount = count;
         observedSelectedIndex = state.SelectedIndex;
         observedEntranceCount = entranceCount;
+
+        DevToolPerformanceMonitor.RecordPresentation(
+            DevToolPresentationChannel.Triggers,
+            DevToolPresentationOutcome.FullRebuild);
     }
+
+    private static void PublishSelectionOnly(int selectedIndex, long selectionRevision)
+    {
+        EditorTriggerSnapshot[] source = current.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
+        EditorTriggerSnapshot[] next = null;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorTriggerSnapshot trigger = source[i];
+            bool selected = i == selectedIndex;
+            if (trigger.Selected == selected) continue;
+
+            next ??= (EditorTriggerSnapshot[])source.Clone();
+            next[i] = CloneWithSelection(trigger, selected);
+        }
+
+        current = new EditorTriggerPresentationSnapshot
+        {
+            Available = current.Available,
+            TriggerTypes = current.TriggerTypes,
+            EventTypes = current.EventTypes,
+            SongNames = current.SongNames,
+            SlugcatNames = current.SlugcatNames,
+            Triggers = next ?? source,
+            SelectedIndex = selectedIndex,
+            EntranceCount = current.EntranceCount
+        };
+
+        observedSelectionRevision = selectionRevision;
+        observedSelectedIndex = selectedIndex;
+    }
+
+    private static EditorTriggerSnapshot CloneWithSelection(EditorTriggerSnapshot trigger, bool selected) => new()
+    {
+        Index = trigger.Index,
+        Type = trigger.Type,
+        Selected = selected,
+        IsSpot = trigger.IsSpot,
+        X = trigger.X,
+        Y = trigger.Y,
+        Radius = trigger.Radius,
+        ActiveFromCycle = trigger.ActiveFromCycle,
+        ActiveToCycle = trigger.ActiveToCycle,
+        DelaySeconds = trigger.DelaySeconds,
+        FireChance = trigger.FireChance,
+        MultiUse = trigger.MultiUse,
+        Entrance = trigger.Entrance,
+        Karma = trigger.Karma,
+        CreatureType = trigger.CreatureType,
+        AllowedSlugcats = trigger.AllowedSlugcats,
+        Event = trigger.Event
+    };
 
     internal static void Clear()
     {
@@ -229,6 +329,7 @@ public static class TriggerEditorPresentationHub
         observedPage = null;
         observedSongNames = null;
         observedRevision = 0L;
+        observedSelectionRevision = 0L;
         observedTriggerCount = -1;
         observedSelectedIndex = int.MinValue;
         observedEntranceCount = int.MinValue;
@@ -299,7 +400,8 @@ public static class TriggerEditorPresentationHub
         if (triggerTypeCount != nextTriggerCount)
         {
             triggerTypes = new string[nextTriggerCount];
-            for (int i = 0; i < nextTriggerCount; i++) triggerTypes[i] = ExtEnum<EventTrigger.TriggerType>.values.GetEntry(i);
+            for (int i = 0; i < nextTriggerCount; i++)
+                triggerTypes[i] = ExtEnum<EventTrigger.TriggerType>.values.GetEntry(i);
             triggerTypeCount = nextTriggerCount;
         }
 
@@ -307,7 +409,8 @@ public static class TriggerEditorPresentationHub
         if (eventTypeCount != nextEventCount)
         {
             eventTypes = new string[nextEventCount];
-            for (int i = 0; i < nextEventCount; i++) eventTypes[i] = ExtEnum<TriggeredEvent.EventType>.values.GetEntry(i);
+            for (int i = 0; i < nextEventCount; i++)
+                eventTypes[i] = ExtEnum<TriggeredEvent.EventType>.values.GetEntry(i);
             eventTypeCount = nextEventCount;
         }
 
@@ -387,17 +490,13 @@ public static class TriggerEditorCommandQueue
             {
                 long historyBeforeCommand = session?.History.Revision ?? 0L;
                 bool changed = false;
+                bool modelCommand = command.Kind != TriggerEditorCommandKind.Select;
 
                 switch (command.Kind)
                 {
                     case TriggerEditorCommandKind.Select:
-                    {
-                        TriggerEditorState state = TriggerEditorStateHub.Get(session);
-                        int before = state?.SelectedIndex ?? -1;
                         TriggerEditorActions.Select(session, command.Index);
-                        changed = (state?.SelectedIndex ?? -1) != before;
                         break;
-                    }
                     case TriggerEditorCommandKind.Create:
                         changed = TriggerEditorActions.Create(session, command.Text);
                         break;
@@ -421,7 +520,10 @@ public static class TriggerEditorCommandQueue
                         break;
                 }
 
-                if (changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                // Pure selection never invalidates the Trigger model channel. Non-history model
+                // mutations retain the direct fallback for compatibility paths that cannot produce
+                // a snapshot history entry.
+                if (modelCommand && changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
             catch (Exception error)
@@ -430,9 +532,6 @@ public static class TriggerEditorCommandQueue
             }
         }
 
-        // History mutations are consumed by CorePresentation, which invalidates Shell and the active
-        // workspace exactly once for the whole update. Only selection or another successful edit
-        // that intentionally did not create history needs a direct Trigger revision here.
         if (nonHistoryDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
     }
