@@ -50,6 +50,7 @@ internal static class MiscRuntime
     {
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
+        DryCycle.DevUI.DevTool.Core.EditorRevisionHub.Reset();
 
         if (!_enabled)
         {
