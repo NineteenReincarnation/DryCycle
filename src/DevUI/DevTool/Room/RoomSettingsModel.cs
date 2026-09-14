@@ -98,6 +98,28 @@ public sealed class EditorRoomSettingsSnapshot
 
 internal static class RoomSettingsPresentation
 {
+    private static string[] dangerTypesCache = Array.Empty<string>();
+    private static int dangerTypesCount = -1;
+
+    private static string[] terrainPalettesCache = Array.Empty<string>();
+    private static bool terrainPalettesCached;
+
+    private static string[] availableEffectsCache = Array.Empty<string>();
+    private static string[] availableEffectCategoriesCache = Array.Empty<string>();
+    private static int availableEffectTypeCount = -1;
+    private static Type availableEffectPageType;
+
+    /// <summary>
+    /// Warms data that depends only on the installed mod/asset set. This is called during normal
+    /// mods initialization so the first O/H DevTool frame does not pay a cold filesystem scan.
+    /// Failed early asset access is intentionally not cached and will retry when the UI needs it.
+    /// </summary>
+    internal static void WarmStaticCatalogs()
+    {
+        GetDangerTypes();
+        GetTerrainPalettes();
+    }
+
     internal static EditorRoomSettingsSnapshot Capture(EditorSession session)
     {
         RoomSettings settings = session?.RoomSettings;
@@ -113,7 +135,7 @@ internal static class RoomSettingsPresentation
         {
             Available = true,
             DangerType = settings.DangerType?.value ?? string.Empty,
-            DangerTypes = CopyEnumValues<RoomRain.DangerType>(),
+            DangerTypes = GetDangerTypes(),
             RainIntensity = settings.RainIntensity,
             RumbleIntensity = settings.RumbleIntensity,
             CeilingDrips = settings.CeilingDrips,
@@ -147,7 +169,7 @@ internal static class RoomSettingsPresentation
             TerrainDepth = settings.TerrainDepth,
             TerrainSkyFade = settings.TerrainSkyFade,
             TerrainPalette = settings.TerrainPalette ?? string.Empty,
-            TerrainPalettes = CopyTerrainPalettes(),
+            TerrainPalettes = GetTerrainPalettes(),
             HasTerrainFadePalette = settings.terrainFadePalette != null,
             TerrainFadePalette = settings.terrainFadePalette?.palette ?? string.Empty,
             TerrainFadePaletteFades = CopyFades(settings.terrainFadePalette?.fades),
@@ -222,8 +244,20 @@ internal static class RoomSettingsPresentation
         out string[] categories)
     {
         RoomSettingsPage page = session?.Owner?.activePage as RoomSettingsPage;
-        List<(string Type, string Category)> result = new();
+        Type pageType = page?.GetType();
         List<string> entries = ExtEnum<RoomSettings.RoomEffect.Type>.values.entries;
+        int typeCount = entries.Count;
+
+        if (availableEffectTypeCount == typeCount &&
+            availableEffectPageType == pageType &&
+            availableEffectsCache.Length > 0)
+        {
+            types = availableEffectsCache;
+            categories = availableEffectCategoriesCache;
+            return;
+        }
+
+        List<(string Type, string Category)> result = new();
         for (int i = 0; i < entries.Count; i++)
         {
             string value = entries[i];
@@ -241,13 +275,20 @@ internal static class RoomSettingsPresentation
             return category != 0 ? category : string.Compare(a.Type, b.Type, StringComparison.OrdinalIgnoreCase);
         });
 
-        types = new string[result.Count];
-        categories = new string[result.Count];
+        string[] builtTypes = new string[result.Count];
+        string[] builtCategories = new string[result.Count];
         for (int i = 0; i < result.Count; i++)
         {
-            types[i] = result[i].Type;
-            categories[i] = result[i].Category;
+            builtTypes[i] = result[i].Type;
+            builtCategories[i] = result[i].Category;
         }
+
+        availableEffectsCache = builtTypes;
+        availableEffectCategoriesCache = builtCategories;
+        availableEffectTypeCount = typeCount;
+        availableEffectPageType = pageType;
+        types = builtTypes;
+        categories = builtCategories;
     }
 
     private static string EffectCategory(RoomSettingsPage page, RoomSettings.RoomEffect.Type type)
@@ -377,8 +418,10 @@ internal static class RoomSettingsPresentation
         };
     }
 
-    private static string[] CopyTerrainPalettes()
+    private static string[] GetTerrainPalettes()
     {
+        if (terrainPalettesCached) return terrainPalettesCache;
+
         try
         {
             string[] files = AssetManager.ListDirectory("terrainpalettes");
@@ -392,23 +435,33 @@ internal static class RoomSettingsPresentation
                 if (string.IsNullOrEmpty(name) || !names.Add(name)) continue;
                 result.Add(name);
             }
+
             result.Sort(StringComparer.OrdinalIgnoreCase);
-            return result.ToArray();
+            terrainPalettesCache = result.ToArray();
+            terrainPalettesCached = true;
+            return terrainPalettesCache;
         }
         catch
         {
+            // AssetManager may not be ready during an unusually early warm-up. Do not poison the
+            // cache in that case; the first real Room snapshot will retry normally.
             return Array.Empty<string>();
         }
     }
 
-    private static float[] CopyFades(float[] source) =>
-        source == null ? Array.Empty<float>() : (float[])source.Clone();
-
-    private static string[] CopyEnumValues<T>() where T : ExtEnum<T>
+    private static string[] GetDangerTypes()
     {
-        List<string> entries = ExtEnum<T>.values.entries;
+        List<string> entries = ExtEnum<RoomRain.DangerType>.values.entries;
+        if (dangerTypesCount == entries.Count && dangerTypesCache.Length == entries.Count)
+            return dangerTypesCache;
+
         string[] result = new string[entries.Count];
         for (int i = 0; i < entries.Count; i++) result[i] = entries[i];
-        return result;
+        dangerTypesCache = result;
+        dangerTypesCount = entries.Count;
+        return dangerTypesCache;
     }
+
+    private static float[] CopyFades(float[] source) =>
+        source == null ? Array.Empty<float>() : (float[])source.Clone();
 }
