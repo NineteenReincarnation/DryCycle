@@ -41,6 +41,7 @@ internal static class ObjectPresentationChangeHintHub
         internal bool Collection;
         internal PlacedObject Member;
         internal bool HasMember;
+        internal long CollectionRevision = 1L;
 
         internal ObjectPresentationChangeHint Consume()
         {
@@ -59,6 +60,11 @@ internal static class ObjectPresentationChangeHintHub
             Collection = false;
             Member = null;
             HasMember = false;
+        }
+
+        internal void TouchCollection()
+        {
+            CollectionRevision = CollectionRevision >= long.MaxValue ? 1L : CollectionRevision + 1L;
         }
     }
 
@@ -106,6 +112,13 @@ internal static class ObjectPresentationChangeHintHub
         if (session == null) return;
         State state = Get(session);
         if (state.Full) return;
+
+        // One pending semantic collection change is enough to invalidate selection membership.
+        // Avoid bumping repeatedly when several command/history paths report the same batch before
+        // presentation consumes the hint; a later distinct batch will bump again after Consume().
+        if (!state.Collection)
+            state.TouchCollection();
+
         state.Collection = true;
         state.AllMembers = false;
         state.HasMember = false;
@@ -116,12 +129,26 @@ internal static class ObjectPresentationChangeHintHub
     {
         if (session == null) return;
         State state = Get(session);
+
+        // Full includes collection uncertainty. Preserve the same coalescing rule as MarkCollection
+        // so one real batch cannot produce several selection-membership invalidations.
+        if (!state.Collection)
+            state.TouchCollection();
+
         state.Full = true;
         state.AllMembers = true;
         state.Collection = true;
         state.HasMember = false;
         state.Member = null;
     }
+
+    /// <summary>
+    /// Non-consuming semantic revision used by EditorSession to validate selection membership only
+    /// when the object collection may have changed. The pending presentation hint can still be
+    /// consumed independently by the Objects presentation pipeline.
+    /// </summary>
+    internal static long GetCollectionRevision(EditorSession session) =>
+        session == null ? 0L : Get(session).CollectionRevision;
 
     internal static ObjectPresentationChangeHint Consume(EditorSession session) =>
         session == null ? default : Get(session).Consume();
