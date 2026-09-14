@@ -47,6 +47,7 @@ public sealed class EditorPresentationSnapshot
     public static readonly EditorPresentationSnapshot Empty = new();
 
     public bool Available { get; init; }
+    public bool Hydrated { get; init; }
     public bool DevToolsActive { get; init; }
     public string Document { get; init; } = string.Empty;
     public string RoomName { get; init; } = string.Empty;
@@ -73,7 +74,7 @@ public static class EditorPresentationHub
 
     public static EditorPresentationSnapshot Current => current;
 
-    internal static void Publish(EditorSession session)
+    internal static void Publish(EditorSession session, bool shellOnly = false)
     {
         if (session?.Owner == null)
         {
@@ -83,14 +84,14 @@ public static class EditorPresentationHub
 
         // Object presentation is one of the heavier DevTool payloads: it walks every placed
         // object, captures inspector adapters and may initialize reflection-backed object catalogs.
-        // None of that data is consumed outside Objects mode, so do not put it on the O/H opening
-        // frame for Room/Map/Sound/etc. The first Objects frame remains authoritative and builds the
-        // same payload lazily when it is actually needed.
+        // The opening frame publishes only the editor shell, matching the industry bootstrap-scene
+        // pattern: establish a responsive surface first, then hydrate expensive workspace data on
+        // the following frame instead of competing with vanilla DevUI construction.
         EditorObjectSnapshot[] scene = Array.Empty<EditorObjectSnapshot>();
         EditorObjectTypeSnapshot[] objectLibrary = Array.Empty<EditorObjectTypeSnapshot>();
         EditorInspectorSnapshot inspector = new();
 
-        if (session.ToolMode == EditorToolMode.Objects)
+        if (!shellOnly && session.ToolMode == EditorToolMode.Objects)
         {
             List<PlacedObject> live = session.RoomSettings?.placedObjects;
             scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
@@ -151,6 +152,7 @@ public static class EditorPresentationHub
         current = new EditorPresentationSnapshot
         {
             Available = true,
+            Hydrated = !shellOnly,
             DevToolsActive = session.Owner.game?.devToolsActive == true,
             Document = session.DocumentKey.ToString(),
             RoomName = session.Room?.abstractRoom?.name ?? session.RoomSettings?.name ?? string.Empty,
