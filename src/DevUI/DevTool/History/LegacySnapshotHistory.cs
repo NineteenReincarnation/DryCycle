@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
@@ -168,7 +169,9 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
     public IEditorStateSnapshot CaptureCurrent(EditorSession session) =>
         ReferenceEquals(session?.RoomSettings, settings) ? Capture(settings) : null;
 
-    public bool Restore(EditorSession session)
+    public bool Restore(EditorSession session) => Restore(session, refreshCompatibilityPage: true);
+
+    internal bool Restore(EditorSession session, bool refreshCompatibilityPage)
     {
         RoomSettings current = session?.RoomSettings;
         if (!ReferenceEquals(current, settings) || current?.placedObjects == null) return false;
@@ -183,7 +186,8 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
             }
 
             session.Selection.RemoveMissing(current.placedObjects);
-            session.Owner?.activePage?.Refresh();
+            if (refreshCompatibilityPage)
+                PlacedObjectState.RefreshCompatibilityPage(session);
             return true;
         }
         catch (Exception error)
@@ -255,8 +259,12 @@ internal sealed class RoomSettingsStateSnapshot : IEditorStateSnapshot
             if (!parsed.Load(timeline)) return false;
 
             CopyEditableFields(parsed, current);
-            if (placedObjects != null && !placedObjects.Restore(session)) return false;
-            session.Owner?.activePage?.Refresh();
+            if (placedObjects != null && !placedObjects.Restore(session, refreshCompatibilityPage: false)) return false;
+
+            // Whole-RoomSettings fallback restore used to refresh once inside the nested object
+            // collection restore and then a second time here. Reconcile the active compatibility
+            // page exactly once; rebuilt migrated pages can defer that work until legacy return.
+            PlacedObjectState.RefreshCompatibilityPage(session);
             return true;
         }
         catch (Exception error)
@@ -348,8 +356,12 @@ internal sealed class RelationshipStateSnapshot : IEditorStateSnapshot
                 inner[pair.Key] = pair.Value;
             RelationshipPage.changedRelationships[outer.Key] = inner;
         }
-        page.refresh = true;
-        page.Refresh();
+
+        // Fallback snapshots are intentionally broad, but they still do not need to rebuild the
+        // complete hidden vanilla matrix while the rebuilt relationship workspace owns presentation.
+        page.refresh = false;
+        if (!LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+            page.Refresh();
         return true;
     }
 
@@ -483,6 +495,11 @@ internal sealed class MapStateSnapshot : IEditorStateSnapshot
     {
         if (session?.Owner?.activePage is not MapPage page || !ReferenceEquals(page.world, world)) return false;
 
+        // Full-map snapshots are fallback-only, but Undo/Redo can still invoke them while the rebuilt
+        // workspace owns presentation. Defer only the expensive vanilla visual rebuild; all model and
+        // DevUI-node state below is restored immediately. Custom/opaque pages fail closed here.
+        bool deferRefresh = LegacyDevUiQuiescenceController.TryDeferRefresh(session);
+
         Dictionary<string, RoomState> byName = new(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < rooms.Count; i++) byName[rooms[i].Name] = rooms[i];
 
@@ -500,22 +517,29 @@ internal sealed class MapStateSnapshot : IEditorStateSnapshot
             if (state.Attractions != null)
                 roomPanel.roomRep.room.roomAttractions = (AbstractRoom.CreatureRoomAttraction[])state.Attractions.Clone();
 
+            roomPanel.roomRep.room.namedRoomAttractions ??=
+                new Dictionary<string, AbstractRoom.CreatureRoomAttraction>();
             roomPanel.roomRep.room.namedRoomAttractions.Clear();
             foreach (KeyValuePair<string, AbstractRoom.CreatureRoomAttraction> pair in state.NamedAttractions)
                 roomPanel.roomRep.room.namedRoomAttractions[pair.Key] = pair.Value;
-            roomPanel.Refresh();
+
+            if (!deferRefresh)
+                roomPanel.Refresh();
         }
 
+        page.world.defaultRoomAttractions ??= new Dictionary<CreatureTemplate.Type, string>();
         page.world.defaultRoomAttractions.Clear();
         foreach (KeyValuePair<CreatureTemplate.Type, string> pair in defaultAttractions)
             page.world.defaultRoomAttractions[pair.Key] = pair.Value;
 
+        page.world.defaultNamedAttractions ??= new Dictionary<string, string>();
         page.world.defaultNamedAttractions.Clear();
         foreach (KeyValuePair<string, string> pair in defaultNamedAttractions)
             page.world.defaultNamedAttractions[pair.Key] = pair.Value;
 
         RestoreMaterials(page);
-        page.Refresh();
+        if (!deferRefresh)
+            page.Refresh();
         return true;
     }
 
