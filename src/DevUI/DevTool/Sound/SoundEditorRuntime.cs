@@ -106,9 +106,9 @@ public static class SoundEditorPresentationHub
         if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
         if (state.SelectedIndex < -1) state.SelectedIndex = -1;
 
-        // Vanilla mode, explicit legacy UI, legacy transactions and an active world-handle drag are
-        // compatibility write paths that bypass DryCycle's command queues. Keep Sound live only for
-        // those windows; ordinary rebuilt-UI frames use the revision clock.
+        // Explicit legacy UI, legacy transactions and an active world-handle drag are compatibility
+        // write paths that bypass DryCycle's command queues. Keep Sound live only for those windows;
+        // ordinary rebuilt-UI frames use the revision clock.
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
             session.Owner.draggedNode != null || page.draggedObject != null)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
@@ -278,34 +278,52 @@ public static class SoundEditorCommandQueue
 
     internal static void Process(EditorSession session)
     {
+        long historyBeforeBatch = session?.History.Revision ?? 0L;
+        bool nonHistorySceneDirty = false;
+
         while (queue.TryDequeue(out SoundEditorCommand command))
         {
             try
             {
+                long historyBeforeCommand = session?.History.Revision ?? 0L;
+                SoundEditorState state = SoundEditorStateHub.Get(session);
+                int selectedBefore = state?.SelectedIndex ?? -1;
+                int soundCountBefore = session?.RoomSettings?.ambientSounds?.Count ?? 0;
+                bool changed = false;
+                bool sceneCommand = false;
+
                 switch (command.Kind)
                 {
                     case SoundEditorCommandKind.Select:
                         SoundEditorActions.Select(session, command.Index);
+                        changed = (state?.SelectedIndex ?? -1) != selectedBefore;
+                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.Create:
-                        SoundEditorActions.Create(session, command.Text, command.SecondaryIndex);
+                        changed = SoundEditorActions.Create(session, command.Text, command.SecondaryIndex);
+                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.CreateFromLibrary:
-                        SoundEditorActions.CreateFromLibrary(
+                        changed = SoundEditorActions.CreateFromLibrary(
                             session,
                             command.Text,
                             command.SecondaryIndex,
                             command.Key,
                             command.Index);
+                        // Destination 1 is group-only; 0/2 can change the room scene.
+                        sceneCommand = command.Index != 1;
                         break;
                     case SoundEditorCommandKind.Delete:
-                        SoundEditorActions.Delete(session, command.Index);
+                        changed = SoundEditorActions.Delete(session, command.Index);
+                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.SetRoomValue:
-                        SoundEditorActions.SetRoomValue(session, command.Key, command.Value);
+                        changed = SoundEditorActions.SetRoomValue(session, command.Key, command.Value);
+                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.SetSoundValue:
-                        SoundEditorActions.SetSoundValue(session, command.Index, command.Key, command.Value);
+                        changed = SoundEditorActions.SetSoundValue(session, command.Index, command.Key, command.Value);
+                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.ReloadGroups:
                         SoundGroupLibrary.Reload();
@@ -336,24 +354,35 @@ public static class SoundEditorCommandQueue
                             command.Text);
                         break;
                     case SoundEditorCommandKind.ApplyGroup:
-                        SoundEditorActions.ApplyGroup(session, command.Key);
+                        changed = SoundEditorActions.ApplyGroup(session, command.Key);
+                        sceneCommand = true;
                         break;
                 }
 
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
-                if (command.Kind is SoundEditorCommandKind.Create or
-                    SoundEditorCommandKind.CreateFromLibrary or
-                    SoundEditorCommandKind.Delete or
-                    SoundEditorCommandKind.SetRoomValue or
-                    SoundEditorCommandKind.SetSoundValue or
-                    SoundEditorCommandKind.ApplyGroup)
-                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                if (!sceneCommand)
+                    continue;
+
+                int soundCountAfter = session?.RoomSettings?.ambientSounds?.Count ?? 0;
+                int selectedAfter = state?.SelectedIndex ?? -1;
+                bool observableSceneChange = changed ||
+                                             soundCountAfter != soundCountBefore ||
+                                             selectedAfter != selectedBefore;
+
+                // Successful model edits normally create history, and CorePresentation consumes that
+                // authoritative revision once per update. Selection and compatibility-success paths
+                // can change the visible Sound snapshot without a history entry; retain a direct
+                // workspace dirty signal only for those cases.
+                if (observableSceneChange && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                    nonHistorySceneDirty = true;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool sound command failed: " + error.Message);
             }
         }
+
+        if (nonHistorySceneDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
     }
 
     internal static void Clear()
