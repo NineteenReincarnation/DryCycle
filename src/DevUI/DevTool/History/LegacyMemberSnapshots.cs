@@ -6,6 +6,8 @@ using System.Text;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Sound;
+using DryCycle.DevUI.DevTool.Triggers;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.History;
@@ -320,15 +322,17 @@ internal sealed class SingleAmbientSoundStateSnapshot : IEditorStateSnapshot
 
         try
         {
+            int previousIndex = settings.ambientSounds.IndexOf(target);
+            bool previouslyPresent = previousIndex >= 0;
+
             if (!present)
             {
                 settings.ambientSounds.Remove(target);
             }
             else
             {
-                int currentIndex = settings.ambientSounds.IndexOf(target);
-                if (currentIndex >= 0)
-                    settings.ambientSounds.RemoveAt(currentIndex);
+                if (previousIndex >= 0)
+                    settings.ambientSounds.RemoveAt(previousIndex);
 
                 int insertIndex = Math.Max(0, Math.Min(index, settings.ambientSounds.Count));
                 settings.ambientSounds.Insert(insertIndex, target);
@@ -337,6 +341,15 @@ internal sealed class SingleAmbientSoundStateSnapshot : IEditorStateSnapshot
                 target.inherited = inherited;
                 target.overWrite = overWrite;
             }
+
+            int finalIndex = settings.ambientSounds.IndexOf(target);
+            bool membershipOrOrderChanged =
+                previouslyPresent != present ||
+                (present && previousIndex != finalIndex);
+            if (membershipOrOrderChanged)
+                SoundPresentationChangeHintHub.MarkCollection(session);
+            else if (present && finalIndex >= 0)
+                SoundPresentationChangeHintHub.MarkMember(session, finalIndex);
 
             if (session.Owner?.activePage is SoundPage soundPage)
                 soundPage.Refresh();
@@ -412,15 +425,17 @@ internal sealed class SingleTriggerStateSnapshot : IEditorStateSnapshot
 
         try
         {
+            int previousIndex = settings.triggers.IndexOf(target);
+            bool previouslyPresent = previousIndex >= 0;
+
             if (!present)
             {
                 settings.triggers.Remove(target);
             }
             else
             {
-                int currentIndex = settings.triggers.IndexOf(target);
-                if (currentIndex >= 0)
-                    settings.triggers.RemoveAt(currentIndex);
+                if (previousIndex >= 0)
+                    settings.triggers.RemoveAt(previousIndex);
 
                 int insertIndex = Math.Max(0, Math.Min(index, settings.triggers.Count));
                 settings.triggers.Insert(insertIndex, target);
@@ -430,6 +445,15 @@ internal sealed class SingleTriggerStateSnapshot : IEditorStateSnapshot
                 target.tEvent = null;
                 target.FromString(serialized.Split(TriggerSeparator, StringSplitOptions.None));
             }
+
+            int finalIndex = settings.triggers.IndexOf(target);
+            bool membershipOrOrderChanged =
+                previouslyPresent != present ||
+                (present && previousIndex != finalIndex);
+            if (membershipOrOrderChanged)
+                TriggerPresentationChangeHintHub.MarkCollection(session);
+            else if (present && finalIndex >= 0)
+                TriggerPresentationChangeHintHub.MarkMember(session, finalIndex);
 
             if (session.Owner?.activePage is TriggersPage triggersPage)
                 triggersPage.Refresh();
