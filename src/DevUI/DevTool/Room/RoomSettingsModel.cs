@@ -120,7 +120,114 @@ internal static class RoomSettingsPresentation
         GetTerrainPalettes();
     }
 
-    internal static EditorRoomSettingsSnapshot Capture(EditorSession session)
+    internal static EditorRoomSettingsSnapshot Capture(EditorSession session) =>
+        CaptureFull(session);
+
+    /// <summary>
+    /// Rebuilds only the immutable Room payloads named by a trusted semantic hint. Every scalar is
+    /// cheap to read, but arrays/catalogs/effect descriptors are deliberately retained by reference
+    /// unless the edit can affect them. Unknown writers never call this path; the hub falls back to
+    /// CaptureFull when no reliable hint is available.
+    /// </summary>
+    internal static EditorRoomSettingsSnapshot Capture(
+        EditorSession session,
+        EditorRoomSettingsSnapshot previous,
+        RoomPresentationChangeHint hint)
+    {
+        RoomSettings settings = session?.RoomSettings;
+        if (settings == null) return EditorRoomSettingsSnapshot.Empty;
+        if (previous?.Available != true || hint.Full || !hint.HasChanges)
+            return CaptureFull(session);
+
+        bool readValues = hint.Values;
+
+        bool templatesAvailable = previous.TemplateControlsAvailable;
+        string regionName = previous.RegionName;
+        string currentTemplate = previous.CurrentTemplate;
+        string[] templateNames = previous.TemplateNames ?? Array.Empty<string>();
+
+        string[] localKeys = previous.LocalSettingKeys ?? Array.Empty<string>();
+        string[] templateKeys = previous.TemplateOverrideKeys ?? Array.Empty<string>();
+        if (hint.Overrides)
+            CaptureOverrideState(settings, out localKeys, out templateKeys);
+
+        EditorRoomEffectSnapshot[] effects;
+        if (hint.Effects)
+        {
+            effects = CaptureEffects(session, settings);
+        }
+        else if (hint.EffectRowIndex >= 0)
+        {
+            effects = CaptureEffectRowPatch(session, settings, previous.Effects, hint.EffectRowIndex);
+        }
+        else
+        {
+            effects = previous.Effects ?? Array.Empty<EditorRoomEffectSnapshot>();
+        }
+
+        float[] fadePaletteFades = hint.FadePalette
+            ? CopyFades(settings.fadePalette?.fades)
+            : previous.FadePaletteFades ?? Array.Empty<float>();
+        float[] terrainFadePaletteFades = hint.TerrainFadePalette
+            ? CopyFades(settings.terrainFadePalette?.fades)
+            : previous.TerrainFadePaletteFades ?? Array.Empty<float>();
+
+        return new EditorRoomSettingsSnapshot
+        {
+            Available = true,
+            DangerType = readValues ? settings.DangerType?.value ?? string.Empty : previous.DangerType,
+            DangerTypes = previous.DangerTypes ?? GetDangerTypes(),
+            RainIntensity = readValues ? settings.RainIntensity : previous.RainIntensity,
+            RumbleIntensity = readValues ? settings.RumbleIntensity : previous.RumbleIntensity,
+            CeilingDrips = readValues ? settings.CeilingDrips : previous.CeilingDrips,
+            WaveSpeed = readValues ? settings.WaveSpeed : previous.WaveSpeed,
+            WaveLength = readValues ? settings.WaveLength : previous.WaveLength,
+            WaveAmplitude = readValues ? settings.WaveAmplitude : previous.WaveAmplitude,
+            SecondWaveLength = readValues ? settings.SecondWaveLength : previous.SecondWaveLength,
+            SecondWaveAmplitude = readValues ? settings.SecondWaveAmplitude : previous.SecondWaveAmplitude,
+            Clouds = readValues ? settings.Clouds : previous.Clouds,
+            Grime = readValues ? settings.Grime : previous.Grime,
+            RandomItemDensity = readValues ? settings.RandomItemDensity : previous.RandomItemDensity,
+            RandomItemSpearChance = readValues ? settings.RandomItemSpearChance : previous.RandomItemSpearChance,
+            WaterReflectionAlpha = readValues ? settings.WaterReflectionAlpha : previous.WaterReflectionAlpha,
+            Palette = readValues ? settings.Palette : previous.Palette,
+            EffectColorA = readValues ? settings.EffectColorA : previous.EffectColorA,
+            EffectColorB = readValues ? settings.EffectColorB : previous.EffectColorB,
+            HasFadePalette = hint.FadePalette ? settings.fadePalette != null : previous.HasFadePalette,
+            FadePalette = hint.FadePalette ? settings.fadePalette?.palette ?? -1 : previous.FadePalette,
+            FadePaletteFades = fadePaletteFades,
+            RoomSpecificScript = readValues ? settings.roomSpecificScript : previous.RoomSpecificScript,
+            WetTerrain = readValues ? settings.wetTerrain : previous.WetTerrain,
+            TerrainAvailable = previous.TerrainAvailable,
+            TerrainLight = readValues ? settings.TerrainLight : previous.TerrainLight,
+            TerrainStainAmount = readValues ? settings.TerrainStainAmount : previous.TerrainStainAmount,
+            TerrainStainBrightness = readValues ? settings.TerrainStainBrightness : previous.TerrainStainBrightness,
+            TerrainStainHeight = readValues ? settings.TerrainStainHeight : previous.TerrainStainHeight,
+            TerrainWaves = readValues ? settings.TerrainWaves : previous.TerrainWaves,
+            TerrainEdgeRadius = readValues ? settings.TerrainEdgeRadius : previous.TerrainEdgeRadius,
+            TerrainGooHeight = readValues ? settings.TerrainGooHeight : previous.TerrainGooHeight,
+            TerrainGrain = readValues ? settings.TerrainGrain : previous.TerrainGrain,
+            TerrainDepth = readValues ? settings.TerrainDepth : previous.TerrainDepth,
+            TerrainSkyFade = readValues ? settings.TerrainSkyFade : previous.TerrainSkyFade,
+            TerrainPalette = readValues ? settings.TerrainPalette ?? string.Empty : previous.TerrainPalette,
+            TerrainPalettes = previous.TerrainPalettes ?? GetTerrainPalettes(),
+            HasTerrainFadePalette = hint.TerrainFadePalette ? settings.terrainFadePalette != null : previous.HasTerrainFadePalette,
+            TerrainFadePalette = hint.TerrainFadePalette ? settings.terrainFadePalette?.palette ?? string.Empty : previous.TerrainFadePalette,
+            TerrainFadePaletteFades = terrainFadePaletteFades,
+            CameraCount = previous.CameraCount,
+            TemplateControlsAvailable = templatesAvailable,
+            RegionName = regionName,
+            CurrentTemplate = currentTemplate,
+            TemplateNames = templateNames,
+            LocalSettingKeys = localKeys,
+            TemplateOverrideKeys = templateKeys,
+            Effects = effects,
+            AvailableEffects = previous.AvailableEffects ?? Array.Empty<string>(),
+            AvailableEffectCategories = previous.AvailableEffectCategories ?? Array.Empty<string>()
+        };
+    }
+
+    private static EditorRoomSettingsSnapshot CaptureFull(EditorSession session)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null) return EditorRoomSettingsSnapshot.Empty;
@@ -196,46 +303,76 @@ internal static class RoomSettingsPresentation
         for (int i = 0; i < settings.effects.Count; i++)
         {
             RoomSettings.RoomEffect effect = settings.effects[i];
-
-            // Preview effects are real runtime list entries on purpose so unknown mods can see
-            // them through standard Rain World APIs. They must never become editor document rows.
             if (EffectPreviewRuntime.IsPreviewEffect(effect))
                 continue;
 
-            // UI commands use the document index with the preview entry removed. If the pointer
-            // leaves the browser and immediately clicks the inspector in the same frontend frame,
-            // the preview rolls back before command processing and this logical index still points
-            // at the correct real RoomEffect.
             int logicalIndex = result.Count;
-
-            if (effect == null)
-            {
-                result.Add(new EditorRoomEffectSnapshot { Index = logicalIndex, Type = "<null>" });
-                continue;
-            }
-
-            int count = Math.Max(1, RoomSettings.RoomEffect.GetSliderCount(effect.type));
-            string[] names = new string[count];
-            float[] values = new float[count];
-            for (int slider = 0; slider < count; slider++)
-            {
-                names[slider] = RoomSettings.RoomEffect.GetSliderName(effect.type, slider) ?? ("Value " + (slider + 1));
-                values[slider] = effect.GetAmount(slider);
-            }
-
-            result.Add(new EditorRoomEffectSnapshot
-            {
-                Index = logicalIndex,
-                Type = effect.type?.value ?? string.Empty,
-                Category = EffectCategory(page, effect.type),
-                Inherited = effect.inherited,
-                OverWrite = effect.overWrite,
-                Save = effect.save,
-                SliderNames = names,
-                Values = values
-            });
+            result.Add(CaptureEffect(page, effect, logicalIndex));
         }
         return result.ToArray();
+    }
+
+    private static EditorRoomEffectSnapshot[] CaptureEffectRowPatch(
+        EditorSession session,
+        RoomSettings settings,
+        EditorRoomEffectSnapshot[] previous,
+        int dirtyLogicalIndex)
+    {
+        if (previous == null || dirtyLogicalIndex < 0 || settings?.effects == null)
+            return CaptureEffects(session, settings);
+
+        RoomSettings.RoomEffect dirty = null;
+        int logicalCount = 0;
+        for (int i = 0; i < settings.effects.Count; i++)
+        {
+            RoomSettings.RoomEffect effect = settings.effects[i];
+            if (EffectPreviewRuntime.IsPreviewEffect(effect))
+                continue;
+
+            if (logicalCount == dirtyLogicalIndex)
+                dirty = effect;
+            logicalCount++;
+        }
+
+        // A row-level hint is valid only while collection shape is unchanged. Any add/remove or
+        // preview mismatch safely widens to the normal Effects capture instead of patching by index.
+        if (logicalCount != previous.Length || dirtyLogicalIndex >= logicalCount)
+            return CaptureEffects(session, settings);
+
+        EditorRoomEffectSnapshot[] next = (EditorRoomEffectSnapshot[])previous.Clone();
+        RoomSettingsPage page = session?.Owner?.activePage as RoomSettingsPage;
+        next[dirtyLogicalIndex] = CaptureEffect(page, dirty, dirtyLogicalIndex);
+        return next;
+    }
+
+    private static EditorRoomEffectSnapshot CaptureEffect(
+        RoomSettingsPage page,
+        RoomSettings.RoomEffect effect,
+        int logicalIndex)
+    {
+        if (effect == null)
+            return new EditorRoomEffectSnapshot { Index = logicalIndex, Type = "<null>" };
+
+        int count = Math.Max(1, RoomSettings.RoomEffect.GetSliderCount(effect.type));
+        string[] names = new string[count];
+        float[] values = new float[count];
+        for (int slider = 0; slider < count; slider++)
+        {
+            names[slider] = RoomSettings.RoomEffect.GetSliderName(effect.type, slider) ?? ("Value " + (slider + 1));
+            values[slider] = effect.GetAmount(slider);
+        }
+
+        return new EditorRoomEffectSnapshot
+        {
+            Index = logicalIndex,
+            Type = effect.type?.value ?? string.Empty,
+            Category = EffectCategory(page, effect.type),
+            Inherited = effect.inherited,
+            OverWrite = effect.overWrite,
+            Save = effect.save,
+            SliderNames = names,
+            Values = values
+        };
     }
 
     private static void CaptureAvailableEffects(
