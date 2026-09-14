@@ -47,7 +47,6 @@ internal static class SoundEditorActions
                 if (existing != null && !existing.inherited && existing.type?.Index == soundType &&
                     string.Equals(existing.sample, sample, StringComparison.Ordinal))
                 {
-                    // Selecting an already-existing non-spot sound is presentation state only.
                     SoundEditorStateHub.Get(session)?.SetSelectedIndex(i);
                     return false;
                 }
@@ -115,15 +114,16 @@ internal static class SoundEditorActions
         if (before == null) return false;
 
         settings.ambientSounds.RemoveAt(index);
-        RefreshSoundPage(session);
         IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, sound);
-
-        if (SnapshotHistoryEntry.TryCreate(
+        if (!SnapshotHistoryEntry.TryCreate(
                 "Delete sound " + (sound.sample ?? string.Empty),
                 before,
                 after,
                 out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+            return false;
+
+        RefreshSoundPage(session);
+        session.History.Push(entry);
 
         SoundEditorState state = SoundEditorStateHub.Get(session);
         if (state != null)
@@ -339,7 +339,6 @@ internal static class SoundEditorActions
 
         if (changed == 0) return false;
 
-        RefreshSoundPage(session);
         IEditorStateSnapshot after = AmbientSoundCollectionStateSnapshot.Capture(settings);
         if (!SnapshotHistoryEntry.TryCreate(
                 "Apply sound group " + (group.Name ?? group.Id),
@@ -348,6 +347,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
+        RefreshSoundPage(session);
         session.History.Push(entry);
         SoundEditorStateHub.Get(session)?.SetSelectedIndex(lastIndex);
         return true;
@@ -474,11 +474,11 @@ internal static class SoundEditorActions
         IEditorStateSnapshot before = SingleAmbientSoundStateSnapshot.Capture(settings, target);
         if (before == null || !mutation()) return false;
 
-        if (refreshSoundPage) RefreshSoundPage(session);
         IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, target);
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
+        if (refreshSoundPage) RefreshSoundPage(session);
         session.History.Push(entry);
         return true;
     }
