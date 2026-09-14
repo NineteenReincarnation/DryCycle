@@ -116,9 +116,9 @@ internal static class WorldSubregionSelector
         EditorMapPresentationSnapshot snapshot,
         EditorMapRoomSnapshot room)
     {
-        // This is intentionally a full room-inspector replacement rather than an overlay on top of
-        // the old InputText. Keeping two widgets bound to the same property would make the free-form
-        // editor look authoritative even though the selector is the intended workflow.
+        // This remains a full replacement because the selector must replace the old free-form
+        // subregion InputText. Any feature owned by the room inspector must therefore also be
+        // composed here; otherwise the replacement silently hides later additions to the base view.
         if (snapshot == null || room == null)
         {
             orig(snapshot, room);
@@ -197,6 +197,11 @@ internal static class WorldSubregionSelector
                 : DevToolUiSettings.T("等待房间数据", "waiting for room data")) +
             " · " + (visual.Curves?.Length ?? 0) + DevToolUiSettings.T(" 条曲面层", " curve layer(s)"),
             true);
+
+        // WorldSubregionSelector replaces the entire room inspector instead of calling the base
+        // implementation. Keep creature authoring explicitly in this composition so the selector
+        // cannot hide the creature-spawn/lineage editor that the base inspector owns.
+        WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
         DrawRoomConnections(snapshot, room.RoomIndex);
@@ -287,7 +292,10 @@ internal static class WorldSubregionSelector
 
         ImGui.Spacing();
         if (empty || duplicate) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("创建并应用", "Create & Apply"), "CreateWorldSubregionConfirm", DevToolButtonTone.Primary))
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("创建并应用", "Create & Apply"),
+                "CreateWorldSubregionConfirm",
+                DevToolButtonTone.Primary))
         {
             AssignSubregion(newSubregionRoom, normalized);
             ImGui.CloseCurrentPopup();
@@ -297,7 +305,10 @@ internal static class WorldSubregionSelector
         if (empty || duplicate) ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("取消", "Cancel"), "CreateWorldSubregionCancel", DevToolButtonTone.Subtle))
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("取消", "Cancel"),
+                "CreateWorldSubregionCancel",
+                DevToolButtonTone.Subtle))
         {
             ImGui.CloseCurrentPopup();
             newSubregionName = string.Empty;
