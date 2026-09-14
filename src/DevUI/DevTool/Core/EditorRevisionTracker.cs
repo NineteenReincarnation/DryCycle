@@ -34,8 +34,8 @@ internal enum EditorRevisionKind
 internal sealed class EditorRevisionTracker
 {
     private readonly long[] revisions = new long[(int)EditorRevisionKind.Count];
-    private bool presentationModeObserved;
-    private bool vanillaOwnedPresentation;
+    private bool presentationOwnershipObserved;
+    private bool rebuiltPresentationWasActive;
 
     internal EditorRevisionTracker()
     {
@@ -73,18 +73,18 @@ internal sealed class EditorRevisionTracker
     }
 
     /// <summary>
-    /// Called only from DevUI.Update. The volatile presentation flag may be written by RWImGui's
-    /// render callback, but revision mutation stays on Rain World's main thread. Returning from full
-    /// vanilla presentation invalidates every channel exactly once so edits performed while rebuilt
-    /// snapshots were intentionally dormant become visible immediately.
+    /// Called only from DevUI.Update. Frontend attachment / UI-mode / overlay-visibility flags may be
+    /// written from the RWImGui side, but revision mutation remains on Rain World's main thread.
+    /// Any dormant -> active transition invalidates every channel once, making edits performed while
+    /// rebuilt snapshots were intentionally sleeping visible on the first returned frame.
     /// </summary>
-    internal void ObservePresentationMode(bool useVanilla)
+    internal void ObservePresentationOwnership(bool rebuiltPresentationActive)
     {
         bool returningToRebuilt =
-            presentationModeObserved && vanillaOwnedPresentation && !useVanilla;
+            presentationOwnershipObserved && !rebuiltPresentationWasActive && rebuiltPresentationActive;
 
-        presentationModeObserved = true;
-        vanillaOwnedPresentation = useVanilla;
+        presentationOwnershipObserved = true;
+        rebuiltPresentationWasActive = rebuiltPresentationActive;
 
         if (returningToRebuilt)
             MarkAll();
@@ -148,25 +148,35 @@ internal static class EditorRevisionHub
     }
 
     /// <summary>
+    /// True only while the rebuilt surface is actually drawable. Full Vanilla mode, a detached
+    /// RWImGui bridge, and Escape-hidden overlay periods intentionally put immutable snapshot
+    /// production to sleep. Re-entry is handled by ObservePresentationMode on the main thread.
+    /// </summary>
+    internal static bool IsRebuiltPresentationActive(EditorSession session) =>
+        session?.Owner != null &&
+        EditorInputRouter.FrontendAttached &&
+        !EditorUiModeState.UseVanilla &&
+        !EditorUiModeState.OverlayHidden;
+
+    /// <summary>
     /// Main-thread ownership observation. Call once per DevUI update before any presentation hub
     /// reads revisions.
     /// </summary>
     internal static void ObservePresentationMode(EditorSession session)
     {
         if (session == null) return;
-        Tracker(session).ObservePresentationMode(EditorUiModeState.UseVanilla);
+        Tracker(session).ObservePresentationOwnership(IsRebuiltPresentationActive(session));
     }
 
     /// <summary>
-    /// Reports whether the current rebuilt workspace must be treated as an opaque live writer.
-    /// Full vanilla presentation is intentionally excluded: rebuilt windows are not drawn there,
-    /// and ObservePresentationMode invalidates every channel once ownership returns to New UI.
-    /// Explicit legacy panels inside New UI, legacy transactions, diagnostics and unknown custom
-    /// Pages remain live because the rebuilt surface is visible while those writers are active.
+    /// Reports whether the currently visible rebuilt workspace must be treated as an opaque live
+    /// writer. Dormant presentation periods are excluded because all channels are invalidated once
+    /// when rebuilt ownership returns. Explicit legacy panels inside New UI, pending legacy
+    /// transactions, diagnostics and unknown custom Pages remain live because both models are active.
     /// </summary>
     internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
     {
-        if (session?.Owner == null || !EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla)
+        if (!IsRebuiltPresentationActive(session))
             return false;
 
         if (session.LegacyUiVisible || session.LegacyTransactions.HasPendingTransaction)
