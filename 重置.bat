@@ -5,21 +5,14 @@ title DryCycle Full Reset and Recloning
 rem ============================================================
 rem DryCycle FULL RESET
 rem
-rem This script intentionally destroys the entire local DryCycle
-rem directory and clones a brand-new copy of branch main.
+rem Deletes EVERYTHING INSIDE the local DryCycle folder, then
+rem clones a brand-new copy of origin/main into the same folder.
 rem
-rem NOTHING inside the target directory is preserved:
-rem   - tracked changes
-rem   - untracked files
-rem   - ignored files
-rem   - local commits / branches
-rem   - mod assets
-rem   - lib files
-rem   - build outputs and caches
-rem   - the local .git directory
-rem
-rem The script copies itself to %%TEMP%% before deletion so it can
-rem safely remove the directory that originally contained this BAT.
+rem Important Windows detail:
+rem Explorer / OneDrive may keep the DryCycle DIRECTORY itself open.
+rem Therefore this script does NOT require deleting the outer folder.
+rem It removes every child entry, including .git/hidden/ignored files,
+rem verifies the folder is empty, and clones main into that empty folder.
 rem ============================================================
 
 set "REPO_URL=https://github.com/NineteenReincarnation/DryCycle.git"
@@ -27,12 +20,6 @@ set "BRANCH=main"
 
 if /I "%~1"=="--worker" goto :worker
 
-rem ------------------------------------------------------------
-rem Resolve target directory.
-rem If this BAT is inside a Git checkout, reset that directory.
-rem Otherwise default to %%USERPROFILE%%\Desktop\DryCycle.
-rem An explicit first argument may override the target directory.
-rem ------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%.") do set "SCRIPT_DIR=%%~fI"
 
@@ -57,13 +44,12 @@ echo Branch     : %BRANCH%
 echo Target     : %TARGET%
 echo.
 echo WARNING:
-echo   EVERYTHING inside the target directory will be deleted.
+echo   EVERYTHING INSIDE the target folder will be deleted.
+echo   This includes .git, tracked changes, untracked files,
+echo   ignored files, local commits, mod assets, lib files and caches.
 echo   There is NO backup and NO recovery branch.
 echo.
 
-rem ------------------------------------------------------------
-rem Preflight before destroying anything.
-rem ------------------------------------------------------------
 where git >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Git was not found in PATH.
@@ -80,17 +66,13 @@ if errorlevel 1 (
 echo [OK] Remote main is reachable.
 echo.
 
-choice /C YN /N /M "Delete the ENTIRE local DryCycle directory and clone main again? [Y/N]: "
+choice /C YN /N /M "Delete ALL local DryCycle contents and clone main again? [Y/N]: "
 if errorlevel 2 (
     echo.
     echo Cancelled. Nothing was deleted.
     goto :done_outer
 )
 
-rem ------------------------------------------------------------
-rem Relaunch from TEMP. The original cmd process must exit before
-rem the worker removes the repository directory.
-rem ------------------------------------------------------------
 set "TEMP_BAT=%TEMP%\DryCycleFullReset_%RANDOM%_%RANDOM%.bat"
 copy /y "%~f0" "%TEMP_BAT%" >nul 2>&1
 if errorlevel 1 (
@@ -109,11 +91,7 @@ set "TARGET=%~2"
 if not defined TARGET goto :worker_fail
 for %%I in ("%TARGET%") do set "TARGET=%%~fI"
 
-rem The worker must not keep its current directory inside TARGET.
 cd /d "%TEMP%" >nul 2>&1
-
-rem Give the original cmd.exe a moment to release its working dir
-rem and the original BAT file before removing the repository.
 >nul 2>&1 timeout /t 1 /nobreak
 
 call :validate_target "%TARGET%"
@@ -128,51 +106,73 @@ echo Target: %TARGET%
 echo.
 
 rem ------------------------------------------------------------
-rem 1. Delete the entire local repository directory.
+rem 1. Keep the outer directory, but delete every entry inside it.
+rem This avoids Windows Explorer / OneDrive locking the directory
+rem object itself while still producing a completely empty checkout.
 rem ------------------------------------------------------------
-echo [1/3] Deleting ALL local files...
-if exist "%TARGET%" (
-    attrib -R -S -H "%TARGET%\*" /S /D >nul 2>&1
-    rd /s /q "%TARGET%" >nul 2>&1
-)
-
-rem PowerShell fallback handles stubborn read-only/hidden entries.
-if exist "%TARGET%" (
-    set "DRYCYCLE_RESET_TARGET=%TARGET%"
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "Remove-Item -LiteralPath $env:DRYCYCLE_RESET_TARGET -Recurse -Force -ErrorAction Stop" >nul 2>&1
-)
-
-if exist "%TARGET%" (
-    echo [ERROR] Could not completely delete the target directory.
-    echo Close Visual Studio, terminals, Explorer windows, or other programs
-    echo that may be holding files under:
-    echo   %TARGET%
+echo [1/3] Deleting ALL contents inside DryCycle...
+if not exist "%TARGET%" mkdir "%TARGET%" >nul 2>&1
+if not exist "%TARGET%" (
+    echo [ERROR] Could not create target directory.
     goto :worker_fail
 )
-echo [OK] Local directory deleted completely.
+
+set "DRYCYCLE_RESET_TARGET=%TARGET%"
+
+rem Remove read-only/system/hidden attributes where possible first.
+attrib -R -S -H "%TARGET%\*" /S /D >nul 2>&1
+
+rem PowerShell removes normal, hidden and .git entries but leaves the
+rem outer DryCycle directory intact, so Explorer may keep viewing it.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$p=$env:DRYCYCLE_RESET_TARGET; Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Remove-Item -Recurse -Force -ErrorAction Stop" >nul 2>&1
+
+rem CMD fallback for anything PowerShell did not remove.
+del /f /s /q "%TARGET%\*" >nul 2>&1
+for /d %%D in ("%TARGET%\*") do rd /s /q "%%~fD" >nul 2>&1
+
+rem Verify there is literally nothing left inside the directory.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$p=$env:DRYCYCLE_RESET_TARGET; if((Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Measure-Object).Count -ne 0){exit 2}" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Some local files are still locked and could not be deleted:
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$p=$env:DRYCYCLE_RESET_TARGET; Get-ChildItem -LiteralPath $p -Force | ForEach-Object { Write-Host ('  ' + $_.FullName) }"
+    echo.
+    echo Close Visual Studio, terminals, Git clients, or any program that
+    echo is holding an actual FILE inside DryCycle, then run this BAT again.
+    echo Explorer may stay open on the empty DryCycle folder.
+    goto :worker_fail
+)
+
+echo [OK] DryCycle contents are completely empty.
+echo [OK] The outer DryCycle folder was intentionally kept.
 echo.
 
 rem ------------------------------------------------------------
-rem 2. Clone a completely fresh main checkout.
+rem 2. Git supports cloning into an existing directory when it is empty.
 rem ------------------------------------------------------------
-echo [2/3] Cloning a fresh copy of main...
+echo [2/3] Cloning a fresh copy of main into the empty folder...
 git clone --branch "%BRANCH%" --single-branch "%REPO_URL%" "%TARGET%"
 if errorlevel 1 (
     echo.
     echo [ERROR] Fresh clone failed.
-    echo [INFO] The old local repository was already deleted.
+    echo [INFO] The old local contents were already removed.
+    echo [INFO] The DryCycle directory itself was preserved.
     echo [INFO] Fix the network/Git problem and run this BAT again.
-    if exist "%TARGET%" rd /s /q "%TARGET%" >nul 2>&1
     goto :worker_fail
 )
 echo [OK] Fresh clone completed.
 echo.
 
 rem ------------------------------------------------------------
-rem 3. Verify branch, commit identity, and clean working tree.
+rem 3. Verify exact main identity and a clean working tree.
 rem ------------------------------------------------------------
 echo [3/3] Verifying fresh checkout...
+set "LOCAL_BRANCH="
+set "LOCAL_HEAD="
+set "REMOTE_HEAD="
+set "DIRTY="
 for /f "delims=" %%B in ('git -C "%TARGET%" branch --show-current 2^>nul') do set "LOCAL_BRANCH=%%B"
 for /f "delims=" %%L in ('git -C "%TARGET%" rev-parse HEAD 2^>nul') do set "LOCAL_HEAD=%%L"
 for /f "delims=" %%R in ('git -C "%TARGET%" rev-parse origin/%BRANCH% 2^>nul') do set "REMOTE_HEAD=%%R"
@@ -181,7 +181,6 @@ if /I not "!LOCAL_BRANCH!"=="%BRANCH%" (
     echo [ERROR] Expected branch %BRANCH%, got !LOCAL_BRANCH!.
     goto :worker_fail
 )
-
 if not defined LOCAL_HEAD (
     echo [ERROR] Could not read local HEAD.
     goto :worker_fail
@@ -218,7 +217,6 @@ echo Path   : %TARGET%
 echo.
 pause
 
-rem Delete this temporary worker after cmd.exe exits.
 start "" /b cmd.exe /d /c "timeout /t 2 /nobreak ^>nul ^& del /f /q ""%~f0"""
 exit /b 0
 
@@ -234,23 +232,19 @@ for %%I in ("%CHECK_TARGET%") do (
     set "CHECK_NAME=%%~nxI"
 )
 
-rem Hard stops against catastrophic path mistakes.
 if /I "!CHECK_TARGET!"=="%SystemDrive%\" (
-    echo [ERROR] Refusing to delete a drive root.
+    echo [ERROR] Refusing to reset a drive root.
     exit /b 1
 )
 if /I "!CHECK_TARGET!"=="%USERPROFILE%" (
-    echo [ERROR] Refusing to delete the user profile.
+    echo [ERROR] Refusing to reset the user profile.
     exit /b 1
 )
 if /I "!CHECK_TARGET!"=="%USERPROFILE%\Desktop" (
-    echo [ERROR] Refusing to delete the Desktop directory.
+    echo [ERROR] Refusing to reset the Desktop directory.
     exit /b 1
 )
 
-rem A normal standalone reset targets a folder literally named DryCycle.
-rem If the checkout has another folder name, only accept it when its
-rem origin remote proves that it is this DryCycle repository.
 if /I "!CHECK_NAME!"=="DryCycle" exit /b 0
 
 if exist "!CHECK_TARGET!\.git" (
