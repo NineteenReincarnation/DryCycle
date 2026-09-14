@@ -10,17 +10,43 @@ namespace DryCycle.DevUI.DevTool.Room;
 public static class RoomEditorPresentationHub
 {
     private static volatile EditorRoomSettingsSnapshot current = EditorRoomSettingsSnapshot.Empty;
+    private static EditorSession observedSession;
+    private static global::RoomSettings observedSettings;
+    private static long observedRevision;
 
     public static EditorRoomSettingsSnapshot Current => current;
 
     internal static void Publish(EditorSession session)
     {
-        current = session?.ToolMode == EditorToolMode.Room
-            ? RoomSettingsPresentation.Capture(session)
-            : EditorRoomSettingsSnapshot.Empty;
+        if (session?.ToolMode != EditorToolMode.Room || session.RoomSettings == null)
+        {
+            Clear();
+            return;
+        }
+
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
+
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Room);
+        if (ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedSettings, session.RoomSettings) &&
+            observedRevision == revision &&
+            current.Available)
+            return;
+
+        current = RoomSettingsPresentation.Capture(session);
+        observedSession = session;
+        observedSettings = session.RoomSettings;
+        observedRevision = revision;
     }
 
-    internal static void Clear() => current = EditorRoomSettingsSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorRoomSettingsSnapshot.Empty;
+        observedSession = null;
+        observedSettings = null;
+        observedRevision = 0L;
+    }
 }
 
 public enum RoomEditorCommandKind
@@ -112,6 +138,12 @@ public static class RoomEditorCommandQueue
                             RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                 }
+
+                // Room commands are sparse user actions. Invalidating after a processed command is
+                // substantially cheaper and more deterministic than rebuilding the entire settings
+                // snapshot every frame, while harmless no-op commands merely cause one extra build.
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
             }
             catch (Exception error)
             {
