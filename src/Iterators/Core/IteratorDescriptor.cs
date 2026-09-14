@@ -40,6 +40,15 @@ public sealed class IteratorDescriptor
         Func<IteratorContext, IteratorRuntime> runtimeFactory,
         Func<IteratorContext, IteratorBody> bodyFactory,
         Func<IteratorContext, IteratorArm> armFactory)
+        : this(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, null)
+    {
+    }
+
+    /// <summary>完整组件工厂入口；保留已有四、五、七参数构造签名。</summary>
+    public IteratorDescriptor(IteratorID id, IEnumerable<string> rooms, string displayName,
+        IReadOnlyDictionary<string, string> metadata, Func<IteratorContext, IteratorRuntime> runtimeFactory,
+        Func<IteratorContext, IteratorBody> bodyFactory, Func<IteratorContext, IteratorArm> armFactory,
+        Func<IteratorContext, IteratorGraphics> graphicsFactory)
     {
         ID = id ?? throw new ArgumentNullException(nameof(id));
         if (rooms == null)
@@ -49,6 +58,7 @@ public sealed class IteratorDescriptor
         RuntimeFactory = runtimeFactory ?? CreateDefaultRuntime;
         BodyFactory = bodyFactory ?? CreateDefaultBody;
         ArmFactory = armFactory ?? CreateDefaultArm;
+        GraphicsFactory = graphicsFactory ?? CreateDefaultGraphics;
         Rooms = new ReadOnlyCollection<string>(new List<string>(rooms));
         var metadataCopy = new Dictionary<string, string>(StringComparer.Ordinal);
         if (metadata != null)
@@ -83,10 +93,12 @@ public sealed class IteratorDescriptor
 
     public Func<IteratorContext, IteratorBody> BodyFactory { get; }
     public Func<IteratorContext, IteratorArm> ArmFactory { get; }
+    public Func<IteratorContext, IteratorGraphics> GraphicsFactory { get; }
 
     private static IteratorRuntime CreateDefaultRuntime(IteratorContext context) => new(context);
     private static IteratorBody CreateDefaultBody(IteratorContext context) => new StandardIteratorBody(context);
     private static IteratorArm CreateDefaultArm(IteratorContext context) => new NoArm(context);
+    private static IteratorGraphics CreateDefaultGraphics(IteratorContext context) => new StandardIteratorGraphics(context);
 
     /// <summary>验证定义本身。不会注册或检查全局冲突；全局冲突由 Registry.Register 检查。</summary>
     public void Validate()

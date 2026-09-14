@@ -12,6 +12,7 @@
     <DeployToGame>false</DeployToGame>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System.Drawing" />
     <ProjectReference Include="../../src/DryCycle.csproj" AdditionalProperties="DeployToGame=false;BuildRWImGuiBridge=false" />
     <Reference Include="PUBLIC-Assembly-CSharp">
       <HintPath>$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll</HintPath>

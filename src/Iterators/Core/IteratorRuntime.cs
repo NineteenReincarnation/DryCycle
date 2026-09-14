@@ -38,6 +38,7 @@ public class IteratorRuntime
     public IteratorID ID => Descriptor.ID;
     public IteratorBody Body { get; private set; }
     public IteratorArm Arm { get; private set; }
+    public IteratorGraphics Graphics { get; private set; }
     public IteratorLifecycle State { get; private set; } = IteratorLifecycle.RuntimeCreated;
     public bool IsInitialized => State == IteratorLifecycle.Initialized || State == IteratorLifecycle.Active;
     public bool IsActive => State == IteratorLifecycle.Active;
@@ -72,6 +73,8 @@ public class IteratorRuntime
         try
         {
             if (!InitializeBodyAndArm()) return false;
+            InitializeGraphics();
+            if (State != IteratorLifecycle.RuntimeCreated) return false;
             Context.RefreshPlayers();
             Context.Logger = _createLog;
             OnCreate();
@@ -158,6 +161,8 @@ public class IteratorRuntime
             if (!IsActive) return;
             Body.AfterPhysics();
             if (!IsActive) return;
+            Graphics?.Update();
+            if (!IsActive) return;
             Context.Logger = _lateUpdateLog;
             OnLateUpdate();
             if (IsActive) UpdateCount++;
@@ -192,6 +197,7 @@ public class IteratorRuntime
         {
             try
             {
+                Graphics?.Release();
                 Arm?.Release();
                 Body?.Release();
                 _release?.Invoke(this);
@@ -208,5 +214,31 @@ public class IteratorRuntime
                 _destroyLog.Info($"Destroyed ({reason}).");
             }
         }
+    }
+
+    private void InitializeGraphics()
+    {
+        var logger = _initializeLog.ForModule("Graphics");
+        try
+        {
+            IteratorGraphics graphics = Descriptor.GraphicsFactory(Context);
+            if (graphics == null || !ReferenceEquals(graphics.Context, Context) || graphics.Claimed || graphics.IsDestroyed)
+                throw new InvalidOperationException("GraphicsFactory must return a new Graphics built with the supplied Context.");
+            graphics.Claimed = true; Graphics = graphics;
+            if (State != IteratorLifecycle.RuntimeCreated) { graphics.Release(); return; }
+            graphics.Initialize();
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Graphics initialization failed; trying the standard appearance.", exception);
+            Graphics?.Release();
+            if (State != IteratorLifecycle.RuntimeCreated) return;
+            Graphics = new StandardIteratorGraphics(Context) { Claimed = true };
+            try { Graphics.Initialize(); }
+            catch (Exception fallbackFailure) { Graphics.Disable("Fallback", fallbackFailure); }
+        }
+        if (State != IteratorLifecycle.RuntimeCreated) return;
+        try { (Context.Oracle as IteratorHost)?.AttachGraphics(); }
+        catch (Exception exception) { Graphics.Disable("Attach", exception); }
     }
 }

@@ -6,7 +6,7 @@ namespace DryCycle.Iterators;
 
 /// <summary>
 /// Oracle 实体适配器，不承载剧情/AI。Body 与 Arm 由 Runtime 组合调度；
-/// 仅保留游戏物理适配，Graphics 在第四阶段接入。
+/// 游戏物理与相机图形均由内部适配器连接。
 /// </summary>
 internal sealed class IteratorHost : Oracle
 {
@@ -100,8 +100,24 @@ internal sealed class IteratorHost : Oracle
 
     public override void InitiateGraphicsModule()
     {
-        // Phase 4 supplies the graphics component. Never invoke OracleGraphics here:
-        // vanilla graphics assumes an OracleArm and one of the vanilla behaviors.
+        // Room.AddObject can request graphics before Runtime has initialized Body.
+        if (graphicsModule == null && _runtime?.Graphics is { IsInitialized: true, IsDestroyed: false, IsEnabled: true } graphics)
+            graphicsModule = new IteratorGraphicsHost(this, graphics);
+    }
+
+    internal void AttachGraphics()
+    {
+        InitiateGraphicsModule();
+        if (graphicsModule == null || room == null || room.drawableObjects.Contains(graphicsModule)) return;
+        room.drawableObjects.Add(graphicsModule);
+        foreach (RoomCamera camera in room.game.cameras)
+            if (ReferenceEquals(camera.room, room)) camera.NewObjectInRoom(graphicsModule);
+    }
+
+    public override void RemoveGraphicsModule()
+    {
+        (graphicsModule as IteratorGraphicsHost)?.ReleaseViews();
+        graphicsModule = null;
     }
 
     public override void Destroy()
@@ -120,6 +136,13 @@ internal sealed class IteratorHost : Oracle
         _runtime = null;
         slatedForDeletetion = true;
         Room currentRoom = room;
+        GraphicsModule drawing = graphicsModule;
+        (drawing as IteratorGraphicsHost)?.ReleaseViews();
+        currentRoom?.drawableObjects?.Remove(drawing);
+        if (!ReferenceEquals(currentRoom, owningRoom)) owningRoom?.drawableObjects?.Remove(drawing);
+        // Oracle.Destroy assumes cameras[0] and cleans only that camera. Our adapter
+        // already detached every view; keep vanilla cleanup away from custom graphics.
+        graphicsModule = null;
         try
         {
             base.Destroy();

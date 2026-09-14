@@ -13,6 +13,7 @@ public class IteratorBuilder
     private Func<IteratorContext, IteratorRuntime> _runtimeFactory;
     private Func<IteratorContext, IteratorBody> _bodyFactory;
     private Func<IteratorContext, IteratorArm> _armFactory;
+    private Func<IteratorContext, IteratorGraphics> _graphicsFactory;
 
     /// <summary>创建一个独立 Builder；扩展 Mod 可通过扩展方法组合公共配置方法。</summary>
     public IteratorBuilder(IteratorID id) => _id = id ?? throw new ArgumentNullException(nameof(id));
@@ -59,7 +60,7 @@ public class IteratorBuilder
     }
 
     /// <summary>验证并创建定义快照；没有 Registry 或 Oracle ExtEnum 副作用。</summary>
-    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory);
+    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory, _graphicsFactory);
 
     /// <summary>设置实例工厂，可注入参数或派生 Runtime；不在 Builder 阶段运行该工厂。</summary>
     public IteratorBuilder Runtime(Func<IteratorContext, IteratorRuntime> factory)
@@ -79,6 +80,13 @@ public class IteratorBuilder
     public IteratorBuilder Arm(Func<IteratorContext, IteratorArm> factory)
     {
         _armFactory = factory ?? throw new ArgumentNullException(nameof(factory));
+        return this;
+    }
+
+    /// <summary>替换整个图形组件，支持自定义身体结构；每个 Runtime 必须创建独立组件。</summary>
+    public IteratorBuilder Graphics(Func<IteratorContext, IteratorGraphics> factory)
+    {
+        _graphicsFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
 

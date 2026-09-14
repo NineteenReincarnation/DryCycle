@@ -50,7 +50,8 @@ internal static class Program
         int core = CoreTests.Run();
         int runtime = RuntimeTests.Run();
         int body = BodyTests.Run();
-        return Math.Max(Math.Max(core, runtime), body);
+        int graphics = GraphicsTests.Run(_rainWorldDir);
+        return Math.Max(Math.Max(core, runtime), Math.Max(body, graphics));
     }
 
     private static Assembly ResolveGameAssembly(object sender, ResolveEventArgs args)

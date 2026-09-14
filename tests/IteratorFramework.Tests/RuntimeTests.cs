@@ -116,13 +116,13 @@ internal static class RuntimeTests
         Check(scene.Room.updateList.Count == 1 && scene.Room.physicalObjects[1].Count == 1, "one actual room object");
         Check(scene.AbstractRoom.entities.Count == 0, "realization host never enters persistent abstract entities");
         Check(scene.Room.gravity == 0.73f && oracle.mySwarmers.Count == 0 && oracle.myScreen == null && oracle.arm == null, "no vanilla room, swarmer, projection or arm side effects");
-        Check(oracle.oracleBehavior == null && oracle.graphicsModule == null, "no premature vanilla behavior or graphics");
+        Check(oracle.oracleBehavior == null && oracle.graphicsModule is IteratorGraphicsHost, "custom graphics without vanilla behavior");
         Check(ReferenceEquals(runtime.Context.StorySession, scene.Game.session), "story context is available");
         scene.Room.ReadyForAI();
         Check(scene.Room.updateList.Count == 1 && IteratorRuntimes.Active.Count == 1, "repeated readiness does not duplicate host");
         oracle.InitiateGraphicsModule();
         oracle.Update(true);
-        Check(runtime.UpdateCount == 1 && oracle.graphicsModule == null, "host update routes to runtime without vanilla graphics");
+        Check(runtime.UpdateCount == 1 && oracle.graphicsModule is IteratorGraphicsHost, "host update routes to runtime with custom graphics");
     }
 
     private static void Lifecycle()

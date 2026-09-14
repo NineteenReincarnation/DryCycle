@@ -55,6 +55,7 @@ internal sealed class Plugin : BaseUnityPlugin
         Logger = base.Logger;
         Iterators.IteratorLogBridge.Enable(Logger);
         Iterators.IteratorHooks.Install();
+        Iterators.PwnIteratorExample.Enable();
 
         if (!_contentRegistered)
         {
@@ -91,6 +92,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     public void OnDisable()
     {
+        Iterators.PwnIteratorExample.Unregister();
         Iterators.IteratorHooks.Uninstall();
         Iterators.IteratorLogBridge.Disable();
         AIDebuggerRuntime.Uninstall();
