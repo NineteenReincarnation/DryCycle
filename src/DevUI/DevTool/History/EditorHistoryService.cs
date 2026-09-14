@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.History;
 
@@ -47,6 +48,7 @@ public sealed class EditorHistoryService
     private EditorDocumentKey activeDocument;
     private bool hasActiveDocument;
     private long revision = 1L;
+    private int lastPublishedInvalidationFrame = int.MinValue;
 
     public EditorHistoryService(int capacity)
     {
@@ -143,8 +145,21 @@ public sealed class EditorHistoryService
         if (session == null || !ReferenceEquals(session.History, this))
             return;
 
-        EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
-        EditorRevisionHub.MarkWorkspace(session);
+        // A command batch can legitimately push several small history entries before presentation
+        // runs once at the end of the frame. One Shell/document-family invalidation is sufficient for
+        // all of them. Keep History.Revision exact for stack/UI semantics, but coalesce only the
+        // downstream presentation clocks so the revision layer does not reintroduce duplicate dirties.
+        int frame = Time.frameCount;
+        if (lastPublishedInvalidationFrame != frame)
+        {
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+            EditorRevisionHub.MarkWorkspace(session);
+            lastPublishedInvalidationFrame = frame;
+        }
+
+        // Always advance the retained History key to the exact final stack revision, even when the
+        // presentation invalidation above was coalesced. Otherwise CorePresentation would see the
+        // second/third push as a new edge and publish the same semantic dirty again later this frame.
         EditorPresentationHub.ObservePublishedHistoryRevision(session, revision);
 
         // A successful model-history mutation also means that any retained vanilla screen-space
