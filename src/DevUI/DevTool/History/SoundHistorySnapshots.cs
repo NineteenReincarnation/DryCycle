@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
@@ -59,74 +57,40 @@ internal sealed class SoundRoomVolumeStateSnapshot : IEditorStateSnapshot
 }
 
 /// <summary>
-/// In-memory snapshot of the AmbientSound collection. Used for true batch mutations such as applying
-/// a Sound Group, where several existing members may be replaced and several new members inserted in
-/// one history transaction. Object identity, list order and each sound's lossless save string are all
-/// retained, allowing Undo/Redo without RoomSettings.Save, temporary files or reparsing unrelated
-/// room settings.
+/// In-memory snapshot of AmbientSound collection membership/order. ApplyGroup only replaces members;
+/// it never mutates the sound objects that it removes. Retaining object references is therefore both
+/// more exact and safer than round-tripping every sound through ToString/FromString, especially for
+/// third-party AmbientSound subclasses whose serialization contract is unknown to DryCycle.
 /// </summary>
 internal sealed class AmbientSoundCollectionStateSnapshot : IEditorStateSnapshot
 {
-    private sealed class Entry
-    {
-        internal AmbientSound Target;
-        internal string Serialized;
-        internal bool Inherited;
-        internal bool OverWrite;
-    }
-
-    private static readonly string[] SoundSeparator = { "><" };
-
     private readonly RoomSettings settings;
-    private readonly Entry[] entries;
+    private readonly AmbientSound[] members;
+    private readonly string fingerprint;
 
-    private AmbientSoundCollectionStateSnapshot(RoomSettings settings, Entry[] entries, string fingerprint)
+    private AmbientSoundCollectionStateSnapshot(RoomSettings settings, AmbientSound[] members, string fingerprint)
     {
         this.settings = settings;
-        this.entries = entries;
-        Fingerprint = fingerprint;
+        this.members = members;
+        this.fingerprint = fingerprint;
     }
 
     public string Kind =>
         "AmbientSoundCollection:" + (settings == null ? 0 : RuntimeHelpers.GetHashCode(settings));
 
-    public string Fingerprint { get; }
+    public string Fingerprint => fingerprint;
 
     internal static AmbientSoundCollectionStateSnapshot Capture(RoomSettings settings)
     {
         if (settings?.ambientSounds == null)
             return null;
 
-        Entry[] entries = new Entry[settings.ambientSounds.Count];
-        StringBuilder fingerprint = new();
+        AmbientSound[] members = settings.ambientSounds.ToArray();
+        string[] ids = new string[members.Length];
+        for (int i = 0; i < members.Length; i++)
+            ids[i] = members[i] == null ? "null" : RuntimeHelpers.GetHashCode(members[i]).ToString(CultureInfo.InvariantCulture);
 
-        for (int i = 0; i < settings.ambientSounds.Count; i++)
-        {
-            AmbientSound sound = settings.ambientSounds[i];
-            if (sound == null)
-            {
-                entries[i] = new Entry();
-                fingerprint.Append(i).Append(":null;");
-                continue;
-            }
-
-            string serialized = sound.ToString() ?? string.Empty;
-            entries[i] = new Entry
-            {
-                Target = sound,
-                Serialized = serialized,
-                Inherited = sound.inherited,
-                OverWrite = sound.overWrite
-            };
-
-            fingerprint.Append(i).Append(':')
-                .Append(RuntimeHelpers.GetHashCode(sound)).Append(':')
-                .Append(sound.inherited ? '1' : '0').Append(':')
-                .Append(sound.overWrite ? '1' : '0').Append(':')
-                .Append(serialized).Append(';');
-        }
-
-        return new AmbientSoundCollectionStateSnapshot(settings, entries, fingerprint.ToString());
+        return new AmbientSoundCollectionStateSnapshot(settings, members, string.Join("|", ids));
     }
 
     public IEditorStateSnapshot CaptureCurrent(EditorSession session) =>
@@ -140,17 +104,11 @@ internal sealed class AmbientSoundCollectionStateSnapshot : IEditorStateSnapshot
         try
         {
             settings.ambientSounds.Clear();
-            for (int i = 0; i < entries.Length; i++)
+            for (int i = 0; i < members.Length; i++)
             {
-                Entry entry = entries[i];
-                AmbientSound sound = entry?.Target;
-                if (sound == null)
-                    continue;
-
-                sound.FromString((entry.Serialized ?? string.Empty).Split(SoundSeparator, StringSplitOptions.None));
-                sound.inherited = entry.Inherited;
-                sound.overWrite = entry.OverWrite;
-                settings.ambientSounds.Add(sound);
+                AmbientSound sound = members[i];
+                if (sound != null)
+                    settings.ambientSounds.Add(sound);
             }
 
             // Collection shape changes require the vanilla compatibility backend to recreate its
