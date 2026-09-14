@@ -81,11 +81,21 @@ public static class MapEditorPresentationHub
         internal bool AmbiguousPair;
     }
 
+    // Revision invalidation is the normal fast path. The full semantic fingerprint remains as a
+    // bounded compatibility audit for external code that mutates map data without using DryCycle's
+    // commands. At 40 FPS this checks roughly every 0.75 s on otherwise completely stable maps.
+    private const int IntegrityAuditInterval = 30;
+
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
+    private static EditorSession observedSession;
     private static MapPage observedPage;
     private static global::World observedWorld;
+    private static long observedRevision;
     private static ulong observedFingerprint;
     private static int observedWorldTextRevision = int.MinValue;
+    private static int observedCurrentRoomIndex = int.MinValue;
+    private static int observedSelectedRoomIndex = int.MinValue;
+    private static int framesUntilIntegrityAudit = IntegrityAuditInterval;
     private static bool retainedValid;
 
     public static EditorMapPresentationSnapshot Current => current;
@@ -103,15 +113,59 @@ public static class MapEditorPresentationHub
         }
 
         MapEditorState state = MapEditorStateHub.Get(session);
-        ulong fingerprint = ComputePresentationFingerprint(session, page, state);
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
+
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
         int worldTextRevision = WorldTextRegistry.Revision;
-        if (retainedValid &&
+        int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
+        int selectedRoomIndex = state?.SelectedRoomIndex ?? -1;
+
+        bool fastStable =
+            retainedValid &&
+            ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedPage, page) &&
             ReferenceEquals(observedWorld, page.world) &&
-            observedFingerprint == fingerprint &&
+            observedRevision == revision &&
             observedWorldTextRevision == worldTextRevision &&
-            current.Available)
-            return;
+            observedCurrentRoomIndex == currentRoomIndex &&
+            observedSelectedRoomIndex == selectedRoomIndex &&
+            current.Available;
+
+        ulong fingerprint;
+        if (fastStable)
+        {
+            framesUntilIntegrityAudit--;
+            if (framesUntilIntegrityAudit > 0)
+                return;
+
+            framesUntilIntegrityAudit = IntegrityAuditInterval;
+            fingerprint = ComputePresentationFingerprint(session, page, state);
+            if (observedFingerprint == fingerprint)
+                return;
+        }
+        else
+        {
+            framesUntilIntegrityAudit = IntegrityAuditInterval;
+            fingerprint = ComputePresentationFingerprint(session, page, state);
+
+            // A revision can be conservatively invalidated by an opaque compatibility writer even
+            // when no semantic value changed. Preserve the existing fingerprint short-circuit so
+            // such a dirty signal does not force allocation of the full room/connection graph.
+            if (retainedValid &&
+                ReferenceEquals(observedSession, session) &&
+                ReferenceEquals(observedPage, page) &&
+                ReferenceEquals(observedWorld, page.world) &&
+                observedFingerprint == fingerprint &&
+                observedWorldTextRevision == worldTextRevision &&
+                current.Available)
+            {
+                observedRevision = revision;
+                observedCurrentRoomIndex = currentRoomIndex;
+                observedSelectedRoomIndex = selectedRoomIndex;
+                return;
+            }
+        }
 
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
@@ -125,8 +179,6 @@ public static class MapEditorPresentationHub
                 if (!string.IsNullOrEmpty(name)) disabled.Add(name);
             }
         }
-
-        int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
 
         for (int i = 0; i < page.subNodes.Count; i++)
         {
@@ -172,21 +224,26 @@ public static class MapEditorPresentationHub
             Connections = connections.ToArray()
         };
 
+        observedSession = session;
         observedPage = page;
         observedWorld = page.world;
+        observedRevision = revision;
         observedFingerprint = correctedSelection
             ? ComputePresentationFingerprint(session, page, state)
             : fingerprint;
         // BuildConnections may lazily load world.txt for exact target-node resolution. Capture the
         // post-build revision so that first load does not cause an unnecessary second rebuild.
         observedWorldTextRevision = WorldTextRegistry.Revision;
+        observedCurrentRoomIndex = currentRoomIndex;
+        observedSelectedRoomIndex = state.SelectedRoomIndex;
+        framesUntilIntegrityAudit = IntegrityAuditInterval;
         retainedValid = true;
     }
 
     /// <summary>
-    /// Stable Map frames only execute this allocation-free signature scan. It deliberately hashes
-    /// every source value used by the presentation snapshot so the expensive room/node/connection
-    /// object graph is rebuilt only after a semantic or visual change.
+    /// Allocation-free semantic signature retained as an integrity audit. Normal stable frames are
+    /// filtered by revisions before reaching this scan; the audit periodically detects external
+    /// compatibility writes that cannot participate in DryCycle's revision protocol.
     /// </summary>
     private static ulong ComputePresentationFingerprint(
         EditorSession session,
@@ -250,10 +307,15 @@ public static class MapEditorPresentationHub
 
     private static void ResetRetainedState()
     {
+        observedSession = null;
         observedPage = null;
         observedWorld = null;
+        observedRevision = 0L;
         observedFingerprint = 0UL;
         observedWorldTextRevision = int.MinValue;
+        observedCurrentRoomIndex = int.MinValue;
+        observedSelectedRoomIndex = int.MinValue;
+        framesUntilIntegrityAudit = IntegrityAuditInterval;
         retainedValid = false;
     }
 
@@ -289,7 +351,6 @@ public static class MapEditorPresentationHub
         List<EditorMapConnectionSnapshot> result = new();
         HashSet<long> reservedEndpoints = new();
 
-        // Compatibility with maps authored before exact targets moved into world.txt.
         WorldConnectionEdge[] explicitEdges = WorldTopologyRegistry.GetRegionEdges(world.name);
         for (int i = 0; i < explicitEdges.Length; i++)
         {
@@ -360,8 +421,6 @@ public static class MapEditorPresentationHub
             if (used[i]) continue;
             DirectedConnectionArc arc = arcs[i];
 
-            // <targetExit>Room is already a complete endpoint mapping. Pair only with the exact
-            // reciprocal token; if none exists, this is a valid one-way exact connection.
             if (arc.ToNode >= 0)
             {
                 int exactReverse = -1;
