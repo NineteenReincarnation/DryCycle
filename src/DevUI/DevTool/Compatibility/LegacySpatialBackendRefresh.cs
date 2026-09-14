@@ -6,10 +6,10 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Keeps only the live world/backend part of migrated Sound/Trigger pages synchronized while the
-/// rebuilt frontend owns presentation. Vanilla page Refresh rebuilds every hidden panel and, for
+/// Keeps only the live world/backend part of migrated Objects/Sound/Trigger pages synchronized while
+/// the rebuilt frontend owns presentation. Vanilla page Refresh rebuilds every hidden panel and, for
 /// SoundPage, tears down every AmbientSoundPlayer even when one scalar changed. The rebuilt editor
-/// only needs spatial handles plus the actual ambient-audio runtime to stay live.
+/// only needs object/spatial handles plus the actual ambient-audio runtime to stay live.
 ///
 /// This class never runs before the page's first ordinary materialization and never owns legacy UI
 /// presentation. Callers must fall back to the original page Refresh whenever the page is visible,
@@ -17,6 +17,23 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// </summary>
 internal static class LegacySpatialBackendRefresh
 {
+    internal static bool TryRefreshObjects(ObjectsPage page)
+    {
+        if (page?.owner?.room == null || page.RoomSettings?.placedObjects == null || page.initRefresh)
+            return false;
+
+        try
+        {
+            ReconcileObjectRepresentations(page);
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool minimal Objects backend refresh failed: " + error.Message);
+            return false;
+        }
+    }
+
     internal static bool TryRefreshSound(SoundPage page)
     {
         if (page?.owner?.room == null || page.RoomSettings?.ambientSounds == null || page.initRefresh)
@@ -49,6 +66,42 @@ internal static class LegacySpatialBackendRefresh
         {
             Plugin.Logger?.LogWarning("DevTool minimal Trigger backend refresh failed: " + error.Message);
             return false;
+        }
+    }
+
+    private static void ReconcileObjectRepresentations(ObjectsPage page)
+    {
+        List<PlacedObject> objects = page.RoomSettings.placedObjects;
+        HashSet<PlacedObject> represented = new(ReferenceComparer<PlacedObject>.Instance);
+
+        // ObjectsPage.CreateObjRep registers each representation as a direct tempNode. Retain the
+        // representation instance for every still-live model member so POM/RegionKit/vanilla handle
+        // state, drag state and sprite allocations are not churned by unrelated edits.
+        for (int i = page.subNodes.Count - 1; i >= 0; i--)
+        {
+            if (page.subNodes[i] is not PlacedObjectRepresentation representation)
+                continue;
+
+            PlacedObject placedObject = representation.pObj;
+            if (placedObject == null ||
+                !ContainsReference(objects, placedObject) ||
+                !represented.Add(placedObject))
+            {
+                RemoveDynamicNode(page, representation, i);
+            }
+        }
+
+        // Only missing model members need a compatibility representation. Use vanilla's public
+        // factory path rather than constructing base representations ourselves so ordinary hooks and
+        // custom object factories continue to participate exactly as they do in ObjectsPage.Refresh.
+        for (int i = 0; i < objects.Count; i++)
+        {
+            PlacedObject placedObject = objects[i];
+            if (placedObject?.type == null || represented.Contains(placedObject))
+                continue;
+
+            page.CreateObjRep(placedObject.type, placedObject);
+            represented.Add(placedObject);
         }
     }
 
@@ -294,6 +347,9 @@ internal static class LegacySpatialBackendRefresh
 
         switch (page)
         {
+            case ObjectsPage objects when ReferenceEquals(objects.draggedObject, node):
+                objects.draggedObject = null;
+                break;
             case SoundPage sound when ReferenceEquals(sound.draggedObject, node):
                 sound.draggedObject = null;
                 break;
