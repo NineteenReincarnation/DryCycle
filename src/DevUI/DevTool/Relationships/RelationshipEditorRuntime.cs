@@ -93,22 +93,49 @@ public static class RelationshipEditorPresentationHub
         int creatureTypeCount = ExtEnum<CreatureTemplate.Type>.values.Count;
         int nextRelationshipTypeCount = ExtEnum<CreatureTemplate.Relationship.Type>.values.Count;
 
-        if (ReferenceEquals(observedSession, session) &&
+        bool sameIdentity =
+            ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedPage, page) &&
+            current.Available;
+        bool modelStable =
+            sameIdentity &&
             observedRevision == revision &&
             observedCreatureTypeCount == creatureTypeCount &&
-            relationshipTypeCount == nextRelationshipTypeCount &&
-            string.Equals(observedPrimary, state.PrimaryCreature, StringComparison.Ordinal) &&
+            relationshipTypeCount == nextRelationshipTypeCount;
+        bool primaryStable =
+            modelStable &&
+            string.Equals(observedPrimary, state.PrimaryCreature, StringComparison.Ordinal);
+
+        if (primaryStable &&
             string.Equals(observedOther, state.SelectedOtherCreature, StringComparison.Ordinal) &&
-            observedDirection == state.SelectedDirection &&
-            current.Available)
+            observedDirection == state.SelectedDirection)
+        {
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Relationships,
+                DevToolPresentationOutcome.CacheHit);
             return;
+        }
+
+        // Pair/direction selection does not affect relationship values. Preserve the entire matrix
+        // and replace only the old/new Selected rows. Changing the primary creature is different: it
+        // changes every effective relationship and therefore correctly falls through to a full build.
+        if (primaryStable)
+        {
+            PublishSelectionOnly(state);
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Relationships,
+                DevToolPresentationOutcome.PartialRebuild);
+            return;
+        }
 
         List<CreatureTemplate> templates = CollectTemplates();
         if (templates.Count == 0)
         {
             current = new EditorRelationshipPresentationSnapshot { Available = true };
             Observe(session, page, revision, creatureTypeCount, state);
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Relationships,
+                DevToolPresentationOutcome.FullRebuild);
             return;
         }
 
@@ -151,6 +178,47 @@ public static class RelationshipEditorPresentationHub
         };
 
         Observe(session, page, revision, creatureTypeCount, state);
+        DevToolPerformanceMonitor.RecordPresentation(
+            DevToolPresentationChannel.Relationships,
+            DevToolPresentationOutcome.FullRebuild);
+    }
+
+    private static void PublishSelectionOnly(RelationshipEditorState state)
+    {
+        EditorRelationshipRowSnapshot[] source = current.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
+        EditorRelationshipRowSnapshot[] next = null;
+        string selectedOther = state?.SelectedOtherCreature ?? string.Empty;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorRelationshipRowSnapshot row = source[i];
+            bool selected = string.Equals(row.CreatureType, selectedOther, StringComparison.Ordinal);
+            if (row.Selected == selected) continue;
+
+            next ??= (EditorRelationshipRowSnapshot[])source.Clone();
+            next[i] = new EditorRelationshipRowSnapshot
+            {
+                CreatureType = row.CreatureType,
+                DisplayName = row.DisplayName,
+                Selected = selected,
+                PrimaryToOther = row.PrimaryToOther,
+                OtherToPrimary = row.OtherToPrimary
+            };
+        }
+
+        current = new EditorRelationshipPresentationSnapshot
+        {
+            Available = current.Available,
+            PrimaryCreature = current.PrimaryCreature,
+            SelectedOtherCreature = selectedOther,
+            SelectedDirection = state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther,
+            CreatureTypes = current.CreatureTypes,
+            RelationshipTypes = current.RelationshipTypes,
+            Rows = next ?? source
+        };
+
+        observedOther = selectedOther;
+        observedDirection = state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
     }
 
     internal static void Clear()
@@ -294,37 +362,47 @@ public static class RelationshipEditorCommandQueue
             try
             {
                 long historyBeforeCommand = session?.History.Revision ?? 0L;
-                RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
-                string primaryBefore = state?.PrimaryCreature ?? string.Empty;
-                string otherBefore = state?.SelectedOtherCreature ?? string.Empty;
-                EditorRelationshipDirection directionBefore =
-                    state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
                 bool changed = false;
+                bool modelCommand = false;
 
                 switch (command.Kind)
                 {
                     case RelationshipEditorCommandKind.SelectPrimary:
+                    {
+                        RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
+                        string before = state?.PrimaryCreature ?? string.Empty;
                         RelationshipEditorActions.SelectPrimary(session, command.Primary);
-                        changed = !string.Equals(primaryBefore, state?.PrimaryCreature ?? string.Empty, StringComparison.Ordinal) ||
-                                  !string.Equals(otherBefore, state?.SelectedOtherCreature ?? string.Empty, StringComparison.Ordinal);
+                        changed = !string.Equals(before, state?.PrimaryCreature ?? string.Empty, StringComparison.Ordinal);
                         break;
+                    }
                     case RelationshipEditorCommandKind.SelectPair:
+                    {
+                        RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
+                        string otherBefore = state?.SelectedOtherCreature ?? string.Empty;
+                        EditorRelationshipDirection directionBefore =
+                            state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
                         RelationshipEditorActions.SelectPair(session, command.Other, command.Direction);
                         changed = !string.Equals(otherBefore, state?.SelectedOtherCreature ?? string.Empty, StringComparison.Ordinal) ||
                                   directionBefore != (state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther);
                         break;
+                    }
                     case RelationshipEditorCommandKind.SetRelationshipType:
                         changed = RelationshipEditorActions.SetType(session, command.Primary, command.Other, command.Direction, command.Text);
+                        modelCommand = true;
                         break;
                     case RelationshipEditorCommandKind.SetRelationshipIntensity:
                         changed = RelationshipEditorActions.SetIntensity(session, command.Primary, command.Other, command.Direction, command.Value);
+                        modelCommand = true;
                         break;
                     case RelationshipEditorCommandKind.ResetRelationship:
                         changed = RelationshipEditorActions.Reset(session, command.Primary, command.Other, command.Direction);
+                        modelCommand = true;
                         break;
                 }
 
-                if (changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                // Primary/pair selection is explicit presentation state and is observed directly by
+                // RelationshipEditorPresentationHub. Only model mutations need the workspace clock.
+                if (modelCommand && changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
             catch (Exception error)
@@ -333,9 +411,6 @@ public static class RelationshipEditorCommandQueue
             }
         }
 
-        // Selection has no document-history entry, while relationship mutations do. Let the core
-        // history revision invalidate Shell + Relationships once for edit batches and only produce a
-        // direct workspace revision for state-only selection changes.
         if (nonHistoryDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
     }
