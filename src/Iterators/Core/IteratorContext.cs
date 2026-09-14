@@ -21,6 +21,8 @@ public sealed class IteratorContext
     public IteratorID ID => Descriptor.ID;
     public IteratorDescriptor Descriptor { get; }
     public IteratorRuntime Runtime { get; private set; }
+    public IteratorBody Body => Runtime?.Body;
+    public IteratorArm Arm => Runtime?.Arm;
     public Oracle Oracle { get; private set; }
     public Room Room { get; private set; }
     public World World { get; private set; }

@@ -36,6 +36,8 @@ public class IteratorRuntime
     public IteratorContext Context { get; }
     public IteratorDescriptor Descriptor => Context.Descriptor;
     public IteratorID ID => Descriptor.ID;
+    public IteratorBody Body { get; private set; }
+    public IteratorArm Arm { get; private set; }
     public IteratorLifecycle State { get; private set; } = IteratorLifecycle.RuntimeCreated;
     public bool IsInitialized => State == IteratorLifecycle.Initialized || State == IteratorLifecycle.Active;
     public bool IsActive => State == IteratorLifecycle.Active;
@@ -69,6 +71,7 @@ public class IteratorRuntime
         _initializing = true;
         try
         {
+            if (!InitializeBodyAndArm()) return false;
             Context.RefreshPlayers();
             Context.Logger = _createLog;
             OnCreate();
@@ -100,6 +103,31 @@ public class IteratorRuntime
         }
     }
 
+    private bool InitializeBodyAndArm()
+    {
+        Context.Logger = _initializeLog.ForModule("Body").ForPhase("Factory");
+        IteratorBody body = Descriptor.BodyFactory(Context);
+        if (body == null || !ReferenceEquals(body.Context, Context) || body.Claimed || body.IsDestroyed)
+            throw new InvalidOperationException("BodyFactory must return a new Body built with the supplied Context.");
+        body.Claim();
+        Body = body;
+        // A user factory may unload the room or destroy the Runtime before returning.
+        if (State != IteratorLifecycle.RuntimeCreated) { body.Release(); return false; }
+
+        Context.Logger = _initializeLog.ForModule("Arm").ForPhase("Factory");
+        IteratorArm arm = Descriptor.ArmFactory(Context);
+        if (arm == null || !ReferenceEquals(arm.Context, Context) || arm.Claimed || arm.IsDestroyed)
+            throw new InvalidOperationException("ArmFactory must return a new Arm built with the supplied Context.");
+        arm.Claim();
+        Arm = arm;
+        if (State != IteratorLifecycle.RuntimeCreated) { arm.Release(); return false; }
+
+        Body.Initialize();
+        if (State != IteratorLifecycle.RuntimeCreated) return false;
+        Arm.Initialize();
+        return State == IteratorLifecycle.RuntimeCreated;
+    }
+
     internal void Tick()
     {
         if (!IsActive || _initializing || _updating)
@@ -119,6 +147,16 @@ public class IteratorRuntime
             Context.Logger = _updateLog;
             Context.RefreshPlayers();
             OnUpdate();
+            if (!IsActive) return;
+            Body.Update();
+            if (!IsActive) return;
+            Arm.Update();
+            if (!IsActive) return;
+            Body.AdvancePhysics();
+            if (!IsActive) return;
+            Arm.AfterPhysics();
+            if (!IsActive) return;
+            Body.AfterPhysics();
             if (!IsActive) return;
             Context.Logger = _lateUpdateLog;
             OnLateUpdate();
@@ -154,6 +192,8 @@ public class IteratorRuntime
         {
             try
             {
+                Arm?.Release();
+                Body?.Release();
                 _release?.Invoke(this);
             }
             catch (Exception exception)

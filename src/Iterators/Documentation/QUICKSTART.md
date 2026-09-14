@@ -1,4 +1,4 @@
-# 第一阶段快速开始
+# Iterator Framework 快速开始
 
 ## 引用
 
@@ -43,9 +43,44 @@ private void UnregisterIterator()
 }
 ```
 
-房间不需要 `_AI` 后缀。未填名称时使用 ID；本阶段至少需要一个房间。该注册示例只建立定义和游戏 ID 映射，进入房间自动生成实体将在第二阶段接入。
+房间不需要 `_AI` 后缀。未填名称时使用 ID；至少需要一个房间。请在目标房间完成加载前注册：DryCycle 启用时安装集中 Hook，`Room.ReadyForAI` 完成后自动为已注册房间创建默认 Runtime 和 Oracle 宿主。
 
-房间退出和普通 Session 重启不应注销定义。定义不保存当前游戏对象；所属 Mod 停用、移除或重新加载定义时，使用保留的 Descriptor 显式注销。DryCycle 日志桥会随插件启停释放日志后端引用；注册表目前不会自动推断或清理外部 Mod 的定义所有权。
+当前默认身体在初始位置悬停，具备移动和游戏碰撞，默认使用 NoArm；外观和对话由后续阶段实现。使用 `Context.Body.MoveTo(...)`、`SetPose(...)` 或替换 `.Body(...)` / `.Arm(...)` 工厂，见 [Body 文档](BODY.md)。
+
+房间卸载和普通 Session 重启只销毁实例，不注销定义；玩家离开但房间仍保持加载时，实例仍存在。所属 Mod 停用、移除或重新加载定义时，使用保留的 Descriptor 显式注销，框架会先销毁它的全部实例。DryCycle 停用会释放所有实例、Hook 和日志后端引用，但不会推断外部 Mod 的定义所有权。
+
+## 自定义 Runtime 与延迟注册
+
+```csharp
+public sealed class MyIteratorRuntime : IteratorRuntime
+{
+    public MyIteratorRuntime(IteratorContext context) : base(context) { }
+
+    protected override void OnActivate()
+    {
+        Context.Logger.Info("已绑定房间 " + Context.Room.abstractRoom.name);
+    }
+
+    protected override void OnDestroy()
+    {
+        Context.Logger.Info("实例结束：" + DestroyReason);
+    }
+}
+```
+
+在注册链中添加 `.Runtime(context => new MyIteratorRuntime(context))`。每次生成都必须返回新实例，并把框架提供的 Context 原样传入构造函数。
+
+若定义在房间已经就绪后才注册，或需要主动重试失败的生成，可在 Unity 主线程用当前 Room 请求：
+
+```csharp
+if (IteratorRuntimes.TrySpawn(room, out IteratorRuntime runtime))
+{
+    Oracle host = runtime.Context.Oracle;
+    IteratorRuntimes.TryGet(host, out IteratorRuntime sameRuntime);
+}
+```
+
+已有 Active 实例时返回该实例；未启用、房间未就绪、无匹配定义或生成失败时返回 false/null。不要每帧请求生成。完整回调时序与清理语义见 [Runtime 文档](RUNTIME.md)。
 
 ## 多房间与元数据
 
@@ -90,4 +125,4 @@ IteratorDescriptor definition = Iterator.Create("MYMOD_EXTRA")
     .Register();
 ```
 
-不需要继承框架内部类型或操作任何 Hook。Body、Graphics、Behavior 和 Conversation 的配置方法尚未进入第一阶段 API。
+不需要继承框架内部类型或操作任何 Hook。Graphics、Behavior 和 Conversation 的配置方法尚未实现。

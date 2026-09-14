@@ -1,6 +1,6 @@
-# 第一阶段 API 约定
+# 定义与注册 API 约定
 
-公共类型统一位于 `DryCycle.Iterators`。未列出的内部类型不是外部扩展接口。
+公共类型统一位于 `DryCycle.Iterators`。本文说明定义、注册和日志；实例 API 见 [Runtime 与生命周期](RUNTIME.md) 和 [Body / Arm / Pose](BODY.md)。未列出的内部类型不是外部扩展接口。
 
 ## ID 与输入
 
@@ -27,22 +27,30 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 | `.Name(name)` | 设置 Builder 的显示名称。 |
 | `.Room(name)` / `.Rooms(params names)` | 添加精确房间名；至少一个、忽略大小写去重；批次内有错误时整批不写入。 |
 | `.WithMetadata(key, value)` | 设置区分大小写的扩展键；同一键在 Builder 中后写覆盖前写。 |
+| `.Runtime(factory)` | 设置 `Func<IteratorContext, IteratorRuntime>`，不立即运行；null 抛出 `ArgumentNullException`。 |
+| `.Body(factory)` / `.Arm(factory)` | 设置身体/机械臂工厂，类型分别为 `Func<IteratorContext, IteratorBody>` / `Func<IteratorContext, IteratorArm>`；null 报错。 |
 | `.Build()` | 返回新的、已验证的不可变 Descriptor；无全局状态副作用。 |
 | `.Register()` | 等价于 `IteratorRegistry.Register(Build())`。每次调用都会先创建新 Descriptor。 |
 | `new IteratorDescriptor(id, rooms, displayName = null, metadata = null)` | 直接构造，输入列表和字典均复制。 |
+| `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory)` | 含 Runtime 工厂的完整重载；null 工厂使用默认 `IteratorRuntime`。保留原四参数构造签名。 |
+| `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory)` | 第三阶段完整重载；null Body / Arm 工厂使用 StandardIteratorBody / NoArm；保留原四参数和五参数签名。 |
 | `descriptor.ID / DisplayName / Rooms / Metadata` | 只读定义数据，集合不能被外部修改。 |
+| `descriptor.RuntimeFactory` | 只读工厂，每次生成时传入新 Context；须返回使用该 Context 构造的全新 Runtime。 |
+| `descriptor.BodyFactory / ArmFactory` | 只读组件工厂，使用当前 Context 返回新组件，在 Runtime.OnCreate 前创建并初始化。 |
 | `descriptor.Validate()` | 验证定义，不修改数据、不查询游戏或全局冲突。 |
 
 重复调用同一个 Builder 的 `Register()` 会遇到重复 ID 错误，因为每次 Build 都创建不同定义。需要幂等调用时保留返回的 Descriptor，再将同一对象传入 Registry。
 
-第一阶段只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Descriptor 也尚无 Body、Graphics、Brain、Conversation、Environment 或 Module 工厂；这些工厂随对应实现加入，不提前暴露 `object` 工厂或无功能占位接口。
+当前只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Descriptor 尚无 Graphics、Brain、Conversation、Environment 或 Module 工厂；这些工厂随对应实现加入，不提前暴露 `object` 工厂或无功能占位接口。
+
+Build 保存当时的工厂委托；之后修改 Builder 不会改变旧 Descriptor。委托捕获的对象不会被深拷贝，应只捕获可跨 Session 使用的配置。不要让长期注册的定义间接保存 Room、Oracle 或 Player。
 
 ## Registry
 
 | API | 约定 |
 | --- | --- |
 | `IteratorRegistry.Register(descriptor)` | 返回该定义。同一实例重复注册幂等；不同定义占用相同 ID 或任一房间时抛出 `InvalidOperationException`，不覆盖。 |
-| `IteratorRegistry.Unregister(descriptor)` | 仅移除当前仍由这个 Descriptor 实例拥有的注册。已注销或已被新定义替代时返回 false。null 抛出参数异常。 |
+| `IteratorRegistry.Unregister(descriptor)` | 先销毁该定义的全部 Runtime，再移除房间索引和游戏 ID。仅接受仍拥有注册的 Descriptor 实例；已注销、正注销或已被新定义替代时返回 false。null 抛出参数异常。 |
 | `IteratorRegistry.Registered` | 注册顺序的不可变集合快照；之后增删不会改变旧快照。 |
 | `TryGet(id, out descriptor)` | 接受 `IteratorID` 或 string，按 ID 字符串 Ordinal 查询。传入 null 字面量时需要明确重载类型。 |
 | `TryGetByRoom(name, out descriptor)` | 完整房间名，OrdinalIgnoreCase，无后缀推断或模糊匹配。 |
@@ -57,7 +65,9 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 
 框架按照字符串查找，正常 ExtEnum 注销导致其他 Index 变化时，已存在的映射仍有效。其他 Mod 不应绕过 Registry 修改或注销框架拥有的 ExtEnum；公共游戏值对象本身仍具有游戏原有的可变接口。
 
-定义不引用 Session 或 Room 实体，可在多次游戏 Session 之间保留。第一阶段的“重载”指显式注销旧 Descriptor，再注册新 Descriptor；没有自动文件重载、活动 Runtime 热替换或卸载 Hook。
+定义可在多次游戏 Session 之间保留。房间卸载与 Session 结束会销毁对应实例，DryCycle 停用会销毁全部实例并卸载 Hook；这些操作都保留注册定义。外部 Mod 停用时须自行注销它拥有的 Descriptor。
+
+显式“重载”指注销旧 Descriptor，再注册新 Descriptor；没有自动文件重载或活动 Runtime 热替换。注销的 `OnDestroy` 期间仍可查询原定义和游戏 ID，但不能重注册或重新生成同一 ID。对其他定义的注册/注销会保留，不会被旧快照覆盖。可在 Unregister 返回后注册替代定义，并对已经加载的房间显式调用 `IteratorRuntimes.TrySpawn`。
 
 ## Logger
 
@@ -86,12 +96,12 @@ logger.Error("Operation failed.", exception);
 
 DryCycle 启用时默认输出到其 BepInEx 日志源；停用或独立调用时回退到 `System.Diagnostics.Trace`。Trace 在没有接收器的进程中不保证落盘。自定义接收器只接收最终等级与格式化文本，不需要引用 BepInEx。
 
-日志接收器抛异常时先尝试 Trace 回退，Trace 或扩展异常对象的格式化再失败时也不会向调用者传播。日志回调内再次调用日志会被重入保护跳过。此处隔离的是**日志后端**；Graphics、Dialogue 与其他运行时模块的错误隔离尚待各阶段实现。
+日志接收器抛异常时先尝试 Trace 回退，Trace 或扩展异常对象的格式化再失败时也不会向调用者传播。日志回调内再次调用日志会被重入保护跳过。Runtime 另有生命周期回调异常保护，见 [Runtime 文档](RUNTIME.md)；Graphics、Dialogue 与其他模块的错误隔离尚待各阶段实现。
 
 ## 扩展和 API 演进
 
-- 本阶段 public 接口仅用于外部定义、查询、注销及日志；ExtEnum 适配、索引快照和 BepInEx 桥保持 internal/private。
+- Public 接口提供定义、注册、实例工厂、实例查询、生命周期扩展及日志；ExtEnum 适配、索引快照和 BepInEx 桥保持 internal/private。
 - 外部 Mod 可以使用 Builder 扩展方法或直接构造 Descriptor，无须访问 Hook。
-- 未来增加 Runtime/Context 时继续保持 Descriptor 静态、Runtime 实例化以及 Module 组合的分工。
-- 进入有活动实例的阶段时，必须在接入游戏前补齐注销与 Runtime 销毁协调；当前没有活动实例，因此注销立即释放定义。
+- Descriptor 保存配置，Runtime 管理单个实例，Context 提供当前游戏引用；后续 Module 以组合方式接入。
+- Hook 与 Oracle 宿主适配器保持 internal；外部 Mod 派生 Runtime 无须自行安装 Hook 或继承 Oracle。
 - 正式发布后的破坏性 API 变更需提供 `[Obsolete]` 与迁移说明，不依靠临时宽类型接口维持兼容。

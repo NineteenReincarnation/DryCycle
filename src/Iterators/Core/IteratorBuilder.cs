@@ -11,6 +11,8 @@ public class IteratorBuilder
     private readonly Dictionary<string, string> _metadata = new(StringComparer.Ordinal);
     private string _displayName;
     private Func<IteratorContext, IteratorRuntime> _runtimeFactory;
+    private Func<IteratorContext, IteratorBody> _bodyFactory;
+    private Func<IteratorContext, IteratorArm> _armFactory;
 
     /// <summary>创建一个独立 Builder；扩展 Mod 可通过扩展方法组合公共配置方法。</summary>
     public IteratorBuilder(IteratorID id) => _id = id ?? throw new ArgumentNullException(nameof(id));
@@ -57,12 +59,26 @@ public class IteratorBuilder
     }
 
     /// <summary>验证并创建定义快照；没有 Registry 或 Oracle ExtEnum 副作用。</summary>
-    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory);
+    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory);
 
     /// <summary>设置实例工厂，可注入参数或派生 Runtime；不在 Builder 阶段运行该工厂。</summary>
     public IteratorBuilder Runtime(Func<IteratorContext, IteratorRuntime> factory)
     {
         _runtimeFactory = factory ?? throw new ArgumentNullException(nameof(factory));
+        return this;
+    }
+
+    /// <summary>替换默认身体；每次生成必须使用传入的 Context 创建新组件。</summary>
+    public IteratorBuilder Body(Func<IteratorContext, IteratorBody> factory)
+    {
+        _bodyFactory = factory ?? throw new ArgumentNullException(nameof(factory));
+        return this;
+    }
+
+    /// <summary>替换默认 NoArm 约束；每次生成必须返回新组件，不要求原版 OracleArm。</summary>
+    public IteratorBuilder Arm(Func<IteratorContext, IteratorArm> factory)
+    {
+        _armFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
 

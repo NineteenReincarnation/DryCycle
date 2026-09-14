@@ -169,10 +169,13 @@ D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/
 
 ## Iterator Framework
 
-The first development phase provides immutable iterator definitions, fluent registration,
-ID/room/Oracle ID lookup, safe unregister/re-register handling, validation, and scoped logging.
-It does not yet spawn Oracle entities or install room/runtime hooks.
+The first three development phases provide immutable definitions, fluent registration,
+per-room runtimes, replaceable bodies and arm constraints, movement, collision, and pose input.
+Registered rooms spawn an Oracle host with a default hovering body; graphics are reserved
+for phase four. Managed validation passes; Unity in-game validation is pending.
 See the [Iterator Framework documentation](src/Iterators/Documentation/README.md) and
+[runtime lifecycle API](src/Iterators/Documentation/RUNTIME.md),
+[body, arm and pose API](src/Iterators/Documentation/BODY.md), and
 [phase progress and validation](src/Iterators/Documentation/PROGRESS.md).
 
 ## Source layout

@@ -33,6 +33,7 @@ internal static class IteratorHooks
         {
             _constructorHook = true;
             IL.Oracle.ctor += PatchOracleConstructor;
+            IteratorPhysicsAdapter.Prepare();
             _roomReadyHook = true;
             On.Room.ReadyForAI += RoomReady;
             _roomUnloadHook = true;

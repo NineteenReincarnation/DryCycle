@@ -5,8 +5,8 @@ using UnityEngine;
 namespace DryCycle.Iterators;
 
 /// <summary>
-/// Oracle 实体适配器，不承载剧情/AI。第二阶段为静止、无绘制的物理宿主壳；
-/// Body 运动、Arm 和 Graphics 在各自阶段以组合组件接入。
+/// Oracle 实体适配器，不承载剧情/AI。Body 与 Arm 由 Runtime 组合调度；
+/// 仅保留游戏物理适配，Graphics 在第四阶段接入。
 /// </summary>
 internal sealed class IteratorHost : Oracle
 {
@@ -78,6 +78,25 @@ internal sealed class IteratorHost : Oracle
         evenUpdate = eu;
         _runtime?.Tick();
     }
+
+    internal void ConfigurePhysics(BodyChunk[] chunks, BodyChunkConnection[] connections, BodyProfile profile)
+    {
+        bodyChunks = chunks;
+        bodyChunkConnections = connections;
+        airFriction = profile.AirFriction;
+        gravity = profile.Gravity;
+        waterFriction = profile.WaterFriction;
+        buoyancy = profile.Buoyancy;
+        bounce = profile.Bounce;
+        surfaceFriction = profile.SurfaceFriction;
+        collisionRange = 50f;
+        foreach (BodyChunk chunk in chunks)
+            collisionRange = Mathf.Max(collisionRange, Vector2.Distance(chunks[0].pos, chunk.pos) + chunk.rad);
+    }
+
+    // Call PhysicalObject's implementation directly, bypassing Oracle.Update's AI.
+    // This adapter does not detour either Update method or copy game physics code.
+    internal void UpdatePhysics() => IteratorPhysicsAdapter.Update(this, evenUpdate);
 
     public override void InitiateGraphicsModule()
     {

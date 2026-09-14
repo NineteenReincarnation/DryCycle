@@ -25,6 +25,7 @@ internal static class Program
         AppDomain.CurrentDomain.AssemblyResolve += ResolveGameAssembly;
         try
         {
+            PrepareManagedUnity();
             return RunTests();
         }
         catch (Exception exception)
@@ -38,6 +39,9 @@ internal static class Program
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void PrepareManagedUnity() => ManagedUnityFixture.Load(_rainWorldDir);
+
     // Install resolution before JIT touches the API's game types. Execute the real
     // managed game assembly, not a mock Oracle or a source-linked copy of the Core.
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -45,7 +49,8 @@ internal static class Program
     {
         int core = CoreTests.Run();
         int runtime = RuntimeTests.Run();
-        return Math.Max(core, runtime);
+        int body = BodyTests.Run();
+        return Math.Max(Math.Max(core, runtime), body);
     }
 
     private static Assembly ResolveGameAssembly(object sender, ResolveEventArgs args)
