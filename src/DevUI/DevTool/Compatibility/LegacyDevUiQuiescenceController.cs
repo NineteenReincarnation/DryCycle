@@ -76,6 +76,13 @@ internal static class LegacyDevUiQuiescenceController
         On.DevInterface.MapPage.Update += MapPage_Update;
         On.DevInterface.DialogPage.Update += DialogPage_Update;
         On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
+
+        // Sound/Trigger page Refresh is much heavier than their retained world-space backend needs.
+        // While the rebuilt UI owns presentation, intercept recurring refreshes and reconcile only
+        // spatial handles plus the live ambient-audio membership. Full Refresh remains authoritative
+        // for first materialization, visible legacy UI, diagnostics and opaque third-party pages.
+        On.DevInterface.SoundPage.Refresh += SoundPage_Refresh;
+        On.DevInterface.TriggersPage.Refresh += TriggersPage_Refresh;
         enabled = true;
     }
 
@@ -83,6 +90,8 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (!enabled) return;
 
+        On.DevInterface.TriggersPage.Refresh -= TriggersPage_Refresh;
+        On.DevInterface.SoundPage.Refresh -= SoundPage_Refresh;
         On.DevInterface.RelationshipPage.Update -= RelationshipPage_Update;
         On.DevInterface.DialogPage.Update -= DialogPage_Update;
         On.DevInterface.MapPage.Update -= MapPage_Update;
@@ -172,6 +181,38 @@ internal static class LegacyDevUiQuiescenceController
         if (TryPumpDerivedPage(self)) return;
         FlushDeferredRefresh(self);
         orig(self);
+    }
+
+    private static void SoundPage_Refresh(On.DevInterface.SoundPage.orig_Refresh orig, SoundPage self)
+    {
+        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshSound(self))
+        {
+            DeferredRefreshPages.Add(self);
+            return;
+        }
+
+        orig(self);
+        DeferredRefreshPages.Remove(self);
+    }
+
+    private static void TriggersPage_Refresh(On.DevInterface.TriggersPage.orig_Refresh orig, TriggersPage self)
+    {
+        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshTriggers(self))
+        {
+            DeferredRefreshPages.Add(self);
+            return;
+        }
+
+        orig(self);
+        DeferredRefreshPages.Remove(self);
+    }
+
+    private static bool CanUseMinimalSpatialRefresh(Page page)
+    {
+        if (fullCompatibilityDepth > 0 || page == null || HasExternalCompatibilityNodes(page))
+            return false;
+
+        return TryGetQuiescentProfile(page, out PageProfile profile) && profile.PreserveWorldHandles;
     }
 
     private static bool TryPumpDerivedPage(Page page)
