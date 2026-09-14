@@ -4,6 +4,7 @@ using System.Security;
 using System.Text;
 using System.Threading;
 using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
@@ -19,7 +20,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui";
     public const string PluginName = "DryCycle DevTool RWImGui Frontend";
-    public const string PluginVersion = "0.1.0";
+    public const string PluginVersion = "0.1.1";
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
@@ -28,6 +29,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private bool sessionWasPaused;
     private bool focusTransitionActive;
     private bool applicationFocused;
+    private bool creatureCatalogFallbackChecked;
+    private bool ownsCreatureCatalogRuntime;
 
     private void OnEnable()
     {
@@ -37,10 +40,18 @@ public sealed class BridgePlugin : BaseUnityPlugin
         sessionWasPaused = false;
         focusTransitionActive = false;
         applicationFocused = UnityEngine.Application.isFocused;
+        creatureCatalogFallbackChecked = false;
+        ownsCreatureCatalogRuntime = false;
         EditorUiModeState.SetOverlayHidden(false);
         EditorInputRouter.SetFrontendAttached(true);
         DevToolFrontend.SetLogger(Logger);
         DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused);
+
+        // The room inspector is composed by the bridge itself, so its authoring sections must share
+        // the bridge lifetime as well. Dedicated helper plugins may also call these methods; both
+        // Enable paths are idempotent.
+        WorldCreatureSpawnInspector.Enable(Logger);
+        WorldLineageInspector.Enable(Logger);
 
         // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
         // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -66,6 +77,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void Update()
     {
+        EnsureCreatureCatalogRuntime();
+        if (ownsCreatureCatalogRuntime)
+            WorldCreatureCatalogPicker.PumpMainThread();
+
         // If RWImGui created the shared context after RainWorld.Start returned, this gives the font
         // registration one final safe pre-render opportunity. The helper refuses to touch a missing
         // context and DevToolFontCatalog refuses to mutate an atlas once the first frame has begun.
@@ -117,6 +132,24 @@ public sealed class BridgePlugin : BaseUnityPlugin
         DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
     }
 
+    private void EnsureCreatureCatalogRuntime()
+    {
+        if (creatureCatalogFallbackChecked) return;
+        creatureCatalogFallbackChecked = true;
+
+        // WorldCreatureCatalogRuntimePlugin normally owns the expensive main-thread catalog pump.
+        // Some BepInEx/loader combinations can leave auxiliary plugin types from the same assembly
+        // undiscovered even while the primary BridgePlugin is alive. Detect that once all plugins
+        // have had a chance to load and let the bridge own the runtime only as a fallback.
+        if (Chainloader.PluginInfos.TryGetValue(WorldCreatureCatalogRuntimePlugin.PluginId, out var info) &&
+            info?.Instance != null)
+            return;
+
+        WorldCreatureCatalogPicker.Initialize(Logger);
+        ownsCreatureCatalogRuntime = true;
+        Logger.LogWarning("Creature catalog runtime helper was not loaded; BridgePlugin activated the built-in fallback pump.");
+    }
+
     private static bool IsSessionDefinitelyClosed(EditorSession session, RainWorldGame game)
     {
         if (session == null || game == null) return true;
@@ -146,6 +179,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
         applicationFocused = true;
         EditorInputRouter.SetFrontendAttached(false);
         TryUnregisterCallback();
+
+        if (ownsCreatureCatalogRuntime)
+            WorldCreatureCatalogPicker.Shutdown();
+        ownsCreatureCatalogRuntime = false;
+        creatureCatalogFallbackChecked = false;
+        WorldLineageInspector.Disable();
+        WorldCreatureSpawnInspector.Disable();
     }
 
     private static void RainWorld_Start(On.RainWorld.orig_Start orig, RainWorld self)
