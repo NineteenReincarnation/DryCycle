@@ -266,9 +266,6 @@ internal static class RoomEditorActions
         IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
         if (before == null) return false;
 
-        // Vanilla Create owns effect construction/defaults and third-party hooks. The history scope
-        // is still only RoomSettings.effects because Create can replace an inherited effect of the
-        // same type while adding the new local row.
         page.Signal(DevUISignalType.Create, page, typeName);
 
         bool created = false;
@@ -284,6 +281,7 @@ internal static class RoomEditorActions
         if (!created) return false;
 
         IEditorStateSnapshot after = RoomEffectCollectionStateSnapshot.Capture(settings);
+        if (!SnapshotsDiffer(before, after)) return false;
         PushHistory(session, "Add effect " + typeName, before, after);
         return true;
     }
@@ -299,12 +297,11 @@ internal static class RoomEditorActions
         if (before == null) return false;
 
         string type = effect.type?.value ?? "effect";
-        // RemoveEffect removes inherited rows and re-applies parent effects, so deletion is a small
-        // collection transaction rather than a single-member transaction.
         settings.RemoveEffect(effect.type);
-        RefreshLegacyPageOrDefer(session);
 
         IEditorStateSnapshot after = RoomEffectCollectionStateSnapshot.Capture(settings);
+        if (!SnapshotsDiffer(before, after)) return false;
+        RefreshLegacyPageOrDefer(session);
         PushHistory(session, "Delete effect " + type, before, after);
         return true;
     }
@@ -334,8 +331,9 @@ internal static class RoomEditorActions
             effect.extraAmounts[extraIndex] = Mathf.Clamp01(value);
         }
 
-        RefreshLegacyPageOrDefer(session);
         IEditorStateSnapshot after = before.CaptureCurrent(session);
+        if (!SnapshotsDiffer(before, after)) return false;
+        RefreshLegacyPageOrDefer(session);
         PushHistory(session, "Change " + (effect.type?.value ?? "effect"), before, after);
         ApplyEffectLiveSideEffect(session, effect, sliderIndex);
         return true;
@@ -542,8 +540,9 @@ internal static class RoomEditorActions
         IEditorStateSnapshot before = CaptureRoomSettingSnapshot(settings, key);
         if (before == null || !mutation(settings)) return false;
 
-        RefreshLegacyPageOrDefer(session);
         IEditorStateSnapshot after = before.CaptureCurrent(session);
+        if (!SnapshotsDiffer(before, after)) return false;
+        RefreshLegacyPageOrDefer(session);
         PushHistory(session, label, before, after);
         return true;
     }
@@ -560,8 +559,9 @@ internal static class RoomEditorActions
         IEditorStateSnapshot before = RoomPaletteFadeStateSnapshot.Capture(settings, terrain);
         if (before == null || !mutation(settings)) return false;
 
-        RefreshLegacyPageOrDefer(session);
         IEditorStateSnapshot after = before.CaptureCurrent(session);
+        if (!SnapshotsDiffer(before, after)) return false;
+        RefreshLegacyPageOrDefer(session);
         PushHistory(session, label, before, after);
         return true;
     }
@@ -574,6 +574,11 @@ internal static class RoomEditorActions
             return RoomPaletteFadeStateSnapshot.Capture(settings, terrain: true);
         return RoomSettingStateSnapshot.Capture(settings, key);
     }
+
+    private static bool SnapshotsDiffer(IEditorStateSnapshot before, IEditorStateSnapshot after) =>
+        before != null && after != null &&
+        string.Equals(before.Kind, after.Kind, StringComparison.Ordinal) &&
+        !string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal);
 
     private static void PushHistory(
         EditorSession session,
