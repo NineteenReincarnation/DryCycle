@@ -94,6 +94,13 @@ internal static class DevToolRuntime
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.BeforeDevUiUpdate(self);
         EditorSession session = DevToolSessionHub.Current;
+
+        // Reopening DevTools used to restore the previous page immediately, which could make H
+        // construct the vanilla default page and then construct a second heavy page in the same
+        // frame. Apply that workspace restoration one update later and keep that restoration frame
+        // shell-only. This spreads unavoidable main-thread construction across frames instead of
+        // creating a single visible hitch.
+        bool restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
         session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
         EditorInputRouter.UpdateShortcuts(session);
@@ -138,13 +145,60 @@ internal static class DevToolRuntime
             session,
             suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
 
-        EditorPresentationHub.Publish(session);
-        RoomEditorPresentationHub.Publish(session);
-        SoundEditorPresentationHub.Publish(session);
-        TriggerEditorPresentationHub.Publish(session);
-        MapEditorPresentationHub.Publish(session);
-        DialogEditorPresentationHub.Publish(session);
-        RelationshipEditorPresentationHub.Publish(session);
+        // Progressive hydration: frame 1 publishes only lightweight editor chrome. If reopening
+        // restores a different vanilla page, that page-construction frame is shell-only as well.
+        // The next frame hydrates only the active workspace instead of running every presentation
+        // producer unconditionally.
+        bool shellOnly = session?.IsOpeningFrame == true || restoredWorkspaceThisFrame;
+        PublishPresentations(session, shellOnly);
+    }
+
+    private static void PublishPresentations(EditorSession session, bool shellOnly)
+    {
+        EditorPresentationHub.Publish(session, shellOnly);
+
+        if (shellOnly || session == null)
+        {
+            ClearDetailPresentations();
+            return;
+        }
+
+        // Page-local presentation is demand-driven. Inactive workspaces do not need to build or
+        // diff snapshots just because DevUI itself is open.
+        switch (session.ToolMode)
+        {
+            case EditorToolMode.Room:
+                RoomEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Sound:
+                SoundEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Triggers:
+                TriggerEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Map:
+                MapEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Dialog:
+                DialogEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Relationships:
+                RelationshipEditorPresentationHub.Publish(session);
+                break;
+            case EditorToolMode.Objects:
+                // Object data is owned by EditorPresentationHub itself.
+                break;
+        }
+    }
+
+    private static void ClearDetailPresentations()
+    {
+        RoomEditorPresentationHub.Clear();
+        SoundEditorPresentationHub.Clear();
+        TriggerEditorPresentationHub.Clear();
+        MapEditorPresentationHub.Clear();
+        DialogEditorPresentationHub.Clear();
+        RelationshipEditorPresentationHub.Clear();
     }
 
     private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
@@ -196,6 +250,10 @@ public sealed class EditorSession
 {
     private EditorDocumentKey documentKey;
     private Page observedLegacyPage;
+    private int activationUpdateCount;
+    private bool deferredViewRestorePending;
+    private EditorToolMode deferredRestoreMode;
+    private bool deferredRestoreLegacyUi;
 
     internal EditorSession(global::DevInterface.DevUI owner)
     {
@@ -221,6 +279,7 @@ public sealed class EditorSession
     public bool PlacementActive => !string.IsNullOrEmpty(PlacementType);
     public string PlacementType { get; private set; } = string.Empty;
     public string ObjectSearch { get; set; } = string.Empty;
+    internal bool IsOpeningFrame => activationUpdateCount <= 1;
 
     public global::Room Room => Owner?.room;
     public RoomSettings RoomSettings => Room?.roomSettings;
@@ -252,27 +311,48 @@ public sealed class EditorSession
         Selection.RemoveMissing(RoomSettings?.placedObjects);
     }
 
+    internal void MarkUpdateStarted()
+    {
+        if (activationUpdateCount < int.MaxValue)
+            activationUpdateCount++;
+    }
+
     /// <summary>
-    /// Restores only stable presentation/workspace state after vanilla H recreated DevUI.
-    /// Transient interaction state such as an active placement or drag is intentionally not
-    /// carried across the destroyed DevUI instance.
+    /// Restores stable presentation/workspace state after vanilla H recreated DevUI. Cheap state is
+    /// restored immediately, while a page switch is deferred so the opening frame never constructs
+    /// two DevInterface pages back-to-back.
     /// </summary>
     internal void RestoreViewStateFrom(EditorSession previous)
     {
         if (previous == null) return;
 
-        EditorToolMode previousMode = previous.ToolMode;
-        bool previousLegacyUiVisible = previous.LegacyUiVisible;
         FocusMode = previous.FocusMode;
         BrowserOpen = previous.BrowserOpen;
         InspectorOpen = previous.InspectorOpen;
         ObjectSearch = previous.ObjectSearch ?? string.Empty;
         CancelPlacement();
 
-        SetToolMode(previousMode);
-        LegacyUiVisible = previousLegacyUiVisible;
+        deferredRestoreMode = previous.ToolMode;
+        deferredRestoreLegacyUi = previous.LegacyUiVisible;
+        deferredViewRestorePending = deferredRestoreMode != ToolMode || deferredRestoreLegacyUi;
+    }
+
+    /// <summary>
+    /// Applies a deferred workspace restore no earlier than the second update of a newly-created
+    /// DevUI session. Returns true when this frame performed restoration so callers can keep the
+    /// frame presentation-only and hydrate data on the next update.
+    /// </summary>
+    internal bool ApplyDeferredViewRestore()
+    {
+        if (!deferredViewRestorePending || activationUpdateCount < 2)
+            return false;
+
+        deferredViewRestorePending = false;
+        SetToolMode(deferredRestoreMode);
+        LegacyUiVisible = deferredRestoreLegacyUi;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
+        return true;
     }
 
     public void SetToolMode(EditorToolMode mode)
@@ -501,6 +581,7 @@ public static class DevToolSessionHub
         }
 
         session.Synchronize(ui);
+        session.MarkUpdateStarted();
         current.SetTarget(session);
     }
 
