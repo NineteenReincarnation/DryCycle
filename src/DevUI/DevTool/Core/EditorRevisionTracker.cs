@@ -199,12 +199,16 @@ internal static class EditorRevisionHub
     }
 
     /// <summary>
-    /// True only while the rebuilt surface is actually drawable. Full Vanilla mode, a detached
-    /// RWImGui bridge, and Escape-hidden overlay periods intentionally put immutable snapshot
-    /// production to sleep. Re-entry is handled by ObservePresentationMode on the main thread.
+    /// True only while the rebuilt surface is actually drawable. The session must still be the live
+    /// RainWorldGame DevUI owner; toggling DevTools off leaves the DevUI object allocated in vanilla,
+    /// so Owner != null alone is not a sufficient lifetime check. Full Vanilla mode, a detached
+    /// RWImGui bridge and Escape-hidden overlay periods likewise put immutable snapshot production
+    /// to sleep. Re-entry is handled by ObservePresentationMode on the main thread.
     /// </summary>
     internal static bool IsRebuiltPresentationActive(EditorSession session) =>
-        session?.Owner != null &&
+        session != null &&
+        ReferenceEquals(DevToolSessionHub.Current, session) &&
+        DevToolSessionHub.IsCurrentSessionLive &&
         EditorInputRouter.FrontendAttached &&
         !EditorUiModeState.UseVanilla &&
         !EditorUiModeState.OverlayHidden;
