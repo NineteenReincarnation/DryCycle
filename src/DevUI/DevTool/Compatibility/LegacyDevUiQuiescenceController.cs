@@ -1,10 +1,22 @@
 using System;
 using System.Collections.Generic;
+using BepInEx;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
+
+[BepInPlugin(PluginId, PluginName, global::DryCycle.Plugin.Version)]
+[BepInDependency(global::DryCycle.Plugin.ModId, BepInDependency.DependencyFlags.HardDependency)]
+internal sealed class LegacyDevUiQuiescencePlugin : BaseUnityPlugin
+{
+    internal const string PluginId = "DryCycle.DevTool.LegacyQuiescence";
+    internal const string PluginName = "DryCycle DevTool Legacy UI Quiescence";
+
+    private void OnEnable() => LegacyDevUiQuiescenceController.Enable();
+    private void OnDisable() => LegacyDevUiQuiescenceController.Disable();
+}
 
 /// <summary>
 /// Turns the migrated vanilla DevInterface into a minimal compatibility backend while the rebuilt
@@ -60,12 +72,14 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (enabled) return;
         On.DevInterface.DevUINode.Update += DevUINode_Update;
+        On.DevInterface.MapPage.Update += MapPage_Update;
         enabled = true;
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
+        On.DevInterface.MapPage.Update -= MapPage_Update;
         On.DevInterface.DevUINode.Update -= DevUINode_Update;
         SuppressedInitialRefreshPages.Clear();
         selectiveTraversalDepth = 0;
@@ -76,9 +90,8 @@ internal static class LegacyDevUiQuiescenceController
 
     /// <summary>
     /// MapPage is the one migrated page whose own override performs substantial hidden work after
-    /// base.Update(), including MapObject's synchronous room preparation loop. The input router
-    /// calls this before vanilla MapPage.Update. Returning true means the minimal backend was
-    /// pumped and the original override must not run this frame.
+    /// base.Update(), including MapObject's synchronous room preparation loop. Returning true means
+    /// the minimal backend was pumped and the original MapPage override must not run this frame.
     /// </summary>
     internal static bool TryUpdateMapBackend(MapPage page)
     {
@@ -93,6 +106,14 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (owner?.activePage == null) return false;
         return TryGetQuiescentProfile(owner.activePage, out _);
+    }
+
+    private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, MapPage self)
+    {
+        if (TryUpdateMapBackend(self))
+            return;
+
+        orig(self);
     }
 
     private static void DevUINode_Update(On.DevInterface.DevUINode.orig_Update orig, DevUINode self)
