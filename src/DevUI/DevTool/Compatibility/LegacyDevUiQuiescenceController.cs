@@ -77,10 +77,10 @@ internal static partial class LegacyDevUiQuiescenceController
         On.DevInterface.DialogPage.Update += DialogPage_Update;
         On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
 
-        // Sound/Trigger page Refresh is much heavier than their retained world-space backend needs.
-        // While the rebuilt UI owns presentation, intercept recurring refreshes and reconcile only
-        // spatial handles plus the live ambient-audio membership. Full Refresh remains authoritative
-        // for first materialization, visible legacy UI, diagnostics and opaque third-party pages.
+        // Recurring Refresh on Objects/Sound/Trigger pages is much heavier than the retained world
+        // backend needs. Intercept it only while the rebuilt UI owns presentation; first
+        // materialization, explicit legacy UI and opaque third-party pages still use vanilla Refresh.
+        On.DevInterface.ObjectsPage.Refresh += ObjectsPage_Refresh;
         On.DevInterface.SoundPage.Refresh += SoundPage_Refresh;
         On.DevInterface.TriggersPage.Refresh += TriggersPage_Refresh;
         enabled = true;
@@ -92,6 +92,7 @@ internal static partial class LegacyDevUiQuiescenceController
 
         On.DevInterface.TriggersPage.Refresh -= TriggersPage_Refresh;
         On.DevInterface.SoundPage.Refresh -= SoundPage_Refresh;
+        On.DevInterface.ObjectsPage.Refresh -= ObjectsPage_Refresh;
         On.DevInterface.RelationshipPage.Update -= RelationshipPage_Update;
         On.DevInterface.DialogPage.Update -= DialogPage_Update;
         On.DevInterface.MapPage.Update -= MapPage_Update;
@@ -182,6 +183,20 @@ internal static partial class LegacyDevUiQuiescenceController
         if (TryPumpDerivedPage(self)) return;
         FlushDeferredRefresh(self);
         orig(self);
+    }
+
+    private static void ObjectsPage_Refresh(On.DevInterface.ObjectsPage.orig_Refresh orig, ObjectsPage self)
+    {
+        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshObjects(self))
+        {
+            InvalidateBackendPlan(self);
+            DeferredRefreshPages.Add(self);
+            return;
+        }
+
+        orig(self);
+        InvalidateBackendPlan(self);
+        DeferredRefreshPages.Remove(self);
     }
 
     private static void SoundPage_Refresh(On.DevInterface.SoundPage.orig_Refresh orig, SoundPage self)
