@@ -72,15 +72,58 @@ public static class EditorPresentationHub
     private static EditorObjectTypeSnapshot[] libraryCache = Array.Empty<EditorObjectTypeSnapshot>();
     private static int libraryTypeCount = -1;
 
+    private static EditorSession observedSession;
+    private static global::Room observedRoom;
+    private static Page observedPage;
+    private static long observedShellRevision;
+    private static long observedObjectRevision;
+    private static bool observedShellOnly;
+    private static int observedObjectCount = -1;
+    private static int observedSelectionCount = -1;
+    private static PlacedObject observedPrimarySelection;
+
     public static EditorPresentationSnapshot Current => current;
 
     internal static void Publish(EditorSession session, bool shellOnly = false)
     {
         if (session?.Owner == null)
         {
-            current = EditorPresentationSnapshot.Empty;
+            Clear();
             return;
         }
+
+        bool objectWorkspace = !shellOnly && session.ToolMode == EditorToolMode.Objects;
+        if (objectWorkspace &&
+            (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) || session.Owner.draggedNode != null))
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+
+        long shellRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Shell);
+        long objectRevision = objectWorkspace
+            ? EditorRevisionHub.Get(session, EditorRevisionKind.Objects)
+            : 0L;
+
+        List<PlacedObject> live = objectWorkspace ? session.RoomSettings?.placedObjects : null;
+        int objectCount = live?.Count ?? 0;
+        int selectionCount = objectWorkspace ? session.Selection.Count : 0;
+        PlacedObject primarySelection = objectWorkspace ? session.Selection.PrimaryPlacedObject : null;
+        int typeCount = objectWorkspace ? ExtEnum<PlacedObject.Type>.values.Count : libraryTypeCount;
+        bool libraryStale = objectWorkspace && (libraryTypeCount != typeCount || libraryCache.Length == 0);
+
+        // Session identity protects reopen/room transitions. Revision numbers handle deterministic
+        // DryCycle writes, while the cheap count/selection/page checks cover structural changes made
+        // by the small compatibility backend without re-walking every PlacedObject on stable frames.
+        if (!libraryStale &&
+            ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedRoom, session.Room) &&
+            ReferenceEquals(observedPage, session.Owner.activePage) &&
+            observedShellOnly == shellOnly &&
+            observedShellRevision == shellRevision &&
+            observedObjectRevision == objectRevision &&
+            observedObjectCount == objectCount &&
+            observedSelectionCount == selectionCount &&
+            ReferenceEquals(observedPrimarySelection, primarySelection) &&
+            current.Available)
+            return;
 
         // Object presentation is one of the heavier DevTool payloads: it walks every placed
         // object, captures inspector adapters and may initialize reflection-backed object catalogs.
@@ -91,9 +134,8 @@ public static class EditorPresentationHub
         EditorObjectTypeSnapshot[] objectLibrary = Array.Empty<EditorObjectTypeSnapshot>();
         EditorInspectorSnapshot inspector = new();
 
-        if (!shellOnly && session.ToolMode == EditorToolMode.Objects)
+        if (objectWorkspace)
         {
-            List<PlacedObject> live = session.RoomSettings?.placedObjects;
             scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
             if (live != null)
             {
@@ -111,9 +153,8 @@ public static class EditorPresentationHub
                 }
             }
 
-            PlacedObject selected = session.Selection.PrimaryPlacedObject;
+            PlacedObject selected = primarySelection;
             int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
-            int selectionCount = session.Selection.Count;
 
             EditorPropertySnapshot[] properties;
             string[] mixedPropertyKeys;
@@ -143,8 +184,7 @@ public static class EditorPresentationHub
                     : Array.Empty<LegacyControlSnapshot>()
             };
 
-            int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
-            if (libraryTypeCount != typeCount || libraryCache.Length == 0)
+            if (libraryStale)
                 RebuildLibraryCache(typeCount);
             objectLibrary = libraryCache;
         }
@@ -170,9 +210,31 @@ public static class EditorPresentationHub
             ObjectLibrary = objectLibrary,
             Inspector = inspector
         };
+
+        observedSession = session;
+        observedRoom = session.Room;
+        observedPage = session.Owner.activePage;
+        observedShellRevision = shellRevision;
+        observedObjectRevision = objectRevision;
+        observedShellOnly = shellOnly;
+        observedObjectCount = objectCount;
+        observedSelectionCount = selectionCount;
+        observedPrimarySelection = primarySelection;
     }
 
-    internal static void Clear() => current = EditorPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorPresentationSnapshot.Empty;
+        observedSession = null;
+        observedRoom = null;
+        observedPage = null;
+        observedShellRevision = 0L;
+        observedObjectRevision = 0L;
+        observedShellOnly = false;
+        observedObjectCount = -1;
+        observedSelectionCount = -1;
+        observedPrimarySelection = null;
+    }
 
     internal static void InvalidateObjectLibrary()
     {
@@ -281,7 +343,11 @@ public static class EditorUiCommandQueue
         if (session == null) return;
         while (queue.TryDequeue(out EditorUiCommand command))
         {
-            try { Execute(session, command); }
+            try
+            {
+                Execute(session, command);
+                InvalidateAfterCommand(session, command.Kind);
+            }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool UI command failed: " + error.Message);
@@ -292,6 +358,43 @@ public static class EditorUiCommandQueue
     internal static void Clear()
     {
         while (queue.TryDequeue(out _)) { }
+    }
+
+    private static void InvalidateAfterCommand(EditorSession session, EditorUiCommandKind kind)
+    {
+        switch (kind)
+        {
+            case EditorUiCommandKind.Save:
+                return;
+
+            case EditorUiCommandKind.ToggleFocus:
+            case EditorUiCommandKind.ToggleBrowser:
+            case EditorUiCommandKind.ToggleInspector:
+            case EditorUiCommandKind.BeginPlacement:
+            case EditorUiCommandKind.CancelPlacement:
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                return;
+
+            case EditorUiCommandKind.SelectObject:
+            case EditorUiCommandKind.ToggleObjectSelection:
+            case EditorUiCommandKind.SelectObjectRange:
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+                return;
+
+            case EditorUiCommandKind.SetToolMode:
+            case EditorUiCommandKind.ToggleLegacyUi:
+            case EditorUiCommandKind.Undo:
+            case EditorUiCommandKind.Redo:
+                EditorRevisionHub.MarkShellAndWorkspace(session);
+                return;
+
+            default:
+                // Remaining commands mutate object data and normally push history entries, so both
+                // the object snapshot and shell undo/redo labels need a fresh publication.
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+                return;
+        }
     }
 
     private static void Execute(EditorSession session, EditorUiCommand command)
