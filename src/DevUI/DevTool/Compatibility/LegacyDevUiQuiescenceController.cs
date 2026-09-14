@@ -52,11 +52,13 @@ internal static class LegacyDevUiQuiescenceController
     private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(DevUI).Assembly;
     private static readonly System.Reflection.Assembly DryCycleAssembly = typeof(global::DryCycle.Plugin).Assembly;
     private static readonly HashSet<Page> SuppressedInitialRefreshPages = new();
+    private static readonly HashSet<Page> ExternalCompatibilityPages = new();
 
     private static bool enabled;
     private static int selectiveTraversalDepth;
     private static int fullCompatibilityDepth;
     private static PageProfile activeProfile;
+    private static bool externalWriterObservedInPump;
 
     internal static void Enable()
     {
@@ -89,9 +91,11 @@ internal static class LegacyDevUiQuiescenceController
         On.DevInterface.DevUINode.Update -= DevUINode_Update;
 
         SuppressedInitialRefreshPages.Clear();
+        ExternalCompatibilityPages.Clear();
         selectiveTraversalDepth = 0;
         fullCompatibilityDepth = 0;
         activeProfile = null;
+        externalWriterObservedInPump = false;
         enabled = false;
     }
 
@@ -100,6 +104,14 @@ internal static class LegacyDevUiQuiescenceController
         if (owner?.activePage == null) return false;
         return TryGetQuiescentProfile(owner.activePage, out _);
     }
+
+    /// <summary>
+    /// Once an opaque third-party subtree has been observed on a page, remember that fact for the
+    /// page lifetime. This lets the revision layer stay conservative when the developer temporarily
+    /// exposes the full legacy UI, where selective traversal is intentionally disabled.
+    /// </summary>
+    internal static bool HasExternalCompatibilityNodes(Page page) =>
+        page != null && ExternalCompatibilityPages.Contains(page);
 
     private static void ObjectsPage_Update(On.DevInterface.ObjectsPage.orig_Update orig, ObjectsPage self)
     {
@@ -196,11 +208,23 @@ internal static class LegacyDevUiQuiescenceController
             DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyQuiescenceBackend);
 
         PageProfile previousProfile = activeProfile;
+        bool previousExternalWriterObserved = externalWriterObservedInPump;
         activeProfile = profile;
+        externalWriterObservedInPump = false;
         selectiveTraversalDepth++;
         try
         {
             PumpChildren(page, profile);
+
+            // A page can contain several nodes from the same or different third-party assemblies.
+            // They are all opaque writers, but presentation only needs one workspace revision edge
+            // after the complete legacy backend pass. Do not bump once per foreign node.
+            if (externalWriterObservedInPump)
+            {
+                EditorSession session = DevToolSessionHub.Current;
+                if (session != null && ReferenceEquals(session.Owner, page.owner))
+                    EditorRevisionHub.MarkWorkspace(session, profile.ToolMode);
+            }
 
             if (!page.initRefresh) return;
 
@@ -233,6 +257,7 @@ internal static class LegacyDevUiQuiescenceController
         {
             selectiveTraversalDepth--;
             activeProfile = previousProfile;
+            externalWriterObservedInPump = previousExternalWriterObserved;
         }
     }
 
@@ -253,11 +278,12 @@ internal static class LegacyDevUiQuiescenceController
         if (IsExternalCompatibilityNode(node))
         {
             // Unknown third-party DevInterface code is an opaque writer. Keep its complete subtree
-            // alive and invalidate only this workspace so the rebuilt UI observes any state changes
-            // without globally disabling revision-driven presentation for unrelated editors.
-            EditorSession session = DevToolSessionHub.Current;
-            if (session != null && ReferenceEquals(session.Owner, node.owner))
-                EditorRevisionHub.MarkWorkspace(session, profile.ToolMode);
+            // alive, remember that the page contains foreign compatibility code, and let the page
+            // pump publish one batched workspace invalidation after all such nodes have updated.
+            externalWriterObservedInPump = true;
+            Page owningPage = node.owner?.activePage;
+            if (owningPage != null)
+                ExternalCompatibilityPages.Add(owningPage);
 
             fullCompatibilityDepth++;
             try
