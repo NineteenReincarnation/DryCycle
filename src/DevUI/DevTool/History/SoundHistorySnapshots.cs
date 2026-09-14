@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Sound;
 
 namespace DryCycle.DevUI.DevTool.History;
 
@@ -45,6 +46,7 @@ internal sealed class SoundRoomVolumeStateSnapshot : IEditorStateSnapshot
 
         settings.BkgDroneVolume = backgroundDroneVolume;
         settings.BkgDroneNoThreatVolume = noThreatDroneVolume;
+        SoundPresentationChangeHintHub.MarkRoomValues(session);
 
         // The rebuilt Sound frontend reads RoomSettings directly through its revisioned snapshot.
         // Refresh hidden vanilla controls only when they actually own presentation.
@@ -110,6 +112,8 @@ internal sealed class AmbientSoundCollectionStateSnapshot : IEditorStateSnapshot
                 if (sound != null)
                     settings.ambientSounds.Add(sound);
             }
+
+            SoundPresentationChangeHintHub.MarkCollection(session);
 
             // Collection shape changes require the vanilla compatibility backend to recreate its
             // world-space Sound handles even when the screen-space SoundPage is quiescent.
