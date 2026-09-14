@@ -206,7 +206,8 @@ internal static class DevToolPerformanceMonitor
 
     internal static Scope Measure(DevToolPerformanceMetric metric)
     {
-        if (Volatile.Read(ref enabled) == 0 || metric < 0 || metric >= DevToolPerformanceMetric.Count)
+        int index = (int)metric;
+        if (Volatile.Read(ref enabled) == 0 || index < 0 || index >= Series.Length)
             return default;
 
         return new Scope(metric, Stopwatch.GetTimestamp(), Volatile.Read(ref generation));
