@@ -115,7 +115,8 @@ internal static class RoomPresentationChangeHintHub
     {
         if (session == null) return;
         State state = Get(session);
-        state.Values = true;
+        // Fade payloads are their own immutable fields; changing one does not require rereading the
+        // ordinary Room scalar set or override badges.
         if (terrain) state.TerrainFadePalette = true;
         else state.FadePalette = true;
     }
