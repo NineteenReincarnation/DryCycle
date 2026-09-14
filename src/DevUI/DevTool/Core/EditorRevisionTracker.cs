@@ -34,6 +34,8 @@ internal enum EditorRevisionKind
 internal sealed class EditorRevisionTracker
 {
     private readonly long[] revisions = new long[(int)EditorRevisionKind.Count];
+    private bool presentationModeObserved;
+    private bool vanillaOwnedPresentation;
 
     internal EditorRevisionTracker()
     {
@@ -70,6 +72,24 @@ internal sealed class EditorRevisionTracker
             revisions[i] = Next(revisions[i]);
     }
 
+    /// <summary>
+    /// Called only from DevUI.Update. The volatile presentation flag may be written by RWImGui's
+    /// render callback, but revision mutation stays on Rain World's main thread. Returning from full
+    /// vanilla presentation invalidates every channel exactly once so edits performed while rebuilt
+    /// snapshots were intentionally dormant become visible immediately.
+    /// </summary>
+    internal void ObservePresentationMode(bool useVanilla)
+    {
+        bool returningToRebuilt =
+            presentationModeObserved && vanillaOwnedPresentation && !useVanilla;
+
+        presentationModeObserved = true;
+        vanillaOwnedPresentation = useVanilla;
+
+        if (returningToRebuilt)
+            MarkAll();
+    }
+
     internal static EditorRevisionKind WorkspaceKind(EditorToolMode mode) => mode switch
     {
         EditorToolMode.Objects => EditorRevisionKind.Objects,
@@ -95,12 +115,12 @@ internal static class EditorRevisionHub
     private static ConditionalWeakTable<EditorSession, EditorRevisionTracker> trackers = new();
 
     internal static long Get(EditorSession session, EditorRevisionKind kind) =>
-        session == null ? 0L : trackers.GetValue(session, _ => new EditorRevisionTracker()).Get(kind);
+        session == null ? 0L : Tracker(session).Get(kind);
 
     internal static void Mark(EditorSession session, EditorRevisionKind kind)
     {
         if (session == null) return;
-        trackers.GetValue(session, _ => new EditorRevisionTracker()).Mark(kind);
+        Tracker(session).Mark(kind);
     }
 
     internal static void MarkWorkspace(EditorSession session) =>
@@ -109,7 +129,7 @@ internal static class EditorRevisionHub
     internal static void MarkWorkspace(EditorSession session, EditorToolMode mode)
     {
         if (session == null) return;
-        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkWorkspace(mode);
+        Tracker(session).MarkWorkspace(mode);
     }
 
     internal static void MarkShellAndWorkspace(EditorSession session) =>
@@ -118,19 +138,29 @@ internal static class EditorRevisionHub
     internal static void MarkShellAndWorkspace(EditorSession session, EditorToolMode mode)
     {
         if (session == null) return;
-        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkShellAndWorkspace(mode);
+        Tracker(session).MarkShellAndWorkspace(mode);
     }
 
     internal static void MarkAll(EditorSession session)
     {
         if (session == null) return;
-        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkAll();
+        Tracker(session).MarkAll();
+    }
+
+    /// <summary>
+    /// Main-thread ownership observation. Call once per DevUI update before any presentation hub
+    /// reads revisions.
+    /// </summary>
+    internal static void ObservePresentationMode(EditorSession session)
+    {
+        if (session == null) return;
+        Tracker(session).ObservePresentationMode(EditorUiModeState.UseVanilla);
     }
 
     /// <summary>
     /// Reports whether the current rebuilt workspace must be treated as an opaque live writer.
     /// Full vanilla presentation is intentionally excluded: rebuilt windows are not drawn there,
-    /// and EditorUiModeState invalidates every channel once when ownership returns to New UI.
+    /// and ObservePresentationMode invalidates every channel once ownership returns to New UI.
     /// Explicit legacy panels inside New UI, legacy transactions, diagnostics and unknown custom
     /// Pages remain live because the rebuilt surface is visible while those writers are active.
     /// </summary>
@@ -147,4 +177,7 @@ internal static class EditorRevisionHub
 
     internal static void Reset() =>
         trackers = new ConditionalWeakTable<EditorSession, EditorRevisionTracker>();
+
+    private static EditorRevisionTracker Tracker(EditorSession session) =>
+        trackers.GetValue(session, _ => new EditorRevisionTracker());
 }
