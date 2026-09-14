@@ -108,9 +108,20 @@ internal static class WorldMapLegacyVisualGuard
     {
         if (!enabled) return;
 
+        // Once DevTools is gone there is no page that can legitimately be refreshed later in this
+        // frame. Restore a still-owned page exactly once at the lifetime edge, then make gameplay
+        // frames an O(1) no-op instead of re-evaluating every map/frontend ownership condition.
+        if (!DevToolSessionHub.IsCurrentSessionLive)
+        {
+            if (suppressedPage != null || SuppressedSprites.Count != 0 || SuppressedLabels.Count != 0)
+                Restore();
+            suppressionDirty = true;
+            nextSafetyAuditFrame = 0;
+            return;
+        }
+
         EditorSession session = DevToolRuntime.ActiveSession;
         bool rebuiltMapOwnsLegacySuppression =
-            DevToolSessionHub.IsCurrentSessionLive &&
             !EditorUiModeState.UseVanilla &&
             EditorInputRouter.FrontendAttached &&
             session != null &&
