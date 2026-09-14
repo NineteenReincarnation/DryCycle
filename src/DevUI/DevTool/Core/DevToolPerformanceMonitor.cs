@@ -22,6 +22,7 @@ internal enum DevToolPerformanceMetric
     CommandProcessing,
     LegacyPresentation,
     ObjectGizmoPresentation,
+    LegacyQuiescenceBackend,
     CorePresentation,
     RoomPresentation,
     SoundPresentation,
