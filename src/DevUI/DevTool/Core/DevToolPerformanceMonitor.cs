@@ -116,13 +116,19 @@ internal static class DevToolPerformanceMonitor
             }
         }
 
-        internal void Record(long elapsedTicks)
+        internal void Record(long elapsedTicks, int expectedGeneration)
         {
             if (elapsedTicks < 0L)
                 elapsedTicks = 0L;
 
             lock (sync)
             {
+                // The first generation check happens before taking this lock to keep the common
+                // rejection path cheap. Repeat it here so Reset cannot clear the ring and then have
+                // an already-in-flight old scope append a stale sample after the reset boundary.
+                if (Volatile.Read(ref enabled) == 0 || expectedGeneration != Volatile.Read(ref generation))
+                    return;
+
                 samples[next] = elapsedTicks;
                 next++;
                 if (next == samples.Length)
@@ -233,7 +239,7 @@ internal static class DevToolPerformanceMonitor
             return;
 
         long elapsed = Stopwatch.GetTimestamp() - startTimestamp;
-        Series[index].Record(elapsed);
+        Series[index].Record(elapsed, scopeGeneration);
     }
 
     private static MetricSeries[] CreateSeries()
