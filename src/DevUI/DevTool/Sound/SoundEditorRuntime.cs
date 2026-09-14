@@ -81,6 +81,14 @@ internal static class SoundEditorStateHub
 public static class SoundEditorPresentationHub
 {
     private static volatile EditorSoundPresentationSnapshot current = EditorSoundPresentationSnapshot.Empty;
+    private static EditorSession observedSession;
+    private static global::RoomSettings observedSettings;
+    private static SoundPage observedPage;
+    private static string[] observedFileNames;
+    private static long observedRevision;
+    private static int observedSoundCount = -1;
+    private static int observedSelectedIndex = int.MinValue;
+
     public static EditorSoundPresentationSnapshot Current => current;
 
     internal static void Publish(EditorSession session)
@@ -88,7 +96,7 @@ public static class SoundEditorPresentationHub
         if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null ||
             session.Owner?.activePage is not SoundPage page)
         {
-            current = EditorSoundPresentationSnapshot.Empty;
+            Clear();
             return;
         }
 
@@ -97,6 +105,25 @@ public static class SoundEditorPresentationHub
         int count = session.RoomSettings.ambientSounds.Count;
         if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
         if (state.SelectedIndex < -1) state.SelectedIndex = -1;
+
+        // Vanilla mode, explicit legacy UI, legacy transactions and an active world-handle drag are
+        // compatibility write paths that bypass DryCycle's command queues. Keep Sound live only for
+        // those windows; ordinary rebuilt-UI frames use the revision clock.
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
+            session.Owner.draggedNode != null || page.draggedObject != null)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Sound);
+        string[] fileNames = page.fileNames ?? Array.Empty<string>();
+        if (ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedSettings, session.RoomSettings) &&
+            ReferenceEquals(observedPage, page) &&
+            ReferenceEquals(observedFileNames, fileNames) &&
+            observedRevision == revision &&
+            observedSoundCount == count &&
+            observedSelectedIndex == state.SelectedIndex &&
+            current.Available)
+            return;
 
         // Resource discovery belongs to the Rain World / DevUI thread. RWImGui receives only the
         // immutable presentation snapshots below and never touches AssetManager or the mutable
@@ -153,9 +180,27 @@ public static class SoundEditorPresentationHub
             Sounds = sounds,
             SelectedIndex = state.SelectedIndex
         };
+
+        observedSession = session;
+        observedSettings = session.RoomSettings;
+        observedPage = page;
+        observedFileNames = fileNames;
+        observedRevision = revision;
+        observedSoundCount = count;
+        observedSelectedIndex = state.SelectedIndex;
     }
 
-    internal static void Clear() => current = EditorSoundPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorSoundPresentationSnapshot.Empty;
+        observedSession = null;
+        observedSettings = null;
+        observedPage = null;
+        observedFileNames = null;
+        observedRevision = 0L;
+        observedSoundCount = -1;
+        observedSelectedIndex = int.MinValue;
+    }
 }
 
 public enum SoundEditorCommandKind
@@ -294,6 +339,15 @@ public static class SoundEditorCommandQueue
                         SoundEditorActions.ApplyGroup(session, command.Key);
                         break;
                 }
+
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+                if (command.Kind is SoundEditorCommandKind.Create or
+                    SoundEditorCommandKind.CreateFromLibrary or
+                    SoundEditorCommandKind.Delete or
+                    SoundEditorCommandKind.SetRoomValue or
+                    SoundEditorCommandKind.SetSoundValue or
+                    SoundEditorCommandKind.ApplyGroup)
+                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
             }
             catch (Exception error)
             {
