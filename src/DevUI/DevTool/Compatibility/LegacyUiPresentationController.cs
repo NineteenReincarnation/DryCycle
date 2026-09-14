@@ -38,10 +38,15 @@ internal static class LegacyUiPresentationController
     private static readonly Vector2 Offscreen = new(-100000f, -100000f);
     private static bool lifetimeMonitorInstalled;
     private static bool observedLiveSession;
+    private static EditorSession observedLifetimeSession;
+    private static Page observedLifetimePage;
+    private static EditorDocumentKey observedLifetimeDocument;
+    private static bool hasObservedLifetimeDocument;
 
     internal static void Apply(Page page, bool suppressLegacyControls)
     {
         EnsureLifetimeMonitor();
+        ObserveDocumentLifetime(page);
 
         // Compatibility verification is diagnostic work, not presentation work. A full audit walks
         // instantiated DevInterface trees, mirrors controls and exercises reflection-backed action
@@ -88,12 +93,18 @@ internal static class LegacyUiPresentationController
 
     internal static void Reset()
     {
+        Page retiredPage = hiddenPage ?? observedLifetimePage;
+
         if (lifetimeMonitorInstalled)
         {
             On.RainWorldGame.Update -= RainWorldGame_Update;
             lifetimeMonitorInstalled = false;
         }
         observedLiveSession = false;
+        observedLifetimeSession = null;
+        observedLifetimePage = null;
+        observedLifetimeDocument = default;
+        hasObservedLifetimeDocument = false;
 
         RestoreHiddenPage();
         hidden.Clear();
@@ -101,6 +112,10 @@ internal static class LegacyUiPresentationController
         hiddenPage = null;
         DevUiFullAudit.Reset();
         DevUiMigrationCoverage.Reset();
+        UniversalDevUiCommandQueue.Clear();
+        UniversalDevUiPresentationHub.Clear();
+        DevUiPageCoverageTracker.Reset();
+        LegacyDevUiQuiescenceController.ReleasePage(retiredPage);
     }
 
     /// <summary>
@@ -116,6 +131,38 @@ internal static class LegacyUiPresentationController
         On.RainWorldGame.Update += RainWorldGame_Update;
         lifetimeMonitorInstalled = true;
         observedLiveSession = DevToolSessionHub.IsCurrentSessionLive;
+    }
+
+    /// <summary>
+    /// A mod can theoretically reuse the same Page instance while changing the editor document.
+    /// Page identity alone would then preserve a deferred-refresh/external-writer/backend-plan cache
+    /// compiled for the previous room. Detect that uncommon edge from the authoritative DocumentKey
+    /// after EditorSession.Synchronize has run and discard only the page-keyed compatibility state.
+    /// </summary>
+    private static void ObserveDocumentLifetime(Page page)
+    {
+        EditorSession session = DevToolSessionHub.Current;
+        if (session == null)
+        {
+            observedLifetimeSession = null;
+            observedLifetimePage = null;
+            observedLifetimeDocument = default;
+            hasObservedLifetimeDocument = false;
+            return;
+        }
+
+        bool sameSession = ReferenceEquals(observedLifetimeSession, session);
+        bool samePage = ReferenceEquals(observedLifetimePage, page);
+        if (sameSession && samePage && hasObservedLifetimeDocument &&
+            !observedLifetimeDocument.Equals(session.DocumentKey))
+        {
+            LegacyDevUiQuiescenceController.ReleasePage(page);
+        }
+
+        observedLifetimeSession = session;
+        observedLifetimePage = page;
+        observedLifetimeDocument = session.DocumentKey;
+        hasObservedLifetimeDocument = true;
     }
 
     private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
@@ -169,6 +216,8 @@ internal static class LegacyUiPresentationController
         UniversalDevUiPresentationHub.Clear();
         DevUiPageCoverageTracker.Reset();
 
+        // Reset normally releases the observed/hidden page already. Keep the explicit release for
+        // the case where presentation never hid the active page during this DevUI lifetime.
         LegacyDevUiQuiescenceController.ReleasePage(retiredPage);
     }
 
