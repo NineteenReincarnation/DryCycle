@@ -37,6 +37,7 @@ internal sealed class EditorRevisionTracker
     private readonly long[] revisions = new long[(int)EditorRevisionKind.Count];
     private bool presentationOwnershipObserved;
     private bool rebuiltPresentationWasActive;
+    private bool suppressMarksUntilFirstRead;
 
     internal EditorRevisionTracker()
     {
@@ -46,12 +47,21 @@ internal sealed class EditorRevisionTracker
 
     internal long Get(EditorRevisionKind kind)
     {
+        // Returning from Vanilla/hidden/detached presentation already advances every channel once.
+        // CorePresentation may immediately notice a History.Revision edge from the dormant period
+        // and attempt to mark Shell + workspace again before it reads either clock. Keep that tiny
+        // post-observation window idempotent, then reopen normal marking on the first revision read.
+        suppressMarksUntilFirstRead = false;
+
         int index = (int)kind;
         return index >= 0 && index < revisions.Length ? revisions[index] : 0L;
     }
 
     internal void Mark(EditorRevisionKind kind)
     {
+        if (suppressMarksUntilFirstRead)
+            return;
+
         int index = (int)kind;
         if (index < 0 || index >= revisions.Length)
             return;
@@ -88,7 +98,14 @@ internal sealed class EditorRevisionTracker
         rebuiltPresentationWasActive = rebuiltPresentationActive;
 
         if (returningToRebuilt)
+        {
             MarkAll();
+
+            // ObservePresentationMode runs immediately before CorePresentation. Until that first
+            // consumer reads a revision, MarkAll is the authoritative invalidation for this return
+            // frame. This prevents dormant History changes from double-bumping the same channels.
+            suppressMarksUntilFirstRead = true;
+        }
     }
 
     internal static EditorRevisionKind WorkspaceKind(EditorToolMode mode) => mode switch
