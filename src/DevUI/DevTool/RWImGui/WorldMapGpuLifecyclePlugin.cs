@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Threading;
 using BepInEx;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -54,14 +55,18 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
         EditorSession session = DevToolRuntime.ActiveSession;
         bool rebuiltMapVisible =
+            EditorInputRouter.FrontendAttached &&
             session?.ToolMode == EditorToolMode.Map &&
             !EditorUiModeState.UseVanilla &&
-            !EditorUiModeState.OverlayHidden;
+            !EditorUiModeState.OverlayHidden &&
+            !session.LegacyUiVisible;
 
         if (!rebuiltMapVisible)
         {
-            // Tool switches keep retained scene/cache data warm. The scene Apply(null) path disables
-            // the high-depth camera and, through the pipe-batch hook, hides retained map sockets too.
+            // Tool switches, detached frontend, explicit legacy UI and Escape-hidden presentation all
+            // keep retained scene/cache data warm, but none of them owns the screen. Apply(null)
+            // disables the high-depth camera and, through the pipe-batch hook, hides retained map
+            // sockets too. This is the final same-frame ownership arbiter after all map pumps.
             WorldMapGpuScene.Apply(null, session);
         }
     }
