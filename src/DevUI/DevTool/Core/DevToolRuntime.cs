@@ -133,9 +133,9 @@ internal static class DevToolRuntime
             DialogEditorCommandQueue.Process(session);
             RelationshipEditorCommandQueue.Process(session);
 
-            // Commands cannot replace the DevUI owner/document behind this session. The only
-            // post-command invariant that needs reconciling is selected-object membership, so do
-            // not pay for a third full EditorSession.Synchronize() in the same frame.
+            // Page-switch commands reconcile their page/document immediately inside SetToolMode.
+            // Stable command frames therefore only need selected-object membership validation here,
+            // preserving the no-third-full-Synchronize() fast path.
             session?.SynchronizeSelectionValidity();
 
             if (EffectLivePreviewEnabled)
@@ -545,8 +545,12 @@ public sealed class EditorSession
         LegacyTransactions.Reset();
         LegacyUiVisible = false;
         Owner.SwitchPage(pageIndex);
-        observedLegacyPage = Owner.activePage;
-        ToolMode = ResolveToolMode(observedLegacyPage);
+
+        // SwitchPage constructs a new concrete Page immediately and can cross document boundaries
+        // (Room <-> RegionMap <-> Relationships). Reconcile now so any later command in this same
+        // queue batch writes to the correct History document and presentation identity. This keeps
+        // stable frames cheap because the structural pass only happens on an actual page switch.
+        Synchronize(Owner);
     }
 
     public void BeginPlacement(string type)
