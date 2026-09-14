@@ -21,6 +21,10 @@ internal static class ObjectGizmoPresentationController
     private static ObjectsPage page;
     private static bool enabled;
     private static bool presentationActive;
+    private static long appliedObjectRevision;
+    private static long appliedSelectionRevision;
+    private static int appliedObjectCount = -1;
+    private static int appliedTopLevelNodeCount = -1;
 
     internal static void Enable()
     {
@@ -34,6 +38,7 @@ internal static class ObjectGizmoPresentationController
         if (!enabled) return;
         On.DevInterface.Handle.Update -= Handle_Update;
         RestoreAll();
+        ResetAppliedState();
         presentationActive = false;
         enabled = false;
     }
@@ -43,16 +48,36 @@ internal static class ObjectGizmoPresentationController
         if (!ReferenceEquals(page, objectsPage))
         {
             RestoreAll();
+            ResetAppliedState();
             page = objectsPage;
         }
 
-        presentationActive = active && objectsPage != null && session != null;
-        if (!presentationActive)
+        bool nextActive = active && objectsPage != null && session != null;
+        if (!nextActive)
         {
-            RestoreAll();
+            if (presentationActive || hidden.Count > 0)
+                RestoreAll();
+            presentationActive = false;
+            ResetAppliedState();
             page = objectsPage;
             return;
         }
+
+        presentationActive = true;
+
+        // Applying gizmo visibility used to recursively walk the complete ObjectsPage tree every
+        // DevUI frame, then recursively walk every child handle again even when nothing changed.
+        // The visibility policy depends only on the page structure, object model revision and
+        // selection. Those are explicit semantic keys now, so stable frames can return in O(1).
+        long objectRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Objects);
+        long selectionRevision = session.Selection.Revision;
+        int objectCount = session.RoomSettings?.placedObjects?.Count ?? 0;
+        int topLevelNodeCount = objectsPage.subNodes?.Count ?? 0;
+        if (appliedObjectRevision == objectRevision &&
+            appliedSelectionRevision == selectionRevision &&
+            appliedObjectCount == objectCount &&
+            appliedTopLevelNodeCount == topLevelNodeCount)
+            return;
 
         PlacedObject selected = session.Selection.Count == 1
             ? session.Selection.PrimaryPlacedObject
@@ -66,6 +91,11 @@ internal static class ObjectGizmoPresentationController
             else
                 HideExtraGizmo(representation);
         });
+
+        appliedObjectRevision = objectRevision;
+        appliedSelectionRevision = selectionRevision;
+        appliedObjectCount = objectCount;
+        appliedTopLevelNodeCount = topLevelNodeCount;
     }
 
     internal static void Reset()
@@ -73,6 +103,7 @@ internal static class ObjectGizmoPresentationController
         RestoreAll();
         page = null;
         presentationActive = false;
+        ResetAppliedState();
     }
 
     private static void Handle_Update(On.DevInterface.Handle.orig_Update orig, Handle self)
@@ -256,5 +287,13 @@ internal static class ObjectGizmoPresentationController
         foreach (KeyValuePair<DevUINode, SpriteState> pair in hidden)
             RestoreNodeSprites(pair.Key);
         hidden.Clear();
+    }
+
+    private static void ResetAppliedState()
+    {
+        appliedObjectRevision = 0L;
+        appliedSelectionRevision = 0L;
+        appliedObjectCount = -1;
+        appliedTopLevelNodeCount = -1;
     }
 }
