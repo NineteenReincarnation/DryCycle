@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Room;
 
@@ -295,8 +296,8 @@ internal sealed class RoomPaletteFadeStateSnapshot : IEditorStateSnapshot
 }
 
 /// <summary>
-/// History unit for one RoomEffect. Presence/list position and all built-in editable fields are kept
-/// so amount edits and local effect deletion never require a whole-room save/parse round trip.
+/// History unit for one RoomEffect amount vector. Collection membership changes use the separate
+/// collection snapshot because vanilla effect add/remove can replace inherited rows.
 /// </summary>
 internal sealed class SingleRoomEffectStateSnapshot : IEditorStateSnapshot
 {
@@ -356,9 +357,6 @@ internal sealed class SingleRoomEffectStateSnapshot : IEditorStateSnapshot
             target.extraAmounts == null ? Array.Empty<float>() : (float[])target.extraAmounts.Clone());
     }
 
-    internal static IEditorStateSnapshot Absent(RoomSettings settings, RoomSettings.RoomEffect target) =>
-        settings == null || target == null ? null : new RoomEffectAbsentSnapshot(settings, target);
-
     public IEditorStateSnapshot CaptureCurrent(EditorSession session) =>
         ReferenceEquals(session?.RoomSettings, settings) ? Capture(settings, target) : null;
 
@@ -388,9 +386,14 @@ internal sealed class SingleRoomEffectStateSnapshot : IEditorStateSnapshot
                 int count = Math.Min(target.extraAmounts.Length, extraAmounts.Length);
                 for (int i = 0; i < count; i++) target.extraAmounts[i] = extraAmounts[i];
             }
+
+            int sliderCount = Math.Max(1, RoomSettings.RoomEffect.GetSliderCount(target.type));
+            for (int slider = 0; slider < sliderCount; slider++)
+                RoomEditorActions.ApplyEffectLiveSideEffect(session, target, slider);
         }
 
         RoomEditorActions.RefreshLegacyPageOrDefer(session);
+        RoomEffectLiveCompatibility.Reconcile(session);
         return true;
     }
 
@@ -404,35 +407,5 @@ internal sealed class SingleRoomEffectStateSnapshot : IEditorStateSnapshot
         for (int i = 0; i < extraAmounts.Length; i++)
             result += "|" + extraAmounts[i].ToString("R", CultureInfo.InvariantCulture);
         return result;
-    }
-
-    private sealed class RoomEffectAbsentSnapshot : IEditorStateSnapshot
-    {
-        private readonly RoomSettings settings;
-        private readonly RoomSettings.RoomEffect target;
-
-        internal RoomEffectAbsentSnapshot(RoomSettings settings, RoomSettings.RoomEffect target)
-        {
-            this.settings = settings;
-            this.target = target;
-        }
-
-        public string Kind => "RoomEffect:" + RuntimeHelpers.GetHashCode(target);
-        public string Fingerprint => "0";
-
-        public IEditorStateSnapshot CaptureCurrent(EditorSession session) =>
-            ReferenceEquals(session?.RoomSettings, settings)
-                ? SingleRoomEffectStateSnapshot.Capture(settings, target)
-                : null;
-
-        public bool Restore(EditorSession session)
-        {
-            if (!ReferenceEquals(session?.RoomSettings, settings) || settings?.effects == null)
-                return false;
-
-            settings.effects.Remove(target);
-            RoomEditorActions.RefreshLegacyPageOrDefer(session);
-            return true;
-        }
     }
 }
