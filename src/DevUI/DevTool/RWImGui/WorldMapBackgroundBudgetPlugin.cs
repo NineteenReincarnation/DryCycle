@@ -53,7 +53,6 @@ internal static class WorldMapBackgroundBudget
     private static ManualLogSource log;
     private static IDisposable geometryHook;
     private static IDisposable shortcutHook;
-    private static FieldInfo zoomField;
     private static bool enabled;
     private static int lastGeometrySweepFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
@@ -88,9 +87,8 @@ internal static class WorldMapBackgroundBudget
                 null,
                 new[] { typeof(int), typeof(int) },
                 null);
-            zoomField = typeof(WorldMapView).GetField("zoom", flags);
 
-            if (geometryBackground == null || shortcutBackground == null || zoomField == null)
+            if (geometryBackground == null || shortcutBackground == null)
                 throw new MissingMemberException("World Map background-budget hook targets were not found.");
 
             geometryHook = constructor.Invoke(
@@ -104,7 +102,7 @@ internal static class WorldMapBackgroundBudget
         catch (Exception error)
         {
             Disable();
-            log?.LogWarning("World Map background preview budget could not attach: " + Unwrap(error).Message);
+            logger?.LogWarning("World Map background preview budget could not attach: " + Unwrap(error).Message);
         }
     }
 
@@ -112,7 +110,7 @@ internal static class WorldMapBackgroundBudget
     {
         DisposeHook(ref shortcutHook);
         DisposeHook(ref geometryHook);
-        zoomField = null;
+        WorldMapHotState.Invalidate();
         lastGeometrySweepFrame = -1000;
         lastShortcutSweepFrame = -1000;
         geometryRegion = string.Empty;
@@ -135,8 +133,7 @@ internal static class WorldMapBackgroundBudget
             return;
         }
 
-        float zoom = zoomField?.GetValue(null) is float value ? value : 1f;
-        if (zoom < DetailedBackgroundZoom)
+        if (WorldMapHotState.Zoom < DetailedBackgroundZoom)
             return;
 
         if (Time.frameCount - lastGeometrySweepFrame < GeometrySweepIntervalFrames)
