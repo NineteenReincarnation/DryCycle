@@ -75,8 +75,6 @@ internal static class TriggerEditorActions
             page.Refresh();
         }
 
-        // Creation history is one member changing from absent -> present. Avoid serializing the
-        // complete RoomSettings file twice just to remember one newly-created trigger.
         IEditorStateSnapshot before = AbsentMemberSnapshots.Trigger(session.RoomSettings, created);
         IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, created);
         if (SnapshotHistoryEntry.TryCreate(
@@ -98,15 +96,16 @@ internal static class TriggerEditorActions
         if (before == null) return false;
 
         session.RoomSettings.triggers.RemoveAt(index);
-        RefreshPage(session);
         IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, trigger);
-
-        if (SnapshotHistoryEntry.TryCreate(
+        if (!SnapshotHistoryEntry.TryCreate(
                 "Delete trigger " + (trigger.type?.value ?? string.Empty),
                 before,
                 after,
                 out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+            return false;
+
+        RefreshPage(session);
+        session.History.Push(entry);
 
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
         if (state != null)
@@ -131,7 +130,6 @@ internal static class TriggerEditorActions
                     if (trigger.activeToCycle >= 0) from = Math.Min(from, trigger.activeToCycle);
                     trigger.activeFromCycle = from;
                     return true;
-
                 case TriggerEditorKeys.ActiveToCycle:
                     if (value.Kind != EditorPropertyKind.Integer) return false;
                     if (value.Integer < 0)
@@ -141,38 +139,31 @@ internal static class TriggerEditorActions
                     }
                     trigger.activeToCycle = Mathf.Clamp(value.Integer, trigger.activeFromCycle, 79);
                     return true;
-
                 case TriggerEditorKeys.DelaySeconds:
                     if (value.Kind != EditorPropertyKind.Float) return false;
                     trigger.delay = Mathf.RoundToInt(Mathf.Clamp(value.X, 0f, 120f) * 40f);
                     return true;
-
                 case TriggerEditorKeys.FireChance:
                     if (value.Kind != EditorPropertyKind.Float) return false;
                     trigger.fireChance = Mathf.Clamp01(value.X);
                     return true;
-
                 case TriggerEditorKeys.MultiUse:
                     if (value.Kind != EditorPropertyKind.Boolean) return false;
                     trigger.multiUse = value.Boolean;
                     return true;
-
                 case TriggerEditorKeys.Entrance:
                     if (value.Kind != EditorPropertyKind.Integer) return false;
                     int maxEntrance = (session.Room?.abstractRoom?.connections?.Length ?? 0) - 1;
                     trigger.entrance = Mathf.Clamp(value.Integer, -1, Math.Max(-1, maxEntrance));
                     return true;
-
                 case TriggerEditorKeys.Karma:
                     if (value.Kind != EditorPropertyKind.Integer) return false;
                     trigger.karma = Mathf.Clamp(value.Integer, 0, 4);
                     return true;
-
                 case TriggerEditorKeys.Position:
                     if (value.Kind != EditorPropertyKind.Vector2 || trigger is not SpotTrigger spotPosition) return false;
                     spotPosition.pos = new Vector2(value.X, value.Y);
                     return true;
-
                 case TriggerEditorKeys.Radius:
                     if (value.Kind != EditorPropertyKind.Float || trigger is not SpotTrigger spotRadius) return false;
                     float radius = Mathf.Max(0f, value.X);
@@ -182,13 +173,11 @@ internal static class TriggerEditorActions
                     spotRadius.rad = radius;
                     spotRadius.radHandlePosition = direction * radius;
                     return true;
-
                 case TriggerEditorKeys.CreatureType:
                     if (value.Kind != EditorPropertyKind.String || trigger is not SeeCreatureTrigger see || string.IsNullOrEmpty(value.Text))
                         return false;
                     see.creatureType = new CreatureTemplate.Type(value.Text, false);
                     return true;
-
                 default:
                     return false;
             }
@@ -406,12 +395,12 @@ internal static class TriggerEditorActions
 
         IEditorStateSnapshot before = SingleTriggerStateSnapshot.Capture(session.RoomSettings, target);
         if (before == null || !mutation()) return false;
-        if (refreshPage) RefreshPage(session);
-        IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, target);
 
+        IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, target);
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
+        if (refreshPage) RefreshPage(session);
         session.History.Push(entry);
         return true;
     }
