@@ -49,7 +49,7 @@ internal static partial class LegacyDevUiQuiescenceController
         new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: true)
     };
 
-    private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(DevUI).Assembly;
+    private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(global::DevInterface.DevUI).Assembly;
     private static readonly System.Reflection.Assembly DryCycleAssembly = typeof(global::DryCycle.Plugin).Assembly;
     private static readonly HashSet<Page> SuppressedInitialRefreshPages = new();
     private static readonly HashSet<Page> DeferredRefreshPages = new();
@@ -112,7 +112,7 @@ internal static partial class LegacyDevUiQuiescenceController
         enabled = false;
     }
 
-    internal static bool IsQuiescent(DevUI owner)
+    internal static bool IsQuiescent(global::DevInterface.DevUI owner)
     {
         if (owner?.activePage == null) return false;
         return TryGetQuiescentProfile(owner.activePage, out _);

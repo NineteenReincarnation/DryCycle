@@ -37,8 +37,8 @@ public sealed class MyRuntime : IteratorRuntime
 | `ReleaseMovement()` | 取消主动移动，保留惯性、姿势控制和游戏重力/碰撞。 |
 | `MovementTarget` | 原始请求目标，可为 null；约束后的目标可用 `Context.Arm.ConstrainTarget(...)` 查询。 |
 | `LookAt(point)` / `ClearLookTarget()` | 设置/清空注视点，仅保存坐标，不保存 Player 引用，不自动转动身体或眼睛。 |
-| `SetPose(pose)` / `Pose` | 设置/读取不可变姿势；默认身体逐步调整朝向，后续 Graphics 可读取姿势和手脚目标。 |
-| `LeftHandPosition / RightHandPosition / LeftFootPosition / RightFootPosition` | 当前姿势转换到房间坐标的手脚目标；第三阶段不生成可绘制或独立碰撞的手脚。 |
+| `SetPose(pose)` / `Pose` | 设置/读取不可变姿势；默认身体逐步调整朝向，Graphics 读取姿势和手脚目标。 |
+| `LeftHandPosition / RightHandPosition / LeftFootPosition / RightFootPosition` | 当前姿势转换到房间坐标的手脚目标；第四阶段 Graphics 绘制手脚，但手脚没有独立碰撞。 |
 | `Chunks` | 只读结构视图，Chunk 本身是实际游戏对象，供高级物理扩展使用。直接修改者负责遵守游戏物理约定。 |
 | `IsInitialized / IsDestroyed` | 组件生命周期状态。销毁后 Chunks 清空、目标清空，控制方法抛 ObjectDisposedException。 |
 
@@ -119,10 +119,10 @@ public sealed class SingleBody : IteratorBody
 
 ConfigurePhysics 只能在 OnInitialize 调用；支持 1–64 个当前 Oracle 拥有且索引正确的 Chunk，连接必须引用该身体的不同 Chunk。数组会复制；初始尺寸、位置、连接和归属均会验证。自定义身体可通过覆盖 `UseGamePhysics => false` 完全自行推进物理，但仍须配置合法宿主结构。
 
-初始化顺序：Body 工厂 → Arm 工厂 → Body.OnInitialize → Arm.OnInitialize → Runtime.OnCreate → 后续 Runtime 生命周期。Body 工厂可访问已绑定 Oracle，Arm 工厂可访问已创建但尚未初始化的 Body。Body.OnInitialize 中 Arm 尚未完成初始化，不应调用其 ConstrainTarget。
+初始化顺序：Body 工厂 → Arm 工厂 → Body.OnInitialize → Arm.OnInitialize → Graphics 初始化 → Brain 初始化 → Runtime.OnCreate → 后续 Runtime 生命周期。Body 工厂可访问已绑定 Oracle，Arm 工厂可访问已创建但尚未初始化的 Body。Body.OnInitialize 中 Arm 尚未完成初始化，不应调用其 ConstrainTarget。
 
-每帧顺序：Runtime.OnUpdate → Body.OnUpdate → Arm.OnUpdate → 游戏 PhysicalObject.Update（可选择跳过）→ Arm.OnAfterPhysics → Body.OnAfterPhysics → Runtime.OnLateUpdate。任一步销毁实例即停止后续步骤；递归更新被 Runtime 保护拦截。
+每帧顺序：Brain 感知与动作 → Runtime.OnUpdate → Body.OnUpdate → Arm.OnUpdate → 游戏 PhysicalObject.Update（可选择跳过）→ Arm.OnAfterPhysics → Body.OnAfterPhysics → Graphics 更新 → Runtime.OnLateUpdate。任一步销毁实例即停止后续步骤；递归更新被 Runtime 保护拦截。
 
-销毁顺序：Runtime.OnDestroy → Arm.OnDestroy → Body.OnDestroy → 宿主与索引清理 → Context 清空游戏引用。回调应能清理部分初始化的资源。Body / Arm 之后仍能查询 IsDestroyed，但不应继续持有外部复制的 Chunk 引用。身体或约束回调失败时结束当前 Runtime，因为继续运行无法保证其物理结构有效；其他实例不受影响。
+销毁顺序：Runtime.OnDestroy → Brain 清理 → Graphics 清理 → Arm.OnDestroy → Body.OnDestroy → 宿主与索引清理 → Context 清空游戏引用。回调应能清理部分初始化的资源。Body / Arm 之后仍能查询 IsDestroyed，但不应继续持有外部复制的 Chunk 引用。身体或约束回调失败时结束当前 Runtime，因为继续运行无法保证其物理结构有效；其他实例不受影响。
 
 物理桥仅在 Hook 安装时创建一次非虚方法调用，直接复用游戏 PhysicalObject.Update，不复制游戏物理源码，也不修改原版 Oracle.Update。独立检查覆盖托管物理路径；Unity 原生水体/天气、实际房间流式加载及其他 Mod 交互仍需游戏内验证。

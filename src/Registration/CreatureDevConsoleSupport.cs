@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using DryCycle.Framework.Creature.Core;
@@ -19,9 +20,16 @@ internal static class CreatureDevConsoleSupport
         "DevConsole.ObjectSpawner, DevConsole";
 
     private static readonly HashSet<CreatureTemplate.Type> RegisteredTypes = new();
+    private static readonly Dictionary<CreatureTemplate.Type, object> OwnedSpawners = new();
+    private static IDictionary _spawners;
 
     internal static void ResetRegistration()
     {
+        if (_spawners != null)
+            foreach (KeyValuePair<CreatureTemplate.Type, object> entry in OwnedSpawners)
+                if (ReferenceEquals(_spawners[entry.Key], entry.Value)) _spawners.Remove(entry.Key);
+        OwnedSpawners.Clear();
+        _spawners = null;
         RegisteredTypes.Clear();
     }
 
@@ -38,6 +46,9 @@ internal static class CreatureDevConsoleSupport
 
         try
         {
+            _spawners = objectSpawnerType.GetField("safeCritSpawners", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) as IDictionary;
+            if (_spawners == null)
+                throw new MissingMemberException("DevConsole creature spawner cleanup interface is unavailable.");
             Type spawnerInfoType = objectSpawnerType.GetNestedType(
                 "SpawnerInfo",
                 BindingFlags.Public);
@@ -121,6 +132,7 @@ internal static class CreatureDevConsoleSupport
             });
 
         RegisteredTypes.Add(descriptor.Type);
+        OwnedSpawners[descriptor.Type] = spawnerInfo;
         Plugin.Logger?.LogInfo(
             $"Dev Console support enabled: use `spawn {descriptor.Type.value}`.");
     }

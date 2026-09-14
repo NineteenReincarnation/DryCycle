@@ -370,7 +370,7 @@ internal static class LegacySpatialBackendRefresh
     private static bool NeedsSpatialSoundHandle(AmbientSound sound) =>
         sound is SpotSound || sound is DirectionalSound;
 
-    private static RoomCamera PrimaryCamera(DevUI owner)
+    private static RoomCamera PrimaryCamera(global::DevInterface.DevUI owner)
     {
         RoomCamera[] cameras = owner?.room?.game?.cameras;
         return cameras != null && cameras.Length > 0 ? cameras[0] : null;

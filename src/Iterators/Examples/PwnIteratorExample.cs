@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace DryCycle.Iterators;
 
-/// <summary>PWN_AI 的第四阶段样例。无剧情命名、AI 或对话；区域未安装时仅保留无副作用的房间绑定。</summary>
+/// <summary>PWN_AI 样例。第五阶段加入基础玩家观察，无剧情或对话；区域未安装时仅保留房间绑定。</summary>
 public static class PwnIteratorExample
 {
     public const string ID = "DryCycle_PWN_Sample";
@@ -14,7 +14,8 @@ public static class PwnIteratorExample
         _definition = Iterator.Create(ID).Name("PWN 示例迭代器").Room("PWN_AI")
             .Runtime(context => new SampleRuntime(context))
             .Graphics(context => new PwnIteratorGraphics(context))
-            .WithMetadata("DryCycle.Example", "Phase4").Register();
+            .Brain(context => new StandardIteratorBrain(context))
+            .WithMetadata("DryCycle.Example", "Phase5").Register();
         return _definition;
     }
     public static void Unregister()

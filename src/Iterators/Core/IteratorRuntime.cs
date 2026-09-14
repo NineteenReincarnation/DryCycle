@@ -39,6 +39,7 @@ public class IteratorRuntime
     public IteratorBody Body { get; private set; }
     public IteratorArm Arm { get; private set; }
     public IteratorGraphics Graphics { get; private set; }
+    public IteratorBrain Brain { get; private set; }
     public IteratorLifecycle State { get; private set; } = IteratorLifecycle.RuntimeCreated;
     public bool IsInitialized => State == IteratorLifecycle.Initialized || State == IteratorLifecycle.Active;
     public bool IsActive => State == IteratorLifecycle.Active;
@@ -76,6 +77,8 @@ public class IteratorRuntime
             InitializeGraphics();
             if (State != IteratorLifecycle.RuntimeCreated) return false;
             Context.RefreshPlayers();
+            InitializeBrain();
+            if (State != IteratorLifecycle.RuntimeCreated) return false;
             Context.Logger = _createLog;
             OnCreate();
             if (State != IteratorLifecycle.RuntimeCreated) return false;
@@ -149,6 +152,9 @@ public class IteratorRuntime
         {
             Context.Logger = _updateLog;
             Context.RefreshPlayers();
+            Brain?.Update();
+            if (!IsActive) return;
+            Context.Logger = _updateLog;
             OnUpdate();
             if (!IsActive) return;
             Body.Update();
@@ -197,6 +203,7 @@ public class IteratorRuntime
         {
             try
             {
+                Brain?.Release();
                 Graphics?.Release();
                 Arm?.Release();
                 Body?.Release();
@@ -240,5 +247,28 @@ public class IteratorRuntime
         if (State != IteratorLifecycle.RuntimeCreated) return;
         try { (Context.Oracle as IteratorHost)?.AttachGraphics(); }
         catch (Exception exception) { Graphics.Disable("Attach", exception); }
+    }
+
+    private void InitializeBrain()
+    {
+        try
+        {
+            Context.Logger = _initializeLog.ForModule("Brain").ForPhase("Factory");
+            IteratorBrain brain = Descriptor.BrainFactory(Context);
+            if (brain == null || !ReferenceEquals(brain.Context, Context) || brain.Claimed || brain.IsDestroyed)
+                throw new InvalidOperationException("BrainFactory must return a new Brain built with the supplied Context.");
+            brain.Claimed = true; Brain = brain;
+            if (State != IteratorLifecycle.RuntimeCreated) { brain.Release(); return; }
+            brain.Initialize();
+        }
+        catch (Exception exception)
+        {
+            _initializeLog.ForModule("Brain").Error("Brain initialization failed; using passive Idle behavior.", exception);
+            Brain?.Release();
+            if (State != IteratorLifecycle.RuntimeCreated) return;
+            Brain = new IteratorBrain(Context) { Claimed = true };
+            try { Brain.Initialize(); }
+            catch (Exception fallbackFailure) { Brain.Disable("Fallback", fallbackFailure); }
+        }
     }
 }

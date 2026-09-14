@@ -49,6 +49,15 @@ public sealed class IteratorDescriptor
         IReadOnlyDictionary<string, string> metadata, Func<IteratorContext, IteratorRuntime> runtimeFactory,
         Func<IteratorContext, IteratorBody> bodyFactory, Func<IteratorContext, IteratorArm> armFactory,
         Func<IteratorContext, IteratorGraphics> graphicsFactory)
+        : this(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory, null)
+    {
+    }
+
+    /// <summary>包含 Brain 工厂的完整入口，保留四、五、七、八参数构造兼容性。</summary>
+    public IteratorDescriptor(IteratorID id, IEnumerable<string> rooms, string displayName,
+        IReadOnlyDictionary<string, string> metadata, Func<IteratorContext, IteratorRuntime> runtimeFactory,
+        Func<IteratorContext, IteratorBody> bodyFactory, Func<IteratorContext, IteratorArm> armFactory,
+        Func<IteratorContext, IteratorGraphics> graphicsFactory, Func<IteratorContext, IteratorBrain> brainFactory)
     {
         ID = id ?? throw new ArgumentNullException(nameof(id));
         if (rooms == null)
@@ -59,6 +68,7 @@ public sealed class IteratorDescriptor
         BodyFactory = bodyFactory ?? CreateDefaultBody;
         ArmFactory = armFactory ?? CreateDefaultArm;
         GraphicsFactory = graphicsFactory ?? CreateDefaultGraphics;
+        BrainFactory = brainFactory ?? CreateDefaultBrain;
         Rooms = new ReadOnlyCollection<string>(new List<string>(rooms));
         var metadataCopy = new Dictionary<string, string>(StringComparer.Ordinal);
         if (metadata != null)
@@ -94,11 +104,13 @@ public sealed class IteratorDescriptor
     public Func<IteratorContext, IteratorBody> BodyFactory { get; }
     public Func<IteratorContext, IteratorArm> ArmFactory { get; }
     public Func<IteratorContext, IteratorGraphics> GraphicsFactory { get; }
+    public Func<IteratorContext, IteratorBrain> BrainFactory { get; }
 
     private static IteratorRuntime CreateDefaultRuntime(IteratorContext context) => new(context);
     private static IteratorBody CreateDefaultBody(IteratorContext context) => new StandardIteratorBody(context);
     private static IteratorArm CreateDefaultArm(IteratorContext context) => new NoArm(context);
     private static IteratorGraphics CreateDefaultGraphics(IteratorContext context) => new StandardIteratorGraphics(context);
+    private static IteratorBrain CreateDefaultBrain(IteratorContext context) => new StandardIteratorBrain(context);
 
     /// <summary>验证定义本身。不会注册或检查全局冲突；全局冲突由 Registry.Register 检查。</summary>
     public void Validate()

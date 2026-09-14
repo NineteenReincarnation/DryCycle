@@ -1,0 +1,280 @@
+using System.Collections.Generic;
+using RWCustom;
+using UnityEngine;
+
+namespace DryCycle.Items.ScavengerLance;
+
+internal sealed partial class ScavengerLance : Weapon
+{
+    private readonly HashSet<Creature> _hitCreatures = new();
+    private readonly Dictionary<Creature, int> _shaftContacts = new();
+    private Vector2 _previousTip;
+    private Vector2 _previousGrip;
+    private bool _havePreviousPose;
+    private bool _wasCharging;
+    private bool _gripValid;
+    private LanceGrip _grip;
+    private int _thrustFrames;
+    private int _thrustCooldown;
+    private int _flightFrames;
+    private int _clock;
+    private int _wallCooldown;
+    private float _bend;
+    private float _lastBend;
+    private float _bendVelocity;
+    private Vector2 _thrustDirection;
+
+    internal ScavengerLance(AbstractScavengerLance data, World world) : base(data, world)
+    {
+        bodyChunks = new[] { new BodyChunk(this, 0, Vector2.zero, 3f, 0.34f) };
+        bodyChunkConnections = new BodyChunkConnection[0];
+        airFriction = 0.997f;
+        gravity = 0.85f;
+        bounce = 0.12f;
+        surfaceFriction = 0.65f;
+        waterFriction = 0.93f;
+        buoyancy = 0.45f;
+        collisionLayer = 2;
+        exitThrownModeSpeed = 6f;
+    }
+
+    internal float Length => ((AbstractScavengerLance)abstractPhysicalObject).Length;
+    internal Creature Holder => grabbedBy.Count > 0 ? grabbedBy[0].grabber : null;
+    internal Vector2 Tip => firstChunk.pos + rotation * (Length * (1f - LanceCombatMath.GripFraction));
+    internal Vector2 Tail => firstChunk.pos - rotation * (Length * LanceCombatMath.GripFraction);
+    internal bool CanThrust => _thrustCooldown == 0 && Holder != null;
+    public override bool HeavyWeapon => true;
+
+    public override void NewRoom(Room newRoom)
+    {
+        base.NewRoom(newRoom);
+        _havePreviousPose = false;
+        _gripValid = false;
+        _wasCharging = false;
+        _thrustFrames = _flightFrames = 0;
+        _hitCreatures.Clear();
+        _shaftContacts.Clear();
+    }
+
+    internal void RequestThrust(Vector2 direction)
+    {
+        if (!CanThrust || Holder == null || !Holder.Consious) return;
+        _thrustDirection = direction.sqrMagnitude > 0.01f ? direction.normalized : rotation;
+        _thrustFrames = 12;
+        _thrustCooldown = 44;
+        _hitCreatures.Clear();
+    }
+
+    public override void Thrown(Creature thrower, Vector2 pos, Vector2? traceFrom,
+        IntVector2 direction, float force, bool eu)
+    {
+        base.Thrown(thrower, pos, traceFrom, direction, Mathf.Min(force, 0.38f), eu);
+        // Free-mode rigid-rod flight owns all collisions. Weapon's center projectile
+        // trace would otherwise turn a shaft hit into the same event as a tip hit.
+        ChangeMode(Mode.Free);
+        rotation = direction.ToVector2().normalized;
+        lastRotation = rotation;
+        rotationSpeed = 0f;
+        _flightFrames = 28;
+        _thrustFrames = 0;
+        _hitCreatures.Clear();
+        _havePreviousPose = false;
+    }
+
+    public override void Update(bool eu)
+    {
+        _clock++;
+        if (_thrustCooldown > 0) _thrustCooldown--;
+        if (_wallCooldown > 0) _wallCooldown--;
+        if (_flightFrames > 0) _flightFrames--;
+        _lastBend = _bend;
+        _bendVelocity = (_bendVelocity - _bend * 0.2f) * 0.72f;
+        _bend = Mathf.Clamp(_bend + _bendVelocity, -5f, 5f);
+
+        Creature holder = Holder;
+        _gripValid = holder is ILanceWielder wielder && wielder.TryGetLanceGrip(this, out _grip);
+        bool charging = _gripValid && _grip.Charging && holder.Consious;
+        if (charging && !_wasCharging) _hitCreatures.Clear();
+        _wasCharging = charging;
+        if (holder != null)
+        {
+            if (mode != Mode.Carried) ChangeMode(Mode.Carried);
+            Vector2 desired = _gripValid ? _grip.Direction : GenericDirection(holder);
+            if (_thrustFrames > 0) desired = _thrustDirection;
+            float turn = charging ? 1.5f : (_gripValid && _grip.Braced ? 9f : 5f);
+            float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
+            setRotation = Custom.DegToVec(angle);
+            rotationSpeed = 0f;
+        }
+        else if (mode == Mode.Carried) ChangeMode(Mode.Free);
+
+        base.Update(eu);
+        if (room == null) { _havePreviousPose = false; return; }
+        if (holder != null) SynchronizeGrip(eu);
+        if (holder != null && (!holder.Consious || holder.enteringShortCut.HasValue || holder.inShortcut))
+        {
+            _thrustFrames = 0;
+            _havePreviousPose = false;
+            return;
+        }
+
+        Vector2 currentTip = Tip;
+        if (!_havePreviousPose || Vector2.Distance(_previousGrip, firstChunk.pos) > 160f)
+        {
+            _previousTip = currentTip;
+            _previousGrip = firstChunk.pos;
+            _havePreviousPose = true;
+        }
+        bool sweptWall = TraceSolid(_previousTip, currentTip, out float wallFraction);
+        bool rodWall = !PoseFits(firstChunk.pos, rotation);
+        float speed = holder != null ? Vector2.Dot(holder.mainBodyChunk.vel, rotation) : Vector2.Dot(firstChunk.vel, rotation);
+
+        if (charging || _thrustFrames > 0 || _flightFrames > 0)
+            ResolveTip(currentTip, sweptWall ? wallFraction : 1f, charging, speed);
+        ResolveShaft();
+        if (sweptWall || rodWall) ResolveTerrain(holder, speed, charging);
+
+        if (_thrustFrames > 0) _thrustFrames--;
+        _previousTip = Tip;
+        _previousGrip = firstChunk.pos;
+        if (_clock % 240 == 0) _shaftContacts.Clear();
+    }
+
+    // Scavenger's vanilla graphics callback also positions held items. This method
+    // restores the authoritative physical grip after that callback, without ticking AI.
+    internal void SynchronizeGrip(bool eu)
+    {
+        Creature holder = Holder;
+        if (holder == null) return;
+        _gripValid = holder is ILanceWielder wielder && wielder.TryGetLanceGrip(this, out _grip);
+        Vector2 position = _gripValid ? _grip.Position : holder.mainBodyChunk.pos + rotation * 9f;
+        if (_thrustFrames > 0)
+            position += rotation * (Mathf.Sin((12 - _thrustFrames) / 12f * Mathf.PI) * 17f);
+        firstChunk.MoveFromOutsideMyUpdate(eu, position);
+        firstChunk.vel = holder.mainBodyChunk.vel;
+        setRotation = rotation;
+    }
+
+    private Vector2 GenericDirection(Creature holder)
+    {
+        if (holder is Player player)
+            return new Vector2(player.ThrowDirection, player.bodyMode == Player.BodyModeIndex.Crawl ? 0.15f : 0.48f).normalized;
+        float sign = Mathf.Abs(holder.mainBodyChunk.vel.x) > 0.3f ? Mathf.Sign(holder.mainBodyChunk.vel.x) : Mathf.Sign(rotation.x);
+        return new Vector2(sign == 0f ? 1f : sign, 0.6f).normalized;
+    }
+
+    private void ResolveTip(Vector2 tip, float maxFraction, bool charging, float holderSpeed)
+    {
+        Creature holder = Holder;
+        BodyChunk nearest = null;
+        float firstHit = maxFraction;
+        foreach (AbstractCreature abstractTarget in room.abstractRoom.creatures)
+        {
+            Creature target = abstractTarget.realizedCreature;
+            if (target == null || target == holder || target.room != room || target.dead ||
+                _hitCreatures.Contains(target) || (holder == null && target == thrownBy && _flightFrames > 20)) continue;
+            foreach (BodyChunk chunk in target.bodyChunks)
+            {
+                if (LanceCombatMath.SweepTip(_previousTip, tip, chunk.lastPos, chunk.pos, chunk.rad + 2f, out float hit) &&
+                    hit <= firstHit && room.VisualContact(firstChunk.pos, chunk.pos))
+                { firstHit = hit; nearest = chunk; }
+            }
+        }
+        if (nearest == null) return;
+        Creature victim = (Creature)nearest.owner;
+        Vector2 contactTip = Vector2.Lerp(_previousTip, tip, firstHit);
+        Vector2 relative = tip - _previousTip - (nearest.pos - nearest.lastPos);
+        Vector2 targetDirection = Vector2.Lerp(nearest.lastPos, nearest.pos, firstHit) -
+            Vector2.Lerp(_previousGrip, firstChunk.pos, firstHit);
+        float alignment = Mathf.Min(Vector2.Dot(rotation, relative.normalized), Vector2.Dot(rotation, targetDirection.normalized));
+        bool thrust = _thrustFrames > 0 || _flightFrames > 0;
+        float speed = charging ? Mathf.Max(0f, holderSpeed) : Mathf.Max(0f, Vector2.Dot(relative, rotation));
+        LanceImpact impact = LanceCombatMath.Impact(speed, alignment, holder?.TotalMass ?? TotalMass,
+            victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust);
+        if (impact.Damage <= 0f) return;
+        _hitCreatures.Add(victim);
+        victim.SetKillTag((holder ?? thrownBy)?.abstractCreature);
+        victim.Violence(firstChunk, rotation * impact.Impulse, nearest, null, Creature.DamageType.Stab, impact.Damage, impact.Stun);
+        nearest.vel += rotation * (impact.Impulse / Mathf.Max(0.25f, victim.TotalMass));
+        if (holder != null)
+        {
+            foreach (BodyChunk chunk in holder.bodyChunks)
+                chunk.vel -= rotation * Mathf.Max(0f, Vector2.Dot(chunk.vel, rotation)) * (1f - impact.RetainedSpeed);
+            if (charging && holder is ILanceWielder wielder) wielder.LanceImpact(false, speed, impact.RetainedSpeed);
+        }
+        else { firstChunk.vel *= 0.35f; _flightFrames = 0; }
+        _bendVelocity += Mathf.Min(3.5f, impact.Impulse * 0.4f);
+        room.PlaySound(SoundID.Spear_Stick_In_Creature, contactTip, 0.75f, 0.85f);
+        if (holder != null) room.socialEventRecognizer?.WeaponAttack(this, holder, victim, true);
+    }
+
+    private void ResolveShaft()
+    {
+        Vector2 shaftEnd = Tip - rotation * 9f;
+        Creature holder = Holder;
+        foreach (AbstractCreature abstractTarget in room.abstractRoom.creatures)
+        {
+            Creature target = abstractTarget.realizedCreature;
+            if (target == null || target == holder || target.room != room || target.dead ||
+                (_shaftContacts.TryGetValue(target, out int frame) && _clock - frame < 20)) continue;
+            foreach (BodyChunk chunk in target.bodyChunks)
+            {
+                Vector2 close = LanceCombatMath.ClosestPoint(Tail, shaftEnd, chunk.pos);
+                Vector2 away = chunk.pos - close;
+                if (away.sqrMagnitude > (chunk.rad + 2f) * (chunk.rad + 2f) || !room.VisualContact(firstChunk.pos, chunk.pos)) continue;
+                float motion = Mathf.Min(3.5f, (firstChunk.pos - _previousGrip).magnitude * 0.2f + (_thrustFrames > 0 ? 1.5f : 0f));
+                if (motion < 0.4f) continue;
+                chunk.vel += (away.sqrMagnitude > 0.01f ? away.normalized : Custom.PerpendicularVector(rotation)) *
+                    motion / Mathf.Max(0.5f, target.TotalMass);
+                if (_thrustFrames > 0 && target.TotalMass < 1.5f) target.Stun(3);
+                _shaftContacts[target] = _clock;
+                break; // Shaft and butt only push; they never call Violence.
+            }
+        }
+    }
+
+    private bool TraceSolid(Vector2 start, Vector2 end, out float fraction)
+    {
+        int steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(start, end) / 3f));
+        for (int i = 0; i <= steps; i++)
+            if (room.GetTile(Vector2.Lerp(start, end, (float)i / steps)).Solid)
+            { fraction = (float)i / steps; return true; }
+        fraction = 1f;
+        return false;
+    }
+
+    private bool PoseFits(Vector2 grip, Vector2 direction) => !TraceSolid(
+        grip - direction * (Length * LanceCombatMath.GripFraction),
+        grip + direction * (Length * (1f - LanceCombatMath.GripFraction)), out _);
+
+    private void ResolveTerrain(Creature holder, float speed, bool charging)
+    {
+        if (_wallCooldown == 0)
+        {
+            _bendVelocity += Mathf.Min(4f, Mathf.Abs(speed) * 0.18f + 0.3f);
+            if (Mathf.Abs(speed) > 4f) room.PlaySound(SoundID.Spear_Bounce_Off_Wall, firstChunk.pos, 0.65f, 0.8f);
+            if (charging && holder is ILanceWielder wielder) wielder.LanceImpact(true, speed, 0.12f);
+            _wallCooldown = 14;
+        }
+        _flightFrames = _thrustFrames = 0;
+        if (holder != null && speed > 0f)
+            foreach (BodyChunk chunk in holder.bodyChunks) chunk.vel -= rotation * Vector2.Dot(chunk.vel, rotation) * 0.35f;
+        else if (holder == null)
+        { firstChunk.vel *= 0.6f; rotationSpeed *= -0.2f; }
+
+        // Rigid-rod terrain constraint: try the nearest fitting orientation, including
+        // a horizontal resting pose. This applies to the actual item, also when dropped.
+        float angle = Custom.VecToDeg(rotation);
+        for (int step = 1; step <= 12; step++)
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Vector2 candidate = Custom.DegToVec(angle + step * 15f * side);
+                if (!PoseFits(firstChunk.pos, candidate)) continue;
+                rotation = candidate;
+                setRotation = candidate;
+                return;
+            }
+        if (holder == null && PoseFits(_previousGrip, lastRotation))
+        { firstChunk.pos = _previousGrip; rotation = lastRotation; }
+    }
+}

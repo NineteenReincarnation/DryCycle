@@ -24,6 +24,7 @@ public sealed class IteratorContext
     public IteratorBody Body => Runtime?.Body;
     public IteratorArm Arm => Runtime?.Arm;
     public IteratorGraphics Graphics => Runtime?.Graphics;
+    public IteratorBrain Brain => Runtime?.Brain;
     public Oracle Oracle { get; private set; }
     public Room Room { get; private set; }
     public World World { get; private set; }

@@ -45,7 +45,7 @@ private void UnregisterIterator()
 
 房间不需要 `_AI` 后缀。未填名称时使用 ID；至少需要一个房间。请在目标房间完成加载前注册：DryCycle 启用时安装集中 Hook，`Room.ReadyForAI` 完成后自动为已注册房间创建默认 Runtime 和 Oracle 宿主。
 
-当前默认身体在初始位置悬停，具备移动和游戏碰撞，默认使用 NoArm；外观和对话由后续阶段实现。使用 `Context.Body.MoveTo(...)`、`SetPose(...)` 或替换 `.Body(...)` / `.Arm(...)` 工厂，见 [Body 文档](BODY.md)。
+当前默认身体在初始位置悬停，具备移动和游戏碰撞，默认使用 NoArm；默认使用标准网格外观与 StandardIteratorBrain，观察可见玩家；对话在后续阶段实现。使用 `Context.Body.MoveTo(...)`、`SetPose(...)` 或替换 `.Body(...)` / `.Arm(...)` 工厂，见 [Body 文档](BODY.md)。
 
 房间卸载和普通 Session 重启只销毁实例，不注销定义；玩家离开但房间仍保持加载时，实例仍存在。所属 Mod 停用、移除或重新加载定义时，使用保留的 Descriptor 显式注销，框架会先销毁它的全部实例。DryCycle 停用会释放所有实例、Hook 和日志后端引用，但不会推断外部 Mod 的定义所有权。
 
@@ -125,4 +125,4 @@ IteratorDescriptor definition = Iterator.Create("MYMOD_EXTRA")
     .Register();
 ```
 
-不需要继承框架内部类型或操作任何 Hook。Graphics、Behavior 和 Conversation 的配置方法尚未实现。
+不需要继承框架内部类型或操作任何 Hook。通过 `.Graphics(context => new StandardIteratorGraphics(context, profile))` 配置外观，见 [Graphics 与 PWN_AI 样例](GRAPHICS.md)。通过 `.Brain(ctx => new StandardIteratorBrain(ctx))` 或自定义 Brain 配置行为，见 [行为文档](BEHAVIOR.md)。Conversation 在第六阶段实现。

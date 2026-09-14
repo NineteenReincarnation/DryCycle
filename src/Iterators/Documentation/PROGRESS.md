@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14。
 
-范围依据：《Iterator Framework 迭代器轮子开发任务书》第 81–83 节。前三阶段实现与托管验证已完成，真实游戏内验收待做；第四阶段尚未开始。本轮按用户要求仅增加第三阶段必要的集成检查。
+范围依据：《Iterator Framework 迭代器轮子开发任务书》第 81–85 节。前五阶段实现与托管验证已完成，真实游戏内验收待做。本轮完成 Brain、动作、状态机、行为模块、感知与 PWN_AI 玩家观察，只增加五组必要行为检查，未进入第六阶段。
 
 ## 第一阶段已实现
 
@@ -41,11 +41,40 @@
 - 身体、机械臂工厂归属及复用保护，非法配置/坐标/初始结构检查，失败和创建中途销毁后的清理。
 - [Body、Arm 与 Pose 使用文档](BODY.md)，包含默认用法、替换工厂、生命周期与自定义身体示例。
 
+## 第四阶段已实现
+
+- `IteratorGraphics`：每实例视觉组件、更新与相机插值分离、公开 Render 数据入口、组件归属及清理保护。
+- `GraphicsProfile`：不可变颜色、尺寸、Face / Gown / Mark 开关、0–8 个 Halo、Cable、Shader / Atlas 元素、调色和发光外观参数。
+- `SpriteRegistry` / `SpriteHandle`：按名称注册，初始化后冻结布局；内部管理相机下标，拒绝重复名称和跨 Sprite / 实例的网格共享。
+- `IteratorMesh` / `IteratorMeshPart`：拓扑和 UV 防御性复制、只读数据视图、有限坐标检查、多边形 / 椭圆 / 描边及局部变形；可完全替换标准人形。
+- 标准部件：身体 / 袖子 / 手脚、Face、Gown、Halo、Cable；姿势与注视输入、确定性眨眼和袍摆，FixedArm 的可视线缆。
+- 内部相机适配器：独立 TriangleMesh、世界坐标转相机坐标、每相机调色、绘制层级、退出观看 / 重建 / 销毁清理。
+- 可选图形错误隔离：部件异常只停用该部件；工厂与整体初始化异常尝试标准外观；渲染器或整体图形失败停用绘制并保留 Runtime。
+- Atlas 引用计数与借用保护、缺失元素 / Shader 的安全回退。标准外观和样例仅借用游戏 Futile_White，无新图集或 Shader Bundle。
+- `.Graphics(...)` / GraphicsFactory / Context.Graphics，保留既有 Descriptor 构造签名；Runtime 统一初始化、更新及清理。
+- PWN_AI 自动登记样例：白色面部、额头大小圆环、金色扭转头饰、白紫长袍，不含左右蓝球。实际房间 48×36 格，当前安全位置 `(470, 350)`，没有修改房间或世界文件。
+- [Graphics API 与样例文档](GRAPHICS.md)，以及同一套编译后网格生成的角色、透明背景和房间放置预览。
+
+## 第五阶段已实现
+
+- `IteratorBrain`：每实例行为中心、被动 Idle 回退、统一生命周期与异常处理；`.Brain(...)`、BrainFactory、Context.Brain；保留所有既有 Descriptor 构造签名。
+- `IteratorAction`：初始化、进入 / 更新 / 退出、独立进入 / 保持条件、优先级、可打断性、完成状态与清理。
+- `IteratorStateMachine`：具名动作、优先级仲裁、同优先级稳定排序、待处理请求、不可打断动作、完成和条件失效后的切换；每帧最多进入一个新动作，回调请求延后处理。
+- `IteratorBehaviorModule`：工厂 / 初始化阶段组合模块，OnSense、OnPlayerEvent、OnUpdate、模块拥有的动作及局部故障隔离；无需扩展者安装全局 Hook。
+- `PlayerSensor` / `IteratorSensorProfile`：当前房间玩家、距离、实际地形视线、生命和捷径状态、接近阈值与目标切换阈值；默认 5 帧采样，复用记录和集合。
+- 集中感知通知：Entered / Left / Approached / MovedAway / Died / Revived；离开和销毁时释放保留记录中的 Player 引用。
+- `StandardIteratorBrain` / `ObservePlayer` / `IdleAction` / `ObservePlayerAction`：基础 Idle 与观察可见存活玩家，不追逐、不攻击、不触发对话；保留 Body 已有姿势与移动目标。
+- Runtime 在 OnUpdate 前推进 Brain，让 Runtime 可以覆盖同帧身体输入；Brain 在 Graphics / Body 清理前结束动作和模块。
+- PWN_AI 接入默认观察，维持第四阶段参考造型、展示姿势和悬停位置；玩家离开、死亡、在捷径中或被墙挡住时结束观察。
+- [行为 API 与扩展示例](BEHAVIOR.md)，并同步已有生命周期、Body、Graphics、快速开始与仓库入口文档。
+
 ## 已运行的验证
 
 主项目及独立测试项目 Release 编译：**0 个警告，0 个错误**。
 
-检查共 **35/35 组通过，1947 项断言，0 个失败**：第一阶段 13 组 / 1564 项，第二阶段 18 组 / 331 项，第三阶段 4 组 / 52 项。
+当前检出的 DevTool 有两处同名命名空间与类型的解析冲突，阻塞整体 DLL 构建；已在两个 Compatibility 文件中将三处类型引用限定为 `global::DevInterface.DevUI`，没有修改其逻辑。
+
+检查共 **44/44 组通过，2059 项断言，0 个失败**：第一阶段 13 组 / 1564 项，第二阶段 18 组 / 331 项，第三阶段 4 组 / 52 项，第四阶段 4 组 / 42 项，第五阶段 5 组 / 70 项。
 
 测试项目引用实际编译的 `DryCycle.dll`，运行时加载本机安装的 `Assembly-CSharp.dll`，没有源文件链接副本或 Oracle 模拟类型。第二阶段用托管房间夹具准备游戏对象图，执行实际的 Room.ReadyForAI、Oracle 构造补丁、实体增删与 Runtime 更新。卸载和关闭处理使用替代原方法委托检查框架清理顺序，未调用完整 Unity 关闭流程。
 
@@ -84,28 +113,47 @@
 3. 固定机械臂的目标与惯性约束、无需原版 OracleArm、初始不可达时的清理。
 4. 单 Chunk 自定义身体、组件初始化/反向销毁顺序、外来工厂结果保护、约束更新和清理异常、工厂中途销毁。
 
+第四阶段 4 组必要检查：
+
+1. 命名网格布局、冻结、别名和有限输入保护；绘制不推进 Runtime；失败部件与正常部件隔离。
+2. 图形工厂失败的标准回退、外来组件保护、工厂中途销毁、重复清理和无残留 Drawable。
+3. 实际 Futile SpriteLeaser / TriangleMesh 的多相机独立性、相机偏移、调色板、缺失资源回退、退出观看重建、全部视图清理及借用 Atlas 保留。
+4. PWN_AI 实际房间地形解析、样例幂等注册、全部部件正常初始化、无 Halo / Cable / 蓝球、有限网格且不穿实墙、样例注销与 CPU 预览导出。
+
+已查看并调整角色预览：收窄青色高光、调整金色头饰和袍摆。预览与游戏读取同一套网格，但不能代替游戏内 Shader / 光照效果或用户最终视觉验收。
+
+第五阶段 5 组必要检查：
+
+1. 条件与优先级仲裁、同优先级顺序、不可打断、完成与保持条件失效、回调内排队和重复请求。
+2. 玩家进入 / 离开 / 接近 / 死亡 / 复活，低频缓存、目标切换与接近阈值、实际 Room.VisualContact 墙体遮挡、捷径状态。
+3. 行为模块及其动作隔离、动作故障的单次退出与 Idle 回退、整体 Brain 故障、中途销毁停止后续更新。
+4. Brain 工厂或部分初始化失败、外来工厂结果、工厂中途销毁、动作 / 模块幂等清理、玩家引用和房间 Drawable 释放。
+5. PWN 样例的 Brain → Body 注视 → 编译后面部网格传递，确认姿势和位置保持稳定，离开后回到 Idle。
+
 复现命令（仓库根目录）：
 
 ```powershell
 dotnet build .\tests\IteratorFramework.Tests\IteratorFramework.Tests.csproj -c Release -p:DeployToGame=false -v minimal
-& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Application/Steam/steamapps/common/Rain World"
+New-Item -ItemType Directory -Force .\artifacts\iterator-framework | Out-Null
+& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Application/Steam/steamapps/common/Rain World" > .\artifacts\iterator-framework\phase5-tests.log 2>&1
 ```
 
 该构建会同时生成主项目。其他机器可传入 `-p:RainWorldDir="游戏目录"`，运行测试时传入同一个目录。测试项目默认关闭游戏部署；只编译主项目时同样应传入 `-p:DeployToGame=false` 以生成本地产物。
 
-本轮 DLL 输出：`src/bin/Release/DryCycle.dll`；检查日志：`artifacts/iterator-framework/phase3-tests.log`。两者均为本地生成产物，不提交游戏程序集、测试生成的 CoreModule 或反编译代码。没有覆盖游戏目录的 DLL 或资源。
+本轮 DLL 输出：`src/bin/Release/DryCycle.dll`；检查日志：`artifacts/iterator-framework/phase5-tests.log`。预览位于同一 artifacts 目录的 `pwn-iterator-preview.png`、`pwn-iterator-transparent.png` 和 `pwn-ai-placement.png`。均为本地生成产物，不提交游戏程序集、测试生成的 CoreModule 或反编译代码。没有覆盖游戏目录的 DLL 或资源。
 
 ## 验证边界
 
 - 没有启动 Unity 游戏进程，也没有部署到游戏。真实房间流式加载、存档进入/退出、原版迭代器共存和其他 Mod 兼容仍需游戏内验收。
 - 托管夹具和循环检查验证状态、绑定和释放行为，不等于真实游戏的场景或 Session 重启。
-- 当前宿主已具备身体移动和碰撞，但没有 Graphics 绘制；身体与姿势状态可通过 Context.Body 查询。
-- 尚无图形、行为、对话或存档模块；Runtime 回调异常处理不代表未来各模块已具备独立隔离。
+- 当前宿主已具备身体、姿势与 Graphics；相机检查使用未挂载 Stage 的 Futile 容器，没有验证 GPU 上传、实际图集加载或 Shader 执行。
+- 行为、感知和图形部件已实现并独立隔离；尚无对话、物品/伤害交互或存档模块。
+- 感知是按间隔采样的地形视线和距离，不包含光照、伪装或完整潜行 AI；两次采样之间的短暂变化可能不被记录。
 - 外部注册者须按文档保留并注销自己的 Descriptor；不提供按外部 Mod 所有权自动清理或文件热重载。
 
 ## Public API 检查点
 
-公共接口无需传递 Hook；Builder 不拥有注册状态；Descriptor 不暴露可变集合；Registry 不缓存游戏实体；ID 映射不依赖可变 Index。前三阶段保持已有 Descriptor 构造签名，通过具名类型的 Runtime / Body / Arm 工厂扩展。BodyProfile 和 IteratorPose 可安全共享，Body / Arm 实例不可复用；游戏引用和部分初始化清理语义已记录。
+公共接口无需传递 Hook；Builder 不拥有注册状态；Descriptor 不暴露可变集合；Registry 不缓存游戏实体；ID 映射不依赖可变 Index。前五阶段保持已有 Descriptor 构造签名，通过具名类型的 Runtime / Body / Arm / Graphics / Brain 工厂扩展。BodyProfile、IteratorPose、GraphicsProfile、IteratorSensorProfile 可安全共享，组件和网格实例不可复用；游戏引用、相机视图和部分初始化清理语义已记录。
 
 ## 后续阶段
 
@@ -114,12 +162,12 @@ dotnet build .\tests\IteratorFramework.Tests\IteratorFramework.Tests.csproj -c R
 | 1 | ID、Descriptor、Builder、Registry、Validation、Logger | 已完成本阶段实现和托管验收 |
 | 2 | Runtime、Context、Lifecycle、Oracle 与 Room 绑定、创建销毁 | 实现与托管验证完成；游戏内验收待做 |
 | 3 | Body、Arm 抽象、基础移动、Pose | 实现与托管验证完成；游戏内验收待做 |
-| 4 | Graphics、SpriteRegistry、Profile、Halo、Face、Gown、Cable | 未开始 |
-| 5 | Brain、Action、StateMachine、Sensors、玩家观察 | 未开始 |
+| 4 | Graphics、SpriteRegistry、Profile、Halo、Face、Gown、Cable | 实现、托管验证和 CPU 预览完成；游戏内验收待做 |
+| 5 | Brain、Action、StateMachine、BehaviorModule、Sensors、玩家观察 | 实现与托管验证完成；游戏内验收待做 |
 | 6 | Conversation、Sequence、Conditions、Commands、Branch、Interrupt | 未开始 |
 | 7 | Player/Item/Creature/Pearl/Weapon Interaction | 未开始 |
 | 8 | Environment、Gravity、Neuron、Music、Projection、Room Effects | 未开始 |
 | 9 | Module、Dependency、Save、Persistent State、Migration | 未开始 |
 | 10 | DevConsole、Debug、Diagnostics、Compatibility、完整文档与示例 | 未开始 |
 
-下一开发阶段为 Graphics、SpriteRegistry、GraphicsProfile 及标准外观组件。完整框架尚未达到任务书第 100 节最终验收标准。
+下一开发阶段为 Conversation、Dialogue Sequence、Conditions、Commands、Branch 和 Interrupt。本次没有实现第六阶段。完整框架尚未达到任务书第 100 节最终验收标准。

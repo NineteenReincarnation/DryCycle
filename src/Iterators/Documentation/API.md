@@ -1,6 +1,6 @@
 # 定义与注册 API 约定
 
-公共类型统一位于 `DryCycle.Iterators`。本文说明定义、注册和日志；实例 API 见 [Runtime 与生命周期](RUNTIME.md) 和 [Body / Arm / Pose](BODY.md)。未列出的内部类型不是外部扩展接口。
+公共类型统一位于 `DryCycle.Iterators`。本文说明定义、注册和日志；实例 API 见 [Runtime 与生命周期](RUNTIME.md)、[Body / Arm / Pose](BODY.md) 和 [Brain / 行为](BEHAVIOR.md)。未列出的内部类型不是外部扩展接口。
 
 ## ID 与输入
 
@@ -28,6 +28,8 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 | `.Room(name)` / `.Rooms(params names)` | 添加精确房间名；至少一个、忽略大小写去重；批次内有错误时整批不写入。 |
 | `.WithMetadata(key, value)` | 设置区分大小写的扩展键；同一键在 Builder 中后写覆盖前写。 |
 | `.Runtime(factory)` | 设置 `Func<IteratorContext, IteratorRuntime>`，不立即运行；null 抛出 `ArgumentNullException`。 |
+| `.Graphics(factory)` | 设置 `Func<IteratorContext, IteratorGraphics>`，每次实例创建独立图形组件；null 报错。 |
+| `.Brain(factory)` | 设置 `Func<IteratorContext, IteratorBrain>`；默认 StandardIteratorBrain，null 报错。 |
 | `.Body(factory)` / `.Arm(factory)` | 设置身体/机械臂工厂，类型分别为 `Func<IteratorContext, IteratorBody>` / `Func<IteratorContext, IteratorArm>`；null 报错。 |
 | `.Build()` | 返回新的、已验证的不可变 Descriptor；无全局状态副作用。 |
 | `.Register()` | 等价于 `IteratorRegistry.Register(Build())`。每次调用都会先创建新 Descriptor。 |
@@ -36,12 +38,16 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 | `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory)` | 第三阶段完整重载；null Body / Arm 工厂使用 StandardIteratorBody / NoArm；保留原四参数和五参数签名。 |
 | `descriptor.ID / DisplayName / Rooms / Metadata` | 只读定义数据，集合不能被外部修改。 |
 | `descriptor.RuntimeFactory` | 只读工厂，每次生成时传入新 Context；须返回使用该 Context 构造的全新 Runtime。 |
+| `descriptor.GraphicsFactory` | 只读图形工厂；默认 StandardIteratorGraphics，图形失败不会结束 Runtime。 |
+| `descriptor.BrainFactory` | 只读行为工厂；每次创建独立 Brain，失败回退被动 Idle，不能复用外来实例。 |
+| `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory, brainFactory)` | 第五阶段完整重载；null Brain 工厂使用 StandardIteratorBrain，保留四、五、七、八参数签名。 |
+| `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory)` | 第四阶段完整重载，保留四、五、七参数签名；null Graphics 工厂使用标准外观。 |
 | `descriptor.BodyFactory / ArmFactory` | 只读组件工厂，使用当前 Context 返回新组件，在 Runtime.OnCreate 前创建并初始化。 |
 | `descriptor.Validate()` | 验证定义，不修改数据、不查询游戏或全局冲突。 |
 
 重复调用同一个 Builder 的 `Register()` 会遇到重复 ID 错误，因为每次 Build 都创建不同定义。需要幂等调用时保留返回的 Descriptor，再将同一对象传入 Registry。
 
-当前只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Descriptor 尚无 Graphics、Brain、Conversation、Environment 或 Module 工厂；这些工厂随对应实现加入，不提前暴露 `object` 工厂或无功能占位接口。
+当前只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Descriptor 尚无 Conversation、Environment 或通用 Module 工厂；这些工厂随对应实现加入，不提前暴露 `object` 工厂或无功能占位接口。
 
 Build 保存当时的工厂委托；之后修改 Builder 不会改变旧 Descriptor。委托捕获的对象不会被深拷贝，应只捕获可跨 Session 使用的配置。不要让长期注册的定义间接保存 Room、Oracle 或 Player。
 
@@ -96,7 +102,7 @@ logger.Error("Operation failed.", exception);
 
 DryCycle 启用时默认输出到其 BepInEx 日志源；停用或独立调用时回退到 `System.Diagnostics.Trace`。Trace 在没有接收器的进程中不保证落盘。自定义接收器只接收最终等级与格式化文本，不需要引用 BepInEx。
 
-日志接收器抛异常时先尝试 Trace 回退，Trace 或扩展异常对象的格式化再失败时也不会向调用者传播。日志回调内再次调用日志会被重入保护跳过。Runtime 另有生命周期回调异常保护，见 [Runtime 文档](RUNTIME.md)；Graphics、Dialogue 与其他模块的错误隔离尚待各阶段实现。
+日志接收器抛异常时先尝试 Trace 回退，Trace 或扩展异常对象的格式化再失败时也不会向调用者传播。日志回调内再次调用日志会被重入保护跳过。Runtime 另有生命周期回调异常保护，见 [Runtime 文档](RUNTIME.md)；Graphics 已提供部件级停用与标准外观回退，见 [Graphics 文档](GRAPHICS.md)；Brain 已实现行为模块和动作隔离，见 [行为文档](BEHAVIOR.md)；Dialogue 与后续模块尚未实现。
 
 ## 扩展和 API 演进
 

@@ -10,6 +10,12 @@ internal static class ItemRegistry
 
     internal static IEnumerable<ItemDefinition> Registered => Definitions.Values;
 
+    internal static void Unregister(ItemDefinition definition)
+    {
+        if (definition != null && Definitions.TryGetValue(definition.Type, out ItemDefinition current) &&
+            ReferenceEquals(current, definition)) Definitions.Remove(definition.Type);
+    }
+
     internal static void Register(ItemDefinition definition)
     {
         if (definition == null)

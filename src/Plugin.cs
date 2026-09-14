@@ -6,6 +6,7 @@ using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
 using DryCycle.Creatures.DesertBatfly;
 using DryCycle.Creatures.MantleCrab;
+using DryCycle.Creatures.LanceScavenger;
 using DryCycle.DayNight;
 using DryCycle.Debugging.AI;
 using DryCycle.DevUI.DevTool.World;
@@ -14,6 +15,7 @@ using DryCycle.Items.DewPod;
 using DryCycle.Items.KarmaSpear;
 using DryCycle.Items.KingVultureSpear;
 using DryCycle.Items.RopeSpear;
+using DryCycle.Items.ScavengerLance;
 using DryCycle.Misc;
 using DryCycle.PlayerAbility.SlugCatKarmicArmor;
 using DryCycle.Registration;
@@ -62,6 +64,7 @@ internal sealed class Plugin : BaseUnityPlugin
             MossySpiderDefinition.Register();
             MantleCrabDefinition.Register();
             DB_Definition.Register();
+            LanceScavengerDefinition.Register();
             _contentRegistered = true;
         }
 
@@ -80,6 +83,8 @@ internal sealed class Plugin : BaseUnityPlugin
 
         CreatureCoreRegistry.Enable();
         DryCycleContent.Enable();
+        ScavengerLanceHooks.Enable();
+        LanceScavengerHooks.Enable();
         DB_Relationships.Enable();
         DB_RainWorldHooks.Enable();
         SpinebackLizardHooks.Enable();
@@ -101,6 +106,9 @@ internal sealed class Plugin : BaseUnityPlugin
         On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
         DB_Relationships.Disable();
         DB_RainWorldHooks.Disable();
+        LanceScavengerHooks.Disable();
+        ScavengerLanceHooks.Disable();
+        LanceScavengerAssets.Unload();
         CreatureCoreRegistry.Disable();
         DryCycleContent.Disable();
         CreatureDevConsoleSupport.ResetRegistration();
@@ -182,6 +190,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
+        ScavengerLanceDevConsoleSupport.ResetRegistration();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
         KarmaSpearDevConsoleSupport.ResetRegistration();
@@ -196,6 +205,7 @@ internal sealed class Plugin : BaseUnityPlugin
         orig(self);
 
         DryCycleShaderAssets.EnsureLoaded(self);
+        LanceScavengerAssets.EnsureLoaded();
         RegionDayNightOptions.Register();
 
         if (_initialized)
@@ -352,6 +362,7 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         orig(self);
         CreatureDevConsoleSupport.TryRegisterAll();
+        ScavengerLanceDevConsoleSupport.TryRegister();
         RopeSpearDevConsoleSupport.TryRegister();
         KarmaSpearDevConsoleSupport.TryRegister();
         SpinebackLizardDevConsoleSupport.TryRegister();

@@ -14,6 +14,7 @@ public class IteratorBuilder
     private Func<IteratorContext, IteratorBody> _bodyFactory;
     private Func<IteratorContext, IteratorArm> _armFactory;
     private Func<IteratorContext, IteratorGraphics> _graphicsFactory;
+    private Func<IteratorContext, IteratorBrain> _brainFactory;
 
     /// <summary>创建一个独立 Builder；扩展 Mod 可通过扩展方法组合公共配置方法。</summary>
     public IteratorBuilder(IteratorID id) => _id = id ?? throw new ArgumentNullException(nameof(id));
@@ -60,7 +61,7 @@ public class IteratorBuilder
     }
 
     /// <summary>验证并创建定义快照；没有 Registry 或 Oracle ExtEnum 副作用。</summary>
-    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory, _graphicsFactory);
+    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory, _graphicsFactory, _brainFactory);
 
     /// <summary>设置实例工厂，可注入参数或派生 Runtime；不在 Builder 阶段运行该工厂。</summary>
     public IteratorBuilder Runtime(Func<IteratorContext, IteratorRuntime> factory)
@@ -87,6 +88,13 @@ public class IteratorBuilder
     public IteratorBuilder Graphics(Func<IteratorContext, IteratorGraphics> factory)
     {
         _graphicsFactory = factory ?? throw new ArgumentNullException(nameof(factory));
+        return this;
+    }
+
+    /// <summary>替换行为中心；每次生成必须使用所传 Context 创建新 Brain。</summary>
+    public IteratorBuilder Brain(Func<IteratorContext, IteratorBrain> factory)
+    {
+        _brainFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
 
