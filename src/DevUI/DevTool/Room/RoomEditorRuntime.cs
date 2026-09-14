@@ -95,11 +95,13 @@ public static class RoomEditorCommandQueue
     {
         if (session == null) return;
 
-        bool roomDirty = false;
+        long historyBeforeBatch = session.History.Revision;
+        bool nonHistoryDirty = false;
         while (queue.TryDequeue(out RoomEditorCommand command))
         {
             try
             {
+                long historyBeforeCommand = session.History.Revision;
                 bool changed = false;
                 switch (command.Kind)
                 {
@@ -124,9 +126,6 @@ public static class RoomEditorCommandQueue
                         changed = RoomEditorActions.SaveRoomAsTemplate(session, command.Key);
                         break;
                     case RoomEditorCommandKind.AddEffect:
-                        // A browser hover may currently own a temporary RoomEffect/controller.
-                        // Tear that transaction down before the persistent edit so its rollback can
-                        // never remove or overwrite the newly committed runtime state.
                         EffectPreviewRuntime.EndForPersistentOperation("add room effect");
                         changed = RoomEditorActions.AddRoomEffect(session, command.Key);
                         if (changed)
@@ -146,7 +145,8 @@ public static class RoomEditorCommandQueue
                         break;
                 }
 
-                roomDirty |= changed;
+                if (changed && session.History.Revision == historyBeforeCommand)
+                    nonHistoryDirty = true;
             }
             catch (Exception error)
             {
@@ -154,10 +154,11 @@ public static class RoomEditorCommandQueue
             }
         }
 
-        // Multiple ImGui edits can be queued before one Rain World update. One revision edge is
-        // enough to invalidate the immutable room snapshot for the whole batch. History owns its
-        // own revision, so the shell's Undo/Redo labels are refreshed independently by Core.
-        if (roomDirty)
+        // Normal model edits push document history; CorePresentation converts that one history edge
+        // into Shell + active-workspace invalidation for the entire batch. Operations such as saving
+        // a template can update visible Room catalogs without history, so preserve one direct Room
+        // revision only when the whole batch stayed outside history.
+        if (nonHistoryDirty && session.History.Revision == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
     }
 
