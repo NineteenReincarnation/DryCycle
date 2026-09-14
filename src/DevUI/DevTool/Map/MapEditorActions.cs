@@ -16,8 +16,11 @@ internal static class MapEditorActions
 
         int next = FindRoomPanel(session, roomIndex) != null ? roomIndex : -1;
         if (state.SelectedRoomIndex == next) return;
+
+        // Selection is an explicit presentation key in MapEditorPresentationHub. Do not dirty the
+        // map model revision: the hub can update only the old/new room flags and retain the room-node
+        // cache plus the complete connection graph.
         state.SelectedRoomIndex = next;
-        EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
     }
 
     internal static bool SetRoomPosition(EditorSession session, int roomIndex, EditorPropertyValue value)
@@ -69,11 +72,19 @@ internal static class MapEditorActions
         }
 
         MapStateSnapshot after = MapStateSnapshot.Capture(page);
-        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+        bool historyPushed = SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry);
+        if (historyPushed)
+        {
+            // History.Revision is the authoritative dirty source. CorePresentation will invalidate
+            // Shell + active Map once for the whole DevUI update.
             session.History.Push(entry);
-
-        EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
-        EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+        }
+        else
+        {
+            // Conservative fallback for a successful compatibility mutation that could not produce
+            // a history diff. Shell history state did not change, so only Map needs invalidation.
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
+        }
         return true;
     }
 
