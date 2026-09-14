@@ -72,9 +72,10 @@ internal static class MapEditorActions
         if (before == null || !mutation(panel)) return false;
 
         // RoomPanel.Refresh() calls RoomRepresentation.CreateMapTexture(). While the rebuilt World
-        // Workspace owns presentation, that hidden vanilla texture work has no consumer and can be
-        // much more expensive than the actual model edit. Keep it only when legacy Map UI is live.
-        if (!LegacyDevUiQuiescenceController.IsQuiescent(session.Owner))
+        // Workspace owns presentation, that hidden vanilla texture work has no consumer. Mark the
+        // exact Map page stale instead, so it is materialized once immediately before legacy/vanilla
+        // presentation returns. TryDeferRefresh also fails closed for opaque third-party subtrees.
+        if (!LegacyDevUiQuiescenceController.TryDeferRefresh(session))
         {
             try
             {
