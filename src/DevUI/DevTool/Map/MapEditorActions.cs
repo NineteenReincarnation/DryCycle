@@ -1,5 +1,6 @@
 using System;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
@@ -67,19 +68,23 @@ internal static class MapEditorActions
 
         // Position/layer/subregion edits are room-local. Capturing the old full MapStateSnapshot here
         // copied every room, node-position array, attraction dictionary and material twice per edit.
-        // The member-scoped snapshot preserves the exact same undo semantics for this room while
-        // keeping unrelated map state out of the transaction.
         SingleMapRoomStateSnapshot before = SingleMapRoomStateSnapshot.Capture(page, panel);
         if (before == null || !mutation(panel)) return false;
 
-        try
+        // RoomPanel.Refresh() calls RoomRepresentation.CreateMapTexture(). While the rebuilt World
+        // Workspace owns presentation, that hidden vanilla texture work has no consumer and can be
+        // much more expensive than the actual model edit. Keep it only when legacy Map UI is live.
+        if (!LegacyDevUiQuiescenceController.IsQuiescent(session.Owner))
         {
-            panel.Refresh();
-            page.Refresh();
-        }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool map refresh failed: " + error.Message);
+            try
+            {
+                panel.Refresh();
+                page.Refresh();
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool map refresh failed: " + error.Message);
+            }
         }
 
         SingleMapRoomStateSnapshot after = SingleMapRoomStateSnapshot.Capture(page, panel);
