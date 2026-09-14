@@ -289,7 +289,7 @@ public static class EditorUiCommandQueue
 
     internal static void Clear()
     {
-        while (queue.TryDequeue(out _) { }
+        while (queue.TryDequeue(out _)) { }
     }
 
     private static void Execute(EditorSession session, EditorUiCommand command)
