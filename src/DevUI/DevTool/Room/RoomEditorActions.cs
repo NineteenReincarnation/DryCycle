@@ -49,7 +49,7 @@ internal static class RoomEditorActions
     {
         if (session?.RoomSettings == null || string.IsNullOrEmpty(key)) return false;
 
-        bool changed = Mutate(session, "Change " + key, settings =>
+        bool changed = MutateRoomSetting(session, "Change " + key, key, settings =>
         {
             switch (key)
             {
@@ -138,7 +138,7 @@ internal static class RoomEditorActions
     {
         if (session?.RoomSettings == null || string.IsNullOrEmpty(key)) return false;
 
-        bool changed = Mutate(session, "Inherit " + key, settings =>
+        bool changed = MutateRoomSetting(session, "Inherit " + key, key, settings =>
         {
             switch (key)
             {
@@ -184,7 +184,7 @@ internal static class RoomEditorActions
         if (settings?.fadePalette?.fades == null || cameraIndex < 0 || cameraIndex >= settings.fadePalette.fades.Length)
             return false;
 
-        bool changed = Mutate(session, "Change palette fade", _ =>
+        bool changed = MutatePaletteFade(session, "Change palette fade", terrain: false, _ =>
         {
             settings.fadePalette.fades[cameraIndex] = Mathf.Clamp01(value);
             return true;
@@ -199,7 +199,7 @@ internal static class RoomEditorActions
         if (settings?.terrainFadePalette?.fades == null || cameraIndex < 0 || cameraIndex >= settings.terrainFadePalette.fades.Length)
             return false;
 
-        bool changed = Mutate(session, "Change terrain palette fade", _ =>
+        bool changed = MutatePaletteFade(session, "Change terrain palette fade", terrain: true, _ =>
         {
             settings.terrainFadePalette.fades[cameraIndex] = Mathf.Clamp01(value);
             return true;
@@ -237,7 +237,7 @@ internal static class RoomEditorActions
         try
         {
             settings.SaveAsTemplate(TemplateButtonText(region, templateName), region);
-            session.Owner?.activePage?.Refresh();
+            RefreshLegacyPageOrDefer(session);
             return true;
         }
         catch (Exception error)
@@ -253,19 +253,33 @@ internal static class RoomEditorActions
         if (session.ToolMode != EditorToolMode.Room) session.SetToolMode(EditorToolMode.Room);
         if (session.Owner.activePage is not RoomSettingsPage page) return false;
 
+        RoomSettings settings = session.RoomSettings;
         RoomSettings.RoomEffect.Type type = new(typeName, false);
-        for (int i = 0; i < session.RoomSettings.effects.Count; i++)
+        for (int i = 0; i < settings.effects.Count; i++)
         {
-            RoomSettings.RoomEffect existing = session.RoomSettings.effects[i];
+            RoomSettings.RoomEffect existing = settings.effects[i];
             if (existing != null && !existing.inherited && existing.type == type)
                 return true;
         }
 
-        return Mutate(session, "Add effect " + typeName, _ =>
+        page.Signal(DevUISignalType.Create, page, typeName);
+
+        RoomSettings.RoomEffect created = null;
+        for (int i = settings.effects.Count - 1; i >= 0; i--)
         {
-            page.Signal(DevUISignalType.Create, page, typeName);
-            return true;
-        }, refreshPage: false);
+            RoomSettings.RoomEffect candidate = settings.effects[i];
+            if (candidate != null && !candidate.inherited && candidate.type == type)
+            {
+                created = candidate;
+                break;
+            }
+        }
+        if (created == null) return false;
+
+        IEditorStateSnapshot before = SingleRoomEffectStateSnapshot.Absent(settings, created);
+        IEditorStateSnapshot after = SingleRoomEffectStateSnapshot.Capture(settings, created);
+        PushHistory(session, "Add effect " + typeName, before, after);
+        return true;
     }
 
     internal static bool DeleteRoomEffect(EditorSession session, int index)
@@ -275,12 +289,16 @@ internal static class RoomEditorActions
         RoomSettings.RoomEffect effect = settings.effects[index];
         if (effect == null || effect.inherited) return false;
 
+        IEditorStateSnapshot before = SingleRoomEffectStateSnapshot.Capture(settings, effect);
+        if (before == null) return false;
+
         string type = effect.type?.value ?? "effect";
-        return Mutate(session, "Delete effect " + type, current =>
-        {
-            current.RemoveEffect(effect.type);
-            return true;
-        });
+        settings.RemoveEffect(effect.type);
+        RefreshLegacyPageOrDefer(session);
+
+        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        PushHistory(session, "Delete effect " + type, before, after);
+        return true;
     }
 
     internal static bool SetRoomEffectAmount(EditorSession session, int effectIndex, int sliderIndex, float value)
@@ -293,23 +311,26 @@ internal static class RoomEditorActions
         int sliderCount = Math.Max(1, RoomSettings.RoomEffect.GetSliderCount(effect.type));
         if (sliderIndex < 0 || sliderIndex >= sliderCount) return false;
 
-        bool changed = Mutate(session, "Change " + (effect.type?.value ?? "effect"), _ =>
-        {
-            if (sliderIndex == 0)
-            {
-                effect.amount = Mathf.Clamp01(value);
-                return true;
-            }
+        IEditorStateSnapshot before = SingleRoomEffectStateSnapshot.Capture(settings, effect);
+        if (before == null) return false;
 
+        if (sliderIndex == 0)
+        {
+            effect.amount = Mathf.Clamp01(value);
+        }
+        else
+        {
             int extraIndex = sliderIndex - 1;
             if (effect.extraAmounts == null || extraIndex < 0 || extraIndex >= effect.extraAmounts.Length)
                 return false;
             effect.extraAmounts[extraIndex] = Mathf.Clamp01(value);
-            return true;
-        });
+        }
 
-        if (changed) ApplyEffectLiveSideEffect(session, effect, sliderIndex);
-        return changed;
+        RefreshLegacyPageOrDefer(session);
+        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        PushHistory(session, "Change " + (effect.type?.value ?? "effect"), before, after);
+        ApplyEffectLiveSideEffect(session, effect, sliderIndex);
+        return true;
     }
 
     private static bool SetFadePalette(EditorSession session, RoomSettings settings, EditorPropertyValue value)
@@ -348,7 +369,7 @@ internal static class RoomEditorActions
         return true;
     }
 
-    private static void ApplyLiveSideEffect(EditorSession session, string key)
+    internal static void ApplyLiveSideEffect(EditorSession session, string key)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null) return;
@@ -381,7 +402,7 @@ internal static class RoomEditorActions
         }
     }
 
-    private static void ApplyEffectLiveSideEffect(EditorSession session, RoomSettings.RoomEffect effect, int sliderIndex)
+    internal static void ApplyEffectLiveSideEffect(EditorSession session, RoomSettings.RoomEffect effect, int sliderIndex)
     {
         if (effect == null) return;
         try
@@ -402,8 +423,8 @@ internal static class RoomEditorActions
             if (effect.type == RoomSettings.RoomEffect.Type.ModifyEffectColorA ||
                 effect.type == RoomSettings.RoomEffect.Type.ModifyEffectColorB)
             {
-                RoomSettings settings = session.RoomSettings;
-                camera.ApplyEffectColorsToAllPaletteTextures(settings.EffectColorA, settings.EffectColorB);
+                RoomSettings current = session.RoomSettings;
+                camera.ApplyEffectColorsToAllPaletteTextures(current.EffectColorA, current.EffectColorB);
             }
         }
         catch (Exception error)
@@ -471,7 +492,7 @@ internal static class RoomEditorActions
         try
         {
             settings.SetTemplate(TemplateButtonText(region, templateName), region);
-            session.Owner?.activePage?.Refresh();
+            RefreshLegacyPageOrDefer(session);
             ApplyLiveSideEffect(session, RoomSettingKeys.Palette);
             ApplyLiveSideEffect(session, RoomSettingKeys.EffectColorA);
             ApplyLiveSideEffect(session, RoomSettingKeys.TerrainPalette);
@@ -501,31 +522,68 @@ internal static class RoomEditorActions
             ? "NONE"
             : (region?.name ?? string.Empty) + " - " + templateName;
 
-    private static bool Mutate(
+    private static bool MutateRoomSetting(
         EditorSession session,
         string label,
-        Func<RoomSettings, bool> mutation,
-        bool refreshPage = true)
+        string key,
+        Func<RoomSettings, bool> mutation)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null || mutation == null) return false;
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(settings);
+        IEditorStateSnapshot before = CaptureRoomSettingSnapshot(settings, key);
         if (before == null || !mutation(settings)) return false;
 
-        if (refreshPage)
-        {
-            try { session.Owner?.activePage?.Refresh(); }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning("DevTool room page refresh failed: " + error.Message);
-            }
-        }
-
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(settings);
-        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+        RefreshLegacyPageOrDefer(session);
+        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        PushHistory(session, label, before, after);
         return true;
+    }
+
+    private static bool MutatePaletteFade(
+        EditorSession session,
+        string label,
+        bool terrain,
+        Func<RoomSettings, bool> mutation)
+    {
+        RoomSettings settings = session?.RoomSettings;
+        if (settings == null || mutation == null) return false;
+
+        IEditorStateSnapshot before = RoomPaletteFadeStateSnapshot.Capture(settings, terrain);
+        if (before == null || !mutation(settings)) return false;
+
+        RefreshLegacyPageOrDefer(session);
+        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        PushHistory(session, label, before, after);
+        return true;
+    }
+
+    private static IEditorStateSnapshot CaptureRoomSettingSnapshot(RoomSettings settings, string key)
+    {
+        if (key == RoomSettingKeys.FadePalette)
+            return RoomPaletteFadeStateSnapshot.Capture(settings, terrain: false);
+        if (key == RoomSettingKeys.TerrainFadePalette)
+            return RoomPaletteFadeStateSnapshot.Capture(settings, terrain: true);
+        return RoomSettingStateSnapshot.Capture(settings, key);
+    }
+
+    private static void PushHistory(
+        EditorSession session,
+        string label,
+        IEditorStateSnapshot before,
+        IEditorStateSnapshot after)
+    {
+        if (session != null && SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+    }
+
+    internal static void RefreshLegacyPageOrDefer(EditorSession session)
+    {
+        try { session?.Owner?.activePage?.Refresh(); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool room page refresh failed: " + error.Message);
+        }
     }
 
     private static bool SetFloat(EditorPropertyValue value, Action<float> setter)
