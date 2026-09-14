@@ -13,7 +13,7 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// compatibility behaviour remain live. Unknown/custom pages always fall back to the complete
 /// vanilla update rather than being partially suspended by a heuristic.
 /// </summary>
-internal static class LegacyDevUiQuiescenceController
+internal static partial class LegacyDevUiQuiescenceController
 {
     private sealed class PageProfile
     {
@@ -103,6 +103,7 @@ internal static class LegacyDevUiQuiescenceController
         SuppressedInitialRefreshPages.Clear();
         DeferredRefreshPages.Clear();
         ExternalCompatibilityPages.Clear();
+        ResetBackendPlans();
         selectiveTraversalDepth = 0;
         fullCompatibilityDepth = 0;
         activeProfile = null;
@@ -187,11 +188,13 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshSound(self))
         {
+            InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
             return;
         }
 
         orig(self);
+        InvalidateBackendPlan(self);
         DeferredRefreshPages.Remove(self);
     }
 
@@ -199,11 +202,13 @@ internal static class LegacyDevUiQuiescenceController
     {
         if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshTriggers(self))
         {
+            InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
             return;
         }
 
         orig(self);
+        InvalidateBackendPlan(self);
         DeferredRefreshPages.Remove(self);
     }
 
@@ -305,6 +310,7 @@ internal static class LegacyDevUiQuiescenceController
         try
         {
             page.Refresh();
+            InvalidateBackendPlan(page);
             page.initRefresh = false;
         }
         catch (Exception error)
@@ -329,7 +335,7 @@ internal static class LegacyDevUiQuiescenceController
         selectiveTraversalDepth++;
         try
         {
-            PumpChildren(page, profile);
+            PumpCompiledBackendPlan(page, profile);
 
             // A page can contain several nodes from the same or different third-party assemblies.
             // They are all opaque writers, but presentation only needs one workspace revision edge
@@ -354,6 +360,7 @@ internal static class LegacyDevUiQuiescenceController
                 try
                 {
                     page.Refresh();
+                    InvalidateBackendPlan(page);
                     DeferredRefreshPages.Remove(page);
                 }
                 finally
@@ -384,7 +391,8 @@ internal static class LegacyDevUiQuiescenceController
         if (parent?.subNodes == null) return;
 
         // Preserve vanilla's reverse child order. Some gizmo hierarchies rely on the last-created
-        // handle getting first refusal on dragging.
+        // handle getting first refusal on dragging. This helper remains for the small subtree beneath
+        // one compiled world-backend root; the page-wide traversal itself is retained in a plan.
         for (int i = parent.subNodes.Count - 1; i >= 0; i--)
             PumpBranch(parent.subNodes[i], profile);
     }
