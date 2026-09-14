@@ -75,6 +75,7 @@ public static class RelationshipEditorPresentationHub
     private static EditorRelationshipDirection observedDirection;
 
     public static EditorRelationshipPresentationSnapshot Current => current;
+    internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
 
     internal static void Publish(EditorSession session)
     {
@@ -86,7 +87,10 @@ public static class RelationshipEditorPresentationHub
         }
 
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+        {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
+            RelationshipPresentationChangeHintHub.MarkFull(session);
+        }
 
         RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Relationships);
@@ -97,34 +101,47 @@ public static class RelationshipEditorPresentationHub
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedPage, page) &&
             current.Available;
-        bool modelStable =
+        bool catalogStable =
             sameIdentity &&
-            observedRevision == revision &&
             observedCreatureTypeCount == creatureTypeCount &&
             relationshipTypeCount == nextRelationshipTypeCount;
         bool primaryStable =
-            modelStable &&
+            catalogStable &&
             string.Equals(observedPrimary, state.PrimaryCreature, StringComparison.Ordinal);
+        bool modelStable = primaryStable && observedRevision == revision;
 
-        if (primaryStable &&
+        if (modelStable &&
             string.Equals(observedOther, state.SelectedOtherCreature, StringComparison.Ordinal) &&
             observedDirection == state.SelectedDirection)
         {
-            DevToolPerformanceMonitor.RecordPresentation(
-                DevToolPresentationChannel.Relationships,
-                DevToolPresentationOutcome.CacheHit);
+            LastOutcome = DevToolPresentationOutcome.CacheHit;
             return;
         }
 
         // Pair/direction selection does not affect relationship values. Preserve the entire matrix
-        // and replace only the old/new Selected rows. Changing the primary creature is different: it
-        // changes every effective relationship and therefore correctly falls through to a full build.
-        if (primaryStable)
+        // and replace only the old/new Selected rows.
+        if (modelStable)
         {
             PublishSelectionOnly(state);
-            DevToolPerformanceMonitor.RecordPresentation(
-                DevToolPresentationChannel.Relationships,
-                DevToolPresentationOutcome.PartialRebuild);
+            LastOutcome = DevToolPresentationOutcome.PartialRebuild;
+            return;
+        }
+
+        bool modelChanged = sameIdentity && observedRevision != revision;
+        RelationshipPresentationChangeHint hint = modelChanged
+            ? RelationshipPresentationChangeHintHub.Consume(session)
+            : default;
+
+        // A type/intensity/reset edit changes exactly one directed relationship, but the UI row owns
+        // both directions for one primary/other pair. Re-capture that one row and retain every other
+        // row plus the static creature/relationship catalogs. Unknown history/legacy writers supply
+        // no pair hint (or explicitly mark Full) and therefore fall through to the safe full build.
+        if (primaryStable && hint.HasPair &&
+            string.Equals(hint.Primary, state.PrimaryCreature, StringComparison.Ordinal) &&
+            TryPublishPairOnly(state, hint.Other))
+        {
+            Observe(session, page, revision, creatureTypeCount, state);
+            LastOutcome = DevToolPresentationOutcome.PartialRebuild;
             return;
         }
 
@@ -133,9 +150,7 @@ public static class RelationshipEditorPresentationHub
         {
             current = new EditorRelationshipPresentationSnapshot { Available = true };
             Observe(session, page, revision, creatureTypeCount, state);
-            DevToolPerformanceMonitor.RecordPresentation(
-                DevToolPresentationChannel.Relationships,
-                DevToolPresentationOutcome.FullRebuild);
+            LastOutcome = DevToolPresentationOutcome.FullRebuild;
             return;
         }
 
@@ -178,9 +193,51 @@ public static class RelationshipEditorPresentationHub
         };
 
         Observe(session, page, revision, creatureTypeCount, state);
-        DevToolPerformanceMonitor.RecordPresentation(
-            DevToolPresentationChannel.Relationships,
-            DevToolPresentationOutcome.FullRebuild);
+        LastOutcome = DevToolPresentationOutcome.FullRebuild;
+    }
+
+    private static bool TryPublishPairOnly(RelationshipEditorState state, string otherType)
+    {
+        if (state == null || string.IsNullOrEmpty(state.PrimaryCreature) || string.IsNullOrEmpty(otherType))
+            return false;
+
+        CreatureTemplate primary = ResolveTemplate(state.PrimaryCreature);
+        CreatureTemplate other = ResolveTemplate(otherType);
+        if (primary?.type == null || other?.type == null || primary.type == other.type)
+            return false;
+
+        EditorRelationshipRowSnapshot[] source = current.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
+        int rowIndex = -1;
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (!string.Equals(source[i]?.CreatureType, otherType, StringComparison.Ordinal)) continue;
+            rowIndex = i;
+            break;
+        }
+        if (rowIndex < 0) return false;
+
+        EditorRelationshipRowSnapshot old = source[rowIndex];
+        EditorRelationshipRowSnapshot[] rows = (EditorRelationshipRowSnapshot[])source.Clone();
+        rows[rowIndex] = new EditorRelationshipRowSnapshot
+        {
+            CreatureType = other.type.value,
+            DisplayName = string.IsNullOrEmpty(other.name) ? other.type.value : other.name,
+            Selected = string.Equals(state.SelectedOtherCreature, other.type.value, StringComparison.Ordinal),
+            PrimaryToOther = Capture(primary, other),
+            OtherToPrimary = Capture(other, primary)
+        };
+
+        current = new EditorRelationshipPresentationSnapshot
+        {
+            Available = current.Available,
+            PrimaryCreature = state.PrimaryCreature,
+            SelectedOtherCreature = state.SelectedOtherCreature,
+            SelectedDirection = state.SelectedDirection,
+            CreatureTypes = current.CreatureTypes,
+            RelationshipTypes = current.RelationshipTypes,
+            Rows = rows
+        };
+        return old != null;
     }
 
     private static void PublishSelectionOnly(RelationshipEditorState state)
@@ -223,6 +280,7 @@ public static class RelationshipEditorPresentationHub
 
     internal static void Clear()
     {
+        RelationshipPresentationChangeHintHub.Clear(observedSession);
         current = EditorRelationshipPresentationSnapshot.Empty;
         observedSession = null;
         observedPage = null;
@@ -231,6 +289,7 @@ public static class RelationshipEditorPresentationHub
         observedPrimary = string.Empty;
         observedOther = string.Empty;
         observedDirection = EditorRelationshipDirection.PrimaryToOther;
+        LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
     private static void Observe(
@@ -286,6 +345,19 @@ public static class RelationshipEditorPresentationHub
 
         result.Sort((a, b) => string.Compare(a?.type?.value, b?.type?.value, StringComparison.OrdinalIgnoreCase));
         return result;
+    }
+
+    private static CreatureTemplate ResolveTemplate(string typeName)
+    {
+        if (string.IsNullOrEmpty(typeName)) return null;
+        try
+        {
+            return StaticWorld.GetCreatureTemplate(new CreatureTemplate.Type(typeName, false));
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static CreatureTemplate FindTemplate(List<CreatureTemplate> templates, string typeName)
@@ -402,7 +474,11 @@ public static class RelationshipEditorCommandQueue
 
                 // Primary/pair selection is explicit presentation state and is observed directly by
                 // RelationshipEditorPresentationHub. Only model mutations need the workspace clock.
-                if (modelCommand && changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                if (!modelCommand || !changed)
+                    continue;
+
+                RelationshipPresentationChangeHintHub.MarkPair(session, command.Primary, command.Other);
+                if ((session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
             catch (Exception error)
