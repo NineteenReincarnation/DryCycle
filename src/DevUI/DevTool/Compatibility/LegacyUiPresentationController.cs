@@ -1,6 +1,13 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Dialog;
+using DryCycle.DevUI.DevTool.Map;
+using DryCycle.DevUI.DevTool.Relationships;
+using DryCycle.DevUI.DevTool.Room;
+using DryCycle.DevUI.DevTool.Sound;
+using DryCycle.DevUI.DevTool.Triggers;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
@@ -29,9 +36,13 @@ internal static class LegacyUiPresentationController
 
     private static Page hiddenPage;
     private static readonly Vector2 Offscreen = new(-100000f, -100000f);
+    private static bool lifetimeMonitorInstalled;
+    private static bool observedLiveSession;
 
     internal static void Apply(Page page, bool suppressLegacyControls)
     {
+        EnsureLifetimeMonitor();
+
         // Compatibility verification is diagnostic work, not presentation work. A full audit walks
         // instantiated DevInterface trees, mirrors controls and exercises reflection-backed action
         // routes. Running it from Apply meant the same frame that H constructed vanilla DevUI also
@@ -77,12 +88,88 @@ internal static class LegacyUiPresentationController
 
     internal static void Reset()
     {
+        if (lifetimeMonitorInstalled)
+        {
+            On.RainWorldGame.Update -= RainWorldGame_Update;
+            lifetimeMonitorInstalled = false;
+        }
+        observedLiveSession = false;
+
         RestoreHiddenPage();
         hidden.Clear();
         hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
         DevUiFullAudit.Reset();
         DevUiMigrationCoverage.Reset();
+    }
+
+    /// <summary>
+    /// DevUI.Update stops running as soon as DevTools closes, so page/session references retained by
+    /// presentation caches cannot rely on a later editor frame to clear themselves. Install one tiny
+    /// RainWorldGame lifetime observer while DevUI is active and release those roots exactly once on
+    /// the live -> dormant edge. The observer unhooks itself during cleanup and is lazily installed
+    /// again by Apply when DevTools is opened next time.
+    /// </summary>
+    private static void EnsureLifetimeMonitor()
+    {
+        if (lifetimeMonitorInstalled) return;
+        On.RainWorldGame.Update += RainWorldGame_Update;
+        lifetimeMonitorInstalled = true;
+        observedLiveSession = DevToolSessionHub.IsCurrentSessionLive;
+    }
+
+    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
+    {
+        orig(self);
+
+        bool live = DevToolSessionHub.IsCurrentSessionLive;
+        if (live)
+        {
+            observedLiveSession = true;
+            return;
+        }
+
+        if (!observedLiveSession)
+            return;
+
+        observedLiveSession = false;
+        ReleaseDormantEditorState();
+    }
+
+    private static void ReleaseDormantEditorState()
+    {
+        EditorSession session = DevToolSessionHub.Current;
+        Page retiredPage = session?.Owner?.activePage;
+
+        // Finish/cancel transient editor ownership first so nothing stale can execute against a new
+        // DevUI owner if the editor is reopened later.
+        session?.LegacyTransactions.Reset();
+        session?.CancelPlacement();
+        EditorUiCommandQueue.Clear();
+        RoomEditorCommandQueue.Clear();
+        SoundEditorCommandQueue.Clear();
+        TriggerEditorCommandQueue.Clear();
+        MapEditorCommandQueue.Clear();
+        DialogEditorCommandQueue.Clear();
+        RelationshipEditorCommandQueue.Clear();
+        UniversalDevUiCommandQueue.Clear();
+
+        // Restore any temporarily hidden legacy visuals before dropping the strong node/page roots.
+        // Reset also removes this lifetime hook; Apply installs it again on the next DevUI lifetime.
+        Reset();
+        ObjectGizmoPresentationController.Reset();
+
+        EditorPresentationHub.Clear();
+        RoomEditorPresentationHub.Clear();
+        SoundEditorPresentationHub.Clear();
+        TriggerEditorPresentationHub.Clear();
+        MapEditorPresentationHub.Clear();
+        DialogEditorPresentationHub.Clear();
+        RelationshipEditorPresentationHub.Clear();
+        UniversalDevUiPresentationHub.Clear();
+        DevUiPageCoverageTracker.Reset();
+
+        LegacyDevUiQuiescenceController.ReleasePage(retiredPage);
     }
 
     private static void SuppressChildren(DevUINode parent)
