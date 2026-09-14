@@ -44,9 +44,6 @@ internal static class WorldMapGpuInteractionIndex
 
     private static ManualLogSource log;
     private static IDisposable hoverHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo layerVisibleField;
     private static EditorMapPresentationSnapshot indexedSnapshot;
     private static bool enabled;
 
@@ -68,11 +65,8 @@ internal static class WorldMapGpuInteractionIndex
                     typeof(Num.Vector2), typeof(Num.Vector2)
                 },
                 null);
-            panField = mapType.GetField("pan", flags);
-            zoomField = mapType.GetField("zoom", flags);
-            layerVisibleField = mapType.GetField("layerVisible", flags);
-            if (findHoveredRoom == null || panField == null || zoomField == null || layerVisibleField == null)
-                throw new MissingMemberException("World Map spatial hover targets were not found.");
+            if (findHoveredRoom == null)
+                throw new MissingMemberException("World Map spatial hover target was not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             if (hookType == null)
@@ -98,11 +92,9 @@ internal static class WorldMapGpuInteractionIndex
         try { hoverHook?.Dispose(); }
         catch { }
         hoverHook = null;
-        panField = null;
-        zoomField = null;
-        layerVisibleField = null;
         indexedSnapshot = null;
         roomLookup.Clear();
+        WorldMapHotState.Invalidate();
         enabled = false;
         log = null;
     }
@@ -119,11 +111,11 @@ internal static class WorldMapGpuInteractionIndex
 
         try
         {
-            Num.Vector2 pan = panField.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
-            float zoom = zoomField.GetValue(null) is float z ? Math.Max(0.0001f, z) : 1f;
+            Num.Vector2 pan = WorldMapHotState.Pan;
+            float zoom = WorldMapHotState.Zoom;
             Num.Vector2 mapPoint = (mouse - canvasMin - pan) / zoom;
-            int layerMask = CurrentLayerMask();
-            if (!WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out int roomIndex)) return null;
+            if (!WorldMapGpuScene.TryHitRoom(mapPoint, WorldMapHotState.LayerMask, out int roomIndex))
+                return null;
 
             EnsureLookup(snapshot);
             return roomLookup.TryGetValue(roomIndex, out EditorMapRoomSnapshot room) ? room : null;
@@ -145,15 +137,6 @@ internal static class WorldMapGpuInteractionIndex
             EditorMapRoomSnapshot room = rooms[i];
             if (room != null) roomLookup[room.RoomIndex] = room;
         }
-    }
-
-    private static int CurrentLayerMask()
-    {
-        bool[] layers = layerVisibleField?.GetValue(null) as bool[];
-        int mask = 0;
-        for (int i = 0; i < 3; i++)
-            if (layers == null || i >= layers.Length || layers[i]) mask |= 1 << i;
-        return mask;
     }
 
     private static Exception Unwrap(Exception error)
