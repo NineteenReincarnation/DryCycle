@@ -19,7 +19,31 @@ internal static class MultiSelectionInspector
         if (selected == null || selected.Count == 0)
             return Array.Empty<EditorPropertySnapshot>();
 
-        EditorPropertySnapshot[] first = ObjectInspectorRegistry.Capture(selected[0]);
+        // Capturing inspector properties can involve adapter/reflection work. The previous path
+        // recaptured every peer once per property from the first object, making a P-property,
+        // S-object selection pay roughly P*S full captures. Snapshot each selected object exactly
+        // once, then use a key index for the intersection/comparison pass.
+        EditorPropertySnapshot[][] captured = new EditorPropertySnapshot[selected.Count][];
+        Dictionary<string, EditorPropertySnapshot>[] byKey =
+            new Dictionary<string, EditorPropertySnapshot>[selected.Count];
+
+        for (int s = 0; s < selected.Count; s++)
+        {
+            EditorPropertySnapshot[] properties = ObjectInspectorRegistry.Capture(selected[s]) ??
+                                                  Array.Empty<EditorPropertySnapshot>();
+            captured[s] = properties;
+
+            Dictionary<string, EditorPropertySnapshot> index = new(StringComparer.Ordinal);
+            for (int i = 0; i < properties.Length; i++)
+            {
+                EditorPropertySnapshot property = properties[i];
+                if (property == null || string.IsNullOrEmpty(property.Key)) continue;
+                index[property.Key] = property;
+            }
+            byKey[s] = index;
+        }
+
+        EditorPropertySnapshot[] first = captured[0];
         if (first.Length == 0)
             return first;
 
@@ -37,7 +61,7 @@ internal static class MultiSelectionInspector
 
             for (int s = 1; s < selected.Count; s++)
             {
-                EditorPropertySnapshot peer = Find(ObjectInspectorRegistry.Capture(selected[s]), candidate.Key);
+                byKey[s].TryGetValue(candidate.Key, out EditorPropertySnapshot peer);
                 if (!Compatible(candidate, peer))
                 {
                     existsEverywhere = false;
@@ -58,18 +82,6 @@ internal static class MultiSelectionInspector
 
         mixedPropertyKeys = mixed.ToArray();
         return common.ToArray();
-    }
-
-    private static EditorPropertySnapshot Find(EditorPropertySnapshot[] properties, string key)
-    {
-        if (properties == null) return null;
-        for (int i = 0; i < properties.Length; i++)
-        {
-            EditorPropertySnapshot property = properties[i];
-            if (property != null && string.Equals(property.Key, key, StringComparison.Ordinal))
-                return property;
-        }
-        return null;
     }
 
     private static bool Compatible(EditorPropertySnapshot a, EditorPropertySnapshot b)
