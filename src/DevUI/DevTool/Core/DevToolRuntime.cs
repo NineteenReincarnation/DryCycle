@@ -24,14 +24,8 @@ namespace DryCycle.DevUI.DevTool.Core;
 internal static class DevToolRuntime
 {
     private static bool enabled;
-
-    // TEMPORARY: live RoomEffect hover preview is disabled while its visual rollback/runtime
-    // behavior is being repaired. Keep the preview implementation intact so restoring it later is
-    // a one-line gate change instead of another architectural rewrite.
     private static readonly bool EffectLivePreviewEnabled = false;
 
-    // Compatibility accessor for infrastructure that needs the live editor session.
-    // DevToolSessionHub remains the single source of truth.
     internal static EditorSession ActiveSession => DevToolSessionHub.Current;
 
     internal static void Enable()
@@ -104,11 +98,6 @@ internal static class DevToolRuntime
         }
         EditorSession session = DevToolSessionHub.Current;
 
-        // Reopening DevTools used to restore the previous page immediately, which could make H
-        // construct the vanilla default page and then construct a second heavy page in the same
-        // frame. Apply that workspace restoration one update later and keep that restoration frame
-        // shell-only. This spreads unavoidable main-thread construction across frames instead of
-        // creating a single visible hitch.
         bool restoredWorkspaceThisFrame;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DeferredWorkspaceRestore))
             restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
@@ -143,8 +132,6 @@ internal static class DevToolRuntime
                 EffectPreviewRuntime.AfterDevUiUpdate(self);
         }
 
-        // New UI hides only the already-migrated screen controls. Vanilla mode restores the
-        // complete original page while keeping the tiny frontend mode switch available.
         bool suppressMigratedLegacyUi =
             !EditorUiModeState.UseVanilla &&
             EditorInputRouter.FrontendAttached &&
@@ -175,8 +162,6 @@ internal static class DevToolRuntime
 
     private static void PublishPresentations(EditorSession session, bool shellOnly)
     {
-        // Attachment, Vanilla/New-UI mode, and overlay visibility can all change outside the DevUI
-        // producer. Observe the ownership edge on the Rain World thread before reading revisions.
         EditorRevisionHub.ObservePresentationMode(session);
 
         if (session == null)
@@ -186,10 +171,6 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Immutable snapshots are useful only while the rebuilt frontend can actually draw them.
-        // During Vanilla mode, a detached bridge, or Escape-hidden overlay, authoritative model work
-        // continues but snapshot production sleeps. Re-entry MarkAll()s exactly once so the first
-        // visible rebuilt frame captures the complete latest state.
         if (!EditorRevisionHub.IsRebuiltPresentationActive(session))
             return;
 
@@ -500,23 +481,36 @@ public sealed class EditorSession
 public sealed class EditorSelection
 {
     private readonly List<PlacedObject> placedObjects = new();
+    private long revision = 1L;
 
     public IReadOnlyList<PlacedObject> PlacedObjects => placedObjects;
     public PlacedObject PrimaryPlacedObject => placedObjects.Count == 0 ? null : placedObjects[placedObjects.Count - 1];
     public int Count => placedObjects.Count;
+    public long Revision => revision;
 
     public bool Contains(PlacedObject value) => value != null && placedObjects.Contains(value);
 
     public void SelectOnly(PlacedObject value)
     {
+        if (value == null)
+        {
+            Clear();
+            return;
+        }
+
+        if (placedObjects.Count == 1 && ReferenceEquals(placedObjects[0], value))
+            return;
+
         placedObjects.Clear();
-        if (value != null) placedObjects.Add(value);
+        placedObjects.Add(value);
+        Touch();
     }
 
     public void Toggle(PlacedObject value)
     {
         if (value == null) return;
         if (!placedObjects.Remove(value)) placedObjects.Add(value);
+        Touch();
     }
 
     public void SelectRange(IList<PlacedObject> live, int anchor, int target, bool additive)
@@ -524,6 +518,8 @@ public sealed class EditorSelection
         if (live == null || live.Count == 0) return;
         anchor = Math.Max(0, Math.Min(anchor, live.Count - 1));
         target = Math.Max(0, Math.Min(target, live.Count - 1));
+
+        List<PlacedObject> previous = new(placedObjects);
         if (!additive) placedObjects.Clear();
 
         int min = Math.Min(anchor, target);
@@ -533,9 +529,17 @@ public sealed class EditorSelection
             PlacedObject item = live[i];
             if (item != null && !placedObjects.Contains(item)) placedObjects.Add(item);
         }
+
+        if (!SameSelection(previous, placedObjects))
+            Touch();
     }
 
-    public void Clear() => placedObjects.Clear();
+    public void Clear()
+    {
+        if (placedObjects.Count == 0) return;
+        placedObjects.Clear();
+        Touch();
+    }
 
     internal void RemoveMissing(List<PlacedObject> live)
     {
@@ -544,7 +548,23 @@ public sealed class EditorSelection
             Clear();
             return;
         }
-        placedObjects.RemoveAll(item => item == null || !live.Contains(item));
+
+        if (placedObjects.RemoveAll(item => item == null || !live.Contains(item)) > 0)
+            Touch();
+    }
+
+    private void Touch()
+    {
+        revision = revision >= long.MaxValue ? 1L : revision + 1L;
+    }
+
+    private static bool SameSelection(List<PlacedObject> a, List<PlacedObject> b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a == null || b == null || a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+            if (!ReferenceEquals(a[i], b[i])) return false;
+        return true;
     }
 }
 
