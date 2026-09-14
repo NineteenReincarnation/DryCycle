@@ -66,7 +66,7 @@ public sealed class EditorPresentationSnapshot
     public EditorInspectorSnapshot Inspector { get; init; } = new();
 }
 
-public static class EditorPresentationHub
+public static partial class EditorPresentationHub
 {
     private static volatile EditorPresentationSnapshot current = EditorPresentationSnapshot.Empty;
     private static EditorObjectTypeSnapshot[] libraryCache = Array.Empty<EditorObjectTypeSnapshot>();
@@ -92,6 +92,7 @@ public static class EditorPresentationHub
     private static PlacedObject observedPrimarySelection;
 
     public static EditorPresentationSnapshot Current => current;
+    internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
 
     internal static void Publish(EditorSession session, bool shellOnly = false)
     {
@@ -103,8 +104,8 @@ public static class EditorPresentationHub
 
         // History can change through keyboard shortcuts and legacy transaction completion without
         // passing through EditorUiCommandQueue. Detect that authoritative revision before reading
-        // presentation revisions. The active workspace is invalidated as Undo/Redo can restore data
-        // in any editor model, while Shell owns the undo/redo labels and availability flags.
+        // presentation revisions. Known history snapshots may also have supplied a semantic Object
+        // hint; unknown history remains safe because absence of a hint forces a full object capture.
         long historyRevision = session.History.Revision;
         if (ReferenceEquals(observedSession, session) &&
             observedHistoryRevision != 0L &&
@@ -115,9 +116,25 @@ public static class EditorPresentationHub
         }
 
         bool objectWorkspace = !shellOnly && session.ToolMode == EditorToolMode.Objects;
-        if (objectWorkspace &&
-            (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) || session.Owner.draggedNode != null))
-            EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+        if (objectWorkspace)
+        {
+            PlacedObject draggedObject = ResolveDraggedPlacedObject(session.Owner.draggedNode);
+            if (draggedObject == null && session.Owner.activePage is global::DevInterface.ObjectsPage objectsPage)
+                draggedObject = objectsPage.draggedObject?.pObj;
+
+            if (draggedObject != null)
+            {
+                // A live world handle is a trusted one-member writer even though the legacy
+                // transaction recorder is intentionally active around the gesture.
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+                ObjectPresentationChangeHintHub.MarkMember(session, draggedObject);
+            }
+            else if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) || session.Owner.draggedNode != null)
+            {
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+                ObjectPresentationChangeHintHub.MarkFull(session);
+            }
+        }
 
         long shellRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Shell);
         long objectRevision = objectWorkspace
@@ -133,10 +150,14 @@ public static class EditorPresentationHub
         bool libraryStale = objectWorkspace && (libraryTypeCount != typeCount || libraryCache.Length == 0);
         string placementType = session.PlacementType ?? string.Empty;
 
-        if (!libraryStale &&
+        bool sameIdentity =
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedRoom, session.Room) &&
             ReferenceEquals(observedPage, session.Owner.activePage) &&
+            current.Available;
+
+        if (!libraryStale &&
+            sameIdentity &&
             observedShellOnly == shellOnly &&
             observedShellRevision == shellRevision &&
             observedObjectRevision == objectRevision &&
@@ -151,32 +172,39 @@ public static class EditorPresentationHub
             string.Equals(observedPlacementType, placementType, StringComparison.Ordinal) &&
             observedObjectCount == objectCount &&
             observedSelectionCount == selectionCount &&
-            ReferenceEquals(observedPrimarySelection, primarySelection) &&
-            current.Available)
+            ReferenceEquals(observedPrimarySelection, primarySelection))
+        {
+            LastOutcome = DevToolPresentationOutcome.CacheHit;
             return;
+        }
 
         EditorObjectSnapshot[] scene = Array.Empty<EditorObjectSnapshot>();
         EditorObjectTypeSnapshot[] objectLibrary = Array.Empty<EditorObjectTypeSnapshot>();
         EditorInspectorSnapshot inspector = new();
+        bool objectFullCapture = false;
+        bool objectPartialCapture = false;
 
         if (objectWorkspace)
         {
-            // Selection membership has its own semantic revision. Shell-only changes can therefore
-            // reuse the expensive immutable object payload without hashing/scanning the selection or
-            // recapturing reflection-backed inspector controls.
-            bool objectPayloadStable =
+            bool stableObjectContext =
                 current.Available &&
                 current.Hydrated &&
                 current.ToolMode == EditorToolMode.Objects &&
-                ReferenceEquals(observedSession, session) &&
-                ReferenceEquals(observedRoom, session.Room) &&
-                ReferenceEquals(observedPage, session.Owner.activePage) &&
-                observedObjectRevision == objectRevision &&
-                observedSelectionRevision == selectionRevision &&
-                observedObjectCount == objectCount &&
-                observedSelectionCount == selectionCount &&
-                ReferenceEquals(observedPrimarySelection, primarySelection) &&
-                observedLegacyUiVisible == session.LegacyUiVisible;
+                sameIdentity &&
+                observedObjectCount == objectCount;
+
+            bool modelChanged = observedObjectRevision != objectRevision;
+            bool selectionChanged =
+                observedSelectionRevision != selectionRevision ||
+                observedSelectionCount != selectionCount ||
+                !ReferenceEquals(observedPrimarySelection, primarySelection);
+            bool legacyVisibilityChanged = observedLegacyUiVisible != session.LegacyUiVisible;
+
+            bool objectPayloadStable =
+                stableObjectContext &&
+                !modelChanged &&
+                !selectionChanged &&
+                !legacyVisibilityChanged;
 
             if (objectPayloadStable)
             {
@@ -185,53 +213,32 @@ public static class EditorPresentationHub
             }
             else
             {
-                scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
-                if (live != null)
+                ObjectPresentationChangeHint hint = modelChanged
+                    ? ObjectPresentationChangeHintHub.Consume(session)
+                    : default;
+
+                if (stableObjectContext &&
+                    TryCaptureObjectPartial(
+                        session,
+                        live,
+                        selectionCount,
+                        primarySelection,
+                        selectionRevision,
+                        hint,
+                        modelChanged,
+                        selectionChanged,
+                        legacyVisibilityChanged,
+                        out scene,
+                        out inspector))
                 {
-                    for (int i = 0; i < live.Count; i++)
-                    {
-                        PlacedObject item = live[i];
-                        scene[i] = new EditorObjectSnapshot
-                        {
-                            Index = i,
-                            Type = item?.type?.value ?? "Unknown",
-                            X = item?.pos.x ?? 0f,
-                            Y = item?.pos.y ?? 0f,
-                            Selected = session.Selection.Contains(item)
-                        };
-                    }
+                    objectPartialCapture = true;
                 }
-
-                PlacedObject selected = primarySelection;
-                int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
-
-                EditorPropertySnapshot[] properties;
-                string[] mixedPropertyKeys;
-                if (selectionCount > 1)
-                    properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
                 else
                 {
-                    properties = ObjectInspectorRegistry.Capture(selected);
-                    mixedPropertyKeys = Array.Empty<string>();
+                    scene = CaptureObjectScene(session, live);
+                    inspector = CaptureObjectInspector(session, live, selectionCount, primarySelection);
+                    objectFullCapture = true;
                 }
-
-                inspector = new EditorInspectorSnapshot
-                {
-                    HasSelection = selected != null && selectedIndex >= 0,
-                    ObjectIndex = selectedIndex,
-                    SelectionCount = selectionCount,
-                    Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
-                    X = selected?.pos.x ?? 0f,
-                    Y = selected?.pos.y ?? 0f,
-                    DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
-                    LegacyUiAvailable = selectionCount == 1,
-                    LegacyUiVisible = session.LegacyUiVisible,
-                    Properties = properties,
-                    MixedPropertyKeys = mixedPropertyKeys,
-                    LegacyControls = selectionCount == 1
-                        ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
-                        : Array.Empty<LegacyControlSnapshot>()
-                };
             }
 
             if (libraryStale)
@@ -279,10 +286,26 @@ public static class EditorPresentationHub
         observedObjectCount = objectCount;
         observedSelectionCount = selectionCount;
         observedPrimarySelection = primarySelection;
+
+        if (objectWorkspace)
+        {
+            LastOutcome = objectFullCapture
+                ? DevToolPresentationOutcome.FullRebuild
+                : DevToolPresentationOutcome.PartialRebuild;
+        }
+        else
+        {
+            // Core shell snapshots are intentionally light; once a session already exists, replacing
+            // shell metadata is a partial rebuild even when no Objects payload is active.
+            LastOutcome = sameIdentity || objectPartialCapture
+                ? DevToolPresentationOutcome.PartialRebuild
+                : DevToolPresentationOutcome.FullRebuild;
+        }
     }
 
     internal static void Clear()
     {
+        ObjectPresentationChangeHintHub.Clear(observedSession);
         current = EditorPresentationSnapshot.Empty;
         observedSession = null;
         observedRoom = null;
@@ -302,6 +325,7 @@ public static class EditorPresentationHub
         observedObjectCount = -1;
         observedSelectionCount = -1;
         observedPrimarySelection = null;
+        LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
     internal static void InvalidateObjectLibrary()
@@ -420,17 +444,39 @@ public static class EditorUiCommandQueue
                 long historyBeforeCommand = session.History.Revision;
                 long selectionBefore = session.Selection.Revision;
                 int objectCountBefore = session.RoomSettings?.placedObjects?.Count ?? 0;
+                PlacedObject commandTarget = ResolveObject(session, command.Index);
+                int selectionCountBefore = session.Selection.Count;
+                PlacedObject primaryBefore = session.Selection.PrimaryPlacedObject;
+
                 bool objectCommandSucceeded = Execute(session, command);
+
+                long historyAfterCommand = session.History.Revision;
                 long selectionAfter = session.Selection.Revision;
                 int objectCountAfter = session.RoomSettings?.placedObjects?.Count ?? 0;
+                bool historyChanged = historyAfterCommand != historyBeforeCommand;
+                bool membershipChanged = objectCountBefore != objectCountAfter;
+                bool selectionChanged = selectionBefore != selectionAfter;
 
-                bool visibleObjectStateChanged =
-                    selectionBefore != selectionAfter ||
-                    objectCountBefore != objectCountAfter ||
-                    (objectCommandSucceeded && IsObjectModelCommand(command.Kind));
+                bool objectModelCommand = IsObjectModelCommand(command.Kind);
+                bool observableModelChange = objectModelCommand &&
+                    (historyChanged || membershipChanged || objectCommandSucceeded);
 
-                if (visibleObjectStateChanged && session.History.Revision == historyBeforeCommand)
-                    nonHistoryObjectDirty = true;
+                if (observableModelChange)
+                {
+                    MarkObjectPresentationChange(
+                        session,
+                        command,
+                        commandTarget,
+                        membershipChanged,
+                        selectionCountBefore,
+                        primaryBefore);
+
+                    if (!historyChanged)
+                        nonHistoryObjectDirty = true;
+                }
+
+                // Selection has its own revision and never needs to bump Objects model revision.
+                _ = selectionChanged;
             }
             catch (Exception error)
             {
@@ -439,9 +485,8 @@ public static class EditorUiCommandQueue
         }
 
         // History mutations are converted into Shell + active-workspace invalidation by the core
-        // presentation hub. Direct shell state is already an explicit core cache key. Selection has
-        // its own monotonic revision, so this queue no longer scans/hashes selection members merely
-        // to decide whether the object payload is dirty.
+        // presentation hub. Direct compatibility writes without history retain one explicit Objects
+        // revision for the whole queue batch.
         if (nonHistoryObjectDirty && session.History.Revision == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
     }
@@ -449,6 +494,61 @@ public static class EditorUiCommandQueue
     internal static void Clear()
     {
         while (queue.TryDequeue(out _)) { }
+    }
+
+    private static void MarkObjectPresentationChange(
+        EditorSession session,
+        EditorUiCommand command,
+        PlacedObject commandTarget,
+        bool membershipChanged,
+        int selectionCountBefore,
+        PlacedObject primaryBefore)
+    {
+        if (membershipChanged)
+        {
+            ObjectPresentationChangeHintHub.MarkCollection(session);
+            return;
+        }
+
+        switch (command.Kind)
+        {
+            case EditorUiCommandKind.SetObjectPosition:
+            case EditorUiCommandKind.SetObjectProperty:
+                ObjectPresentationChangeHintHub.MarkMember(session, commandTarget);
+                break;
+
+            case EditorUiCommandKind.SetSelectionPosition:
+            case EditorUiCommandKind.SetSelectionProperty:
+                if (selectionCountBefore == 1)
+                    ObjectPresentationChangeHintHub.MarkMember(session, primaryBefore);
+                else
+                    ObjectPresentationChangeHintHub.MarkAllMembers(session);
+                break;
+
+            case EditorUiCommandKind.DeleteObject:
+            case EditorUiCommandKind.DeleteSelection:
+            case EditorUiCommandKind.DuplicateSelection:
+            case EditorUiCommandKind.CreateObject:
+            case EditorUiCommandKind.PlaceObjectAtCursor:
+                ObjectPresentationChangeHintHub.MarkCollection(session);
+                break;
+
+            // A third-party legacy control can legally mutate more than the object represented by
+            // the clicked panel. Keep those bridge actions conservative unless a dedicated adapter
+            // provides a narrower contract in the future.
+            case EditorUiCommandKind.InvokeLegacyButton:
+            case EditorUiCommandKind.SetLegacySlider:
+            case EditorUiCommandKind.ResetLegacySlider:
+            case EditorUiCommandKind.SetLegacyText:
+            case EditorUiCommandKind.SetLegacyDirection:
+            case EditorUiCommandKind.SetLegacyColor:
+                ObjectPresentationChangeHintHub.MarkFull(session);
+                break;
+
+            default:
+                ObjectPresentationChangeHintHub.MarkFull(session);
+                break;
+        }
     }
 
     private static bool Execute(EditorSession session, EditorUiCommand command)
