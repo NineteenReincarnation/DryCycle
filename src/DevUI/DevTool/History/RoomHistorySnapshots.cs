@@ -141,6 +141,7 @@ internal sealed class RoomSettingStateSnapshot : IEditorStateSnapshot
             default: return false;
         }
 
+        RoomPresentationChangeHintHub.MarkSetting(session, key);
         RoomEditorActions.ApplyLiveSideEffect(session, key);
         RoomEditorActions.RefreshLegacyPageOrDefer(session);
         return true;
@@ -253,6 +254,7 @@ internal sealed class RoomPaletteFadeStateSnapshot : IEditorStateSnapshot
                 settings.terrainFadePalette = value;
             }
 
+            RoomPresentationChangeHintHub.MarkPaletteFade(session, terrain: true);
             RoomEditorActions.ApplyLiveSideEffect(session, RoomSettingKeys.TerrainFadePalette);
         }
         else
@@ -268,6 +270,7 @@ internal sealed class RoomPaletteFadeStateSnapshot : IEditorStateSnapshot
                 settings.fadePalette = value;
             }
 
+            RoomPresentationChangeHintHub.MarkPaletteFade(session, terrain: false);
             RoomEditorActions.ApplyLiveSideEffect(session, RoomSettingKeys.FadePalette);
         }
 
@@ -391,6 +394,12 @@ internal sealed class SingleRoomEffectStateSnapshot : IEditorStateSnapshot
             for (int slider = 0; slider < sliderCount; slider++)
                 RoomEditorActions.ApplyEffectLiveSideEffect(session, target, slider);
         }
+
+        int logicalIndex = settings.effects.IndexOf(target);
+        if (logicalIndex >= 0)
+            RoomPresentationChangeHintHub.MarkEffectAmount(session, logicalIndex);
+        else
+            RoomPresentationChangeHintHub.MarkEffects(session);
 
         RoomEditorActions.RefreshLegacyPageOrDefer(session);
         RoomEffectLiveCompatibility.Reconcile(session);
