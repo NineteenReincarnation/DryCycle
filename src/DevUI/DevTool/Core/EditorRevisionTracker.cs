@@ -141,9 +141,42 @@ internal static class EditorRevisionHub
         Tracker(session).Mark(kind);
     }
 
-    internal static void MarkWorkspace(EditorSession session) =>
-        MarkWorkspace(session, session?.ToolMode ?? EditorToolMode.Room);
+    /// <summary>
+    /// Invalidates every workspace that can be mutated by the active document's shared history
+    /// stack. Room, Objects, Sound and Triggers deliberately share one Room document history; an
+    /// Undo executed while another one of those tools is visible can therefore restore data owned by
+    /// an inactive presentation hub. Advancing the whole document family keeps those retained caches
+    /// correct without rebuilding them until the user actually returns to that tool.
+    /// </summary>
+    internal static void MarkWorkspace(EditorSession session)
+    {
+        if (session == null) return;
 
+        EditorRevisionTracker tracker = Tracker(session);
+        switch (session.DocumentKey.Kind)
+        {
+            case EditorDocumentKind.Room:
+                tracker.Mark(EditorRevisionKind.Objects);
+                tracker.Mark(EditorRevisionKind.Room);
+                tracker.Mark(EditorRevisionKind.Sound);
+                tracker.Mark(EditorRevisionKind.Triggers);
+                break;
+            case EditorDocumentKind.RegionMap:
+                tracker.Mark(EditorRevisionKind.Map);
+                break;
+            case EditorDocumentKind.Relationships:
+                tracker.Mark(EditorRevisionKind.Relationships);
+                break;
+            default:
+                tracker.MarkWorkspace(session.ToolMode);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Narrow invalidation for a caller that explicitly owns one workspace channel rather than a
+    /// document-wide History.Revision edge.
+    /// </summary>
     internal static void MarkWorkspace(EditorSession session, EditorToolMode mode)
     {
         if (session == null) return;
