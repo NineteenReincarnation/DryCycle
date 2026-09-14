@@ -10,11 +10,11 @@ namespace DryCycle.Items.KarmaSpear;
 /// Deployment consumes one stored Karma point immediately. Its radius uses the pre-consumption
 /// level and its lifetime is that level multiplied by five seconds.
 /// The boundary is communicated by expanding pulses rather than a persistent fixed circle.
+/// Creatures that begin inside may leave, but once outside they cannot re-enter.
 /// </summary>
 internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 {
     private const int InitialFormationFrames = 28;
-    private const int VisibilityRefreshFrames = 12;
 
     private readonly KarmaSpear _source;
     private readonly int _activationKarmaLevel;
@@ -22,8 +22,8 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
     private readonly float _radius;
     private readonly StaticSoundLoop _soundLoop;
     private readonly Dictionary<Creature, int> _creatureSoundAges = new();
+    private readonly Dictionary<Creature, CreatureBarrierState> _creatureStates = new();
 
-    private Vector2 _visibilityOrigin;
     private int _age;
 
     internal KarmaSpearField(
@@ -69,17 +69,12 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 
         Vector2 center = _source.firstChunk.pos;
 
-        if (_age == 1 || _age % VisibilityRefreshFrames == 0)
-        {
-            _visibilityOrigin = FindOpenVisibilityOrigin(center);
-        }
-
         EnforceBarrier(center);
         UpdateSound(center);
-        CleanupCreatureSoundAges();
+        CleanupTrackedCreatures();
 
-        // The expanding pulse is now the only range visualization. There is intentionally
-        // no persistent ring left on screen between pulses.
+        // The expanding pulse is the only range visualization. There is intentionally no
+        // persistent ring left on screen between pulses.
         if (_age == 1 || _age % 28 == 0)
         {
             KarmicVisualEffects.SpawnFieldPulse(_source, _radius);
@@ -174,17 +169,13 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         Vector2 from = chunk.lastPos;
         Vector2 to = chunk.pos;
 
+        // Projectiles already inside may leave freely. Only outside -> inside travel is blocked.
         if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
         {
             return;
         }
 
         if (!TryGetCircleEntry(from, to, center, collisionRadius, out Vector2 hitPoint, out Vector2 normal))
-        {
-            return;
-        }
-
-        if (!BarrierDirectionVisible(center, normal))
         {
             return;
         }
@@ -225,36 +216,51 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
             return;
         }
 
-        BodyChunk main = creature.mainBodyChunk;
-        float collisionRadius = _radius + Mathf.Max(3f, main.rad);
-        Vector2 from = main.lastPos;
-        Vector2 to = main.pos;
+        if (!_creatureStates.TryGetValue(creature, out CreatureBarrierState state))
+        {
+            // Classify by the body centre only once. A creature that genuinely began inside is
+            // allowed to leave through the one-way barrier. An outside creature is locked out
+            // immediately even if one long limb/chunk already overlaps the boundary.
+            bool beganInside = (creature.mainBodyChunk.pos - center).sqrMagnitude < _radius * _radius;
+            state = new CreatureBarrierState(beganInside);
+            _creatureStates.Add(creature, state);
+        }
 
-        if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius)
+        if (state.AllowUntilFullyOutside)
+        {
+            if (!IsCreatureFullyOutside(creature, center))
+            {
+                return;
+            }
+
+            // Once an initially-inside creature has completely left, it becomes an outside
+            // creature for the remainder of this field and cannot re-enter.
+            state.AllowUntilFullyOutside = false;
+        }
+
+        if (!TryFindCreatureBoundaryCorrection(
+                creature,
+                center,
+                out Vector2 correction,
+                out Vector2 contactNormal,
+                out Vector2 hitPoint))
         {
             return;
         }
 
-        if (!TryGetCircleEntry(from, to, center, collisionRadius, out Vector2 hitPoint, out Vector2 normal))
-        {
-            return;
-        }
+        // Move the whole creature by one common correction. Never push individual body chunks
+        // independently: doing so fights BodyChunkConnections and can create lizard acceleration.
+        ShiftPhysicalObject(creature, correction);
 
-        if (!BarrierDirectionVisible(center, normal) || Vector2.Dot(to - from, normal) >= 0f)
-        {
-            return;
-        }
-
-        Vector2 targetMainPos = hitPoint + normal * 1.5f;
-        ShiftPhysicalObject(creature, targetMainPos - main.pos);
-
+        // Remove only velocity aimed into the protected area. Tangential/outward motion remains,
+        // so creatures slide along the boundary rather than being stunned or launched.
         for (int i = 0; i < creature.bodyChunks.Length; i++)
         {
             BodyChunk bodyChunk = creature.bodyChunks[i];
-            float inwardSpeed = Vector2.Dot(bodyChunk.vel, normal);
+            float inwardSpeed = Vector2.Dot(bodyChunk.vel, contactNormal);
             if (inwardSpeed < 0f)
             {
-                bodyChunk.vel -= normal * inwardSpeed;
+                bodyChunk.vel -= contactNormal * inwardSpeed;
             }
         }
 
@@ -270,52 +276,91 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         }
     }
 
-    private Vector2 FindOpenVisibilityOrigin(Vector2 center)
+    private bool TryFindCreatureBoundaryCorrection(
+        Creature creature,
+        Vector2 center,
+        out Vector2 correction,
+        out Vector2 contactNormal,
+        out Vector2 hitPoint)
     {
-        if (room == null)
-        {
-            return center;
-        }
+        correction = Vector2.zero;
+        contactNormal = Vector2.zero;
+        hitPoint = Vector2.zero;
 
-        Vector2 spearDirection = _source.rotation.sqrMagnitude > 0.001f
-            ? _source.rotation.normalized
-            : Vector2.right;
+        float bestCorrectionSqr = 0f;
+        bool blocked = false;
 
-        Vector2 openSide = -spearDirection;
-        Vector2 perpendicular = new(-openSide.y, openSide.x);
-        Vector2[] directions =
+        for (int i = 0; i < creature.bodyChunks.Length; i++)
         {
-            openSide,
-            perpendicular,
-            -perpendicular,
-            spearDirection
-        };
-        float[] distances = { 18f, 28f, 38f, 52f };
+            BodyChunk chunk = creature.bodyChunks[i];
+            float collisionRadius = _radius + Mathf.Max(3f, chunk.rad);
+            Vector2 radial = chunk.pos - center;
+            float distance = radial.magnitude;
 
-        for (int d = 0; d < distances.Length; d++)
-        {
-            for (int i = 0; i < directions.Length; i++)
+            // Normal case: a body chunk currently overlaps the protected side of the circle.
+            // Push the entire creature outward far enough to place this chunk back outside.
+            if (distance < collisionRadius)
             {
-                Vector2 candidate = center + directions[i] * distances[d];
-                if (!room.GetTile(candidate).Solid)
+                Vector2 normal = distance > 0.001f
+                    ? radial / distance
+                    : SafeOutwardNormal(chunk.lastPos - center);
+                Vector2 candidate = normal * (collisionRadius - distance + 1.5f);
+
+                if (!blocked || candidate.sqrMagnitude > bestCorrectionSqr)
                 {
-                    return candidate;
+                    blocked = true;
+                    bestCorrectionSqr = candidate.sqrMagnitude;
+                    correction = candidate;
+                    contactNormal = normal;
+                    hitPoint = center + normal * _radius;
                 }
+
+                continue;
+            }
+
+            // Swept test closes the high-speed/tunnelling case: both endpoints can be outside
+            // while the body chunk crossed through the circle during the frame.
+            Vector2 from = chunk.lastPos;
+            if ((from - center).sqrMagnitude <= collisionRadius * collisionRadius ||
+                !TryGetCircleEntry(from, chunk.pos, center, collisionRadius, out Vector2 entryPoint, out Vector2 entryNormal) ||
+                Vector2.Dot(chunk.pos - from, entryNormal) >= 0f)
+            {
+                continue;
+            }
+
+            Vector2 targetPos = entryPoint + entryNormal * 1.5f;
+            Vector2 sweptCorrection = targetPos - chunk.pos;
+            if (!blocked || sweptCorrection.sqrMagnitude > bestCorrectionSqr)
+            {
+                blocked = true;
+                bestCorrectionSqr = sweptCorrection.sqrMagnitude;
+                correction = sweptCorrection;
+                contactNormal = entryNormal;
+                hitPoint = center + entryNormal * _radius;
             }
         }
 
-        return center;
+        return blocked;
     }
 
-    private bool BarrierDirectionVisible(Vector2 center, Vector2 normal)
+    private bool IsCreatureFullyOutside(Creature creature, Vector2 center)
     {
-        if (room == null)
+        for (int i = 0; i < creature.bodyChunks.Length; i++)
         {
-            return false;
+            BodyChunk chunk = creature.bodyChunks[i];
+            float outsideRadius = _radius + Mathf.Max(3f, chunk.rad) + 2f;
+            if ((chunk.pos - center).sqrMagnitude <= outsideRadius * outsideRadius)
+            {
+                return false;
+            }
         }
 
-        Vector2 point = center + normal * _radius;
-        return room.VisualContact(_visibilityOrigin, point);
+        return true;
+    }
+
+    private static Vector2 SafeOutwardNormal(Vector2 radial)
+    {
+        return radial.sqrMagnitude > 0.000001f ? radial.normalized : Vector2.up;
     }
 
     private static bool TryGetCircleEntry(
@@ -391,17 +436,17 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         }
     }
 
-    private void CleanupCreatureSoundAges()
+    private void CleanupTrackedCreatures()
     {
-        if (_creatureSoundAges.Count == 0 || _age % 120 != 0)
+        if (_age % 120 != 0)
         {
             return;
         }
 
         List<Creature> remove = new();
-        foreach (KeyValuePair<Creature, int> pair in _creatureSoundAges)
+        foreach (KeyValuePair<Creature, CreatureBarrierState> pair in _creatureStates)
         {
-            if (pair.Key == null || pair.Key.slatedForDeletetion || pair.Key.room != room || _age - pair.Value > 240)
+            if (pair.Key == null || pair.Key.slatedForDeletetion || pair.Key.room != room)
             {
                 remove.Add(pair.Key);
             }
@@ -409,10 +454,14 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
 
         for (int i = 0; i < remove.Count; i++)
         {
-            if (remove[i] != null)
+            Creature creature = remove[i];
+            if (creature == null)
             {
-                _creatureSoundAges.Remove(remove[i]);
+                continue;
             }
+
+            _creatureStates.Remove(creature);
+            _creatureSoundAges.Remove(creature);
         }
     }
 
@@ -485,5 +534,15 @@ internal sealed class KarmaSpearField : UpdatableAndDeletable, IDrawable
         {
             newContainer.AddChild(sLeaser.sprites[i]);
         }
+    }
+
+    private sealed class CreatureBarrierState
+    {
+        internal CreatureBarrierState(bool allowUntilFullyOutside)
+        {
+            AllowUntilFullyOutside = allowUntilFullyOutside;
+        }
+
+        internal bool AllowUntilFullyOutside { get; set; }
     }
 }
