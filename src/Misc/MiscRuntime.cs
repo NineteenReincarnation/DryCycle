@@ -19,6 +19,13 @@ internal static class MiscRuntime
         DryCycle.WorldLink.WorldLinkRuntime.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
+        // The Room editor has a few catalogs whose source is static for the lifetime of the loaded
+        // mod set (danger types and terrain-palette assets). Resolve them during the normal mods-init
+        // phase instead of charging their cold filesystem/registry cost to the first O/H UI frame.
+        // If AssetManager is not ready yet, RoomSettingsPresentation deliberately leaves the cache
+        // invalid so opening the editor can retry safely.
+        DryCycle.DevUI.DevTool.Room.RoomSettingsPresentation.WarmStaticCatalogs();
+
         // These two utilities only exist as temporary compatibility fallbacks. They are
         // disabled by default to avoid duplicate hooks/UI once their replacement is active.
         if (DryCycle.DayNight.RegionDayNightOptions.EnableLegacyIndividualPlacedObjectViewer)
