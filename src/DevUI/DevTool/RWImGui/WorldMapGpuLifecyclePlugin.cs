@@ -76,10 +76,12 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void SuspendDormantMapRuntime()
     {
-        // The stable-cache gate deliberately retains Page/session identity while Map stays active.
-        // Drop that optimization key before the live DevUI owner disappears; the durable baked cache
-        // itself remains available for the next editor lifetime.
-        WorldMapGpuStableCacheGate.ReleaseRetainedKey();
+        // The stable-cache gate and region preload layer can otherwise retain the retired MapPage,
+        // immutable snapshots and up to several regions of managed bake data for the entire gameplay
+        // session. Dispose their hooks/cache in dependency order; WorldMapGpuCache.FlushNow in the
+        // renderer shutdown below still preserves the active durable bake on disk.
+        WorldMapGpuStableCacheGate.Disable();
+        WorldMapGpuRegionPreload.Disable();
 
         // Retire helpers which keep live Page/snapshot/route state. Their BepInEx components remain
         // enabled, but the static runtimes are idempotent and therefore safe to park until the next
@@ -104,14 +106,15 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         MapRoomGeometryPresentationHub.Clear();
 
         // Disable the renderer last so hooked retained helpers can hide/destroy their own resources
-        // before the scene camera/chunks are torn down.
+        // before the scene camera/chunks are torn down and the active bake is flushed to disk.
         WorldMapGpuRuntime.Disable();
     }
 
     private void ResumeDormantMapRuntime()
     {
-        // Rebuild the dependency order used during normal BepInEx startup. The first reopened Map
-        // frame can then consume the durable GPU cache immediately without retaining any old Page.
+        // Rebuild the dependency order used during normal BepInEx startup. Region preload installs
+        // before the stable-cache gate so the latter remains the outer O(1) fast path once baking is
+        // complete. The first reopened Map frame can then warm from disk/resident data normally.
         WorldMapPlayerLocator.Enable(Logger);
         WorldMapPerformance.Enable(Logger);
         WorldMapExactShortcuts.Enable(Logger);
@@ -120,6 +123,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         WorldMapGpuIncrementalRouter.Enable(Logger);
         WorldMapGpuPipeBatch.Enable(Logger);
         WorldMapGpuInteractionIndex.Enable(Logger);
+        WorldMapGpuRegionPreload.Enable(Logger);
+        WorldMapGpuStableCacheGate.Enable(Logger);
     }
 
     private static void ClearShortcutPresentationCache()
