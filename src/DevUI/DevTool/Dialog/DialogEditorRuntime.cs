@@ -237,20 +237,23 @@ public static class DialogEditorCommandQueue
 
     internal static void Process(EditorSession session)
     {
+        bool dirty = false;
         while (queue.TryDequeue(out DialogEditorCommand command))
         {
             try
             {
-                if (command.Kind == DialogEditorCommandKind.SelectDialog)
-                    DialogEditorActions.SelectDialog(session, command.Path);
-
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Dialog);
+                if (command.Kind == DialogEditorCommandKind.SelectDialog &&
+                    DialogEditorActions.SelectDialog(session, command.Path))
+                    dirty = true;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool dialog command failed: " + error.Message);
             }
         }
+
+        if (dirty)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Dialog);
     }
 
     internal static void Clear()
