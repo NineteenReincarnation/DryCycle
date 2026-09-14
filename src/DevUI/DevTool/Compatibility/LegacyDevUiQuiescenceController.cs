@@ -192,6 +192,9 @@ internal static class LegacyDevUiQuiescenceController
 
     private static void PumpPageBackend(Page page, PageProfile profile)
     {
+        using DevToolPerformanceMonitor.Scope performanceScope =
+            DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyQuiescenceBackend);
+
         PageProfile previousProfile = activeProfile;
         activeProfile = profile;
         selectiveTraversalDepth++;
