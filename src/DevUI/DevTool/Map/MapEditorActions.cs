@@ -13,7 +13,11 @@ internal static class MapEditorActions
     {
         MapEditorState state = MapEditorStateHub.Get(session);
         if (state == null) return;
-        state.SelectedRoomIndex = FindRoomPanel(session, roomIndex) != null ? roomIndex : -1;
+
+        int next = FindRoomPanel(session, roomIndex) != null ? roomIndex : -1;
+        if (state.SelectedRoomIndex == next) return;
+        state.SelectedRoomIndex = next;
+        EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
     }
 
     internal static bool SetRoomPosition(EditorSession session, int roomIndex, EditorPropertyValue value)
@@ -67,6 +71,9 @@ internal static class MapEditorActions
         MapStateSnapshot after = MapStateSnapshot.Capture(page);
         if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             session.History.Push(entry);
+
+        EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
+        EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
         return true;
     }
 
