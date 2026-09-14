@@ -174,8 +174,7 @@ internal static class DevToolRuntime
         if (!EditorRevisionHub.IsRebuiltPresentationActive(session))
             return;
 
-        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
-            EditorPresentationHub.Publish(session, shellOnly);
+        PublishCorePresentation(session, shellOnly);
 
         if (shellOnly)
         {
@@ -186,32 +185,149 @@ internal static class DevToolRuntime
         switch (session.ToolMode)
         {
             case EditorToolMode.Room:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RoomPresentation))
-                    RoomEditorPresentationHub.Publish(session);
+                PublishRoomPresentation(session);
                 break;
             case EditorToolMode.Sound:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SoundPresentation))
-                    SoundEditorPresentationHub.Publish(session);
+                PublishSoundPresentation(session);
                 break;
             case EditorToolMode.Triggers:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.TriggerPresentation))
-                    TriggerEditorPresentationHub.Publish(session);
+                PublishTriggerPresentation(session);
                 break;
             case EditorToolMode.Map:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.MapPresentation))
-                    MapEditorPresentationHub.Publish(session);
+                PublishMapPresentation(session);
                 break;
             case EditorToolMode.Dialog:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DialogPresentation))
-                    DialogEditorPresentationHub.Publish(session);
+                PublishDialogPresentation(session);
                 break;
             case EditorToolMode.Relationships:
-                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RelationshipPresentation))
-                    RelationshipEditorPresentationHub.Publish(session);
+                PublishRelationshipPresentation(session);
                 break;
             case EditorToolMode.Objects:
                 break;
         }
+    }
+
+    private static void PublishCorePresentation(EditorSession session, bool shellOnly)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorPresentationSnapshot before = monitor ? EditorPresentationHub.Current : null;
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
+            EditorPresentationHub.Publish(session, shellOnly);
+
+        if (!monitor || !DevToolPerformanceMonitor.Enabled) return;
+        EditorPresentationSnapshot after = EditorPresentationHub.Current;
+        DevToolPresentationOutcome outcome;
+        if (ReferenceEquals(before, after))
+        {
+            outcome = DevToolPresentationOutcome.CacheHit;
+        }
+        else if (before?.Available == true && after?.Available == true &&
+                 ReferenceEquals(before.SceneObjects, after.SceneObjects) &&
+                 ReferenceEquals(before.Inspector, after.Inspector))
+        {
+            outcome = DevToolPresentationOutcome.PartialRebuild;
+        }
+        else
+        {
+            outcome = DevToolPresentationOutcome.FullRebuild;
+        }
+
+        DevToolPerformanceMonitor.RecordPresentation(DevToolPresentationChannel.Core, outcome);
+    }
+
+    private static void PublishRoomPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorRoomSettingsSnapshot before = monitor ? RoomEditorPresentationHub.Current : null;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RoomPresentation))
+            RoomEditorPresentationHub.Publish(session);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            RecordSimplePresentation(DevToolPresentationChannel.Room, before, RoomEditorPresentationHub.Current);
+    }
+
+    private static void PublishSoundPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorSoundPresentationSnapshot before = monitor ? SoundEditorPresentationHub.Current : null;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SoundPresentation))
+            SoundEditorPresentationHub.Publish(session);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            RecordSimplePresentation(DevToolPresentationChannel.Sound, before, SoundEditorPresentationHub.Current);
+    }
+
+    private static void PublishTriggerPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorTriggerPresentationSnapshot before = monitor ? TriggerEditorPresentationHub.Current : null;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.TriggerPresentation))
+            TriggerEditorPresentationHub.Publish(session);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            RecordSimplePresentation(DevToolPresentationChannel.Triggers, before, TriggerEditorPresentationHub.Current);
+    }
+
+    private static void PublishMapPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorMapPresentationSnapshot before = monitor ? MapEditorPresentationHub.Current : null;
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.MapPresentation))
+            MapEditorPresentationHub.Publish(session);
+
+        if (!monitor || !DevToolPerformanceMonitor.Enabled) return;
+        EditorMapPresentationSnapshot after = MapEditorPresentationHub.Current;
+        DevToolPresentationOutcome outcome;
+        if (ReferenceEquals(before, after))
+        {
+            outcome = DevToolPresentationOutcome.CacheHit;
+        }
+        else if (before?.Available == true && after?.Available == true &&
+                 ReferenceEquals(before.Connections, after.Connections))
+        {
+            outcome = DevToolPresentationOutcome.PartialRebuild;
+        }
+        else
+        {
+            outcome = DevToolPresentationOutcome.FullRebuild;
+        }
+
+        DevToolPerformanceMonitor.RecordPresentation(DevToolPresentationChannel.Map, outcome);
+    }
+
+    private static void PublishDialogPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorDialogPresentationSnapshot before = monitor ? DialogEditorPresentationHub.Current : null;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DialogPresentation))
+            DialogEditorPresentationHub.Publish(session);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            RecordSimplePresentation(DevToolPresentationChannel.Dialog, before, DialogEditorPresentationHub.Current);
+    }
+
+    private static void PublishRelationshipPresentation(EditorSession session)
+    {
+        bool monitor = DevToolPerformanceMonitor.Enabled;
+        EditorRelationshipPresentationSnapshot before = monitor ? RelationshipEditorPresentationHub.Current : null;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RelationshipPresentation))
+            RelationshipEditorPresentationHub.Publish(session);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            RecordSimplePresentation(
+                DevToolPresentationChannel.Relationships,
+                before,
+                RelationshipEditorPresentationHub.Current);
+    }
+
+    private static void RecordSimplePresentation<T>(
+        DevToolPresentationChannel channel,
+        T before,
+        T after)
+        where T : class
+    {
+        DevToolPerformanceMonitor.RecordPresentation(
+            channel,
+            ReferenceEquals(before, after)
+                ? DevToolPresentationOutcome.CacheHit
+                : DevToolPresentationOutcome.FullRebuild);
     }
 
     private static void ClearDetailPresentations()
