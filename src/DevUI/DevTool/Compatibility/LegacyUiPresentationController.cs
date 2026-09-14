@@ -19,6 +19,8 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// </summary>
 internal static class LegacyUiPresentationController
 {
+    private const int SuppressionAuditIntervalFrames = 120;
+
     private sealed class NodeState
     {
         internal bool HasPosition;
@@ -42,6 +44,18 @@ internal static class LegacyUiPresentationController
     private static Page observedLifetimePage;
     private static EditorDocumentKey observedLifetimeDocument;
     private static bool hasObservedLifetimeDocument;
+
+    // Stable migrated pages do not need a complete suppression tree walk every frame. Quiescence
+    // prevents known screen-space controls from updating at all; only explicit legacy transactions,
+    // opaque third-party backends, semantic workspace changes or sparse structure audits need to
+    // touch the tree again.
+    private static bool suppressionApplied;
+    private static EditorSession appliedSession;
+    private static EditorDocumentKey appliedDocument;
+    private static bool hasAppliedDocument;
+    private static long appliedWorkspaceRevision;
+    private static int appliedTopLevelNodeCount = -1;
+    private static int nextSuppressionAuditFrame;
 
     internal static void Apply(Page page, bool suppressLegacyControls)
     {
@@ -67,6 +81,52 @@ internal static class LegacyUiPresentationController
             return;
         }
 
+        EditorSession session = DevToolSessionHub.Current;
+        long workspaceRevision = session == null
+            ? 0L
+            : EditorRevisionHub.Get(session, EditorRevisionTracker.WorkspaceKind(session.ToolMode));
+        int topLevelNodeCount = page.subNodes?.Count ?? 0;
+        bool safetyAuditDue = Time.frameCount >= nextSuppressionAuditFrame;
+        bool documentChanged =
+            !ReferenceEquals(appliedSession, session) ||
+            !hasAppliedDocument ||
+            session == null ||
+            !appliedDocument.Equals(session.DocumentKey);
+        bool revisionChanged = appliedWorkspaceRevision != workspaceRevision;
+        bool topLevelChanged = appliedTopLevelNodeCount != topLevelNodeCount;
+
+        // Opaque compatibility nodes are allowed to run their own Update every frame and may change
+        // visibility without publishing a DryCycle revision. Active legacy transactions likewise run
+        // the complete original lifecycle. Keep per-frame suppression only for those conservative
+        // cases; exact migrated/quiescent pages otherwise use the retained hidden state.
+        bool continuousSuppression =
+            DevUiDiagnosticsPolicy.Enabled ||
+            session?.LegacyTransactions.HasPendingTransaction == true ||
+            LegacyDevUiQuiescenceController.HasExternalCompatibilityNodes(page);
+
+        bool semanticOrStructuralChange =
+            !suppressionApplied ||
+            documentChanged ||
+            topLevelChanged ||
+            safetyAuditDue ||
+            (!continuousSuppression && revisionChanged);
+
+        if (!continuousSuppression && !semanticOrStructuralChange)
+            return;
+
+        // Rebase remembered visibility only at structural/semantic boundaries. This both drops stale
+        // node references after Refresh/replacement and captures the current live tree as the new
+        // restoration baseline. Continuous opaque writers still get suppression every frame without
+        // paying Restore+recapture every frame; the sparse audit rebases them periodically.
+        bool rebase = suppressionApplied &&
+                      (documentChanged || topLevelChanged || safetyAuditDue ||
+                       (!continuousSuppression && revisionChanged));
+        if (rebase)
+        {
+            RestoreHiddenPage();
+            hiddenPage = page;
+        }
+
         if (page is MapPage mapPage)
         {
             // MapPage persists RoomPanel.pos/devPos through SaveMapConfig(). Never move its
@@ -79,10 +139,29 @@ internal static class LegacyUiPresentationController
             // labels/lines are added directly to Futile.stage and CreatureVis.Update() can make
             // them visible again every frame. Suppress them after the vanilla update as well.
             SuppressMapDirectVisuals(mapPage);
-            return;
+        }
+        else
+        {
+            SuppressChildren(page);
         }
 
-        SuppressChildren(page);
+        suppressionApplied = true;
+        appliedSession = session;
+        if (session != null)
+        {
+            appliedDocument = session.DocumentKey;
+            hasAppliedDocument = true;
+        }
+        else
+        {
+            appliedDocument = default;
+            hasAppliedDocument = false;
+        }
+        appliedWorkspaceRevision = workspaceRevision;
+        appliedTopLevelNodeCount = topLevelNodeCount;
+
+        if (semanticOrStructuralChange)
+            nextSuppressionAuditFrame = Time.frameCount + SuppressionAuditIntervalFrames;
     }
 
     internal static void Restore(Page page)
@@ -110,6 +189,7 @@ internal static class LegacyUiPresentationController
         hidden.Clear();
         hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
+        ResetSuppressionState();
         DevUiFullAudit.Reset();
         DevUiMigrationCoverage.Reset();
         UniversalDevUiCommandQueue.Clear();
@@ -449,6 +529,7 @@ internal static class LegacyUiPresentationController
         if (hidden.Count == 0 && hiddenDirectMapVisuals.Count == 0)
         {
             hiddenPage = null;
+            ResetSuppressionState();
             return;
         }
 
@@ -479,6 +560,18 @@ internal static class LegacyUiPresentationController
         hidden.Clear();
         hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
+        ResetSuppressionState();
+    }
+
+    private static void ResetSuppressionState()
+    {
+        suppressionApplied = false;
+        appliedSession = null;
+        appliedDocument = default;
+        hasAppliedDocument = false;
+        appliedWorkspaceRevision = 0L;
+        appliedTopLevelNodeCount = -1;
+        nextSuppressionAuditFrame = 0;
     }
 
     private static void RestoreVisibility<TNode>(IList<TNode> nodes, bool[] visibility) where TNode : FNode
