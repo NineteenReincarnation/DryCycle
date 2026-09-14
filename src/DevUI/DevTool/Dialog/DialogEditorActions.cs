@@ -13,12 +13,15 @@ internal static class DialogEditorActions
             return false;
         if (!IsKnownDialogPath(page, path)) return false;
 
+        DialogEditorState state = DialogEditorStateHub.Get(session);
+        if (state != null && string.Equals(state.SelectedPath, path, StringComparison.Ordinal))
+            return false;
+
         try
         {
             page.ClearDialogs();
             page.shiftY = 0f;
             page.convoLoader.LoadEvents(path);
-            DialogEditorState state = DialogEditorStateHub.Get(session);
             if (state != null) state.SelectedPath = path;
             return true;
         }
