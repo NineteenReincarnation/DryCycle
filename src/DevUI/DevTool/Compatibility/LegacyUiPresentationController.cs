@@ -204,6 +204,7 @@ internal static class LegacyUiPresentationController
         // Restore any temporarily hidden legacy visuals before dropping the strong node/page roots.
         // Reset also removes this lifetime hook; Apply installs it again on the next DevUI lifetime.
         Reset();
+        ObjectGizmoPresentationController.Reset();
 
         EditorPresentationHub.Clear();
         RoomEditorPresentationHub.Clear();
