@@ -81,59 +81,72 @@ public static class EditorPresentationHub
             return;
         }
 
-        List<PlacedObject> live = session.RoomSettings?.placedObjects;
-        EditorObjectSnapshot[] scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
-        if (live != null)
+        // Object presentation is one of the heavier DevTool payloads: it walks every placed
+        // object, captures inspector adapters and may initialize reflection-backed object catalogs.
+        // None of that data is consumed outside Objects mode, so do not put it on the O/H opening
+        // frame for Room/Map/Sound/etc. The first Objects frame remains authoritative and builds the
+        // same payload lazily when it is actually needed.
+        EditorObjectSnapshot[] scene = Array.Empty<EditorObjectSnapshot>();
+        EditorObjectTypeSnapshot[] objectLibrary = Array.Empty<EditorObjectTypeSnapshot>();
+        EditorInspectorSnapshot inspector = new();
+
+        if (session.ToolMode == EditorToolMode.Objects)
         {
-            for (int i = 0; i < live.Count; i++)
+            List<PlacedObject> live = session.RoomSettings?.placedObjects;
+            scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
+            if (live != null)
             {
-                PlacedObject item = live[i];
-                scene[i] = new EditorObjectSnapshot
+                for (int i = 0; i < live.Count; i++)
                 {
-                    Index = i,
-                    Type = item?.type?.value ?? "Unknown",
-                    X = item?.pos.x ?? 0f,
-                    Y = item?.pos.y ?? 0f,
-                    Selected = session.Selection.Contains(item)
-                };
+                    PlacedObject item = live[i];
+                    scene[i] = new EditorObjectSnapshot
+                    {
+                        Index = i,
+                        Type = item?.type?.value ?? "Unknown",
+                        X = item?.pos.x ?? 0f,
+                        Y = item?.pos.y ?? 0f,
+                        Selected = session.Selection.Contains(item)
+                    };
+                }
             }
+
+            PlacedObject selected = session.Selection.PrimaryPlacedObject;
+            int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
+            int selectionCount = session.Selection.Count;
+
+            EditorPropertySnapshot[] properties;
+            string[] mixedPropertyKeys;
+            if (selectionCount > 1)
+                properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
+            else
+            {
+                properties = ObjectInspectorRegistry.Capture(selected);
+                mixedPropertyKeys = Array.Empty<string>();
+            }
+
+            inspector = new EditorInspectorSnapshot
+            {
+                HasSelection = selected != null && selectedIndex >= 0,
+                ObjectIndex = selectedIndex,
+                SelectionCount = selectionCount,
+                Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
+                X = selected?.pos.x ?? 0f,
+                Y = selected?.pos.y ?? 0f,
+                DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
+                LegacyUiAvailable = selectionCount == 1,
+                LegacyUiVisible = session.LegacyUiVisible,
+                Properties = properties,
+                MixedPropertyKeys = mixedPropertyKeys,
+                LegacyControls = selectionCount == 1
+                    ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
+                    : Array.Empty<LegacyControlSnapshot>()
+            };
+
+            int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
+            if (libraryTypeCount != typeCount || libraryCache.Length == 0)
+                RebuildLibraryCache(typeCount);
+            objectLibrary = libraryCache;
         }
-
-        PlacedObject selected = session.Selection.PrimaryPlacedObject;
-        int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
-        int selectionCount = session.Selection.Count;
-
-        EditorPropertySnapshot[] properties;
-        string[] mixedPropertyKeys;
-        if (selectionCount > 1)
-            properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
-        else
-        {
-            properties = ObjectInspectorRegistry.Capture(selected);
-            mixedPropertyKeys = Array.Empty<string>();
-        }
-
-        EditorInspectorSnapshot inspector = new()
-        {
-            HasSelection = selected != null && selectedIndex >= 0,
-            ObjectIndex = selectedIndex,
-            SelectionCount = selectionCount,
-            Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
-            X = selected?.pos.x ?? 0f,
-            Y = selected?.pos.y ?? 0f,
-            DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
-            LegacyUiAvailable = selectionCount == 1 && session.ToolMode == EditorToolMode.Objects,
-            LegacyUiVisible = session.LegacyUiVisible,
-            Properties = properties,
-            MixedPropertyKeys = mixedPropertyKeys,
-            LegacyControls = selectionCount == 1
-                ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
-                : Array.Empty<LegacyControlSnapshot>()
-        };
-
-        int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
-        if (libraryTypeCount != typeCount || libraryCache.Length == 0)
-            RebuildLibraryCache(typeCount);
 
         current = new EditorPresentationSnapshot
         {
@@ -152,7 +165,7 @@ public static class EditorPresentationHub
             PlacementActive = session.PlacementActive,
             PlacementType = session.PlacementType,
             SceneObjects = scene,
-            ObjectLibrary = libraryCache,
+            ObjectLibrary = objectLibrary,
             Inspector = inspector
         };
     }
@@ -276,7 +289,7 @@ public static class EditorUiCommandQueue
 
     internal static void Clear()
     {
-        while (queue.TryDequeue(out _)) { }
+        while (queue.TryDequeue(out _) { }
     }
 
     private static void Execute(EditorSession session, EditorUiCommand command)
