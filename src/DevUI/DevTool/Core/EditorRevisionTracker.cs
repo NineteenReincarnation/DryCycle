@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Input;
 
@@ -171,18 +172,42 @@ internal static class EditorRevisionHub
     /// <summary>
     /// Reports whether the currently visible rebuilt workspace must be treated as an opaque live
     /// writer. Dormant presentation periods are excluded because all channels are invalidated once
-    /// when rebuilt ownership returns. Explicit legacy panels inside New UI, pending legacy
-    /// transactions, diagnostics and unknown custom Pages remain live because both models are active.
+    /// when rebuilt ownership returns. Active pointer/text transactions stay live. An explicitly
+    /// visible legacy panel on one of the exact migrated vanilla pages can remain cached while idle:
+    /// LegacyTransactionRecorder brackets every supported edit and history invalidates on commit.
+    /// Unknown/custom pages remain conservative continuous writers.
     /// </summary>
     internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
     {
         if (!IsRebuiltPresentationActive(session))
             return false;
 
-        if (session.LegacyUiVisible || session.LegacyTransactions.HasPendingTransaction)
+        if (session.LegacyTransactions.HasPendingTransaction)
             return true;
 
+        if (session.LegacyUiVisible && IsExactMigratedPage(session))
+            return false;
+
         return !LegacyDevUiQuiescenceController.IsQuiescent(session.Owner);
+    }
+
+    private static bool IsExactMigratedPage(EditorSession session)
+    {
+        Page page = session?.Owner?.activePage;
+        if (page == null) return false;
+
+        Type runtimeType = page.GetType();
+        return session.ToolMode switch
+        {
+            EditorToolMode.Room => runtimeType == typeof(RoomSettingsPage),
+            EditorToolMode.Objects => runtimeType == typeof(ObjectsPage),
+            EditorToolMode.Sound => runtimeType == typeof(SoundPage),
+            EditorToolMode.Triggers => runtimeType == typeof(TriggersPage),
+            EditorToolMode.Map => runtimeType == typeof(MapPage),
+            EditorToolMode.Dialog => runtimeType == typeof(DialogPage),
+            EditorToolMode.Relationships => runtimeType == typeof(RelationshipPage),
+            _ => false
+        };
     }
 
     internal static void Reset() =>
