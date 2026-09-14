@@ -161,53 +161,79 @@ public static class EditorPresentationHub
 
         if (objectWorkspace)
         {
-            scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
-            if (live != null)
+            // Shell state (Browser/Inspector visibility, focus mode, undo labels, placement chrome)
+            // changes much more often than the object model. Reuse the immutable heavy payload when
+            // only shell data changed instead of re-walking every PlacedObject and recapturing all
+            // inspector adapters/legacy controls. Object-library invalidation is independent so a
+            // newly registered type can rebuild just the catalog while scene/inspector stay retained.
+            bool objectPayloadStable =
+                current.Available &&
+                current.Hydrated &&
+                current.ToolMode == EditorToolMode.Objects &&
+                ReferenceEquals(observedSession, session) &&
+                ReferenceEquals(observedRoom, session.Room) &&
+                ReferenceEquals(observedPage, session.Owner.activePage) &&
+                observedObjectRevision == objectRevision &&
+                observedObjectCount == objectCount &&
+                observedSelectionCount == selectionCount &&
+                ReferenceEquals(observedPrimarySelection, primarySelection) &&
+                observedLegacyUiVisible == session.LegacyUiVisible;
+
+            if (objectPayloadStable)
             {
-                for (int i = 0; i < live.Count; i++)
-                {
-                    PlacedObject item = live[i];
-                    scene[i] = new EditorObjectSnapshot
-                    {
-                        Index = i,
-                        Type = item?.type?.value ?? "Unknown",
-                        X = item?.pos.x ?? 0f,
-                        Y = item?.pos.y ?? 0f,
-                        Selected = session.Selection.Contains(item)
-                    };
-                }
+                scene = current.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
+                inspector = current.Inspector ?? new EditorInspectorSnapshot();
             }
-
-            PlacedObject selected = primarySelection;
-            int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
-
-            EditorPropertySnapshot[] properties;
-            string[] mixedPropertyKeys;
-            if (selectionCount > 1)
-                properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
             else
             {
-                properties = ObjectInspectorRegistry.Capture(selected);
-                mixedPropertyKeys = Array.Empty<string>();
-            }
+                scene = live == null ? Array.Empty<EditorObjectSnapshot>() : new EditorObjectSnapshot[live.Count];
+                if (live != null)
+                {
+                    for (int i = 0; i < live.Count; i++)
+                    {
+                        PlacedObject item = live[i];
+                        scene[i] = new EditorObjectSnapshot
+                        {
+                            Index = i,
+                            Type = item?.type?.value ?? "Unknown",
+                            X = item?.pos.x ?? 0f,
+                            Y = item?.pos.y ?? 0f,
+                            Selected = session.Selection.Contains(item)
+                        };
+                    }
+                }
 
-            inspector = new EditorInspectorSnapshot
-            {
-                HasSelection = selected != null && selectedIndex >= 0,
-                ObjectIndex = selectedIndex,
-                SelectionCount = selectionCount,
-                Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
-                X = selected?.pos.x ?? 0f,
-                Y = selected?.pos.y ?? 0f,
-                DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
-                LegacyUiAvailable = selectionCount == 1,
-                LegacyUiVisible = session.LegacyUiVisible,
-                Properties = properties,
-                MixedPropertyKeys = mixedPropertyKeys,
-                LegacyControls = selectionCount == 1
-                    ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
-                    : Array.Empty<LegacyControlSnapshot>()
-            };
+                PlacedObject selected = primarySelection;
+                int selectedIndex = selected != null && live != null ? live.IndexOf(selected) : -1;
+
+                EditorPropertySnapshot[] properties;
+                string[] mixedPropertyKeys;
+                if (selectionCount > 1)
+                    properties = MultiSelectionInspector.Capture(session.Selection.PlacedObjects, out mixedPropertyKeys);
+                else
+                {
+                    properties = ObjectInspectorRegistry.Capture(selected);
+                    mixedPropertyKeys = Array.Empty<string>();
+                }
+
+                inspector = new EditorInspectorSnapshot
+                {
+                    HasSelection = selected != null && selectedIndex >= 0,
+                    ObjectIndex = selectedIndex,
+                    SelectionCount = selectionCount,
+                    Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
+                    X = selected?.pos.x ?? 0f,
+                    Y = selected?.pos.y ?? 0f,
+                    DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
+                    LegacyUiAvailable = selectionCount == 1,
+                    LegacyUiVisible = session.LegacyUiVisible,
+                    Properties = properties,
+                    MixedPropertyKeys = mixedPropertyKeys,
+                    LegacyControls = selectionCount == 1
+                        ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
+                        : Array.Empty<LegacyControlSnapshot>()
+                };
+            }
 
             if (libraryStale)
                 RebuildLibraryCache(typeCount);
