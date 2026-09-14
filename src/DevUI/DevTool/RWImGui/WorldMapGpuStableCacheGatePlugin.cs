@@ -118,6 +118,13 @@ internal static class WorldMapGpuStableCacheGate
         log = null;
     }
 
+    /// <summary>
+    /// Drops only the retained fast-path identity. The durable WorldMapGpuCache remains warm. Call
+    /// this when the Map Page/session lifetime ends so this optimization cannot root a retired DevUI
+    /// graph merely because WorldMapGpuRuntime no longer invokes Update outside the Map workspace.
+    /// </summary>
+    internal static void ReleaseRetainedKey() => ResetStableKey();
+
     private static void CacheUpdateHook(
         OrigCacheUpdate orig,
         EditorSession session,
