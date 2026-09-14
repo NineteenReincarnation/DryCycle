@@ -32,10 +32,12 @@ internal static class LegacyUiPresentationController
 
     internal static void Apply(Page page, bool suppressLegacyControls)
     {
-        // Audit before any legacy node is moved or hidden. The full audit discovers every
-        // instantiated DevInterface page structurally and runs the same generic protocol scanner
-        // over vanilla, RegionKit, DryCycle and third-party trees without per-mod adapters.
-        DevUiFullAudit.ObserveAll(page);
+        // Compatibility verification is diagnostic work, not presentation work. A full audit walks
+        // instantiated DevInterface trees, mirrors controls and exercises reflection-backed action
+        // routes. Running it from Apply meant the same frame that H constructed vanilla DevUI also
+        // paid for the audit. Keep the audit available for explicit development sessions only.
+        if (DevUiDiagnosticsPolicy.Enabled)
+            DevUiFullAudit.ObserveAll(page);
 
         if (!ReferenceEquals(hiddenPage, page))
         {
