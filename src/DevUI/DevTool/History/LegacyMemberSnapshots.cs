@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
@@ -166,8 +167,14 @@ internal sealed class SingleMapRoomStateSnapshot : IEditorStateSnapshot
             foreach (KeyValuePair<string, AbstractRoom.CreatureRoomAttraction> pair in namedAttractions)
                 room.namedRoomAttractions[pair.Key] = pair.Value;
 
-            panel.Refresh();
-            page.Refresh();
+            // RoomPanel.Refresh creates/rebinds the vanilla map texture. The rebuilt World Workspace
+            // reads model state directly, so hidden vanilla refresh work is skipped during undo/redo
+            // just as it is during the original edit. Legacy/vanilla mode keeps the old behavior.
+            if (!LegacyDevUiQuiescenceController.IsQuiescent(session.Owner))
+            {
+                panel.Refresh();
+                page.Refresh();
+            }
             return true;
         }
         catch (Exception error)
