@@ -116,11 +116,20 @@ public static class SoundEditorPresentationHub
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
-        // Legacy handle drags are model writes that bypass command history. Selection itself has a
-        // separate state revision and therefore no longer dirties the Sound model channel.
-        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
-            session.Owner.draggedNode != null || page.draggedObject != null)
+        // Opaque compatibility writers do not provide member hints, so force the safe full-capture
+        // path. A known native drag can use the selected row when quiescence still owns the page.
+        bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
+        bool nativeDrag = session.Owner.draggedNode != null || page.draggedObject != null;
+        if (opaqueLiveWriter)
+        {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+            SoundPresentationChangeHintHub.MarkFull(session);
+        }
+        else if (nativeDrag)
+        {
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+            SoundPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
+        }
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Sound);
         long selectionRevision = state.Revision;
@@ -131,11 +140,15 @@ public static class SoundEditorPresentationHub
             ReferenceEquals(observedSettings, session.RoomSettings) &&
             ReferenceEquals(observedPage, page) &&
             current.Available;
-        bool modelStable =
+        bool resourceCatalogStable =
             sameIdentity &&
+            ReferenceEquals(observedFileNames, fileNames) &&
+            current.SampleEntries != null &&
+            current.Samples != null;
+        bool modelStable =
+            resourceCatalogStable &&
             observedRevision == revision &&
-            observedSoundCount == count &&
-            ReferenceEquals(observedFileNames, fileNames);
+            observedSoundCount == count;
 
         if (modelStable &&
             observedSelectionRevision == selectionRevision &&
@@ -148,8 +161,7 @@ public static class SoundEditorPresentationHub
         }
 
         // Selection-only changes never touch resource discovery or model capture. Clone the retained
-        // immutable array and replace only the old/new selected rows; every other row and all sample
-        // metadata keep reference identity.
+        // immutable array and replace only the old/new selected rows.
         if (modelStable)
         {
             PublishSelectionOnly(state.SelectedIndex, selectionRevision);
@@ -159,14 +171,17 @@ public static class SoundEditorPresentationHub
             return;
         }
 
-        // Resource discovery is independent from mutable room sound values. A volume/position edit
-        // must not rescan the sample catalog when SoundPage.fileNames is still the same authoritative
-        // resource set.
-        bool resourceCatalogStable =
-            sameIdentity &&
-            ReferenceEquals(observedFileNames, fileNames) &&
-            current.SampleEntries != null &&
-            current.Samples != null;
+        SoundPresentationChangeHint hint = SoundPresentationChangeHintHub.Consume(session);
+        if (resourceCatalogStable && hint.HasChanges && !hint.Full)
+        {
+            if (PublishSemanticPartial(session, state, count, revision, selectionRevision, hint))
+            {
+                DevToolPerformanceMonitor.RecordPresentation(
+                    DevToolPresentationChannel.Sound,
+                    DevToolPresentationOutcome.PartialRebuild);
+                return;
+            }
+        }
 
         EditorSoundSampleSnapshot[] sampleEntries;
         string[] samples;
@@ -184,41 +199,7 @@ public static class SoundEditorPresentationHub
         }
 
         SoundGroupLibrary.EnsureLoaded();
-
-        EditorSoundSnapshot[] sounds = new EditorSoundSnapshot[count];
-        for (int i = 0; i < count; i++)
-        {
-            AmbientSound sound = session.RoomSettings.ambientSounds[i];
-            float doppler = sound is DopplerAffectedSound dopplerSound ? dopplerSound.dopplerFac : 0f;
-            float taper = sound is SpotSound spotForTaper ? spotForTaper.taper : 0f;
-            Vector2 pos = sound is SpotSound spot ? spot.pos : Vector2.zero;
-            float radius = sound is SpotSound spotForRadius ? spotForRadius.rad : 0f;
-            Vector2 direction = sound is DirectionalSound directional ? directional.direction : Vector2.zero;
-            EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sound?.sample ?? string.Empty);
-
-            sounds[i] = new EditorSoundSnapshot
-            {
-                Index = i,
-                Type = sound?.type?.value ?? string.Empty,
-                Sample = sound?.sample ?? string.Empty,
-                Inherited = sound?.inherited ?? false,
-                OverWrite = sound?.overWrite ?? false,
-                Volume = sound?.volume ?? 0f,
-                Pitch = sound?.pitch ?? 1f,
-                Doppler = doppler,
-                Taper = taper,
-                X = pos.x,
-                Y = pos.y,
-                Radius = radius,
-                DirectionX = direction.x,
-                DirectionY = direction.y,
-                Selected = i == state.SelectedIndex,
-                ResourceAvailable = resource.Available,
-                ResourceSourceKind = resource.SourceKind,
-                ResourceSourceName = resource.SourceName,
-                ResourceSourceId = resource.SourceId
-            };
-        }
+        EditorSoundSnapshot[] sounds = CaptureAllSounds(session, state.SelectedIndex);
 
         current = new EditorSoundPresentationSnapshot
         {
@@ -232,14 +213,7 @@ public static class SoundEditorPresentationHub
             SelectedIndex = state.SelectedIndex
         };
 
-        observedSession = session;
-        observedSettings = session.RoomSettings;
-        observedPage = page;
-        observedFileNames = fileNames;
-        observedRevision = revision;
-        observedSelectionRevision = selectionRevision;
-        observedSoundCount = count;
-        observedSelectedIndex = state.SelectedIndex;
+        Observe(session, page, fileNames, revision, selectionRevision, count, state.SelectedIndex);
 
         DevToolPerformanceMonitor.RecordPresentation(
             DevToolPresentationChannel.Sound,
@@ -248,21 +222,115 @@ public static class SoundEditorPresentationHub
                 : DevToolPresentationOutcome.FullRebuild);
     }
 
+    private static bool PublishSemanticPartial(
+        EditorSession session,
+        SoundEditorState state,
+        int count,
+        long revision,
+        long selectionRevision,
+        SoundPresentationChangeHint hint)
+    {
+        EditorSoundSnapshot[] source = current.Sounds ?? Array.Empty<EditorSoundSnapshot>();
+        if (!hint.Collection && source.Length != count)
+            return false;
+
+        EditorSoundSnapshot[] sounds;
+        if (hint.Collection || hint.AllMembers)
+        {
+            sounds = CaptureAllSounds(session, state.SelectedIndex);
+        }
+        else if (hint.MemberIndex >= 0)
+        {
+            if (hint.MemberIndex >= count || hint.MemberIndex >= source.Length)
+                return false;
+
+            sounds = (EditorSoundSnapshot[])source.Clone();
+            sounds[hint.MemberIndex] = CaptureSound(session, hint.MemberIndex, state.SelectedIndex);
+            sounds = ApplySelection(sounds, state.SelectedIndex);
+        }
+        else
+        {
+            sounds = ApplySelection(source, state.SelectedIndex);
+        }
+
+        current = new EditorSoundPresentationSnapshot
+        {
+            Available = true,
+            RoomKey = current.RoomKey,
+            BackgroundDroneVolume = hint.RoomValues
+                ? session.RoomSettings.BkgDroneVolume
+                : current.BackgroundDroneVolume,
+            NoThreatDroneVolume = hint.RoomValues
+                ? session.RoomSettings.BkgDroneNoThreatVolume
+                : current.NoThreatDroneVolume,
+            Samples = current.Samples,
+            SampleEntries = current.SampleEntries,
+            Sounds = sounds,
+            SelectedIndex = state.SelectedIndex
+        };
+
+        Observe(
+            session,
+            session.Owner.activePage as SoundPage,
+            (session.Owner.activePage as SoundPage)?.fileNames ?? Array.Empty<string>(),
+            revision,
+            selectionRevision,
+            count,
+            state.SelectedIndex);
+        return true;
+    }
+
+    private static EditorSoundSnapshot[] CaptureAllSounds(EditorSession session, int selectedIndex)
+    {
+        int count = session?.RoomSettings?.ambientSounds?.Count ?? 0;
+        if (count == 0) return Array.Empty<EditorSoundSnapshot>();
+
+        EditorSoundSnapshot[] sounds = new EditorSoundSnapshot[count];
+        for (int i = 0; i < count; i++)
+            sounds[i] = CaptureSound(session, i, selectedIndex);
+        return sounds;
+    }
+
+    private static EditorSoundSnapshot CaptureSound(EditorSession session, int index, int selectedIndex)
+    {
+        AmbientSound sound = session?.RoomSettings?.ambientSounds != null &&
+                             index >= 0 && index < session.RoomSettings.ambientSounds.Count
+            ? session.RoomSettings.ambientSounds[index]
+            : null;
+        float doppler = sound is DopplerAffectedSound dopplerSound ? dopplerSound.dopplerFac : 0f;
+        float taper = sound is SpotSound spotForTaper ? spotForTaper.taper : 0f;
+        Vector2 pos = sound is SpotSound spot ? spot.pos : Vector2.zero;
+        float radius = sound is SpotSound spotForRadius ? spotForRadius.rad : 0f;
+        Vector2 direction = sound is DirectionalSound directional ? directional.direction : Vector2.zero;
+        EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sound?.sample ?? string.Empty);
+
+        return new EditorSoundSnapshot
+        {
+            Index = index,
+            Type = sound?.type?.value ?? string.Empty,
+            Sample = sound?.sample ?? string.Empty,
+            Inherited = sound?.inherited ?? false,
+            OverWrite = sound?.overWrite ?? false,
+            Volume = sound?.volume ?? 0f,
+            Pitch = sound?.pitch ?? 1f,
+            Doppler = doppler,
+            Taper = taper,
+            X = pos.x,
+            Y = pos.y,
+            Radius = radius,
+            DirectionX = direction.x,
+            DirectionY = direction.y,
+            Selected = index == selectedIndex,
+            ResourceAvailable = resource.Available,
+            ResourceSourceKind = resource.SourceKind,
+            ResourceSourceName = resource.SourceName,
+            ResourceSourceId = resource.SourceId
+        };
+    }
+
     private static void PublishSelectionOnly(int selectedIndex, long selectionRevision)
     {
         EditorSoundSnapshot[] source = current.Sounds ?? Array.Empty<EditorSoundSnapshot>();
-        EditorSoundSnapshot[] next = null;
-
-        for (int i = 0; i < source.Length; i++)
-        {
-            EditorSoundSnapshot sound = source[i];
-            bool selected = i == selectedIndex;
-            if (sound.Selected == selected) continue;
-
-            next ??= (EditorSoundSnapshot[])source.Clone();
-            next[i] = CloneWithSelection(sound, selected);
-        }
-
         current = new EditorSoundPresentationSnapshot
         {
             Available = current.Available,
@@ -271,12 +339,30 @@ public static class SoundEditorPresentationHub
             NoThreatDroneVolume = current.NoThreatDroneVolume,
             Samples = current.Samples,
             SampleEntries = current.SampleEntries,
-            Sounds = next ?? source,
+            Sounds = ApplySelection(source, selectedIndex),
             SelectedIndex = selectedIndex
         };
 
         observedSelectionRevision = selectionRevision;
         observedSelectedIndex = selectedIndex;
+    }
+
+    private static EditorSoundSnapshot[] ApplySelection(EditorSoundSnapshot[] source, int selectedIndex)
+    {
+        source ??= Array.Empty<EditorSoundSnapshot>();
+        EditorSoundSnapshot[] next = null;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorSoundSnapshot sound = source[i];
+            bool selected = i == selectedIndex;
+            if (sound == null || sound.Selected == selected) continue;
+
+            next ??= (EditorSoundSnapshot[])source.Clone();
+            next[i] = CloneWithSelection(sound, selected);
+        }
+
+        return next ?? source;
     }
 
     private static EditorSoundSnapshot CloneWithSelection(EditorSoundSnapshot sound, bool selected) => new()
@@ -302,8 +388,28 @@ public static class SoundEditorPresentationHub
         ResourceSourceId = sound.ResourceSourceId
     };
 
+    private static void Observe(
+        EditorSession session,
+        SoundPage page,
+        string[] fileNames,
+        long revision,
+        long selectionRevision,
+        int count,
+        int selectedIndex)
+    {
+        observedSession = session;
+        observedSettings = session?.RoomSettings;
+        observedPage = page;
+        observedFileNames = fileNames;
+        observedRevision = revision;
+        observedSelectionRevision = selectionRevision;
+        observedSoundCount = count;
+        observedSelectedIndex = selectedIndex;
+    }
+
     internal static void Clear()
     {
+        SoundPresentationChangeHintHub.Clear(observedSession);
         current = EditorSoundPresentationSnapshot.Empty;
         observedSession = null;
         observedSettings = null;
@@ -471,12 +577,21 @@ public static class SoundEditorCommandQueue
                     continue;
 
                 int soundCountAfter = session?.RoomSettings?.ambientSounds?.Count ?? 0;
-                bool observableModelChange = changed || soundCountAfter != soundCountBefore;
+                long historyAfterCommand = session?.History.Revision ?? 0L;
+                bool historyChanged = historyAfterCommand != historyBeforeCommand;
+                bool membershipChanged = soundCountAfter != soundCountBefore;
 
-                // Pure selection is carried by SoundEditorState.Revision and never dirties the model.
-                // Compatibility-success paths that change room sound data without creating history
-                // still retain one direct workspace invalidation as a safety fallback.
-                if (observableModelChange && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                // CreateFromLibrary may succeed only because it wrote a local group while reusing an
+                // already-existing scene sound. Do not turn that library-only success into a false
+                // scene revision. All ordinary scene mutations either push history or change count.
+                bool directSceneMutation =
+                    changed && command.Kind != SoundEditorCommandKind.CreateFromLibrary;
+                bool observableModelChange = historyChanged || membershipChanged || directSceneMutation;
+                if (!observableModelChange)
+                    continue;
+
+                MarkPresentationChange(session, command, membershipChanged);
+                if (!historyChanged)
                     nonHistorySceneDirty = true;
             }
             catch (Exception error)
@@ -487,6 +602,34 @@ public static class SoundEditorCommandQueue
 
         if (nonHistorySceneDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+    }
+
+    private static void MarkPresentationChange(
+        EditorSession session,
+        SoundEditorCommand command,
+        bool membershipChanged)
+    {
+        switch (command.Kind)
+        {
+            case SoundEditorCommandKind.SetRoomValue:
+                SoundPresentationChangeHintHub.MarkRoomValues(session);
+                break;
+            case SoundEditorCommandKind.SetSoundValue:
+                SoundPresentationChangeHintHub.MarkMember(session, command.Index);
+                break;
+            case SoundEditorCommandKind.Create:
+            case SoundEditorCommandKind.Delete:
+            case SoundEditorCommandKind.ApplyGroup:
+                SoundPresentationChangeHintHub.MarkCollection(session);
+                break;
+            case SoundEditorCommandKind.CreateFromLibrary:
+                if (membershipChanged)
+                    SoundPresentationChangeHintHub.MarkCollection(session);
+                break;
+            default:
+                SoundPresentationChangeHintHub.MarkFull(session);
+                break;
+        }
     }
 
     internal static void Clear()
