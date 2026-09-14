@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Reflection.Emit;
 using UnityEngine;
 using Num = System.Numerics;
 
@@ -8,16 +9,19 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Shared once-per-frame snapshot of the private WorldMapView interaction state.
 ///
-/// Several compatibility plugins need pan/zoom/layer visibility, and reading those private static
-/// fields through reflection at every room/hover/background query creates avoidable boxing and
-/// reflection traffic. Centralizing the read keeps the compatibility boundary while reducing it to
-/// at most one reflected state capture per Unity frame.
+/// The private-field boundary is bound once to visibility-skipping DynamicMethod getters. Hot
+/// consumers therefore share one direct static-field capture per Unity frame without FieldInfo
+/// invocation or value-type boxing.
 /// </summary>
 internal static class WorldMapHotState
 {
-    private static readonly FieldInfo PanField;
-    private static readonly FieldInfo ZoomField;
-    private static readonly FieldInfo LayerVisibleField;
+    private delegate Num.Vector2 PanGetter();
+    private delegate float ZoomGetter();
+    private delegate bool[] LayerGetter();
+
+    private static readonly PanGetter ReadPan;
+    private static readonly ZoomGetter ReadZoom;
+    private static readonly LayerGetter ReadLayers;
 
     private static int capturedFrame = int.MinValue;
     private static Num.Vector2 pan = Num.Vector2.Zero;
@@ -26,11 +30,20 @@ internal static class WorldMapHotState
 
     static WorldMapHotState()
     {
-        const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-        Type mapType = typeof(WorldMapView);
-        PanField = mapType.GetField("pan", flags);
-        ZoomField = mapType.GetField("zoom", flags);
-        LayerVisibleField = mapType.GetField("layerVisible", flags);
+        try
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+            Type mapType = typeof(WorldMapView);
+            ReadPan = BuildGetter<PanGetter>(mapType.GetField("pan", flags), typeof(Num.Vector2), "ReadWorldMapPan");
+            ReadZoom = BuildGetter<ZoomGetter>(mapType.GetField("zoom", flags), typeof(float), "ReadWorldMapZoom");
+            ReadLayers = BuildGetter<LayerGetter>(mapType.GetField("layerVisible", flags), typeof(bool[]), "ReadWorldMapLayers");
+        }
+        catch
+        {
+            ReadPan = null;
+            ReadZoom = null;
+            ReadLayers = null;
+        }
     }
 
     internal static Num.Vector2 Pan
@@ -70,10 +83,10 @@ internal static class WorldMapHotState
 
         try
         {
-            pan = PanField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
-            zoom = ZoomField?.GetValue(null) is float z ? Math.Max(0.0001f, z) : 1f;
+            pan = ReadPan != null ? ReadPan() : Num.Vector2.Zero;
+            zoom = ReadZoom != null ? Math.Max(0.0001f, ReadZoom()) : 1f;
 
-            bool[] layers = LayerVisibleField?.GetValue(null) as bool[];
+            bool[] layers = ReadLayers?.Invoke();
             int mask = 0;
             for (int i = 0; i < 3; i++)
                 if (layers == null || i >= layers.Length || layers[i]) mask |= 1 << i;
@@ -85,5 +98,23 @@ internal static class WorldMapHotState
             zoom = 1f;
             layerMask = 7;
         }
+    }
+
+    private static TDelegate BuildGetter<TDelegate>(FieldInfo field, Type resultType, string name)
+        where TDelegate : class
+    {
+        if (field == null || field.FieldType != resultType)
+            return null;
+
+        DynamicMethod method = new(
+            name,
+            resultType,
+            Type.EmptyTypes,
+            typeof(WorldMapHotState).Module,
+            true);
+        ILGenerator il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldsfld, field);
+        il.Emit(OpCodes.Ret);
+        return method.CreateDelegate(typeof(TDelegate)) as TDelegate;
     }
 }
