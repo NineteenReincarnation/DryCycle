@@ -52,6 +52,7 @@ internal static class LegacyDevUiQuiescenceController
     private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(DevUI).Assembly;
     private static readonly System.Reflection.Assembly DryCycleAssembly = typeof(global::DryCycle.Plugin).Assembly;
     private static readonly HashSet<Page> SuppressedInitialRefreshPages = new();
+    private static readonly HashSet<Page> DeferredRefreshPages = new();
     private static readonly HashSet<Page> ExternalCompatibilityPages = new();
 
     private static bool enabled;
@@ -91,6 +92,7 @@ internal static class LegacyDevUiQuiescenceController
         On.DevInterface.DevUINode.Update -= DevUINode_Update;
 
         SuppressedInitialRefreshPages.Clear();
+        DeferredRefreshPages.Clear();
         ExternalCompatibilityPages.Clear();
         selectiveTraversalDepth = 0;
         fullCompatibilityDepth = 0;
@@ -106,6 +108,23 @@ internal static class LegacyDevUiQuiescenceController
     }
 
     /// <summary>
+    /// Rebuilt editors can mutate the model without rebuilding an invisible vanilla screen-space
+    /// page immediately. Exact migrated pages with no opaque third-party controls are marked stale
+    /// and refreshed once, immediately before vanilla/legacy presentation becomes active again.
+    /// </summary>
+    internal static bool TryDeferRefresh(EditorSession session)
+    {
+        Page page = session?.Owner?.activePage;
+        if (page == null || HasExternalCompatibilityNodes(page))
+            return false;
+        if (!TryGetQuiescentProfile(page, out _))
+            return false;
+
+        DeferredRefreshPages.Add(page);
+        return true;
+    }
+
+    /// <summary>
     /// Once an opaque third-party subtree has been observed on a page, remember that fact for the
     /// page lifetime. This lets the revision layer stay conservative when the developer temporarily
     /// exposes the full legacy UI, where selective traversal is intentionally disabled.
@@ -116,36 +135,42 @@ internal static class LegacyDevUiQuiescenceController
     private static void ObjectsPage_Update(On.DevInterface.ObjectsPage.orig_Update orig, ObjectsPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
     private static void SoundPage_Update(On.DevInterface.SoundPage.orig_Update orig, SoundPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
     private static void TriggersPage_Update(On.DevInterface.TriggersPage.orig_Update orig, TriggersPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
     private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, MapPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
     private static void DialogPage_Update(On.DevInterface.DialogPage.orig_Update orig, DialogPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
     private static void RelationshipPage_Update(On.DevInterface.RelationshipPage.orig_Update orig, RelationshipPage self)
     {
         if (TryPumpDerivedPage(self)) return;
+        FlushDeferredRefresh(self);
         orig(self);
     }
 
@@ -219,6 +244,8 @@ internal static class LegacyDevUiQuiescenceController
                 return;
             }
 
+            FlushDeferredRefresh(page);
+
             // Map can intentionally skip its first legacy Refresh while the new UI owns it. If the
             // developer switches back to vanilla/legacy mode, restore that initialization contract
             // before normal DevUINode.Update resumes.
@@ -227,6 +254,26 @@ internal static class LegacyDevUiQuiescenceController
         }
 
         orig(self);
+    }
+
+    private static void FlushDeferredRefresh(Page page)
+    {
+        if (page == null || !DeferredRefreshPages.Remove(page)) return;
+
+        fullCompatibilityDepth++;
+        try
+        {
+            page.Refresh();
+            page.initRefresh = false;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool deferred legacy page refresh failed: " + error.Message);
+        }
+        finally
+        {
+            fullCompatibilityDepth--;
+        }
     }
 
     private static void PumpPageBackend(Page page, PageProfile profile)
