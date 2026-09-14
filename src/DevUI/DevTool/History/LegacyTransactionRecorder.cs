@@ -12,33 +12,52 @@ namespace DryCycle.DevUI.DevTool.History;
 /// Compatibility recorder for legacy DevInterface and RegionKit/POM controls. It does not
 /// own an Undo stack. It only brackets legacy pointer/text interactions into before/after
 /// snapshots and pushes the resulting entry into the session's document history.
+///
+/// Stable frames never search the complete hidden DevUI tree. Pointer-origin discovery happens on
+/// the input edge that can actually start a legacy edit, and the one special external text editor is
+/// retained once discovered. This keeps compatibility recording dormant when no legacy interaction
+/// is in progress instead of turning it into a second per-frame tree walker.
 /// </summary>
 public sealed class LegacyTransactionRecorder
 {
     private const string WeatherEditorId = "DryCycle_WeatherSpatial";
+    private const int MissingWeatherEditorProbeInterval = 60;
 
     private IEditorStateSnapshot pointerStart;
     private IEditorStateSnapshot externalStart;
+    private DevUINode pointerOrigin;
     private DevUINode externalOrigin;
     private DevUINode legacyExternalOrigin;
     private int pointerMask;
+
+    private Page observedWeatherPage;
+    private Panel weatherEditorPanel;
+    private int weatherEditorProbeCountdown;
+    private bool weatherEditorActiveThisUpdate;
 
     internal bool HasPendingTransaction => pointerStart != null || externalStart != null;
 
     internal void BeforeLegacyUpdate(EditorSession session)
     {
-        if (session?.Owner == null || IsWeatherEditorActive(session.Owner.activePage)) return;
-        if (EditorInputRouter.WantsMouse) return;
+        if (session?.Owner == null) return;
 
         int current = CurrentPointerMask();
-        if (current != 0 && pointerMask == 0)
+        bool pointerPressedThisFrame = current != 0 && pointerMask == 0;
+        weatherEditorActiveThisUpdate = IsWeatherEditorActive(
+            session.Owner.activePage,
+            forceProbe: pointerPressedThisFrame);
+
+        if (weatherEditorActiveThisUpdate || EditorInputRouter.WantsMouse)
+            return;
+
+        if (pointerPressedThisFrame)
         {
-            // Resolve the actual legacy node first. Known collection members (Sound/Trigger) and
-            // placed-object representations use member-scoped snapshots; unknown controls retain
-            // the document-level compatibility fallback. Empty-room clicks allocate nothing.
-            DevUINode origin = FindDeepestMouseNode(session.Owner.activePage);
-            if (origin != null)
-                pointerStart = CaptureForNode(session, origin);
+            // One hit-test traversal is justified on the gesture edge because the node under the
+            // pointer defines the transaction scope. The result is retained through AfterLegacyUpdate
+            // and also serves legacy text-focus detection, avoiding a second traversal that frame.
+            pointerOrigin = FindDeepestMouseNode(session.Owner.activePage);
+            if (pointerOrigin != null)
+                pointerStart = CaptureForNode(session, pointerOrigin);
         }
     }
 
@@ -50,13 +69,17 @@ public sealed class LegacyTransactionRecorder
             return;
         }
 
-        if (!IsWeatherEditorActive(session.Owner.activePage))
-            SynchronizeExternalEditors(session);
-
         int current = CurrentPointerMask();
+        bool pointerPressedThisFrame = current != 0 && pointerMask == 0;
+
+        if (!weatherEditorActiveThisUpdate)
+            SynchronizeExternalEditors(session, pointerPressedThisFrame ? pointerOrigin : null);
+
         if (pointerStart != null && current == 0)
             CommitPointer(session);
 
+        if (current == 0)
+            pointerOrigin = null;
         pointerMask = current;
     }
 
@@ -64,9 +87,15 @@ public sealed class LegacyTransactionRecorder
     {
         pointerStart = null;
         externalStart = null;
+        pointerOrigin = null;
         externalOrigin = null;
         legacyExternalOrigin = null;
         pointerMask = CurrentPointerMask();
+
+        observedWeatherPage = null;
+        weatherEditorPanel = null;
+        weatherEditorProbeCountdown = 0;
+        weatherEditorActiveThisUpdate = false;
     }
 
     private void CommitPointer(EditorSession session)
@@ -98,7 +127,7 @@ public sealed class LegacyTransactionRecorder
             pointerStart = pointerStart.CaptureCurrent(session);
     }
 
-    private void SynchronizeExternalEditors(EditorSession session)
+    private void SynchronizeExternalEditors(EditorSession session, DevUINode pressedOrigin)
     {
         DryCycleTextField focused = DryCycleInputFocus.Focused;
         if (focused != null &&
@@ -130,19 +159,68 @@ public sealed class LegacyTransactionRecorder
             return;
         }
 
-        DevUINode legacy = legacyExternalOrigin;
-        if (legacy == null || !IsLegacyEditorEditing(legacy))
+        if (legacyExternalOrigin != null)
         {
-            legacy = FindDeepestMouseNode(session.Owner.activePage);
-            if (legacy == null || !IsLegacyEditorEditing(legacy))
+            if (IsLegacyEditorEditing(legacyExternalOrigin))
             {
-                legacyExternalOrigin = null;
+                BeginExternal(session, legacyExternalOrigin);
                 return;
             }
-            legacyExternalOrigin = legacy;
+            legacyExternalOrigin = null;
         }
 
+        // The legacy SolarShade text box can only enter editing from an input gesture. Reuse the
+        // node already hit-tested before the vanilla update, then inspect its ancestors after vanilla
+        // had a chance to flip the private _editing flag. Stable frames do no tree search at all.
+        DevUINode legacy = FindEditingLegacyEditorAncestor(pressedOrigin);
+        if (legacy == null) return;
+
+        legacyExternalOrigin = legacy;
         BeginExternal(session, legacy);
+    }
+
+    private bool IsWeatherEditorActive(Page page, bool forceProbe)
+    {
+        if (!ReferenceEquals(observedWeatherPage, page))
+        {
+            observedWeatherPage = page;
+            weatherEditorPanel = null;
+            weatherEditorProbeCountdown = 0;
+        }
+
+        if (weatherEditorPanel != null)
+        {
+            // A retained panel belongs to one concrete DevUI/page lifetime. If an owner/page switch
+            // invalidates that relationship, drop it and probe again instead of keeping a stale node.
+            if (ReferenceEquals(weatherEditorPanel.owner?.activePage, page))
+                return !weatherEditorPanel.collapsed;
+
+            weatherEditorPanel = null;
+            weatherEditorProbeCountdown = 0;
+        }
+
+        if (!forceProbe && weatherEditorProbeCountdown > 0)
+        {
+            weatherEditorProbeCountdown--;
+            return false;
+        }
+
+        weatherEditorProbeCountdown = MissingWeatherEditorProbeInterval;
+        DevUINode found = FindNode(page, WeatherEditorId);
+        weatherEditorPanel = found as Panel;
+        return weatherEditorPanel != null && !weatherEditorPanel.collapsed;
+    }
+
+    private static DevUINode FindEditingLegacyEditorAncestor(DevUINode node)
+    {
+        DevUINode current = node;
+        while (current != null)
+        {
+            if (IsLegacyEditorEditing(current))
+                return current;
+            current = current.parentNode;
+        }
+        return null;
     }
 
     private static IEditorStateSnapshot CaptureForNode(EditorSession session, DevUINode origin)
@@ -167,12 +245,6 @@ public sealed class LegacyTransactionRecorder
         if (global::UnityEngine.Input.GetMouseButton(0)) result |= 1;
         if (global::UnityEngine.Input.GetMouseButton(1)) result |= 2;
         return result;
-    }
-
-    private static bool IsWeatherEditorActive(Page page)
-    {
-        DevUINode editor = FindNode(page, WeatherEditorId);
-        return editor is Panel panel && !panel.collapsed;
     }
 
     private static DevUINode FindNode(DevUINode root, string id)
