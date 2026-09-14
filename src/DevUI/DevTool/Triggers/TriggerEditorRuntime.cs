@@ -148,11 +148,18 @@ public static class TriggerEditorPresentationHub
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
-        // World-space trigger handles can still write the model outside our command queues. Pure
-        // selection is tracked separately and therefore does not dirty the Trigger model revision.
-        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
-            session.Owner.draggedNode != null || page.draggedObject != null)
+        bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
+        bool nativeDrag = session.Owner.draggedNode != null || page.draggedObject != null;
+        if (opaqueLiveWriter)
+        {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
+            TriggerPresentationChangeHintHub.MarkFull(session);
+        }
+        else if (nativeDrag)
+        {
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
+            TriggerPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
+        }
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Triggers);
         long selectionRevision = state.Revision;
@@ -168,13 +175,15 @@ public static class TriggerEditorPresentationHub
             ReferenceEquals(observedSettings, session.RoomSettings) &&
             ReferenceEquals(observedPage, page) &&
             current.Available;
-        bool modelStable =
+        bool metadataStable =
             sameIdentity &&
             !staticListsStale &&
             ReferenceEquals(observedSongNames, songNames) &&
-            observedRevision == revision &&
-            observedTriggerCount == count &&
             observedEntranceCount == entranceCount;
+        bool modelStable =
+            metadataStable &&
+            observedRevision == revision &&
+            observedTriggerCount == count;
 
         if (modelStable &&
             observedSelectionRevision == selectionRevision &&
@@ -195,37 +204,19 @@ public static class TriggerEditorPresentationHub
             return;
         }
 
-        EditorTriggerSnapshot[] triggers = new EditorTriggerSnapshot[count];
-        for (int i = 0; i < count; i++)
+        TriggerPresentationChangeHint hint = TriggerPresentationChangeHintHub.Consume(session);
+        if (metadataStable && hint.HasChanges && !hint.Full)
         {
-            EventTrigger trigger = session.RoomSettings.triggers[i];
-            SpotTrigger spot = trigger as SpotTrigger;
-            string[] allowed = new string[trigger?.slugcats?.Count ?? 0];
-            for (int s = 0; s < allowed.Length; s++)
-                allowed[s] = trigger.slugcats[s]?.value ?? string.Empty;
-
-            triggers[i] = new EditorTriggerSnapshot
+            if (PublishSemanticPartial(session, state, count, revision, selectionRevision, hint))
             {
-                Index = i,
-                Type = trigger?.type?.value ?? string.Empty,
-                Selected = i == state.SelectedIndex,
-                IsSpot = spot != null,
-                X = spot?.pos.x ?? 0f,
-                Y = spot?.pos.y ?? 0f,
-                Radius = spot?.rad ?? 0f,
-                ActiveFromCycle = trigger?.activeFromCycle ?? 0,
-                ActiveToCycle = trigger?.activeToCycle ?? -1,
-                DelaySeconds = (trigger?.delay ?? 0) / 40f,
-                FireChance = trigger?.fireChance ?? 1f,
-                MultiUse = trigger?.multiUse ?? false,
-                Entrance = trigger?.entrance ?? -1,
-                Karma = trigger?.karma ?? 0,
-                CreatureType = trigger is SeeCreatureTrigger see ? see.creatureType?.value ?? string.Empty : string.Empty,
-                AllowedSlugcats = allowed,
-                Event = CaptureEvent(trigger?.tEvent)
-            };
+                DevToolPerformanceMonitor.RecordPresentation(
+                    DevToolPresentationChannel.Triggers,
+                    DevToolPresentationOutcome.PartialRebuild);
+                return;
+            }
         }
 
+        EditorTriggerSnapshot[] triggers = CaptureAllTriggers(session, state.SelectedIndex);
         RebuildStaticListsIfNeeded();
 
         // Song names are page/catalog metadata, not Trigger model data. Reuse the sorted immutable
@@ -254,36 +245,117 @@ public static class TriggerEditorPresentationHub
             EntranceCount = entranceCount
         };
 
-        observedSession = session;
-        observedSettings = session.RoomSettings;
-        observedPage = page;
-        observedSongNames = songNames;
-        observedRevision = revision;
-        observedSelectionRevision = selectionRevision;
-        observedTriggerCount = count;
-        observedSelectedIndex = state.SelectedIndex;
-        observedEntranceCount = entranceCount;
-
+        Observe(session, page, songNames, revision, selectionRevision, count, state.SelectedIndex, entranceCount);
         DevToolPerformanceMonitor.RecordPresentation(
             DevToolPresentationChannel.Triggers,
             DevToolPresentationOutcome.FullRebuild);
     }
 
+    private static bool PublishSemanticPartial(
+        EditorSession session,
+        TriggerEditorState state,
+        int count,
+        long revision,
+        long selectionRevision,
+        TriggerPresentationChangeHint hint)
+    {
+        EditorTriggerSnapshot[] source = current.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
+        if (!hint.Collection && source.Length != count)
+            return false;
+
+        EditorTriggerSnapshot[] triggers;
+        if (hint.Collection || hint.AllMembers)
+        {
+            triggers = CaptureAllTriggers(session, state.SelectedIndex);
+        }
+        else if (hint.MemberIndex >= 0)
+        {
+            if (hint.MemberIndex >= count || hint.MemberIndex >= source.Length)
+                return false;
+
+            triggers = (EditorTriggerSnapshot[])source.Clone();
+            triggers[hint.MemberIndex] = CaptureTrigger(session, hint.MemberIndex, state.SelectedIndex);
+            triggers = ApplySelection(triggers, state.SelectedIndex);
+        }
+        else
+        {
+            triggers = ApplySelection(source, state.SelectedIndex);
+        }
+
+        current = new EditorTriggerPresentationSnapshot
+        {
+            Available = true,
+            TriggerTypes = current.TriggerTypes,
+            EventTypes = current.EventTypes,
+            SongNames = current.SongNames,
+            SlugcatNames = current.SlugcatNames,
+            Triggers = triggers,
+            SelectedIndex = state.SelectedIndex,
+            EntranceCount = current.EntranceCount
+        };
+
+        TriggersPage page = session.Owner.activePage as TriggersPage;
+        Observe(
+            session,
+            page,
+            page?.songNames ?? Array.Empty<string>(),
+            revision,
+            selectionRevision,
+            count,
+            state.SelectedIndex,
+            current.EntranceCount);
+        return true;
+    }
+
+    private static EditorTriggerSnapshot[] CaptureAllTriggers(EditorSession session, int selectedIndex)
+    {
+        int count = session?.RoomSettings?.triggers?.Count ?? 0;
+        if (count == 0) return Array.Empty<EditorTriggerSnapshot>();
+
+        EditorTriggerSnapshot[] result = new EditorTriggerSnapshot[count];
+        for (int i = 0; i < count; i++)
+            result[i] = CaptureTrigger(session, i, selectedIndex);
+        return result;
+    }
+
+    private static EditorTriggerSnapshot CaptureTrigger(EditorSession session, int index, int selectedIndex)
+    {
+        EventTrigger trigger = session?.RoomSettings?.triggers != null &&
+                               index >= 0 && index < session.RoomSettings.triggers.Count
+            ? session.RoomSettings.triggers[index]
+            : null;
+        SpotTrigger spot = trigger as SpotTrigger;
+        string[] allowed = new string[trigger?.slugcats?.Count ?? 0];
+        for (int s = 0; s < allowed.Length; s++)
+            allowed[s] = trigger.slugcats[s]?.value ?? string.Empty;
+
+        return new EditorTriggerSnapshot
+        {
+            Index = index,
+            Type = trigger?.type?.value ?? string.Empty,
+            Selected = index == selectedIndex,
+            IsSpot = spot != null,
+            X = spot?.pos.x ?? 0f,
+            Y = spot?.pos.y ?? 0f,
+            Radius = spot?.rad ?? 0f,
+            ActiveFromCycle = trigger?.activeFromCycle ?? 0,
+            ActiveToCycle = trigger?.activeToCycle ?? -1,
+            DelaySeconds = (trigger?.delay ?? 0) / 40f,
+            FireChance = trigger?.fireChance ?? 1f,
+            MultiUse = trigger?.multiUse ?? false,
+            Entrance = trigger?.entrance ?? -1,
+            Karma = trigger?.karma ?? 0,
+            CreatureType = trigger is SeeCreatureTrigger see
+                ? see.creatureType?.value ?? string.Empty
+                : string.Empty,
+            AllowedSlugcats = allowed,
+            Event = CaptureEvent(trigger?.tEvent)
+        };
+    }
+
     private static void PublishSelectionOnly(int selectedIndex, long selectionRevision)
     {
         EditorTriggerSnapshot[] source = current.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
-        EditorTriggerSnapshot[] next = null;
-
-        for (int i = 0; i < source.Length; i++)
-        {
-            EditorTriggerSnapshot trigger = source[i];
-            bool selected = i == selectedIndex;
-            if (trigger.Selected == selected) continue;
-
-            next ??= (EditorTriggerSnapshot[])source.Clone();
-            next[i] = CloneWithSelection(trigger, selected);
-        }
-
         current = new EditorTriggerPresentationSnapshot
         {
             Available = current.Available,
@@ -291,13 +363,31 @@ public static class TriggerEditorPresentationHub
             EventTypes = current.EventTypes,
             SongNames = current.SongNames,
             SlugcatNames = current.SlugcatNames,
-            Triggers = next ?? source,
+            Triggers = ApplySelection(source, selectedIndex),
             SelectedIndex = selectedIndex,
             EntranceCount = current.EntranceCount
         };
 
         observedSelectionRevision = selectionRevision;
         observedSelectedIndex = selectedIndex;
+    }
+
+    private static EditorTriggerSnapshot[] ApplySelection(EditorTriggerSnapshot[] source, int selectedIndex)
+    {
+        source ??= Array.Empty<EditorTriggerSnapshot>();
+        EditorTriggerSnapshot[] next = null;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorTriggerSnapshot trigger = source[i];
+            bool selected = i == selectedIndex;
+            if (trigger == null || trigger.Selected == selected) continue;
+
+            next ??= (EditorTriggerSnapshot[])source.Clone();
+            next[i] = CloneWithSelection(trigger, selected);
+        }
+
+        return next ?? source;
     }
 
     private static EditorTriggerSnapshot CloneWithSelection(EditorTriggerSnapshot trigger, bool selected) => new()
@@ -321,8 +411,30 @@ public static class TriggerEditorPresentationHub
         Event = trigger.Event
     };
 
+    private static void Observe(
+        EditorSession session,
+        TriggersPage page,
+        string[] songNames,
+        long revision,
+        long selectionRevision,
+        int count,
+        int selectedIndex,
+        int entranceCount)
+    {
+        observedSession = session;
+        observedSettings = session?.RoomSettings;
+        observedPage = page;
+        observedSongNames = songNames;
+        observedRevision = revision;
+        observedSelectionRevision = selectionRevision;
+        observedTriggerCount = count;
+        observedSelectedIndex = selectedIndex;
+        observedEntranceCount = entranceCount;
+    }
+
     internal static void Clear()
     {
+        TriggerPresentationChangeHintHub.Clear(observedSession);
         current = EditorTriggerPresentationSnapshot.Empty;
         observedSession = null;
         observedSettings = null;
@@ -520,10 +632,14 @@ public static class TriggerEditorCommandQueue
                         break;
                 }
 
-                // Pure selection never invalidates the Trigger model channel. Non-history model
-                // mutations retain the direct fallback for compatibility paths that cannot produce
-                // a snapshot history entry.
-                if (modelCommand && changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                if (!modelCommand || !changed)
+                    continue;
+
+                MarkPresentationChange(session, command);
+
+                // Non-history model mutations retain the direct fallback for compatibility paths
+                // that cannot produce a snapshot history entry.
+                if ((session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
             catch (Exception error)
@@ -534,6 +650,27 @@ public static class TriggerEditorCommandQueue
 
         if (nonHistoryDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
+    }
+
+    private static void MarkPresentationChange(EditorSession session, TriggerEditorCommand command)
+    {
+        switch (command.Kind)
+        {
+            case TriggerEditorCommandKind.Create:
+            case TriggerEditorCommandKind.Delete:
+                TriggerPresentationChangeHintHub.MarkCollection(session);
+                break;
+            case TriggerEditorCommandKind.SetValue:
+            case TriggerEditorCommandKind.ToggleSlugcat:
+            case TriggerEditorCommandKind.SetEventType:
+            case TriggerEditorCommandKind.ClearEvent:
+            case TriggerEditorCommandKind.SetEventValue:
+                TriggerPresentationChangeHintHub.MarkMember(session, command.Index);
+                break;
+            default:
+                TriggerPresentationChangeHintHub.MarkFull(session);
+                break;
+        }
     }
 
     internal static void Clear()
