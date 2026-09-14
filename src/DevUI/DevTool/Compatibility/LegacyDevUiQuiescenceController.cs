@@ -154,8 +154,35 @@ internal static class LegacyDevUiQuiescenceController
         if (!TryGetQuiescentProfile(page, out PageProfile profile) || !profile.BypassPageOverride)
             return false;
 
+        PrepareQuiescentFrame(page);
         PumpPageBackend(page, profile);
         return true;
+    }
+
+    /// <summary>
+    /// Preserve the tiny transient-state contract from the bypassed vanilla page Update methods.
+    /// Objects/Sound/Triggers reset draggedObject at the start of every frame before their world
+    /// handles repopulate it. Without this, one completed drag remains sticky forever and makes the
+    /// revision layer believe the model is still being edited on every stable frame. Trash-bin state
+    /// is also cleared because the hidden screen-space trash bin is intentionally not pumped.
+    /// </summary>
+    private static void PrepareQuiescentFrame(Page page)
+    {
+        switch (page)
+        {
+            case ObjectsPage objects:
+                objects.draggedObject = null;
+                objects.removeIfReleaseObject = null;
+                break;
+            case SoundPage sound:
+                sound.draggedObject = null;
+                sound.removeIfReleaseObject = null;
+                break;
+            case TriggersPage triggers:
+                triggers.draggedObject = null;
+                triggers.removeIfReleaseObject = null;
+                break;
+        }
     }
 
     private static void DevUINode_Update(On.DevInterface.DevUINode.orig_Update orig, DevUINode self)
