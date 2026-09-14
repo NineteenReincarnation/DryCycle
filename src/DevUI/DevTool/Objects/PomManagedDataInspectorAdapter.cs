@@ -24,8 +24,45 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     private const string EnumFieldDefinitionName = "Pom.Pom+EnumField`1";
     private const string ExtEnumFieldDefinitionName = "Pom.Pom+ExtEnumField`1";
 
+    private readonly struct MemberKey : IEquatable<MemberKey>
+    {
+        internal MemberKey(Type type, string name)
+        {
+            Type = type;
+            Name = name ?? string.Empty;
+        }
+
+        internal Type Type { get; }
+        internal string Name { get; }
+
+        public bool Equals(MemberKey other) =>
+            ReferenceEquals(Type, other.Type) && string.Equals(Name, other.Name, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) => obj is MemberKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return ((Type != null ? Type.GetHashCode() : 0) * 397) ^
+                       StringComparer.Ordinal.GetHashCode(Name ?? string.Empty);
+            }
+        }
+    }
+
     public static readonly PomManagedDataInspectorAdapter Instance = new();
     private static bool registered;
+
+    // ManagedData/property capture is a dirty-path operation, but one capture can touch dozens of
+    // fields. Reflection member discovery used to repeat the complete inheritance walk for every
+    // field/value on every capture. POM runtime types are stable after load, so cache metadata while
+    // keeping all actual values live on the target instances.
+    private static readonly Dictionary<MemberKey, MemberInfo> ReadMemberCache = new();
+    private static readonly Dictionary<MemberKey, MemberInfo> WriteMemberCache = new();
+    private static readonly Dictionary<Type, MethodInfo> GetValueMethodCache = new();
+    private static readonly Dictionary<Type, MethodInfo> SetValueMethodCache = new();
+    private static readonly Dictionary<Type, MethodInfo> SerializeMethodCache = new();
+    private static readonly Dictionary<Type, MethodInfo> ParseMethodCache = new();
 
     private PomManagedDataInspectorAdapter() { }
 
@@ -244,7 +281,7 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     {
         try
         {
-            MethodInfo method = FindGenericMethod(data?.GetType(), "GetValue", 1, 1);
+            MethodInfo method = FindCachedGenericMethod(data?.GetType(), "GetValue", 1, 1, GetValueMethodCache);
             return method?.MakeGenericMethod(typeof(object)).Invoke(data, new object[] { key });
         }
         catch (Exception error) { Plugin.Logger?.LogWarning("DevTool POM GetValue failed for '" + key + "': " + error.Message); return null; }
@@ -255,7 +292,7 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         if (data == null || value == null) return false;
         try
         {
-            MethodInfo method = FindGenericMethod(data.GetType(), "SetValue", 1, 2);
+            MethodInfo method = FindCachedGenericMethod(data.GetType(), "SetValue", 1, 2, SetValueMethodCache);
             if (method == null) return false;
             method.MakeGenericMethod(value.GetType()).Invoke(data, new[] { (object)key, value });
             return true;
@@ -263,19 +300,35 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         catch (Exception error) { Plugin.Logger?.LogWarning("DevTool POM SetValue failed for '" + key + "': " + error.Message); return false; }
     }
 
-    private static MethodInfo FindGenericMethod(Type type, string name, int genericArguments, int parameters)
+    private static MethodInfo FindCachedGenericMethod(
+        Type type,
+        string name,
+        int genericArguments,
+        int parameters,
+        Dictionary<Type, MethodInfo> cache)
     {
-        for (Type current = type; current != null; current = current.BaseType)
+        if (type == null) return null;
+        if (cache.TryGetValue(type, out MethodInfo cached)) return cached;
+
+        MethodInfo result = null;
+        for (Type current = type; current != null && result == null; current = current.BaseType)
         {
             MethodInfo[] methods = current.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             for (int i = 0; i < methods.Length; i++)
             {
                 MethodInfo method = methods[i];
-                if (string.Equals(method.Name, name, StringComparison.Ordinal) && method.IsGenericMethodDefinition &&
-                    method.GetGenericArguments().Length == genericArguments && method.GetParameters().Length == parameters) return method;
+                if (!string.Equals(method.Name, name, StringComparison.Ordinal) ||
+                    !method.IsGenericMethodDefinition ||
+                    method.GetGenericArguments().Length != genericArguments ||
+                    method.GetParameters().Length != parameters)
+                    continue;
+                result = method;
+                break;
             }
         }
-        return null;
+
+        cache[type] = result;
+        return result;
     }
 
     private static Type FindGenericBase(Type type, string genericDefinitionName)
@@ -289,8 +342,14 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     {
         try
         {
-            MethodInfo method = field?.GetType().GetMethod("ToString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null, new[] { typeof(object) }, null);
+            Type type = field?.GetType();
+            if (type == null) return value?.ToString() ?? string.Empty;
+            if (!SerializeMethodCache.TryGetValue(type, out MethodInfo method))
+            {
+                method = type.GetMethod("ToString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null, new[] { typeof(object) }, null);
+                SerializeMethodCache[type] = method;
+            }
             return method?.Invoke(field, new[] { value })?.ToString() ?? value?.ToString() ?? string.Empty;
         }
         catch { return value?.ToString() ?? string.Empty; }
@@ -301,8 +360,14 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
         parsed = false;
         try
         {
-            MethodInfo method = field?.GetType().GetMethod("FromString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null, new[] { typeof(string) }, null);
+            Type type = field?.GetType();
+            if (type == null) return null;
+            if (!ParseMethodCache.TryGetValue(type, out MethodInfo method))
+            {
+                method = type.GetMethod("FromString", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    null, new[] { typeof(string) }, null);
+                ParseMethodCache[type] = method;
+            }
             if (method == null) return null;
             object value = method.Invoke(field, new object[] { text ?? string.Empty });
             parsed = value != null;
@@ -325,28 +390,62 @@ public sealed class PomManagedDataInspectorAdapter : IObjectInspectorAdapter
     private static object ReadMember(object instance, string name)
     {
         if (instance == null || string.IsNullOrEmpty(name)) return null;
-        for (Type current = instance.GetType(); current != null; current = current.BaseType)
+        MemberInfo member = ResolveMember(instance.GetType(), name, writable: false);
+        return member switch
         {
-            FieldInfo field = current.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (field != null) return field.GetValue(instance);
-            PropertyInfo property = current.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (property != null && property.CanRead && property.GetIndexParameters().Length == 0) return property.GetValue(instance, null);
-        }
-        return null;
+            FieldInfo field => field.GetValue(instance),
+            PropertyInfo property => property.GetValue(instance, null),
+            _ => null
+        };
     }
 
     private static bool WriteMember(object instance, string name, object value)
     {
         if (instance == null || string.IsNullOrEmpty(name)) return false;
-        for (Type current = instance.GetType(); current != null; current = current.BaseType)
+        MemberInfo member = ResolveMember(instance.GetType(), name, writable: true);
+        if (member is FieldInfo field)
         {
-            FieldInfo field = current.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (field != null && !field.IsInitOnly && (value == null || field.FieldType.IsInstanceOfType(value))) { field.SetValue(instance, value); return true; }
-            PropertyInfo property = current.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-            if (property != null && property.CanWrite && property.GetIndexParameters().Length == 0 && (value == null || property.PropertyType.IsInstanceOfType(value)))
-            { property.SetValue(instance, value, null); return true; }
+            if (value != null && !field.FieldType.IsInstanceOfType(value)) return false;
+            field.SetValue(instance, value);
+            return true;
+        }
+        if (member is PropertyInfo property)
+        {
+            if (value != null && !property.PropertyType.IsInstanceOfType(value)) return false;
+            property.SetValue(instance, value, null);
+            return true;
         }
         return false;
+    }
+
+    private static MemberInfo ResolveMember(Type type, string name, bool writable)
+    {
+        Dictionary<MemberKey, MemberInfo> cache = writable ? WriteMemberCache : ReadMemberCache;
+        MemberKey key = new(type, name);
+        if (cache.TryGetValue(key, out MemberInfo cached)) return cached;
+
+        MemberInfo result = null;
+        for (Type current = type; current != null && result == null; current = current.BaseType)
+        {
+            FieldInfo field = current.GetField(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null && (!writable || !field.IsInitOnly))
+            {
+                result = field;
+                break;
+            }
+
+            PropertyInfo property = current.GetProperty(
+                name,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (property != null && property.GetIndexParameters().Length == 0 &&
+                (writable ? property.CanWrite : property.CanRead))
+                result = property;
+        }
+
+        cache[key] = result;
+        return result;
     }
 
     private static bool IsTypeOrBase(Type type, string fullName)
