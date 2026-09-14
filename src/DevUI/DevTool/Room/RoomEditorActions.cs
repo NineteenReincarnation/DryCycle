@@ -216,7 +216,7 @@ internal static class RoomEditorActions
         if (settings == null || region == null || string.IsNullOrEmpty(templateName)) return false;
 
         string before = CurrentTemplateName(settings, region);
-        if (string.Equals(before, templateName, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(before, templateName, StringComparison.OrdinalIgnoreCase)) return false;
         if (!ApplyTemplate(session, templateName)) return false;
 
         string after = CurrentTemplateName(settings, region);
@@ -260,7 +260,7 @@ internal static class RoomEditorActions
         {
             RoomSettings.RoomEffect existing = settings.effects[i];
             if (existing != null && !existing.inherited && existing.type == type)
-                return true;
+                return false;
         }
 
         IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
@@ -498,6 +498,7 @@ internal static class RoomEditorActions
         try
         {
             settings.SetTemplate(TemplateButtonText(region, templateName), region);
+            RoomPresentationChangeHintHub.MarkFull(session);
             RefreshLegacyPageOrDefer(session);
             ApplyLiveSideEffect(session, RoomSettingKeys.Palette);
             ApplyLiveSideEffect(session, RoomSettingKeys.EffectColorA);
