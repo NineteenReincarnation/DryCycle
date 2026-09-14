@@ -6,7 +6,8 @@ namespace DryCycle.Items.KarmaSpear;
 /// <summary>
 /// Freezes a struck creature at the exact physical pose it had when karmic time stop began.
 /// One stored Karma point is consumed before this object is created; the duration is based on
-/// the spear's level before that consumption: level x 5 seconds.
+/// the spear's level before that consumption: level x 5 seconds. The stop remains active only
+/// while the Karma Spear is physically embedded in the creature.
 /// </summary>
 internal sealed class KarmicTimeStopEffect : UpdatableAndDeletable
 {
@@ -67,6 +68,15 @@ internal sealed class KarmicTimeStopEffect : UpdatableAndDeletable
             _source.room != room)
         {
             Finish(restoreMotion: false);
+            return;
+        }
+
+        // Time stop is physically anchored by the spear. Pulling the spear out switches it
+        // away from StuckInCreature, so the target resumes immediately instead of waiting for
+        // the original Karma-derived duration to expire. The charge was already spent at hit.
+        if (_source.mode != Weapon.Mode.StuckInCreature)
+        {
+            Finish(restoreMotion: true);
             return;
         }
 
@@ -136,7 +146,9 @@ internal sealed class KarmicTimeStopEffect : UpdatableAndDeletable
         }
 
         // Time stop consumes its single charge at activation, not at completion. Completion
-        // only releases the effect and deliberately dislodges the spear from the creature.
+        // only releases the effect. If the spear is still embedded because the timer expired,
+        // CompleteCreatureEffect dislodges it; if it was manually pulled out, this is a no-op
+        // for spear mode and only clears the active-effect latch.
         _source?.CompleteCreatureEffect(
             _chargeGeneration,
             _target,
