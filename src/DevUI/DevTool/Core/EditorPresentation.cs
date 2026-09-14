@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Objects;
@@ -79,6 +78,7 @@ public static class EditorPresentationHub
     private static long observedShellRevision;
     private static long observedObjectRevision;
     private static long observedHistoryRevision;
+    private static long observedSelectionRevision;
     private static bool observedShellOnly;
     private static EditorToolMode observedToolMode;
     private static bool observedFocusMode;
@@ -123,6 +123,7 @@ public static class EditorPresentationHub
         long objectRevision = objectWorkspace
             ? EditorRevisionHub.Get(session, EditorRevisionKind.Objects)
             : 0L;
+        long selectionRevision = objectWorkspace ? session.Selection.Revision : 0L;
 
         List<PlacedObject> live = objectWorkspace ? session.RoomSettings?.placedObjects : null;
         int objectCount = live?.Count ?? 0;
@@ -140,6 +141,7 @@ public static class EditorPresentationHub
             observedShellRevision == shellRevision &&
             observedObjectRevision == objectRevision &&
             observedHistoryRevision == historyRevision &&
+            observedSelectionRevision == selectionRevision &&
             observedToolMode == session.ToolMode &&
             observedFocusMode == session.FocusMode &&
             observedBrowserOpen == session.BrowserOpen &&
@@ -159,9 +161,9 @@ public static class EditorPresentationHub
 
         if (objectWorkspace)
         {
-            // Shell state changes much more often than the object model. Reuse the immutable heavy
-            // payload when only chrome/history state changed instead of walking every PlacedObject
-            // and recapturing reflection/legacy inspector controls.
+            // Selection membership has its own semantic revision. Shell-only changes can therefore
+            // reuse the expensive immutable object payload without hashing/scanning the selection or
+            // recapturing reflection-backed inspector controls.
             bool objectPayloadStable =
                 current.Available &&
                 current.Hydrated &&
@@ -170,6 +172,7 @@ public static class EditorPresentationHub
                 ReferenceEquals(observedRoom, session.Room) &&
                 ReferenceEquals(observedPage, session.Owner.activePage) &&
                 observedObjectRevision == objectRevision &&
+                observedSelectionRevision == selectionRevision &&
                 observedObjectCount == objectCount &&
                 observedSelectionCount == selectionCount &&
                 ReferenceEquals(observedPrimarySelection, primarySelection) &&
@@ -264,6 +267,7 @@ public static class EditorPresentationHub
         observedShellRevision = shellRevision;
         observedObjectRevision = objectRevision;
         observedHistoryRevision = historyRevision;
+        observedSelectionRevision = selectionRevision;
         observedShellOnly = shellOnly;
         observedToolMode = session.ToolMode;
         observedFocusMode = session.FocusMode;
@@ -286,6 +290,7 @@ public static class EditorPresentationHub
         observedShellRevision = 0L;
         observedObjectRevision = 0L;
         observedHistoryRevision = 0L;
+        observedSelectionRevision = 0L;
         observedShellOnly = false;
         observedToolMode = EditorToolMode.Room;
         observedFocusMode = false;
@@ -413,10 +418,10 @@ public static class EditorUiCommandQueue
             try
             {
                 long historyBeforeCommand = session.History.Revision;
-                int selectionBefore = SelectionSignature(session.Selection);
+                long selectionBefore = session.Selection.Revision;
                 int objectCountBefore = session.RoomSettings?.placedObjects?.Count ?? 0;
                 bool objectCommandSucceeded = Execute(session, command);
-                int selectionAfter = SelectionSignature(session.Selection);
+                long selectionAfter = session.Selection.Revision;
                 int objectCountAfter = session.RoomSettings?.placedObjects?.Count ?? 0;
 
                 bool visibleObjectStateChanged =
@@ -434,9 +439,9 @@ public static class EditorUiCommandQueue
         }
 
         // History mutations are converted into Shell + active-workspace invalidation by the core
-        // presentation hub. Direct shell state (focus/browser/inspector/placement/tool mode) is part
-        // of the core cache key and needs no revision at all. Only object/selection changes that did
-        // not create history require one explicit Objects edge here.
+        // presentation hub. Direct shell state is already an explicit core cache key. Selection has
+        // its own monotonic revision, so this queue no longer scans/hashes selection members merely
+        // to decide whether the object payload is dirty.
         if (nonHistoryObjectDirty && session.History.Revision == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
     }
@@ -551,20 +556,6 @@ public static class EditorUiCommandQueue
         EditorUiCommandKind.SetLegacyText or
         EditorUiCommandKind.SetLegacyDirection or
         EditorUiCommandKind.SetLegacyColor;
-
-    private static int SelectionSignature(EditorSelection selection)
-    {
-        if (selection == null || selection.Count == 0) return 0;
-        unchecked
-        {
-            int hash = 17;
-            IReadOnlyList<PlacedObject> values = selection.PlacedObjects;
-            hash = hash * 31 + values.Count;
-            for (int i = 0; i < values.Count; i++)
-                hash = hash * 31 + (values[i] == null ? 0 : RuntimeHelpers.GetHashCode(values[i]));
-            return hash;
-        }
-    }
 
     private static PlacedObject ResolveObject(EditorSession session, int index)
     {
