@@ -13,6 +13,13 @@ internal static class FontSettingsWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
+        // Typography inspection touches the font catalog and local font diagnostics. It is useful
+        // once the editor is interactive, but it is not part of the minimum first-visible frame.
+        // Progressive hydration keeps this secondary window out of O/H activation and page-restore
+        // frames, then resumes the exact same UI on the next fully hydrated frame.
+        if (!EditorPresentationHub.Current.Hydrated)
+            return;
+
         // The Map workspace needs uninterrupted horizontal/vertical space. Typography settings are
         // presentation-only and do not need to cover the graph while Map is the active tool.
         if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
