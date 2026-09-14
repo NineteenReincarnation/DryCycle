@@ -1,21 +1,34 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.History;
 
 /// <summary>
-/// Resolves legacy controls whose complete edit domain is one member of a RoomSettings collection.
-/// These snapshots sit in front of the document-level compatibility fallback: known Sound/Trigger
-/// controls get O(1)-sized transactions, while unknown third-party controls still retain the safe
-/// whole-document snapshot path.
+/// Resolves legacy controls whose complete edit domain is one small model member. These snapshots
+/// sit in front of the document-level compatibility fallback: known room/sound/trigger controls get
+/// bounded transactions, while unknown third-party controls retain the safe whole-document path.
 /// </summary>
 internal static class LegacyMemberSnapshotFactory
 {
     internal static IEditorStateSnapshot CaptureForNode(EditorSession session, DevUINode origin)
     {
-        if (session?.RoomSettings == null || origin == null)
+        if (session?.Owner == null || origin == null)
+            return null;
+
+        if (session.Owner.activePage is MapPage mapPage)
+        {
+            RoomPanel roomPanel = FindAncestor<RoomPanel>(origin);
+            if (roomPanel?.roomRep?.room != null)
+                return SingleMapRoomStateSnapshot.Capture(mapPage, roomPanel);
+        }
+
+        if (session.RoomSettings == null)
             return null;
 
         AmbientSoundPanel soundPanel = FindAncestor<AmbientSoundPanel>(origin);
@@ -37,6 +50,190 @@ internal static class LegacyMemberSnapshotFactory
             if (current is T typed)
                 return typed;
             current = current.parentNode;
+        }
+        return null;
+    }
+}
+
+/// <summary>
+/// One-room Map transaction. Position/layer/subregion and room-local map metadata are copied, but
+/// unrelated rooms, global attraction defaults and map materials are deliberately excluded. This is
+/// the normal history unit for room moves and room-panel legacy edits.
+/// </summary>
+internal sealed class SingleMapRoomStateSnapshot : IEditorStateSnapshot
+{
+    private readonly global::World world;
+    private readonly string roomName;
+    private readonly Vector2 pos;
+    private readonly Vector2 devPos;
+    private readonly int layer;
+    private readonly string subregion;
+    private readonly Vector2[] nodePositions;
+    private readonly int[] exitDirections;
+    private readonly AbstractRoom.CreatureRoomAttraction[] attractions;
+    private readonly Dictionary<string, AbstractRoom.CreatureRoomAttraction> namedAttractions;
+
+    private SingleMapRoomStateSnapshot(
+        global::World world,
+        string roomName,
+        Vector2 pos,
+        Vector2 devPos,
+        int layer,
+        string subregion,
+        Vector2[] nodePositions,
+        int[] exitDirections,
+        AbstractRoom.CreatureRoomAttraction[] attractions,
+        Dictionary<string, AbstractRoom.CreatureRoomAttraction> namedAttractions)
+    {
+        this.world = world;
+        this.roomName = roomName ?? string.Empty;
+        this.pos = pos;
+        this.devPos = devPos;
+        this.layer = layer;
+        this.subregion = subregion;
+        this.nodePositions = nodePositions;
+        this.exitDirections = exitDirections;
+        this.attractions = attractions;
+        this.namedAttractions = namedAttractions ?? new Dictionary<string, AbstractRoom.CreatureRoomAttraction>(StringComparer.Ordinal);
+        Fingerprint = BuildFingerprint();
+    }
+
+    public string Kind =>
+        "MapRoom:" + (world == null ? 0 : RuntimeHelpers.GetHashCode(world)) + ":" + roomName;
+
+    public string Fingerprint { get; }
+
+    internal static SingleMapRoomStateSnapshot Capture(MapPage page, RoomPanel panel)
+    {
+        AbstractRoom room = panel?.roomRep?.room;
+        if (page?.world == null || room == null)
+            return null;
+
+        return new SingleMapRoomStateSnapshot(
+            page.world,
+            room.name,
+            panel.pos,
+            panel.devPos,
+            panel.layer,
+            room.subregionName,
+            panel.roomRep.nodePositions == null ? null : (Vector2[])panel.roomRep.nodePositions.Clone(),
+            panel.roomRep.exitDirections == null ? null : (int[])panel.roomRep.exitDirections.Clone(),
+            room.roomAttractions == null ? null : (AbstractRoom.CreatureRoomAttraction[])room.roomAttractions.Clone(),
+            room.namedRoomAttractions == null
+                ? new Dictionary<string, AbstractRoom.CreatureRoomAttraction>(StringComparer.Ordinal)
+                : new Dictionary<string, AbstractRoom.CreatureRoomAttraction>(room.namedRoomAttractions, StringComparer.Ordinal));
+    }
+
+    internal static SingleMapRoomStateSnapshot Capture(MapPage page, int roomIndex)
+    {
+        RoomPanel panel = FindRoomPanel(page, roomIndex);
+        return panel == null ? null : Capture(page, panel);
+    }
+
+    public IEditorStateSnapshot CaptureCurrent(EditorSession session)
+    {
+        if (session?.Owner?.activePage is not MapPage page || !ReferenceEquals(page.world, world))
+            return null;
+
+        RoomPanel panel = FindRoomPanel(page, roomName);
+        return panel == null ? null : Capture(page, panel);
+    }
+
+    public bool Restore(EditorSession session)
+    {
+        if (session?.Owner?.activePage is not MapPage page || !ReferenceEquals(page.world, world))
+            return false;
+
+        RoomPanel panel = FindRoomPanel(page, roomName);
+        AbstractRoom room = panel?.roomRep?.room;
+        if (panel == null || room == null)
+            return false;
+
+        try
+        {
+            panel.pos = pos;
+            panel.devPos = devPos;
+            panel.layer = layer;
+            room.subregionName = subregion;
+            panel.roomRep.nodePositions = nodePositions == null ? null : (Vector2[])nodePositions.Clone();
+            panel.roomRep.exitDirections = exitDirections == null ? null : (int[])exitDirections.Clone();
+
+            if (attractions != null)
+                room.roomAttractions = (AbstractRoom.CreatureRoomAttraction[])attractions.Clone();
+
+            room.namedRoomAttractions ??= new Dictionary<string, AbstractRoom.CreatureRoomAttraction>();
+            room.namedRoomAttractions.Clear();
+            foreach (KeyValuePair<string, AbstractRoom.CreatureRoomAttraction> pair in namedAttractions)
+                room.namedRoomAttractions[pair.Key] = pair.Value;
+
+            panel.Refresh();
+            page.Refresh();
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool single-map-room restore failed: " + error.Message);
+            return false;
+        }
+    }
+
+    private string BuildFingerprint()
+    {
+        StringBuilder builder = new();
+        builder.Append(roomName).Append('|');
+        AppendVector(builder, pos);
+        AppendVector(builder, devPos);
+        builder.Append(layer).Append('|').Append(subregion ?? string.Empty).Append('|');
+
+        if (nodePositions != null)
+            for (int i = 0; i < nodePositions.Length; i++) AppendVector(builder, nodePositions[i]);
+        builder.Append('|');
+
+        if (exitDirections != null)
+            for (int i = 0; i < exitDirections.Length; i++) builder.Append(exitDirections[i]).Append(',');
+        builder.Append('|');
+
+        if (attractions != null)
+            for (int i = 0; i < attractions.Length; i++) builder.Append(attractions[i]?.value ?? string.Empty).Append(',');
+        builder.Append('|');
+
+        List<string> keys = new(namedAttractions.Keys);
+        keys.Sort(StringComparer.Ordinal);
+        for (int i = 0; i < keys.Count; i++)
+        {
+            string key = keys[i];
+            builder.Append(key).Append('=').Append(namedAttractions[key]?.value ?? string.Empty).Append(',');
+        }
+        return builder.ToString();
+    }
+
+    private static void AppendVector(StringBuilder builder, Vector2 value)
+    {
+        builder.Append(value.x.ToString("R", CultureInfo.InvariantCulture))
+            .Append(',')
+            .Append(value.y.ToString("R", CultureInfo.InvariantCulture))
+            .Append('|');
+    }
+
+    private static RoomPanel FindRoomPanel(MapPage page, int roomIndex)
+    {
+        if (page?.subNodes == null) return null;
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is RoomPanel panel && panel.roomRep?.room?.index == roomIndex)
+                return panel;
+        }
+        return null;
+    }
+
+    private static RoomPanel FindRoomPanel(MapPage page, string name)
+    {
+        if (page?.subNodes == null || string.IsNullOrEmpty(name)) return null;
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is RoomPanel panel &&
+                string.Equals(panel.roomRep?.room?.name, name, StringComparison.OrdinalIgnoreCase))
+                return panel;
         }
         return null;
     }
