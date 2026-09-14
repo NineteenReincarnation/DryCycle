@@ -263,22 +263,27 @@ internal static class RoomEditorActions
                 return true;
         }
 
+        IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
+        if (before == null) return false;
+
+        // Vanilla Create owns effect construction/defaults and third-party hooks. The history scope
+        // is still only RoomSettings.effects because Create can replace an inherited effect of the
+        // same type while adding the new local row.
         page.Signal(DevUISignalType.Create, page, typeName);
 
-        RoomSettings.RoomEffect created = null;
+        bool created = false;
         for (int i = settings.effects.Count - 1; i >= 0; i--)
         {
             RoomSettings.RoomEffect candidate = settings.effects[i];
             if (candidate != null && !candidate.inherited && candidate.type == type)
             {
-                created = candidate;
+                created = true;
                 break;
             }
         }
-        if (created == null) return false;
+        if (!created) return false;
 
-        IEditorStateSnapshot before = SingleRoomEffectStateSnapshot.Absent(settings, created);
-        IEditorStateSnapshot after = SingleRoomEffectStateSnapshot.Capture(settings, created);
+        IEditorStateSnapshot after = RoomEffectCollectionStateSnapshot.Capture(settings);
         PushHistory(session, "Add effect " + typeName, before, after);
         return true;
     }
@@ -290,14 +295,16 @@ internal static class RoomEditorActions
         RoomSettings.RoomEffect effect = settings.effects[index];
         if (effect == null || effect.inherited) return false;
 
-        IEditorStateSnapshot before = SingleRoomEffectStateSnapshot.Capture(settings, effect);
+        IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
         if (before == null) return false;
 
         string type = effect.type?.value ?? "effect";
+        // RemoveEffect removes inherited rows and re-applies parent effects, so deletion is a small
+        // collection transaction rather than a single-member transaction.
         settings.RemoveEffect(effect.type);
         RefreshLegacyPageOrDefer(session);
 
-        IEditorStateSnapshot after = before.CaptureCurrent(session);
+        IEditorStateSnapshot after = RoomEffectCollectionStateSnapshot.Capture(settings);
         PushHistory(session, "Delete effect " + type, before, after);
         return true;
     }
