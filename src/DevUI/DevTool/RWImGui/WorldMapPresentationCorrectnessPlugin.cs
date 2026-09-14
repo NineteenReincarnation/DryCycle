@@ -33,9 +33,10 @@ public sealed class WorldMapPresentationCorrectnessPlugin : BaseUnityPlugin
 
     private void OnEnable() => WorldMapPresentationCorrectness.Enable(Logger);
 
-    // Defensive final suppression. Other plugins can be enabled/disabled independently and a
-    // stale retained renderer must never get one frame to leak over gameplay or another DevTool.
-    private void LateUpdate() => WorldMapPresentationCorrectness.SuppressRetainedPresentation();
+    // Defensive final suppression is only needed while the live Map tool can touch retained Unity
+    // renderers. Dormant gameplay and unrelated DevTool pages are already parked by the lifecycle
+    // controller, so skip all reflection/GameObject work there.
+    private void LateUpdate() => WorldMapPresentationCorrectness.LateUpdate();
 
     private void OnDisable() => WorldMapPresentationCorrectness.Disable();
 }
@@ -235,6 +236,18 @@ internal static class WorldMapPresentationCorrectness
         localPositionsField = null;
         enabled = false;
         log = null;
+    }
+
+    internal static void LateUpdate()
+    {
+        if (!enabled || !DevToolSessionHub.IsCurrentSessionLive)
+            return;
+
+        EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map)
+            return;
+
+        SuppressRetainedPresentation();
     }
 
     internal static void SuppressRetainedPresentation()
