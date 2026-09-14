@@ -56,6 +56,14 @@ internal static class DialogEditorStateHub
 public static class DialogEditorPresentationHub
 {
     private static volatile EditorDialogPresentationSnapshot current = EditorDialogPresentationSnapshot.Empty;
+    private static EditorSession observedSession;
+    private static DialogPage observedPage;
+    private static object observedConversationLoader;
+    private static string[] observedDialogPaths;
+    private static long observedRevision;
+    private static string observedSelectedPath = string.Empty;
+    private static string observedLanguage = string.Empty;
+    private static bool observedNewUi;
 
     public static EditorDialogPresentationSnapshot Current => current;
 
@@ -63,7 +71,7 @@ public static class DialogEditorPresentationHub
     {
         if (session?.ToolMode != EditorToolMode.Dialog || session.Owner?.activePage is not DialogPage page)
         {
-            current = EditorDialogPresentationSnapshot.Empty;
+            Clear();
             return;
         }
 
@@ -85,9 +93,28 @@ public static class DialogEditorPresentationHub
         if (page.leftBoundary != null) page.leftBoundary.isVisible = !newUi;
         if (page.rightBoundary != null) page.rightBoundary.isVisible = !newUi;
 
-        string[] paths = page.dialogPanel?.dialogPaths == null
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Dialog);
+
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Dialog);
+        string[] dialogPaths = page.dialogPanel?.dialogPaths ?? Array.Empty<string>();
+        string language = session.Owner.game?.rainWorld?.inGameTranslator?.currentLanguage?.value ?? string.Empty;
+        object conversationLoader = page.convoLoader;
+
+        if (ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedPage, page) &&
+            ReferenceEquals(observedConversationLoader, conversationLoader) &&
+            ReferenceEquals(observedDialogPaths, dialogPaths) &&
+            observedRevision == revision &&
+            string.Equals(observedSelectedPath, state.SelectedPath, StringComparison.Ordinal) &&
+            string.Equals(observedLanguage, language, StringComparison.Ordinal) &&
+            observedNewUi == newUi &&
+            current.Available)
+            return;
+
+        string[] paths = dialogPaths.Length == 0
             ? Array.Empty<string>()
-            : (string[])page.dialogPanel.dialogPaths.Clone();
+            : (string[])dialogPaths.Clone();
         Array.Sort(paths, StringComparer.OrdinalIgnoreCase);
 
         List<EditorDialogEventSnapshot> events = new();
@@ -151,7 +178,6 @@ public static class DialogEditorPresentationHub
             }
         }
 
-        string language = session.Owner.game?.rainWorld?.inGameTranslator?.currentLanguage?.value ?? string.Empty;
         current = new EditorDialogPresentationSnapshot
         {
             Available = true,
@@ -161,9 +187,29 @@ public static class DialogEditorPresentationHub
             DialogPaths = paths,
             Events = events.ToArray()
         };
+
+        observedSession = session;
+        observedPage = page;
+        observedConversationLoader = conversationLoader;
+        observedDialogPaths = dialogPaths;
+        observedRevision = revision;
+        observedSelectedPath = state.SelectedPath ?? string.Empty;
+        observedLanguage = language;
+        observedNewUi = newUi;
     }
 
-    internal static void Clear() => current = EditorDialogPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorDialogPresentationSnapshot.Empty;
+        observedSession = null;
+        observedPage = null;
+        observedConversationLoader = null;
+        observedDialogPaths = null;
+        observedRevision = 0L;
+        observedSelectedPath = string.Empty;
+        observedLanguage = string.Empty;
+        observedNewUi = false;
+    }
 }
 
 public enum DialogEditorCommandKind
@@ -197,6 +243,8 @@ public static class DialogEditorCommandQueue
             {
                 if (command.Kind == DialogEditorCommandKind.SelectDialog)
                     DialogEditorActions.SelectDialog(session, command.Path);
+
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Dialog);
             }
             catch (Exception error)
             {
