@@ -25,8 +25,11 @@ internal static class LanceCombatMath
         float targetMass, bool charging, float runUp, bool thrusting)
     {
         float facing = Mathf.InverseLerp(0.55f, 0.98f, alignment);
-        float momentum = Mathf.InverseLerp(5f, 19f, speed);
-        float full = charging ? momentum * facing * Mathf.InverseLerp(35f, 110f, runUp) : 0f;
+        // A normal spear deals 1 damage. Reach that at the actual launch speed
+        // after a useful run-up, rather than requiring the initial speed to survive
+        // every air/ground/contact loss until impact.
+        float momentum = Mathf.InverseLerp(3f, 12f, speed);
+        float full = charging ? momentum * Mathf.InverseLerp(25f, 80f, runUp) : 0f;
         float ordinary = thrusting ? Mathf.Lerp(0.12f, 0.42f, facing) : 0f;
         // A thrown lance is awkward, and a passive stationary tip is harmless.
         float damage = Mathf.Max(ordinary, charging ? Mathf.Lerp(0.12f, 1.35f, full) * facing : 0f);

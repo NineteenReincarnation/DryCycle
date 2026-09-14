@@ -22,10 +22,25 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             return null;
         }
     }
-    internal bool IsStableForBrace => Consious && grabbedBy.Count == 0 && Submersion < 0.2f &&
-        (bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0 ||
-            room.GetTile(mainBodyChunk.pos - new Vector2(0f, 26f)).Solid) &&
-        movMode != MovementMode.Climb && movMode != MovementMode.Swim && mainBodyChunk.vel.magnitude < 5f;
+    internal bool IsStableForBrace
+    {
+        get
+        {
+            if (room == null || !Consious || grabbedBy.Count > 0 || Submersion >= 0.2f ||
+                movMode == MovementMode.Climb || movMode == MovementMode.Swim ||
+                Mathf.Abs(mainBodyChunk.vel.x) > 6f || Mathf.Abs(mainBodyChunk.vel.y) > 4f) return false;
+            // Scavengers stand on procedural limbs; their chest need not touch terrain.
+            // Test support below the hips, including one-way floors and slopes.
+            if (bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0) return true;
+            for (float below = bodyChunks[1].rad; below <= bodyChunks[1].rad + 24f; below += 6f)
+            {
+                Room.Tile tile = room.GetTile(bodyChunks[1].pos - Vector2.up * below);
+                if (tile.Solid || tile.Terrain == Room.Tile.TerrainType.Floor || tile.Terrain == Room.Tile.TerrainType.Slope)
+                    return true;
+            }
+            return false;
+        }
+    }
 
     public override void PlaceInRoom(Room placeRoom)
     { base.PlaceInRoom(placeRoom); EnsureBirthLance(); }

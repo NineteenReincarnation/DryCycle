@@ -63,6 +63,12 @@ internal sealed partial class ScavengerLance : Weapon
         _thrustFrames = 12;
         _thrustCooldown = 44;
         _hitCreatures.Clear();
+        // Orient before recording the attack sweep: turning the shaft is not a stab.
+        rotation = _thrustDirection;
+        setRotation = rotation;
+        _previousTip = Tip;
+        _previousGrip = firstChunk.pos;
+        _havePreviousPose = true;
     }
 
     public override void Thrown(Creature thrower, Vector2 pos, Vector2? traceFrom,
@@ -101,7 +107,7 @@ internal sealed partial class ScavengerLance : Weapon
             if (mode != Mode.Carried) ChangeMode(Mode.Carried);
             Vector2 desired = _gripValid ? _grip.Direction : GenericDirection(holder);
             if (_thrustFrames > 0) desired = _thrustDirection;
-            float turn = charging ? 1.5f : (_gripValid && _grip.Braced ? 9f : 5f);
+            float turn = charging || _thrustFrames > 0 ? 180f : (_gripValid && _grip.Braced ? 12f : 8f);
             float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
             setRotation = Custom.DegToVec(angle);
             rotationSpeed = 0f;
@@ -196,13 +202,13 @@ internal sealed partial class ScavengerLance : Weapon
         victim.SetKillTag((holder ?? thrownBy)?.abstractCreature);
         victim.Violence(firstChunk, rotation * impact.Impulse, nearest, null, Creature.DamageType.Stab, impact.Damage, impact.Stun);
         nearest.vel += rotation * (impact.Impulse / Mathf.Max(0.25f, victim.TotalMass));
-        if (holder != null)
+        if (charging && holder is ILanceWielder wielder)
         {
             foreach (BodyChunk chunk in holder.bodyChunks)
                 chunk.vel -= rotation * Mathf.Max(0f, Vector2.Dot(chunk.vel, rotation)) * (1f - impact.RetainedSpeed);
-            if (charging && holder is ILanceWielder wielder) wielder.LanceImpact(false, speed, impact.RetainedSpeed);
+            wielder.LanceImpact(false, speed, impact.RetainedSpeed);
         }
-        else { firstChunk.vel *= 0.35f; _flightFrames = 0; }
+        else if (holder == null) { firstChunk.vel *= 0.35f; _flightFrames = 0; }
         _bendVelocity += Mathf.Min(3.5f, impact.Impulse * 0.4f);
         room.PlaySound(SoundID.Spear_Stick_In_Creature, contactTip, 0.75f, 0.85f);
         if (holder != null) room.socialEventRecognizer?.WeaponAttack(this, holder, victim, true);
@@ -257,7 +263,7 @@ internal sealed partial class ScavengerLance : Weapon
             _wallCooldown = 14;
         }
         _flightFrames = _thrustFrames = 0;
-        if (holder != null && speed > 0f)
+        if (charging && holder != null && speed > 0f)
             foreach (BodyChunk chunk in holder.bodyChunks) chunk.vel -= rotation * Vector2.Dot(chunk.vel, rotation) * 0.35f;
         else if (holder == null)
         { firstChunk.vel *= 0.6f; rotationSpeed *= -0.2f; }

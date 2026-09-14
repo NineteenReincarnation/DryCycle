@@ -19,7 +19,7 @@ internal static class ChargeLanePlanner
         float flightTime = Mathf.Clamp(Mathf.Abs(targetPos.x - origin.x) / 18f, 0f, 16f);
         Vector2 predicted = targetPos + Vector2.ClampMagnitude(target.mainBodyChunk.vel * flightTime, 65f);
         float dx = predicted.x - origin.x;
-        if (Mathf.Abs(dx) < 155f || Mathf.Abs(dx) > 430f) return new ChargeLane(false, predicted, "distance");
+        if (Mathf.Abs(dx) < 155f || Mathf.Abs(dx) > 300f) return new ChargeLane(false, predicted, "distance");
         if (Mathf.Abs(predicted.y - origin.y) > 35f) return new ChargeLane(false, predicted, "height");
         Vector2 end = new(predicted.x + Mathf.Sign(dx) * 45f, origin.y);
         string block = CorridorBlock(scav, origin, end, target);
@@ -49,16 +49,21 @@ internal static class ChargeLanePlanner
             if (room.GetTile(at).AnyWater) return "water";
         }
         if (!room.VisualContact(origin, end)) return "tip path";
-        foreach (AbstractCreature abstractOther in room.abstractRoom.creatures)
+        return FriendInPath(scav, origin, end, target) ? "friend in lane" : null;
+    }
+
+    internal static bool FriendInPath(LanceScavenger scav, Vector2 origin, Vector2 end, Creature target)
+    {
+        foreach (AbstractCreature abstractOther in scav.room.abstractRoom.creatures)
         {
             Creature other = abstractOther.realizedCreature;
-            if (other == null || other == scav || other == target || other.dead || other.room != room) continue;
+            if (other == null || other == scav || other == target || other.dead || other.room != scav.room) continue;
             if (!IsFriend(scav, other)) continue;
             foreach (BodyChunk chunk in other.bodyChunks)
                 if ((chunk.pos - LanceCombatMath.ClosestPoint(origin, end, chunk.pos)).sqrMagnitude <
-                    (chunk.rad + 21f) * (chunk.rad + 21f)) return "friend in lane";
+                    (chunk.rad + 21f) * (chunk.rad + 21f)) return true;
         }
-        return null;
+        return false;
     }
 
     private static bool IsFriend(LanceScavenger scav, Creature other)

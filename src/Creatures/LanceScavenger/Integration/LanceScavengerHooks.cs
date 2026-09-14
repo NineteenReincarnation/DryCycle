@@ -17,6 +17,7 @@ internal static class LanceScavengerHooks
         On.ScavengerAI.WeaponScore += WeaponScore;
         On.ScavengerAI.CollectScore_PhysicalObject_bool += CollectScore;
         On.ScavengerAI.RealWeapon += RealWeapon;
+        On.ScavengerAI.CheckThrow += CheckThrow;
         On.ScavengerAbstractAI.InitGearUp += InitGear;
         _enabled = true;
     }
@@ -30,6 +31,7 @@ internal static class LanceScavengerHooks
         On.ScavengerAI.WeaponScore -= WeaponScore;
         On.ScavengerAI.CollectScore_PhysicalObject_bool -= CollectScore;
         On.ScavengerAI.RealWeapon -= RealWeapon;
+        On.ScavengerAI.CheckThrow -= CheckThrow;
         On.ScavengerAbstractAI.InitGearUp -= InitGear;
         _enabled = false;
     }
@@ -37,10 +39,20 @@ internal static class LanceScavengerHooks
     {
         if (self is not LanceScavenger lance || lance.Brain == null) { orig(self); return; }
         lance.Brain.Update();
-        if (lance.Motor.OwnsMovement && !self.safariControlled) { lance.Motor.Act(); return; }
+        if (lance.Combat.State == LanceState.Charge && !self.safariControlled) { lance.Motor.Act(); return; }
+        bool holdPosition = lance.Motor.OwnsMovement && !self.safariControlled;
+        if (holdPosition)
+        {
+            self.animation = null;
+            self.commitToMoveCounter = 0;
+            self.moving = false;
+        }
         // Vanilla Act calls AI.Update. It must not tick a second time this frame.
         lance.Brain.SkipNextUpdate = true;
         try { orig(self); } finally { lance.Brain.SkipNextUpdate = false; }
+        // Brace/recovery still need vanilla leg support and torso stabilization.
+        // Only the airborne charge replaces locomotion completely.
+        if (holdPosition) lance.Motor.Act();
     }
     private static void CombatUpdate(On.Scavenger.orig_CombatUpdate orig, Scavenger self)
     {
@@ -51,6 +63,13 @@ internal static class LanceScavengerHooks
     {
         if (self is LanceScavenger && self.grasps[0]?.grabbed is ScavengerLance) return;
         orig(self, direction);
+    }
+    private static void CheckThrow(On.ScavengerAI.orig_CheckThrow orig, ScavengerAI self)
+    {
+        // AttackBehavior calls this independently of Scavenger.CombatUpdate.
+        // A ThrowChargeAnimation otherwise competes with the lance's brace.
+        if (self.scavenger is LanceScavenger lance && lance.Lance != null) return;
+        orig(self);
     }
     private static int WeaponScore(On.ScavengerAI.orig_WeaponScore orig, ScavengerAI self,
         PhysicalObject obj, bool pickupDropInsteadOfWeaponSelection, bool reallyWantsSpear)

@@ -57,8 +57,11 @@ internal sealed class LanceScavengerAI : ScavengerAI
             ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target);
         bool laneClear = Lane.Clear;
         if (_owner.Combat.State == LanceState.Charge)
-            laneClear = ChargeLanePlanner.CorridorBlock(_owner, _owner.mainBodyChunk.pos,
-                _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target) == null;
+            // The launch lane was checked on the ground. Requiring the airborne
+            // chest to remain at that floor height cancels a valid leap immediately.
+            // Intercept newcomers here; the real lance/body own terrain impacts.
+            laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
+                _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target);
         _owner.Combat.Tick(new LanceSituation(active, armed, Target != null, Hostile, warning, distance, laneClear, stable));
 
         if (!armed) { RecoverWeapon(); return; }
@@ -75,14 +78,16 @@ internal sealed class LanceScavengerAI : ScavengerAI
                 _planAge = 18;
                 _staging = Target != null && ChargeLanePlanner.FindStagingPosition(_owner, Target, out WorldCoordinate spot) ? spot : null;
             }
-            if (_staging.HasValue) SetDestination(_staging.Value);
-            else SetDestination(creature.pos);
+            if (_staging.HasValue) creature.abstractAI.SetDestination(_staging.Value);
+            else creature.abstractAI.SetDestination(creature.pos);
             // Keep ordinary terrain locomotion; the custom destination owns tactics.
-            behavior = Behavior.Idle;
+            // Idle locomotion vetoes moves into discomfort, including the first
+            // step towards an enemy. A deliberate combat relocation is travel.
+            behavior = Behavior.Travel;
             runSpeedGoal = 0.8f;
         }
         else if (state != LanceState.Observe && state != LanceState.Disarmed)
-        { SetDestination(creature.pos); _staging = null; }
+        { creature.abstractAI.SetDestination(creature.pos); _staging = null; }
         else if (behavior == Behavior.Attack && !Hostile)
         {
             behavior = Behavior.Idle;
@@ -93,6 +98,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
     private void SelectTarget(out bool warning)
     {
+        Creature previous = Target;
         Target = null; Hostile = false; warning = false;
         float best = float.MinValue;
         for (int i = 0; i < tracker.CreaturesCount; i++)
@@ -100,26 +106,32 @@ internal sealed class LanceScavengerAI : ScavengerAI
             Tracker.CreatureRepresentation rep = tracker.GetRep(i);
             Creature candidate = rep.representedCreature.realizedCreature;
             if (candidate == null || candidate == _owner || candidate is Scavenger || candidate.room != _owner.room ||
-                candidate.dead || !candidate.Consious || candidate.TotalMass < 0.18f || !rep.VisualContact) continue;
+                candidate.dead || !candidate.Consious || candidate.TotalMass < 0.18f) continue;
+            if (!rep.VisualContact && (candidate != previous ||
+                !_owner.room.VisualContact(_owner.mainBodyChunk.pos, candidate.mainBodyChunk.pos))) continue;
             float distance = Vector2.Distance(candidate.mainBodyChunk.pos, _owner.mainBodyChunk.pos);
             if (distance > 480f) continue;
             bool recent = candidate == _recentAttacker && _hostilityMemory > 0;
             ScavengerTrackState tracked = rep.dynamicRelationship?.state as ScavengerTrackState;
-            bool lethal = tracked?.taggedViolenceType == ViolenceType.Lethal;
+            bool lethal = tracked?.taggedViolenceType == ViolenceType.Lethal ||
+                (rep == focusCreature && currentViolenceType == ViolenceType.Lethal);
             CreatureTemplate.Relationship relationship = rep.dynamicRelationship?.currentRelationship ?? StaticRelationship(rep.representedCreature);
             bool hostile = recent || (lethal && (relationship.type == CreatureTemplate.Relationship.Type.Attacks ||
-                relationship.type == CreatureTemplate.Relationship.Type.Afraid) && relationship.intensity >= 0.45f);
-            if (candidate is Player && !recent)
-                hostile &= rep.dynamicRelationship != null && LikeOfPlayer(rep.dynamicRelationship) < 0.4f;
+                relationship.type == CreatureTemplate.Relationship.Type.Afraid));
+            // Vanilla has already resolved reputation, warnings and Artificer here.
+            // Requiring a second intensity/reputation threshold rejects real enemies.
+            if (candidate is Player player && _owner.PlayerHasImmunity(player)) hostile = false;
             bool warn = !hostile && (tracked?.taggedViolenceType == ViolenceType.Warning || tracked?.taggedViolenceType == ViolenceType.NonLethal);
             if (!hostile && !warn) continue;
             // Let a retreating enemy leave instead of renewing an endless chase.
             float leaving = Vector2.Dot(candidate.mainBodyChunk.vel, (candidate.mainBodyChunk.pos - _owner.mainBodyChunk.pos).normalized);
             if (distance > 340f && leaving > 2f) continue;
             float score = (hostile ? 600f : 0f) + (recent ? 100f : 0f) - distance;
+            if (candidate == previous && (_owner.Combat.State == LanceState.Brace || _owner.Combat.State == LanceState.Charge)) score += 200f;
             if (score <= best) continue;
             best = score; Target = candidate; Hostile = hostile; warning = warn;
         }
+        if (Target != null) focusCreature = tracker.RepresentationForCreature(Target.abstractCreature, false);
     }
 
     private void RecoverWeapon()
@@ -142,8 +154,8 @@ internal sealed class LanceScavengerAI : ScavengerAI
             { behavior = Behavior.Idle; currentViolenceType = ViolenceType.None; SetDestination(creature.pos); }
             return;
         }
-        behavior = Behavior.Idle;
-        SetDestination(_owner.room.GetWorldCoordinate(nearest.firstChunk.pos));
+        behavior = Behavior.Travel;
+        creature.abstractAI.SetDestination(_owner.room.GetWorldCoordinate(nearest.firstChunk.pos));
         if (distance < 32f)
         {
             if (_owner.grasps[0] != null) _owner.ReleaseGrasp(0);

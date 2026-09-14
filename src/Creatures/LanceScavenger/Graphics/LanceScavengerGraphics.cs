@@ -23,7 +23,11 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         _start = TotalSprites;
         _shoulderSide = (owner.abstractCreature.ID.RandomSeed & 1) == 0 ? -1 : 1;
         _mask = new VultureMaskGraphics(owner, VultureMask.MaskType.NORMAL, _start + EquipmentSprites, LanceScavengerAssets.Prefix)
-        { ColorA = new HSLColor(0.12f, 0.18f, 0.79f), ColorB = new HSLColor(0.105f, 0.43f, 0.43f) };
+        {
+            ColorA = new HSLColor(0.115f, 0.42f, 0.62f), ColorB = new HSLColor(0.105f, 0.43f, 0.43f),
+            rotationA = Vector2.up, lastRotationA = Vector2.up,
+            rotationB = Vector2.up, lastRotationB = Vector2.up
+        };
         // Preserve normal procedural branching while making it subordinate to the mask horn.
         foreach (Eartlers.Vertex[] branch in eartlers.points)
             for (int i = 0; i < branch.Length; i++)
@@ -53,10 +57,6 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         _cords[2].Update(shoulder - axis * 4f, _owner.mainBodyChunk.vel, _owner.gravity);
         _ribbons[0].Update(chest - axis * 4f + across * _shoulderSide * 6f, _owner.mainBodyChunk.vel, _owner.gravity);
         _ribbons[1].Update(hips + across * _shoulderSide * 5f, _owner.mainBodyChunk.vel, _owner.gravity);
-        _mask.lastRotationA = _mask.rotationA;
-        _mask.rotationA = Vector2.Lerp(_mask.rotationA, -FaceDirection(1f), 0.45f).normalized;
-        _mask.rotationB = Vector2.up;
-        _mask.lastRotationB = Vector2.up;
 
         ScavengerLance lance = _owner.Lance;
         if (lance == null || !_owner.Consious) return;
@@ -90,6 +90,8 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         for (int i = 13; i < EquipmentSprites; i++)
             sLeaser.sprites[_start + i] = new FSprite((i - 13) % 3 == 1 ? "Circle20" : "pixel");
         _mask.InitiateSprites(sLeaser, rCam);
+        for (int i = 0; i < _mask.BaseTotalSprites; i++)
+            sLeaser.sprites[_mask.firstSprite + i].shader = rCam.game.rainWorld.Shaders["Basic"];
         _maskAvailable = LanceScavengerAssets.EnsureLoaded();
         ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         AddToContainer(sLeaser, rCam, null);
@@ -153,23 +155,26 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         ApplyEquipmentPalette(sLeaser, rCam.currentPalette, _owner.room.Darkness(chest) * (1f - _owner.room.LightSourceExposure(chest)));
         if (_maskAvailable)
         {
-            Vector2 raw = ToVector(HeadDir(t)).normalized;
-            Vector2 face = FaceDirection(t);
-            float angle = Custom.VecToDeg(raw);
-            _mask.overrideAnchorVector = Mathf.Abs(angle) < 30f ? -raw : -face;
-            _mask.overrideDrawVector = head + Vector2.up * (Mathf.Abs(angle) < 30f ? 4f : Mathf.Abs(angle) <= 90f ? 1f : 0f);
+            // These atlas frames are authored upright and facing right. Feeding the
+            // negated Kraken-mask face vector both mirrors and rolls them backwards.
+            // Separate head roll from local gaze; native graphics still choose all
+            // nine frames, mirror, anchor and shade the three layers.
+            Vector2 headUp = (head - chest).normalized;
+            if (headUp.sqrMagnitude < 0.01f) headUp = Vector2.up;
+            Vector2 headRight = new(headUp.y, -headUp.x);
+            Vector2 gaze = Vector2.Lerp(ToVector(lastLookPoint), ToVector(lookPoint), t) - head;
+            Vector2 localGaze = new(Vector2.Dot(gaze, headRight), Vector2.Dot(gaze, headUp));
+            float neutral = Mathf.Lerp(lastNeutralFace, neutralFace, t);
+            Vector2 facing = Vector2.Lerp(localGaze.normalized, Vector2.up, neutral).normalized;
+            _mask.overrideRotationVector = headUp;
+            _mask.overrideAnchorVector = facing.sqrMagnitude > 0.01f ? facing : Vector2.up;
+            _mask.overrideDrawVector = head + headUp;
+            _mask.ApplyPalette(sLeaser, rCam, rCam.currentPalette);
             _mask.DrawSprites(sLeaser, rCam, t, cam);
         }
         else _mask.SetVisible(sLeaser, false);
     }
 
-    private Vector2 FaceDirection(float t)
-    {
-        float neutral = Mathf.Lerp(lastNeutralFace, neutralFace, t);
-        float up = Mathf.Lerp(lastLookUp, lookUp, t) * (1f - neutral);
-        return Vector2.Lerp(ToVector(HeadDir(t)).normalized, -Custom.DegToVec(-BodyAxis(t)),
-            Mathf.Lerp(0.5f, 1f, Mathf.Max(Mathf.Pow(up, 1.1f), neutral))).normalized;
-    }
     private Vector2 DrawPosition(int index, float t) => Vector2.Lerp(ToVector(drawPositions[index, 1]), ToVector(drawPositions[index, 0]), t);
     private static Vector2 ToVector(Unity.Mathematics.float2 value) => new(value.x, value.y);
     internal static void DrawSash(TriangleMesh mesh, Vector2 start, Vector2 end, Vector2 across, Vector2 cam, float width)

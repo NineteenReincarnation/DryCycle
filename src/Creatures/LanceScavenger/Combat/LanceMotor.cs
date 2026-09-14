@@ -32,7 +32,7 @@ internal sealed class LanceMotor
                 _launchPoint = _owner.mainBodyChunk.pos;
                 Direction = new Vector2(Mathf.Sign(_owner.Brain.Aim.x - _launchPoint.x), 0f);
                 float speed = Mathf.Lerp(17f, 19.5f, _owner.abstractCreature.personality.energy);
-                foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel = new Vector2(Direction.x * speed, 3.2f);
+                foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel = new Vector2(Direction.x * speed, 4.2f);
                 _owner.room.PlaySound(SoundID.Slugcat_Throw_Spear, _owner.mainBodyChunk.pos, 0.75f, 0.7f);
             }
             // A single launch impulse. No per-frame speed reset or airborne steering.
@@ -48,8 +48,7 @@ internal sealed class LanceMotor
         Vector2 aim = _owner.Brain.Target == null ? Vector2.right :
             Custom.DirVec(_owner.mainBodyChunk.pos, _owner.Brain.Target.mainBodyChunk.pos);
         foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= 0.65f;
-        _owner.WeightedPush(1, 0, new Vector2(aim.x, -0.2f), state == LanceState.Brace ? 0.5f : 0.2f);
-        _owner.bodyChunks[2].vel += new Vector2(aim.x * 0.3f, -0.15f);
+        _owner.WeightedPush(1, 0, new Vector2(aim.x, 0f), state == LanceState.Brace ? 0.15f : 0.08f);
         if (state == LanceState.Brace && _owner.Combat.Age == 1)
             _owner.room.PlaySound(SoundID.Scavenger_Knuckle_Hit_Ground, _owner.mainBodyChunk.pos, 0.55f, 0.7f);
         if (state == LanceState.CloseDefense) _owner.Lance?.RequestThrust(aim);

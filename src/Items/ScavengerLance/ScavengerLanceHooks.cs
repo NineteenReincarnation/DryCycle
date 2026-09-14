@@ -15,6 +15,8 @@ internal static class ScavengerLanceHooks
         _definition = new ScavengerLanceDefinition();
         ItemRegistry.Register(_definition);
         On.Player.Grabability += Grabability;
+        On.Player.HeavyCarry += HeavyCarry;
+        On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
         On.Player.ThrowObject += ThrowObject;
         _enabled = true;
     }
@@ -23,6 +25,8 @@ internal static class ScavengerLanceHooks
         if (!_enabled) return;
         ScavengerLanceDevConsoleSupport.ResetRegistration();
         On.Player.Grabability -= Grabability;
+        On.Player.HeavyCarry -= HeavyCarry;
+        On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
         On.Player.ThrowObject -= ThrowObject;
         ItemRegistry.Unregister(_definition);
         _definition = null;
@@ -32,6 +36,18 @@ internal static class ScavengerLanceHooks
     }
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
         obj is ScavengerLance ? Player.ObjectGrabability.TwoHands : orig(self, obj);
+
+    // Two hands describes the grip, not a dragged mass. The vanilla heavy-carry
+    // constraint pulls the player's body towards the extending tip during a stab.
+    private static bool HeavyCarry(On.Player.orig_HeavyCarry orig, Player self, PhysicalObject obj) =>
+        obj is not ScavengerLance && orig(self, obj);
+
+    private static void GraphicsModuleUpdated(On.Player.orig_GraphicsModuleUpdated orig, Player self, bool actuallyViewed, bool eu)
+    {
+        orig(self, actuallyViewed, eu);
+        foreach (Creature.Grasp grasp in self.grasps)
+            if (grasp?.grabbed is ScavengerLance lance) lance.SynchronizeGrip(eu);
+    }
 
     private static void ThrowObject(On.Player.orig_ThrowObject orig, Player self, int grasp, bool eu)
     {
