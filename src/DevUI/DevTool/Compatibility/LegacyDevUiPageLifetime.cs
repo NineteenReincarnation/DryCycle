@@ -1,4 +1,5 @@
 using DevInterface;
+using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
@@ -21,5 +22,14 @@ internal static partial class LegacyDevUiQuiescenceController
         DeferredRefreshPages.Remove(page);
         ExternalCompatibilityPages.Remove(page);
         InvalidateBackendPlan(page);
+
+        // The unified Map geometry cache stores live AbstractRoom and RoomRepresentation references.
+        // A tool switch constructs a fresh MapPage when the developer returns, even if region and
+        // room counts are unchanged. Keeping the old cache would therefore both root the retired
+        // page/world graph and allow Prime() to reuse stale RoomRepresentation instances until the
+        // periodic structure audit runs. Retiring a MapPage is an exact lifetime boundary: flush the
+        // persistent snapshot and rebuild cheaply from the new page on next entry.
+        if (page is MapPage)
+            MapRoomGeometryPresentationHub.Clear();
     }
 }
