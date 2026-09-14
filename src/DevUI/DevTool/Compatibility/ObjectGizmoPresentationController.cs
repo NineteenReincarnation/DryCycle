@@ -18,7 +18,11 @@ internal static class ObjectGizmoPresentationController
     }
 
     private static readonly Dictionary<DevUINode, SpriteState> hidden = new();
+    private static readonly HashSet<Handle> activeHandles = new();
+    private static readonly HashSet<Handle> suppressedHandles = new();
+    private static readonly HashSet<Handle> draggingHandles = new();
     private static ObjectsPage page;
+    private static PlacedObject selectedObject;
     private static bool enabled;
     private static bool presentationActive;
     private static long appliedObjectRevision;
@@ -79,13 +83,16 @@ internal static class ObjectGizmoPresentationController
             appliedTopLevelNodeCount == topLevelNodeCount)
             return;
 
-        PlacedObject selected = session.Selection.Count == 1
+        selectedObject = session.Selection.Count == 1
             ? session.Selection.PrimaryPlacedObject
             : null;
+        activeHandles.Clear();
+        suppressedHandles.Clear();
+        draggingHandles.Clear();
 
         Visit(objectsPage, representation =>
         {
-            bool fullGizmo = selected != null && ReferenceEquals(selected, representation.pObj);
+            bool fullGizmo = selectedObject != null && ReferenceEquals(selectedObject, representation.pObj);
             if (fullGizmo)
                 RestoreFullGizmo(representation);
             else
@@ -122,28 +129,71 @@ internal static class ObjectGizmoPresentationController
             return;
         }
 
+        global::DevInterface.DevUI owner = self.owner;
+        bool dragging = self.dragged || ReferenceEquals(owner?.draggedNode, self);
+        if (dragging)
+        {
+            // A handle that was already being dragged when selection/presentation ownership changed
+            // must finish that drag normally. Restore its remembered sprites only for the drag;
+            // once the drag ends it falls back into the cached suppression policy below.
+            if (suppressedHandles.Contains(self))
+            {
+                RestoreNodeSprites(self);
+                draggingHandles.Add(self);
+            }
+            orig(self);
+            return;
+        }
+
+        if (draggingHandles.Remove(self) && suppressedHandles.Contains(self))
+            HideNodeSprites(self);
+
+        // Stable known handles never walk the parent chain again. This hook runs for every vanilla
+        // Handle.Update, so changing the common path from ancestor traversal to hash lookup removes
+        // the remaining per-object scheduling cost after Apply itself became revision-gated.
+        if (activeHandles.Contains(self))
+        {
+            orig(self);
+            return;
+        }
+
+        if (suppressedHandles.Contains(self))
+        {
+            SuppressInput(orig, self, owner);
+            return;
+        }
+
+        // Third-party nodes can be inserted after the page-level Apply pass. Classify an unknown
+        // handle lazily the first time it updates, then cache that decision. A non-object handle is
+        // considered genuinely active and is never suppressed by this controller.
         PlacedObjectRepresentation representation = FindRepresentation(self.parentNode);
         if (representation == null)
         {
+            activeHandles.Add(self);
             orig(self);
             return;
         }
 
-        EditorSession session = DevToolSessionHub.Current;
-        bool allowChildHandle =
-            session != null &&
-            session.ToolMode == EditorToolMode.Objects &&
-            session.LegacyUiVisible == false &&
-            session.Selection.Count == 1 &&
-            ReferenceEquals(session.Selection.PrimaryPlacedObject, representation.pObj);
-
+        bool allowChildHandle = selectedObject != null &&
+                                ReferenceEquals(selectedObject, representation.pObj);
         if (allowChildHandle)
         {
+            activeHandles.Add(self);
             orig(self);
             return;
         }
 
-        global::DevInterface.DevUI owner = self.owner;
+        Remember(self);
+        HideNodeSprites(self);
+        suppressedHandles.Add(self);
+        SuppressInput(orig, self, owner);
+    }
+
+    private static void SuppressInput(
+        On.DevInterface.Handle.orig_Update orig,
+        Handle self,
+        global::DevInterface.DevUI owner)
+    {
         if (owner == null)
         {
             self.dragged = false;
@@ -220,10 +270,12 @@ internal static class ObjectGizmoPresentationController
             DevUINode child = node.subNodes[i];
             if (child == null) continue;
 
-            if (child is Handle)
+            if (child is Handle handle)
             {
                 Remember(child);
                 HideNodeSprites(child);
+                activeHandles.Remove(handle);
+                suppressedHandles.Add(handle);
             }
 
             HideChildHandles(child);
@@ -244,7 +296,12 @@ internal static class ObjectGizmoPresentationController
         {
             DevUINode child = node.subNodes[i];
             if (child == null) continue;
-            if (child is Handle) RestoreNodeSprites(child);
+            if (child is Handle handle)
+            {
+                RestoreNodeSprites(child);
+                suppressedHandles.Remove(handle);
+                activeHandles.Add(handle);
+            }
             RestoreChildHandles(child);
         }
     }
@@ -283,10 +340,17 @@ internal static class ObjectGizmoPresentationController
 
     private static void RestoreAll()
     {
-        if (hidden.Count == 0) return;
-        foreach (KeyValuePair<DevUINode, SpriteState> pair in hidden)
-            RestoreNodeSprites(pair.Key);
-        hidden.Clear();
+        if (hidden.Count > 0)
+        {
+            foreach (KeyValuePair<DevUINode, SpriteState> pair in hidden)
+                RestoreNodeSprites(pair.Key);
+            hidden.Clear();
+        }
+
+        activeHandles.Clear();
+        suppressedHandles.Clear();
+        draggingHandles.Clear();
+        selectedObject = null;
     }
 
     private static void ResetAppliedState()
@@ -295,5 +359,9 @@ internal static class ObjectGizmoPresentationController
         appliedSelectionRevision = 0L;
         appliedObjectCount = -1;
         appliedTopLevelNodeCount = -1;
+        activeHandles.Clear();
+        suppressedHandles.Clear();
+        draggingHandles.Clear();
+        selectedObject = null;
     }
 }
