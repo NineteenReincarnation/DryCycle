@@ -5,6 +5,7 @@ using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -12,11 +13,12 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Keeps the vanilla MapPage alive as an authoring/data source without allowing its Futile visuals
 /// to leak through the rebuilt RWImGui world map.
 ///
-/// The core compatibility layer already suppresses migrated legacy UI after DevUI.Update. The GPU
-/// map/cache pipeline can, however, refresh RoomPanel/MiniMap later in the same Unity frame and make
-/// those Futile nodes visible again. This guard runs in LateUpdate, after both update paths, and
-/// reapplies presentation-only suppression. MapPage data, positions and update logic stay untouched.
-/// Switching back to Vanilla or explicitly showing legacy UI restores the original presentation.
+/// The core compatibility layer already suppresses migrated legacy UI after DevUI.Update. Some map
+/// cache/materialization paths can still refresh RoomPanel/MiniMap later in the frame and make those
+/// Futile nodes visible again. Refresh hooks mark the guard dirty and LateUpdate performs one
+/// presentation-only suppression pass only when needed. A sparse safety audit covers unusual mods
+/// that mutate visibility directly without calling Refresh, avoiding an O(N) MapPage walk on every
+/// stable frame.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -28,8 +30,8 @@ public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
 
     private void OnEnable() => WorldMapLegacyVisualGuard.Enable(Logger);
 
-    // LateUpdate is deliberate. MapPage/MiniMap.Refresh can set isVisible=true after the core
-    // suppression pass; doing this immediately before rendering closes that same-frame leak.
+    // LateUpdate is deliberate. A RoomPanel/MiniMap refresh can happen after the core suppression
+    // pass; applying a dirty suppression immediately before rendering closes that same-frame leak.
     private void LateUpdate() => WorldMapLegacyVisualGuard.LateUpdate();
 
     private void OnDisable() => WorldMapLegacyVisualGuard.Disable();
@@ -37,26 +39,69 @@ public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
 
 internal static class WorldMapLegacyVisualGuard
 {
+    private const int SafetyAuditIntervalFrames = 120;
+
     private static readonly HashSet<FSprite> SuppressedSprites = new();
     private static readonly HashSet<FLabel> SuppressedLabels = new();
 
     private static ManualLogSource log;
     private static MapPage suppressedPage;
     private static bool enabled;
+    private static bool suppressionDirty;
+    private static int nextSafetyAuditFrame;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
         log = logger;
+        On.DevInterface.RoomPanel.Refresh += RoomPanel_Refresh;
+        On.DevInterface.MiniMap.Refresh += MiniMap_Refresh;
         enabled = true;
-        log?.LogInfo("World Map legacy visual guard enabled.");
+        suppressionDirty = true;
+        nextSafetyAuditFrame = 0;
+        log?.LogInfo("World Map legacy visual guard enabled (dirty-driven).");
     }
 
     internal static void Disable()
     {
+        if (!enabled)
+        {
+            Restore();
+            return;
+        }
+
+        On.DevInterface.MiniMap.Refresh -= MiniMap_Refresh;
+        On.DevInterface.RoomPanel.Refresh -= RoomPanel_Refresh;
         Restore();
+        suppressionDirty = false;
+        nextSafetyAuditFrame = 0;
         enabled = false;
         log = null;
+    }
+
+    private static void RoomPanel_Refresh(On.DevInterface.RoomPanel.orig_Refresh orig, RoomPanel self)
+    {
+        orig(self);
+        MarkDirty(self?.mapPage);
+    }
+
+    private static void MiniMap_Refresh(On.DevInterface.MiniMap.orig_Refresh orig, MiniMap self)
+    {
+        orig(self);
+        MarkDirty(self?.mapPage);
+    }
+
+    private static void MarkDirty(MapPage page)
+    {
+        if (!enabled || page == null) return;
+
+        EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map ||
+            !ReferenceEquals(session.Owner?.activePage, page) ||
+            EditorUiModeState.UseVanilla || session.LegacyUiVisible)
+            return;
+
+        suppressionDirty = true;
     }
 
     internal static void LateUpdate()
@@ -65,7 +110,9 @@ internal static class WorldMapLegacyVisualGuard
 
         EditorSession session = DevToolRuntime.ActiveSession;
         bool rebuiltMapOwnsPresentation =
+            DevToolSessionHub.IsCurrentSessionLive &&
             !EditorUiModeState.UseVanilla &&
+            !EditorUiModeState.OverlayHidden &&
             EditorInputRouter.FrontendAttached &&
             session != null &&
             !session.LegacyUiVisible &&
@@ -75,6 +122,8 @@ internal static class WorldMapLegacyVisualGuard
         if (!rebuiltMapOwnsPresentation)
         {
             Restore();
+            suppressionDirty = true;
+            nextSafetyAuditFrame = 0;
             return;
         }
 
@@ -83,10 +132,18 @@ internal static class WorldMapLegacyVisualGuard
         {
             Restore();
             suppressedPage = page;
+            suppressionDirty = true;
+            nextSafetyAuditFrame = 0;
         }
+
+        bool safetyAuditDue = Time.frameCount >= nextSafetyAuditFrame;
+        if (!suppressionDirty && !safetyAuditDue)
+            return;
 
         SuppressNode(page);
         SuppressCreatureVisuals(page);
+        suppressionDirty = false;
+        nextSafetyAuditFrame = Time.frameCount + SafetyAuditIntervalFrames;
     }
 
     private static void SuppressNode(DevUINode node)
