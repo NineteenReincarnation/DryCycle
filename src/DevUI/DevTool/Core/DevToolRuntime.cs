@@ -70,6 +70,7 @@ internal static class DevToolRuntime
         MapEditorStateHub.Reset();
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
+        RelationshipPresentationChangeHintHub.Reset();
         ObjectPresentationChangeHintHub.Reset();
         RoomPresentationChangeHintHub.Reset();
         SoundPresentationChangeHintHub.Reset();
@@ -295,14 +296,12 @@ internal static class DevToolRuntime
     private static void PublishRelationshipPresentation(EditorSession session)
     {
         bool monitor = DevToolPerformanceMonitor.Enabled;
-        EditorRelationshipPresentationSnapshot before = monitor ? RelationshipEditorPresentationHub.Current : null;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RelationshipPresentation))
             RelationshipEditorPresentationHub.Publish(session);
         if (monitor && DevToolPerformanceMonitor.Enabled)
-            RecordSimplePresentation(
+            DevToolPerformanceMonitor.RecordPresentation(
                 DevToolPresentationChannel.Relationships,
-                before,
-                RelationshipEditorPresentationHub.Current);
+                RelationshipEditorPresentationHub.LastOutcome);
     }
 
     private static void RecordSimplePresentation<T>(
@@ -756,6 +755,7 @@ public static class DevToolSessionHub
     {
         if (ui == null) return;
 
+        bool created = false;
         if (!sessions.TryGetValue(ui, out EditorSession session))
         {
             current.TryGetTarget(out EditorSession previous);
@@ -766,6 +766,7 @@ public static class DevToolSessionHub
 
             session = new EditorSession(ui);
             sessions.Add(ui, session);
+            created = true;
 
             if (restoreViewState)
             {
@@ -776,7 +777,11 @@ public static class DevToolSessionHub
             }
         }
 
-        session.Synchronize(ui);
+        // EditorSession's constructor already synchronized a freshly-created session. Repeating the
+        // same structural pass here added a third full sync on the activation frame for no semantic
+        // benefit. Existing sessions still synchronize once before vanilla update as normal.
+        if (!created)
+            session.Synchronize(ui);
         session.MarkUpdateStarted();
         current.SetTarget(session);
     }
