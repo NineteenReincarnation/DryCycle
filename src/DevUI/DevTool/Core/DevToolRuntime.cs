@@ -71,6 +71,8 @@ internal static class DevToolRuntime
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
         RoomPresentationChangeHintHub.Reset();
+        SoundPresentationChangeHintHub.Reset();
+        TriggerPresentationChangeHintHub.Reset();
         EditorRevisionHub.Reset();
         DevToolSessionHub.Reset();
         DevToolPerformanceMonitor.SetEnabled(false);
@@ -250,22 +252,17 @@ internal static class DevToolRuntime
 
     private static void PublishSoundPresentation(EditorSession session)
     {
-        bool monitor = DevToolPerformanceMonitor.Enabled;
-        EditorSoundPresentationSnapshot before = monitor ? SoundEditorPresentationHub.Current : null;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SoundPresentation))
             SoundEditorPresentationHub.Publish(session);
-        if (monitor && DevToolPerformanceMonitor.Enabled)
-            RecordSimplePresentation(DevToolPresentationChannel.Sound, before, SoundEditorPresentationHub.Current);
+        // SoundEditorPresentationHub owns Hit/Partial/Full classification because it can distinguish
+        // selection-only and member-level patch paths that are invisible from snapshot identity.
     }
 
     private static void PublishTriggerPresentation(EditorSession session)
     {
-        bool monitor = DevToolPerformanceMonitor.Enabled;
-        EditorTriggerPresentationSnapshot before = monitor ? TriggerEditorPresentationHub.Current : null;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.TriggerPresentation))
             TriggerEditorPresentationHub.Publish(session);
-        if (monitor && DevToolPerformanceMonitor.Enabled)
-            RecordSimplePresentation(DevToolPresentationChannel.Triggers, before, TriggerEditorPresentationHub.Current);
+        // TriggerEditorPresentationHub likewise reports its own granular outcome.
     }
 
     private static void PublishMapPresentation(EditorSession session)
