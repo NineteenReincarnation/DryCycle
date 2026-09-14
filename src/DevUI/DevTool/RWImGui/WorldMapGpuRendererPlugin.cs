@@ -40,6 +40,11 @@ public sealed class WorldMapGpuRendererPlugin : BaseUnityPlugin
 
 internal static class WorldMapGpuRuntime
 {
+    // Packed MapTex atlases become visually unstable when heavily minified: greys average into the
+    // dark atlas/background and rooms read as black blocks. Below this zoom we cover the sampled
+    // texture with a compact semantic LOD built from the already cached RasterRuns instead.
+    private const float SemanticRoomLodZoom = 0.52f;
+
     private delegate void OrigDrawCanvas(EditorMapPresentationSnapshot snapshot);
     private delegate void HookDrawCanvas(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot);
     private delegate void OrigDrawRoomGeometry(
@@ -362,12 +367,18 @@ internal static class WorldMapGpuRuntime
 
         if (hovered && room != null) frameHoveredRoomIndex = room.RoomIndex;
 
+        float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
+        if (zoom < SemanticRoomLodZoom && visual?.DetailedRasterAvailable == true)
+        {
+            DrawSemanticRoomLod(draw, room, visual, roomMin, zoom);
+            return;
+        }
+
         // Selection/hover have moved to a separate dynamic retained mesh. Keeping them out of the
         // ImGui room pass prevents the whole interaction effect from being regenerated as immediate
         // draw commands every frame.
         if (selected || hovered) return;
 
-        float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         float width = Math.Max(1f, visual?.WidthTiles ?? 12f) * WorldMapGpuScene.TileDisplaySize * zoom;
         float height = Math.Max(1f, visual?.HeightTiles ?? 6f) * WorldMapGpuScene.TileDisplaySize * zoom;
         Num.Vector2 max = roomMin + new Num.Vector2(width, height);
@@ -375,6 +386,71 @@ internal static class WorldMapGpuRuntime
             room?.CurrentRoom == true ? ImGuiCol.Header :
             room?.Disabled == true ? ImGuiCol.TextDisabled : ImGuiCol.Border);
         draw.AddRect(roomMin, max, color, Math.Max(1f, 3f * zoom), ImDrawFlags.None, 1f);
+    }
+
+    /// <summary>
+    /// Far-zoom semantic thumbnail. A single opaque Air fill masks the minified MapTex completely;
+    /// non-Air raster runs then restore the room silhouette without depending on atlas mip sampling.
+    /// Water is intentionally omitted at this LOD, matching the original low-LOD map path.
+    /// </summary>
+    private static void DrawSemanticRoomLod(
+        ImDrawListPtr draw,
+        EditorMapRoomSnapshot room,
+        EditorMapRoomVisualSnapshot visual,
+        Num.Vector2 roomMin,
+        float zoom)
+    {
+        float tileScale = WorldMapGpuScene.TileDisplaySize * zoom;
+        float widthTiles = Math.Max(1f, visual.WidthTiles);
+        float heightTiles = Math.Max(1f, visual.HeightTiles);
+        Num.Vector2 roomMax = roomMin + new Num.Vector2(widthTiles * tileScale, heightTiles * tileScale);
+
+        // Cover the raw atlas first. This is the important part of the fix: the room can no longer
+        // collapse into the dark minified atlas color when zoomed far out.
+        draw.AddRectFilled(roomMin, roomMax, SemanticGeometryColor(EditorMapGeometryKind.Air));
+
+        EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
+        for (int i = 0; i < runs.Length; i++)
+        {
+            EditorMapRectSnapshot run = runs[i];
+            if (run.Width <= 0f || run.Height <= 0f ||
+                run.Kind == EditorMapGeometryKind.Air ||
+                run.Kind == EditorMapGeometryKind.Water)
+                continue;
+
+            float x0 = roomMin.X + run.X * tileScale;
+            float x1 = roomMin.X + (run.X + run.Width) * tileScale;
+            float y0 = roomMin.Y + (heightTiles - (run.Y + run.Height)) * tileScale;
+            float y1 = roomMin.Y + (heightTiles - run.Y) * tileScale;
+            draw.AddRectFilled(
+                new Num.Vector2(Math.Min(x0, x1), Math.Min(y0, y1)),
+                new Num.Vector2(Math.Max(x0, x1), Math.Max(y0, y1)),
+                SemanticGeometryColor(run.Kind));
+        }
+
+        uint outline = ImGui.GetColorU32(
+            room?.CurrentRoom == true ? ImGuiCol.Header :
+            room?.Disabled == true ? ImGuiCol.TextDisabled : ImGuiCol.Border);
+        draw.AddRect(roomMin, roomMax, outline, Math.Max(1f, 3f * zoom), ImDrawFlags.None, 1f);
+    }
+
+    private static uint SemanticGeometryColor(EditorMapGeometryKind kind)
+    {
+        return kind switch
+        {
+            EditorMapGeometryKind.Air => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.59f, 0.60f, 1.00f)),
+            EditorMapGeometryKind.BackWall => ImGui.GetColorU32(new Num.Vector4(0.47f, 0.48f, 0.49f, 1.00f)),
+            EditorMapGeometryKind.Solid => ImGui.GetColorU32(new Num.Vector4(0.29f, 0.30f, 0.31f, 1.00f)),
+            EditorMapGeometryKind.Structure => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.31f, 0.31f, 1.00f)),
+            EditorMapGeometryKind.Shortcut => ImGui.GetColorU32(new Num.Vector4(0.84f, 0.85f, 0.84f, 1.00f)),
+            EditorMapGeometryKind.Transport => ImGui.GetColorU32(new Num.Vector4(0.72f, 0.20f, 0.28f, 1.00f)),
+            EditorMapGeometryKind.Water => ImGui.GetColorU32(new Num.Vector4(0.12f, 0.34f, 0.78f, 0.24f)),
+            EditorMapGeometryKind.LocalTerrain => ImGui.GetColorU32(new Num.Vector4(0.73f, 0.46f, 0.39f, 1.00f)),
+            EditorMapGeometryKind.CurvedSlope => ImGui.GetColorU32(new Num.Vector4(0.88f, 0.89f, 0.90f, 1.00f)),
+            EditorMapGeometryKind.QuicksandMaterial => ImGui.GetColorU32(ImGuiCol.ButtonHovered),
+            EditorMapGeometryKind.QuicksandBody => ImGui.GetColorU32(ImGuiCol.Separator),
+            _ => ImGui.GetColorU32(ImGuiCol.Border)
+        };
     }
 
     private static void DrawToolbarHook(OrigDrawToolbar orig, EditorMapPresentationSnapshot snapshot)
