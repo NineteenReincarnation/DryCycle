@@ -1,16 +1,19 @@
+using System.Reflection;
 using System.Threading;
 using BepInEx;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Closes the lifetime gap between the retained Unity map renderer and DevUI/RWImGui presentation.
+/// Closes the lifetime gap between retained World Map services and DevUI/RWImGui presentation.
 ///
-/// WorldMapGpuRuntime is hosted by an always-on BepInEx component, while DevUI.Update stops as soon
-/// as Rain World closes DevTools. Its last ImGui FrameState can therefore remain valid-looking after
-/// the editor is gone. This observer runs in LateUpdate so it executes after the renderer's ordinary
-/// Update and can reliably prevent a stale retained Camera from drawing over gameplay/Vanilla UI.
+/// Most World Map helpers are hosted by always-on BepInEx components, while DevUI.Update stops as
+/// soon as Rain World closes DevTools. Without an explicit lifetime edge, their last FrameState,
+/// MapPage indexes and shortcut caches can outlive the editor page that produced them. This observer
+/// runs in LateUpdate so it executes after the ordinary map pumps and retires the complete transient
+/// map runtime exactly once when the live DevTools session disappears.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -34,13 +37,9 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         bool live = DevToolSessionHub.IsCurrentSessionLive;
         if (!live)
         {
-            // Before the first DevUI lifetime there is nothing to retire. Once a real editor session
-            // has existed, however, disabling the runtime is preferable to merely hiding its camera:
-            // the renderer Update would otherwise consume the stale last FrameState and recreate the
-            // scene every frame after a close. Reopening DevTools reattaches the hooks lazily below.
             if (observedLiveSession && !runtimeSuspendedForDormantSession)
             {
-                WorldMapGpuRuntime.Disable();
+                SuspendDormantMapRuntime();
                 runtimeSuspendedForDormantSession = true;
             }
             return;
@@ -49,7 +48,7 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         observedLiveSession = true;
         if (runtimeSuspendedForDormantSession)
         {
-            WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId);
+            ResumeDormantMapRuntime();
             runtimeSuspendedForDormantSession = false;
         }
 
@@ -61,18 +60,75 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
         if (!rebuiltMapVisible)
         {
-            // Tool switches keep the retained meshes/materials warm. Vanilla mode and Escape-hidden
-            // overlays must still suppress the high-depth Unity camera immediately; passing no frame
-            // uses WorldMapGpuScene's existing cheap camera-off path without destroying GPU caches.
+            // Tool switches keep retained scene/cache data warm. The scene Apply(null) path disables
+            // the high-depth camera and, through the pipe-batch hook, hides retained map sockets too.
             WorldMapGpuScene.Apply(null, session);
+        }
+    }
+
+    private void SuspendDormantMapRuntime()
+    {
+        // Retire helpers which keep live Page/snapshot/route state. Their BepInEx components remain
+        // enabled, but the static runtimes are idempotent and therefore safe to park until the next
+        // real DevTools lifetime. This also makes their Update methods O(1) no-ops while gameplay is
+        // running without the editor.
+        WorldMapPlayerLocator.Disable();
+        WorldMapExactShortcuts.Disable();
+        WorldMapGpuInteractionIndex.Disable();
+        WorldMapGpuPipeBatch.Disable();
+        WorldMapGpuIncrementalRouter.Disable();
+        WorldMapGpuRetainedOptimizer.Disable();
+        WorldMapPerformance.Disable();
+
+        // The basic shortcut presentation owns AbstractRoom/RoomRepresentation references but is
+        // intentionally an internal presentation cache rather than a BepInEx runtime. Clear its
+        // private cache once at the lifetime boundary without adding a reverse dependency from the
+        // core DevTool assembly to the RWImGui frontend.
+        ClearShortcutPresentationCache();
+
+        // Geometry is also cleared by the core Page lifetime release. Calling it here is idempotent
+        // and closes the edge even if DevUI disappears before that observer sees the retired page.
+        MapRoomGeometryPresentationHub.Clear();
+
+        // Disable the renderer last so hooked retained helpers can hide/destroy their own resources
+        // before the scene camera/chunks are torn down.
+        WorldMapGpuRuntime.Disable();
+    }
+
+    private void ResumeDormantMapRuntime()
+    {
+        // Rebuild the dependency order used during normal BepInEx startup. The first reopened Map
+        // frame can then consume the durable GPU cache immediately without retaining any old Page.
+        WorldMapPlayerLocator.Enable(Logger);
+        WorldMapPerformance.Enable(Logger);
+        WorldMapExactShortcuts.Enable(Logger);
+        WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId);
+        WorldMapGpuRetainedOptimizer.Enable(Logger);
+        WorldMapGpuIncrementalRouter.Enable(Logger);
+        WorldMapGpuPipeBatch.Enable(Logger);
+        WorldMapGpuInteractionIndex.Enable(Logger);
+    }
+
+    private static void ClearShortcutPresentationCache()
+    {
+        try
+        {
+            MethodInfo clear = typeof(WorldMapShortcutPresentation).GetMethod(
+                "Clear",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            clear?.Invoke(null, null);
+        }
+        catch
+        {
+            // Cache retirement is best-effort during shutdown; a later Prime() also resets a stale
+            // region before publishing any shortcut data.
         }
     }
 
     private void OnDisable()
     {
-        // WorldMapGpuRendererPlugin owns the actual hook lifetime and performs the full final Disable.
-        // We only guarantee that this helper cannot leave its retained camera visible if plugin
-        // shutdown ordering invokes us first.
+        // Plugin shutdown can arrive in any component order. Hide presentation immediately; the
+        // owning plugin runtimes perform their own idempotent final Disable calls afterwards.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
