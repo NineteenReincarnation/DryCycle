@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
@@ -12,6 +13,8 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// </summary>
 internal static class ObjectGizmoPresentationController
 {
+    private const int StructureAuditIntervalFrames = 120;
+
     private sealed class SpriteState
     {
         internal bool[] Visibility;
@@ -29,6 +32,7 @@ internal static class ObjectGizmoPresentationController
     private static long appliedSelectionRevision;
     private static int appliedObjectCount = -1;
     private static int appliedTopLevelNodeCount = -1;
+    private static int nextStructureAuditFrame;
 
     internal static void Enable()
     {
@@ -72,12 +76,16 @@ internal static class ObjectGizmoPresentationController
         // Applying gizmo visibility used to recursively walk the complete ObjectsPage tree every
         // DevUI frame, then recursively walk every child handle again even when nothing changed.
         // The visibility policy depends only on the page structure, object model revision and
-        // selection. Those are explicit semantic keys now, so stable frames can return in O(1).
+        // selection. Those are explicit semantic keys now, so stable frames return in O(1).
+        // A sparse audit remains for third-party code that swaps DevUINodes without publishing a
+        // DryCycle revision and happens to preserve both collection and top-level node counts.
         long objectRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Objects);
         long selectionRevision = session.Selection.Revision;
         int objectCount = session.RoomSettings?.placedObjects?.Count ?? 0;
         int topLevelNodeCount = objectsPage.subNodes?.Count ?? 0;
-        if (appliedObjectRevision == objectRevision &&
+        bool structureAuditDue = Time.frameCount >= nextStructureAuditFrame;
+        if (!structureAuditDue &&
+            appliedObjectRevision == objectRevision &&
             appliedSelectionRevision == selectionRevision &&
             appliedObjectCount == objectCount &&
             appliedTopLevelNodeCount == topLevelNodeCount)
@@ -103,6 +111,7 @@ internal static class ObjectGizmoPresentationController
         appliedSelectionRevision = selectionRevision;
         appliedObjectCount = objectCount;
         appliedTopLevelNodeCount = topLevelNodeCount;
+        nextStructureAuditFrame = Time.frameCount + StructureAuditIntervalFrames;
     }
 
     internal static void Reset()
@@ -359,6 +368,7 @@ internal static class ObjectGizmoPresentationController
         appliedSelectionRevision = 0L;
         appliedObjectCount = -1;
         appliedTopLevelNodeCount = -1;
+        nextStructureAuditFrame = 0;
         activeHandles.Clear();
         suppressedHandles.Clear();
         draggingHandles.Clear();
