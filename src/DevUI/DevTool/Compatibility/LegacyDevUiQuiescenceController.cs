@@ -306,11 +306,14 @@ internal static class LegacyDevUiQuiescenceController
             {
                 // Materialize once so vanilla and third-party world representations still exist as
                 // a compatibility backend. Their screen-space controls become dormant immediately
-                // after construction unless explicitly needed by a bridge transaction.
+                // after construction unless explicitly needed by a bridge transaction. If a rebuilt
+                // edit already marked this page stale, this refresh contains that current model state
+                // and therefore consumes the deferred wake-up refresh as well.
                 fullCompatibilityDepth++;
                 try
                 {
                     page.Refresh();
+                    DeferredRefreshPages.Remove(page);
                 }
                 finally
                 {
