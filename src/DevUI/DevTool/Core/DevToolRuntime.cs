@@ -70,6 +70,7 @@ internal static class DevToolRuntime
         MapEditorStateHub.Reset();
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
+        RoomPresentationChangeHintHub.Reset();
         EditorRevisionHub.Reset();
         DevToolSessionHub.Reset();
         DevToolPerformanceMonitor.SetEnabled(false);
@@ -239,11 +240,12 @@ internal static class DevToolRuntime
     private static void PublishRoomPresentation(EditorSession session)
     {
         bool monitor = DevToolPerformanceMonitor.Enabled;
-        EditorRoomSettingsSnapshot before = monitor ? RoomEditorPresentationHub.Current : null;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RoomPresentation))
             RoomEditorPresentationHub.Publish(session);
         if (monitor && DevToolPerformanceMonitor.Enabled)
-            RecordSimplePresentation(DevToolPresentationChannel.Room, before, RoomEditorPresentationHub.Current);
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Room,
+                RoomEditorPresentationHub.LastOutcome);
     }
 
     private static void PublishSoundPresentation(EditorSession session)
