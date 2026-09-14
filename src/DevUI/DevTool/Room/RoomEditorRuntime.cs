@@ -94,62 +94,71 @@ public static class RoomEditorCommandQueue
     internal static void Process(EditorSession session)
     {
         if (session == null) return;
+
+        bool roomDirty = false;
         while (queue.TryDequeue(out RoomEditorCommand command))
         {
             try
             {
+                bool changed = false;
                 switch (command.Kind)
                 {
                     case RoomEditorCommandKind.SetSetting:
-                        RoomEditorActions.SetRoomSetting(session, command.Key, command.Value);
+                        changed = RoomEditorActions.SetRoomSetting(session, command.Key, command.Value);
                         break;
                     case RoomEditorCommandKind.ResetSetting:
-                        RoomEditorActions.ResetRoomSetting(session, command.Key);
+                        changed = RoomEditorActions.ResetRoomSetting(session, command.Key);
                         break;
                     case RoomEditorCommandKind.SetPaletteFade:
-                        RoomEditorActions.SetPaletteFade(session, command.Index, command.Value.X);
+                        changed = RoomEditorActions.SetPaletteFade(session, command.Index, command.Value.X);
                         break;
                     case RoomEditorCommandKind.SetTerrainPaletteFade:
-                        RoomEditorActions.SetTerrainPaletteFade(session, command.Index, command.Value.X);
+                        changed = RoomEditorActions.SetTerrainPaletteFade(session, command.Index, command.Value.X);
                         break;
                     case RoomEditorCommandKind.SetTemplate:
-                        if (RoomEditorActions.SetRoomTemplate(session, command.Key))
+                        changed = RoomEditorActions.SetRoomTemplate(session, command.Key);
+                        if (changed)
                             RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.SaveAsTemplate:
-                        RoomEditorActions.SaveRoomAsTemplate(session, command.Key);
+                        changed = RoomEditorActions.SaveRoomAsTemplate(session, command.Key);
                         break;
                     case RoomEditorCommandKind.AddEffect:
                         // A browser hover may currently own a temporary RoomEffect/controller.
                         // Tear that transaction down before the persistent edit so its rollback can
                         // never remove or overwrite the newly committed runtime state.
                         EffectPreviewRuntime.EndForPersistentOperation("add room effect");
-                        if (RoomEditorActions.AddRoomEffect(session, command.Key))
+                        changed = RoomEditorActions.AddRoomEffect(session, command.Key);
+                        if (changed)
                             RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.DeleteEffect:
                         EffectPreviewRuntime.EndForPersistentOperation("delete room effect");
-                        if (RoomEditorActions.DeleteRoomEffect(session, command.Index))
+                        changed = RoomEditorActions.DeleteRoomEffect(session, command.Index);
+                        if (changed)
                             RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                     case RoomEditorCommandKind.SetEffectAmount:
                         EffectPreviewRuntime.EndForPersistentOperation("change room effect");
-                        if (RoomEditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X))
+                        changed = RoomEditorActions.SetRoomEffectAmount(session, command.Index, command.SecondaryIndex, command.Value.X);
+                        if (changed)
                             RoomEffectLiveCompatibility.Reconcile(session);
                         break;
                 }
 
-                // Room commands are sparse user actions. Invalidating after a processed command is
-                // substantially cheaper and more deterministic than rebuilding the entire settings
-                // snapshot every frame, while harmless no-op commands merely cause one extra build.
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                roomDirty |= changed;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool room command failed: " + error.Message);
             }
         }
+
+        // Multiple ImGui edits can be queued before one Rain World update. One revision edge is
+        // enough to invalidate the immutable room snapshot for the whole batch. History owns its
+        // own revision, so the shell's Undo/Redo labels are refreshed independently by Core.
+        if (roomDirty)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
     }
 
     internal static void Clear()
