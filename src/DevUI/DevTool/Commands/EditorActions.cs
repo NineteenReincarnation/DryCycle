@@ -117,6 +117,8 @@ public static class EditorActions
     public static bool SetObjectPosition(EditorSession session, PlacedObject target, Vector2 newPosition)
     {
         if (session?.RoomSettings == null || target == null) return false;
+        if ((target.pos - newPosition).sqrMagnitude <= 0.000001f) return false;
+
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         target.pos = newPosition;
         TryRefresh(target);
@@ -169,13 +171,18 @@ public static class EditorActions
     {
         if (session?.RoomSettings == null || target == null || string.IsNullOrEmpty(key)) return false;
 
-        bool accepted = false;
-        MutateObject(
-            session,
-            target,
-            "Change " + key,
-            () => accepted = ObjectInspectorRegistry.TrySetValue(target, key, value));
-        return accepted;
+        PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
+        if (!ObjectInspectorRegistry.TrySetValue(target, key, value))
+            return false;
+
+        TryRefresh(target);
+        PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, target);
+        if (before != null && before.SameAs(after))
+            return false;
+
+        if (PlacedObjectHistoryEntry.TryCreate("Change " + key, before, after, out PlacedObjectHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
     }
 
     public static bool SetSelectionProperty(EditorSession session, string key, EditorPropertyValue value)
@@ -196,9 +203,13 @@ public static class EditorActions
         }
 
         if (changed == 0) return false;
-        session.Owner.activePage?.Refresh();
 
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (before != null && after != null &&
+            string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal))
+            return false;
+
+        session.Owner.activePage?.Refresh();
         if (SnapshotHistoryEntry.TryCreate(
                 changed == 1 ? "Change " + key : "Change " + key + " on " + changed + " objects",
                 before,
