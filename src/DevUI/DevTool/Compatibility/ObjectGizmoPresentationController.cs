@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
@@ -30,6 +31,7 @@ internal static class ObjectGizmoPresentationController
     private static bool presentationActive;
     private static long appliedObjectRevision;
     private static long appliedSelectionRevision;
+    private static long appliedCollectionRevision;
     private static int appliedObjectCount = -1;
     private static int appliedTopLevelNodeCount = -1;
     private static int nextStructureAuditFrame;
@@ -81,15 +83,31 @@ internal static class ObjectGizmoPresentationController
         // DryCycle revision and happens to preserve both collection and top-level node counts.
         long objectRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Objects);
         long selectionRevision = session.Selection.Revision;
+        long collectionRevision = ObjectPresentationChangeHintHub.GetCollectionRevision(session);
         int objectCount = session.RoomSettings?.placedObjects?.Count ?? 0;
         int topLevelNodeCount = objectsPage.subNodes?.Count ?? 0;
         bool structureAuditDue = Time.frameCount >= nextStructureAuditFrame;
         if (!structureAuditDue &&
             appliedObjectRevision == objectRevision &&
             appliedSelectionRevision == selectionRevision &&
+            appliedCollectionRevision == collectionRevision &&
             appliedObjectCount == objectCount &&
             appliedTopLevelNodeCount == topLevelNodeCount)
             return;
+
+        // hidden/handle caches deliberately retain original sprite visibility while the rebuilt
+        // presentation owns the page. When the object collection or DevUINode structure changes,
+        // removed nodes would otherwise stay strongly referenced until the whole page is retired.
+        // Rebase those caches only on topology edges (or the sparse third-party audit), then rebuild
+        // the current policy in the same frame. Stable member edits and selection-only changes keep
+        // the cheaper incremental path.
+        bool topologyChanged =
+            structureAuditDue ||
+            appliedCollectionRevision != collectionRevision ||
+            appliedObjectCount != objectCount ||
+            appliedTopLevelNodeCount != topLevelNodeCount;
+        if (topologyChanged)
+            RestoreAll();
 
         selectedObject = session.Selection.Count == 1
             ? session.Selection.PrimaryPlacedObject
@@ -109,6 +127,7 @@ internal static class ObjectGizmoPresentationController
 
         appliedObjectRevision = objectRevision;
         appliedSelectionRevision = selectionRevision;
+        appliedCollectionRevision = collectionRevision;
         appliedObjectCount = objectCount;
         appliedTopLevelNodeCount = topLevelNodeCount;
         nextStructureAuditFrame = Time.frameCount + StructureAuditIntervalFrames;
@@ -366,6 +385,7 @@ internal static class ObjectGizmoPresentationController
     {
         appliedObjectRevision = 0L;
         appliedSelectionRevision = 0L;
+        appliedCollectionRevision = 0L;
         appliedObjectCount = -1;
         appliedTopLevelNodeCount = -1;
         nextStructureAuditFrame = 0;
