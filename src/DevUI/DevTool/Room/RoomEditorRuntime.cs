@@ -15,6 +15,7 @@ public static class RoomEditorPresentationHub
     private static long observedRevision;
 
     public static EditorRoomSettingsSnapshot Current => current;
+    internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
 
     internal static void Publish(EditorSession session)
     {
@@ -24,17 +25,35 @@ public static class RoomEditorPresentationHub
             return;
         }
 
+        // Opaque legacy/third-party writers deliberately do not provide semantic hints. Mark their
+        // Room revision and force the safe full-capture path rather than assuming what they changed.
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+        {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
+            RoomPresentationChangeHintHub.MarkFull(session);
+        }
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Room);
-        if (ReferenceEquals(observedSession, session) &&
+        bool sameContext =
+            ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedSettings, session.RoomSettings) &&
-            observedRevision == revision &&
-            current.Available)
-            return;
+            current.Available;
 
-        current = RoomSettingsPresentation.Capture(session);
+        if (sameContext && observedRevision == revision)
+        {
+            LastOutcome = DevToolPresentationOutcome.CacheHit;
+            return;
+        }
+
+        RoomPresentationChangeHint hint = RoomPresentationChangeHintHub.Consume(session);
+        bool partial = sameContext && hint.HasChanges && !hint.Full;
+        current = partial
+            ? RoomSettingsPresentation.Capture(session, current, hint)
+            : RoomSettingsPresentation.Capture(session);
+        LastOutcome = partial
+            ? DevToolPresentationOutcome.PartialRebuild
+            : DevToolPresentationOutcome.FullRebuild;
+
         observedSession = session;
         observedSettings = session.RoomSettings;
         observedRevision = revision;
@@ -42,10 +61,12 @@ public static class RoomEditorPresentationHub
 
     internal static void Clear()
     {
+        RoomPresentationChangeHintHub.Clear(observedSession);
         current = EditorRoomSettingsSnapshot.Empty;
         observedSession = null;
         observedSettings = null;
         observedRevision = 0L;
+        LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 }
 
@@ -145,7 +166,10 @@ public static class RoomEditorCommandQueue
                         break;
                 }
 
-                if (changed && session.History.Revision == historyBeforeCommand)
+                if (!changed) continue;
+
+                MarkPresentationChange(session, command);
+                if (session.History.Revision == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
             catch (Exception error)
@@ -160,6 +184,34 @@ public static class RoomEditorCommandQueue
         // revision only when the whole batch stayed outside history.
         if (nonHistoryDirty && session.History.Revision == historyBeforeBatch)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Room);
+    }
+
+    private static void MarkPresentationChange(EditorSession session, RoomEditorCommand command)
+    {
+        switch (command.Kind)
+        {
+            case RoomEditorCommandKind.SetSetting:
+            case RoomEditorCommandKind.ResetSetting:
+                RoomPresentationChangeHintHub.MarkSetting(session, command.Key);
+                break;
+            case RoomEditorCommandKind.SetPaletteFade:
+                RoomPresentationChangeHintHub.MarkPaletteFade(session, terrain: false);
+                break;
+            case RoomEditorCommandKind.SetTerrainPaletteFade:
+                RoomPresentationChangeHintHub.MarkPaletteFade(session, terrain: true);
+                break;
+            case RoomEditorCommandKind.SetEffectAmount:
+                RoomPresentationChangeHintHub.MarkEffectAmount(session, command.Index);
+                break;
+            case RoomEditorCommandKind.AddEffect:
+            case RoomEditorCommandKind.DeleteEffect:
+                RoomPresentationChangeHintHub.MarkEffects(session);
+                break;
+            case RoomEditorCommandKind.SetTemplate:
+            case RoomEditorCommandKind.SaveAsTemplate:
+                RoomPresentationChangeHintHub.MarkFull(session);
+                break;
+        }
     }
 
     internal static void Clear()
