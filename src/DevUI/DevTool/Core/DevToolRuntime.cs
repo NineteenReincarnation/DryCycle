@@ -435,9 +435,14 @@ public sealed class EditorSession
             ResetSelectionValidation();
         }
 
-        if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
+        Page nextPage = owner?.activePage;
+        if (!ReferenceEquals(observedLegacyPage, nextPage))
         {
-            observedLegacyPage = owner?.activePage;
+            // Quiescence caches are deliberately page-keyed and use HashSet<Page> on their hottest
+            // membership checks. Explicitly release the retired page before dropping our last normal
+            // reference so long mapping sessions cannot retain every Page ever visited.
+            LegacyDevUiQuiescenceController.ReleasePage(observedLegacyPage);
+            observedLegacyPage = nextPage;
             ToolMode = ResolveToolMode(observedLegacyPage);
             LegacyTransactions.Reset();
             LegacyUiVisible = false;
@@ -763,6 +768,14 @@ public static class DevToolSessionHub
         if (!sessions.TryGetValue(ui, out EditorSession session))
         {
             current.TryGetTarget(out EditorSession previous);
+
+            // A new DevUI owner retires the previous owner's current Page even when view-state
+            // restoration is not allowed (room/game transition). Release page-keyed compatibility
+            // caches before constructing the replacement session so those HashSets cannot root the
+            // old DevUI graph.
+            if (previous != null && !ReferenceEquals(previous.Owner, ui))
+                LegacyDevUiQuiescenceController.ReleasePage(previous.Owner?.activePage);
+
             bool restoreViewState = CanRestoreViewState(previous, ui);
             int previousMapRoom = -1;
             if (restoreViewState)
@@ -808,6 +821,8 @@ public static class DevToolSessionHub
 
     internal static void Reset()
     {
+        current.TryGetTarget(out EditorSession session);
+        LegacyDevUiQuiescenceController.ReleasePage(session?.Owner?.activePage);
         sessions = new ConditionalWeakTable<global::DevInterface.DevUI, EditorSession>();
         current = new WeakReference<EditorSession>(null);
     }
