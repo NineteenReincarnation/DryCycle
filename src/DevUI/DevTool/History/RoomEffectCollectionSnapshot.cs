@@ -123,6 +123,7 @@ internal sealed class RoomEffectCollectionStateSnapshot : IEditorStateSnapshot
                 settings.effects.Add(effect);
             }
 
+            RoomPresentationChangeHintHub.MarkEffects(session);
             RoomEditorActions.RefreshLegacyPageOrDefer(session);
             RoomEffectLiveCompatibility.Reconcile(session);
             return true;
