@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -80,4 +81,64 @@ internal sealed class EditorRevisionTracker
     };
 
     private static long Next(long value) => value >= long.MaxValue ? 1L : value + 1L;
+}
+
+/// <summary>
+/// Associates revision clocks with EditorSession without expanding the public session surface.
+/// All mutation calls happen on Rain World's main thread; the ConditionalWeakTable only provides
+/// lifetime ownership so closing DevUI cannot leave revision state rooted forever.
+/// </summary>
+internal static class EditorRevisionHub
+{
+    private static ConditionalWeakTable<EditorSession, EditorRevisionTracker> trackers = new();
+
+    internal static long Get(EditorSession session, EditorRevisionKind kind) =>
+        session == null ? 0L : trackers.GetValue(session, _ => new EditorRevisionTracker()).Get(kind);
+
+    internal static void Mark(EditorSession session, EditorRevisionKind kind)
+    {
+        if (session == null) return;
+        trackers.GetValue(session, _ => new EditorRevisionTracker()).Mark(kind);
+    }
+
+    internal static void MarkWorkspace(EditorSession session) =>
+        MarkWorkspace(session, session?.ToolMode ?? EditorToolMode.Room);
+
+    internal static void MarkWorkspace(EditorSession session, EditorToolMode mode)
+    {
+        if (session == null) return;
+        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkWorkspace(mode);
+    }
+
+    internal static void MarkShellAndWorkspace(EditorSession session) =>
+        MarkShellAndWorkspace(session, session?.ToolMode ?? EditorToolMode.Room);
+
+    internal static void MarkShellAndWorkspace(EditorSession session, EditorToolMode mode)
+    {
+        if (session == null) return;
+        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkShellAndWorkspace(mode);
+    }
+
+    internal static void MarkAll(EditorSession session)
+    {
+        if (session == null) return;
+        trackers.GetValue(session, _ => new EditorRevisionTracker()).MarkAll();
+    }
+
+    /// <summary>
+    /// Full vanilla/legacy presentation and active legacy transactions are mutable compatibility
+    /// surfaces whose writes do not pass through DryCycle command queues. While one of those paths
+    /// is explicitly active, correctness wins over snapshot reuse and the current workspace stays
+    /// live. Normal rebuilt-UI frames remain revision-driven.
+    /// </summary>
+    internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
+    {
+        if (session == null) return false;
+        return EditorUiModeState.UseVanilla ||
+               session.LegacyUiVisible ||
+               session.LegacyTransactions.HasPendingTransaction;
+    }
+
+    internal static void Reset() =>
+        trackers = new ConditionalWeakTable<EditorSession, EditorRevisionTracker>();
 }
