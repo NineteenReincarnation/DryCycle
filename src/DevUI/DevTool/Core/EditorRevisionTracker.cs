@@ -173,9 +173,9 @@ internal static class EditorRevisionHub
     /// Reports whether the currently visible rebuilt workspace must be treated as an opaque live
     /// writer. Dormant presentation periods are excluded because all channels are invalidated once
     /// when rebuilt ownership returns. Active pointer/text transactions stay live. An explicitly
-    /// visible legacy panel on one of the exact migrated vanilla pages can remain cached while idle:
-    /// LegacyTransactionRecorder brackets every supported edit and history invalidates on commit.
-    /// Unknown/custom pages remain conservative continuous writers.
+    /// visible legacy panel on one of the exact migrated vanilla pages can remain cached while idle
+    /// only when no opaque third-party subtree has been observed on that page. Unknown/custom pages
+    /// and migrated pages containing foreign controls remain conservative continuous writers.
     /// </summary>
     internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
     {
@@ -185,7 +185,10 @@ internal static class EditorRevisionHub
         if (session.LegacyTransactions.HasPendingTransaction)
             return true;
 
-        if (session.LegacyUiVisible && IsExactMigratedPage(session))
+        Page page = session.Owner?.activePage;
+        if (session.LegacyUiVisible &&
+            IsExactMigratedPage(session) &&
+            !LegacyDevUiQuiescenceController.HasExternalCompatibilityNodes(page))
             return false;
 
         return !LegacyDevUiQuiescenceController.IsQuiescent(session.Owner);
