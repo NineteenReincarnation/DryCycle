@@ -49,7 +49,7 @@ internal static class TriggerEditorActions
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
         if (state == null) return;
         int count = session?.RoomSettings?.triggers?.Count ?? 0;
-        state.SelectedIndex = index >= 0 && index < count ? index : -1;
+        state.SetSelectedIndex(index >= 0 && index < count ? index : -1);
     }
 
     internal static bool Create(EditorSession session, string typeName)
@@ -84,7 +84,7 @@ internal static class TriggerEditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
 
-        TriggerEditorStateHub.Get(session).SelectedIndex = session.RoomSettings.triggers.IndexOf(created);
+        TriggerEditorStateHub.Get(session)?.SetSelectedIndex(session.RoomSettings.triggers.IndexOf(created));
         return true;
     }
 
@@ -108,7 +108,7 @@ internal static class TriggerEditorActions
         if (state != null)
         {
             int count = session.RoomSettings.triggers.Count;
-            state.SelectedIndex = count == 0 ? -1 : Math.Min(index, count - 1);
+            state.SetSelectedIndex(count == 0 ? -1 : Math.Min(index, count - 1));
         }
         return true;
     }
@@ -227,8 +227,6 @@ internal static class TriggerEditorActions
             TriggeredEvent.EventType eventType = new(eventTypeName, false);
             if (panel != null)
             {
-                // Reuse vanilla's event factory so built-in defaults (especially multiUse)
-                // and ordinary hooks on TriggerPanel.AddEvent remain intact.
                 panel.AddEvent(eventType);
                 return trigger.tEvent != null;
             }
