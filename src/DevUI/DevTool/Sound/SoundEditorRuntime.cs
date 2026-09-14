@@ -48,6 +48,15 @@ public sealed class EditorSoundPresentationSnapshot
 internal sealed class SoundEditorState
 {
     internal int SelectedIndex = -1;
+    internal long Revision = 1L;
+
+    internal bool SetSelectedIndex(int value)
+    {
+        if (SelectedIndex == value) return false;
+        SelectedIndex = value;
+        Revision = Revision >= long.MaxValue ? 1L : Revision + 1L;
+        return true;
+    }
 }
 
 internal static class SoundEditorStateHub
@@ -68,7 +77,7 @@ internal static class SoundEditorStateHub
             if (current is AmbientSoundPanel panel && panel.sound != null)
             {
                 int index = session.RoomSettings.ambientSounds.IndexOf(panel.sound);
-                if (index >= 0) Get(session).SelectedIndex = index;
+                if (index >= 0) Get(session)?.SetSelectedIndex(index);
                 return;
             }
             current = current.parentNode;
@@ -86,6 +95,7 @@ public static class SoundEditorPresentationHub
     private static SoundPage observedPage;
     private static string[] observedFileNames;
     private static long observedRevision;
+    private static long observedSelectionRevision;
     private static int observedSoundCount = -1;
     private static int observedSelectedIndex = int.MinValue;
 
@@ -103,32 +113,76 @@ public static class SoundEditorPresentationHub
         SoundEditorStateHub.SynchronizeFromLegacyNode(session, session.Owner.draggedNode ?? page.draggedObject);
         SoundEditorState state = SoundEditorStateHub.Get(session);
         int count = session.RoomSettings.ambientSounds.Count;
-        if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
-        if (state.SelectedIndex < -1) state.SelectedIndex = -1;
+        if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
+        if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
-        // Explicit legacy UI, legacy transactions and an active world-handle drag are compatibility
-        // write paths that bypass DryCycle's command queues. Keep Sound live only for those windows;
-        // ordinary rebuilt-UI frames use the revision clock.
+        // Legacy handle drags are model writes that bypass command history. Selection itself has a
+        // separate state revision and therefore no longer dirties the Sound model channel.
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
             session.Owner.draggedNode != null || page.draggedObject != null)
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Sound);
+        long selectionRevision = state.Revision;
         string[] fileNames = page.fileNames ?? Array.Empty<string>();
-        if (ReferenceEquals(observedSession, session) &&
+
+        bool sameIdentity =
+            ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedSettings, session.RoomSettings) &&
             ReferenceEquals(observedPage, page) &&
-            ReferenceEquals(observedFileNames, fileNames) &&
+            current.Available;
+        bool modelStable =
+            sameIdentity &&
             observedRevision == revision &&
             observedSoundCount == count &&
-            observedSelectedIndex == state.SelectedIndex &&
-            current.Available)
-            return;
+            ReferenceEquals(observedFileNames, fileNames);
 
-        // Resource discovery belongs to the Rain World / DevUI thread. RWImGui receives only the
-        // immutable presentation snapshots below and never touches AssetManager or the mutable
-        // source catalog from its render thread.
-        EditorSoundSampleSnapshot[] sampleEntries = SoundSampleCatalog.Refresh(page);
+        if (modelStable &&
+            observedSelectionRevision == selectionRevision &&
+            observedSelectedIndex == state.SelectedIndex)
+        {
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Sound,
+                DevToolPresentationOutcome.CacheHit);
+            return;
+        }
+
+        // Selection-only changes never touch resource discovery or model capture. Clone the retained
+        // immutable array and replace only the old/new selected rows; every other row and all sample
+        // metadata keep reference identity.
+        if (modelStable)
+        {
+            PublishSelectionOnly(state.SelectedIndex, selectionRevision);
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Sound,
+                DevToolPresentationOutcome.PartialRebuild);
+            return;
+        }
+
+        // Resource discovery is independent from mutable room sound values. A volume/position edit
+        // must not rescan the sample catalog when SoundPage.fileNames is still the same authoritative
+        // resource set.
+        bool resourceCatalogStable =
+            sameIdentity &&
+            ReferenceEquals(observedFileNames, fileNames) &&
+            current.SampleEntries != null &&
+            current.Samples != null;
+
+        EditorSoundSampleSnapshot[] sampleEntries;
+        string[] samples;
+        if (resourceCatalogStable)
+        {
+            sampleEntries = current.SampleEntries;
+            samples = current.Samples;
+        }
+        else
+        {
+            sampleEntries = SoundSampleCatalog.Refresh(page);
+            samples = new string[sampleEntries.Length];
+            for (int i = 0; i < sampleEntries.Length; i++)
+                samples[i] = sampleEntries[i].Sample;
+        }
+
         SoundGroupLibrary.EnsureLoaded();
 
         EditorSoundSnapshot[] sounds = new EditorSoundSnapshot[count];
@@ -166,9 +220,6 @@ public static class SoundEditorPresentationHub
             };
         }
 
-        string[] samples = new string[sampleEntries.Length];
-        for (int i = 0; i < sampleEntries.Length; i++) samples[i] = sampleEntries[i].Sample;
-
         current = new EditorSoundPresentationSnapshot
         {
             Available = true,
@@ -186,9 +237,70 @@ public static class SoundEditorPresentationHub
         observedPage = page;
         observedFileNames = fileNames;
         observedRevision = revision;
+        observedSelectionRevision = selectionRevision;
         observedSoundCount = count;
         observedSelectedIndex = state.SelectedIndex;
+
+        DevToolPerformanceMonitor.RecordPresentation(
+            DevToolPresentationChannel.Sound,
+            resourceCatalogStable
+                ? DevToolPresentationOutcome.PartialRebuild
+                : DevToolPresentationOutcome.FullRebuild);
     }
+
+    private static void PublishSelectionOnly(int selectedIndex, long selectionRevision)
+    {
+        EditorSoundSnapshot[] source = current.Sounds ?? Array.Empty<EditorSoundSnapshot>();
+        EditorSoundSnapshot[] next = null;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorSoundSnapshot sound = source[i];
+            bool selected = i == selectedIndex;
+            if (sound.Selected == selected) continue;
+
+            next ??= (EditorSoundSnapshot[])source.Clone();
+            next[i] = CloneWithSelection(sound, selected);
+        }
+
+        current = new EditorSoundPresentationSnapshot
+        {
+            Available = current.Available,
+            RoomKey = current.RoomKey,
+            BackgroundDroneVolume = current.BackgroundDroneVolume,
+            NoThreatDroneVolume = current.NoThreatDroneVolume,
+            Samples = current.Samples,
+            SampleEntries = current.SampleEntries,
+            Sounds = next ?? source,
+            SelectedIndex = selectedIndex
+        };
+
+        observedSelectionRevision = selectionRevision;
+        observedSelectedIndex = selectedIndex;
+    }
+
+    private static EditorSoundSnapshot CloneWithSelection(EditorSoundSnapshot sound, bool selected) => new()
+    {
+        Index = sound.Index,
+        Type = sound.Type,
+        Sample = sound.Sample,
+        Inherited = sound.Inherited,
+        OverWrite = sound.OverWrite,
+        Volume = sound.Volume,
+        Pitch = sound.Pitch,
+        Doppler = sound.Doppler,
+        Taper = sound.Taper,
+        X = sound.X,
+        Y = sound.Y,
+        Radius = sound.Radius,
+        DirectionX = sound.DirectionX,
+        DirectionY = sound.DirectionY,
+        Selected = selected,
+        ResourceAvailable = sound.ResourceAvailable,
+        ResourceSourceKind = sound.ResourceSourceKind,
+        ResourceSourceName = sound.ResourceSourceName,
+        ResourceSourceId = sound.ResourceSourceId
+    };
 
     internal static void Clear()
     {
@@ -198,6 +310,7 @@ public static class SoundEditorPresentationHub
         observedPage = null;
         observedFileNames = null;
         observedRevision = 0L;
+        observedSelectionRevision = 0L;
         observedSoundCount = -1;
         observedSelectedIndex = int.MinValue;
     }
@@ -224,8 +337,6 @@ public enum SoundEditorCommandKind
 
 public readonly struct SoundEditorCommand
 {
-    // Preserve the original constructor signature for the separately-built RWImGui frontend and
-    // any third-party integration already compiled against DryCycle.dll.
     public SoundEditorCommand(
         SoundEditorCommandKind kind,
         int index = -1,
@@ -243,7 +354,6 @@ public readonly struct SoundEditorCommand
         Indices = Array.Empty<int>();
     }
 
-    // Batch commands use a distinct overload so the legacy constructor above remains binary-stable.
     public SoundEditorCommand(
         SoundEditorCommandKind kind,
         int[] indices,
@@ -297,7 +407,6 @@ public static class SoundEditorCommandQueue
                     case SoundEditorCommandKind.Select:
                         SoundEditorActions.Select(session, command.Index);
                         changed = (state?.SelectedIndex ?? -1) != selectedBefore;
-                        sceneCommand = true;
                         break;
                     case SoundEditorCommandKind.Create:
                         changed = SoundEditorActions.Create(session, command.Text, command.SecondaryIndex);
@@ -310,7 +419,6 @@ public static class SoundEditorCommandQueue
                             command.SecondaryIndex,
                             command.Key,
                             command.Index);
-                        // Destination 1 is group-only; 0/2 can change the room scene.
                         sceneCommand = command.Index != 1;
                         break;
                     case SoundEditorCommandKind.Delete:
@@ -363,16 +471,12 @@ public static class SoundEditorCommandQueue
                     continue;
 
                 int soundCountAfter = session?.RoomSettings?.ambientSounds?.Count ?? 0;
-                int selectedAfter = state?.SelectedIndex ?? -1;
-                bool observableSceneChange = changed ||
-                                             soundCountAfter != soundCountBefore ||
-                                             selectedAfter != selectedBefore;
+                bool observableModelChange = changed || soundCountAfter != soundCountBefore;
 
-                // Successful model edits normally create history, and CorePresentation consumes that
-                // authoritative revision once per update. Selection and compatibility-success paths
-                // can change the visible Sound snapshot without a history entry; retain a direct
-                // workspace dirty signal only for those cases.
-                if (observableSceneChange && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                // Pure selection is carried by SoundEditorState.Revision and never dirties the model.
+                // Compatibility-success paths that change room sound data without creating history
+                // still retain one direct workspace invalidation as a safety fallback.
+                if (observableModelChange && (session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistorySceneDirty = true;
             }
             catch (Exception error)
