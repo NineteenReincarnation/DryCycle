@@ -228,11 +228,11 @@ internal static class RelationshipEditorActions
         {
             if (from == null || to == null) return null;
 
+            CreatureTemplate.Relationship relationship = default;
             bool present =
                 RelationshipPage.changedRelationships.TryGetValue(from, out var changed) &&
                 changed != null &&
-                changed.TryGetValue(to, out CreatureTemplate.Relationship relationship) &&
-                relationship != null;
+                changed.TryGetValue(to, out relationship);
 
             return new SingleRelationshipStateSnapshot(
                 from,
