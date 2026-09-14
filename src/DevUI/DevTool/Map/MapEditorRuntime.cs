@@ -81,18 +81,34 @@ public static class MapEditorPresentationHub
         internal bool AmbiguousPair;
     }
 
-    // Revision invalidation is the normal fast path. The full semantic fingerprint remains as a
-    // bounded compatibility audit for external code that mutates map data without using DryCycle's
-    // commands. At 40 FPS this checks roughly every 0.75 s on otherwise completely stable maps.
+    private readonly struct MapFingerprints
+    {
+        internal MapFingerprints(ulong presentation, ulong topology)
+        {
+            Presentation = presentation;
+            Topology = topology;
+        }
+
+        internal ulong Presentation { get; }
+        internal ulong Topology { get; }
+    }
+
+    // Revision invalidation is the normal fast path. The semantic scan remains as a bounded
+    // compatibility audit for external code that mutates MapPage/AbstractRoom directly without
+    // participating in DryCycle's revision protocol. At 40 FPS this runs roughly every 0.75 s on
+    // otherwise stable maps.
     private const int IntegrityAuditInterval = 30;
 
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
+    private static readonly Dictionary<int, EditorMapRoomNodeSnapshot[]> retainedNodes = new();
     private static EditorSession observedSession;
     private static MapPage observedPage;
     private static global::World observedWorld;
     private static long observedRevision;
-    private static ulong observedFingerprint;
+    private static ulong observedPresentationFingerprint;
+    private static ulong observedTopologyFingerprint;
     private static int observedWorldTextRevision = int.MinValue;
+    private static int observedWorldTopologyRevision = int.MinValue;
     private static int observedCurrentRoomIndex = int.MinValue;
     private static int observedSelectedRoomIndex = int.MinValue;
     private static int framesUntilIntegrityAudit = IntegrityAuditInterval;
@@ -105,10 +121,7 @@ public static class MapEditorPresentationHub
         if (session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page || page.world == null)
         {
             if (retainedValid || !ReferenceEquals(current, EditorMapPresentationSnapshot.Empty))
-            {
-                current = EditorMapPresentationSnapshot.Empty;
-                ResetRetainedState();
-            }
+                Clear();
             return;
         }
 
@@ -118,67 +131,78 @@ public static class MapEditorPresentationHub
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
         int worldTextRevision = WorldTextRegistry.Revision;
+        int worldTopologyRevision = WorldTopologyRegistry.Revision;
         int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
         int selectedRoomIndex = state?.SelectedRoomIndex ?? -1;
 
-        bool fastStable =
+        bool sameIdentity =
             retainedValid &&
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedPage, page) &&
             ReferenceEquals(observedWorld, page.world) &&
+            current.Available;
+        bool modelRevisionsStable =
+            sameIdentity &&
             observedRevision == revision &&
             observedWorldTextRevision == worldTextRevision &&
-            observedCurrentRoomIndex == currentRoomIndex &&
-            observedSelectedRoomIndex == selectedRoomIndex &&
-            current.Available;
+            observedWorldTopologyRevision == worldTopologyRevision;
+        bool flagsChanged =
+            sameIdentity &&
+            (observedCurrentRoomIndex != currentRoomIndex ||
+             observedSelectedRoomIndex != selectedRoomIndex);
 
-        ulong fingerprint;
-        if (fastStable)
+        // Selection/current-room flags are presentation-only. When all authoritative model revisions
+        // are stable, update at most the affected room records and reuse nodes/connections without a
+        // semantic map scan. The periodic audit still runs on schedule to catch opaque writers.
+        if (modelRevisionsStable)
         {
             framesUntilIntegrityAudit--;
             if (framesUntilIntegrityAudit > 0)
-                return;
-
-            framesUntilIntegrityAudit = IntegrityAuditInterval;
-            fingerprint = ComputePresentationFingerprint(session, page, state);
-            if (observedFingerprint == fingerprint)
-                return;
-        }
-        else
-        {
-            framesUntilIntegrityAudit = IntegrityAuditInterval;
-            fingerprint = ComputePresentationFingerprint(session, page, state);
-
-            // A revision can be conservatively invalidated by an opaque compatibility writer even
-            // when no semantic value changed. Preserve the existing fingerprint short-circuit so
-            // such a dirty signal does not force allocation of the full room/connection graph.
-            if (retainedValid &&
-                ReferenceEquals(observedSession, session) &&
-                ReferenceEquals(observedPage, page) &&
-                ReferenceEquals(observedWorld, page.world) &&
-                observedFingerprint == fingerprint &&
-                observedWorldTextRevision == worldTextRevision &&
-                current.Available)
             {
-                observedRevision = revision;
-                observedCurrentRoomIndex = currentRoomIndex;
-                observedSelectedRoomIndex = selectedRoomIndex;
+                if (flagsChanged)
+                    PublishRoomFlagsOnly(page.world, state, currentRoomIndex);
                 return;
             }
+
+            framesUntilIntegrityAudit = IntegrityAuditInterval;
+            MapFingerprints audit = ComputeFingerprints(page);
+            if (observedPresentationFingerprint == audit.Presentation &&
+                observedTopologyFingerprint == audit.Topology)
+            {
+                if (flagsChanged)
+                    PublishRoomFlagsOnly(page.world, state, currentRoomIndex);
+                return;
+            }
+        }
+
+        framesUntilIntegrityAudit = IntegrityAuditInterval;
+        MapFingerprints fingerprints = ComputeFingerprints(page);
+
+        bool topologyChanged =
+            !sameIdentity ||
+            observedTopologyFingerprint != fingerprints.Topology ||
+            observedWorldTextRevision != worldTextRevision ||
+            observedWorldTopologyRevision != worldTopologyRevision;
+        bool roomPresentationChanged =
+            !sameIdentity ||
+            observedPresentationFingerprint != fingerprints.Presentation ||
+            flagsChanged;
+
+        // An opaque compatibility backend may conservatively bump the workspace revision without
+        // changing any value. Consume that edge without allocating a new immutable object graph.
+        if (!topologyChanged && !roomPresentationChanged)
+        {
+            observedRevision = revision;
+            return;
         }
 
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
         Dictionary<string, int> roomIndexByName = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> disabled = new(StringComparer.Ordinal);
-        if (page.world.DisabledMapRooms != null)
-        {
-            for (int i = 0; i < page.world.DisabledMapRooms.Count; i++)
-            {
-                string name = page.world.DisabledMapRooms[i];
-                if (!string.IsNullOrEmpty(name)) disabled.Add(name);
-            }
-        }
+        HashSet<string> disabled = BuildDisabledSet(page.world);
+
+        if (topologyChanged)
+            retainedNodes.Clear();
 
         for (int i = 0; i < page.subNodes.Count; i++)
         {
@@ -186,6 +210,14 @@ public static class MapEditorPresentationHub
             AbstractRoom room = panel.roomRep.room;
             roomIndices.Add(room.index);
             if (!string.IsNullOrWhiteSpace(room.name)) roomIndexByName[room.name] = room.index;
+
+            EditorMapRoomNodeSnapshot[] nodes;
+            if (topologyChanged || !retainedNodes.TryGetValue(room.index, out nodes))
+            {
+                nodes = BuildNodes(room);
+                retainedNodes[room.index] = nodes;
+            }
+
             rooms.Add(new EditorMapRoomSnapshot
             {
                 RoomIndex = room.index,
@@ -198,7 +230,7 @@ public static class MapEditorPresentationHub
                 Disabled = disabled.Contains(room.name ?? string.Empty),
                 CurrentRoom = room.index == currentRoomIndex,
                 Selected = room.index == state.SelectedRoomIndex,
-                Nodes = BuildNodes(room)
+                Nodes = nodes
             });
         }
 
@@ -206,14 +238,23 @@ public static class MapEditorPresentationHub
         if (state.SelectedRoomIndex >= 0 && !roomIndices.Contains(state.SelectedRoomIndex))
         {
             state.SelectedRoomIndex = -1;
+            selectedRoomIndex = -1;
             correctedSelection = true;
         }
 
-        List<EditorMapConnectionSnapshot> connections = BuildConnections(
-            page.world,
-            rooms,
-            roomIndices,
-            roomIndexByName);
+        EditorMapConnectionSnapshot[] connections;
+        if (topologyChanged || current.Connections == null)
+        {
+            connections = BuildConnections(
+                page.world,
+                rooms,
+                roomIndices,
+                roomIndexByName).ToArray();
+        }
+        else
+        {
+            connections = current.Connections;
+        }
 
         current = new EditorMapPresentationSnapshot
         {
@@ -221,81 +262,162 @@ public static class MapEditorPresentationHub
             RegionName = page.world.name ?? string.Empty,
             SelectedRoomIndex = state.SelectedRoomIndex,
             Rooms = rooms.ToArray(),
-            Connections = connections.ToArray()
+            Connections = connections
         };
 
         observedSession = session;
         observedPage = page;
         observedWorld = page.world;
         observedRevision = revision;
-        observedFingerprint = correctedSelection
-            ? ComputePresentationFingerprint(session, page, state)
-            : fingerprint;
-        // BuildConnections may lazily load world.txt for exact target-node resolution. Capture the
-        // post-build revision so that first load does not cause an unnecessary second rebuild.
+        if (correctedSelection)
+            fingerprints = ComputeFingerprints(page);
+        observedPresentationFingerprint = fingerprints.Presentation;
+        observedTopologyFingerprint = fingerprints.Topology;
+        // BuildConnections may lazily load world.txt/WorldTopology.json. Capture post-build
+        // revisions so first-load initialization does not cause an unnecessary second rebuild.
         observedWorldTextRevision = WorldTextRegistry.Revision;
+        observedWorldTopologyRevision = WorldTopologyRegistry.Revision;
         observedCurrentRoomIndex = currentRoomIndex;
         observedSelectedRoomIndex = state.SelectedRoomIndex;
         framesUntilIntegrityAudit = IntegrityAuditInterval;
         retainedValid = true;
     }
 
+    private static HashSet<string> BuildDisabledSet(global::World world)
+    {
+        HashSet<string> disabled = new(StringComparer.Ordinal);
+        if (world?.DisabledMapRooms == null) return disabled;
+        for (int i = 0; i < world.DisabledMapRooms.Count; i++)
+        {
+            string name = world.DisabledMapRooms[i];
+            if (!string.IsNullOrEmpty(name)) disabled.Add(name);
+        }
+        return disabled;
+    }
+
+    private static void PublishRoomFlagsOnly(global::World world, MapEditorState state, int currentRoomIndex)
+    {
+        EditorMapRoomSnapshot[] source = current.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        EditorMapRoomSnapshot[] next = null;
+        int selectedRoomIndex = state?.SelectedRoomIndex ?? -1;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorMapRoomSnapshot room = source[i];
+            bool nextCurrent = room.RoomIndex == currentRoomIndex;
+            bool nextSelected = room.RoomIndex == selectedRoomIndex;
+            if (room.CurrentRoom == nextCurrent && room.Selected == nextSelected)
+                continue;
+
+            next ??= (EditorMapRoomSnapshot[])source.Clone();
+            next[i] = new EditorMapRoomSnapshot
+            {
+                RoomIndex = room.RoomIndex,
+                Name = room.Name,
+                X = room.X,
+                Y = room.Y,
+                Layer = room.Layer,
+                Subregion = room.Subregion,
+                OffScreenDen = room.OffScreenDen,
+                Disabled = room.Disabled,
+                CurrentRoom = nextCurrent,
+                Selected = nextSelected,
+                Nodes = room.Nodes
+            };
+        }
+
+        if (next != null)
+        {
+            current = new EditorMapPresentationSnapshot
+            {
+                Available = true,
+                RegionName = world?.name ?? current.RegionName,
+                SelectedRoomIndex = selectedRoomIndex,
+                Rooms = next,
+                Connections = current.Connections
+            };
+        }
+        else if (current.SelectedRoomIndex != selectedRoomIndex)
+        {
+            current = new EditorMapPresentationSnapshot
+            {
+                Available = true,
+                RegionName = world?.name ?? current.RegionName,
+                SelectedRoomIndex = selectedRoomIndex,
+                Rooms = source,
+                Connections = current.Connections
+            };
+        }
+
+        observedCurrentRoomIndex = currentRoomIndex;
+        observedSelectedRoomIndex = selectedRoomIndex;
+    }
+
     /// <summary>
-    /// Allocation-free semantic signature retained as an integrity audit. Normal stable frames are
-    /// filtered by revisions before reaching this scan; the audit periodically detects external
-    /// compatibility writes that cannot participate in DryCycle's revision protocol.
+    /// Computes visual-room and topology signatures in one pass. Selection/current-room state is
+    /// tracked explicitly and is intentionally excluded so changing those flags does not require a
+    /// full room scan. The topology signature excludes room positions/layers/subregions, allowing
+    /// visual map edits to retain exact node arrays and the expensive connection graph.
     /// </summary>
-    private static ulong ComputePresentationFingerprint(
-        EditorSession session,
-        MapPage page,
-        MapEditorState state)
+    private static MapFingerprints ComputeFingerprints(MapPage page)
     {
         unchecked
         {
-            ulong hash = 1469598103934665603UL;
-            hash = Mix(hash, StringHash(page.world?.name));
-            hash = Mix(hash, state?.SelectedRoomIndex ?? -1);
-            hash = Mix(hash, session?.Room?.abstractRoom?.index ?? -1);
+            ulong presentation = 1469598103934665603UL;
+            ulong topology = 1469598103934665603UL;
+            int worldNameHash = StringHash(page.world?.name);
+            presentation = Mix(presentation, worldNameHash);
+            topology = Mix(topology, worldNameHash);
 
             var disabled = page.world?.DisabledMapRooms;
-            hash = Mix(hash, disabled?.Count ?? 0);
+            presentation = Mix(presentation, disabled?.Count ?? 0);
             if (disabled != null)
             {
                 for (int i = 0; i < disabled.Count; i++)
-                    hash = Mix(hash, StringHash(disabled[i]));
+                    presentation = Mix(presentation, StringHash(disabled[i]));
             }
 
-            hash = Mix(hash, page.subNodes?.Count ?? 0);
-            if (page.subNodes == null) return hash;
+            int subNodeCount = page.subNodes?.Count ?? 0;
+            presentation = Mix(presentation, subNodeCount);
+            topology = Mix(topology, subNodeCount);
+            if (page.subNodes == null)
+                return new MapFingerprints(presentation, topology);
+
             for (int i = 0; i < page.subNodes.Count; i++)
             {
                 if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
                 AbstractRoom room = panel.roomRep.room;
-                hash = Mix(hash, room.index);
-                hash = Mix(hash, StringHash(room.name));
-                hash = Mix(hash, panel.devPos.x.GetHashCode());
-                hash = Mix(hash, panel.devPos.y.GetHashCode());
-                hash = Mix(hash, panel.layer);
-                hash = Mix(hash, StringHash(room.subregionName));
-                hash = Mix(hash, room.offScreenDen ? 1 : 0);
+                int roomNameHash = StringHash(room.name);
+
+                presentation = Mix(presentation, room.index);
+                presentation = Mix(presentation, roomNameHash);
+                presentation = Mix(presentation, panel.devPos.x.GetHashCode());
+                presentation = Mix(presentation, panel.devPos.y.GetHashCode());
+                presentation = Mix(presentation, panel.layer);
+                presentation = Mix(presentation, StringHash(room.subregionName));
+                presentation = Mix(presentation, room.offScreenDen ? 1 : 0);
+
+                topology = Mix(topology, room.index);
+                topology = Mix(topology, roomNameHash);
 
                 AbstractRoomNode[] nodes = room.nodes;
-                hash = Mix(hash, nodes?.Length ?? 0);
+                topology = Mix(topology, nodes?.Length ?? 0);
                 if (nodes != null)
                 {
                     for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
-                        hash = Mix(hash, StringHash(nodes[nodeIndex].type?.value));
+                        topology = Mix(topology, StringHash(nodes[nodeIndex].type?.value));
                 }
 
                 int[] connections = room.connections;
-                hash = Mix(hash, connections?.Length ?? 0);
+                topology = Mix(topology, connections?.Length ?? 0);
                 if (connections != null)
                 {
                     for (int connectionIndex = 0; connectionIndex < connections.Length; connectionIndex++)
-                        hash = Mix(hash, connections[connectionIndex]);
+                        topology = Mix(topology, connections[connectionIndex]);
                 }
             }
-            return hash;
+
+            return new MapFingerprints(presentation, topology);
         }
     }
 
@@ -307,12 +429,15 @@ public static class MapEditorPresentationHub
 
     private static void ResetRetainedState()
     {
+        retainedNodes.Clear();
         observedSession = null;
         observedPage = null;
         observedWorld = null;
         observedRevision = 0L;
-        observedFingerprint = 0UL;
+        observedPresentationFingerprint = 0UL;
+        observedTopologyFingerprint = 0UL;
         observedWorldTextRevision = int.MinValue;
+        observedWorldTopologyRevision = int.MinValue;
         observedCurrentRoomIndex = int.MinValue;
         observedSelectedRoomIndex = int.MinValue;
         framesUntilIntegrityAudit = IntegrityAuditInterval;
