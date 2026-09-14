@@ -4,6 +4,7 @@ using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.Preview;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Room;
@@ -289,9 +290,8 @@ internal static class RoomEditorActions
     internal static bool DeleteRoomEffect(EditorSession session, int index)
     {
         RoomSettings settings = session?.RoomSettings;
-        if (settings?.effects == null || index < 0 || index >= settings.effects.Count) return false;
-        RoomSettings.RoomEffect effect = settings.effects[index];
-        if (effect == null || effect.inherited) return false;
+        if (!TryResolveEffect(settings, index, out RoomSettings.RoomEffect effect) || effect.inherited)
+            return false;
 
         IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
         if (before == null) return false;
@@ -309,9 +309,8 @@ internal static class RoomEditorActions
     internal static bool SetRoomEffectAmount(EditorSession session, int effectIndex, int sliderIndex, float value)
     {
         RoomSettings settings = session?.RoomSettings;
-        if (settings?.effects == null || effectIndex < 0 || effectIndex >= settings.effects.Count) return false;
-        RoomSettings.RoomEffect effect = settings.effects[effectIndex];
-        if (effect == null || effect.inherited) return false;
+        if (!TryResolveEffect(settings, effectIndex, out RoomSettings.RoomEffect effect) || effect.inherited)
+            return false;
 
         int sliderCount = Math.Max(1, RoomSettings.RoomEffect.GetSliderCount(effect.type));
         if (sliderIndex < 0 || sliderIndex >= sliderCount) return false;
@@ -574,6 +573,34 @@ internal static class RoomEditorActions
         if (key == RoomSettingKeys.TerrainFadePalette)
             return RoomPaletteFadeStateSnapshot.Capture(settings, terrain: true);
         return RoomSettingStateSnapshot.Capture(settings, key);
+    }
+
+    private static bool TryResolveEffect(
+        RoomSettings settings,
+        int logicalIndex,
+        out RoomSettings.RoomEffect effect)
+    {
+        effect = null;
+        if (settings?.effects == null || logicalIndex < 0)
+            return false;
+
+        int currentLogicalIndex = 0;
+        for (int i = 0; i < settings.effects.Count; i++)
+        {
+            RoomSettings.RoomEffect candidate = settings.effects[i];
+            if (EffectPreviewRuntime.IsPreviewEffect(candidate))
+                continue;
+
+            if (currentLogicalIndex == logicalIndex)
+            {
+                effect = candidate;
+                return effect != null;
+            }
+
+            currentLogicalIndex++;
+        }
+
+        return false;
     }
 
     private static bool SnapshotsDiffer(IEditorStateSnapshot before, IEditorStateSnapshot after) =>
