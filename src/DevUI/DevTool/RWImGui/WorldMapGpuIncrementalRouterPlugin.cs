@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -43,6 +44,8 @@ internal static class WorldMapGpuIncrementalRouter
         OrigBuildRoutes orig,
         IReadOnlyList<WorldConnectionRouter.Request> requests,
         IReadOnlyList<WorldConnectionRouter.Obstacle> obstacles);
+    private delegate int StaticIntGetter();
+    private delegate void StaticIntSetter(int value);
 
     private sealed class RetainedRoute
     {
@@ -77,10 +80,19 @@ internal static class WorldMapGpuIncrementalRouter
     private static readonly Dictionary<string, RetainedRoute> retained = new(StringComparer.Ordinal);
     private static readonly Dictionary<int, WorldConnectionRouter.Obstacle> previousObstacles = new();
 
+    // Drag routing is a Unity-main-thread path. Keep its temporary topology worksets retained so a
+    // mouse drag does not manufacture Dictionary/HashSet/List garbage every rendered frame.
+    private static readonly Dictionary<int, WorldConnectionRouter.Obstacle> currentObstacles = new();
+    private static readonly HashSet<int> changedRooms = new();
+    private static readonly List<int> dirtyIndices = new();
+    private static readonly List<WorldConnectionRouter.Request> dirtyRequests = new();
+    private static readonly HashSet<string> aliveIds = new(StringComparer.Ordinal);
+    private static readonly List<string> staleIds = new();
+
     private static ManualLogSource log;
     private static IDisposable buildRoutesHook;
-    private static FieldInfo draggingRoomField;
-    private static FieldInfo sceneTopologyHashField;
+    private static StaticIntGetter readDraggingRoom;
+    private static StaticIntSetter writeSceneTopologyHash;
     private static bool enabled;
     private static bool forceFullNext;
     private static int previousDraggingRoom = -1;
@@ -103,10 +115,15 @@ internal static class WorldMapGpuIncrementalRouter
                     typeof(IReadOnlyList<WorldConnectionRouter.Obstacle>)
                 },
                 null);
-            draggingRoomField = typeof(WorldMapView).GetField("draggingRoom", flags);
-            sceneTopologyHashField = typeof(WorldMapGpuScene).GetField("lastTopologyHash", flags);
+            FieldInfo draggingRoomField = typeof(WorldMapView).GetField("draggingRoom", flags);
+            FieldInfo sceneTopologyHashField = typeof(WorldMapGpuScene).GetField("lastTopologyHash", flags);
             if (buildRoutes == null || draggingRoomField == null || sceneTopologyHashField == null)
                 throw new MissingMemberException("GPU World Map incremental route targets were not found.");
+
+            readDraggingRoom = BuildStaticIntGetter(draggingRoomField, "ReadWorldMapDraggingRoom");
+            writeSceneTopologyHash = BuildStaticIntSetter(sceneTopologyHashField, "WriteWorldMapTopologyHash");
+            if (readDraggingRoom == null || writeSceneTopologyHash == null)
+                throw new MissingMemberException("GPU World Map incremental route field accessors were not created.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             if (hookType == null)
@@ -132,8 +149,14 @@ internal static class WorldMapGpuIncrementalRouter
         DisposeHook(ref buildRoutesHook);
         retained.Clear();
         previousObstacles.Clear();
-        draggingRoomField = null;
-        sceneTopologyHashField = null;
+        currentObstacles.Clear();
+        changedRooms.Clear();
+        dirtyIndices.Clear();
+        dirtyRequests.Clear();
+        aliveIds.Clear();
+        staleIds.Clear();
+        readDraggingRoom = null;
+        writeSceneTopologyHash = null;
         forceFullNext = false;
         previousDraggingRoom = -1;
         enabled = false;
@@ -149,7 +172,7 @@ internal static class WorldMapGpuIncrementalRouter
             // A drag uses local incremental routing for responsiveness. Make the next retained scene
             // update run one global route pass so lane/crossing costs settle using the final layout.
             forceFullNext = true;
-            try { sceneTopologyHashField?.SetValue(null, int.MinValue); }
+            try { writeSceneTopologyHash?.Invoke(int.MinValue); }
             catch { }
         }
         previousDraggingRoom = dragging;
@@ -170,24 +193,27 @@ internal static class WorldMapGpuIncrementalRouter
             return BuildFullAndStore(orig, requests, obstacles);
         }
 
-        Dictionary<int, WorldConnectionRouter.Obstacle> currentObstacles = BuildObstacleIndex(obstacles);
-        HashSet<int> changedRooms = FindChangedRooms(currentObstacles);
-        if (changedRooms.Count == 0)
+        Dictionary<int, WorldConnectionRouter.Obstacle> current = BuildObstacleIndex(obstacles);
+        HashSet<int> changed = FindChangedRooms(current);
+        if (changed.Count == 0)
         {
-            RememberObstacles(currentObstacles);
+            RememberObstacles(current);
             return ReuseAll(requests);
         }
 
-        List<int> dirtyIndices = new();
-        List<WorldConnectionRouter.Request> dirtyRequests = new();
+        dirtyIndices.Clear();
+        dirtyRequests.Clear();
+        EnsureListCapacity(dirtyIndices, requests.Count);
+        EnsureListCapacity(dirtyRequests, requests.Count);
+
         for (int i = 0; i < requests.Count; i++)
         {
             WorldConnectionRouter.Request request = requests[i];
             if (request == null || string.IsNullOrEmpty(request.Id) ||
                 !retained.TryGetValue(request.Id, out RetainedRoute cached) ||
                 RequestChanged(request, cached) ||
-                changedRooms.Contains(request.StartRoom) || changedRooms.Contains(request.EndRoom) ||
-                RouteTouchesChangedObstacle(cached, changedRooms, currentObstacles))
+                changed.Contains(request.StartRoom) || changed.Contains(request.EndRoom) ||
+                RouteTouchesChangedObstacle(cached, changed, current))
             {
                 dirtyIndices.Add(i);
                 dirtyRequests.Add(request);
@@ -196,7 +222,7 @@ internal static class WorldMapGpuIncrementalRouter
 
         if (dirtyRequests.Count == 0)
         {
-            RememberObstacles(currentObstacles);
+            RememberObstacles(current);
             return ReuseAll(requests);
         }
 
@@ -239,7 +265,7 @@ internal static class WorldMapGpuIncrementalRouter
             }
         }
 
-        RememberObstacles(currentObstacles);
+        RememberObstacles(current);
         PruneTo(requests);
         return result;
     }
@@ -349,33 +375,34 @@ internal static class WorldMapGpuIncrementalRouter
     private static Dictionary<int, WorldConnectionRouter.Obstacle> BuildObstacleIndex(
         IReadOnlyList<WorldConnectionRouter.Obstacle> obstacles)
     {
-        Dictionary<int, WorldConnectionRouter.Obstacle> result = new(obstacles?.Count ?? 0);
-        if (obstacles == null) return result;
-        for (int i = 0; i < obstacles.Count; i++) result[obstacles[i].RoomIndex] = obstacles[i];
-        return result;
+        currentObstacles.Clear();
+        if (obstacles == null) return currentObstacles;
+        for (int i = 0; i < obstacles.Count; i++)
+            currentObstacles[obstacles[i].RoomIndex] = obstacles[i];
+        return currentObstacles;
     }
 
     private static HashSet<int> FindChangedRooms(
         Dictionary<int, WorldConnectionRouter.Obstacle> current)
     {
-        HashSet<int> changed = new();
+        changedRooms.Clear();
         foreach (KeyValuePair<int, WorldConnectionRouter.Obstacle> pair in current)
         {
             if (!previousObstacles.TryGetValue(pair.Key, out WorldConnectionRouter.Obstacle old) ||
                 !ObstacleEqual(old, pair.Value))
-                changed.Add(pair.Key);
+                changedRooms.Add(pair.Key);
         }
         foreach (int room in previousObstacles.Keys)
-            if (!current.ContainsKey(room)) changed.Add(room);
-        return changed;
+            if (!current.ContainsKey(room)) changedRooms.Add(room);
+        return changedRooms;
     }
 
     private static bool RouteTouchesChangedObstacle(
         RetainedRoute route,
-        HashSet<int> changedRooms,
+        HashSet<int> changed,
         Dictionary<int, WorldConnectionRouter.Obstacle> current)
     {
-        foreach (int room in changedRooms)
+        foreach (int room in changed)
         {
             if (previousObstacles.TryGetValue(room, out WorldConnectionRouter.Obstacle old) &&
                 route.Bounds.Intersects(old.Min, old.Max, BoundsPadding))
@@ -395,7 +422,8 @@ internal static class WorldMapGpuIncrementalRouter
 
     private static RouteBounds ComputeBounds(Num.Vector2[] points)
     {
-        if (points == null || points.Length == 0) return new RouteBounds(Num.Vector2.Zero, Num.Vector2.Zero);
+        if (points == null || points.Length == 0)
+            return new RouteBounds(Num.Vector2.Zero, Num.Vector2.Zero);
         Num.Vector2 min = points[0];
         Num.Vector2 max = points[0];
         for (int i = 1; i < points.Length; i++)
@@ -415,19 +443,57 @@ internal static class WorldMapGpuIncrementalRouter
 
     private static void PruneTo(IReadOnlyList<WorldConnectionRouter.Request> requests)
     {
-        HashSet<string> alive = new(StringComparer.Ordinal);
+        aliveIds.Clear();
+        staleIds.Clear();
         for (int i = 0; i < requests.Count; i++)
-            if (!string.IsNullOrEmpty(requests[i]?.Id)) alive.Add(requests[i].Id);
-        if (alive.Count == retained.Count) return;
-        List<string> stale = new();
-        foreach (string id in retained.Keys) if (!alive.Contains(id)) stale.Add(id);
-        for (int i = 0; i < stale.Count; i++) retained.Remove(stale[i]);
+            if (!string.IsNullOrEmpty(requests[i]?.Id)) aliveIds.Add(requests[i].Id);
+        if (aliveIds.Count == retained.Count) return;
+
+        foreach (string id in retained.Keys)
+            if (!aliveIds.Contains(id)) staleIds.Add(id);
+        for (int i = 0; i < staleIds.Count; i++) retained.Remove(staleIds[i]);
     }
 
     private static int ReadDraggingRoom()
     {
-        try { return draggingRoomField?.GetValue(null) is int value ? value : -1; }
+        try { return readDraggingRoom?.Invoke() ?? -1; }
         catch { return -1; }
+    }
+
+    private static StaticIntGetter BuildStaticIntGetter(FieldInfo field, string name)
+    {
+        if (field == null || field.FieldType != typeof(int)) return null;
+        DynamicMethod method = new(
+            name,
+            typeof(int),
+            Type.EmptyTypes,
+            typeof(WorldMapGpuIncrementalRouter).Module,
+            true);
+        ILGenerator il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldsfld, field);
+        il.Emit(OpCodes.Ret);
+        return (StaticIntGetter)method.CreateDelegate(typeof(StaticIntGetter));
+    }
+
+    private static StaticIntSetter BuildStaticIntSetter(FieldInfo field, string name)
+    {
+        if (field == null || field.FieldType != typeof(int)) return null;
+        DynamicMethod method = new(
+            name,
+            typeof(void),
+            new[] { typeof(int) },
+            typeof(WorldMapGpuIncrementalRouter).Module,
+            true);
+        ILGenerator il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Stsfld, field);
+        il.Emit(OpCodes.Ret);
+        return (StaticIntSetter)method.CreateDelegate(typeof(StaticIntSetter));
+    }
+
+    private static void EnsureListCapacity<T>(List<T> list, int required)
+    {
+        if (list.Capacity < required) list.Capacity = required;
     }
 
     private static void DisposeHook(ref IDisposable hook)
