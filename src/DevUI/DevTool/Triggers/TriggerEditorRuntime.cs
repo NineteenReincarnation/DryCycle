@@ -115,6 +115,15 @@ public static class TriggerEditorPresentationHub
     private static int eventTypeCount = -1;
     private static int slugcatCount = -1;
 
+    private static EditorSession observedSession;
+    private static global::RoomSettings observedSettings;
+    private static TriggersPage observedPage;
+    private static string[] observedSongNames;
+    private static long observedRevision;
+    private static int observedTriggerCount = -1;
+    private static int observedSelectedIndex = int.MinValue;
+    private static int observedEntranceCount = int.MinValue;
+
     public static EditorTriggerPresentationSnapshot Current => current;
 
     internal static void Publish(EditorSession session)
@@ -122,7 +131,7 @@ public static class TriggerEditorPresentationHub
         if (session?.ToolMode != EditorToolMode.Triggers || session.RoomSettings?.triggers == null ||
             session.Owner?.activePage is not TriggersPage page)
         {
-            current = EditorTriggerPresentationSnapshot.Empty;
+            Clear();
             return;
         }
 
@@ -131,6 +140,30 @@ public static class TriggerEditorPresentationHub
         int count = session.RoomSettings.triggers.Count;
         if (state.SelectedIndex >= count) state.SelectedIndex = count - 1;
         if (state.SelectedIndex < -1) state.SelectedIndex = -1;
+
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session) ||
+            session.Owner.draggedNode != null || page.draggedObject != null)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
+
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Triggers);
+        string[] songNames = page.songNames ?? Array.Empty<string>();
+        int entranceCount = session.Room?.abstractRoom?.connections?.Length ?? 0;
+        bool staticListsStale =
+            triggerTypeCount != ExtEnum<EventTrigger.TriggerType>.values.Count ||
+            eventTypeCount != ExtEnum<TriggeredEvent.EventType>.values.Count ||
+            slugcatCount != ExtEnum<SlugcatStats.Name>.values.Count;
+
+        if (!staticListsStale &&
+            ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedSettings, session.RoomSettings) &&
+            ReferenceEquals(observedPage, page) &&
+            ReferenceEquals(observedSongNames, songNames) &&
+            observedRevision == revision &&
+            observedTriggerCount == count &&
+            observedSelectedIndex == state.SelectedIndex &&
+            observedEntranceCount == entranceCount &&
+            current.Available)
+            return;
 
         EditorTriggerSnapshot[] triggers = new EditorTriggerSnapshot[count];
         for (int i = 0; i < count; i++)
@@ -163,7 +196,7 @@ public static class TriggerEditorPresentationHub
         }
 
         RebuildStaticListsIfNeeded();
-        string[] songs = page.songNames == null ? Array.Empty<string>() : (string[])page.songNames.Clone();
+        string[] songs = songNames.Length == 0 ? Array.Empty<string>() : (string[])songNames.Clone();
         Array.Sort(songs, StringComparer.OrdinalIgnoreCase);
 
         current = new EditorTriggerPresentationSnapshot
@@ -175,11 +208,31 @@ public static class TriggerEditorPresentationHub
             SlugcatNames = slugcatNames,
             Triggers = triggers,
             SelectedIndex = state.SelectedIndex,
-            EntranceCount = session.Room?.abstractRoom?.connections?.Length ?? 0
+            EntranceCount = entranceCount
         };
+
+        observedSession = session;
+        observedSettings = session.RoomSettings;
+        observedPage = page;
+        observedSongNames = songNames;
+        observedRevision = revision;
+        observedTriggerCount = count;
+        observedSelectedIndex = state.SelectedIndex;
+        observedEntranceCount = entranceCount;
     }
 
-    internal static void Clear() => current = EditorTriggerPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorTriggerPresentationSnapshot.Empty;
+        observedSession = null;
+        observedSettings = null;
+        observedPage = null;
+        observedSongNames = null;
+        observedRevision = 0L;
+        observedTriggerCount = -1;
+        observedSelectedIndex = int.MinValue;
+        observedEntranceCount = int.MinValue;
+    }
 
     private static EditorTriggeredEventSnapshot CaptureEvent(TriggeredEvent value)
     {
@@ -356,6 +409,10 @@ public static class TriggerEditorCommandQueue
                         TriggerEditorActions.SetEventValue(session, command.Index, command.Key, command.Value);
                         break;
                 }
+
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
+                if (command.Kind != TriggerEditorCommandKind.Select)
+                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
             }
             catch (Exception error)
             {
