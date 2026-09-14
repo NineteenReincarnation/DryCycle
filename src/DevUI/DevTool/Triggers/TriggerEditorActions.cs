@@ -58,7 +58,6 @@ internal static class TriggerEditorActions
         if (session.ToolMode != EditorToolMode.Triggers) session.SetToolMode(EditorToolMode.Triggers);
         if (session.Owner?.activePage is not TriggersPage page) return false;
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
         int count = session.RoomSettings.triggers.Count;
 
         // Keep the vanilla public construction path so ordinary Rain World hooks from other
@@ -76,7 +75,10 @@ internal static class TriggerEditorActions
             page.Refresh();
         }
 
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        // Creation history is one member changing from absent -> present. Avoid serializing the
+        // complete RoomSettings file twice just to remember one newly-created trigger.
+        IEditorStateSnapshot before = AbsentMemberSnapshots.Trigger(session.RoomSettings, created);
+        IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, created);
         if (SnapshotHistoryEntry.TryCreate(
                 "Create trigger " + typeName,
                 before,
@@ -92,10 +94,12 @@ internal static class TriggerEditorActions
     {
         if (!TryGet(session, index, out EventTrigger trigger)) return false;
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        IEditorStateSnapshot before = SingleTriggerStateSnapshot.Capture(session.RoomSettings, trigger);
+        if (before == null) return false;
+
         session.RoomSettings.triggers.RemoveAt(index);
         RefreshPage(session);
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, trigger);
 
         if (SnapshotHistoryEntry.TryCreate(
                 "Delete trigger " + (trigger.type?.value ?? string.Empty),
@@ -117,7 +121,7 @@ internal static class TriggerEditorActions
     {
         if (!TryGet(session, index, out EventTrigger trigger) || string.IsNullOrEmpty(key)) return false;
 
-        return Mutate(session, "Change trigger " + key, () =>
+        return Mutate(session, trigger, "Change trigger " + key, () =>
         {
             switch (key)
             {
@@ -196,7 +200,7 @@ internal static class TriggerEditorActions
         if (!TryGet(session, index, out EventTrigger trigger) || trigger.slugcats == null || string.IsNullOrEmpty(slugcatName))
             return false;
 
-        return Mutate(session, "Change trigger slugcats", () =>
+        return Mutate(session, trigger, "Change trigger slugcats", () =>
         {
             SlugcatStats.Name name = new(slugcatName, false);
             int found = -1;
@@ -221,7 +225,7 @@ internal static class TriggerEditorActions
         if (!TryGet(session, index, out EventTrigger trigger) || string.IsNullOrEmpty(eventTypeName)) return false;
         if (session.Owner?.activePage is not TriggersPage page) return false;
 
-        return Mutate(session, "Set trigger event " + eventTypeName, () =>
+        return Mutate(session, trigger, "Set trigger event " + eventTypeName, () =>
         {
             TriggerPanel panel = FindPanel(page, trigger);
             TriggeredEvent.EventType eventType = new(eventTypeName, false);
@@ -240,7 +244,7 @@ internal static class TriggerEditorActions
     internal static bool ClearEvent(EditorSession session, int index)
     {
         if (!TryGet(session, index, out EventTrigger trigger) || trigger.tEvent == null) return false;
-        return Mutate(session, "Remove trigger event", () =>
+        return Mutate(session, trigger, "Remove trigger event", () =>
         {
             trigger.tEvent = null;
             return true;
@@ -252,7 +256,7 @@ internal static class TriggerEditorActions
         if (!TryGet(session, index, out EventTrigger trigger) || trigger.tEvent == null || string.IsNullOrEmpty(key))
             return false;
 
-        return Mutate(session, "Change event " + key, () =>
+        return Mutate(session, trigger, "Change event " + key, () =>
         {
             if (trigger.tEvent is MusicEvent music)
                 return SetMusicEventValue(music, key, value);
@@ -391,15 +395,24 @@ internal static class TriggerEditorActions
                  eventType == TriggeredEvent.EventType.ShowProjectedImageEvent) trigger.multiUse = true;
     }
 
-    private static bool Mutate(EditorSession session, string label, Func<bool> mutation, bool refreshPage = true)
+    private static bool Mutate(
+        EditorSession session,
+        EventTrigger target,
+        string label,
+        Func<bool> mutation,
+        bool refreshPage = true)
     {
-        if (session?.RoomSettings == null || mutation == null) return false;
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        if (session?.RoomSettings == null || target == null || mutation == null) return false;
+
+        IEditorStateSnapshot before = SingleTriggerStateSnapshot.Capture(session.RoomSettings, target);
         if (before == null || !mutation()) return false;
         if (refreshPage) RefreshPage(session);
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
-        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+        IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, target);
+
+        if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            return false;
+
+        session.History.Push(entry);
         return true;
     }
 
