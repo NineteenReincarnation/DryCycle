@@ -49,9 +49,11 @@ internal sealed class SoundRoomVolumeStateSnapshot : IEditorStateSnapshot
         SoundPresentationChangeHintHub.MarkRoomValues(session);
 
         // The rebuilt Sound frontend reads RoomSettings directly through its revisioned snapshot.
-        // Refresh hidden vanilla controls only when they actually own presentation.
-        if (!LegacyDevUiQuiescenceController.IsQuiescent(session.Owner) &&
-            session.Owner?.activePage is SoundPage page)
+        // The hidden vanilla page still has retained slider/label state, though, so record it as
+        // stale instead of simply skipping Refresh. Returning to Vanilla/legacy then materializes
+        // the current values exactly once; foreign/custom pages still fall back to immediate Refresh.
+        if (session.Owner?.activePage is SoundPage page &&
+            !LegacyDevUiQuiescenceController.TryDeferRefresh(session))
             page.Refresh();
 
         return true;
