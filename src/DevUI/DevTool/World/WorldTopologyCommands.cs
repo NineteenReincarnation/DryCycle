@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.World;
 
@@ -130,9 +129,6 @@ internal static class WorldTopologyCommandQueue
             return;
         }
 
-        // Manual mapping is also the recovery path for an unresolved parser result. Do not require
-        // both endpoints to already point at each other: an empty Exit may be selected and repaired
-        // by the editor. We only reject stealing an endpoint that belongs to a third room.
         int oldA = ConnectionTarget(roomA, command.NodeA);
         int oldB = ConnectionTarget(roomB, command.NodeB);
         if (oldA >= 0 && oldA != roomB.index)
@@ -393,10 +389,6 @@ internal static class WorldTopologyCommandQueue
         bool validA = roomA != null && IsExit(roomA, edge.A.NodeIndex);
         bool validB = roomB != null && IsExit(roomB, edge.B.NodeIndex);
 
-        // A malformed sidecar mapping must never trap the editor in an uneditable state. If its
-        // endpoint identity is already invalid, discard only the broken sidecar record and leave
-        // world.txt untouched; the presentation layer can immediately fall back to the authoritative
-        // room connection text and re-resolve it.
         if (!validA || !validB)
         {
             if (!WorldTopologyRegistry.RemoveEdge(region, edgeId))
@@ -405,8 +397,10 @@ internal static class WorldTopologyCommandQueue
                 return;
             }
 
+            // RemoveEdge already advances the authoritative WorldTopology semantic revision.
+            // Let MapEditorPresentationHub observe that edge and rebuild topology through its normal
+            // retained path; clearing the whole map cache here threw away room/node state needlessly.
             WorldTopologyRuntime.NotifyTopologyChanged();
-            MapEditorPresentationHub.Clear();
             Succeed("Removed the invalid explicit mapping; the connection will be rebuilt from world.txt.");
             return;
         }
