@@ -24,22 +24,15 @@ public static class EditorUiModeState
 
     public static void SetVanilla(bool value)
     {
-        bool previous = useVanilla;
+        // This setter is called from both Rain World's main thread (shortcuts) and RWImGui's render
+        // callback. Keep it strictly presentation-state-only. Main-thread revision invalidation for
+        // Vanilla -> New UI hand-off is observed later by EditorRevisionHub from DevUI.Update.
         useVanilla = value;
 
         // Preserve the original contract: requesting New UI also clears a temporary Escape/pause
         // hide even when New UI was already selected.
         if (!value)
             overlayHidden = false;
-
-        if (previous && !value)
-        {
-            // While vanilla DevInterface owns presentation the rebuilt frontend deliberately does
-            // not keep heavy immutable snapshots synchronized. Crossing back to New UI is the
-            // authoritative hand-off point: invalidate every channel once so the first rebuilt
-            // frame observes all edits made through vanilla or third-party controls.
-            EditorRevisionHub.MarkAll(DevToolSessionHub.Current);
-        }
     }
 
     public static void SetOverlayHidden(bool value)
