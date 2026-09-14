@@ -77,6 +77,8 @@ internal static class DevToolRuntime
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
         DevToolSessionHub.Reset();
+        DevToolPerformanceMonitor.SetEnabled(false);
+        DevToolPerformanceMonitor.Reset();
         enabled = false;
     }
 
@@ -90,9 +92,15 @@ internal static class DevToolRuntime
             return;
         }
 
-        DevToolSessionHub.Synchronize(self);
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.BeforeDevUiUpdate(self);
+        using DevToolPerformanceMonitor.Scope totalScope =
+            DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DevUiUpdateTotal);
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SessionSynchronization))
+        {
+            DevToolSessionHub.Synchronize(self);
+            if (EffectLivePreviewEnabled)
+                EffectPreviewRuntime.BeforeDevUiUpdate(self);
+        }
         EditorSession session = DevToolSessionHub.Current;
 
         // Reopening DevTools used to restore the previous page immediately, which could make H
@@ -100,26 +108,39 @@ internal static class DevToolRuntime
         // frame. Apply that workspace restoration one update later and keep that restoration frame
         // shell-only. This spreads unavoidable main-thread construction across frames instead of
         // creating a single visible hitch.
-        bool restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
-        session?.LegacyTransactions.BeforeLegacyUpdate(session);
+        bool restoredWorkspaceThisFrame;
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DeferredWorkspaceRestore))
+            restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
 
-        EditorInputRouter.UpdateShortcuts(session);
-        orig(self);
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyTransactionBefore))
+            session?.LegacyTransactions.BeforeLegacyUpdate(session);
 
-        session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
-        session?.Synchronize(self);
-        session?.LegacyTransactions.AfterLegacyUpdate(session);
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.InputShortcuts))
+            EditorInputRouter.UpdateShortcuts(session);
 
-        EditorUiCommandQueue.Process(session);
-        RoomEditorCommandQueue.Process(session);
-        SoundEditorCommandQueue.Process(session);
-        TriggerEditorCommandQueue.Process(session);
-        MapEditorCommandQueue.Process(session);
-        DialogEditorCommandQueue.Process(session);
-        RelationshipEditorCommandQueue.Process(session);
-        session?.Synchronize(self);
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.AfterDevUiUpdate(self);
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.VanillaDevUiUpdate))
+            orig(self);
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.PostLegacySynchronization))
+        {
+            session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
+            session?.Synchronize(self);
+            session?.LegacyTransactions.AfterLegacyUpdate(session);
+        }
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CommandProcessing))
+        {
+            EditorUiCommandQueue.Process(session);
+            RoomEditorCommandQueue.Process(session);
+            SoundEditorCommandQueue.Process(session);
+            TriggerEditorCommandQueue.Process(session);
+            MapEditorCommandQueue.Process(session);
+            DialogEditorCommandQueue.Process(session);
+            RelationshipEditorCommandQueue.Process(session);
+            session?.Synchronize(self);
+            if (EffectLivePreviewEnabled)
+                EffectPreviewRuntime.AfterDevUiUpdate(self);
+        }
 
         // New UI hides only the already-migrated screen controls. Vanilla mode restores the
         // complete original page while keeping the tiny frontend mode switch available.
@@ -135,15 +156,20 @@ internal static class DevToolRuntime
              (session.ToolMode == EditorToolMode.Map && self.activePage is MapPage) ||
              (session.ToolMode == EditorToolMode.Dialog && self.activePage is DialogPage) ||
              (session.ToolMode == EditorToolMode.Relationships && self.activePage is RelationshipPage));
-        LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
+
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyPresentation))
+            LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
         // Objects keeps the original representations as its compatibility backend, but only the
         // single selected object exposes the full vanilla gizmo. Every other object is reduced to
         // its center handle so the room remains readable and objects can still be selected directly.
-        ObjectGizmoPresentationController.Apply(
-            self.activePage as ObjectsPage,
-            session,
-            suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.ObjectGizmoPresentation))
+        {
+            ObjectGizmoPresentationController.Apply(
+                self.activePage as ObjectsPage,
+                session,
+                suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
+        }
 
         // Progressive hydration: frame 1 publishes only lightweight editor chrome. If reopening
         // restores a different vanilla page, that page-construction frame is shell-only as well.
@@ -155,7 +181,8 @@ internal static class DevToolRuntime
 
     private static void PublishPresentations(EditorSession session, bool shellOnly)
     {
-        EditorPresentationHub.Publish(session, shellOnly);
+        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
+            EditorPresentationHub.Publish(session, shellOnly);
 
         if (shellOnly || session == null)
         {
@@ -168,22 +195,28 @@ internal static class DevToolRuntime
         switch (session.ToolMode)
         {
             case EditorToolMode.Room:
-                RoomEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RoomPresentation))
+                    RoomEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Sound:
-                SoundEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SoundPresentation))
+                    SoundEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Triggers:
-                TriggerEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.TriggerPresentation))
+                    TriggerEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Map:
-                MapEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.MapPresentation))
+                    MapEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Dialog:
-                DialogEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DialogPresentation))
+                    DialogEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Relationships:
-                RelationshipEditorPresentationHub.Publish(session);
+                using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.RelationshipPresentation))
+                    RelationshipEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Objects:
                 // Object data is owned by EditorPresentationHub itself.
