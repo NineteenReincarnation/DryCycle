@@ -45,6 +45,7 @@ public sealed class EditorHistoryService
     private readonly int capacity;
     private EditorDocumentKey activeDocument;
     private bool hasActiveDocument;
+    private long revision = 1L;
 
     public EditorHistoryService(int capacity)
     {
@@ -56,12 +57,22 @@ public sealed class EditorHistoryService
     public string UndoLabel => CanUndo ? Current.Undo[Current.Undo.Count - 1].Label : null;
     public string RedoLabel => CanRedo ? Current.Redo[Current.Redo.Count - 1].Label : null;
 
+    /// <summary>
+    /// Monotonic presentation revision. This changes for every successful stack mutation even when
+    /// the top labels happen to stay identical (for example, several consecutive "Move object"
+    /// entries), so UI invalidation never has to infer history changes from display strings.
+    /// </summary>
+    public long Revision => revision;
+
     public void ActivateDocument(EditorDocumentKey document)
     {
+        bool changed = !hasActiveDocument || !activeDocument.Equals(document);
         activeDocument = document;
         hasActiveDocument = true;
         if (!documents.ContainsKey(document))
             documents.Add(document, new DocumentHistory());
+        if (changed)
+            BumpRevision();
     }
 
     public void Push(IEditorHistoryEntry entry)
@@ -72,6 +83,7 @@ public sealed class EditorHistoryService
         if (history.Undo.Count > capacity)
             history.Undo.RemoveAt(0);
         history.Redo.Clear();
+        BumpRevision();
     }
 
     public bool Undo(EditorSession session)
@@ -85,6 +97,7 @@ public sealed class EditorHistoryService
 
         history.Undo.RemoveAt(index);
         history.Redo.Add(entry);
+        BumpRevision();
         return true;
     }
 
@@ -101,15 +114,20 @@ public sealed class EditorHistoryService
         history.Undo.Add(entry);
         if (history.Undo.Count > capacity)
             history.Undo.RemoveAt(0);
+        BumpRevision();
         return true;
     }
 
     public void ClearActive()
     {
         if (Current == null) return;
+        if (Current.Undo.Count == 0 && Current.Redo.Count == 0) return;
         Current.Undo.Clear();
         Current.Redo.Clear();
+        BumpRevision();
     }
+
+    private void BumpRevision() => revision = revision >= long.MaxValue ? 1L : revision + 1L;
 
     private DocumentHistory Current =>
         hasActiveDocument && documents.TryGetValue(activeDocument, out DocumentHistory value) ? value : null;
