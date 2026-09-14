@@ -15,10 +15,12 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// CaptureSomeRooms pass still walks the whole room array looking for work on every frame, while
 /// HasCompleteCachedData separately scans the same immutable room set from several callers.
 ///
-/// Retain a completed (session, page, immutable presentation snapshot, cache generation) key instead.
-/// Any map presentation replacement or explicit cache publication/invalidation changes one of those
-/// keys and immediately re-enters the ordinary cache pipeline. The delayed disk write is preserved
-/// with one O(1) dirty check and a single FlushNow after the normal 45-frame settling window.
+/// Retain a completed (session, page, presentation room-membership, cache generation) key instead.
+/// Presentation-only snapshot replacements such as selection/current-room flags or room placement
+/// changes can promote themselves into the retained key after one allocation-free room-id check.
+/// Any room membership change or explicit cache publication/invalidation immediately re-enters the
+/// ordinary cache pipeline. The delayed disk write is preserved with one O(1) dirty check and a
+/// single FlushNow after the normal 45-frame settling window.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRegionPreloadPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -139,10 +141,9 @@ internal static class WorldMapGpuStableCacheGate
         }
 
         int generation = WorldMapGpuCache.Generation;
-        bool exactStableKey = IsExactStableKey(session, page, snapshot, generation);
-        if (exactStableKey)
+        if (TryPromoteStableSnapshot(session, page, snapshot, generation))
         {
-            // The cache is known complete for this immutable presentation generation. Do not run
+            // The cache is known complete for this room membership and generation. Do not run
             // CaptureSomeRooms again: that old path performs an O(region room count) unsuccessful
             // search every stable frame. Preserve only the delayed durable write contract.
             if (WorldMapGpuCache.Dirty && flushDueFrame >= 0 && Time.frameCount >= flushDueFrame)
@@ -155,9 +156,9 @@ internal static class WorldMapGpuStableCacheGate
 
         orig(session, snapshot);
 
-        // This one full completeness check is paid while the key is changing or the progressive
-        // baker is still working. Once it succeeds, both Update and all later completeness queries
-        // use the constant-time key until cache Generation or presentation identity changes.
+        // This one full completeness check is paid while room membership/cache generation changes
+        // or while the progressive baker is still working. Once it succeeds, Update and all later
+        // completeness queries stay constant-time until that structural key changes again.
         if (!WorldMapGpuCache.HasCompleteCachedData(snapshot))
         {
             ResetStableKey();
@@ -179,22 +180,63 @@ internal static class WorldMapGpuStableCacheGate
         {
             EditorSession session = DevToolRuntime.ActiveSession;
             Page page = session?.Owner?.activePage;
-            if (IsExactStableKey(session, page, snapshot, WorldMapGpuCache.Generation))
+            if (TryPromoteStableSnapshot(session, page, snapshot, WorldMapGpuCache.Generation))
                 return true;
         }
 
         return orig(snapshot);
     }
 
-    private static bool IsExactStableKey(
+    private static bool TryPromoteStableSnapshot(
         EditorSession session,
         Page page,
         EditorMapPresentationSnapshot snapshot,
-        int generation) =>
-        ReferenceEquals(stableSession, session) &&
-        ReferenceEquals(stablePage, page) &&
-        ReferenceEquals(stableSnapshot, snapshot) &&
-        stableGeneration == generation;
+        int generation)
+    {
+        if (!ReferenceEquals(stableSession, session) ||
+            !ReferenceEquals(stablePage, page) ||
+            stableGeneration != generation ||
+            stableSnapshot?.Available != true ||
+            snapshot?.Available != true)
+            return false;
+
+        if (ReferenceEquals(stableSnapshot, snapshot))
+            return true;
+
+        if (!HasSameRoomMembership(stableSnapshot, snapshot))
+            return false;
+
+        // The cache is indexed by RoomIndex and readiness only. Selection/current-room flags,
+        // positions, layers and other presentation-only data do not change cache completeness.
+        // Promote the new immutable snapshot so subsequent calls return to the O(1) identity path.
+        stableSnapshot = snapshot;
+        return true;
+    }
+
+    private static bool HasSameRoomMembership(
+        EditorMapPresentationSnapshot a,
+        EditorMapPresentationSnapshot b)
+    {
+        EditorMapRoomSnapshot[] left = a?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        EditorMapRoomSnapshot[] right = b?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        if (left.Length != right.Length) return false;
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            EditorMapRoomSnapshot leftRoom = left[i];
+            EditorMapRoomSnapshot rightRoom = right[i];
+            if (leftRoom == null || rightRoom == null)
+            {
+                if (!ReferenceEquals(leftRoom, rightRoom)) return false;
+                continue;
+            }
+
+            if (leftRoom.RoomIndex != rightRoom.RoomIndex)
+                return false;
+        }
+
+        return true;
+    }
 
     private static void ResetStableKey()
     {
