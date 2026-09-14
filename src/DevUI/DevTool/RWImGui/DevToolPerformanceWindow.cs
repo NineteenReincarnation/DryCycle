@@ -13,7 +13,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class DevToolPerformanceWindow
 {
-    private const float LabelColumn = 184f;
     private const float LastColumn = 286f;
     private const float AverageColumn = 374f;
     private const float P95Column = 462f;
@@ -76,6 +75,7 @@ internal static class DevToolPerformanceWindow
         DrawMetric(DevToolPerformanceMetric.LegacyTransactionBefore, DevToolUiSettings.T("Legacy 事务准备", "Legacy transaction prep"));
         DrawMetric(DevToolPerformanceMetric.InputShortcuts, DevToolUiSettings.T("快捷键输入", "Shortcut input"));
         DrawMetric(DevToolPerformanceMetric.VanillaDevUiUpdate, DevToolUiSettings.T("原版 DevUI", "Vanilla DevUI"));
+        DrawMetric(DevToolPerformanceMetric.LegacyQuiescenceBackend, DevToolUiSettings.T("Legacy 存活后端", "Legacy live backend"));
         DrawMetric(DevToolPerformanceMetric.PostLegacySynchronization, DevToolUiSettings.T("Legacy 后同步", "Post-legacy sync"));
         DrawMetric(DevToolPerformanceMetric.CommandProcessing, DevToolUiSettings.T("命令处理", "Command processing"));
         DrawMetric(DevToolPerformanceMetric.LegacyPresentation, DevToolUiSettings.T("Legacy 表现层", "Legacy presentation"));
