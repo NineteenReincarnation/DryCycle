@@ -179,7 +179,6 @@ internal static class WorldMapPerformance
     private static IDisposable overlayFindConnectionHook;
     private static IDisposable findConnectionAtEndpointHook;
     private static IDisposable isEndpointFreeHook;
-    private static FieldInfo zoomField;
     private static bool enabled;
 
     private static bool routeCacheValid;
@@ -301,7 +300,6 @@ internal static class WorldMapPerformance
                 null,
                 new[] { typeof(EditorMapPresentationSnapshot), typeof(int), typeof(EditorMapRoomNodeSnapshot) },
                 null);
-            zoomField = mapType.GetField("zoom", flags);
 
             MethodInfo mapPublish = typeof(MapEditorPresentationHub).GetMethod(
                 "Publish",
@@ -323,10 +321,9 @@ internal static class WorldMapPerformance
                 null);
 
             if (buildRoutes == null || buildRounded == null || trimEnds == null || offsetPolyline == null ||
-                drawRoomGeometry == null || zoomField == null || mapPublish == null ||
-                geometryPrime == null || shortcutPrime == null || mapFindRoom == null ||
-                overlayFindRoom == null || mapFindConnection == null || overlayFindConnection == null ||
-                findConnectionAtEndpoint == null || isEndpointFree == null)
+                drawRoomGeometry == null || mapPublish == null || geometryPrime == null || shortcutPrime == null ||
+                mapFindRoom == null || overlayFindRoom == null || mapFindConnection == null ||
+                overlayFindConnection == null || findConnectionAtEndpoint == null || isEndpointFree == null)
                 throw new MissingMemberException("World Map performance hook targets were not found.");
 
             routeHook = constructor.Invoke(new object[] { buildRoutes, BuildRoutesHookDelegate }) as IDisposable;
@@ -371,7 +368,7 @@ internal static class WorldMapPerformance
         DisposeHook(ref trimHook);
         DisposeHook(ref roundedHook);
         DisposeHook(ref routeHook);
-        zoomField = null;
+        WorldMapHotState.Invalidate();
         ResetCaches();
         ResetThrottles();
         ClearLookupIndex();
@@ -580,7 +577,7 @@ internal static class WorldMapPerformance
         bool selected,
         bool hovered)
     {
-        float zoom = zoomField?.GetValue(null) is float value ? value : 1f;
+        float zoom = WorldMapHotState.Zoom;
         if (zoom >= OverviewLodZoom || selected || hovered || room?.CurrentRoom == true)
         {
             orig(draw, room, visual, roomMin, selected, hovered);
