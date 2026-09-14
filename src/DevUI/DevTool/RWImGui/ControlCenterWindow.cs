@@ -65,6 +65,7 @@ internal static class ControlCenterWindow
         if (!ImGui.Begin(DevToolUiSettings.T("总控###DevToolControlCenter", "Control Center###DevToolControlCenter"), flags))
         {
             ImGui.End();
+            DrawPerformanceDiagnostics(display);
             return;
         }
 
@@ -84,6 +85,7 @@ internal static class ControlCenterWindow
 
         FitWindowHeightToContents(display, snapshot.FocusMode);
         ImGui.End();
+        DrawPerformanceDiagnostics(display);
     }
 
     private static void DrawHeader(EditorPresentationSnapshot snapshot)
@@ -243,6 +245,18 @@ internal static class ControlCenterWindow
                 "ControlCenterEnglish",
                 chinese ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
+
+        ImGui.Spacing();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("性能", "Profiling"));
+        ImGui.SameLine(keyColumn);
+        bool profiling = DevToolPerformanceMonitor.Enabled;
+        if (DevToolWidgets.ActionButton(
+                profiling
+                    ? DevToolUiSettings.T("监控中", "Monitoring")
+                    : DevToolUiSettings.T("开启", "Enable"),
+                "ControlCenterPerformance",
+                profiling ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            DevToolPerformanceMonitor.SetEnabled(!profiling);
     }
 
     private static void DrawSessionCard(EditorPresentationSnapshot snapshot)
@@ -380,6 +394,12 @@ internal static class ControlCenterWindow
         draw.AddRect(pos, pos + size, ImGui.GetColorU32(BadgeBorder), 5f);
         draw.AddText(pos + padding, ImGui.GetColorU32(BadgeText), text);
         ImGui.Dummy(size);
+    }
+
+    private static void DrawPerformanceDiagnostics(Num.Vector2 display)
+    {
+        if (DevToolPerformanceMonitor.Enabled)
+            DevToolPerformanceWindow.Draw(display);
     }
 
     private static void Send(EditorUiCommandKind kind) =>
