@@ -122,11 +122,15 @@ internal static partial class LegacyDevUiQuiescenceController
     /// Rebuilt editors can mutate the model without rebuilding an invisible vanilla screen-space
     /// page immediately. Exact migrated pages with no opaque third-party controls are marked stale
     /// and refreshed once, immediately before vanilla/legacy presentation becomes active again.
+    ///
+    /// This decision is a low-frequency mutation boundary, so inspect the current tree rather than
+    /// trusting only the sticky compatibility flag populated by the compiled backend audit. A newly
+    /// inserted RegionKit/POM/other foreign node therefore forces the safe full path immediately.
     /// </summary>
     internal static bool TryDeferRefresh(EditorSession session)
     {
         Page page = session?.Owner?.activePage;
-        if (page == null || HasExternalCompatibilityNodes(page))
+        if (page == null || HasExternalCompatibilityNodesNow(page))
             return false;
         if (!TryGetQuiescentProfile(page, out _))
             return false;
@@ -143,46 +147,96 @@ internal static partial class LegacyDevUiQuiescenceController
     internal static bool HasExternalCompatibilityNodes(Page page) =>
         page != null && ExternalCompatibilityPages.Contains(page);
 
+    /// <summary>
+    /// Refresh/defer decisions are infrequent enough to inspect the live tree. This closes the
+    /// window between a third-party runtime insertion and the periodic compiled-plan audit without
+    /// putting an O(N) walk back onto stable frames.
+    /// </summary>
+    private static bool HasExternalCompatibilityNodesNow(Page page)
+    {
+        if (page == null)
+            return false;
+        if (ExternalCompatibilityPages.Contains(page))
+            return true;
+        if (!ContainsExternalCompatibilityNode(page))
+            return false;
+
+        ExternalCompatibilityPages.Add(page);
+        InvalidateBackendPlan(page);
+        return true;
+    }
+
+    private static bool ContainsExternalCompatibilityNode(DevUINode parent)
+    {
+        if (parent?.subNodes == null)
+            return false;
+
+        for (int i = parent.subNodes.Count - 1; i >= 0; i--)
+        {
+            DevUINode child = parent.subNodes[i];
+            if (child == null)
+                continue;
+            if (IsExternalCompatibilityNode(child))
+                return true;
+            if (ContainsExternalCompatibilityNode(child))
+                return true;
+        }
+
+        return false;
+    }
+
     private static void ObjectsPage_Update(On.DevInterface.ObjectsPage.orig_Update orig, ObjectsPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
     }
 
     private static void SoundPage_Update(On.DevInterface.SoundPage.orig_Update orig, SoundPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
     }
 
     private static void TriggersPage_Update(On.DevInterface.TriggersPage.orig_Update orig, TriggersPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
     }
 
     private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, MapPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
     }
 
     private static void DialogPage_Update(On.DevInterface.DialogPage.orig_Update orig, DialogPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
     }
 
     private static void RelationshipPage_Update(On.DevInterface.RelationshipPage.orig_Update orig, RelationshipPage self)
     {
         if (TryPumpDerivedPage(self)) return;
-        FlushDeferredRefresh(self);
+        PrepareFullLegacyPageUpdate(self);
         orig(self);
+    }
+
+    /// <summary>
+    /// If quiescence is no longer active, restore parked screen controls before vanilla's own page
+    /// Update executes. In particular, switching to Vanilla via Ctrl+Shift+U happens earlier in the
+    /// same DevUI frame; waiting for DevToolRuntime's post-orig presentation pass would otherwise
+    /// give vanilla one update against hidden/offscreen controls.
+    /// </summary>
+    private static void PrepareFullLegacyPageUpdate(Page page)
+    {
+        LegacyUiPresentationController.Restore(page);
+        FlushDeferredRefresh(page);
     }
 
     private static void ObjectsPage_Refresh(On.DevInterface.ObjectsPage.orig_Refresh orig, ObjectsPage self)
@@ -229,7 +283,7 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private static bool CanUseMinimalSpatialRefresh(Page page)
     {
-        if (fullCompatibilityDepth > 0 || page == null || HasExternalCompatibilityNodes(page))
+        if (fullCompatibilityDepth > 0 || page == null || HasExternalCompatibilityNodesNow(page))
             return false;
 
         return TryGetQuiescentProfile(page, out PageProfile profile) && profile.PreserveWorldHandles;
@@ -305,7 +359,7 @@ internal static partial class LegacyDevUiQuiescenceController
                 return;
             }
 
-            FlushDeferredRefresh(page);
+            PrepareFullLegacyPageUpdate(page);
 
             // Map can intentionally skip its first legacy Refresh while the new UI owns it. If the
             // developer switches back to vanilla/legacy mode, restore that initialization contract
