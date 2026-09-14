@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -92,7 +93,7 @@ public sealed class PlacedObjectState
             else if (shouldBePresent && finalIndex >= 0)
                 ObjectPresentationChangeHintHub.MarkMember(session, target);
 
-            session.Owner?.activePage?.Refresh();
+            RefreshCompatibilityPage(session);
             return true;
         }
         catch (Exception error)
@@ -125,6 +126,30 @@ public sealed class PlacedObjectState
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Object history is shared by the whole Room document. Undoing an object edit while Room,
+    /// Sound or Triggers is visible must not rebuild that unrelated hidden vanilla page. When the
+    /// Objects backend itself is active we still call Refresh so the quiescence hook can perform its
+    /// minimal world-handle refresh; other migrated pages are merely marked stale until legacy UI
+    /// owns presentation again. Unknown/custom pages fail closed to their ordinary Refresh path.
+    /// </summary>
+    internal static void RefreshCompatibilityPage(EditorSession session)
+    {
+        global::DevInterface.Page page = session?.Owner?.activePage;
+        if (page == null) return;
+
+        if (page is global::DevInterface.ObjectsPage)
+        {
+            page.Refresh();
+            return;
+        }
+
+        if (LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+            return;
+
+        page.Refresh();
     }
 
     private string BuildFingerprint()
