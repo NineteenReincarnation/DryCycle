@@ -1,5 +1,6 @@
 using System;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
@@ -579,6 +580,9 @@ internal static class RoomEditorActions
 
     internal static void RefreshLegacyPageOrDefer(EditorSession session)
     {
+        if (LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+            return;
+
         try { session?.Owner?.activePage?.Refresh(); }
         catch (Exception error)
         {
