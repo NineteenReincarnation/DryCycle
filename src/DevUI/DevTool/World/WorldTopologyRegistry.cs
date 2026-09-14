@@ -24,11 +24,19 @@ internal static class WorldTopologyRegistry
     private static WorldTopologyDocument document = new();
     private static readonly List<string> warnings = new();
     private static bool loaded;
+    private static int revision = 1;
 
     internal static bool Dirty { get; private set; }
     internal static string LoadedPath { get; private set; } = string.Empty;
     internal static string LoadError { get; private set; }
     internal static IReadOnlyList<string> Warnings => warnings;
+
+    /// <summary>
+    /// Semantic in-memory topology revision. Persistence alone does not change it; replacing the
+    /// loaded document or changing an edge does. Map presentation can therefore distinguish an
+    /// actual connection change from an unrelated map visual edit without polling every edge.
+    /// </summary>
+    internal static int Revision => revision;
 
     internal static void EnsureLoaded()
     {
@@ -48,6 +56,7 @@ internal static class WorldTopologyRegistry
         {
             document = new WorldTopologyDocument();
             Dirty = false;
+            BumpRevision();
             return;
         }
 
@@ -55,6 +64,7 @@ internal static class WorldTopologyRegistry
         {
             document = parsed;
             Dirty = false;
+            BumpRevision();
             return;
         }
 
@@ -66,6 +76,7 @@ internal static class WorldTopologyRegistry
             Dirty = true;
             LoadError = $"Primary {FileName} is invalid ({error}); recovered from {Path.GetFileName(backup)}.";
             global::DryCycle.Plugin.Logger?.LogWarning("WorldTopology: " + LoadError);
+            BumpRevision();
             return;
         }
 
@@ -75,6 +86,7 @@ internal static class WorldTopologyRegistry
             ? $"{FileName} and backup are invalid. Primary: {error}; backup: {backupError}"
             : $"{FileName} is invalid and has no backup: {error}";
         global::DryCycle.Plugin.Logger?.LogError("WorldTopology: " + LoadError);
+        BumpRevision();
     }
 
     internal static WorldConnectionEdge[] GetRegionEdges(string region)
@@ -141,6 +153,7 @@ internal static class WorldTopologyRegistry
             Direction = direction
         });
         Dirty = true;
+        BumpRevision();
         return true;
     }
 
@@ -156,6 +169,7 @@ internal static class WorldTopologyRegistry
             if (!string.Equals(edges[i].Id, edgeId, StringComparison.OrdinalIgnoreCase)) continue;
             edges.RemoveAt(i);
             Dirty = true;
+            BumpRevision();
             return true;
         }
         return false;
@@ -177,6 +191,7 @@ internal static class WorldTopologyRegistry
             if (edges[i].Direction == direction) return false;
             edges[i].Direction = direction;
             Dirty = true;
+            BumpRevision();
             return true;
         }
         return false;
@@ -529,6 +544,15 @@ internal static class WorldTopologyRegistry
         WorldConnectionEndpoint b2) =>
         (a1.Equals(a2) && b1.Equals(b2)) ||
         (a1.Equals(b2) && b1.Equals(a2));
+
+    private static void BumpRevision()
+    {
+        unchecked
+        {
+            revision++;
+            if (revision <= 0) revision = 1;
+        }
+    }
 
     private static bool TryInt(object value, out int number)
     {
