@@ -161,9 +161,6 @@ internal static class DevToolRuntime
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyPresentation))
             LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
-        // Objects keeps the original representations as its compatibility backend, but only the
-        // single selected object exposes the full vanilla gizmo. Every other object is reduced to
-        // its center handle so the room remains readable and objects can still be selected directly.
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.ObjectGizmoPresentation))
         {
             ObjectGizmoPresentationController.Apply(
@@ -172,19 +169,14 @@ internal static class DevToolRuntime
                 suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
         }
 
-        // Progressive hydration: frame 1 publishes only lightweight editor chrome. If reopening
-        // restores a different vanilla page, that page-construction frame is shell-only as well.
-        // The next frame hydrates only the active workspace instead of running every presentation
-        // producer unconditionally.
         bool shellOnly = session?.IsOpeningFrame == true || restoredWorkspaceThisFrame;
         PublishPresentations(session, shellOnly);
     }
 
     private static void PublishPresentations(EditorSession session, bool shellOnly)
     {
-        // RWImGui can flip the volatile presentation mode from its render callback. Observe that
-        // ownership edge here, on Rain World's DevUI thread, before any hub reads a revision. When
-        // control returns from full vanilla presentation the tracker invalidates all channels once.
+        // Attachment, Vanilla/New-UI mode, and overlay visibility can all change outside the DevUI
+        // producer. Observe the ownership edge on the Rain World thread before reading revisions.
         EditorRevisionHub.ObservePresentationMode(session);
 
         if (session == null)
@@ -194,11 +186,11 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Full vanilla mode owns presentation and can freely mutate its authoritative model. The
-        // rebuilt snapshots are intentionally dormant here; ObservePresentationMode performs one
-        // complete invalidation when New UI takes ownership again, so background snapshot work is
-        // unnecessary while none of those snapshots are visible.
-        if (EditorUiModeState.UseVanilla)
+        // Immutable snapshots are useful only while the rebuilt frontend can actually draw them.
+        // During Vanilla mode, a detached bridge, or Escape-hidden overlay, authoritative model work
+        // continues but snapshot production sleeps. Re-entry MarkAll()s exactly once so the first
+        // visible rebuilt frame captures the complete latest state.
+        if (!EditorRevisionHub.IsRebuiltPresentationActive(session))
             return;
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
@@ -210,8 +202,6 @@ internal static class DevToolRuntime
             return;
         }
 
-        // Page-local presentation is demand-driven. Inactive workspaces do not need to build or
-        // diff snapshots just because DevUI itself is open.
         switch (session.ToolMode)
         {
             case EditorToolMode.Room:
@@ -239,7 +229,6 @@ internal static class DevToolRuntime
                     RelationshipEditorPresentationHub.Publish(session);
                 break;
             case EditorToolMode.Objects:
-                // Object data is owned by EditorPresentationHub itself.
                 break;
         }
     }
@@ -370,11 +359,6 @@ public sealed class EditorSession
             activationUpdateCount++;
     }
 
-    /// <summary>
-    /// Restores stable presentation/workspace state after vanilla H recreated DevUI. Cheap state is
-    /// restored immediately, while a page switch is deferred so the opening frame never constructs
-    /// two DevInterface pages back-to-back.
-    /// </summary>
     internal void RestoreViewStateFrom(EditorSession previous)
     {
         if (previous == null) return;
@@ -390,11 +374,6 @@ public sealed class EditorSession
         deferredViewRestorePending = deferredRestoreMode != ToolMode || deferredRestoreLegacyUi;
     }
 
-    /// <summary>
-    /// Applies a deferred workspace restore no earlier than the second update of a newly-created
-    /// DevUI session. Returns true when this frame performed restoration so callers can keep the
-    /// frame presentation-only and hydrate data on the next update.
-    /// </summary>
     internal bool ApplyDeferredViewRestore()
     {
         if (!deferredViewRestorePending || activationUpdateCount < 2)
@@ -583,13 +562,6 @@ public static class DevToolSessionHub
         }
     }
 
-    /// <summary>
-    /// True only while the currently published editor session still belongs to the live
-    /// RainWorldGame process and vanilla DevUI is actually open. This deliberately checks
-    /// the authoritative game state instead of the last presentation snapshot so H/O and
-    /// process transitions can hide the optional RWImGui frontend immediately even when
-    /// DevUI.Update is no longer running.
-    /// </summary>
     public static bool IsCurrentSessionLive
     {
         get
