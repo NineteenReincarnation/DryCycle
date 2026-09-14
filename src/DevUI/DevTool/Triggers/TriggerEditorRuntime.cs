@@ -378,47 +378,63 @@ public static class TriggerEditorCommandQueue
 
     internal static void Process(EditorSession session)
     {
+        long historyBeforeBatch = session?.History.Revision ?? 0L;
+        bool nonHistoryDirty = false;
+
         while (queue.TryDequeue(out TriggerEditorCommand command))
         {
             try
             {
+                long historyBeforeCommand = session?.History.Revision ?? 0L;
+                bool changed = false;
+
                 switch (command.Kind)
                 {
                     case TriggerEditorCommandKind.Select:
+                    {
+                        TriggerEditorState state = TriggerEditorStateHub.Get(session);
+                        int before = state?.SelectedIndex ?? -1;
                         TriggerEditorActions.Select(session, command.Index);
+                        changed = (state?.SelectedIndex ?? -1) != before;
                         break;
+                    }
                     case TriggerEditorCommandKind.Create:
-                        TriggerEditorActions.Create(session, command.Text);
+                        changed = TriggerEditorActions.Create(session, command.Text);
                         break;
                     case TriggerEditorCommandKind.Delete:
-                        TriggerEditorActions.Delete(session, command.Index);
+                        changed = TriggerEditorActions.Delete(session, command.Index);
                         break;
                     case TriggerEditorCommandKind.SetValue:
-                        TriggerEditorActions.SetValue(session, command.Index, command.Key, command.Value);
+                        changed = TriggerEditorActions.SetValue(session, command.Index, command.Key, command.Value);
                         break;
                     case TriggerEditorCommandKind.ToggleSlugcat:
-                        TriggerEditorActions.ToggleSlugcat(session, command.Index, command.Text);
+                        changed = TriggerEditorActions.ToggleSlugcat(session, command.Index, command.Text);
                         break;
                     case TriggerEditorCommandKind.SetEventType:
-                        TriggerEditorActions.SetEventType(session, command.Index, command.Text);
+                        changed = TriggerEditorActions.SetEventType(session, command.Index, command.Text);
                         break;
                     case TriggerEditorCommandKind.ClearEvent:
-                        TriggerEditorActions.ClearEvent(session, command.Index);
+                        changed = TriggerEditorActions.ClearEvent(session, command.Index);
                         break;
                     case TriggerEditorCommandKind.SetEventValue:
-                        TriggerEditorActions.SetEventValue(session, command.Index, command.Key, command.Value);
+                        changed = TriggerEditorActions.SetEventValue(session, command.Index, command.Key, command.Value);
                         break;
                 }
 
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
-                if (command.Kind != TriggerEditorCommandKind.Select)
-                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                if (changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                    nonHistoryDirty = true;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool trigger command failed: " + error.Message);
             }
         }
+
+        // History mutations are consumed by CorePresentation, which invalidates Shell and the active
+        // workspace exactly once for the whole update. Only selection or another successful edit
+        // that intentionally did not create history needs a direct Trigger revision here.
+        if (nonHistoryDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
     }
 
     internal static void Clear()
