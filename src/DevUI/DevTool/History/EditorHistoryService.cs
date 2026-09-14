@@ -127,7 +127,25 @@ public sealed class EditorHistoryService
         BumpRevision();
     }
 
-    private void BumpRevision() => revision = revision >= long.MaxValue ? 1L : revision + 1L;
+    private void BumpRevision()
+    {
+        revision = revision >= long.MaxValue ? 1L : revision + 1L;
+
+        // History used to be converted into presentation revisions later, inside CorePresentation.
+        // That was too late for the legacy-visual suppression pass, which intentionally runs before
+        // snapshot publication. Undo/Redo or a completed legacy transaction could therefore create
+        // or refresh vanilla nodes in this frame while suppression still saw the previous workspace
+        // revision. Publish the document-wide invalidation at the authoritative mutation point.
+        // Constructor/document bootstrap bumps are ignored until this history service is the live
+        // session's service; the first presentation is a full capture anyway.
+        EditorSession session = DevToolSessionHub.Current;
+        if (session == null || !ReferenceEquals(session.History, this))
+            return;
+
+        EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+        EditorRevisionHub.MarkWorkspace(session);
+        EditorPresentationHub.ObservePublishedHistoryRevision(session, revision);
+    }
 
     private DocumentHistory Current =>
         hasActiveDocument && documents.TryGetValue(activeDocument, out DocumentHistory value) ? value : null;
