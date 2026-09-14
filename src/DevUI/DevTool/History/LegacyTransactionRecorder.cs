@@ -33,15 +33,12 @@ public sealed class LegacyTransactionRecorder
         int current = CurrentPointerMask();
         if (current != 0 && pointerMask == 0)
         {
-            // The old recorder captured the complete active document for every mouse-down that was
-            // not owned by ImGui. On Objects this could serialize every PlacedObject even when the
-            // developer merely clicked empty room pixels. Resolve the actual legacy node first and
-            // capture through CaptureForNode: placed-object handles get a single-object snapshot,
-            // page controls still receive the appropriate room/map/relationship snapshot, and an
-            // empty click allocates nothing at all.
+            // Resolve the actual legacy node first. Known collection members (Sound/Trigger) and
+            // placed-object representations use member-scoped snapshots; unknown controls retain
+            // the document-level compatibility fallback. Empty-room clicks allocate nothing.
             DevUINode origin = FindDeepestMouseNode(session.Owner.activePage);
             if (origin != null)
-                pointerStart = LegacySnapshotFactory.CaptureForNode(session, origin);
+                pointerStart = CaptureForNode(session, origin);
         }
     }
 
@@ -82,7 +79,7 @@ public sealed class LegacyTransactionRecorder
     private void BeginExternal(EditorSession session, DevUINode origin)
     {
         if (origin == null) return;
-        externalStart = LegacySnapshotFactory.CaptureForNode(session, origin);
+        externalStart = CaptureForNode(session, origin);
         externalOrigin = origin;
     }
 
@@ -146,6 +143,14 @@ public sealed class LegacyTransactionRecorder
         }
 
         BeginExternal(session, legacy);
+    }
+
+    private static IEditorStateSnapshot CaptureForNode(EditorSession session, DevUINode origin)
+    {
+        // Keep specialized member capture separate from the generic factory so the latter remains a
+        // conservative compatibility API. If no exact member scope is known, fall back unchanged.
+        return LegacyMemberSnapshotFactory.CaptureForNode(session, origin) ??
+               LegacySnapshotFactory.CaptureForNode(session, origin);
     }
 
     private static void CommitPair(EditorSession session, IEditorStateSnapshot before, string label)
