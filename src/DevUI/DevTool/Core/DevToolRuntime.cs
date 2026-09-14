@@ -70,6 +70,7 @@ internal static class DevToolRuntime
         MapEditorStateHub.Reset();
         DialogEditorStateHub.Reset();
         RelationshipEditorStateHub.Reset();
+        ObjectPresentationChangeHintHub.Reset();
         RoomPresentationChangeHintHub.Reset();
         SoundPresentationChangeHintHub.Reset();
         TriggerPresentationChangeHintHub.Reset();
@@ -213,30 +214,13 @@ internal static class DevToolRuntime
     private static void PublishCorePresentation(EditorSession session, bool shellOnly)
     {
         bool monitor = DevToolPerformanceMonitor.Enabled;
-        EditorPresentationSnapshot before = monitor ? EditorPresentationHub.Current : null;
-
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CorePresentation))
             EditorPresentationHub.Publish(session, shellOnly);
 
-        if (!monitor || !DevToolPerformanceMonitor.Enabled) return;
-        EditorPresentationSnapshot after = EditorPresentationHub.Current;
-        DevToolPresentationOutcome outcome;
-        if (ReferenceEquals(before, after))
-        {
-            outcome = DevToolPresentationOutcome.CacheHit;
-        }
-        else if (before?.Available == true && after?.Available == true &&
-                 ReferenceEquals(before.SceneObjects, after.SceneObjects) &&
-                 ReferenceEquals(before.Inspector, after.Inspector))
-        {
-            outcome = DevToolPresentationOutcome.PartialRebuild;
-        }
-        else
-        {
-            outcome = DevToolPresentationOutcome.FullRebuild;
-        }
-
-        DevToolPerformanceMonitor.RecordPresentation(DevToolPresentationChannel.Core, outcome);
+        if (monitor && DevToolPerformanceMonitor.Enabled)
+            DevToolPerformanceMonitor.RecordPresentation(
+                DevToolPresentationChannel.Core,
+                EditorPresentationHub.LastOutcome);
     }
 
     private static void PublishRoomPresentation(EditorSession session)
