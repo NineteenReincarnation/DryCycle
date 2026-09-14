@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
+using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -126,17 +128,26 @@ internal static class EditorRevisionHub
     }
 
     /// <summary>
-    /// Full vanilla/legacy presentation and active legacy transactions are mutable compatibility
-    /// surfaces whose writes do not pass through DryCycle command queues. While one of those paths
-    /// is explicitly active, correctness wins over snapshot reuse and the current workspace stays
-    /// live. Normal rebuilt-UI frames remain revision-driven.
+    /// Reports whether the current workspace must be treated as an opaque live writer. Normally the
+    /// rebuilt UI is revision-driven and the known vanilla backend is quiescent. Full vanilla UI,
+    /// explicit legacy UI, legacy transactions, diagnostics or an unknown custom Page can mutate
+    /// authoritative state outside DryCycle's command queues; those cases deliberately trade some
+    /// rebuilding for compatibility correctness.
     /// </summary>
     internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
     {
-        if (session == null) return false;
-        return EditorUiModeState.UseVanilla ||
-               session.LegacyUiVisible ||
-               session.LegacyTransactions.HasPendingTransaction;
+        if (session?.Owner == null || !EditorInputRouter.FrontendAttached)
+            return false;
+
+        if (EditorUiModeState.UseVanilla ||
+            session.LegacyUiVisible ||
+            session.LegacyTransactions.HasPendingTransaction)
+            return true;
+
+        // Exact known migrated pages are pruned by the quiescence backend. If the backend refuses
+        // to quiesce a page (for example a third-party Page subclass or diagnostics mode), regard
+        // the full legacy lifecycle as an unknown writer rather than risking a stale new-UI view.
+        return !LegacyDevUiQuiescenceController.IsQuiescent(session.Owner);
     }
 
     internal static void Reset() =>
