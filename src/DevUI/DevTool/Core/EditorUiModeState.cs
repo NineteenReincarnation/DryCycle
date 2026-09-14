@@ -12,7 +12,7 @@ public static class EditorUiModeState
 
     /// <summary>
     /// True when the original Rain World DevInterface is the primary UI.
-    /// The rebuilt RWImGui frontend draws no windows in this mode.
+    /// The rebuilt RWImGui frontend draws no editor windows in this mode.
     /// </summary>
     public static bool UseVanilla => useVanilla;
 
@@ -24,9 +24,21 @@ public static class EditorUiModeState
 
     public static void SetVanilla(bool value)
     {
+        bool previous = useVanilla;
+        if (previous == value)
+            return;
+
         useVanilla = value;
         if (!value)
+        {
             overlayHidden = false;
+
+            // While vanilla DevInterface owns presentation the rebuilt frontend deliberately does
+            // not keep heavy immutable snapshots synchronized. Crossing back to New UI is the
+            // authoritative hand-off point: invalidate every channel once so the first rebuilt
+            // frame observes all edits made through vanilla or third-party controls.
+            EditorRevisionHub.MarkAll(DevToolSessionHub.Current);
+        }
     }
 
     public static void SetOverlayHidden(bool value)
