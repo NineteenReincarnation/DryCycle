@@ -13,11 +13,12 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// the complete hidden tree every frame defeats part of the quiescence win, so one structural pass
 /// compiles those roots into a retained plan. Stable frames execute only that plan.
 ///
-/// Correctness is protected by three invalidation layers:
+/// Correctness is protected by four invalidation layers:
 /// 1. top-level child identity is checked every frame without allocation;
-/// 2. known page Refresh operations explicitly invalidate the plan;
-/// 3. a low-frequency full semantic audit detects nested relevant nodes added/removed by code that
-///    bypasses our known mutation paths.
+/// 2. every compiled relevant entry verifies that it is still attached to the same parent slot;
+/// 3. known page Refresh operations explicitly invalidate the plan;
+/// 4. a low-frequency full semantic audit detects nested relevant nodes added by code that bypasses
+///    our known mutation paths without disturbing an already-compiled entry.
 ///
 /// The audit only compares relevant execution roots. Changes confined to dormant vanilla/DryCycle
 /// screen controls intentionally do not invalidate the plan because they cannot affect the backend.
@@ -34,14 +35,22 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private readonly struct BackendPlanEntry
     {
-        internal BackendPlanEntry(DevUINode node, BackendPlanEntryKind kind)
+        internal BackendPlanEntry(
+            DevUINode node,
+            BackendPlanEntryKind kind,
+            DevUINode parent,
+            int childIndex)
         {
             Node = node;
             Kind = kind;
+            Parent = parent;
+            ChildIndex = childIndex;
         }
 
         internal DevUINode Node { get; }
         internal BackendPlanEntryKind Kind { get; }
+        internal DevUINode Parent { get; }
+        internal int ChildIndex { get; }
     }
 
     private sealed class BackendPlan
@@ -88,7 +97,8 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (!backendPlans.TryGetValue(page, out BackendPlan plan) ||
             !ReferenceEquals(plan.Profile, profile) ||
-            !TopLevelRootsMatch(page, plan.PageRoots))
+            !TopLevelRootsMatch(page, plan.PageRoots) ||
+            !CompiledEntriesRemainAttached(plan.Entries))
         {
             return RebuildBackendPlan(page, profile);
         }
@@ -137,6 +147,34 @@ internal static partial class LegacyDevUiQuiescenceController
         for (int i = 0; i < count; i++)
             if (!ReferenceEquals(roots[i], page.subNodes[i]))
                 return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Stable-frame attachment validation for nodes already present in the compiled plan. This is
+    /// intentionally O(relevant entries), not O(entire hidden tree): deleting, reparenting or moving
+    /// a retained world/external node invalidates immediately, while unrelated dormant controls do
+    /// not get revisited every frame.
+    /// </summary>
+    private static bool CompiledEntriesRemainAttached(BackendPlanEntry[] entries)
+    {
+        if (entries == null)
+            return false;
+
+        for (int i = 0; i < entries.Length; i++)
+        {
+            BackendPlanEntry entry = entries[i];
+            DevUINode parent = entry.Parent;
+            int childIndex = entry.ChildIndex;
+            if (parent?.subNodes == null ||
+                childIndex < 0 ||
+                childIndex >= parent.subNodes.Count ||
+                !ReferenceEquals(parent.subNodes[childIndex], entry.Node))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -200,20 +238,26 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (parent?.subNodes == null) return;
         for (int i = parent.subNodes.Count - 1; i >= 0; i--)
-            CollectRelevantBranch(parent.subNodes[i], profile, owningPage, entries);
+            CollectRelevantBranch(parent.subNodes[i], profile, owningPage, entries, parent, i);
     }
 
     private static void CollectRelevantBranch(
         DevUINode node,
         PageProfile profile,
         Page owningPage,
-        List<BackendPlanEntry> entries)
+        List<BackendPlanEntry> entries,
+        DevUINode parent,
+        int childIndex)
     {
         if (node == null) return;
 
         if (IsExternalCompatibilityNode(node))
         {
-            entries.Add(new BackendPlanEntry(node, BackendPlanEntryKind.ExternalCompatibility));
+            entries.Add(new BackendPlanEntry(
+                node,
+                BackendPlanEntryKind.ExternalCompatibility,
+                parent,
+                childIndex));
             if (owningPage != null)
                 ExternalCompatibilityPages.Add(owningPage);
             return;
@@ -221,13 +265,17 @@ internal static partial class LegacyDevUiQuiescenceController
 
         if (profile.PreserveWorldHandles && IsWorldBackendNode(node))
         {
-            entries.Add(new BackendPlanEntry(node, BackendPlanEntryKind.WorldBackend));
+            entries.Add(new BackendPlanEntry(
+                node,
+                BackendPlanEntryKind.WorldBackend,
+                parent,
+                childIndex));
             return;
         }
 
         if (node.subNodes == null) return;
         for (int i = node.subNodes.Count - 1; i >= 0; i--)
-            CollectRelevantBranch(node.subNodes[i], profile, owningPage, entries);
+            CollectRelevantBranch(node.subNodes[i], profile, owningPage, entries, node, i);
     }
 
     /// <summary>
