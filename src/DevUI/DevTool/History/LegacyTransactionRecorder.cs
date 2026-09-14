@@ -32,7 +32,17 @@ public sealed class LegacyTransactionRecorder
 
         int current = CurrentPointerMask();
         if (current != 0 && pointerMask == 0)
-            pointerStart = LegacySnapshotFactory.CaptureForPointer(session);
+        {
+            // The old recorder captured the complete active document for every mouse-down that was
+            // not owned by ImGui. On Objects this could serialize every PlacedObject even when the
+            // developer merely clicked empty room pixels. Resolve the actual legacy node first and
+            // capture through CaptureForNode: placed-object handles get a single-object snapshot,
+            // page controls still receive the appropriate room/map/relationship snapshot, and an
+            // empty click allocates nothing at all.
+            DevUINode origin = FindDeepestMouseNode(session.Owner.activePage);
+            if (origin != null)
+                pointerStart = LegacySnapshotFactory.CaptureForNode(session, origin);
+        }
     }
 
     internal void AfterLegacyUpdate(EditorSession session)
