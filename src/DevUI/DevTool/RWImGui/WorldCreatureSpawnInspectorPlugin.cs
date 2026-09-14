@@ -83,22 +83,46 @@ internal static class WorldCreatureSpawnInspector
 
     internal static void DrawIntegrated(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        // This panel is composed directly by WorldWorkspaceView. Rendering must therefore not be
-        // gated by a separate BepInEx plugin lifecycle flag; otherwise the whole section can vanish
-        // even though the workspace itself is alive.
+        // This panel is composed directly by WorldWorkspaceView. Its heading is intentionally drawn
+        // before touching any runtime catalogs: one malformed Mod registration or cache must never
+        // make the whole authoring section silently disappear from the inspector.
         if (snapshot?.Available != true || room == null) return;
-        if (stateRoom != room.RoomIndex)
-            ResetForRoom(room);
-
-        RefreshTimelineCatalog();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置生物", "CREATURE SPAWNS"));
-        WorldCreatureSpawnRecord[] existing = WorldTextRegistry.GetCreatureSpawns(snapshot.RegionName, room.Name);
-        DrawExistingSpawns(snapshot, room, existing);
-        ImGui.Spacing();
-        DrawEditor(snapshot, room);
+        try
+        {
+            if (stateRoom != room.RoomIndex)
+                ResetForRoom(room);
 
-        WorldLineageInspector.DrawIntegrated(snapshot, room);
+            RefreshTimelineCatalog();
+
+            WorldCreatureSpawnRecord[] existing = WorldTextRegistry.GetCreatureSpawns(snapshot.RegionName, room.Name);
+            DrawExistingSpawns(snapshot, room, existing);
+            ImGui.Spacing();
+            DrawEditor(snapshot, room);
+        }
+        catch (Exception error)
+        {
+            ImGui.TextColored(
+                new Num.Vector4(0.92f, 0.42f, 0.42f, 1f),
+                DevToolUiSettings.T("生物编辑器初始化失败：", "Creature editor failed: ") + error.Message);
+            log?.LogError("World creature-spawn inspector failed for '" + room.Name + "': " + error);
+        }
+
+        // Lineage is useful but must not be able to take ordinary spawner authoring (or the rest of
+        // the room inspector) down with it. Keep its failure boundary independent.
+        try
+        {
+            WorldLineageInspector.DrawIntegrated(snapshot, room);
+        }
+        catch (Exception error)
+        {
+            DevToolWidgets.SectionHeader(DevToolUiSettings.T("族谱 / Lineage", "LINEAGE"));
+            ImGui.TextColored(
+                new Num.Vector4(0.92f, 0.42f, 0.42f, 1f),
+                DevToolUiSettings.T("Lineage 编辑器初始化失败：", "Lineage editor failed: ") + error.Message);
+            log?.LogError("World lineage inspector failed for '" + room.Name + "': " + error);
+        }
     }
 
     private static void DrawExistingSpawns(
@@ -383,9 +407,11 @@ internal static class WorldCreatureSpawnInspector
 
     private static void ResetForm(EditorMapRoomSnapshot room)
     {
+        // Do not touch the pipe catalog while merely switching inspector selection. Pipe discovery
+        // can be incrementally populated; DrawEditor is the single safe place that resolves the
+        // current set and repairs selectedDen when necessary.
         editingSpawnId = -1;
-        List<WorldCreaturePipeCatalog.Entry> dens = WorldCreaturePipeCatalog.Get(room);
-        selectedDen = dens.Count > 0 ? dens[0].NodeIndex : -1;
+        selectedDen = -1;
         creatureId = string.Empty;
         amount = 1;
         spawnTags = string.Empty;
