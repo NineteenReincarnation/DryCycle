@@ -53,6 +53,9 @@ internal static class WorldMapGpuRetainedOptimizer
     private static IDisposable roomPanelHook;
     private static MapPage indexedPage;
     private static int indexedSubNodeCount = -1;
+    private static EditorMapPresentationSnapshot cachedSourceSnapshot;
+    private static int cachedSourceGeneration = int.MinValue;
+    private static int cachedSourceHash;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -106,6 +109,9 @@ internal static class WorldMapGpuRetainedOptimizer
         panelIndex.Clear();
         indexedPage = null;
         indexedSubNodeCount = -1;
+        cachedSourceSnapshot = null;
+        cachedSourceGeneration = int.MinValue;
+        cachedSourceHash = 0;
         enabled = false;
         log = null;
     }
@@ -118,13 +124,20 @@ internal static class WorldMapGpuRetainedOptimizer
         if (!enabled || frame?.Snapshot?.Available != true)
             return orig(page, frame);
 
+        EditorMapPresentationSnapshot snapshot = frame.Snapshot;
+        int generation = WorldMapGpuCache.Generation;
+        if (ReferenceEquals(cachedSourceSnapshot, snapshot) && cachedSourceGeneration == generation)
+            return cachedSourceHash;
+
         // WorldMapGpuCache already owns source validation. Its generation changes when cached room
-        // data is invalidated/replaced, so the renderer does not need a per-room MapPage scan here.
+        // data is invalidated/replaced. MapEditorPresentationHub publishes immutable snapshots and
+        // retains the same instance while the map model is stable, so hashing the room identity/layer
+        // vector only once per published snapshot removes the per-frame O(roomCount) scan.
         unchecked
         {
             int hash = 17;
-            hash = hash * 397 ^ WorldMapGpuCache.Generation;
-            EditorMapRoomSnapshot[] rooms = frame.Snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+            hash = hash * 397 ^ generation;
+            EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
             hash = hash * 397 ^ rooms.Length;
             for (int i = 0; i < rooms.Length; i++)
             {
@@ -133,6 +146,10 @@ internal static class WorldMapGpuRetainedOptimizer
                 hash = hash * 397 ^ room.RoomIndex;
                 hash = hash * 397 ^ room.Layer;
             }
+
+            cachedSourceSnapshot = snapshot;
+            cachedSourceGeneration = generation;
+            cachedSourceHash = hash;
             return hash;
         }
     }
