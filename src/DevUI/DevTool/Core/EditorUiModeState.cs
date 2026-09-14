@@ -25,14 +25,15 @@ public static class EditorUiModeState
     public static void SetVanilla(bool value)
     {
         bool previous = useVanilla;
-        if (previous == value)
-            return;
-
         useVanilla = value;
+
+        // Preserve the original contract: requesting New UI also clears a temporary Escape/pause
+        // hide even when New UI was already selected.
         if (!value)
-        {
             overlayHidden = false;
 
+        if (previous && !value)
+        {
             // While vanilla DevInterface owns presentation the rebuilt frontend deliberately does
             // not keep heavy immutable snapshots synchronized. Crossing back to New UI is the
             // authoritative hand-off point: invalidate every channel once so the first rebuilt
