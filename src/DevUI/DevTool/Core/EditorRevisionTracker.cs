@@ -128,25 +128,20 @@ internal static class EditorRevisionHub
     }
 
     /// <summary>
-    /// Reports whether the current workspace must be treated as an opaque live writer. Normally the
-    /// rebuilt UI is revision-driven and the known vanilla backend is quiescent. Full vanilla UI,
-    /// explicit legacy UI, legacy transactions, diagnostics or an unknown custom Page can mutate
-    /// authoritative state outside DryCycle's command queues; those cases deliberately trade some
-    /// rebuilding for compatibility correctness.
+    /// Reports whether the current rebuilt workspace must be treated as an opaque live writer.
+    /// Full vanilla presentation is intentionally excluded: rebuilt windows are not drawn there,
+    /// and EditorUiModeState invalidates every channel once when ownership returns to New UI.
+    /// Explicit legacy panels inside New UI, legacy transactions, diagnostics and unknown custom
+    /// Pages remain live because the rebuilt surface is visible while those writers are active.
     /// </summary>
     internal static bool RequiresLiveWorkspaceRefresh(EditorSession session)
     {
-        if (session?.Owner == null || !EditorInputRouter.FrontendAttached)
+        if (session?.Owner == null || !EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla)
             return false;
 
-        if (EditorUiModeState.UseVanilla ||
-            session.LegacyUiVisible ||
-            session.LegacyTransactions.HasPendingTransaction)
+        if (session.LegacyUiVisible || session.LegacyTransactions.HasPendingTransaction)
             return true;
 
-        // Exact known migrated pages are pruned by the quiescence backend. If the backend refuses
-        // to quiesce a page (for example a third-party Page subclass or diagnostics mode), regard
-        // the full legacy lifecycle as an unknown writer rather than risking a stale new-UI view.
         return !LegacyDevUiQuiescenceController.IsQuiescent(session.Owner);
     }
 
