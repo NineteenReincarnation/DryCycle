@@ -38,27 +38,36 @@ internal static class SoundEditorActions
         if (session.Owner?.activePage is not SoundPage page) return false;
         if (soundType < 0 || soundType > 2) return false;
 
+        RoomSettings settings = session.RoomSettings;
         if (soundType != AmbientSound.Type.Spot.Index)
         {
-            for (int i = 0; i < session.RoomSettings.ambientSounds.Count; i++)
+            for (int i = 0; i < settings.ambientSounds.Count; i++)
             {
-                AmbientSound existing = session.RoomSettings.ambientSounds[i];
+                AmbientSound existing = settings.ambientSounds[i];
                 if (existing != null && !existing.inherited && existing.type?.Index == soundType &&
                     string.Equals(existing.sample, sample, StringComparison.Ordinal))
                 {
+                    // Selecting an already-existing non-spot sound is presentation state only.
                     SoundEditorStateHub.Get(session)?.SetSelectedIndex(i);
-                    return true;
+                    return false;
                 }
             }
         }
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
-        int beforeCount = session.RoomSettings.ambientSounds.Count;
-
+        int beforeCount = settings.ambientSounds.Count;
         page.soundType = soundType;
         page.CreateSoundRep(sample);
 
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        if (settings.ambientSounds.Count <= beforeCount)
+        {
+            SoundEditorStateHub.Get(session)?.SetSelectedIndex(FindLast(session, sample, soundType));
+            return false;
+        }
+
+        int createdIndex = settings.ambientSounds.Count - 1;
+        AmbientSound created = settings.ambientSounds[createdIndex];
+        IEditorStateSnapshot before = AbsentMemberSnapshots.AmbientSound(settings, created);
+        IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, created);
         if (SnapshotHistoryEntry.TryCreate(
                 "Create sound " + sample,
                 before,
@@ -66,14 +75,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
 
-        SoundEditorState state = SoundEditorStateHub.Get(session);
-        if (state != null)
-        {
-            if (session.RoomSettings.ambientSounds.Count > beforeCount)
-                state.SetSelectedIndex(session.RoomSettings.ambientSounds.Count - 1);
-            else
-                state.SetSelectedIndex(FindLast(session, sample, soundType));
-        }
+        SoundEditorStateHub.Get(session)?.SetSelectedIndex(createdIndex);
         return true;
     }
 
@@ -96,10 +98,11 @@ internal static class SoundEditorActions
             return definition != null && SoundGroupLibrary.AddSoundToLocalGroup(groupId, definition);
         }
 
-        if (!Create(session, sample, soundType)) return false;
-        if (!toGroup) return true;
-
+        bool created = Create(session, sample, soundType);
         SoundEditorState state = SoundEditorStateHub.Get(session);
+        if (!created && (state == null || state.SelectedIndex < 0)) return false;
+        if (!toGroup) return created;
+
         return state != null && state.SelectedIndex >= 0 && AddSoundToGroup(session, state.SelectedIndex, groupId);
     }
 
@@ -107,10 +110,13 @@ internal static class SoundEditorActions
     {
         if (!TryGetSound(session, index, out AmbientSound sound) || sound.inherited) return false;
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
-        session.RoomSettings.ambientSounds.RemoveAt(index);
+        RoomSettings settings = session.RoomSettings;
+        IEditorStateSnapshot before = SingleAmbientSoundStateSnapshot.Capture(settings, sound);
+        if (before == null) return false;
+
+        settings.ambientSounds.RemoveAt(index);
         RefreshSoundPage(session);
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(session.RoomSettings);
+        IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, sound);
 
         if (SnapshotHistoryEntry.TryCreate(
                 "Delete sound " + (sound.sample ?? string.Empty),
@@ -122,7 +128,7 @@ internal static class SoundEditorActions
         SoundEditorState state = SoundEditorStateHub.Get(session);
         if (state != null)
         {
-            int count = session.RoomSettings.ambientSounds.Count;
+            int count = settings.ambientSounds.Count;
             state.SetSelectedIndex(count == 0 ? -1 : Math.Min(index, count - 1));
         }
         return true;
@@ -132,20 +138,28 @@ internal static class SoundEditorActions
     {
         if (session?.RoomSettings == null || value.Kind != EditorPropertyKind.Float) return false;
 
-        return Mutate(session, "Change sound room setting", settings =>
+        return MutateRoomVolumes(session, "Change sound room setting", settings =>
         {
             switch (key)
             {
                 case SoundEditorKeys.BackgroundDroneVolume:
-                    settings.BkgDroneVolume = Mathf.Clamp01(value.X);
+                {
+                    float next = Mathf.Clamp01(value.X);
+                    if (Mathf.Approximately(settings.BkgDroneVolume, next)) return false;
+                    settings.BkgDroneVolume = next;
                     return true;
+                }
                 case SoundEditorKeys.NoThreatDroneVolume:
-                    settings.BkgDroneNoThreatVolume = Mathf.Clamp01(value.X);
+                {
+                    float next = Mathf.Clamp01(value.X);
+                    if (Mathf.Approximately(settings.BkgDroneNoThreatVolume, next)) return false;
+                    settings.BkgDroneNoThreatVolume = next;
                     return true;
+                }
                 default:
                     return false;
             }
-        }, refreshSoundPage: false);
+        });
     }
 
     internal static bool SetSoundValue(
@@ -157,44 +171,74 @@ internal static class SoundEditorActions
         if (!TryGetSound(session, index, out AmbientSound sound) || sound.inherited || string.IsNullOrEmpty(key))
             return false;
 
-        return Mutate(session, "Change " + key + " on " + (sound.sample ?? "sound"), _ =>
+        return MutateSound(session, sound, "Change " + key + " on " + (sound.sample ?? "sound"), () =>
         {
             switch (key)
             {
                 case SoundEditorKeys.Volume:
+                {
                     if (value.Kind != EditorPropertyKind.Float) return false;
-                    sound.volume = Mathf.Clamp01(value.X);
+                    float next = Mathf.Clamp01(value.X);
+                    if (Mathf.Approximately(sound.volume, next)) return false;
+                    sound.volume = next;
                     return true;
+                }
                 case SoundEditorKeys.Pitch:
+                {
                     if (value.Kind != EditorPropertyKind.Float) return false;
-                    sound.pitch = Mathf.Clamp(value.X, 0.1f, 1.9f);
+                    float next = Mathf.Clamp(value.X, 0.1f, 1.9f);
+                    if (Mathf.Approximately(sound.pitch, next)) return false;
+                    sound.pitch = next;
                     return true;
+                }
                 case SoundEditorKeys.Doppler:
+                {
                     if (value.Kind != EditorPropertyKind.Float || sound is not DopplerAffectedSound doppler) return false;
-                    doppler.dopplerFac = Mathf.Clamp01(value.X);
+                    float next = Mathf.Clamp01(value.X);
+                    if (Mathf.Approximately(doppler.dopplerFac, next)) return false;
+                    doppler.dopplerFac = next;
                     return true;
+                }
                 case SoundEditorKeys.Taper:
+                {
                     if (value.Kind != EditorPropertyKind.Float || sound is not SpotSound spotTaper) return false;
-                    spotTaper.taper = Mathf.Clamp01(value.X);
+                    float next = Mathf.Clamp01(value.X);
+                    if (Mathf.Approximately(spotTaper.taper, next)) return false;
+                    spotTaper.taper = next;
                     return true;
+                }
                 case SoundEditorKeys.Position:
+                {
                     if (value.Kind != EditorPropertyKind.Vector2 || sound is not SpotSound spotPosition) return false;
-                    spotPosition.pos = new Vector2(value.X, value.Y);
+                    Vector2 next = new(value.X, value.Y);
+                    if ((spotPosition.pos - next).sqrMagnitude <= 0.000001f) return false;
+                    spotPosition.pos = next;
                     return true;
+                }
                 case SoundEditorKeys.Radius:
+                {
                     if (value.Kind != EditorPropertyKind.Float || sound is not SpotSound spotRadius) return false;
                     float radius = Mathf.Max(0f, value.X);
                     Vector2 direction = spotRadius.radHandlePosition.sqrMagnitude > 0.0001f
                         ? spotRadius.radHandlePosition.normalized
                         : Vector2.up;
+                    Vector2 nextHandle = direction * radius;
+                    if (Mathf.Approximately(spotRadius.rad, radius) &&
+                        (spotRadius.radHandlePosition - nextHandle).sqrMagnitude <= 0.000001f)
+                        return false;
                     spotRadius.rad = radius;
-                    spotRadius.radHandlePosition = direction * radius;
+                    spotRadius.radHandlePosition = nextHandle;
                     return true;
+                }
                 case SoundEditorKeys.Direction:
+                {
                     if (value.Kind != EditorPropertyKind.Vector2 || sound is not DirectionalSound directional) return false;
-                    Vector2 next = new(value.X, value.Y);
-                    directional.direction = next.sqrMagnitude > 0.0001f ? next.normalized : Vector2.down;
+                    Vector2 raw = new(value.X, value.Y);
+                    Vector2 next = raw.sqrMagnitude > 0.0001f ? raw.normalized : Vector2.down;
+                    if ((directional.direction - next).sqrMagnitude <= 0.000001f) return false;
+                    directional.direction = next;
                     return true;
+                }
                 default:
                     return false;
             }
@@ -216,8 +260,8 @@ internal static class SoundEditorActions
         if (indices == null || indices.Length == 0 || !TryGetWritableGroup(groupId, out _))
             return false;
 
-        var unique = new HashSet<int>();
-        var definitions = new List<SoundGroupSoundDefinition>(indices.Length);
+        HashSet<int> unique = new();
+        List<SoundGroupSoundDefinition> definitions = new(indices.Length);
         for (int i = 0; i < indices.Length; i++)
         {
             int index = indices[i];
@@ -258,7 +302,7 @@ internal static class SoundEditorActions
             return false;
 
         RoomSettings settings = session.RoomSettings;
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(settings);
+        IEditorStateSnapshot before = AmbientSoundCollectionStateSnapshot.Capture(settings);
         if (before == null) return false;
 
         int changed = 0;
@@ -296,16 +340,16 @@ internal static class SoundEditorActions
         if (changed == 0) return false;
 
         RefreshSoundPage(session);
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(settings);
-        if (SnapshotHistoryEntry.TryCreate(
+        IEditorStateSnapshot after = AmbientSoundCollectionStateSnapshot.Capture(settings);
+        if (!SnapshotHistoryEntry.TryCreate(
                 "Apply sound group " + (group.Name ?? group.Id),
                 before,
                 after,
                 out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+            return false;
 
-        SoundEditorState state = SoundEditorStateHub.Get(session);
-        state?.SetSelectedIndex(lastIndex);
+        session.History.Push(entry);
+        SoundEditorStateHub.Get(session)?.SetSelectedIndex(lastIndex);
         return true;
     }
 
@@ -417,22 +461,43 @@ internal static class SoundEditorActions
         return value.sqrMagnitude > 0.0001f ? value.normalized : Vector2.down;
     }
 
-    private static bool Mutate(
+    private static bool MutateSound(
+        EditorSession session,
+        AmbientSound target,
+        string label,
+        Func<bool> mutation,
+        bool refreshSoundPage = true)
+    {
+        RoomSettings settings = session?.RoomSettings;
+        if (settings == null || target == null || mutation == null) return false;
+
+        IEditorStateSnapshot before = SingleAmbientSoundStateSnapshot.Capture(settings, target);
+        if (before == null || !mutation()) return false;
+
+        if (refreshSoundPage) RefreshSoundPage(session);
+        IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, target);
+        if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            return false;
+
+        session.History.Push(entry);
+        return true;
+    }
+
+    private static bool MutateRoomVolumes(
         EditorSession session,
         string label,
-        Func<RoomSettings, bool> mutation,
-        bool refreshSoundPage = true)
+        Func<RoomSettings, bool> mutation)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null || mutation == null) return false;
 
-        RoomSettingsStateSnapshot before = RoomSettingsStateSnapshot.Capture(settings);
+        IEditorStateSnapshot before = SoundRoomVolumeStateSnapshot.Capture(settings);
         if (before == null || !mutation(settings)) return false;
+        IEditorStateSnapshot after = SoundRoomVolumeStateSnapshot.Capture(settings);
+        if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            return false;
 
-        if (refreshSoundPage) RefreshSoundPage(session);
-        RoomSettingsStateSnapshot after = RoomSettingsStateSnapshot.Capture(settings);
-        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
-            session.History.Push(entry);
+        session.History.Push(entry);
         return true;
     }
 
