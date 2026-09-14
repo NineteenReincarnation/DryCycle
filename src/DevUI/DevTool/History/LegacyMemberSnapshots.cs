@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Core;
 
 namespace DryCycle.DevUI.DevTool.History;
 
