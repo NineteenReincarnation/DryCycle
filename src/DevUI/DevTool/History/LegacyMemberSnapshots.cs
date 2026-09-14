@@ -169,10 +169,10 @@ internal sealed class SingleMapRoomStateSnapshot : IEditorStateSnapshot
             foreach (KeyValuePair<string, AbstractRoom.CreatureRoomAttraction> pair in namedAttractions)
                 room.namedRoomAttractions[pair.Key] = pair.Value;
 
-            // RoomPanel.Refresh creates/rebinds the vanilla map texture. The rebuilt World Workspace
-            // reads model state directly, so hidden vanilla refresh work is skipped during undo/redo
-            // just as it is during the original edit. Legacy/vanilla mode keeps the old behavior.
-            if (!LegacyDevUiQuiescenceController.IsQuiescent(session.Owner))
+            // Keep undo/redo symmetric with normal rebuilt Map edits. Hidden vanilla map textures
+            // are marked stale and materialized once immediately before legacy/vanilla presentation
+            // returns; opaque third-party Map subtrees fail closed and still receive the full refresh.
+            if (!LegacyDevUiQuiescenceController.TryDeferRefresh(session))
             {
                 panel.Refresh();
                 page.Refresh();
