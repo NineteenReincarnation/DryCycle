@@ -17,6 +17,11 @@ internal static class MiscRuntime
         DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable();
         PaletteDirectInputRuntime.Enable();
         DryCycle.WorldLink.WorldLinkRuntime.Enable();
+
+        // Quiescence is part of the DevTool backend architecture, not a separately-discovered
+        // BepInEx feature. Own its hook lifetime explicitly so the legacy backend always follows
+        // the same enable/disable transaction as the rebuilt editor runtime.
+        DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
         // The Room editor has a few catalogs whose source is static for the lifetime of the loaded
@@ -44,6 +49,7 @@ internal static class MiscRuntime
     public static void Disable()
     {
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
+        DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
 
         if (!_enabled)
         {
