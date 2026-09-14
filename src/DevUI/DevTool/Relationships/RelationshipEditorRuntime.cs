@@ -66,25 +66,52 @@ public static class RelationshipEditorPresentationHub
     private static string[] relationshipTypes = Array.Empty<string>();
     private static int relationshipTypeCount = -1;
 
+    private static EditorSession observedSession;
+    private static RelationshipPage observedPage;
+    private static long observedRevision;
+    private static int observedCreatureTypeCount = -1;
+    private static string observedPrimary = string.Empty;
+    private static string observedOther = string.Empty;
+    private static EditorRelationshipDirection observedDirection;
+
     public static EditorRelationshipPresentationSnapshot Current => current;
 
     internal static void Publish(EditorSession session)
     {
         if (session?.ToolMode != EditorToolMode.Relationships ||
-            session.Owner?.activePage is not RelationshipPage)
+            session.Owner?.activePage is not RelationshipPage page)
         {
-            current = EditorRelationshipPresentationSnapshot.Empty;
+            Clear();
             return;
         }
+
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
+
+        RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
+        long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Relationships);
+        int creatureTypeCount = ExtEnum<CreatureTemplate.Type>.values.Count;
+        int nextRelationshipTypeCount = ExtEnum<CreatureTemplate.Relationship.Type>.values.Count;
+
+        if (ReferenceEquals(observedSession, session) &&
+            ReferenceEquals(observedPage, page) &&
+            observedRevision == revision &&
+            observedCreatureTypeCount == creatureTypeCount &&
+            relationshipTypeCount == nextRelationshipTypeCount &&
+            string.Equals(observedPrimary, state.PrimaryCreature, StringComparison.Ordinal) &&
+            string.Equals(observedOther, state.SelectedOtherCreature, StringComparison.Ordinal) &&
+            observedDirection == state.SelectedDirection &&
+            current.Available)
+            return;
 
         List<CreatureTemplate> templates = CollectTemplates();
         if (templates.Count == 0)
         {
             current = new EditorRelationshipPresentationSnapshot { Available = true };
+            Observe(session, page, revision, creatureTypeCount, state);
             return;
         }
 
-        RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
         CreatureTemplate primary = FindTemplate(templates, state.PrimaryCreature) ?? templates[0];
         state.PrimaryCreature = primary.type.value;
 
@@ -122,9 +149,37 @@ public static class RelationshipEditorPresentationHub
             RelationshipTypes = relationshipTypes,
             Rows = rows.ToArray()
         };
+
+        Observe(session, page, revision, creatureTypeCount, state);
     }
 
-    internal static void Clear() => current = EditorRelationshipPresentationSnapshot.Empty;
+    internal static void Clear()
+    {
+        current = EditorRelationshipPresentationSnapshot.Empty;
+        observedSession = null;
+        observedPage = null;
+        observedRevision = 0L;
+        observedCreatureTypeCount = -1;
+        observedPrimary = string.Empty;
+        observedOther = string.Empty;
+        observedDirection = EditorRelationshipDirection.PrimaryToOther;
+    }
+
+    private static void Observe(
+        EditorSession session,
+        RelationshipPage page,
+        long revision,
+        int creatureTypeCount,
+        RelationshipEditorState state)
+    {
+        observedSession = session;
+        observedPage = page;
+        observedRevision = revision;
+        observedCreatureTypeCount = creatureTypeCount;
+        observedPrimary = state?.PrimaryCreature ?? string.Empty;
+        observedOther = state?.SelectedOtherCreature ?? string.Empty;
+        observedDirection = state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
+    }
 
     private static EditorRelationshipValueSnapshot Capture(CreatureTemplate from, CreatureTemplate to)
     {
@@ -253,6 +308,12 @@ public static class RelationshipEditorCommandQueue
                         RelationshipEditorActions.Reset(session, command.Primary, command.Other, command.Direction);
                         break;
                 }
+
+                EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
+                if (command.Kind is RelationshipEditorCommandKind.SetRelationshipType or
+                    RelationshipEditorCommandKind.SetRelationshipIntensity or
+                    RelationshipEditorCommandKind.ResetRelationship)
+                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
             }
             catch (Exception error)
             {
