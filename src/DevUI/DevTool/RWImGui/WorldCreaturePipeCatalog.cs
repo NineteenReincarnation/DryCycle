@@ -83,7 +83,7 @@ internal static class WorldCreaturePipeCatalog
             preserveNode,
             knownDen ? node.Type : "Node",
             false,
-            !knownDen || cached.HasExactMouth));
+            !knownDen));
         preserved.Sort(CompareEntries);
         cached.PreserveVariants[preserveNode] = preserved;
         return preserved;
@@ -125,26 +125,31 @@ internal static class WorldCreaturePipeCatalog
         int nodeFingerprint)
     {
         List<Entry> result = new();
+
+        // AbstractRoom node data is the authoritative set of valid creature dens. Always seed the
+        // catalog from it first; an incrementally resolved CreatureHole array must never hide a
+        // second valid Den/GarbageHoles node from the authoring UI.
+        EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            EditorMapRoomNodeSnapshot node = nodes[i];
+            if (!IsCreatureDen(node) || Contains(result, node.NodeIndex)) continue;
+            result.Add(new Entry(node.NodeIndex, node.Type, false, false));
+        }
+
         bool hasExact = false;
         for (int i = 0; i < exact.Length; i++)
         {
             int nodeIndex = exact[i].NodeIndex;
-            if (nodeIndex < 0 || Contains(result, nodeIndex)) continue;
-            result.Add(new Entry(nodeIndex, NodeType(room, nodeIndex), true, false));
-            hasExact = true;
-        }
+            if (nodeIndex < 0) continue;
 
-        // Exact shortcut parsing is incremental. Until it is ready, fall back to the actual
-        // AbstractRoom Den/GarbageHoles nodes so the selector does not flash empty.
-        if (!hasExact)
-        {
-            EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                EditorMapRoomNodeSnapshot node = nodes[i];
-                if (!IsCreatureDen(node) || Contains(result, node.NodeIndex)) continue;
-                result.Add(new Entry(node.NodeIndex, node.Type, false, false));
-            }
+            hasExact = true;
+            Entry resolved = new(nodeIndex, NodeType(room, nodeIndex), true, false);
+            int existingIndex = IndexOf(result, nodeIndex);
+            if (existingIndex >= 0)
+                result[existingIndex] = resolved;
+            else
+                result.Add(resolved);
         }
 
         result.Sort(CompareEntries);
@@ -183,11 +188,13 @@ internal static class WorldCreaturePipeCatalog
 
     private static int CompareEntries(Entry a, Entry b) => a.NodeIndex.CompareTo(b.NodeIndex);
 
-    private static bool Contains(List<Entry> entries, int nodeIndex)
+    private static bool Contains(List<Entry> entries, int nodeIndex) => IndexOf(entries, nodeIndex) >= 0;
+
+    private static int IndexOf(List<Entry> entries, int nodeIndex)
     {
         for (int i = 0; i < entries.Count; i++)
-            if (entries[i].NodeIndex == nodeIndex) return true;
-        return false;
+            if (entries[i].NodeIndex == nodeIndex) return i;
+        return -1;
     }
 
     private static string NodeType(EditorMapRoomSnapshot room, int nodeIndex)
