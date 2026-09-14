@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
 
@@ -28,10 +29,10 @@ public sealed class WorldMapImGuiPresentationFallbackPlugin : BaseUnityPlugin
 
     private void OnEnable() => WorldMapImGuiPresentationFallback.Enable(Logger);
 
-    // WorldMapGpuRuntime.UpdateMainThread runs in Update and can enable the retained screen camera
-    // again every frame. Disable it in LateUpdate, immediately before Unity renders cameras, so it
-    // can never leak retained routes/rooms over the gameplay viewport while fallback is active.
-    private void LateUpdate() => WorldMapImGuiPresentationFallback.SuppressStandaloneCamera();
+    // WorldMapGpuRuntime.UpdateMainThread can enable the retained screen camera while the Map tool
+    // is live. Suppress it immediately before camera rendering, but do not pay reflection cost during
+    // ordinary gameplay or unrelated DevTool pages where the lifecycle controller already owns hide.
+    private void LateUpdate() => WorldMapImGuiPresentationFallback.LateUpdate();
 
     private void OnDisable() => WorldMapImGuiPresentationFallback.Disable();
 }
@@ -101,6 +102,18 @@ internal static class WorldMapImGuiPresentationFallback
         sceneCameraField = null;
         enabled = false;
         log = null;
+    }
+
+    internal static void LateUpdate()
+    {
+        if (!enabled || !DevToolSessionHub.IsCurrentSessionLive)
+            return;
+
+        EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map)
+            return;
+
+        SuppressStandaloneCamera();
     }
 
     internal static void SuppressStandaloneCamera()
