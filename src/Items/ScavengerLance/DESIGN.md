@@ -1,8 +1,8 @@
 # Scavenger Lance 设计蓝图 V1
 
-> 当前阶段：纯设计阶段。
+> 本文保留初始设计蓝图；当前首版代码已实现，使用方式与验证状态见 [Lance Scavenger 开发说明](../../Creatures/LanceScavenger/README.md)。
 >
-> 本文只定义长枪的玩法、物理、视觉、交互和与 Lance Scavenger 的职责边界，不包含任何代码实现。
+> 本文定义长枪的玩法、物理、视觉、交互和职责边界；与后续 ZIP 任务书冲突时，以该任务的实现规格为准。
 
 ## 一、定位
 
