@@ -28,7 +28,7 @@ internal static class SoundEditorActions
         SoundEditorState state = SoundEditorStateHub.Get(session);
         if (state == null) return;
         int count = session?.RoomSettings?.ambientSounds?.Count ?? 0;
-        state.SelectedIndex = index >= 0 && index < count ? index : -1;
+        state.SetSelectedIndex(index >= 0 && index < count ? index : -1);
     }
 
     internal static bool Create(EditorSession session, string sample, int soundType)
@@ -46,7 +46,7 @@ internal static class SoundEditorActions
                 if (existing != null && !existing.inherited && existing.type?.Index == soundType &&
                     string.Equals(existing.sample, sample, StringComparison.Ordinal))
                 {
-                    SoundEditorStateHub.Get(session).SelectedIndex = i;
+                    SoundEditorStateHub.Get(session)?.SetSelectedIndex(i);
                     return true;
                 }
             }
@@ -70,9 +70,9 @@ internal static class SoundEditorActions
         if (state != null)
         {
             if (session.RoomSettings.ambientSounds.Count > beforeCount)
-                state.SelectedIndex = session.RoomSettings.ambientSounds.Count - 1;
+                state.SetSelectedIndex(session.RoomSettings.ambientSounds.Count - 1);
             else
-                state.SelectedIndex = FindLast(session, sample, soundType);
+                state.SetSelectedIndex(FindLast(session, sample, soundType));
         }
         return true;
     }
@@ -123,7 +123,7 @@ internal static class SoundEditorActions
         if (state != null)
         {
             int count = session.RoomSettings.ambientSounds.Count;
-            state.SelectedIndex = count == 0 ? -1 : Math.Min(index, count - 1);
+            state.SetSelectedIndex(count == 0 ? -1 : Math.Min(index, count - 1));
         }
         return true;
     }
@@ -305,7 +305,7 @@ internal static class SoundEditorActions
             session.History.Push(entry);
 
         SoundEditorState state = SoundEditorStateHub.Get(session);
-        if (state != null) state.SelectedIndex = lastIndex;
+        state?.SetSelectedIndex(lastIndex);
         return true;
     }
 
