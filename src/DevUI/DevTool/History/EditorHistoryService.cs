@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 
 namespace DryCycle.DevUI.DevTool.History;
@@ -72,7 +73,7 @@ public sealed class EditorHistoryService
         if (!documents.ContainsKey(document))
             documents.Add(document, new DocumentHistory());
         if (changed)
-            BumpRevision();
+            BumpRevision(modelMayHaveChanged: false);
     }
 
     public void Push(IEditorHistoryEntry entry)
@@ -83,7 +84,7 @@ public sealed class EditorHistoryService
         if (history.Undo.Count > capacity)
             history.Undo.RemoveAt(0);
         history.Redo.Clear();
-        BumpRevision();
+        BumpRevision(modelMayHaveChanged: true);
     }
 
     public bool Undo(EditorSession session)
@@ -97,7 +98,7 @@ public sealed class EditorHistoryService
 
         history.Undo.RemoveAt(index);
         history.Redo.Add(entry);
-        BumpRevision();
+        BumpRevision(modelMayHaveChanged: true);
         return true;
     }
 
@@ -114,7 +115,7 @@ public sealed class EditorHistoryService
         history.Undo.Add(entry);
         if (history.Undo.Count > capacity)
             history.Undo.RemoveAt(0);
-        BumpRevision();
+        BumpRevision(modelMayHaveChanged: true);
         return true;
     }
 
@@ -124,10 +125,10 @@ public sealed class EditorHistoryService
         if (Current.Undo.Count == 0 && Current.Redo.Count == 0) return;
         Current.Undo.Clear();
         Current.Redo.Clear();
-        BumpRevision();
+        BumpRevision(modelMayHaveChanged: false);
     }
 
-    private void BumpRevision()
+    private void BumpRevision(bool modelMayHaveChanged)
     {
         revision = revision >= long.MaxValue ? 1L : revision + 1L;
 
@@ -145,6 +146,14 @@ public sealed class EditorHistoryService
         EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
         EditorRevisionHub.MarkWorkspace(session);
         EditorPresentationHub.ObservePublishedHistoryRevision(session, revision);
+
+        // A successful model-history mutation also means that any retained vanilla screen-space
+        // representation may now be stale. Exact migrated/quiescent pages therefore register one
+        // deferred full refresh here even if the specialized action only updated its live world
+        // handle. Page/document activation and history-stack-only changes do not dirty the model.
+        // Unknown/foreign pages fail closed because TryDeferRefresh refuses them.
+        if (modelMayHaveChanged)
+            LegacyDevUiQuiescenceController.TryDeferRefresh(session);
     }
 
     private DocumentHistory Current =>
