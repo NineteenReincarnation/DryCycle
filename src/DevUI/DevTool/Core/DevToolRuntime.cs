@@ -119,7 +119,7 @@ internal static class DevToolRuntime
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.PostLegacySynchronization))
         {
             session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
-            session?.Synchronize(self);
+            session?.SynchronizeAfterLegacyUpdate(self);
             session?.LegacyTransactions.AfterLegacyUpdate(session);
         }
 
@@ -381,6 +381,9 @@ public sealed class EditorSession
 
     private EditorDocumentKey documentKey;
     private Page observedLegacyPage;
+    private global::Room observedRoom;
+    private global::World observedWorld;
+    private RoomSettings observedRoomSettings;
     private int activationUpdateCount;
     private bool deferredViewRestorePending;
     private EditorToolMode deferredRestoreMode;
@@ -423,6 +426,10 @@ public sealed class EditorSession
     internal void Synchronize(global::DevInterface.DevUI owner)
     {
         Owner = owner;
+        global::Room nextRoom = owner?.room;
+        global::World nextWorld = owner?.game?.world;
+        RoomSettings nextRoomSettings = nextRoom?.roomSettings;
+
         EditorDocumentKey next = ResolveDocument(owner);
         if (!next.Equals(documentKey))
         {
@@ -449,6 +456,42 @@ public sealed class EditorSession
             if (ToolMode != EditorToolMode.Objects) CancelPlacement();
         }
 
+        observedRoom = nextRoom;
+        observedWorld = nextWorld;
+        observedRoomSettings = nextRoomSettings;
+        SynchronizeSelectionValidity();
+    }
+
+    /// <summary>
+    /// Vanilla DevUI can switch Page or room/world ownership inside its own Update. The old path ran
+    /// a second complete Synchronize every frame solely to catch that edge. Stable frames now compare
+    /// only the structural roots that can change the editor document; a real boundary still falls
+    /// back to the authoritative full synchronization immediately in the same frame.
+    /// </summary>
+    internal void SynchronizeAfterLegacyUpdate(global::DevInterface.DevUI owner)
+    {
+        if (owner == null) return;
+
+        global::Room nextRoom = owner.room;
+        global::World nextWorld = owner.game?.world;
+        RoomSettings nextRoomSettings = nextRoom?.roomSettings;
+        Page nextPage = owner.activePage;
+
+        bool structuralBoundary =
+            !ReferenceEquals(Owner, owner) ||
+            !ReferenceEquals(observedLegacyPage, nextPage) ||
+            !ReferenceEquals(observedRoom, nextRoom) ||
+            !ReferenceEquals(observedWorld, nextWorld) ||
+            !ReferenceEquals(observedRoomSettings, nextRoomSettings);
+
+        if (structuralBoundary)
+        {
+            Synchronize(owner);
+            return;
+        }
+
+        // Legacy controls can still mutate placedObjects without changing any structural root.
+        // Preserve immediate selection membership validation while keeping the stable path O(1).
         SynchronizeSelectionValidity();
     }
 
