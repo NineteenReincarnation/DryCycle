@@ -14,7 +14,8 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// compiles those roots into a retained plan. Stable frames execute only that plan.
 ///
 /// Correctness is protected by four invalidation layers:
-/// 1. top-level child identity is checked every frame without allocation;
+/// 1. top-level child count is checked every frame; pages that actually retain backend roots also
+///    validate top-level identity/order without allocation;
 /// 2. every compiled relevant entry verifies that it is still attached to the same parent slot;
 /// 3. known page Refresh operations explicitly invalidate the plan;
 /// 4. a low-frequency full semantic audit detects nested relevant nodes added by code that bypasses
@@ -97,7 +98,7 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (!backendPlans.TryGetValue(page, out BackendPlan plan) ||
             !ReferenceEquals(plan.Profile, profile) ||
-            !TopLevelRootsMatch(page, plan.PageRoots) ||
+            !TopLevelRootsMatch(page, profile, plan.PageRoots, plan.Entries) ||
             !CompiledEntriesRemainAttached(plan.Entries))
         {
             return RebuildBackendPlan(page, profile);
@@ -138,12 +139,26 @@ internal static partial class LegacyDevUiQuiescenceController
         return roots;
     }
 
-    private static bool TopLevelRootsMatch(Page page, DevUINode[] roots)
+    private static bool TopLevelRootsMatch(
+        Page page,
+        PageProfile profile,
+        DevUINode[] roots,
+        BackendPlanEntry[] entries)
     {
         int count = page?.subNodes?.Count ?? 0;
         if (roots == null || roots.Length != count)
             return false;
 
+        // Room/Map/Dialog/Relationships normally compile an empty backend plan: their exact vanilla
+        // screen-space tree is completely dormant. Scanning every top-level node on every stable
+        // frame buys nothing in that case. Count changes remain immediate, while the existing sparse
+        // semantic audit catches the unusual same-count insertion of a new third-party backend.
+        if (profile?.PreserveWorldHandles != true && (entries == null || entries.Length == 0))
+            return true;
+
+        // Pages with live world/external roots keep the stronger identity/order check. Objects,
+        // Sound and Triggers already pay O(relevant roots) to pump those handles, so preserving exact
+        // vanilla ordering here does not reintroduce a hidden-screen traversal cost.
         for (int i = 0; i < count; i++)
             if (!ReferenceEquals(roots[i], page.subNodes[i]))
                 return false;
