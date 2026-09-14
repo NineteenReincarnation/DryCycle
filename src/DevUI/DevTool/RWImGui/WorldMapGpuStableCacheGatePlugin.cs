@@ -10,11 +10,12 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Removes the last region-size scan from the persistent World Map cache after a snapshot is fully
+/// Removes the last region-size scans from the persistent World Map cache after a snapshot is fully
 /// baked. WorldMapGpuCache.Update deliberately validates/captures progressively, but its completed
-/// CaptureSomeRooms pass still walks the whole room array looking for work on every frame. Retain a
-/// completed (session, page, immutable presentation snapshot, cache generation) key instead.
+/// CaptureSomeRooms pass still walks the whole room array looking for work on every frame, while
+/// HasCompleteCachedData separately scans the same immutable room set from several callers.
 ///
+/// Retain a completed (session, page, immutable presentation snapshot, cache generation) key instead.
 /// Any map presentation replacement or explicit cache publication/invalidation changes one of those
 /// keys and immediately re-enters the ordinary cache pipeline. The delayed disk write is preserved
 /// with one O(1) dirty check and a single FlushNow after the normal 45-frame settling window.
@@ -40,11 +41,17 @@ internal static class WorldMapGpuStableCacheGate
         OrigCacheUpdate orig,
         EditorSession session,
         EditorMapPresentationSnapshot snapshot);
+    private delegate bool OrigHasCompleteCachedData(EditorMapPresentationSnapshot snapshot);
+    private delegate bool HookHasCompleteCachedData(
+        OrigHasCompleteCachedData orig,
+        EditorMapPresentationSnapshot snapshot);
 
     private static readonly HookCacheUpdate CacheUpdateHookDelegate = CacheUpdateHook;
+    private static readonly HookHasCompleteCachedData CompleteHookDelegate = HasCompleteCachedDataHook;
 
     private static ManualLogSource log;
     private static IDisposable updateHook;
+    private static IDisposable completeHook;
     private static EditorSession stableSession;
     private static Page stablePage;
     private static EditorMapPresentationSnapshot stableSnapshot;
@@ -66,8 +73,14 @@ internal static class WorldMapGpuStableCacheGate
                 null,
                 new[] { typeof(EditorSession), typeof(EditorMapPresentationSnapshot) },
                 null);
-            if (update == null)
-                throw new MissingMethodException("WorldMapGpuCache.Update was not found.");
+            MethodInfo hasComplete = typeof(WorldMapGpuCache).GetMethod(
+                "HasCompleteCachedData",
+                flags,
+                null,
+                new[] { typeof(EditorMapPresentationSnapshot) },
+                null);
+            if (update == null || hasComplete == null)
+                throw new MissingMethodException("World Map GPU cache gate targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             if (hookType == null)
@@ -77,8 +90,9 @@ internal static class WorldMapGpuStableCacheGate
                 throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
 
             updateHook = constructor.Invoke(new object[] { update, CacheUpdateHookDelegate }) as IDisposable;
-            if (updateHook == null)
-                throw new InvalidOperationException("World Map stable-cache hook was not created.");
+            completeHook = constructor.Invoke(new object[] { hasComplete, CompleteHookDelegate }) as IDisposable;
+            if (updateHook == null || completeHook == null)
+                throw new InvalidOperationException("World Map stable-cache hooks were not created.");
 
             enabled = true;
             ResetStableKey();
@@ -93,6 +107,9 @@ internal static class WorldMapGpuStableCacheGate
 
     internal static void Disable()
     {
+        try { completeHook?.Dispose(); }
+        catch { }
+        completeHook = null;
         try { updateHook?.Dispose(); }
         catch { }
         updateHook = null;
@@ -115,12 +132,7 @@ internal static class WorldMapGpuStableCacheGate
         }
 
         int generation = WorldMapGpuCache.Generation;
-        bool exactStableKey =
-            ReferenceEquals(stableSession, session) &&
-            ReferenceEquals(stablePage, page) &&
-            ReferenceEquals(stableSnapshot, snapshot) &&
-            stableGeneration == generation;
-
+        bool exactStableKey = IsExactStableKey(session, page, snapshot, generation);
         if (exactStableKey)
         {
             // The cache is known complete for this immutable presentation generation. Do not run
@@ -136,9 +148,9 @@ internal static class WorldMapGpuStableCacheGate
 
         orig(session, snapshot);
 
-        // HasCompleteCachedData is O(room count), but it is paid only while the key is changing or
-        // the progressive baker is still working. Once it succeeds, all subsequent stable frames use
-        // the constant-time key above until cache Generation or presentation identity changes.
+        // This one full completeness check is paid while the key is changing or the progressive
+        // baker is still working. Once it succeeds, both Update and all later completeness queries
+        // use the constant-time key until cache Generation or presentation identity changes.
         if (!WorldMapGpuCache.HasCompleteCachedData(snapshot))
         {
             ResetStableKey();
@@ -151,6 +163,31 @@ internal static class WorldMapGpuStableCacheGate
         stableGeneration = WorldMapGpuCache.Generation;
         flushDueFrame = WorldMapGpuCache.Dirty ? Time.frameCount + SaveDelayFrames : -1;
     }
+
+    private static bool HasCompleteCachedDataHook(
+        OrigHasCompleteCachedData orig,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (enabled && snapshot?.Available == true)
+        {
+            EditorSession session = DevToolRuntime.ActiveSession;
+            Page page = session?.Owner?.activePage;
+            if (IsExactStableKey(session, page, snapshot, WorldMapGpuCache.Generation))
+                return true;
+        }
+
+        return orig(snapshot);
+    }
+
+    private static bool IsExactStableKey(
+        EditorSession session,
+        Page page,
+        EditorMapPresentationSnapshot snapshot,
+        int generation) =>
+        ReferenceEquals(stableSession, session) &&
+        ReferenceEquals(stablePage, page) &&
+        ReferenceEquals(stableSnapshot, snapshot) &&
+        stableGeneration == generation;
 
     private static void ResetStableKey()
     {
