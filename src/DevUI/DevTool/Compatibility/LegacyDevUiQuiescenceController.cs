@@ -1,28 +1,17 @@
 using System;
 using System.Collections.Generic;
-using BepInEx;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
-[BepInPlugin(PluginId, PluginName, global::DryCycle.Plugin.Version)]
-[BepInDependency(global::DryCycle.Plugin.ModId, BepInDependency.DependencyFlags.HardDependency)]
-internal sealed class LegacyDevUiQuiescencePlugin : BaseUnityPlugin
-{
-    internal const string PluginId = "DryCycle.DevTool.LegacyQuiescence";
-    internal const string PluginName = "DryCycle DevTool Legacy UI Quiescence";
-
-    private void OnEnable() => LegacyDevUiQuiescenceController.Enable();
-    private void OnDisable() => LegacyDevUiQuiescenceController.Disable();
-}
-
 /// <summary>
 /// Turns the migrated vanilla DevInterface into a minimal compatibility backend while the rebuilt
 /// frontend owns presentation. Screen-space legacy controls stop participating in the per-frame
-/// update tree; only world-space gizmos and third-party nodes that may still carry compatibility
-/// behaviour remain live. Unknown/custom pages always fall back to the complete vanilla update.
+/// update tree; only world-space gizmos and unknown third-party nodes that may still carry
+/// compatibility behaviour remain live. Unknown/custom pages always fall back to the complete
+/// vanilla update rather than being partially suspended by a heuristic.
 /// </summary>
 internal static class LegacyDevUiQuiescenceController
 {
@@ -52,15 +41,16 @@ internal static class LegacyDevUiQuiescenceController
     private static readonly PageProfile[] Profiles =
     {
         new(typeof(RoomSettingsPage), EditorToolMode.Room, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: false),
-        new(typeof(ObjectsPage), EditorToolMode.Objects, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: false),
-        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: false),
-        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: false),
+        new(typeof(ObjectsPage), EditorToolMode.Objects, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
         new(typeof(MapPage), EditorToolMode.Map, preserveWorldHandles: false, materializeInitialRefresh: false, bypassPageOverride: true),
-        new(typeof(DialogPage), EditorToolMode.Dialog, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: false),
-        new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: false)
+        new(typeof(DialogPage), EditorToolMode.Dialog, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: true)
     };
 
     private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(DevUI).Assembly;
+    private static readonly System.Reflection.Assembly DryCycleAssembly = typeof(global::DryCycle.Plugin).Assembly;
     private static readonly HashSet<Page> SuppressedInitialRefreshPages = new();
 
     private static bool enabled;
@@ -71,35 +61,38 @@ internal static class LegacyDevUiQuiescenceController
     internal static void Enable()
     {
         if (enabled) return;
+
+        // DevUINode.Update is the generic fallback for pages that do not provide their own Update
+        // override. Known derived vanilla pages are intercepted separately so their now-redundant
+        // page-specific work (trash bins, threat sliders, layout, hidden map loading, etc.) never
+        // runs while the rebuilt UI owns that workspace.
         On.DevInterface.DevUINode.Update += DevUINode_Update;
+        On.DevInterface.ObjectsPage.Update += ObjectsPage_Update;
+        On.DevInterface.SoundPage.Update += SoundPage_Update;
+        On.DevInterface.TriggersPage.Update += TriggersPage_Update;
         On.DevInterface.MapPage.Update += MapPage_Update;
+        On.DevInterface.DialogPage.Update += DialogPage_Update;
+        On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
         enabled = true;
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
+
+        On.DevInterface.RelationshipPage.Update -= RelationshipPage_Update;
+        On.DevInterface.DialogPage.Update -= DialogPage_Update;
         On.DevInterface.MapPage.Update -= MapPage_Update;
+        On.DevInterface.TriggersPage.Update -= TriggersPage_Update;
+        On.DevInterface.SoundPage.Update -= SoundPage_Update;
+        On.DevInterface.ObjectsPage.Update -= ObjectsPage_Update;
         On.DevInterface.DevUINode.Update -= DevUINode_Update;
+
         SuppressedInitialRefreshPages.Clear();
         selectiveTraversalDepth = 0;
         fullCompatibilityDepth = 0;
         activeProfile = null;
         enabled = false;
-    }
-
-    /// <summary>
-    /// MapPage is the one migrated page whose own override performs substantial hidden work after
-    /// base.Update(), including MapObject's synchronous room preparation loop. Returning true means
-    /// the minimal backend was pumped and the original MapPage override must not run this frame.
-    /// </summary>
-    internal static bool TryUpdateMapBackend(MapPage page)
-    {
-        if (!TryGetQuiescentProfile(page, out PageProfile profile) || !profile.BypassPageOverride)
-            return false;
-
-        PumpPageBackend(page, profile);
-        return true;
     }
 
     internal static bool IsQuiescent(DevUI owner)
@@ -108,12 +101,49 @@ internal static class LegacyDevUiQuiescenceController
         return TryGetQuiescentProfile(owner.activePage, out _);
     }
 
+    private static void ObjectsPage_Update(On.DevInterface.ObjectsPage.orig_Update orig, ObjectsPage self)
+    {
+        if (TryPumpDerivedPage(self)) return;
+        orig(self);
+    }
+
+    private static void SoundPage_Update(On.DevInterface.SoundPage.orig_Update orig, SoundPage self)
+    {
+        if (TryPumpDerivedPage(self)) return;
+        orig(self);
+    }
+
+    private static void TriggersPage_Update(On.DevInterface.TriggersPage.orig_Update orig, TriggersPage self)
+    {
+        if (TryPumpDerivedPage(self)) return;
+        orig(self);
+    }
+
     private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, MapPage self)
     {
-        if (TryUpdateMapBackend(self))
-            return;
-
+        if (TryPumpDerivedPage(self)) return;
         orig(self);
+    }
+
+    private static void DialogPage_Update(On.DevInterface.DialogPage.orig_Update orig, DialogPage self)
+    {
+        if (TryPumpDerivedPage(self)) return;
+        orig(self);
+    }
+
+    private static void RelationshipPage_Update(On.DevInterface.RelationshipPage.orig_Update orig, RelationshipPage self)
+    {
+        if (TryPumpDerivedPage(self)) return;
+        orig(self);
+    }
+
+    private static bool TryPumpDerivedPage(Page page)
+    {
+        if (!TryGetQuiescentProfile(page, out PageProfile profile) || !profile.BypassPageOverride)
+            return false;
+
+        PumpPageBackend(page, profile);
+        return true;
     }
 
     private static void DevUINode_Update(On.DevInterface.DevUINode.orig_Update orig, DevUINode self)
@@ -150,9 +180,9 @@ internal static class LegacyDevUiQuiescenceController
                 return;
             }
 
-            // Some pages (notably Map) deliberately skip their first legacy Refresh while the new
-            // UI owns presentation. If the developer switches back to vanilla/legacy mode, restore
-            // that initialization contract before the normal DevUINode.Update runs.
+            // Map can intentionally skip its first legacy Refresh while the new UI owns it. If the
+            // developer switches back to vanilla/legacy mode, restore that initialization contract
+            // before normal DevUINode.Update resumes.
             if (SuppressedInitialRefreshPages.Remove(page))
                 page.initRefresh = true;
         }
@@ -173,8 +203,9 @@ internal static class LegacyDevUiQuiescenceController
 
             if (profile.MaterializeInitialRefresh)
             {
-                // Materialize once so vanilla/third-party representations still exist as a
-                // compatibility backend. They are subsequently dormant unless explicitly needed.
+                // Materialize once so vanilla and third-party world representations still exist as
+                // a compatibility backend. Their screen-space controls become dormant immediately
+                // after construction unless explicitly needed by a bridge transaction.
                 fullCompatibilityDepth++;
                 try
                 {
@@ -187,8 +218,9 @@ internal static class LegacyDevUiQuiescenceController
             }
             else
             {
-                // Large fully-replaced pages such as Map do not need their first hidden UI refresh.
-                // Remember this so returning to vanilla presentation can restore it losslessly.
+                // Map is fully represented by World Workspace. Its hidden legacy Refresh creates a
+                // MapObject and begins its own room-texture preparation pipeline, so skip it while
+                // ImGui owns presentation. Returning to vanilla restores initRefresh losslessly.
                 SuppressedInitialRefreshPages.Add(page);
             }
 
@@ -217,8 +249,9 @@ internal static class LegacyDevUiQuiescenceController
 
         if (IsExternalCompatibilityNode(node))
         {
-            // External DevInterface types are intentionally conservative: if another assembly put
-            // behaviour in a node, keep that subtree alive instead of guessing that it is cosmetic.
+            // Unknown external DevInterface code gets the conservative path. RegionKit and other
+            // mods may put meaningful behaviour in an otherwise screen-looking node, so keep that
+            // entire subtree alive rather than applying DryCycle's pruning rules to foreign code.
             fullCompatibilityDepth++;
             try
             {
@@ -237,8 +270,8 @@ internal static class LegacyDevUiQuiescenceController
             return;
         }
 
-        // Vanilla screen-space containers are dormant, but keep walking their structure because a
-        // useful world-space handle or third-party compatibility node can be nested underneath.
+        // Vanilla and DryCycle-owned screen-space nodes are dormant. Keep walking structure only to
+        // discover a nested world-space handle or truly external compatibility node.
         if (node.subNodes == null) return;
         for (int i = node.subNodes.Count - 1; i >= 0; i--)
             PumpBranch(node.subNodes[i], profile);
@@ -274,7 +307,15 @@ internal static class LegacyDevUiQuiescenceController
     private static bool IsExternalCompatibilityNode(DevUINode node)
     {
         Type type = node?.GetType();
-        return type != null && type.Assembly != VanillaDevUiAssembly;
+        if (type == null) return false;
+
+        System.Reflection.Assembly assembly = type.Assembly;
+        if (assembly == VanillaDevUiAssembly) return false;
+
+        // DryCycle's own old DevUI controls (DryCycleTextField/NumericSlider/etc.) are already
+        // represented by the rebuilt frontend and should sleep just like vanilla screen controls.
+        // Unknown foreign assemblies remain conservative compatibility backends.
+        return assembly != DryCycleAssembly;
     }
 
     private static bool TryGetQuiescentProfile(Page page, out PageProfile profile)
