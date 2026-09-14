@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using BepInEx;
@@ -105,16 +106,18 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // and closes the edge even if DevUI disappears before that observer sees the retired page.
         MapRoomGeometryPresentationHub.Clear();
 
-        // Disable the renderer last so hooked retained helpers can hide/destroy their own resources
-        // before the scene camera/chunks are torn down and the active bake is flushed to disk.
+        // Disable the renderer first so the active cache is flushed durably. Then release the cache's
+        // in-memory active-region snapshot as well; otherwise one full region bake remains rooted for
+        // the whole gameplay session even after the multi-region preload cache has been cleared.
         WorldMapGpuRuntime.Disable();
+        ClearGpuCacheWorkingSet();
     }
 
     private void ResumeDormantMapRuntime()
     {
         // Rebuild the dependency order used during normal BepInEx startup. Region preload installs
         // before the stable-cache gate so the latter remains the outer O(1) fast path once baking is
-        // complete. The first reopened Map frame can then warm from disk/resident data normally.
+        // complete. The first reopened Map frame reloads the durable active-region bake from disk.
         WorldMapPlayerLocator.Enable(Logger);
         WorldMapPerformance.Enable(Logger);
         WorldMapExactShortcuts.Enable(Logger);
@@ -140,6 +143,40 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         {
             // Cache retirement is best-effort during shutdown; a later Prime() also resets a stale
             // region before publishing any shortcut data.
+        }
+    }
+
+    private static void ClearGpuCacheWorkingSet()
+    {
+        try
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+            Type cacheType = typeof(WorldMapGpuCache);
+            FieldInfo currentField = cacheType.GetField("current", flags);
+            Type snapshotType = currentField?.FieldType;
+            object empty = snapshotType?.GetField("Empty", flags)?.GetValue(null);
+            if (currentField != null && empty != null)
+                currentField.SetValue(null, empty);
+
+            cacheType.GetField("activeRegion", flags)?.SetValue(null, string.Empty);
+            cacheType.GetField("activePath", flags)?.SetValue(null, string.Empty);
+            cacheType.GetField("validationCursor", flags)?.SetValue(null, 0);
+            cacheType.GetField("captureCursor", flags)?.SetValue(null, 0);
+            cacheType.GetField("dirtyFrame", flags)?.SetValue(null, -1);
+            cacheType.GetField("dirty", flags)?.SetValue(null, false);
+            cacheType.GetField("lastError", flags)?.SetValue(null, string.Empty);
+            cacheType.GetField("cacheHits", flags)?.SetValue(null, 0);
+            cacheType.GetField("cacheMisses", flags)?.SetValue(null, 0);
+
+            if (cacheType.GetField("validatedRooms", flags)?.GetValue(null) is HashSet<int> validated)
+                validated.Clear();
+            if (cacheType.GetField("liveSignatures", flags)?.GetValue(null) is Dictionary<int, ulong> signatures)
+                signatures.Clear();
+        }
+        catch
+        {
+            // The durable cache has already been flushed. Failing to trim the optional in-memory
+            // working set is therefore a memory-only fallback, not a data-integrity failure.
         }
     }
 
