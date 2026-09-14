@@ -131,7 +131,12 @@ internal static class DevToolRuntime
             MapEditorCommandQueue.Process(session);
             DialogEditorCommandQueue.Process(session);
             RelationshipEditorCommandQueue.Process(session);
-            session?.Synchronize(self);
+
+            // Commands cannot replace the DevUI owner/document behind this session. The only
+            // post-command invariant that needs reconciling is selected-object membership, so do
+            // not pay for a third full EditorSession.Synchronize() in the same frame.
+            session?.SynchronizeSelectionValidity();
+
             if (EffectLivePreviewEnabled)
                 EffectPreviewRuntime.AfterDevUiUpdate(self);
         }
@@ -370,12 +375,21 @@ public readonly struct EditorDocumentKey : IEquatable<EditorDocumentKey>
 
 public sealed class EditorSession
 {
+    // Unknown third-party code can mutate RoomSettings.placedObjects without going through DryCycle
+    // invalidation. Known collection writes are caught immediately by the semantic collection
+    // revision below; this low-frequency audit only exists for same-count opaque replacements.
+    private const int SelectionAuditIntervalUpdates = 120;
+
     private EditorDocumentKey documentKey;
     private Page observedLegacyPage;
     private int activationUpdateCount;
     private bool deferredViewRestorePending;
     private EditorToolMode deferredRestoreMode;
     private bool deferredRestoreLegacyUi;
+    private List<PlacedObject> observedPlacedObjectList;
+    private int observedPlacedObjectCount = -1;
+    private long observedObjectCollectionRevision;
+    private int selectionAuditCountdown;
 
     internal EditorSession(global::DevInterface.DevUI owner)
     {
@@ -419,6 +433,7 @@ public sealed class EditorSession
             LegacyTransactions.Reset();
             LegacyUiVisible = false;
             CancelPlacement();
+            ResetSelectionValidation();
         }
 
         if (!ReferenceEquals(observedLegacyPage, owner?.activePage))
@@ -430,13 +445,50 @@ public sealed class EditorSession
             if (ToolMode != EditorToolMode.Objects) CancelPlacement();
         }
 
-        Selection.RemoveMissing(RoomSettings?.placedObjects);
+        SynchronizeSelectionValidity();
+    }
+
+    /// <summary>
+    /// Validates selected PlacedObject identities only when membership may have changed. Normal
+    /// stable frames compare one list reference, one count and one semantic revision, then return.
+    /// Opaque third-party same-count replacement is covered by the infrequent audit countdown.
+    /// </summary>
+    internal void SynchronizeSelectionValidity()
+    {
+        List<PlacedObject> live = RoomSettings?.placedObjects;
+        int liveCount = live?.Count ?? -1;
+        long collectionRevision = ObjectPresentationChangeHintHub.GetCollectionRevision(this);
+
+        bool collectionChanged =
+            !ReferenceEquals(observedPlacedObjectList, live) ||
+            observedPlacedObjectCount != liveCount ||
+            observedObjectCollectionRevision != collectionRevision;
+        bool auditDue = selectionAuditCountdown <= 0;
+
+        if (!collectionChanged && !auditDue)
+            return;
+
+        Selection.RemoveMissing(live);
+        observedPlacedObjectList = live;
+        observedPlacedObjectCount = liveCount;
+        observedObjectCollectionRevision = collectionRevision;
+        selectionAuditCountdown = SelectionAuditIntervalUpdates;
+    }
+
+    private void ResetSelectionValidation()
+    {
+        observedPlacedObjectList = null;
+        observedPlacedObjectCount = -1;
+        observedObjectCollectionRevision = 0L;
+        selectionAuditCountdown = 0;
     }
 
     internal void MarkUpdateStarted()
     {
         if (activationUpdateCount < int.MaxValue)
             activationUpdateCount++;
+        if (selectionAuditCountdown > 0)
+            selectionAuditCountdown--;
     }
 
     internal void RestoreViewStateFrom(EditorSession previous)
