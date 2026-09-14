@@ -54,6 +54,9 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         }
 
         EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map)
+            WorldMapGpuStableCacheGate.ReleaseRetainedKey();
+
         bool rebuiltMapVisible =
             EditorInputRouter.FrontendAttached &&
             session?.ToolMode == EditorToolMode.Map &&
@@ -73,6 +76,11 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void SuspendDormantMapRuntime()
     {
+        // The stable-cache gate deliberately retains Page/session identity while Map stays active.
+        // Drop that optimization key before the live DevUI owner disappears; the durable baked cache
+        // itself remains available for the next editor lifetime.
+        WorldMapGpuStableCacheGate.ReleaseRetainedKey();
+
         // Retire helpers which keep live Page/snapshot/route state. Their BepInEx components remain
         // enabled, but the static runtimes are idempotent and therefore safe to park until the next
         // real DevTools lifetime. This also makes their Update methods O(1) no-ops while gameplay is
@@ -134,6 +142,7 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     {
         // Plugin shutdown can arrive in any component order. Hide presentation immediately; the
         // owning plugin runtimes perform their own idempotent final Disable calls afterwards.
+        WorldMapGpuStableCacheGate.ReleaseRetainedKey();
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
