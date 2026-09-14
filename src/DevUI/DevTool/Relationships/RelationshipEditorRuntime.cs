@@ -286,40 +286,58 @@ public static class RelationshipEditorCommandQueue
 
     internal static void Process(EditorSession session)
     {
+        long historyBeforeBatch = session?.History.Revision ?? 0L;
+        bool nonHistoryDirty = false;
+
         while (queue.TryDequeue(out RelationshipEditorCommand command))
         {
             try
             {
+                long historyBeforeCommand = session?.History.Revision ?? 0L;
+                RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
+                string primaryBefore = state?.PrimaryCreature ?? string.Empty;
+                string otherBefore = state?.SelectedOtherCreature ?? string.Empty;
+                EditorRelationshipDirection directionBefore =
+                    state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
+                bool changed = false;
+
                 switch (command.Kind)
                 {
                     case RelationshipEditorCommandKind.SelectPrimary:
                         RelationshipEditorActions.SelectPrimary(session, command.Primary);
+                        changed = !string.Equals(primaryBefore, state?.PrimaryCreature ?? string.Empty, StringComparison.Ordinal) ||
+                                  !string.Equals(otherBefore, state?.SelectedOtherCreature ?? string.Empty, StringComparison.Ordinal);
                         break;
                     case RelationshipEditorCommandKind.SelectPair:
                         RelationshipEditorActions.SelectPair(session, command.Other, command.Direction);
+                        changed = !string.Equals(otherBefore, state?.SelectedOtherCreature ?? string.Empty, StringComparison.Ordinal) ||
+                                  directionBefore != (state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther);
                         break;
                     case RelationshipEditorCommandKind.SetRelationshipType:
-                        RelationshipEditorActions.SetType(session, command.Primary, command.Other, command.Direction, command.Text);
+                        changed = RelationshipEditorActions.SetType(session, command.Primary, command.Other, command.Direction, command.Text);
                         break;
                     case RelationshipEditorCommandKind.SetRelationshipIntensity:
-                        RelationshipEditorActions.SetIntensity(session, command.Primary, command.Other, command.Direction, command.Value);
+                        changed = RelationshipEditorActions.SetIntensity(session, command.Primary, command.Other, command.Direction, command.Value);
                         break;
                     case RelationshipEditorCommandKind.ResetRelationship:
-                        RelationshipEditorActions.Reset(session, command.Primary, command.Other, command.Direction);
+                        changed = RelationshipEditorActions.Reset(session, command.Primary, command.Other, command.Direction);
                         break;
                 }
 
-                EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
-                if (command.Kind is RelationshipEditorCommandKind.SetRelationshipType or
-                    RelationshipEditorCommandKind.SetRelationshipIntensity or
-                    RelationshipEditorCommandKind.ResetRelationship)
-                    EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+                if (changed && (session?.History.Revision ?? 0L) == historyBeforeCommand)
+                    nonHistoryDirty = true;
             }
             catch (Exception error)
             {
                 Plugin.Logger?.LogWarning("DevTool relationship command failed: " + error.Message);
             }
         }
+
+        // Selection has no document-history entry, while relationship mutations do. Let the core
+        // history revision invalidate Shell + Relationships once for edit batches and only produce a
+        // direct workspace revision for state-only selection changes.
+        if (nonHistoryDirty && (session?.History.Revision ?? 0L) == historyBeforeBatch)
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Relationships);
     }
 
     internal static void Clear()
