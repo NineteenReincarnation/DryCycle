@@ -109,17 +109,16 @@ internal static class WorldMapLegacyVisualGuard
         if (!enabled) return;
 
         EditorSession session = DevToolRuntime.ActiveSession;
-        bool rebuiltMapOwnsPresentation =
+        bool rebuiltMapOwnsLegacySuppression =
             DevToolSessionHub.IsCurrentSessionLive &&
             !EditorUiModeState.UseVanilla &&
-            !EditorUiModeState.OverlayHidden &&
             EditorInputRouter.FrontendAttached &&
             session != null &&
             !session.LegacyUiVisible &&
             session.ToolMode == EditorToolMode.Map &&
             session.Owner?.activePage is MapPage;
 
-        if (!rebuiltMapOwnsPresentation)
+        if (!rebuiltMapOwnsLegacySuppression)
         {
             Restore();
             suppressionDirty = true;
@@ -127,6 +126,10 @@ internal static class WorldMapLegacyVisualGuard
             return;
         }
 
+        // Escape-hidden overlay is still rebuilt-mode ownership: the GPU camera is disabled by the
+        // map lifecycle controller, while the vanilla MapPage must remain visually suppressed. If we
+        // restored here, Restore() would run MapPage.Refresh in LateUpdate after the core suppression
+        // pass and make the entire vanilla map leak into the supposedly hidden editor frame.
         MapPage page = session.Owner.activePage as MapPage;
         if (!ReferenceEquals(page, suppressedPage))
         {
