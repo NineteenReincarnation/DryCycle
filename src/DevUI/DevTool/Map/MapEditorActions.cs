@@ -65,7 +65,11 @@ internal static class MapEditorActions
         RoomPanel panel = FindRoomPanel(page, roomIndex);
         if (panel == null) return false;
 
-        MapStateSnapshot before = MapStateSnapshot.Capture(page);
+        // Position/layer/subregion edits are room-local. Capturing the old full MapStateSnapshot here
+        // copied every room, node-position array, attraction dictionary and material twice per edit.
+        // The member-scoped snapshot preserves the exact same undo semantics for this room while
+        // keeping unrelated map state out of the transaction.
+        SingleMapRoomStateSnapshot before = SingleMapRoomStateSnapshot.Capture(page, panel);
         if (before == null || !mutation(panel)) return false;
 
         try
@@ -78,7 +82,7 @@ internal static class MapEditorActions
             Plugin.Logger?.LogWarning("DevTool map refresh failed: " + error.Message);
         }
 
-        MapStateSnapshot after = MapStateSnapshot.Capture(page);
+        SingleMapRoomStateSnapshot after = SingleMapRoomStateSnapshot.Capture(page, panel);
         bool historyPushed = SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry);
         if (historyPushed)
         {
@@ -88,9 +92,8 @@ internal static class MapEditorActions
         }
         else
         {
-            // A successful compatibility mutation that is outside MapStateSnapshot remains possible
-            // for third-party panel subclasses. Preserve one narrow fallback invalidation for that
-            // case; built-in position/layer/subregion no-ops are filtered before this point.
+            // A successful compatibility mutation outside the known room-local fields remains
+            // possible for third-party RoomPanel subclasses. Preserve one narrow fallback Map edge.
             EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
         }
         return true;
