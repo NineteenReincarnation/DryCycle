@@ -74,10 +74,18 @@ public static class EditorPresentationHub
 
     private static EditorSession observedSession;
     private static global::Room observedRoom;
-    private static Page observedPage;
+    private static global::DevInterface.Page observedPage;
     private static long observedShellRevision;
     private static long observedObjectRevision;
+    private static long observedHistoryRevision;
     private static bool observedShellOnly;
+    private static EditorToolMode observedToolMode;
+    private static bool observedFocusMode;
+    private static bool observedBrowserOpen;
+    private static bool observedInspectorOpen;
+    private static bool observedLegacyUiVisible;
+    private static bool observedPlacementActive;
+    private static string observedPlacementType = string.Empty;
     private static int observedObjectCount = -1;
     private static int observedSelectionCount = -1;
     private static PlacedObject observedPrimarySelection;
@@ -90,6 +98,19 @@ public static class EditorPresentationHub
         {
             Clear();
             return;
+        }
+
+        // History can change through keyboard shortcuts and legacy transaction completion without
+        // passing through EditorUiCommandQueue. Detect that authoritative revision before reading
+        // presentation revisions. The active workspace is invalidated as Undo/Redo can restore data
+        // in any editor model, while Shell owns the undo/redo labels and availability flags.
+        long historyRevision = session.History.Revision;
+        if (ReferenceEquals(observedSession, session) &&
+            observedHistoryRevision != 0L &&
+            observedHistoryRevision != historyRevision)
+        {
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
+            EditorRevisionHub.MarkWorkspace(session);
         }
 
         bool objectWorkspace = !shellOnly && session.ToolMode == EditorToolMode.Objects;
@@ -108,10 +129,11 @@ public static class EditorPresentationHub
         PlacedObject primarySelection = objectWorkspace ? session.Selection.PrimaryPlacedObject : null;
         int typeCount = objectWorkspace ? ExtEnum<PlacedObject.Type>.values.Count : libraryTypeCount;
         bool libraryStale = objectWorkspace && (libraryTypeCount != typeCount || libraryCache.Length == 0);
+        string placementType = session.PlacementType ?? string.Empty;
 
-        // Session identity protects reopen/room transitions. Revision numbers handle deterministic
-        // DryCycle writes, while the cheap count/selection/page checks cover structural changes made
-        // by the small compatibility backend without re-walking every PlacedObject on stable frames.
+        // Session/page identity protects reopen and workspace transitions. Revisions cover model
+        // writes; direct shell-state comparisons cover keyboard paths such as Ctrl+B, Ctrl+I, Tab
+        // and Escape without requiring every caller to remember an invalidation API.
         if (!libraryStale &&
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedRoom, session.Room) &&
@@ -119,17 +141,20 @@ public static class EditorPresentationHub
             observedShellOnly == shellOnly &&
             observedShellRevision == shellRevision &&
             observedObjectRevision == objectRevision &&
+            observedHistoryRevision == historyRevision &&
+            observedToolMode == session.ToolMode &&
+            observedFocusMode == session.FocusMode &&
+            observedBrowserOpen == session.BrowserOpen &&
+            observedInspectorOpen == session.InspectorOpen &&
+            observedLegacyUiVisible == session.LegacyUiVisible &&
+            observedPlacementActive == session.PlacementActive &&
+            string.Equals(observedPlacementType, placementType, StringComparison.Ordinal) &&
             observedObjectCount == objectCount &&
             observedSelectionCount == selectionCount &&
             ReferenceEquals(observedPrimarySelection, primarySelection) &&
             current.Available)
             return;
 
-        // Object presentation is one of the heavier DevTool payloads: it walks every placed
-        // object, captures inspector adapters and may initialize reflection-backed object catalogs.
-        // The opening frame publishes only the editor shell, matching the industry bootstrap-scene
-        // pattern: establish a responsive surface first, then hydrate expensive workspace data on
-        // the following frame instead of competing with vanilla DevUI construction.
         EditorObjectSnapshot[] scene = Array.Empty<EditorObjectSnapshot>();
         EditorObjectTypeSnapshot[] objectLibrary = Array.Empty<EditorObjectTypeSnapshot>();
         EditorInspectorSnapshot inspector = new();
@@ -205,7 +230,7 @@ public static class EditorPresentationHub
             UndoLabel = session.History.UndoLabel ?? string.Empty,
             RedoLabel = session.History.RedoLabel ?? string.Empty,
             PlacementActive = session.PlacementActive,
-            PlacementType = session.PlacementType,
+            PlacementType = placementType,
             SceneObjects = scene,
             ObjectLibrary = objectLibrary,
             Inspector = inspector
@@ -216,7 +241,15 @@ public static class EditorPresentationHub
         observedPage = session.Owner.activePage;
         observedShellRevision = shellRevision;
         observedObjectRevision = objectRevision;
+        observedHistoryRevision = historyRevision;
         observedShellOnly = shellOnly;
+        observedToolMode = session.ToolMode;
+        observedFocusMode = session.FocusMode;
+        observedBrowserOpen = session.BrowserOpen;
+        observedInspectorOpen = session.InspectorOpen;
+        observedLegacyUiVisible = session.LegacyUiVisible;
+        observedPlacementActive = session.PlacementActive;
+        observedPlacementType = placementType;
         observedObjectCount = objectCount;
         observedSelectionCount = selectionCount;
         observedPrimarySelection = primarySelection;
@@ -230,7 +263,15 @@ public static class EditorPresentationHub
         observedPage = null;
         observedShellRevision = 0L;
         observedObjectRevision = 0L;
+        observedHistoryRevision = 0L;
         observedShellOnly = false;
+        observedToolMode = EditorToolMode.Room;
+        observedFocusMode = false;
+        observedBrowserOpen = false;
+        observedInspectorOpen = false;
+        observedLegacyUiVisible = false;
+        observedPlacementActive = false;
+        observedPlacementType = string.Empty;
         observedObjectCount = -1;
         observedSelectionCount = -1;
         observedPrimarySelection = null;
@@ -389,8 +430,6 @@ public static class EditorUiCommandQueue
                 return;
 
             default:
-                // Remaining commands mutate object data and normally push history entries, so both
-                // the object snapshot and shell undo/redo labels need a fresh publication.
                 EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
                 EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
                 return;
