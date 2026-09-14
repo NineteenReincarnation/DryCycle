@@ -28,7 +28,9 @@ internal static class MapEditorActions
         if (value.Kind != EditorPropertyKind.Vector2) return false;
         return Mutate(session, "Move map room", roomIndex, panel =>
         {
-            panel.devPos = new Vector2(value.X, value.Y);
+            Vector2 next = new(value.X, value.Y);
+            if ((panel.devPos - next).sqrMagnitude <= 0.000001f) return false;
+            panel.devPos = next;
             return true;
         });
     }
@@ -37,7 +39,9 @@ internal static class MapEditorActions
     {
         return Mutate(session, "Change map layer", roomIndex, panel =>
         {
-            panel.layer = Mathf.Clamp(layer, 0, 2);
+            int next = Mathf.Clamp(layer, 0, 2);
+            if (panel.layer == next) return false;
+            panel.layer = next;
             return true;
         });
     }
@@ -47,7 +51,10 @@ internal static class MapEditorActions
         return Mutate(session, "Change room subregion", roomIndex, panel =>
         {
             if (panel.roomRep?.room == null) return false;
-            panel.roomRep.room.subregionName = string.IsNullOrWhiteSpace(subregion) ? null : subregion.Trim();
+            string next = string.IsNullOrWhiteSpace(subregion) ? null : subregion.Trim();
+            if (string.Equals(panel.roomRep.room.subregionName, next, StringComparison.Ordinal))
+                return false;
+            panel.roomRep.room.subregionName = next;
             return true;
         });
     }
@@ -81,8 +88,9 @@ internal static class MapEditorActions
         }
         else
         {
-            // Conservative fallback for a successful compatibility mutation that could not produce
-            // a history diff. Shell history state did not change, so only Map needs invalidation.
+            // A successful compatibility mutation that is outside MapStateSnapshot remains possible
+            // for third-party panel subclasses. Preserve one narrow fallback invalidation for that
+            // case; built-in position/layer/subregion no-ops are filtered before this point.
             EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
         }
         return true;
