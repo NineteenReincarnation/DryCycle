@@ -247,7 +247,23 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             float face = Mathf.Abs(mainBodyChunk.vel.x) > 0.3f ? Mathf.Sign(mainBodyChunk.vel.x) : Mathf.Sign(lookPoint.x - mainBodyChunk.pos.x);
             direction = new Vector2(face == 0f ? 1f : face, movMode == MovementMode.Climb ? 2.5f : 0.9f).normalized;
         }
-        Vector2 position = mainBodyChunk.pos + new Vector2(direction.x * 7f, forward ? -5f : 1f);
+
+        // Enhanced hand-held lance: the hand/grip is an anchor, not a point that slides around the
+        // body as the weapon rotates. Counter-sweep may turn the blade through 80/120 degrees while
+        // the scavenger keeps flying forward; the grip therefore follows facing/charge direction,
+        // never direction.x from the rotating lance itself.
+        float gripFacing;
+        if (state == LanceState.Charge)
+            gripFacing = Mathf.Sign(Motor.Direction.x);
+        else if (forward && Brain?.Target != null)
+            gripFacing = Mathf.Sign(Brain.Target.mainBodyChunk.pos.x - mainBodyChunk.pos.x);
+        else if (Mathf.Abs(mainBodyChunk.vel.x) > 0.3f)
+            gripFacing = Mathf.Sign(mainBodyChunk.vel.x);
+        else
+            gripFacing = Mathf.Sign(direction.x);
+        if (gripFacing == 0f) gripFacing = 1f;
+
+        Vector2 position = mainBodyChunk.pos + new Vector2(gripFacing * 7f, forward ? -5f : 1f);
         grip = new LanceGrip(position, direction, forward,
             state == LanceState.Charge && Consious && grabbedBy.Count == 0,
             Motor.RunUp, state == LanceState.Charge && Motor.CounterSweepActive,
