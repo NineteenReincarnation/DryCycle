@@ -107,10 +107,6 @@ internal static class ObjectInspectorView
             return;
         }
 
-        // Touching the optional RegionKit adapter lazily registers it in the core registry.
-        // The first frame may still contain the legacy snapshot; the next publication is native.
-        _ = RegionKitAdvancedShaderInspectorAdapter.IsDataTypeName(inspector.DataType);
-
         if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
             Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
 
@@ -387,10 +383,6 @@ internal static class ObjectInspectorView
 
     private static void DrawCompatibility(EditorInspectorSnapshot inspector)
     {
-        // AdvancedShader is now represented completely by first-class inspector properties.
-        // Do not show its old RegionKit panel controls in parallel.
-        if (RegionKitAdvancedShaderInspectorAdapter.IsDataTypeName(inspector.DataType)) return;
-
         LegacyControlSnapshot[] controls = inspector.LegacyControls ?? Array.Empty<LegacyControlSnapshot>();
         if (controls.Length == 0 && !inspector.LegacyUiAvailable) return;
 

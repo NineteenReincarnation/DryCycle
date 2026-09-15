@@ -9,12 +9,9 @@ internal static class DevUiCompatibilityGateView
     private static readonly Num.Vector4 PassText = new(0.55f, 0.88f, 0.62f, 1f);
     private static readonly Num.Vector4 FailText = new(1.00f, 0.68f, 0.38f, 1f);
 
-    internal static void Draw(UniversalDevUiPresentationSnapshot mirror)
+    internal static void Draw()
     {
-        DevUiPageCoverageSnapshot pages = DevUiPageCoverageTracker.Current;
-        DevUiSemanticConformanceSnapshot semantic = DevUiSemanticConformanceAudit.Evaluate(mirror);
-        DevUiProtocolInventorySnapshot inventory = DevUiProtocolInventory.Current;
-        DevUiCompatibilityGateSnapshot gate = DevUiCompatibilityGate.Evaluate(mirror, pages, semantic, inventory);
+        DevUiCompatibilityGateSnapshot gate = DevUiCompatibilityGate.Current;
 
         string title = DevToolUiSettings.T("通用兼容验收", "GENERIC COMPATIBILITY GATE");
         ImGuiTreeNodeFlags flags = gate.Passed ? ImGuiTreeNodeFlags.None : ImGuiTreeNodeFlags.DefaultOpen;

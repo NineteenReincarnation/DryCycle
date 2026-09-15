@@ -42,7 +42,7 @@ public static class DevUiSemanticConformanceAudit
 
     public static DevUiSemanticConformanceSnapshot Current => current;
 
-    public static DevUiSemanticConformanceSnapshot Evaluate(UniversalDevUiPresentationSnapshot mirror)
+    internal static DevUiSemanticConformanceSnapshot Evaluate(UniversalDevUiPresentationSnapshot mirror)
     {
         EditorSession session = DevToolSessionHub.Current;
         Page page = session?.Owner?.activePage;

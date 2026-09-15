@@ -132,6 +132,19 @@ DevTool/
 - CreatureType 和 Relationship.Type 都从本体 ExtEnum 获取，因此 Mod 正常注册到本体的数据会自然进入面板，不需要依赖 Mod API。
 - 修改直接写入 `RelationshipPage.changedRelationships`，保存继续使用本体日志输出路径。
 
+## Phase 6 最终架构收口
+
+第六阶段不再扩张编辑功能，而是冻结前五阶段形成的长期边界：
+
+- `DevToolRuntime` 只负责 Hook 和帧顺序；跨 Workspace 的 Queue / Presentation / State / Revision / Session 生命周期统一由 `DevToolSubsystemCoordinator` 收口。
+- RWImGui 只读 detached Snapshot 并入队 Command；兼容诊断同样由后端 `DevUiDiagnosticsPublisher` 发布，Draw 不执行 live DevUI 扫描、审计或写操作。
+- POM / RegionKit 专用 Inspector 已从核心删除；第三方原生增强只通过 `DevToolApi 1.x`，未接 API 的内容继续走 Generic DevInterface / Rain World Data Model / Vanilla fallback。
+- 已删除未接线的 Universal Protocol Augmenter 与重复 Generic Protocol Bootstrap；未知协议必须明确显示为缺口并回退，而不是用未验证的特殊适配伪装兼容。
+- Extension Scope 属于外部 Mod 生命周期，不会因为 New UI / Vanilla 切换、房间切换或 DevUI runtime reset 被 DevTool 擅自释放。
+- `DevTool Final Architecture Guard` 持续检查后端/前端依赖方向、第三方私有类型、生命周期所有权和诊断纯读边界。
+
+完整封板契约与验证清单见 [`PHASE6.md`](PHASE6.md)。静态守卫通过不等价于实际 Rain World 联编或游戏内回归通过。
+
 ## 兼容策略
 
 ```text

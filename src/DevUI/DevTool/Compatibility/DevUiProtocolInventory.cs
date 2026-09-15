@@ -38,14 +38,11 @@ public static class DevUiProtocolInventory
     private static int lastAssemblyCount = -1;
     private static string lastFingerprint = string.Empty;
 
-    public static DevUiProtocolInventorySnapshot Current
-    {
-        get
-        {
-            ObserveLoadedTypes();
-            return current;
-        }
-    }
+    /// <summary>
+    /// Latest detached loaded-type snapshot. The expensive assembly/type scan is explicitly pumped
+    /// by the backend diagnostics phase; frontend reads are side-effect free.
+    /// </summary>
+    public static DevUiProtocolInventorySnapshot Current => current;
 
     internal static void ObserveLoadedTypes()
     {
