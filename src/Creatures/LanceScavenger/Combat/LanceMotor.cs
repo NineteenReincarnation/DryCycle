@@ -256,8 +256,12 @@ internal sealed class LanceMotor
     private bool TargetDodged(int chargeAge)
     {
         BodyChunk chunk = _counterTarget.mainBodyChunk;
-        Vector2 expected = _counterTargetLaunchPos +
-            Vector2.ClampMagnitude(_counterTargetLaunchVelocity * chargeAge, 65f);
+        // Do not cap the total expected displacement at 65 px. That cap is useful for pre-launch
+        // tactical aiming, but during a real charge it made an honestly running target appear to
+        // "dodge" as soon as its steady displacement exceeded 65 px. Cap only implausible launch
+        // speed, then keep the expected point moving for the whole flight.
+        Vector2 expectedVelocity = Vector2.ClampMagnitude(_counterTargetLaunchVelocity, 12f);
+        Vector2 expected = _counterTargetLaunchPos + expectedVelocity * chargeAge;
         Vector2 deviation = chunk.pos - expected;
         Vector2 perpendicular = Custom.PerpendicularVector(Direction);
         float lateral = Mathf.Abs(Vector2.Dot(deviation, perpendicular));
