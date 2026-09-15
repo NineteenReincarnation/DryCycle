@@ -36,9 +36,8 @@ internal sealed class LanceScavengerAI : ScavengerAI
     {
         if (SkipNextUpdate) { SkipNextUpdate = false; return; }
 
-        // Let the complete vanilla scavenger brain run first. In particular, this updates
-        // SocialMemory, DynamicRelationship, ViolenceType, fear, prey/threat selection,
-        // reputation reactions and the normal Attack/Flee decision.
+        // Vanilla keeps full ownership of pursuit/flee target selection. The lance layer
+        // watches that same target and takes over only when a charge opportunity exists.
         base.Update();
         if (_owner.room == null) return;
 
@@ -46,26 +45,22 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool armed = _owner.Lance != null;
         bool active = _owner.Consious && _owner.grabbedBy.Count == 0 && !_owner.safariControlled &&
             !_owner.enteringShortCut.HasValue && !_owner.inShortcut && _owner.Submersion < 0.25f;
-        bool stable = _owner.IsStableForBrace;
         float distance = Target == null ? 999f : Vector2.Distance(_owner.mainBodyChunk.pos, Target.mainBodyChunk.pos);
         Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
             ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target);
         bool laneClear = Lane.Clear;
         if (_owner.Combat.State == LanceState.Charge)
-            // The launch lane was checked on the ground. While airborne, only intercept
-            // newly entered friends; body/lance collision owns terrain impacts.
             laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
                 _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target);
 
         _owner.Combat.Tick(new LanceSituation(active, armed, Target != null, TargetViolence, TargetAfraid,
-            distance, laneClear, stable));
+            distance, laneClear));
 
         if (!armed) { RecoverWeapon(); return; }
         LanceState state = _owner.Combat.State;
 
-        // Only a vanilla Lethal + Attacks decision may replace the normal attack
-        // destination with a lance staging point. Afraid targets keep vanilla flee
-        // locomotion unless a safe counter-charge lane already exists.
+        // Lethal + Attacks keeps pursuing with vanilla locomotion until the lance layer
+        // can either charge from the current position or find a reachable staging point.
         if (!TargetAfraid && TargetViolence == ViolenceType.Lethal &&
             (state == LanceState.CreateDistance || state == LanceState.AcquireChargeLane))
         {
@@ -80,6 +75,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
                 creature.abstractAI.SetDestination(_staging.Value);
                 runSpeedGoal = Mathf.Max(runSpeedGoal, 0.8f);
             }
+            // If no staging point exists, leave the vanilla chase destination intact.
         }
         else if (state == LanceState.Brace || state == LanceState.Recover || state == LanceState.CloseDefense)
         {
@@ -88,7 +84,6 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
         else
         {
-            // Threaten/Observe deliberately leave the destination chosen by vanilla AI.
             _staging = null;
         }
     }
@@ -125,11 +120,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
         float tacticRange = Mathf.Max(480f, ChargeLanePlanner.MaximumChargeDistance(_owner) + 40f);
         if (distance > tacticRange) return;
 
-        // Vanilla may remember and pursue unseen creatures. The custom lance tactic only
-        // takes over once the target is actually visible; otherwise vanilla pursuit/fleeing continues.
-        if (!rep.VisualContact && !_owner.room.VisualContact(_owner.mainBodyChunk.pos, candidate.mainBodyChunk.pos))
-            return;
-
+        // Do not require current visual contact here. Vanilla scavengers can remember and
+        // pursue a target; hard terrain clearance in ChargeLane decides whether the lance
+        // can actually launch when that pursuit creates an opportunity.
         Target = candidate;
         TargetViolence = violence;
         TargetAfraid = afraid;
