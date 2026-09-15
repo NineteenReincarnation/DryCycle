@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using DryCycle.DevUI.DevTool.Dialog;
 using ImGuiNET;
@@ -8,7 +9,17 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class DialogEditorView
 {
+    private sealed class DialogBrowserRow
+    {
+        internal string Path;
+        internal string File;
+        internal string Label;
+    }
+
     private static string search = string.Empty;
+    private static string[] projectedPaths;
+    private static string projectedSearch = string.Empty;
+    private static readonly List<DialogBrowserRow> projectedRows = new();
 
     internal static void DrawBrowser(EditorDialogPresentationSnapshot snapshot)
     {
@@ -22,22 +33,19 @@ internal static class DialogEditorView
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索对话", "Search dialogs"), "DialogSearch", ref search, 128);
         ImGui.Separator();
 
-        string[] paths = snapshot.DialogPaths ?? Array.Empty<string>();
-        int matches = 0;
-        for (int i = 0; i < paths.Length; i++)
+        EnsureBrowserProjection(snapshot.DialogPaths ?? Array.Empty<string>());
+        for (int i = 0; i < projectedRows.Count; i++)
         {
-            string path = paths[i];
-            string file = Path.GetFileName(path) ?? path;
-            if (!Matches(file, search)) continue;
-            matches++;
-            bool selected = string.Equals(path, snapshot.SelectedPath, StringComparison.Ordinal);
-            if (ImGui.Selectable(file + "##DialogFile" + i, selected))
-                DialogEditorCommandQueue.Enqueue(new DialogEditorCommand(DialogEditorCommandKind.SelectDialog, path));
+            DialogBrowserRow row = projectedRows[i];
+            bool selected = string.Equals(row.Path, snapshot.SelectedPath, StringComparison.Ordinal);
+            if (ImGui.Selectable(row.Label, selected))
+                DialogEditorCommandQueue.Enqueue(new DialogEditorCommand(DialogEditorCommandKind.SelectDialog, row.Path));
             if (selected) ImGui.SetItemDefaultFocus();
-            if (ImGui.IsItemHovered()) DevToolTooltip.Show(path);
+            if (ImGui.IsItemHovered()) DevToolTooltip.Show(row.Path);
         }
 
-        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的对话文件。", "No matching dialog files."), true);
+        if (projectedRows.Count == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的对话文件。", "No matching dialog files."), true);
     }
 
     internal static void DrawPreview(
@@ -148,7 +156,32 @@ internal static class DialogEditorView
             "Vanilla DialogPage is a preview tool, not a text-file editor. The rebuilt workspace intentionally preserves that boundary rather than writing conversation resources from DevTool."));
     }
 
-    private static bool Matches(string value, string query) =>
-        string.IsNullOrWhiteSpace(query) ||
-        (!string.IsNullOrEmpty(value) && value.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0);
+    private static void EnsureBrowserProjection(string[] paths)
+    {
+        string normalizedSearch = search?.Trim() ?? string.Empty;
+        if (ReferenceEquals(projectedPaths, paths) &&
+            string.Equals(projectedSearch, normalizedSearch, StringComparison.Ordinal))
+            return;
+
+        projectedRows.Clear();
+        for (int i = 0; i < paths.Length; i++)
+        {
+            string path = paths[i];
+            string file = Path.GetFileName(path) ?? path;
+            if (!Matches(file, normalizedSearch)) continue;
+            projectedRows.Add(new DialogBrowserRow
+            {
+                Path = path,
+                File = file,
+                Label = file + "##DialogFile" + i
+            });
+        }
+
+        projectedPaths = paths;
+        projectedSearch = normalizedSearch;
+    }
+
+    private static bool Matches(string value, string normalizedQuery) =>
+        string.IsNullOrEmpty(normalizedQuery) ||
+        (!string.IsNullOrEmpty(value) && value.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0);
 }
