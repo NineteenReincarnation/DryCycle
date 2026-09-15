@@ -1,0 +1,33 @@
+name: DevTool Phase 6 Local Validator Guard
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/validate-devtool-phase6-local.ps1'
+      - '.github/workflows/devtool-phase6-local-validator-guard.yml'
+  push:
+    paths:
+      - 'scripts/validate-devtool-phase6-local.ps1'
+      - '.github/workflows/devtool-phase6-local-validator-guard.yml'
+
+jobs:
+  powershell-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse local validation script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/validate-devtool-phase6-local.ps1'),
+            [ref]$tokens,
+            [ref]$errors)
+
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+          Write-Host 'Phase 6 local validator PowerShell syntax passed.'
