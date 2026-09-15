@@ -144,8 +144,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             if (grasps[i]?.grabbed is ScavengerLance) lance = i;
             else if (grasps[i]?.grabbed is Spear spear && IsOrdinarySpear(spear)) sidearm = i;
         }
-        // Vanilla Scavenger.CheckThrow and Scavenger.Throw operate on grasp 0.
-        // Keep the disposable spear there and the custom lance in the secondary slot.
         if (sidearm > 0 && lance == 0) SwitchGrasps(0, sidearm);
         else if (sidearm > 0 && grasps[0] == null) SwitchGrasps(sidearm, 0);
     }
@@ -217,15 +215,21 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     void ILanceWielder.LanceImpact(bool wall, float speed, float retainedSpeed)
     {
         if (Combat.State != LanceState.Charge) return;
-        Combat.FinishCharge(wall);
         if (wall)
         {
+            Combat.FinishCharge(true);
             foreach (BodyChunk chunk in bodyChunks)
                 chunk.vel = new Vector2(-Motor.Direction.x * Mathf.Min(4f, speed * 0.2f), Mathf.Max(2f, chunk.vel.y * 0.3f));
             Stun(22);
             if (speed > 18.5f)
                 for (int i = 0; i < grasps.Length; i++) if (grasps[i]?.grabbed is ScavengerLance) ReleaseGrasp(i);
         }
-        else if (retainedSpeed < 0.25f) Stun(12);
+        else if (retainedSpeed < 0.25f)
+        {
+            // A heavy impact may still knock the lancer out of the combo, but a normal
+            // creature hit does not trigger the follow-up in mid-air. The charge timer
+            // owns the landing/finish point and enters FollowUpThrow there.
+            Stun(12);
+        }
     }
 }
