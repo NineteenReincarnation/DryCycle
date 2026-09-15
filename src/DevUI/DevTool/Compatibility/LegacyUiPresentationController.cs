@@ -6,6 +6,7 @@ using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
+using DryCycle.DevUI.DevTool.RWImGui;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
 using UnityEngine;
@@ -295,6 +296,13 @@ internal static class LegacyUiPresentationController
         RelationshipEditorPresentationHub.Clear();
         UniversalDevUiPresentationHub.Clear();
         DevUiPageCoverageTracker.Reset();
+
+        // RWImGui views retain pre-grouped rows and source indexes by snapshot identity. The
+        // presentation hubs above no longer own those arrays after Clear(), so release the view-side
+        // mirrors on the same dormant edge instead of keeping the last room alive until next open.
+        DevToolOverlay.ResetRetainedState();
+        SceneWorkspaceWindow.ResetRetainedState();
+        SoundEditorView.ResetRetainedState();
 
         // Reset normally releases the observed/hidden page already. Keep the explicit release for
         // the case where presentation never hid the active page during this DevUI lifetime.
