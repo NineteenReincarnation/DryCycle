@@ -13,13 +13,29 @@ internal readonly struct ChargeLane
 
 internal static class ChargeLanePlanner
 {
+    internal const float MinimumChargeDistance = 60f;   // 3 tiles
+    internal const float MinimumMaximumChargeDistance = 300f; // 15 tiles
+    internal const float MaximumMaximumChargeDistance = 500f; // 25 tiles
+
+    internal static float ChargeCommitment(LanceScavenger scav)
+    {
+        CreatureTemplate.Relationship unused = default;
+        Personality personality = scav.abstractCreature.personality;
+        return Mathf.Clamp01(personality.bravery * 0.45f + personality.aggression * 0.35f + personality.energy * 0.20f);
+    }
+
+    internal static float MaximumChargeDistance(LanceScavenger scav) =>
+        Mathf.Lerp(MinimumMaximumChargeDistance, MaximumMaximumChargeDistance, ChargeCommitment(scav));
+
     internal static ChargeLane Evaluate(LanceScavenger scav, Vector2 origin, Creature target)
     {
         Vector2 targetPos = target.mainBodyChunk.pos;
-        float flightTime = Mathf.Clamp(Mathf.Abs(targetPos.x - origin.x) / 18f, 0f, 16f);
-        Vector2 predicted = targetPos + Vector2.ClampMagnitude(target.mainBodyChunk.vel * flightTime, 65f);
+        float flightTime = Mathf.Clamp(Mathf.Abs(targetPos.x - origin.x) / 18f, 0f, LanceCombatState.MaxChargeFrames);
+        Vector2 predicted = targetPos + Vector2.ClampMagnitude(target.mainBodyChunk.vel * flightTime, 90f);
         float dx = predicted.x - origin.x;
-        if (Mathf.Abs(dx) < 155f || Mathf.Abs(dx) > 300f) return new ChargeLane(false, predicted, "distance");
+        float distance = Mathf.Abs(dx);
+        if (distance < MinimumChargeDistance || distance > MaximumChargeDistance(scav))
+            return new ChargeLane(false, predicted, "distance");
         if (Mathf.Abs(predicted.y - origin.y) > 35f) return new ChargeLane(false, predicted, "height");
         Vector2 end = new(predicted.x + Mathf.Sign(dx) * 45f, origin.y);
         string block = CorridorBlock(scav, origin, end, target);
@@ -78,10 +94,13 @@ internal static class ChargeLanePlanner
         destination = scav.abstractCreature.pos;
         float best = float.MaxValue;
         Vector2 origin = scav.mainBodyChunk.pos;
+        float commitment = ChargeCommitment(scav);
+        float preferredDistance = Mathf.Lerp(120f, 260f, commitment);
+        int maximumStagingDistance = Mathf.FloorToInt(Mathf.Min(MaximumChargeDistance(scav) - 20f, 300f) / 20f) * 20;
         for (int side = -1; side <= 1; side += 2)
-            // Leave room for tile snapping and the body's stopping distance;
-            // a nominal 160px destination can settle below the 155px minimum.
-            for (int distance = 200; distance <= 280; distance += 40)
+            // Start one tile beyond the 3-tile minimum so snapping and braking do not
+            // immediately push the body back inside the no-charge zone.
+            for (int distance = 80; distance <= maximumStagingDistance; distance += 40)
                 for (int height = -20; height <= 20; height += 20)
                 {
                     Vector2 candidate = target.mainBodyChunk.pos + new Vector2(side * distance, height);
@@ -91,7 +110,8 @@ internal static class ChargeLanePlanner
                     // policy for stranded scavengers and rooms without an exit.
                     if (!scav.AI.pathFinder.CoordinateViable(coordinate) ||
                         !Evaluate(scav, candidate, target).Clear) continue;
-                    float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 2f + Mathf.Abs(distance - 240f) * 0.4f;
+                    float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 2f +
+                        Mathf.Abs(distance - preferredDistance) * 0.4f;
                     if (score >= best) continue;
                     best = score;
                     destination = coordinate;
