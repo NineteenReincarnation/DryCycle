@@ -213,7 +213,18 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         bool forward = state == LanceState.Backstep || state == LanceState.Brace || state == LanceState.Charge ||
             state == LanceState.CloseDefense || state == LanceState.Threaten;
         Vector2 direction;
-        if (state == LanceState.Charge) direction = Motor.Direction;
+        if (state == LanceState.Charge)
+        {
+            // Airborne pitch is the last solution committed at takeoff. It never tracks
+            // the target after launch, so the player can still dodge a committed charge.
+            direction = Motor.LanceDirection;
+        }
+        else if (state == LanceState.Brace && Brain?.Lane.CanHit == true)
+        {
+            // During the 0.95 s brace, visibly follow the continuously refreshed ballistic
+            // solution inside the limited +/-15 degree aiming cone.
+            direction = Brain.Lane.LanceDirection;
+        }
         else if (forward && Brain?.Target != null)
         {
             Vector2 delta = Brain.Target.mainBodyChunk.pos - mainBodyChunk.pos;
