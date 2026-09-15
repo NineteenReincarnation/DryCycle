@@ -11,10 +11,11 @@ internal sealed class LanceScavengerAbstractAI : ScavengerAbstractAI
         if (item is AbstractScavengerLance) return false;
         if (item is AbstractSpear spear && !spear.explosive && !spear.electric && !spear.needle)
         {
-            // The normal spear currently occupying grasp 0 is the tactical sidearm.
-            // Preserve only that carried spear; thrown/stolen spears are ordinary world items.
+            // The ordinary spear is reserve equipment and normally lives in grasp 1.
+            // Preserve it in any grasp while it is still physically carried by this scavenger;
+            // once thrown or stolen it is no longer protected and behaves as a normal world item.
             foreach (AbstractPhysicalObject.AbstractObjectStick stick in parent.stuckObjects)
-                if (stick is AbstractPhysicalObject.CreatureGripStick grip && grip.A == parent && grip.B == item && grip.grasp == 0)
+                if (stick is AbstractPhysicalObject.CreatureGripStick grip && grip.A == parent && grip.B == item)
                     return false;
         }
         return base.DoIwantToDropThisItemInDen(item);
