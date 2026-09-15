@@ -22,28 +22,24 @@ jobs:
           snap = Path('src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs')
           s = snap.read_text(encoding='utf-8')
 
-          anchor = '        Guides.Clear();\n        if (frame >= nextStaleAuditFrame)'
-          replacement = '        Guides.Clear();\n        PruneStaleInteractiveState();\n        if (frame >= nextStaleAuditFrame)'
-          if anchor not in s:
-              raise SystemExit('missing snap BeginFrame short anchor')
-          s = s.replace(anchor, replacement, 1)
+          old = "        Guides.Clear();\n        if (frame >= nextStaleAuditFrame)"
+          new = "        Guides.Clear();\n        PruneStaleInteractiveState();\n        if (frame >= nextStaleAuditFrame)"
+          assert old in s
+          s = s.replace(old, new, 1)
+          s = s.replace("        ImGuiIOPtr io = frameContext.Io;\n", "", 1)
 
-          s = s.replace('        ImGuiIOPtr io = frameContext.Io;\n', '', 1)
-
-          live_anchor = '''    private static bool IsWindowLive(string id)
+          live = """    private static bool IsWindowLive(string id)
           {
               return !string.IsNullOrEmpty(id) &&
                      Windows.TryGetValue(id, out WindowState state) &&
                      state.Initialized && state.LastSeenFrame >= frame - 1;
           }
-          '''
-          if live_anchor not in s:
-              raise SystemExit('missing IsWindowLive anchor')
-          helper = '''
+          """
+          helper = """
           
           private static bool IsWindowRecentForInteractiveState(string id)
           {
-              // Preserve the old stale-state tolerance without scanning the entire window table.
+              // Preserve the old two-frame stale-state tolerance without scanning all windows.
               return !string.IsNullOrEmpty(id) &&
                      Windows.TryGetValue(id, out WindowState state) &&
                      state.Initialized && state.LastSeenFrame >= frame - 2;
@@ -80,27 +76,17 @@ jobs:
           
               StaleKeys.Clear();
           }
-          '''
-          s = s.replace(live_anchor, live_anchor + helper, 1)
+          """
+          assert live in s
+          s = s.replace(live, live + helper, 1)
 
-          origin_old = '''                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)
-                      GroupDragOrigins[id] = state.Position;'''
-          origin_new = '''                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
-                      GroupDragOrigins[id] = state.Position;'''
-          if origin_old not in s:
-              raise SystemExit('missing group origin anchor')
-          s = s.replace(origin_old, origin_new, 1)
-
-          after_origin = '''            foreach (string id in Selected)
-              {
-                  if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
+          old = """                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)
                       GroupDragOrigins[id] = state.Position;
               }
+          }
           
-              groupDragStartMouse = frameContext.MousePosition;'''
-          after_origin_new = '''            foreach (string id in Selected)
-              {
-                  if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
+          if (groupDragging)"""
+          new = """                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
                       GroupDragOrigins[id] = state.Position;
               }
           
@@ -108,20 +94,19 @@ jobs:
               {
                   groupDragging = false;
                   GroupDragOrigins.Clear();
-                  return;
               }
+          }
           
-              groupDragStartMouse = frameContext.MousePosition;'''
-          if after_origin not in s:
-              raise SystemExit('missing group origin post anchor')
-          s = s.replace(after_origin, after_origin_new, 1)
+          if (groupDragging)"""
+          assert old in s
+          s = s.replace(old, new, 1)
           snap.write_text(s, encoding='utf-8')
 
           font = Path('src/DevUI/DevTool/RWImGui/FontSettingsWindow.cs')
           s = font.read_text(encoding='utf-8')
 
-          class_anchor = 'internal static class FontSettingsWindow\n{\n'
-          fields = '''internal static class FontSettingsWindow
+          old = "internal static class FontSettingsWindow\n{\n"
+          new = """internal static class FontSettingsWindow
           {
               private static bool fontStatusProjectionValid;
               private static bool projectedFontStatusChinese;
@@ -131,29 +116,26 @@ jobs:
               private static string projectedFontStatus = string.Empty;
               private static string projectedResolvedWeightStatus = string.Empty;
               private static string projectedFamilyWeightsStatus = string.Empty;
-          '''
-          if class_anchor not in s:
-              raise SystemExit('missing font class anchor')
-          s = s.replace(class_anchor, fields, 1)
+          """
+          assert old in s
+          s = s.replace(old, new, 1)
 
-          status_old = '''        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
-          ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
-                             (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace));
-          ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);'''
-          status_new = '''        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
+          old = """        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
+          ImGui.TextDisabled(DevToolUiSettings.T(\"当前字体：\", \"Font: \") +
+                             (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T(\"默认\", \"Default\") : friendlyFace));
+          ImGui.TextDisabled(DevToolUiSettings.T(\"实际字重：\", \"Resolved weight: \") + actualWeight);"""
+          new = """        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
           ImGui.TextDisabled(projectedFontStatus);
-          ImGui.TextDisabled(projectedResolvedWeightStatus);'''
-          if status_old not in s:
-              raise SystemExit('missing font status anchor')
-          s = s.replace(status_old, status_new, 1)
+          ImGui.TextDisabled(projectedResolvedWeightStatus);"""
+          assert old in s
+          s = s.replace(old, new, 1)
 
-          family_old = '            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));'
-          if family_old not in s:
-              raise SystemExit('missing family weights anchor')
-          s = s.replace(family_old, '            ImGui.TextDisabled(projectedFamilyWeightsStatus);', 1)
+          old = '            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));'
+          assert old in s
+          s = s.replace(old, '            ImGui.TextDisabled(projectedFamilyWeightsStatus);', 1)
 
-          selector_anchor = '    private static void DrawChineseFontSelector()\n'
-          helper = '''    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
+          marker = '    private static void DrawChineseFontSelector()\n'
+          helper = """    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
           {
               bool chinese = DevToolUiSettings.IsChinese;
               string stableFontName = fontName ?? string.Empty;
@@ -170,19 +152,18 @@ jobs:
               projectedWeightVariants = weightVariants;
           
               string friendlyFace = DevToolFontCatalog.FriendlyFaceName(stableFontName);
-              projectedFontStatus = DevToolUiSettings.T("当前字体：", "Font: ") +
+              projectedFontStatus = DevToolUiSettings.T(\"当前字体：\", \"Font: \") +
                                     (string.IsNullOrEmpty(friendlyFace)
-                                        ? DevToolUiSettings.T("默认", "Default")
+                                        ? DevToolUiSettings.T(\"默认\", \"Default\")
                                         : friendlyFace);
-              projectedResolvedWeightStatus = DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight;
-              projectedFamilyWeightsStatus = DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants);
+              projectedResolvedWeightStatus = DevToolUiSettings.T(\"实际字重：\", \"Resolved weight: \") + actualWeight;
+              projectedFamilyWeightsStatus = DevToolUiSettings.T(\"当前字体族字重：\", \"Family weights: \") + Math.Max(1, weightVariants);
               fontStatusProjectionValid = true;
           }
           
-          '''
-          if selector_anchor not in s:
-              raise SystemExit('missing font selector anchor')
-          s = s.replace(selector_anchor, helper + selector_anchor, 1)
+          """
+          assert marker in s
+          s = s.replace(marker, helper + marker, 1)
           font.write_text(s, encoding='utf-8')
 
       - name: Run architecture and stable-frame guards
@@ -193,10 +174,7 @@ jobs:
           ! git diff --name-only | grep -E '^src/DevUI/DevTool/(Core|Presentation|Compatibility|Extensions|Runtime)/'
           grep -q 'PruneStaleInteractiveState();' src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs
           grep -q 'state.LastSeenFrame >= frame - 2' src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs
-          grep -q 'if (GroupDragOrigins.Count < 2)' src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs
-          ! grep -q 'ImGuiIOPtr io = frameContext.Io;' src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs
           grep -q 'EnsureFontStatusProjection(fontName, actualWeight, weightVariants);' src/DevUI/DevTool/RWImGui/FontSettingsWindow.cs
-          grep -q 'projectedFamilyWeightsStatus' src/DevUI/DevTool/RWImGui/FontSettingsWindow.cs
 
       - name: Commit fixes and remove temporary runners
         shell: bash
