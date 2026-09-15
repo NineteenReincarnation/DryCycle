@@ -17,9 +17,21 @@ internal static class DialogEditorView
     }
 
     private static string search = string.Empty;
+    private static string observedSearch;
+    private static string normalizedSearch = string.Empty;
     private static string[] projectedPaths;
     private static string projectedSearch = string.Empty;
     private static readonly List<DialogBrowserRow> projectedRows = new();
+
+    internal static void ResetRetainedState()
+    {
+        search = string.Empty;
+        observedSearch = null;
+        normalizedSearch = string.Empty;
+        projectedPaths = null;
+        projectedSearch = string.Empty;
+        projectedRows.Clear();
+    }
 
     internal static void DrawBrowser(EditorDialogPresentationSnapshot snapshot)
     {
@@ -158,9 +170,9 @@ internal static class DialogEditorView
 
     private static void EnsureBrowserProjection(string[] paths)
     {
-        string normalizedSearch = search?.Trim() ?? string.Empty;
+        string query = SearchQuery();
         if (ReferenceEquals(projectedPaths, paths) &&
-            string.Equals(projectedSearch, normalizedSearch, StringComparison.Ordinal))
+            string.Equals(projectedSearch, query, StringComparison.Ordinal))
             return;
 
         projectedRows.Clear();
@@ -168,7 +180,7 @@ internal static class DialogEditorView
         {
             string path = paths[i];
             string file = Path.GetFileName(path) ?? path;
-            if (!Matches(file, normalizedSearch)) continue;
+            if (!Matches(file, query)) continue;
             projectedRows.Add(new DialogBrowserRow
             {
                 Path = path,
@@ -178,7 +190,15 @@ internal static class DialogEditorView
         }
 
         projectedPaths = paths;
-        projectedSearch = normalizedSearch;
+        projectedSearch = query;
+    }
+
+    private static string SearchQuery()
+    {
+        if (string.Equals(observedSearch, search, StringComparison.Ordinal)) return normalizedSearch;
+        observedSearch = search;
+        normalizedSearch = search?.Trim() ?? string.Empty;
+        return normalizedSearch;
     }
 
     private static bool Matches(string value, string normalizedQuery) =>
