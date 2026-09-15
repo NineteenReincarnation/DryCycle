@@ -51,34 +51,7 @@ internal static class DevToolRuntime
         ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
-        EditorUiCommandQueue.Clear();
-        RoomEditorCommandQueue.Clear();
-        SoundEditorCommandQueue.Clear();
-        TriggerEditorCommandQueue.Clear();
-        MapEditorCommandQueue.Clear();
-        DialogEditorCommandQueue.Clear();
-        RelationshipEditorCommandQueue.Clear();
-        EditorPresentationHub.Clear();
-        RoomEditorPresentationHub.Clear();
-        SoundEditorPresentationHub.Clear();
-        TriggerEditorPresentationHub.Clear();
-        MapEditorPresentationHub.Clear();
-        DialogEditorPresentationHub.Clear();
-        RelationshipEditorPresentationHub.Clear();
-        SoundEditorStateHub.Reset();
-        TriggerEditorStateHub.Reset();
-        MapEditorStateHub.Reset();
-        DialogEditorStateHub.Reset();
-        RelationshipEditorStateHub.Reset();
-        RelationshipPresentationChangeHintHub.Reset();
-        ObjectPresentationChangeHintHub.Reset();
-        RoomPresentationChangeHintHub.Reset();
-        SoundPresentationChangeHintHub.Reset();
-        TriggerPresentationChangeHintHub.Reset();
-        EditorRevisionHub.Reset();
-        DevToolSessionHub.Reset();
-        DevToolPerformanceMonitor.SetEnabled(false);
-        DevToolPerformanceMonitor.Reset();
+        DevToolSubsystemCoordinator.ResetRuntimeState();
         enabled = false;
     }
 
@@ -125,13 +98,7 @@ internal static class DevToolRuntime
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CommandProcessing))
         {
-            EditorUiCommandQueue.Process(session);
-            RoomEditorCommandQueue.Process(session);
-            SoundEditorCommandQueue.Process(session);
-            TriggerEditorCommandQueue.Process(session);
-            MapEditorCommandQueue.Process(session);
-            DialogEditorCommandQueue.Process(session);
-            RelationshipEditorCommandQueue.Process(session);
+            DevToolSubsystemCoordinator.ProcessPendingCommands(session);
 
             // Page-switch commands reconcile their page/document immediately inside SetToolMode.
             // Stable command frames therefore only need selected-object membership validation here,
@@ -177,7 +144,7 @@ internal static class DevToolRuntime
         if (session == null)
         {
             EditorPresentationHub.Clear();
-            ClearDetailPresentations();
+            DevToolSubsystemCoordinator.ClearDetailPresentations();
             return;
         }
 
@@ -188,7 +155,7 @@ internal static class DevToolRuntime
 
         if (shellOnly)
         {
-            ClearDetailPresentations();
+            DevToolSubsystemCoordinator.ClearDetailPresentations();
             return;
         }
 
@@ -315,16 +282,6 @@ internal static class DevToolRuntime
             ReferenceEquals(before, after)
                 ? DevToolPresentationOutcome.CacheHit
                 : DevToolPresentationOutcome.FullRebuild);
-    }
-
-    private static void ClearDetailPresentations()
-    {
-        RoomEditorPresentationHub.Clear();
-        SoundEditorPresentationHub.Clear();
-        TriggerEditorPresentationHub.Clear();
-        MapEditorPresentationHub.Clear();
-        DialogEditorPresentationHub.Clear();
-        RelationshipEditorPresentationHub.Clear();
     }
 
     private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
