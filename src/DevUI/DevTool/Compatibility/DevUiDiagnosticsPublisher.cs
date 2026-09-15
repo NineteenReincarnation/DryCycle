@@ -14,6 +14,10 @@ internal static class DevUiDiagnosticsPublisher
         if (!DevUiDiagnosticsPolicy.Enabled || owner == null)
             return;
 
+        // Generic protocol registration is backend infrastructure, not presentation work. Keep the
+        // one-time bootstrap here so an ImGui Draw call never mutates compatibility registries.
+        DevUiGenericProtocolBootstrap.Ensure();
+
         UniversalDevUiPresentationSnapshot mirror = UniversalDevUiPresentationHub.Current;
 
         // Universal mirror publication has already happened in the backend command phase. Build the
