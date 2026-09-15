@@ -61,6 +61,7 @@ internal static class ScavengerLanceHooks
     {
         if (self.grasps[grasp]?.grabbed is not ScavengerLance lance || self.input[0].y < 0)
         { orig(self, grasp, eu); return; }
-        lance.RequestThrust(new Vector2(self.ThrowDirection, self.input[0].y * 0.35f).normalized);
+        lance.RequestThrust(new Vector2(self.ThrowDirection, self.input[0].y * 0.35f).normalized,
+            LanceCombatMath.PlayerThrustMaxDamage);
     }
 }
