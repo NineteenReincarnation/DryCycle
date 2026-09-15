@@ -43,7 +43,7 @@
 
 ## 工作流 A — 清除专用第三方适配器
 
-已完成首轮封板：
+已完成封板：
 
 - 移除 `PomManagedDataInspectorAdapter`。
 - 移除 `RegionKitAdvancedShaderInspectorAdapter`。
@@ -73,7 +73,7 @@ Compatibility 中允许保留 `RegionKit` 等来源名称用于**诊断分类**�
 
 ## 工作流 B — Runtime / Lifecycle 收口
 
-已完成主要收口：
+主体已完成：
 
 - 新增 `DevToolSubsystemCoordinator`，统一拥有跨功能模块的 Command Queue processing、Queue Clear、Presentation Clear、State Reset、Revision/Session Reset。
 - `DevToolRuntime` 回归到 Hook、帧顺序和 Presentation 调度职责，不再直接维护七套 Queue/Clear 列表。
@@ -102,14 +102,14 @@ RWImGui retained projection
 
 ## 工作流 C — Presentation / Command / History / Revision 边界
 
-已完成第一轮完整复核：
+主体已完成复核：
 
 - RWImGui 未发现直接调用 `EditorActions` / `RoomEditorActions` / `SoundEditorActions` / `TriggerEditorActions` / `MapEditorActions` / `DialogEditorActions` / `RelationshipEditorActions` 的写模型旁路。
 - Universal DevUI Command Queue 已并入统一 backend Command phase，不再从 Presentation getter / Draw 阶段执行。
 - `UniversalDevUiPresentationHub.Current` 已变成 O(1) detached snapshot getter；live DevInterface capture 由后端显式发布。
 - History Service 保持模型修改后的权威 revision 发布点；Command Queue 仅为没有进入 History 的可见变化补 revision。
 - History 的 retained key 与 Shell/workspace revision 分离：History.Revision 保持每次栈变化精确递增，而同帧 Presentation dirty 可以合并，避免重复 rebuild。
-- 已复核 Room / Sound 的 batch 语义：进入 History 的正常模型修改不再由 Queue 重复 bump workspace revision；非 History 的目录/模板等可见变化保留直接 invalidation 兜底。
+- 已复核 Room / Sound / Trigger 的 batch 语义：进入 History 的正常模型修改不再由 Queue 重复 bump workspace revision；非 History 的目录、模板或兼容路径可见变化保留直接 invalidation 兜底。
 
 当前约束：
 
@@ -129,13 +129,13 @@ RWImGui Draw
 
 ## 工作流 D — Compatibility / Diagnostics 收口
 
-已完成核心收口。
+主体已完成。
 
 兼容诊断现在也遵守 Presentation 单向边界：
 
 ```text
 Backend diagnostics phase
-    DevUiGenericProtocolBootstrap.Ensure
+    DevUiFullAudit.ObserveAll
     UniversalDevUiPresentationHub.Publish
     DevUiPageCoverageTracker.Observe
     DevUiProtocolInventory.ObserveLoadedTypes
@@ -150,17 +150,20 @@ RWImGui diagnostics views
 
 具体改动：
 
-- 新增 `DevUiDiagnosticsPublisher` 作为后端兼容诊断发布入口。
+- 新增 `DevUiDiagnosticsPublisher` 作为唯一后端兼容诊断发布入口。
 - `DevUiPageCoverageTracker.Current` 改成纯 snapshot getter。
 - `DevUiProtocolInventory.Current` 改成纯 snapshot getter。
 - Semantic Conformance 与 Compatibility Gate 不再从 ImGui Draw 中执行 `Evaluate()`。
-- Generic protocol bootstrap 不再从 ImGui Draw 中执行。
-- Universal mirror capture、loaded-type inventory、page coverage、semantic audit 和 gate evaluation 只在 `DevUiDiagnosticsPolicy.Enabled` 时运行；正常编辑帧不承担这些反射扫描成本。
-- Final Architecture Guard 已禁止 RWImGui 调用这些诊断 side-effect 入口。
+- Universal mirror capture、full audit、loaded-type inventory、page coverage、semantic audit 和 gate evaluation 只在 `DevUiDiagnosticsPolicy.Enabled` 时运行；正常编辑帧不承担这些反射扫描成本。
+- 删除已经没有真实调用链的 `UniversalDevUiProtocolAugmenter`。未知的非标准 `Clicked()` 控件不会再被一套未接线的代码“假装支持”，而是明确显示为协议缺口并走 fallback。
+- 删除重复的 `DevUiGenericProtocolBootstrap`；Page / Panel / Handle 已由 MigrationCoverage 的结构协议直接分类，不再维护第二套注册器。
+- `DevUiFullAudit` 删除重复 Handle 注册、无调用的 `Page → owner` 反射发现入口以及与旧 Draw 驱动模型不一致的注释。
+- MigrationCoverage 的 `RegisterExact / RegisterAssignable / RegisterTypeName` 已收回 internal；诊断层不能再作为第三方“声明已兼容”的公开 API。
+- Final Architecture Guard 已禁止 RWImGui 调用诊断 side-effect 入口，并阻止上述旧 bootstrap/augmenter 被重新引入。
 
 ## 工作流 E — 代码清债
 
-正在进行。
+第二轮主体已完成。
 
 已处理：
 
@@ -168,14 +171,18 @@ RWImGui diagnostics views
 - Runtime / dormant 生命周期重复 Clear/Reset。
 - Universal Presentation getter 的隐式写操作和隐式扫描。
 - Compatibility diagnostics 从 Draw 驱动改为 backend publication。
-- 若干与当前 ownership 不一致的阶段性注释。
+- 删除无调用的 `UniversalDevUiProtocolAugmenter`。
+- 删除重复协议注册器 `DevUiGenericProtocolBootstrap`。
+- 清理 `DevUiFullAudit` 的无调用 owner 发现链、重复 Handle 注册和过期注释。
+- 收紧 MigrationCoverage、Semantic Audit、Compatibility Gate 等诊断层可变入口的可见性。
+- 清理与当前 ownership 不一致的阶段性注释。
 
-仍需继续：
+封板前仍检查：
 
-- 扫描无调用类、旧 bridge 和只为早期迁移存在的兼容入口。
-- 清理剩余过期注释和 README 中与最终架构不一致的描述。
-- 审查过宽 internal/public surface；Phase 5 已发布 API 不做破坏性收缩。
-- 检查重复 Reset / Invalidate / Refresh 边界是否还有小规模残留。
+- PR 全量 diff 中是否还存在明显的死 bridge / 旧 workaround。
+- README / 阶段文档是否与最终实现完全一致。
+- 是否有因为本阶段删除专用增强而误断 Generic DevInterface / Vanilla fallback 的路径。
+- 是否有为了清理代码而扩大 public Extension API 的破坏面。
 
 ## 工作流 F — 最终守卫与验证
 
@@ -184,7 +191,10 @@ RWImGui diagnostics views
 - 后端禁止依赖 ImGuiNET / RWImGui。
 - RWImGui 禁止直接调用各 Workspace Actions。
 - Universal Presentation / PageCoverage / ProtocolInventory 的 `Current` 必须保持纯 detached snapshot getter。
-- RWImGui 禁止执行 Universal Command Queue、Universal Publish、Generic Protocol Bootstrap、Page Coverage Observe、Protocol Inventory Observe、Semantic Evaluate、Compatibility Gate Evaluate。
+- RWImGui 禁止执行 Universal Command Queue、Universal Publish、FullAudit、Page Coverage Observe、Protocol Inventory Observe、Semantic Evaluate、Compatibility Gate Evaluate。
+- Compatibility diagnostics 必须通过单一 `DevUiDiagnosticsPublisher` 发布。
+- 已删除的 Generic Protocol Bootstrap / Universal Protocol Augmenter 不得重新出现。
+- MigrationCoverage 的映射注册方法不得重新成为 public 第三方兼容声明入口。
 - DevTool Runtime 与 dormant cleanup 必须走统一 `DevToolSubsystemCoordinator`。
 - Extension API scope 不得被 UI/runtime reset 接管。
 - 删除的 POM / RegionKit 专用 Inspector 不得重新出现或留下悬空引用。
@@ -192,7 +202,7 @@ RWImGui diagnostics views
 
 仍需完成的验证：
 
-1. PR 最终静态差异审查。
+1. PR 最终静态差异审查，并处理 `main` 在 Phase 6 开发期间前进造成的最终同步问题。
 2. 可用环境下的 `DryCycle.dll` + `DryCycle.DevTool.RWImGui.dll` 完整联编。
 3. Rain World 内基本回归：
    - New UI / Vanilla 切换
@@ -202,11 +212,11 @@ RWImGui diagnostics views
    - Extension API 注册 / Dispose
 4. 性能回归：确认稳定帧没有重新出现整表扫描和重复 Snapshot rebuild。
 
-仓库当前没有覆盖真实 Rain World 安装引用、HookGen、RuntimeDetour 与 RWImGui 的完整通用 CI，因此在拿到实际运行结果前，不把“静态守卫通过”写成“进游戏验证通过”。
+当前可用上传依赖只覆盖 BepInEx、RuntimeDetour、Cecil、UnityEngine/Core/Input、Unity.Mathematics 等一部分真实运行库；完整联编仍缺 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、`Assembly-CSharp-firstpass.dll`、部分 Unity 模块以及 RWImGui 运行库。因此目前继续把“静态守卫通过”和“真实游戏联编/回归通过”严格分开。
 
 ## 当前进度
 
-**第六阶段：约 65%。**
+**第六阶段：约 80%。**
 
 已经完成的主体架构清债：
 
@@ -215,14 +225,15 @@ RWImGui diagnostics views
 - Command Queue fan-out 和 Reset/Clear 所有权统一。
 - Universal DevUI Command / Presentation 边界收口。
 - RWImGui 原生 Workspace 写模型边界复核。
-- History / Revision / semantic hint 第一轮复核。
-- Compatibility diagnostics 全链路后端化。
+- History / Revision / semantic hint 主链复核。
+- Compatibility diagnostics 全链路后端化并去除重复注册/孤立增强器。
+- 诊断层可变入口收紧，不再提供第二套第三方“兼容声明”API。
 - Final Architecture Guard 已覆盖主要冻结边界。
 
 剩余工作主要集中在：
 
-1. 死代码、旧 bridge、旧 workaround 和过期文档的第二轮清债。
-2. PR 全量 diff 的最终架构审查。
+1. PR 全量 diff 最终架构审查与少量文档/注释收尾。
+2. 处理 Phase 6 分支与最新 `main` 的最终同步/合并可用性。
 3. 完整联编环境验证。
 4. Rain World 游戏内功能/兼容/性能回归。
-5. 所有验证完成后更新 README、把 PR 从 Draft 转为 Ready for Review；未经明确指示不合并。
+5. 静态封板完成后再决定是否把 PR 从 Draft 转为 Ready for Review；未经明确指示不合并。
