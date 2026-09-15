@@ -59,22 +59,11 @@ public static class DevUiPageCoverageTracker
     private static ConditionalWeakTable<global::DevInterface.DevUI, OwnerState> states = new();
     private static volatile DevUiPageCoverageSnapshot current = DevUiPageCoverageSnapshot.Empty;
 
-    public static DevUiPageCoverageSnapshot Current
-    {
-        get
-        {
-            EditorSession session = DevToolSessionHub.Current;
-            global::DevInterface.DevUI owner = session?.Owner;
-            if (owner == null || !DevToolSessionHub.IsCurrentSessionLive)
-            {
-                current = DevUiPageCoverageSnapshot.Empty;
-                return current;
-            }
-
-            Observe(owner, UniversalDevUiPresentationHub.Current);
-            return current;
-        }
-    }
+    /// <summary>
+    /// Latest detached coverage snapshot. Observation is owned by the backend diagnostics phase;
+    /// frontend reads must never traverse DevUI or mutate audit state.
+    /// </summary>
+    public static DevUiPageCoverageSnapshot Current => current;
 
     internal static void Observe(
         global::DevInterface.DevUI owner,
