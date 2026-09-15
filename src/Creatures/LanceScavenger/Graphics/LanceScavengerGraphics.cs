@@ -70,9 +70,14 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
             return;
         }
 
-        // The lance is visibly hand-held, not body-mounted. It normally lives in
-        // grasp 0 / hand 0; only an active vanilla sidearm ThrowCharge temporarily
-        // moves it to grasp 1 / hand 1.
+        // Ordinary carry is intentionally left to vanilla ScavengerGraphics. The lance now reads the
+        // vanilla hand-0 ItemPosition/ItemDirection and follows that hand, so walking, stopping and
+        // turning retain the original scavenger limb motion instead of welding the hand to the lance.
+        // Only Threaten still presents the custom weapon forward, and grasp-1 carry is maintained while
+        // a temporary sidearm throw occupies hand 0.
+        bool forceSingleHand = _owner.Combat.State == LanceState.Threaten || _owner.SidearmInPrimary;
+        if (!forceSingleHand) return;
+
         int lanceHand = _owner.SidearmInPrimary ? 1 : 0;
         Vector2 singleDesired = lance.firstChunk.pos + lance.rotation * (lanceHand == 0 ? 10f : -9f);
         hands[lanceHand].absoluteHuntPos = singleDesired;
