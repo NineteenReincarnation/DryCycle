@@ -1,3 +1,4 @@
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
@@ -29,6 +30,10 @@ internal static class DevToolSubsystemCoordinator
         MapEditorCommandQueue.Process(session);
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
+
+        // The universal compatibility queue follows the same backend command phase as native
+        // workspaces. Presentation getters must never execute mutations as a side effect of Draw.
+        UniversalDevUiCommandQueue.Process(session);
     }
 
     internal static void ClearDetailPresentations()
@@ -39,6 +44,7 @@ internal static class DevToolSubsystemCoordinator
         MapEditorPresentationHub.Clear();
         DialogEditorPresentationHub.Clear();
         RelationshipEditorPresentationHub.Clear();
+        UniversalDevUiPresentationHub.Clear();
     }
 
     /// <summary>
@@ -67,6 +73,7 @@ internal static class DevToolSubsystemCoordinator
         MapEditorCommandQueue.Clear();
         DialogEditorCommandQueue.Clear();
         RelationshipEditorCommandQueue.Clear();
+        UniversalDevUiCommandQueue.Clear();
     }
 
     private static void ResetWorkspaceState()
