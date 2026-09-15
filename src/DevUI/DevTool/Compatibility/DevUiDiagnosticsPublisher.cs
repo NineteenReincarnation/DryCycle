@@ -18,11 +18,13 @@ internal static class DevUiDiagnosticsPublisher
         // one-time bootstrap here so an ImGui Draw call never mutates compatibility registries.
         DevUiGenericProtocolBootstrap.Ensure();
 
+        // Migration coverage is the source for the universal mirror's unmapped count. Run the
+        // throttled full audit first so the mirror and every downstream diagnostic snapshot describe
+        // the same backend observation instead of mixing current-frame UI with prior-frame coverage.
+        DevUiFullAudit.ObserveAll(owner);
+        UniversalDevUiPresentationHub.Publish(owner);
         UniversalDevUiPresentationSnapshot mirror = UniversalDevUiPresentationHub.Current;
 
-        // Universal mirror publication has already happened in the backend command phase. Build the
-        // remaining diagnostic snapshots from that detached mirror so the frontend never pumps live
-        // DevInterface state from a Draw call.
         DevUiPageCoverageTracker.Observe(owner, mirror);
         DevUiProtocolInventory.ObserveLoadedTypes();
 
