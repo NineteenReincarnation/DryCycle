@@ -13,7 +13,7 @@ internal readonly struct LanceImpact
     internal float RetainedSpeed { get; }
 }
 
-/// <summary>Shared by the real weapon and deterministic geometry/balance tests.</summary>
+/// <summary>Shared by the real weapon, charge planner and deterministic geometry/balance tests.</summary>
 internal static class LanceCombatMath
 {
     internal const float DefaultLength = 80f;
@@ -24,8 +24,35 @@ internal static class LanceCombatMath
     internal const float ChargeMaxDamage = PreviousChargeMaxDamage * 2.75f;
     internal const float LanceScavengerCloseThrustMaxDamage = ChargeMaxDamage * 0.20f;
 
+    // Bone-nail geometry. The narrow rear section is a handle; almost the entire forward
+    // section is a broad tapered damaging blade. Width decreases monotonically toward the tip.
+    internal const float BladeStartForwardFraction = 0.16f;
+    internal const float BladeShoulderHalfWidth = 6.4f;
+    internal const float BladeTipHalfWidth = 0.65f;
+    internal const int BladeSweepSamples = 8;
+
     internal static float ValidLength(float value) => float.IsNaN(value) || float.IsInfinity(value)
         ? DefaultLength : Math.Max(75f, Math.Min(90f, value));
+
+    internal static float ForwardLength(float length) => length * (1f - GripFraction);
+    internal static float BladeRootDistance(float length) => ForwardLength(length) * BladeStartForwardFraction;
+
+    internal static float BladeHalfWidth(float bladeT)
+    {
+        float t = Mathf.Clamp01(bladeT);
+        // A long wedge rather than a diamond: the profile only narrows as it approaches the point.
+        return Mathf.Lerp(BladeShoulderHalfWidth, BladeTipHalfWidth, Mathf.Pow(t, 0.82f));
+    }
+
+    internal static float BladeDamageMultiplier(float bladeT) =>
+        Mathf.Lerp(0.82f, 1f, Mathf.Pow(Mathf.Clamp01(bladeT), 0.72f));
+
+    internal static Vector2 BladePoint(Vector2 grip, Vector2 direction, float forwardLength, float bladeT)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector2.right;
+        float distance = Mathf.Lerp(forwardLength * BladeStartForwardFraction, forwardLength, Mathf.Clamp01(bladeT));
+        return grip + dir * distance;
+    }
 
     internal static LanceImpact Impact(float speed, float alignment, float holderMass,
         float targetMass, bool charging, float runUp, bool thrusting,
@@ -35,8 +62,6 @@ internal static class LanceCombatMath
         float momentum = Mathf.InverseLerp(3f, 12f, speed);
         float full = charging ? momentum * Mathf.InverseLerp(25f, 80f, runUp) : 0f;
         float ordinary = thrusting ? Mathf.Lerp(0.12f, Mathf.Max(0.12f, thrustMaxDamage), facing) : 0f;
-        // Full charge remains the highest-damage attack. Player thrust and the
-        // lance-scavenger close poke use independent caps supplied by their callers.
         float damage = Mathf.Max(ordinary, charging ? Mathf.Lerp(0.12f, ChargeMaxDamage, full) * facing : 0f);
         if (speed < 2f || alignment < 0.55f) damage = 0f;
         float ratio = Mathf.Max(0.05f, targetMass) / Mathf.Max(0.1f, holderMass);
@@ -67,5 +92,37 @@ internal static class LanceCombatMath
         if (discriminant < 0f) return false;
         fraction = (-b - Mathf.Sqrt(discriminant)) / a;
         return fraction >= 0f && fraction <= 1f;
+    }
+
+    /// <summary>
+    /// Sweeps the complete forward bone blade rather than only the mathematical tip.
+    /// The wedge is sampled along its length; every sample owns the local visual half-width,
+    /// so the shoulder is broad and the point becomes progressively narrower.
+    /// </summary>
+    internal static bool SweepBlade(Vector2 oldGrip, Vector2 oldDirection, Vector2 grip, Vector2 direction,
+        float forwardLength, Vector2 oldTarget, Vector2 target, float targetRadius, float padding,
+        out float fraction, out float bladeT)
+    {
+        fraction = float.MaxValue;
+        bladeT = 1f;
+        bool found = false;
+        Vector2 oldDir = oldDirection.sqrMagnitude > 0.0001f ? oldDirection.normalized : Vector2.right;
+        Vector2 newDir = direction.sqrMagnitude > 0.0001f ? direction.normalized : oldDir;
+
+        for (int i = 0; i < BladeSweepSamples; i++)
+        {
+            float t = BladeSweepSamples == 1 ? 1f : (float)i / (BladeSweepSamples - 1);
+            Vector2 oldPoint = BladePoint(oldGrip, oldDir, forwardLength, t);
+            Vector2 point = BladePoint(grip, newDir, forwardLength, t);
+            float radius = Mathf.Max(0f, targetRadius) + BladeHalfWidth(t) + Mathf.Max(0f, padding);
+            if (!SweepTip(oldPoint, point, oldTarget, target, radius, out float hit) || hit > fraction)
+                continue;
+            fraction = hit;
+            bladeT = t;
+            found = true;
+        }
+
+        if (!found) fraction = 0f;
+        return found;
     }
 }
