@@ -8,15 +8,15 @@ namespace LanceScavenger.Tests;
 internal static class CombatTests
 {
     internal static LanceSituation Situation(ScavengerAI.ViolenceType violence = null, bool afraid = false,
-        float distance = 250f, bool lane = true, bool armed = true, bool active = true,
+        float distance = 250f, bool lane = true, bool armed = true, bool sidearm = false, bool active = true,
         bool target = true) =>
-        new(active, armed, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane);
+        new(active, armed, sidearm, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane);
 
-    internal static LanceCombatState Charge(float distance = 250f, bool afraid = false)
+    internal static LanceCombatState Charge(float distance = 250f, bool afraid = false, bool sidearm = false)
     {
         var combat = new LanceCombatState();
         for (int i = 0; i < LanceCombatState.BraceFrames + 6 && combat.State != LanceState.Charge; i++)
-            combat.Tick(Situation(distance: distance, afraid: afraid));
+            combat.Tick(Situation(distance: distance, afraid: afraid, sidearm: sidearm));
         Check(combat.State == LanceState.Charge, "A clear vanilla-Lethal encounter can reach Charge");
         return combat;
     }
@@ -52,10 +52,19 @@ internal static class CombatTests
 
         int serial = combat.AttackSerial;
         for (int i = 0; i < LanceCombatState.MaxChargeFrames; i++) combat.Tick(Situation());
-        Check(combat.State == LanceState.Recover, "A miss ends in recovery");
+        Check(combat.State == LanceState.Recover, "A miss without a sidearm ends in recovery");
         for (int i = 0; i < 40; i++) combat.Tick(Situation());
         Check(combat.AttackSerial == serial && combat.State == LanceState.Recover,
             "No repeat charge during recovery");
+
+        var combo = Charge(sidearm: true);
+        for (int i = 0; i < LanceCombatState.MaxChargeFrames; i++) combo.Tick(Situation(sidearm: true));
+        Check(combo.State == LanceState.FollowUpThrow,
+            "A predicted charge carrying a sidearm reserves a landing follow-up");
+        for (int i = 0; i < LanceCombatState.FollowUpThrowFrames; i++) combo.Tick(Situation(sidearm: true));
+        Check(combo.FollowUpReady, "Follow-up spear becomes ready after the fast 8-frame settle");
+        combo.CompleteFollowUp();
+        Check(combo.State == LanceState.Recover, "A completed follow-up pays normal recovery");
 
         combat.Recover(true);
         combat.ResetForRoom();
@@ -82,9 +91,9 @@ internal static class CombatTests
             Situation(active: false), Situation(lane: false),
             Situation(violence: ScavengerAI.ViolenceType.Warning) })
         {
-            LanceCombatState combat = Charge();
-            combat.Tick(interruption);
-            Check(combat.State == LanceState.Recover,
+            LanceCombatState interrupted = Charge();
+            interrupted.Tick(interruption);
+            Check(interrupted.State == LanceState.Recover,
                 "Loss of commitment during a charge retains a recovery cost");
         }
 
