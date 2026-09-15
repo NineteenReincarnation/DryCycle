@@ -185,10 +185,13 @@ internal static class LegacyUiPresentationController
         hiddenDirectMapVisuals.Clear();
         hiddenPage = null;
         ResetSuppressionState();
+
+        // Compatibility owns diagnostic/audit state only. Runtime command queues and presentation
+        // hubs are reset by DevToolSubsystemCoordinator so both shutdown paths share one owner.
         DevUiFullAudit.Reset();
         DevUiMigrationCoverage.Reset();
-        UniversalDevUiCommandQueue.Clear();
-        UniversalDevUiPresentationHub.Clear();
+        DevUiSemanticConformanceAudit.Reset();
+        DevUiCompatibilityGate.Reset();
         DevUiPageCoverageTracker.Reset();
         LegacyDevUiQuiescenceController.ReleasePage(retiredPage);
     }
