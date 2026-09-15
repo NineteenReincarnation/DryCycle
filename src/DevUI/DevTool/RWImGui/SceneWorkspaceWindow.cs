@@ -18,10 +18,7 @@ internal static class SceneWorkspaceWindow
     private sealed class ObjectSceneRow
     {
         internal EditorObjectSnapshot Item;
-        internal EditorObjectTypeSnapshot Metadata;
-        internal string Source;
         internal string Category;
-        internal string DisplayName;
         internal string Label;
         internal string Tooltip;
     }
@@ -29,6 +26,7 @@ internal static class SceneWorkspaceWindow
     private sealed class ObjectSceneGroup
     {
         internal string Source;
+        internal DevToolSourceMark SourceMark;
         internal readonly List<ObjectSceneRow> Rows = new();
     }
 
@@ -45,8 +43,16 @@ internal static class SceneWorkspaceWindow
     private static bool projectedChinese;
     private static readonly Dictionary<string, EditorObjectTypeSnapshot> metadataByType =
         new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, ObjectSceneGroup> groupsBySource =
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<ObjectSceneGroup> projectedGroups = new();
     private static int projectedMatchCount;
+
+    private static int statusObjectCount = -1;
+    private static int statusSelectionCount = -1;
+    private static bool statusChinese;
+    private static bool statusValid;
+    private static string statusText = string.Empty;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -106,9 +112,7 @@ internal static class SceneWorkspaceWindow
         if (objectSelectionAnchor >= objects.Length)
             objectSelectionAnchor = -1;
 
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            $"已放置 {objects.Length} 个物件 · 已选 {selectedCount}",
-            $"{objects.Length} placed · {selectedCount} selected"));
+        DevToolWidgets.MutedText(GetStatusText(objects.Length, selectedCount));
 
         if (selectedCount > 0)
         {
@@ -145,7 +149,7 @@ internal static class SceneWorkspaceWindow
         for (int sourceIndex = 0; sourceIndex < projectedGroups.Count; sourceIndex++)
         {
             ObjectSceneGroup group = projectedGroups[sourceIndex];
-            DevToolWidgets.SourceHeader(group.Source, ObjectSourceColor(group.Source), 1.34f, 1f);
+            DevToolWidgets.SourceHeader(group.SourceMark, 1.34f, 1f);
 
             string lastCategory = null;
             List<ObjectSceneRow> rows = group.Rows;
@@ -192,6 +196,22 @@ internal static class SceneWorkspaceWindow
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
     }
 
+    private static string GetStatusText(int objectCount, int selectedCount)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (statusValid && statusObjectCount == objectCount && statusSelectionCount == selectedCount && statusChinese == chinese)
+            return statusText;
+
+        statusText = chinese
+            ? $"已放置 {objectCount} 个物件 · 已选 {selectedCount}"
+            : $"{objectCount} placed · {selectedCount} selected";
+        statusObjectCount = objectCount;
+        statusSelectionCount = selectedCount;
+        statusChinese = chinese;
+        statusValid = true;
+        return statusText;
+    }
+
     private static void EnsureObjectProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
@@ -217,9 +237,8 @@ internal static class SceneWorkspaceWindow
         }
 
         projectedGroups.Clear();
+        groupsBySource.Clear();
         projectedMatchCount = 0;
-        Dictionary<string, ObjectSceneGroup> groupsBySource =
-            new(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < objects.Length; i++)
         {
@@ -240,7 +259,11 @@ internal static class SceneWorkspaceWindow
 
             if (!groupsBySource.TryGetValue(source, out ObjectSceneGroup group))
             {
-                group = new ObjectSceneGroup { Source = source };
+                group = new ObjectSceneGroup
+                {
+                    Source = source,
+                    SourceMark = DevToolSourcePresentation.FromLabel(source)
+                };
                 groupsBySource.Add(source, group);
                 projectedGroups.Add(group);
             }
@@ -251,10 +274,7 @@ internal static class SceneWorkspaceWindow
             group.Rows.Add(new ObjectSceneRow
             {
                 Item = item,
-                Metadata = metadata,
-                Source = source,
                 Category = category,
-                DisplayName = displayName,
                 Label = label,
                 Tooltip = tooltip
             });
@@ -288,19 +308,5 @@ internal static class SceneWorkspaceWindow
         for (int i = 0; i < value.Length && q < query.Length; i++)
             if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
         return q == query.Length;
-    }
-
-    private static Num.Vector4 ObjectSourceColor(string source)
-    {
-        source ??= string.Empty;
-        if (source.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
-            return new Num.Vector4(0.36f, 0.72f, 1f, 1f);
-        if (source.IndexOf("RegionKit", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            source.StartsWith("RK", StringComparison.OrdinalIgnoreCase))
-            return new Num.Vector4(1f, 0.70f, 0.34f, 1f);
-        if (source.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            source.IndexOf("Rain World", StringComparison.OrdinalIgnoreCase) >= 0)
-            return new Num.Vector4(0.88f, 0.88f, 0.88f, 1f);
-        return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
     }
 }
