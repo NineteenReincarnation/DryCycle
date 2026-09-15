@@ -36,9 +36,9 @@ internal static class DevToolSubsystemCoordinator
         UniversalDevUiCommandQueue.Process(session);
 
         // Compatibility diagnostics are explicitly opt-in and have exactly one publication owner.
-        // The publisher performs protocol bootstrap, migration audit, mirror capture and downstream
-        // detached audit snapshots in a defined order. Production editor frames pay none of this
-        // reflection/type-inventory cost when diagnostics are disabled.
+        // The publisher performs migration audit, mirror capture and downstream detached audit
+        // snapshots in a defined order. Production editor frames pay none of this reflection/type-
+        // inventory cost when diagnostics are disabled.
         if (DevUiDiagnosticsPolicy.Enabled && session?.Owner != null)
             DevUiDiagnosticsPublisher.Publish(session.Owner);
     }
