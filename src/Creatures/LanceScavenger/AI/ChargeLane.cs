@@ -6,25 +6,32 @@ namespace DryCycle.Creatures.LanceScavenger;
 internal readonly struct ChargeLane
 {
     internal ChargeLane(bool clear, Vector2 aim, string reason)
-        : this(clear, clear, aim, Vector2.right, 0, reason) { }
+        : this(clear, clear, aim, Vector2.right, 0, clear ? 1f : 0f, reason) { }
 
-    internal ChargeLane(bool pathClear, bool canHit, Vector2 aim, Vector2 lanceDirection, int impactFrame, string reason)
+    internal ChargeLane(bool pathClear, bool canHit, Vector2 aim, Vector2 lanceDirection, int impactFrame,
+        float confidence, string reason)
     {
         PathClear = pathClear;
         CanHit = canHit;
         Aim = aim;
         LanceDirection = lanceDirection.sqrMagnitude > 0.001f ? lanceDirection.normalized : Vector2.right;
         ImpactFrame = impactFrame;
+        Confidence = Mathf.Clamp01(confidence);
         Reason = reason;
     }
 
-    /// <summary>True only when both the physical lane and a predicted lance-tip hit are valid.</summary>
-    internal bool Clear => PathClear && CanHit;
+    /// <summary>
+    /// Planning-valid charge opportunity. The planner is deliberately slightly more tolerant
+    /// than the real lance-tip collision so moving creatures do not require a mathematically
+    /// perfect frame prediction before the scavenger is willing to commit.
+    /// </summary>
+    internal bool Clear => PathClear && CanHit && Confidence >= ChargeLanePlanner.MinimumCommitConfidence;
     internal bool PathClear { get; }
     internal bool CanHit { get; }
     internal Vector2 Aim { get; }
     internal Vector2 LanceDirection { get; }
     internal int ImpactFrame { get; }
+    internal float Confidence { get; }
     internal string Reason { get; }
 }
 
@@ -35,13 +42,15 @@ internal static class ChargeLanePlanner
     internal const float MaximumMaximumChargeDistance = 500f; // 25 tiles
     internal const float MinimumLancePitch = -15f;
     internal const float MaximumLancePitch = 15f;
+    internal const float MinimumCommitConfidence = 0.55f;
 
     // Keep the solver matched to the actual launch motor and vanilla scavenger physics.
     internal const float ChargeLaunchY = 7.3f;
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
     private const float PredictionTargetTravelLimit = 90f;
-    private const float TipHitPadding = 2f;
+    private const float ActualTipHitPadding = 2f;
+    private const float PlanningTipHitPadding = 10f;
 
     internal static float ChargeCommitment(LanceScavenger scav)
     {
@@ -58,53 +67,59 @@ internal static class ChargeLanePlanner
     internal static ChargeLane Evaluate(LanceScavenger scav, Vector2 origin, Creature target)
     {
         if (scav?.room == null || target?.bodyChunks == null || target.bodyChunks.Length == 0)
-            return new ChargeLane(false, false, origin, Vector2.right, 0, "no target");
+            return new ChargeLane(false, false, origin, Vector2.right, 0, 0f, "no target");
 
         Vector2 targetPos = target.mainBodyChunk.pos;
         float dx = targetPos.x - origin.x;
         float distance = Mathf.Abs(dx);
         if (distance < MinimumChargeDistance || distance > MaximumChargeDistance(scav))
-            return new ChargeLane(false, false, targetPos, HorizontalDirection(dx), 0, "distance");
+            return new ChargeLane(false, false, targetPos, HorizontalDirection(dx), 0, 0f, "distance");
 
         float horizontalSign = Mathf.Sign(dx);
         if (horizontalSign == 0f)
-            return new ChargeLane(false, false, targetPos, Vector2.right, 0, "distance");
+            return new ChargeLane(false, false, targetPos, Vector2.right, 0, 0f, "distance");
 
         if (!TrySolveHit(scav, origin, target, horizontalSign, out Vector2 lanceDirection,
-                out Vector2 aim, out int impactFrame))
-            return new ChargeLane(true, false, targetPos, HorizontalDirection(dx), 0, "no ballistic hit");
+                out Vector2 aim, out int impactFrame, out float confidence))
+            return new ChargeLane(true, false, targetPos, HorizontalDirection(dx), 0, 0f, "no ballistic hit");
 
         string block = TrajectoryBlock(scav, origin, horizontalSign, ChargeSpeed(scav), impactFrame, lanceDirection, target);
         if (block != null)
-            return new ChargeLane(false, true, aim, lanceDirection, impactFrame, block);
+            return new ChargeLane(false, true, aim, lanceDirection, impactFrame, confidence, block);
 
-        return new ChargeLane(true, true, aim, lanceDirection, impactFrame, "clear hit");
+        return new ChargeLane(true, true, aim, lanceDirection, impactFrame, confidence,
+            confidence >= 0.88f ? "clear exact hit" : "clear probable hit");
     }
 
     private static bool TrySolveHit(LanceScavenger scav, Vector2 origin, Creature target, float horizontalSign,
-        out Vector2 bestDirection, out Vector2 bestAim, out int bestFrame)
+        out Vector2 bestDirection, out Vector2 bestAim, out int bestFrame, out float bestConfidence)
     {
         bestDirection = new Vector2(horizontalSign, 0f);
         bestAim = target.mainBodyChunk.pos;
         bestFrame = 0;
+        bestConfidence = 0f;
 
-        // Prefer the smallest required correction from horizontal. A high-arcing charge
-        // therefore only depresses/elevates the lance as much as the hit actually needs.
+        // Prefer the smallest required correction from horizontal. Within the same pitch,
+        // exact tip intersections outrank the looser planning corridor.
         for (int pitchMagnitude = 0; pitchMagnitude <= 15; pitchMagnitude++)
         {
-            if (TryPitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude, out bestDirection, out bestAim, out bestFrame))
+            if (TryPitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude, out bestDirection, out bestAim,
+                    out bestFrame, out bestConfidence))
                 return true;
-            if (pitchMagnitude > 0 && TryPitch(pitchMagnitude, out bestDirection, out bestAim, out bestFrame))
+            if (pitchMagnitude > 0 && TryPitch(pitchMagnitude, out bestDirection, out bestAim,
+                    out bestFrame, out bestConfidence))
                 return true;
         }
         return false;
 
-        bool TryPitch(float pitchDegrees, out Vector2 direction, out Vector2 aim, out int impactFrame)
+        bool TryPitch(float pitchDegrees, out Vector2 direction, out Vector2 aim, out int impactFrame,
+            out float confidence)
         {
             float radians = pitchDegrees * Mathf.Deg2Rad;
             direction = new Vector2(horizontalSign * Mathf.Cos(radians), Mathf.Sin(radians)).normalized;
             aim = target.mainBodyChunk.pos;
             impactFrame = 0;
+            confidence = 0f;
 
             float forwardLength = (scav.Lance?.Length ?? LanceCombatMath.DefaultLength) * (1f - LanceCombatMath.GripFraction);
             Vector2 body = origin;
@@ -120,12 +135,24 @@ internal static class ChargeLanePlanner
                 {
                     Vector2 oldTarget = PredictedTargetPosition(chunk, frame - 1);
                     Vector2 newTarget = PredictedTargetPosition(chunk, frame);
-                    if (!LanceCombatMath.SweepTip(previousTip, tip, oldTarget, newTarget,
-                            chunk.rad + TipHitPadding, out float fraction))
-                        continue;
+                    bool exact = LanceCombatMath.SweepTip(previousTip, tip, oldTarget, newTarget,
+                        chunk.rad + ActualTipHitPadding, out float exactFraction);
+                    bool probable = exact || LanceCombatMath.SweepTip(previousTip, tip, oldTarget, newTarget,
+                        chunk.rad + PlanningTipHitPadding, out float probableFraction);
+                    if (!probable) continue;
 
+                    float fraction = exact ? exactFraction : probableFraction;
                     impactFrame = frame;
                     aim = Vector2.Lerp(oldTarget, newTarget, fraction);
+
+                    // The confidence score is intentionally conservative but not binary.
+                    // Exact intersections are very strong; a near corridor still counts as
+                    // a valid tactical opportunity, especially at small pitch and short lead time.
+                    float baseConfidence = exact ? 0.98f : 0.76f;
+                    float pitchPenalty = Mathf.Abs(pitchDegrees) / 15f * 0.08f;
+                    float framePenalty = (float)frame / LanceCombatState.MaxChargeFrames * 0.07f;
+                    float targetSpeedPenalty = Mathf.Clamp01(chunk.vel.magnitude / 12f) * 0.07f;
+                    confidence = Mathf.Clamp01(baseConfidence - pitchPenalty - framePenalty - targetSpeedPenalty);
                     return true;
                 }
                 previousTip = tip;
@@ -169,8 +196,6 @@ internal static class ChargeLanePlanner
 
     private static void StepBody(ref Vector2 position, ref Vector2 velocity)
     {
-        // Match the vanilla scavenger's gravity/air-friction integration closely enough
-        // for aiming. The solution is refreshed every brace frame and once more at launch.
         velocity.y = (velocity.y - ScavengerGravity) * ScavengerAirFriction;
         velocity.x *= ScavengerAirFriction;
         position += velocity;
@@ -236,10 +261,10 @@ internal static class ChargeLanePlanner
                     Vector2 candidate = target.mainBodyChunk.pos + new Vector2(side * distance, height);
                     WorldCoordinate coordinate = scav.room.GetWorldCoordinate(candidate);
                     candidate = scav.room.MiddleOfTile(coordinate);
-                    if (!scav.AI.pathFinder.CoordinateViable(coordinate) ||
-                        !Evaluate(scav, candidate, target).Clear) continue;
+                    ChargeLane lane = Evaluate(scav, candidate, target);
+                    if (!scav.AI.pathFinder.CoordinateViable(coordinate) || !lane.Clear) continue;
                     float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 2f +
-                        Mathf.Abs(distance - preferredDistance) * 0.4f;
+                        Mathf.Abs(distance - preferredDistance) * 0.4f + (1f - lane.Confidence) * 60f;
                     if (score >= best) continue;
                     best = score;
                     destination = coordinate;
