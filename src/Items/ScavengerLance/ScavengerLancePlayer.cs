@@ -7,8 +7,36 @@ internal sealed partial class ScavengerLance
 {
     internal const float PlayerLevelSpeed = 4.5f;
 
+    internal bool RequestPlayerAttack(Vector2 direction, float maxDamage, int frames, int cooldown)
+    {
+        if (_thrustCooldown > 0 || Holder is not Player player || !player.Consious) return false;
+
+        _thrustDirection = direction.sqrMagnitude > 0.01f ? direction.normalized : rotation;
+        _thrustFrames = Mathf.Clamp(frames, 6, 14);
+        _thrustCooldown = Mathf.Max(_thrustFrames + 4, cooldown);
+        _thrustMaxDamage = Mathf.Max(0.12f, maxDamage);
+        _hitCreatures.Clear();
+        rotation = _thrustDirection;
+        setRotation = rotation;
+        _previousTip = Tip;
+        _previousGrip = firstChunk.pos;
+        _havePreviousPose = true;
+        ResetCarryRig();
+        return true;
+    }
+
+    internal void TrackPlayerAttackDirection(Vector2 direction)
+    {
+        if (_thrustFrames <= 0 || Holder is not Player || direction.sqrMagnitude < 0.001f) return;
+        _thrustDirection = direction.normalized;
+        rotation = _thrustDirection;
+        setRotation = rotation;
+    }
+
     internal Vector2 PlayerCarryDirection(Player player, Vector2 handDirection)
     {
+        if (ScavengerLancePlayerController.TryGetPose(player, this, out PlayerLancePose pose))
+            return pose.Direction;
         if (_thrustFrames > 0) return _thrustDirection;
         if (!player.Consious || (player.bodyMode != Player.BodyModeIndex.Stand &&
             player.bodyMode != Player.BodyModeIndex.Default && player.bodyMode != Player.BodyModeIndex.Crawl))
@@ -16,19 +44,56 @@ internal sealed partial class ScavengerLance
         float speed = (player.mainBodyChunk.vel.x + player.bodyChunks[1].vel.x) * 0.5f;
         float level = Mathf.InverseLerp(3f, PlayerLevelSpeed, Mathf.Abs(speed));
         if (level == 0f) return handDirection;
-        // Match actual movement, not left/right input or ThrowDirection. Passing
-        // through zero speed restores the normal hand pose before changing sides.
+        // Normal carry still follows Rain World's hand animation. At running speed the long weapon
+        // gradually levels with actual motion, then naturally returns to the hand pose through zero.
         return Custom.DegToVec(Mathf.LerpAngle(Custom.VecToDeg(handDirection), speed > 0f ? 90f : -90f, level));
     }
 
-    internal void SynchronizePlayerThrust(bool eu)
+    internal void SynchronizePlayerPose(Player player, int hand, bool eu)
     {
-        if (_thrustFrames <= 0 || Holder is not Player) return;
-        rotation = _thrustDirection;
-        setRotation = rotation;
-        // The vanilla graphics callback just placed this chunk in the carrying
-        // hand. Extend from that position without changing either of the hands.
-        firstChunk.MoveFromOutsideMyUpdate(eu, firstChunk.pos + rotation *
-            (Mathf.Sin((12 - _thrustFrames) / 12f * Mathf.PI) * 17f));
+        if (player == null || Holder != player || hand < 0 || hand >= player.grasps.Length ||
+            player.grasps[hand]?.grabbed != this)
+            return;
+
+        bool hasPose = ScavengerLancePlayerController.TryGetPose(player, this, out PlayerLancePose pose);
+        if (!hasPose && _thrustFrames <= 0) return;
+
+        Vector2 direction = hasPose
+            ? pose.Direction
+            : _thrustDirection.sqrMagnitude > 0.001f ? _thrustDirection.normalized : rotation;
+        Vector2 handOffset = hasPose
+            ? pose.PrimaryHandOffset
+            : direction * (Mathf.Sin((12 - Mathf.Min(12, _thrustFrames)) / 12f * Mathf.PI) * 17f);
+
+        PlayerGraphics graphics = player.graphicsModule as PlayerGraphics;
+        Vector2 anchor = firstChunk.pos + handOffset;
+        Vector2 anchorVelocity = player.mainBodyChunk.vel;
+
+        if (graphics != null && graphics.hands != null && hand < graphics.hands.Length)
+        {
+            anchor = graphics.hands[hand].pos + handOffset;
+            graphics.hands[hand].pos = anchor;
+            graphics.hands[hand].vel += handOffset * 0.14f;
+            anchorVelocity = graphics.hands[hand].vel;
+
+            if (hasPose && pose.UseSupportHand)
+            {
+                int supportHand = hand == 0 ? 1 : 0;
+                if (supportHand >= 0 && supportHand < graphics.hands.Length &&
+                    supportHand < player.grasps.Length && player.grasps[supportHand] == null)
+                {
+                    Vector2 supportTarget = anchor + direction * pose.SupportHandDistance + Vector2.down * 0.75f;
+                    Vector2 before = graphics.hands[supportHand].pos;
+                    graphics.hands[supportHand].pos = Vector2.Lerp(before, supportTarget, pose.SupportBlend);
+                    graphics.hands[supportHand].vel += (supportTarget - before) * 0.22f;
+                }
+            }
+        }
+
+        rotation = direction;
+        setRotation = direction;
+        rotationSpeed = 0f;
+        firstChunk.MoveFromOutsideMyUpdate(eu, anchor);
+        firstChunk.vel = anchorVelocity;
     }
 }
