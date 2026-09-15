@@ -134,7 +134,7 @@ internal static class CombatTests
         fullBraceWindow.Tick(Situation());
         fullBraceWindow.Tick(Situation());
         Check(fullBraceWindow.State == LanceState.Brace, "Full-brace-window test reaches brace");
-        fullBraceWindow.Tick(Situation()); // credible solution on the first brace frame
+        fullBraceWindow.Tick(Situation());
         for (int i = 1; i < LanceCombatState.BraceFrames && fullBraceWindow.State == LanceState.Brace; i++)
             fullBraceWindow.Tick(Situation(lane: false, commitReady: true));
         Check(fullBraceWindow.State == LanceState.Charge && fullBraceWindow.AttackSerial == 1,
@@ -175,8 +175,11 @@ internal static class CombatTests
             LanceCombatMath.PlayerThrustMaxDamage);
         LanceImpact scavengerClose = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true,
             LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
+        LanceImpact counterSweep = LanceCombatMath.CounterSweepImpact(0.85f, 0.85f, 2f);
         Check(Mathf.Abs(full.Damage - LanceCombatMath.ChargeMaxDamage) < 0.001f,
             "Maximum charge damage is 2.75x the previous cap");
+        Check(Mathf.Abs(counterSweep.Damage - LanceCombatMath.ChargeMaxDamage) < 0.001f,
+            "Charge counter-sweep always resolves at the full charge damage tier");
         Check(Mathf.Abs(scavengerClose.Damage - full.Damage * 0.20f) < 0.001f,
             "Lance scavenger close thrust caps at 20 percent of maximum charge damage");
         Check(Mathf.Abs(player.Damage - LanceCombatMath.PlayerThrustMaxDamage) < 0.001f,
@@ -185,6 +188,16 @@ internal static class CombatTests
             "Default non-player thrust/throw damage keeps its standard cap");
         Check(full.Damage > player.Damage && player.Damage > scavengerClose.Damage && scavengerClose.Damage > standard.Damage,
             "Charge, player thrust, scavenger close thrust and standard thrust remain distinct damage tiers");
+
+        AbstractCreature.Personality calm = default;
+        calm.energy = calm.aggression = calm.bravery = 0f;
+        AbstractCreature.Personality fierce = default;
+        fierce.energy = fierce.aggression = fierce.bravery = 1f;
+        Check(Mathf.Abs(LanceCombatMath.CounterSweepChance(calm) - 0.20f) < 0.001f,
+            "Lowest counter-sweep personality chance is 20 percent");
+        Check(Mathf.Abs(LanceCombatMath.CounterSweepChance(fierce) - 0.55f) < 0.001f,
+            "Highest counter-sweep personality chance is 55 percent");
+
         Check(LanceCombatMath.Impact(0f, 1f, 1f, 1f, true, 200f, true).Damage == 0f, "Stationary tip is harmless");
         Check(LanceCombatMath.Impact(20f, 0f, 1f, 1f, true, 200f, true).Damage == 0f, "Side strike cannot pierce");
         Check(LanceCombatMath.Impact(20f, -1f, 1f, 1f, true, 200f, true).Damage == 0f, "Rear strike cannot pierce");
