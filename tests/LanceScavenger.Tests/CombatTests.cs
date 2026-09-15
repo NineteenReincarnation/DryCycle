@@ -9,15 +9,15 @@ internal static class CombatTests
 {
     internal static LanceSituation Situation(ScavengerAI.ViolenceType violence = null, bool afraid = false,
         float distance = 250f, bool lane = true, bool armed = true, bool active = true,
-        bool target = true, bool stable = true) =>
-        new(active, armed, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane, stable);
+        bool target = true) =>
+        new(active, armed, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane);
 
     internal static LanceCombatState Charge(float distance = 250f, bool afraid = false)
     {
         var combat = new LanceCombatState();
         for (int i = 0; i < LanceCombatState.BraceFrames + 6 && combat.State != LanceState.Charge; i++)
             combat.Tick(Situation(distance: distance, afraid: afraid));
-        Check(combat.State == LanceState.Charge, "A clear, grounded vanilla-Lethal encounter can reach Charge");
+        Check(combat.State == LanceState.Charge, "A clear vanilla-Lethal encounter can reach Charge");
         return combat;
     }
 
@@ -67,12 +67,12 @@ internal static class CombatTests
     internal static void WeaknessesAndInterruptions()
     {
         foreach (LanceSituation situation in new[] { Situation(distance: 59f), Situation(lane: false),
-            Situation(armed: false), Situation(stable: false), Situation(active: false) })
+            Situation(armed: false), Situation(active: false) })
         {
             var combat = new LanceCombatState();
             for (int i = 0; i < 400; i++) combat.Tick(situation);
             Check(combat.AttackSerial == 0,
-                "Sub-3-tile range, obstruction, disarm, unstable stance or stun cannot start full charge");
+                "Sub-3-tile range, obstruction, disarm or stun cannot start full charge");
         }
 
         LanceCombatState boundary = Charge(60f);
@@ -102,14 +102,23 @@ internal static class CombatTests
 
         LanceCombatState counterCharge = Charge(250f, afraid: true);
         Check(counterCharge.AttackSerial == 1,
-            "A lethal Afraid scavenger may counter-charge only when a safe lane already exists");
+            "A lethal Afraid scavenger may counter-charge when a safe lane already exists");
     }
 
     internal static void ImpactAndSweeps()
     {
         LanceImpact full = LanceCombatMath.Impact(19f, 1f, 0.85f, 0.85f, true, 120f, false);
         LanceImpact jab = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true);
-        Check(full.Damage > jab.Damage && full.Impulse > jab.Impulse, "Charge needs speed/run-up and exceeds a jab");
+        LanceImpact scavengerClose = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true,
+            LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
+        Check(Mathf.Abs(full.Damage - LanceCombatMath.ChargeMaxDamage) < 0.001f,
+            "Maximum charge damage is 2.75x the previous cap");
+        Check(Mathf.Abs(scavengerClose.Damage - full.Damage * 0.5f) < 0.001f,
+            "Lance scavenger close thrust caps at half maximum charge damage");
+        Check(jab.Damage <= LanceCombatMath.StandardThrustMaxDamage + 0.001f,
+            "Normal player/throw thrust damage keeps its old cap");
+        Check(full.Damage > scavengerClose.Damage && scavengerClose.Damage > jab.Damage,
+            "Charge, scavenger close thrust and ordinary thrust remain distinct damage tiers");
         Check(LanceCombatMath.Impact(0f, 1f, 1f, 1f, true, 200f, true).Damage == 0f, "Stationary tip is harmless");
         Check(LanceCombatMath.Impact(20f, 0f, 1f, 1f, true, 200f, true).Damage == 0f, "Side strike cannot pierce");
         Check(LanceCombatMath.Impact(20f, -1f, 1f, 1f, true, 200f, true).Damage == 0f, "Rear strike cannot pierce");
