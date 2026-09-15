@@ -32,6 +32,31 @@ internal static class ControlCenterWindow
     private const float CardBodyScaleChinese = 1.24f;
     private const float CardTitleBoost = 1.10f;
 
+    private static bool headerModeProjectionValid;
+    private static EditorToolMode projectedHeaderMode;
+    private static bool projectedHeaderChinese;
+    private static string headerModeLabel = string.Empty;
+
+    private static string projectedPlacementType = string.Empty;
+    private static bool projectedPlacementChinese;
+    private static string placementLabel = string.Empty;
+
+    private static string projectedUndoSource = string.Empty;
+    private static string projectedRedoSource = string.Empty;
+    private static bool projectedCommandChinese;
+    private static string undoCommandLabel = string.Empty;
+    private static string redoCommandLabel = string.Empty;
+
+    private static bool statusProjectionValid;
+    private static EditorToolMode projectedStatusMode;
+    private static bool projectedStatusChinese;
+    private static int projectedStatusCountA;
+    private static int projectedStatusCountB;
+    private static bool projectedStatusPlacement;
+    private static string projectedStatusTextA = string.Empty;
+    private static string projectedStatusTextB = string.Empty;
+    private static string statusText = string.Empty;
+
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
@@ -91,18 +116,17 @@ internal static class ControlCenterWindow
     private static void DrawHeader(EditorPresentationSnapshot snapshot)
     {
         string room = CurrentRoom(snapshot);
-        string mode = DevToolUiSettings.ToolMode(snapshot.ToolMode);
 
         ImGui.SetWindowFontScale(1.10f);
         ImGui.TextUnformatted(room);
         ImGui.SetWindowFontScale(1f);
         ImGui.SameLine();
-        DevToolWidgets.MutedText("/ " + mode);
+        DevToolWidgets.MutedText(GetHeaderModeLabel(snapshot.ToolMode));
 
         if (snapshot.PlacementActive)
         {
             ImGui.SameLine(0f, 14f);
-            ImGui.TextColored(AccentText, DevToolUiSettings.T("放置：", "Place: ") + snapshot.PlacementType);
+            ImGui.TextColored(AccentText, GetPlacementLabel(snapshot.PlacementType));
         }
 
         string badge = snapshot.FocusMode
@@ -125,12 +149,7 @@ internal static class ControlCenterWindow
 
     private static void DrawCommandRow(EditorPresentationSnapshot snapshot)
     {
-        string undo = string.IsNullOrEmpty(snapshot.UndoLabel)
-            ? DevToolUiSettings.T("撤销", "Undo")
-            : DevToolUiSettings.T("撤销 ", "Undo ") + snapshot.UndoLabel;
-        string redo = string.IsNullOrEmpty(snapshot.RedoLabel)
-            ? DevToolUiSettings.T("重做", "Redo")
-            : DevToolUiSettings.T("重做 ", "Redo ") + snapshot.RedoLabel;
+        EnsureCommandLabels(snapshot.UndoLabel, snapshot.RedoLabel);
 
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("保存", "Save"),
@@ -140,13 +159,13 @@ internal static class ControlCenterWindow
 
         ImGui.SameLine();
         if (!snapshot.CanUndo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(undo, "ControlCenterUndo", DevToolButtonTone.Normal))
+        if (DevToolWidgets.ActionButton(undoCommandLabel, "ControlCenterUndo", DevToolButtonTone.Normal))
             Send(EditorUiCommandKind.Undo);
         if (!snapshot.CanUndo) ImGui.EndDisabled();
 
         ImGui.SameLine();
         if (!snapshot.CanRedo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(redo, "ControlCenterRedo", DevToolButtonTone.Normal))
+        if (DevToolWidgets.ActionButton(redoCommandLabel, "ControlCenterRedo", DevToolButtonTone.Normal))
             Send(EditorUiCommandKind.Redo);
         if (!snapshot.CanRedo) ImGui.EndDisabled();
 
@@ -316,50 +335,138 @@ internal static class ControlCenterWindow
     private static string CurrentRoom(EditorPresentationSnapshot snapshot) =>
         string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
 
+    private static string GetHeaderModeLabel(EditorToolMode mode)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (headerModeProjectionValid && projectedHeaderMode == mode && projectedHeaderChinese == chinese)
+            return headerModeLabel;
+
+        projectedHeaderMode = mode;
+        projectedHeaderChinese = chinese;
+        headerModeProjectionValid = true;
+        headerModeLabel = "/ " + DevToolUiSettings.ToolMode(mode);
+        return headerModeLabel;
+    }
+
+    private static string GetPlacementLabel(string placementType)
+    {
+        string source = placementType ?? string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (projectedPlacementChinese == chinese &&
+            string.Equals(projectedPlacementType, source, StringComparison.Ordinal))
+            return placementLabel;
+
+        projectedPlacementChinese = chinese;
+        projectedPlacementType = source;
+        placementLabel = DevToolUiSettings.T("放置：", "Place: ") + source;
+        return placementLabel;
+    }
+
+    private static void EnsureCommandLabels(string undoSource, string redoSource)
+    {
+        undoSource ??= string.Empty;
+        redoSource ??= string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (projectedCommandChinese == chinese &&
+            string.Equals(projectedUndoSource, undoSource, StringComparison.Ordinal) &&
+            string.Equals(projectedRedoSource, redoSource, StringComparison.Ordinal))
+            return;
+
+        projectedCommandChinese = chinese;
+        projectedUndoSource = undoSource;
+        projectedRedoSource = redoSource;
+        undoCommandLabel = string.IsNullOrEmpty(undoSource)
+            ? DevToolUiSettings.T("撤销", "Undo")
+            : DevToolUiSettings.T("撤销 ", "Undo ") + undoSource;
+        redoCommandLabel = string.IsNullOrEmpty(redoSource)
+            ? DevToolUiSettings.T("重做", "Redo")
+            : DevToolUiSettings.T("重做 ", "Redo ") + redoSource;
+    }
+
     private static string BuildStatusText(EditorPresentationSnapshot snapshot)
     {
-        if (snapshot.ToolMode == EditorToolMode.Objects)
+        int countA = 0;
+        int countB = 0;
+        bool placement = false;
+        string textA = string.Empty;
+        string textB = string.Empty;
+
+        switch (snapshot.ToolMode)
         {
-            int selected = snapshot.Inspector?.SelectionCount ?? 0;
-            string placement = snapshot.PlacementActive
-                ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + snapshot.PlacementType
-                : string.Empty;
-            return DevToolUiSettings.T("物件 ", "Objects ") + (snapshot.SceneObjects?.Length ?? 0) +
-                   DevToolUiSettings.T(" · 已选 ", " · Selected ") + selected + placement;
+            case EditorToolMode.Objects:
+                countA = snapshot.SceneObjects?.Length ?? 0;
+                countB = snapshot.Inspector?.SelectionCount ?? 0;
+                placement = snapshot.PlacementActive;
+                textA = snapshot.PlacementType ?? string.Empty;
+                break;
+
+            case EditorToolMode.Sound:
+                countA = SoundEditorPresentationHub.Current.Sounds?.Length ?? 0;
+                break;
+
+            case EditorToolMode.Triggers:
+                countA = TriggerEditorPresentationHub.Current.Triggers?.Length ?? 0;
+                break;
+
+            case EditorToolMode.Map:
+            {
+                EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
+                countA = map.Rooms?.Length ?? 0;
+                textA = map.RegionName ?? string.Empty;
+                break;
+            }
+
+            case EditorToolMode.Dialog:
+            {
+                EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
+                countA = dialog.Events?.Length ?? 0;
+                textA = dialog.SelectedFileName ?? string.Empty;
+                break;
+            }
+
+            case EditorToolMode.Relationships:
+                textA = RelationshipEditorPresentationHub.Current.PrimaryCreature ?? string.Empty;
+                break;
+
+            default:
+                textA = snapshot.Document ?? string.Empty;
+                break;
         }
 
-        if (snapshot.ToolMode == EditorToolMode.Sound)
-        {
-            EditorSoundPresentationSnapshot sound = SoundEditorPresentationHub.Current;
-            return DevToolUiSettings.T("声音 ", "Sounds ") + (sound.Sounds?.Length ?? 0);
-        }
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (statusProjectionValid &&
+            projectedStatusMode == snapshot.ToolMode &&
+            projectedStatusChinese == chinese &&
+            projectedStatusCountA == countA &&
+            projectedStatusCountB == countB &&
+            projectedStatusPlacement == placement &&
+            string.Equals(projectedStatusTextA, textA, StringComparison.Ordinal) &&
+            string.Equals(projectedStatusTextB, textB, StringComparison.Ordinal))
+            return statusText;
 
-        if (snapshot.ToolMode == EditorToolMode.Triggers)
-        {
-            EditorTriggerPresentationSnapshot trigger = TriggerEditorPresentationHub.Current;
-            return DevToolUiSettings.T("触发器 ", "Triggers ") + (trigger.Triggers?.Length ?? 0);
-        }
+        projectedStatusMode = snapshot.ToolMode;
+        projectedStatusChinese = chinese;
+        projectedStatusCountA = countA;
+        projectedStatusCountB = countB;
+        projectedStatusPlacement = placement;
+        projectedStatusTextA = textA;
+        projectedStatusTextB = textB;
+        statusProjectionValid = true;
 
-        if (snapshot.ToolMode == EditorToolMode.Map)
+        statusText = snapshot.ToolMode switch
         {
-            EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
-            return (map.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间 · ", " rooms · ") + map.RegionName;
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Dialog)
-        {
-            EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
-            return dialog.SelectedFileName + " · " + (dialog.Events?.Length ?? 0) +
-                   DevToolUiSettings.T(" 个事件", " events");
-        }
-
-        if (snapshot.ToolMode == EditorToolMode.Relationships)
-        {
-            EditorRelationshipPresentationSnapshot rel = RelationshipEditorPresentationHub.Current;
-            return DevToolUiSettings.T("主体 ", "Primary ") + rel.PrimaryCreature;
-        }
-
-        return snapshot.Document;
+            EditorToolMode.Objects =>
+                DevToolUiSettings.T("物件 ", "Objects ") + countA +
+                DevToolUiSettings.T(" · 已选 ", " · Selected ") + countB +
+                (placement ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + textA : string.Empty),
+            EditorToolMode.Sound => DevToolUiSettings.T("声音 ", "Sounds ") + countA,
+            EditorToolMode.Triggers => DevToolUiSettings.T("触发器 ", "Triggers ") + countA,
+            EditorToolMode.Map => countA + DevToolUiSettings.T(" 个房间 · ", " rooms · ") + textA,
+            EditorToolMode.Dialog => textA + " · " + countA + DevToolUiSettings.T(" 个事件", " events"),
+            EditorToolMode.Relationships => DevToolUiSettings.T("主体 ", "Primary ") + textA,
+            _ => textA
+        };
+        return statusText;
     }
 
     private static void PushCardStyle()
