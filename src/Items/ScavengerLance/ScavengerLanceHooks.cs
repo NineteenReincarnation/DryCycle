@@ -1,3 +1,4 @@
+using DryCycle.Creatures.LanceScavenger;
 using DryCycle.Registration;
 using UnityEngine;
 
@@ -15,6 +16,7 @@ internal static class ScavengerLanceHooks
         _definition = new ScavengerLanceDefinition();
         ItemRegistry.Register(_definition);
         On.Player.Grabability += Grabability;
+        On.Player.CanIPickThisUp += CanIPickThisUp;
         On.Player.HeavyCarry += HeavyCarry;
         On.Player.GetHeldItemDirection += GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
@@ -26,6 +28,7 @@ internal static class ScavengerLanceHooks
         if (!_enabled) return;
         ScavengerLanceDevConsoleSupport.ResetRegistration();
         On.Player.Grabability -= Grabability;
+        On.Player.CanIPickThisUp -= CanIPickThisUp;
         On.Player.HeavyCarry -= HeavyCarry;
         On.Player.GetHeldItemDirection -= GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
@@ -38,6 +41,19 @@ internal static class ScavengerLanceHooks
     }
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
         obj is ScavengerLance ? Player.ObjectGrabability.BigOneHand : orig(self, obj);
+
+    private static bool CanIPickThisUp(On.Player.orig_CanIPickThisUp orig, Player self, PhysicalObject obj)
+    {
+        if (obj is ScavengerLance lance)
+        {
+            for (int i = 0; i < lance.grabbedBy.Count; i++)
+            {
+                if (lance.grabbedBy[i]?.grabber is LanceScavenger)
+                    return false;
+            }
+        }
+        return orig(self, obj);
+    }
 
     // A carried lance must never pull the player's body towards its extending tip.
     private static bool HeavyCarry(On.Player.orig_HeavyCarry orig, Player self, PhysicalObject obj) =>
