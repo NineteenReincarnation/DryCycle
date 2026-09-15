@@ -32,9 +32,7 @@ internal readonly struct LanceSituation
 /// <summary>Decision timing only; body velocity and weapon impacts live in their own modules.</summary>
 internal sealed class LanceCombatState
 {
-    // Rain World runs at roughly 40 simulation updates per second: 38 frames = 0.95 s.
     internal const int BraceFrames = 38;
-    // Any credible solution seen anywhere during the full 0.95-second brace may be used at release.
     internal const int CommitWindowFrames = BraceFrames;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
@@ -83,9 +81,8 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Once the body has actually launched, tactical target/lane changes must not cancel physics
-        // in mid-air. Terrain impacts and landing finish the charge through the physical callbacks;
-        // this 32-frame timeout is only a failsafe for unusual rooms/gaps.
+        // A launched charge is now a physical commitment. Soft target/relationship changes do not
+        // cancel it in mid-air; landing, wall impact, interruption or this timeout ends the motion.
         if (State == LanceState.Charge)
         {
             if (Age >= MaxChargeFrames) FinishCharge(false);
@@ -104,8 +101,6 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Backstep still requires a currently usable lane before the visible brace begins.
-        // Friendly occupancy waits in place instead of causing both scavengers to swap sides.
         if (State == LanceState.Backstep)
         {
             if (!s.BackstepComplete) return;
@@ -129,9 +124,6 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Brace is one full commitment window. It does not need a perfect solution on the
-        // release frame: any credible solution observed during these 38 frames may be used.
-        // Only hard safety failures (terrain, range, friendly lane, etc.) abort immediately.
         if (State == LanceState.Brace)
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
@@ -215,8 +207,6 @@ internal sealed class LanceCombatState
     {
         if (State == LanceState.Charge)
         {
-            // The launch frame can still report floor contact. Only a charge that has actually
-            // left support is allowed to finish from landing, otherwise it would cancel instantly.
             if (!_chargeAirborne) return;
             _chargeLanded = true;
             FinishCharge(false);
@@ -225,6 +215,18 @@ internal sealed class LanceCombatState
         {
             _followUpLandingAge = Age;
         }
+    }
+
+    // Called only in the transition frame, after the final corrected lance angle has been checked.
+    // This is not a recovery: no launch happened, so no cooldown or recovery tax is applied.
+    internal void CancelChargeBeforeLaunch(bool friendBlocked, bool afraid)
+    {
+        if (State != LanceState.Charge || _chargeAirborne) return;
+        _followUpReserved = false;
+        _chargeLanded = false;
+        _chargeAirborne = false;
+        if (AttackSerial > 0) AttackSerial--;
+        Enter(afraid || friendBlocked ? LanceState.Threaten : LanceState.AcquireChargeLane);
     }
 
     internal void FinishCharge(bool wall)
