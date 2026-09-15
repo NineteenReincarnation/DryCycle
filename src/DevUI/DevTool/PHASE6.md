@@ -196,22 +196,23 @@ RWImGui diagnostics views
 - 删除的 POM / RegionKit 专用 Inspector 不得重新出现或留下悬空引用。
 - Compatibility 以外的功能模块禁止重新依赖第三方私有运行时类型。
 
-当前静态架构守卫和全量 diff 终审已经完成。剩余验证全部依赖真实运行环境：
+当前静态架构守卫、全量 diff 终审和真实联编已经完成。真实 `net48` 编译使用实际 Rain World / HookGen / Unity / RWImGui 程序集完成；`DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll` 均为 **0 warning / 0 error**。
 
-1. 使用实际 Rain World / HookGen / RuntimeDetour / RWImGui 引用完成 `DryCycle.dll` + `DryCycle.DevTool.RWImGui.dll` 联编。
-2. Rain World 内基本回归：
+剩余验证只依赖真实 Rain World 运行环境：
+
+1. Rain World 内基本回归：
    - New UI / Vanilla 切换
    - Save / Undo / Redo
    - Objects / Room / Sound / Triggers / Map / Dialog / Relationships
    - Generic DevInterface 第三方控件回退
    - Extension API 注册 / Dispose
-3. 性能回归：确认稳定帧没有重新出现整表扫描、重复 Snapshot rebuild 或重复 Synchronize。
+2. 性能回归：确认稳定帧没有重新出现整表扫描、重复 Snapshot rebuild 或重复 Synchronize。
 
-当前可用上传依赖只覆盖 BepInEx、RuntimeDetour、Cecil、UnityEngine/Core/Input、Unity.Mathematics 等一部分真实运行库；完整联编仍缺 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、`Assembly-CSharp-firstpass.dll`、部分 Unity 模块以及 RWImGui 运行库。因此目前继续把“静态守卫通过”和“真实游戏联编/回归通过”严格分开。
+真实联编依赖现已补齐并完成验证。编译通过只证明程序集/源码边界成立，仍不替代 Rain World 内功能回归和稳定帧性能回归。
 
 ## 当前进度
 
-**第六阶段：约 90%。**
+**第六阶段：约 98%。**
 
 已经完成的主体架构清债：
 
@@ -226,10 +227,10 @@ RWImGui diagnostics views
 - README / PHASE6 文档与最终实现同步。
 - PR 全量静态 diff 终审完成。
 - Final Architecture Guard 已覆盖主要冻结边界并持续通过。
+- 使用真实 Rain World / HookGen / Unity / RWImGui 引用完成 `DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll` 的 `net48` 联编，两者均 0 warning / 0 error。
 
-剩余约 10% 不再是架构重构，而是真实环境验证：
+剩余约 2% 不再是架构重构，而是 Rain World 游戏内验证：
 
-1. 完整联编。
-2. Rain World 游戏内功能/兼容回归。
-3. 稳定帧性能回归。
-4. 验证完成后再决定是否把 PR 从 Draft 转为 Ready for Review；未经明确指示不合并。
+1. Rain World 游戏内功能/兼容回归。
+2. 稳定帧性能回归。
+3. 验证完成后再决定是否把 PR 从 Draft 转为 Ready for Review；未经明确指示不合并。

@@ -57,13 +57,6 @@ internal static class LegacyUiPresentationController
         EnsureLifetimeMonitor();
         ObserveDocumentLifetime(page);
 
-        // Compatibility verification is diagnostic work, not presentation work. A full audit walks
-        // instantiated DevInterface trees, mirrors controls and exercises reflection-backed action
-        // routes. Running it from Apply meant the same frame that H constructed vanilla DevUI also
-        // paid for the audit. Keep the audit available for explicit development sessions only.
-        if (DevUiDiagnosticsPolicy.Enabled)
-            DevUiFullAudit.ObserveAll(page);
-
         if (!ReferenceEquals(hiddenPage, page))
         {
             RestoreHiddenPage();

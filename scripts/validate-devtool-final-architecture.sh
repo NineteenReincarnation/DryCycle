@@ -92,6 +92,10 @@ if grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator
   echo "Coordinator must not split diagnostic publication ownership from DevUiDiagnosticsPublisher." >&2
   exit 1
 fi
+if grep -Fq 'DevUiFullAudit.ObserveAll(' "$legacy_controller"; then
+  echo "LegacyUiPresentationController must not run FullAudit directly; diagnostics are owned by DevUiDiagnosticsPublisher." >&2
+  exit 1
+fi
 
 required_diagnostics_publisher_symbols=(
   'DevUiFullAudit.ObserveAll(owner)'
