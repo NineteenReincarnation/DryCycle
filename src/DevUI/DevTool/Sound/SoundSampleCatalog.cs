@@ -164,48 +164,28 @@ internal static class SoundSampleCatalog
     internal static EditorSoundSampleSnapshot Resolve(string sample)
     {
         if (string.IsNullOrWhiteSpace(sample))
-        {
-            return new EditorSoundSampleSnapshot
-            {
-                Sample = sample ?? string.Empty,
-                SourceKind = EditorSoundSourceKind.Missing,
-                SourceName = "Missing",
-                Available = false
-            };
-        }
+            return Missing(sample);
 
         if (samples.TryGetValue(sample, out EditorSoundSampleSnapshot known))
             return known;
         if (buildingSamples != null && buildingSamples.TryGetValue(sample, out known))
             return known;
 
-        Dictionary<string, string> loose = buildPhase == BuildPhase.Idle
-            ? looseAmbientFiles
-            : buildingLooseAmbientFiles ?? looseAmbientFiles;
-        Dictionary<string, ModManager.Mod> modOwners = buildPhase == BuildPhase.Idle
-            ? modAmbientOwners
-            : buildingModAmbientOwners ?? modAmbientOwners;
-        Dictionary<string, ModManager.Mod> officialOwners = buildPhase == BuildPhase.Idle
-            ? officialDlcAmbientOwners
-            : buildingOfficialDlcAmbientOwners ?? officialDlcAmbientOwners;
+        // Presentation capture can ask for room-local samples while the global catalog is still
+        // warming. Do not let that read path perform filesystem/provenance work and recreate the
+        // exact first-click spike the activation pipeline is designed to remove. The completed
+        // catalog forces a full Sound presentation recapture, so this placeholder is temporary.
+        if (buildPhase != BuildPhase.Idle)
+            return Missing(sample);
 
         EditorSoundSampleSnapshot resolved = ResolveCore(
             sample,
             knownAvailable: false,
-            loose,
-            modOwners,
-            officialOwners);
-
-        if (buildPhase == BuildPhase.Idle)
-        {
-            samples[sample] = resolved;
-            sortedDirty = true;
-        }
-        else
-        {
-            buildingSamples[sample] = resolved;
-        }
-
+            looseAmbientFiles,
+            modAmbientOwners,
+            officialDlcAmbientOwners);
+        samples[sample] = resolved;
+        sortedDirty = true;
         return resolved;
     }
 
@@ -423,14 +403,16 @@ internal static class SoundSampleCatalog
             return Vanilla(sample);
         }
 
-        return new EditorSoundSampleSnapshot
-        {
-            Sample = sample,
-            SourceKind = EditorSoundSourceKind.Missing,
-            SourceName = "Missing",
-            Available = false
-        };
+        return Missing(sample);
     }
+
+    private static EditorSoundSampleSnapshot Missing(string sample) => new()
+    {
+        Sample = sample ?? string.Empty,
+        SourceKind = EditorSoundSourceKind.Missing,
+        SourceName = "Missing",
+        Available = false
+    };
 
     private static EditorSoundSampleSnapshot Vanilla(string sample) => new()
     {
