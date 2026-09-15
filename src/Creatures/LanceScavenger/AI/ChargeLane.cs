@@ -19,8 +19,7 @@ internal static class ChargeLanePlanner
 
     internal static float ChargeCommitment(LanceScavenger scav)
     {
-        CreatureTemplate.Relationship unused = default;
-        Personality personality = scav.abstractCreature.personality;
+        AbstractCreature.Personality personality = scav.abstractCreature.personality;
         return Mathf.Clamp01(personality.bravery * 0.45f + personality.aggression * 0.35f + personality.energy * 0.20f);
     }
 
