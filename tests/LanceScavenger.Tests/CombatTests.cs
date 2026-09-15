@@ -10,10 +10,10 @@ internal static class CombatTests
     internal static LanceSituation Situation(bool hostile = true, float distance = 250f, bool lane = true,
         bool armed = true, bool active = true, bool target = true, bool warning = false, bool stable = true) =>
         new(active, armed, target, hostile, warning, distance, lane, stable);
-    internal static LanceCombatState Charge()
+    internal static LanceCombatState Charge(float distance = 250f)
     {
         var combat = new LanceCombatState();
-        for (int i = 0; i < 60 && combat.State != LanceState.Charge; i++) combat.Tick(Situation());
+        for (int i = 0; i < 60 && combat.State != LanceState.Charge; i++) combat.Tick(Situation(distance: distance));
         Check(combat.State == LanceState.Charge, "A clear, grounded hostile encounter can reach Charge");
         return combat;
     }
@@ -34,7 +34,7 @@ internal static class CombatTests
         }
         Check(brace >= LanceCombatState.BraceFrames, "Every full charge has a readable brace interval");
         int serial = combat.AttackSerial;
-        for (int i = 0; i < 26; i++) combat.Tick(Situation());
+        for (int i = 0; i < LanceCombatState.MaxChargeFrames; i++) combat.Tick(Situation());
         Check(combat.State == LanceState.Recover, "A miss ends in recovery");
         for (int i = 0; i < 40; i++) combat.Tick(Situation());
         Check(combat.AttackSerial == serial && combat.State == LanceState.Recover, "No repeat charge during recovery");
@@ -45,13 +45,15 @@ internal static class CombatTests
     }
     internal static void WeaknessesAndInterruptions()
     {
-        foreach (LanceSituation situation in new[] { Situation(distance: 35f), Situation(lane: false),
+        foreach (LanceSituation situation in new[] { Situation(distance: 59f), Situation(lane: false),
             Situation(armed: false), Situation(stable: false), Situation(active: false) })
         {
             var combat = new LanceCombatState();
             for (int i = 0; i < 400; i++) combat.Tick(situation);
-            Check(combat.AttackSerial == 0, "Close range, obstruction, disarm, unstable stance or stun cannot start full charge");
+            Check(combat.AttackSerial == 0, "Sub-3-tile range, obstruction, disarm, unstable stance or stun cannot start full charge");
         }
+        LanceCombatState boundary = Charge(60f);
+        Check(boundary.AttackSerial == 1, "Exactly 3 tiles is a valid full-charge distance");
         foreach (LanceSituation interruption in new[] { Situation(armed: false), Situation(target: false), Situation(active: false), Situation(lane: false) })
         {
             LanceCombatState combat = Charge(); combat.Tick(interruption);
