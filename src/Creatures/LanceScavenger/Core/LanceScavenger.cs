@@ -215,8 +215,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         Vector2 direction;
         if (state == LanceState.Charge)
         {
-            // Airborne pitch is the last solution committed at takeoff. It never tracks
-            // the target after launch, so the player can still dodge a committed charge.
+            // Launch aim is fixed, except for the one-shot dodge counter-sweep. The body never
+            // steers toward the target in the air; only the weapon performs the precomputed arc.
             direction = Motor.LanceDirection;
         }
         else if (state == LanceState.Brace && Brain?.Lane.CanHit == true)
@@ -236,7 +236,9 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             direction = new Vector2(face == 0f ? 1f : face, movMode == MovementMode.Climb ? 2.5f : 0.9f).normalized;
         }
         Vector2 position = mainBodyChunk.pos + new Vector2(direction.x * 7f, forward ? -5f : 1f);
-        grip = new LanceGrip(position, direction, forward, state == LanceState.Charge && Consious && grabbedBy.Count == 0, Motor.RunUp);
+        grip = new LanceGrip(position, direction, forward,
+            state == LanceState.Charge && Consious && grabbedBy.Count == 0,
+            Motor.RunUp, state == LanceState.Charge && Motor.CounterSweepActive);
         return Lance == lance && !enteringShortCut.HasValue && !inShortcut;
     }
 
