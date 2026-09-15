@@ -38,12 +38,7 @@ internal sealed class LanceMotor
     private Vector2 _counterSweepStartDirection = Vector2.right;
     private Vector2 _counterSweepEndDirection = Vector2.right;
 
-    /// <summary>Horizontal body travel direction. Airborne steering remains intentionally absent.</summary>
     internal Vector2 Direction { get; private set; } = Vector2.right;
-    /// <summary>
-    /// Weapon direction. Normally this is the launch solution; during the one-shot evasive
-    /// counter-sweep it follows the fixed sweep arc while body travel remains unchanged.
-    /// </summary>
     internal Vector2 LanceDirection { get; private set; } = Vector2.right;
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
@@ -176,7 +171,6 @@ internal sealed class LanceMotor
             }
 
             UpdateCounterSweep();
-            // Body travel stays horizontal even while the weapon performs a counter-sweep.
             _owner.WeightedPush(1, 0, Direction, 0.32f);
             return;
         }
@@ -221,11 +215,6 @@ internal sealed class LanceMotor
         if (chargeAge < 2 || remaining < MinimumCounterSweepRemainingFrames || !TargetDodged(chargeAge))
             return;
 
-        // A dodge event gets exactly one roll. Failure does not reroll on following frames.
-        _counterSweepAttempted = true;
-        if (UnityEngine.Random.value > CounterSweepChance)
-            return;
-
         Vector2 grip = ChargeGrip(LanceDirection);
         Vector2 toTarget = _counterTarget.mainBodyChunk.pos - grip;
         if (toTarget.sqrMagnitude < 16f)
@@ -243,6 +232,11 @@ internal sealed class LanceMotor
         float sign = delta == 0f ? (Custom.PerpendicularVector(Direction).y >= 0f ? 1f : -1f) : Mathf.Sign(delta);
         float sweptDelta = Mathf.Clamp(delta + sign * CounterSweepOvershoot, -maxArc, maxArc);
         if (Mathf.Abs(sweptDelta) < MinimumCounterSweepAngle)
+            return;
+
+        // Only a dodge that actually requires an angular correction consumes the one roll.
+        _counterSweepAttempted = true;
+        if (UnityEngine.Random.value > CounterSweepChance)
             return;
 
         Vector2 end = Custom.DegToVec(currentAngle + sweptDelta).normalized;
@@ -299,8 +293,6 @@ internal sealed class LanceMotor
 
         LanceDirection = next;
         _counterSweepAge = nextAge;
-        // Stay active for the complete eighth sweep frame. The next charge update closes
-        // the window, after the weapon collision code has had a chance to resolve this pose.
     }
 
     private bool CounterSweepArcClear(Vector2 from, Vector2 to, Creature target)
