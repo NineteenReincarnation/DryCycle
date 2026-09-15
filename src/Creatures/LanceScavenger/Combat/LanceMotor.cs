@@ -65,6 +65,7 @@ internal sealed class LanceMotor
             solved = new Vector2(sign == 0f ? 1f : sign, 0f);
         }
         _committedLanceDirection = solved.normalized;
+        LanceDirection = _committedLanceDirection;
         _counterTarget = _owner.Brain?.Target;
         _counterSweepAttempted = false;
         _counterSweepActive = false;
@@ -117,7 +118,11 @@ internal sealed class LanceMotor
             return;
         }
 
-        if (_counterSweepActive) _counterSweepActive = false;
+        if (_counterSweepActive)
+            EndCounterSweep();
+        else if (_committedLanceDirection.sqrMagnitude > 0.001f)
+            LanceDirection = _committedLanceDirection;
+
         if (state == LanceState.Recover)
         {
             if (_owner.IsStableForBrace)
@@ -139,13 +144,23 @@ internal sealed class LanceMotor
         {
             if (_counterSweepAge >= CounterSweepFrames)
             {
-                _counterSweepActive = false;
+                EndCounterSweep();
                 return;
             }
             AdvanceCounterSweep();
             return;
         }
-        if (_counterSweepAttempted || _counterTarget == null || _counterTarget.dead || !_counterTarget.Consious ||
+
+        // Once the one-shot sweep has happened, keep asking the carry rig for the original charge
+        // direction. The rig supplies the visible inertial return instead of leaving the lance frozen
+        // at the last sweep angle or snapping the rendered weapon back in one frame.
+        if (_counterSweepAttempted)
+        {
+            LanceDirection = _committedLanceDirection;
+            return;
+        }
+
+        if (_counterTarget == null || _counterTarget.dead || !_counterTarget.Consious ||
             _counterTarget.room != _owner.room || _owner.Lance == null ||
             _owner.Lance.HasHitCreature(_counterTarget))
             return;
@@ -176,11 +191,17 @@ internal sealed class LanceMotor
 
         _counterSweepAttempted = true;
         if (UnityEngine.Random.value > CounterSweepChance)
+        {
+            LanceDirection = _committedLanceDirection;
             return;
+        }
 
         Vector2 end = Custom.DegToVec(currentAngle + sweptDelta).normalized;
         if (!CounterSweepArcClear(LanceDirection, end, _counterTarget))
+        {
+            LanceDirection = _committedLanceDirection;
             return;
+        }
 
         _counterSweepStartDirection = LanceDirection;
         _counterSweepEndDirection = end;
@@ -234,12 +255,21 @@ internal sealed class LanceMotor
 
         if (!CounterSweepPoseClear(next, _counterTarget))
         {
-            _counterSweepActive = false;
+            EndCounterSweep();
             return;
         }
 
         LanceDirection = next;
         _counterSweepAge = nextAge;
+    }
+
+    private void EndCounterSweep()
+    {
+        _counterSweepActive = false;
+        _counterSweepAge = CounterSweepFrames;
+        LanceDirection = _committedLanceDirection.sqrMagnitude > 0.001f
+            ? _committedLanceDirection.normalized
+            : Direction;
     }
 
     private bool CounterSweepArcClear(Vector2 from, Vector2 to, Creature target)
@@ -284,8 +314,12 @@ internal sealed class LanceMotor
 
     private Vector2 ChargeGrip(Vector2 direction)
     {
-        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Direction;
-        return _owner.mainBodyChunk.pos + new Vector2(dir.x * 7f, -5f);
+        // The hand is a fixed pivot during charge. A counter-sweep rotates the lance around that
+        // pivot; it must not translate the whole weapon through the scavenger when direction.x changes.
+        float face = Mathf.Sign(Direction.x);
+        if (face == 0f) face = Mathf.Sign(direction.x);
+        if (face == 0f) face = 1f;
+        return _owner.mainBodyChunk.pos + new Vector2(face * 7f, -5f);
     }
 
     private void ResetCounterSweep()
