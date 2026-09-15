@@ -166,7 +166,8 @@ internal sealed partial class ScavengerLance : Weapon
             _havePreviousPose = true;
         }
         bool activeTerrainCollision = charging || _thrustFrames > 0 || _flightFrames > 0;
-        bool sweptWall = activeTerrainCollision && TraceSolid(_previousTip, currentTip, out float wallFraction);
+        float wallFraction = 1f;
+        bool sweptWall = activeTerrainCollision && TraceSolid(_previousTip, currentTip, out wallFraction);
         bool rodWall = activeTerrainCollision && !PoseFits(firstChunk.pos, rotation);
         float speed = holder != null ? Vector2.Dot(holder.mainBodyChunk.vel, rotation) : Vector2.Dot(firstChunk.vel, rotation);
 
