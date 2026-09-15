@@ -118,6 +118,11 @@ internal static class ActionToastOverlay
 
     private static void ObserveShortcuts(EditorPresentationSnapshot snapshot)
     {
+        // Shortcut acknowledgements only react to key-down edges. On the overwhelmingly common
+        // stable frame no key transitioned down, so avoid crossing into ImGui IO and avoid all
+        // modifier GetKey calls. This also keeps held Ctrl/Command alone at zero polling cost here.
+        if (!global::UnityEngine.Input.anyKeyDown) return;
+
         ImGuiIOPtr io = ImGui.GetIO();
         if (io.WantTextInput || EditorInputRouter.WantsTextInput) return;
 
