@@ -50,10 +50,7 @@ internal readonly struct WeatherSpatialTarget
     internal WeatherScheduleEventKind Kind { get; }
     internal string WeatherId { get; }
     internal string DisplayName { get; }
-
-    internal string Key => IsFamily
-        ? "Family/" + FamilyId
-        : WeatherSpatialCatalog.WeatherKey(Kind, WeatherId);
+    internal string Key { get; }
 
     internal WeatherSpatialTarget(string familyId, string displayName)
     {
@@ -62,6 +59,7 @@ internal readonly struct WeatherSpatialTarget
         Kind = WeatherScheduleEventKind.Weather;
         WeatherId = null;
         DisplayName = displayName ?? familyId ?? string.Empty;
+        Key = "Family/" + FamilyId;
     }
 
     internal WeatherSpatialTarget(
@@ -74,6 +72,7 @@ internal readonly struct WeatherSpatialTarget
         Kind = kind;
         WeatherId = weatherId ?? string.Empty;
         DisplayName = displayName ?? weatherId ?? string.Empty;
+        Key = WeatherSpatialCatalog.WeatherKey(kind, WeatherId);
     }
 }
 
@@ -111,32 +110,69 @@ internal static class WeatherSpatialCatalog
 
     internal static string NormalizeId(string id)
     {
-        return (id ?? string.Empty)
-            .Trim()
-            .Replace("_", string.Empty)
-            .Replace("-", string.Empty)
-            .ToUpperInvariant();
+        if (string.IsNullOrEmpty(id)) return string.Empty;
+
+        int start = 0;
+        int end = id.Length;
+        while (start < end && char.IsWhiteSpace(id[start])) start++;
+        while (end > start && char.IsWhiteSpace(id[end - 1])) end--;
+
+        bool needsRewrite = start != 0 || end != id.Length;
+        for (int i = start; i < end && !needsRewrite; i++)
+        {
+            char c = id[i];
+            if (c == '_' || c == '-' || char.ToUpperInvariant(c) != c)
+                needsRewrite = true;
+        }
+        if (!needsRewrite) return id;
+
+        char[] buffer = new char[end - start];
+        int count = 0;
+        for (int i = start; i < end; i++)
+        {
+            char c = id[i];
+            if (c == '_' || c == '-') continue;
+            buffer[count++] = char.ToUpperInvariant(c);
+        }
+        return count == 0 ? string.Empty : new string(buffer, 0, count);
     }
 
     internal static string WeatherKey(WeatherScheduleEventKind kind, string id)
     {
-        return (kind == WeatherScheduleEventKind.DangerType ? "DangerType/" : "Weather/") +
-               CanonicalWeatherId(kind, id);
+        string canonical = CanonicalWeatherId(kind, id);
+        if (kind == WeatherScheduleEventKind.DangerType)
+        {
+            return canonical switch
+            {
+                "DeathRain" => "DangerType/DeathRain",
+                "IntenseHeat" => "DangerType/IntenseHeat",
+                "DeathSandStorm" => "DangerType/DeathSandStorm",
+                _ => "DangerType/" + canonical
+            };
+        }
+
+        return canonical switch
+        {
+            "LightRain" => "Weather/LightRain",
+            "HeavyRain" => "Weather/HeavyRain",
+            "Fog" => "Weather/Fog",
+            "DenseFog" => "Weather/DenseFog",
+            "HeatWave" => "Weather/HeatWave",
+            "SandStorm" => "Weather/SandStorm",
+            _ => "Weather/" + canonical
+        };
     }
 
     internal static string CanonicalWeatherId(WeatherScheduleEventKind kind, string id)
     {
-        string normalized = NormalizeId(id);
         for (int i = 0; i < Families.Length; i++)
         {
             IReadOnlyList<WeatherSpatialMember> members = Families[i].Members;
             for (int j = 0; j < members.Count; j++)
             {
                 WeatherSpatialMember member = members[j];
-                if (member.Kind == kind && NormalizeId(member.Id) == normalized)
-                {
+                if (member.Kind == kind && NormalizedEquals(member.Id, id))
                     return member.Id;
-                }
             }
         }
         return (id ?? string.Empty).Trim();
@@ -192,10 +228,9 @@ internal static class WeatherSpatialCatalog
     internal static bool TryGetFamily(string familyId, out WeatherSpatialFamily family)
     {
         family = null;
-        string normalized = NormalizeId(familyId);
         for (int i = 0; i < Families.Length; i++)
         {
-            if (NormalizeId(Families[i].Id) == normalized)
+            if (NormalizedEquals(Families[i].Id, familyId))
             {
                 family = Families[i];
                 return true;
@@ -210,13 +245,12 @@ internal static class WeatherSpatialCatalog
         out WeatherSpatialFamily family)
     {
         family = null;
-        string normalized = NormalizeId(weatherId);
         for (int i = 0; i < Families.Length; i++)
         {
             IReadOnlyList<WeatherSpatialMember> members = Families[i].Members;
             for (int j = 0; j < members.Count; j++)
             {
-                if (members[j].Kind == kind && NormalizeId(members[j].Id) == normalized)
+                if (members[j].Kind == kind && NormalizedEquals(members[j].Id, weatherId))
                 {
                     family = Families[i];
                     return true;
@@ -236,6 +270,34 @@ internal static class WeatherSpatialCatalog
         return TryGetFamily(target.FamilyId, out WeatherSpatialFamily family)
             ? family.Preview
             : new WeatherSpatialMember(WeatherScheduleEventKind.Weather, string.Empty);
+    }
+
+    private static bool NormalizedEquals(string canonical, string candidate)
+    {
+        canonical ??= string.Empty;
+        candidate ??= string.Empty;
+
+        int start = 0;
+        int end = candidate.Length;
+        while (start < end && char.IsWhiteSpace(candidate[start])) start++;
+        while (end > start && char.IsWhiteSpace(candidate[end - 1])) end--;
+
+        int left = 0;
+        int right = start;
+        while (true)
+        {
+            while (left < canonical.Length && (canonical[left] == '_' || canonical[left] == '-')) left++;
+            while (right < end && (candidate[right] == '_' || candidate[right] == '-')) right++;
+
+            bool leftDone = left >= canonical.Length;
+            bool rightDone = right >= end;
+            if (leftDone || rightDone) return leftDone && rightDone;
+
+            if (char.ToUpperInvariant(canonical[left]) != char.ToUpperInvariant(candidate[right]))
+                return false;
+            left++;
+            right++;
+        }
     }
 
     private static WeatherSpatialTarget[] BuildTargets()
