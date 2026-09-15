@@ -169,13 +169,19 @@ internal static class LanceAimSolver
         if (sign == 0f) sign = Mathf.Sign(target.mainBodyChunk.pos.x - scav.mainBodyChunk.pos.x);
         if (sign == 0f) sign = 1f;
 
+        // IMPORTANT: aim-solver pitch uses the normal mathematical convention where 0 degrees is
+        // horizontal-right. RWCustom.Custom.VecToDeg/DegToVec use Rain World's sprite convention
+        // where 0 degrees points upward. Mixing those conventions turned a valid -15..15 degree
+        // release into an almost vertical ~75 degree lance, which immediately hit terrain and put
+        // the scavenger into wall recovery instead of performing the charge.
         float horizontalAngle = sign > 0f ? 0f : 180f;
-        float storedAngle = Custom.VecToDeg(stored.LanceDirection);
-        float desiredAngle = Custom.VecToDeg(desired.normalized);
+        float storedAngle = Mathf.Atan2(stored.LanceDirection.y, stored.LanceDirection.x) * Mathf.Rad2Deg;
+        float desiredAngle = Mathf.Atan2(desired.y, desired.x) * Mathf.Rad2Deg;
         float corrected = Mathf.MoveTowardsAngle(storedAngle, desiredAngle, ReleaseCorrectionDegrees);
         float offset = Mathf.DeltaAngle(horizontalAngle, corrected);
         corrected = horizontalAngle + Mathf.Clamp(offset, MinimumLancePitch, MaximumLancePitch);
-        Vector2 direction = Custom.DegToVec(corrected).normalized;
+        float radians = corrected * Mathf.Deg2Rad;
+        Vector2 direction = new(Mathf.Cos(radians), Mathf.Sin(radians));
         return new LanceAimSolution(true, aim, direction, stored.ImpactFrame, stored.Quality, chunk, stored.Exact);
     }
 
