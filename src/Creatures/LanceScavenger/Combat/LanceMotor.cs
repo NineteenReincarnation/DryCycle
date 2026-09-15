@@ -32,6 +32,12 @@ internal sealed class LanceMotor
     internal Vector2 LanceDirection { get; private set; } = Vector2.right;
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
+
+    // Backstep has been removed from the combat model. Keep these two compatibility values only so
+    // older debug/AI call sites compiled against the previous surface cannot reintroduce movement.
+    internal bool BackstepComplete => true;
+    internal float BackstepDistance => 0f;
+
     internal bool CounterSweepActive => _counterSweepActive;
     internal bool CounterSweepAttempted => _counterSweepAttempted;
     internal float CounterSweepChance => LanceCombatMath.CounterSweepChance(_owner.abstractCreature.personality);
@@ -64,6 +70,10 @@ internal sealed class LanceMotor
         _counterSweepActive = false;
         _counterSweepAge = 0;
     }
+
+    // Compatibility no-op. The state machine no longer enters Backstep and this method never moves
+    // the creature; it only prevents stale callers from failing to compile during the transition.
+    internal void BeginBackstep(Creature target) { }
 
     internal void Act()
     {
