@@ -14,6 +14,7 @@ internal readonly struct LanceSituation
 internal sealed class LanceCombatState
 {
     internal const int BraceFrames = 32;
+    internal const int MaxChargeFrames = 32;
     internal const int RecoveryFrames = 44;
     internal const int WallRecoveryFrames = 82;
     internal LanceState State { get; private set; }
@@ -57,18 +58,17 @@ internal sealed class LanceCombatState
         _hostileFrames++;
         if (State == LanceState.Charge)
         {
-            if (Age >= 26 || !s.Lane) Recover(false);
+            if (Age >= MaxChargeFrames || !s.Lane) Recover(false);
             return;
         }
         if (_hostileFrames < 18) { Enter(LanceState.Threaten); return; }
         if (State == LanceState.CloseDefense && Age < 16) return;
-        if (s.Distance < 75f)
+        if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
         {
             Enter(State == LanceState.CloseDefense || Cooldown > 0 ? LanceState.CreateDistance : LanceState.CloseDefense);
             if (State == LanceState.CloseDefense) Cooldown = 48;
             return;
         }
-        if (s.Distance < 155f) { Enter(LanceState.CreateDistance); return; }
         if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
         if (!s.Stable)
         {
