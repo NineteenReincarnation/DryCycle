@@ -9,6 +9,15 @@ internal sealed class LanceMotor
     private const float MinimumBackstepDistance = 10f; // 0.5 tile
     private const float MaximumBackstepDistance = 30f; // 1.5 tiles
     private const int MaximumBackstepFrames = 18;
+
+    private const int CounterSweepFrames = 8;
+    private const int MinimumCounterSweepRemainingFrames = 8;
+    private const float MinimumDodgeDeviation = 13f;
+    private const float MinimumCounterSweepAngle = 14f;
+    private const float NormalCounterSweepArc = 80f;
+    private const float ReversalCounterSweepArc = 120f;
+    private const float CounterSweepOvershoot = 10f;
+
     private readonly LanceScavenger _owner;
     private int _launchedSerial = -1;
     private Vector2 _launchPoint;
@@ -20,19 +29,35 @@ internal sealed class LanceMotor
     private int _backstepFrames;
     private Vector2 _committedLanceDirection = Vector2.right;
 
+    private Creature _counterTarget;
+    private Vector2 _counterTargetLaunchPos;
+    private Vector2 _counterTargetLaunchVelocity;
+    private bool _counterSweepAttempted;
+    private bool _counterSweepActive;
+    private int _counterSweepAge;
+    private Vector2 _counterSweepStartDirection = Vector2.right;
+    private Vector2 _counterSweepEndDirection = Vector2.right;
+
     /// <summary>Horizontal body travel direction. Airborne steering remains intentionally absent.</summary>
     internal Vector2 Direction { get; private set; } = Vector2.right;
-    /// <summary>One-shot lance pitch solved before takeoff and locked for the whole charge.</summary>
+    /// <summary>
+    /// Weapon direction. Normally this is the launch solution; during the one-shot evasive
+    /// counter-sweep it follows the fixed sweep arc while body travel remains unchanged.
+    /// </summary>
     internal Vector2 LanceDirection { get; private set; } = Vector2.right;
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
     internal bool BackstepComplete => _backstepActive && _backstepComplete;
     internal float BackstepDistance => _backstepDistance;
+    internal bool CounterSweepActive => _counterSweepActive;
+    internal bool CounterSweepAttempted => _counterSweepAttempted;
+    internal float CounterSweepChance => LanceCombatMath.CounterSweepChance(_owner.abstractCreature.personality);
     internal bool OwnsMovement => _owner.Combat.State == LanceState.Backstep || _owner.Combat.State == LanceState.Brace ||
         _owner.Combat.State == LanceState.Charge || _owner.Combat.State == LanceState.FollowUpThrow ||
         _owner.Combat.State == LanceState.Recover || _owner.Combat.State == LanceState.CloseDefense;
 
     internal LanceMotor(LanceScavenger owner) { _owner = owner; }
+
     internal void Reset()
     {
         _launchPoint = _owner.mainBodyChunk.pos;
@@ -42,6 +67,7 @@ internal sealed class LanceMotor
         Direction = Vector2.right;
         LanceDirection = Vector2.right;
         _committedLanceDirection = Vector2.right;
+        ResetCounterSweep();
     }
 
     internal void CommitCharge(ChargeLane solution)
@@ -53,6 +79,10 @@ internal sealed class LanceMotor
             solved = new Vector2(sign == 0f ? 1f : sign, 0f);
         }
         _committedLanceDirection = solved.normalized;
+        _counterTarget = _owner.Brain?.Target;
+        _counterSweepAttempted = false;
+        _counterSweepActive = false;
+        _counterSweepAge = 0;
     }
 
     internal void BeginBackstep(Creature target)
@@ -132,18 +162,33 @@ internal sealed class LanceMotor
                 float speed = ChargeLanePlanner.ChargeSpeed(_owner);
                 foreach (BodyChunk chunk in _owner.bodyChunks)
                     chunk.vel = new Vector2(Direction.x * speed, ChargeLanePlanner.ChargeLaunchY);
+
+                _counterTarget ??= _owner.Brain?.Target;
+                if (_counterTarget != null)
+                {
+                    _counterTargetLaunchPos = _counterTarget.mainBodyChunk.pos;
+                    _counterTargetLaunchVelocity = _counterTarget.mainBodyChunk.vel;
+                }
+                _counterSweepAttempted = false;
+                _counterSweepActive = false;
+                _counterSweepAge = 0;
                 _owner.room.PlaySound(SoundID.Slugcat_Throw_Spear, _owner.mainBodyChunk.pos, 0.75f, 0.7f);
             }
-            // Body travel stays horizontal; LanceDirection is visual/weapon pitch only.
+
+            UpdateCounterSweep();
+            // Body travel stays horizontal even while the weapon performs a counter-sweep.
             _owner.WeightedPush(1, 0, Direction, 0.32f);
             return;
         }
+
+        if (_counterSweepActive) _counterSweepActive = false;
         if (state == LanceState.Recover)
         {
             if (_owner.IsStableForBrace)
                 foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= 0.9f;
             return;
         }
+
         Vector2 aim = _owner.Brain.Target == null ? Vector2.right :
             Custom.DirVec(_owner.mainBodyChunk.pos, _owner.Brain.Target.mainBodyChunk.pos);
         foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= state == LanceState.FollowUpThrow ? 0.78f : 0.65f;
@@ -152,6 +197,163 @@ internal sealed class LanceMotor
             _owner.room.PlaySound(SoundID.Scavenger_Knuckle_Hit_Ground, _owner.mainBodyChunk.pos, 0.55f, 0.7f);
         if (state == LanceState.CloseDefense)
             _owner.Lance?.RequestThrust(aim, LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
+    }
+
+    private void UpdateCounterSweep()
+    {
+        if (_counterSweepActive)
+        {
+            AdvanceCounterSweep();
+            return;
+        }
+        if (_counterSweepAttempted || _counterTarget == null || _counterTarget.dead || !_counterTarget.Consious ||
+            _counterTarget.room != _owner.room || _owner.Lance == null ||
+            _owner.Lance.HasHitCreature(_counterTarget))
+            return;
+
+        int chargeAge = _owner.Combat.Age;
+        int remaining = LanceCombatState.MaxChargeFrames - chargeAge;
+        if (chargeAge < 2 || remaining < MinimumCounterSweepRemainingFrames || !TargetDodged(chargeAge))
+            return;
+
+        // A dodge event gets exactly one roll. Failure does not reroll on following frames.
+        _counterSweepAttempted = true;
+        if (UnityEngine.Random.value > CounterSweepChance)
+            return;
+
+        Vector2 grip = ChargeGrip(LanceDirection);
+        Vector2 toTarget = _counterTarget.mainBodyChunk.pos - grip;
+        if (toTarget.sqrMagnitude < 16f)
+            return;
+
+        float currentAngle = Custom.VecToDeg(LanceDirection);
+        float targetAngle = Custom.VecToDeg(toTarget.normalized);
+        float delta = Mathf.DeltaAngle(currentAngle, targetAngle);
+        bool targetBehind = Vector2.Dot(_counterTarget.mainBodyChunk.pos - _owner.mainBodyChunk.pos, Direction) < 0f;
+        bool reversed = TargetReversed();
+        float maxArc = targetBehind || reversed ? ReversalCounterSweepArc : NormalCounterSweepArc;
+        if (Mathf.Abs(delta) < MinimumCounterSweepAngle && !targetBehind)
+            return;
+
+        float sign = delta == 0f ? (Custom.PerpendicularVector(Direction).y >= 0f ? 1f : -1f) : Mathf.Sign(delta);
+        float sweptDelta = Mathf.Clamp(delta + sign * CounterSweepOvershoot, -maxArc, maxArc);
+        if (Mathf.Abs(sweptDelta) < MinimumCounterSweepAngle)
+            return;
+
+        Vector2 end = Custom.DegToVec(currentAngle + sweptDelta).normalized;
+        if (!CounterSweepArcClear(LanceDirection, end, _counterTarget))
+            return;
+
+        _counterSweepStartDirection = LanceDirection;
+        _counterSweepEndDirection = end;
+        _counterSweepAge = 0;
+        _counterSweepActive = true;
+        _owner.room.PlaySound(SoundID.Slugcat_Throw_Spear, _owner.mainBodyChunk.pos, 0.55f, 1.25f);
+        AdvanceCounterSweep();
+    }
+
+    private bool TargetDodged(int chargeAge)
+    {
+        BodyChunk chunk = _counterTarget.mainBodyChunk;
+        Vector2 expected = _counterTargetLaunchPos +
+            Vector2.ClampMagnitude(_counterTargetLaunchVelocity * chargeAge, 90f);
+        Vector2 deviation = chunk.pos - expected;
+        Vector2 perpendicular = Custom.PerpendicularVector(Direction);
+        float lateral = Mathf.Abs(Vector2.Dot(deviation, perpendicular));
+        float longitudinal = Mathf.Abs(Vector2.Dot(deviation, Direction));
+        bool escapedPrediction = lateral >= Mathf.Max(MinimumDodgeDeviation, chunk.rad + 5f) ||
+            longitudinal >= 18f;
+        bool targetBehind = Vector2.Dot(chunk.pos - _owner.mainBodyChunk.pos, Direction) < -4f;
+        return escapedPrediction || TargetReversed() || targetBehind;
+    }
+
+    private bool TargetReversed()
+    {
+        Vector2 oldVelocity = _counterTargetLaunchVelocity;
+        Vector2 currentVelocity = _counterTarget?.mainBodyChunk.vel ?? Vector2.zero;
+        if (oldVelocity.magnitude < 1.5f || currentVelocity.magnitude < 1.5f) return false;
+        return Vector2.Dot(oldVelocity.normalized, currentVelocity.normalized) < -0.25f;
+    }
+
+    private void AdvanceCounterSweep()
+    {
+        if (!_counterSweepActive) return;
+
+        int nextAge = Mathf.Min(CounterSweepFrames, _counterSweepAge + 1);
+        float t = Mathf.Clamp01((float)nextAge / CounterSweepFrames);
+        float eased = t * t * (3f - 2f * t);
+        float startAngle = Custom.VecToDeg(_counterSweepStartDirection);
+        float endAngle = Custom.VecToDeg(_counterSweepEndDirection);
+        Vector2 next = Custom.DegToVec(Mathf.LerpAngle(startAngle, endAngle, eased)).normalized;
+
+        if (!CounterSweepPoseClear(next, _counterTarget))
+        {
+            _counterSweepActive = false;
+            return;
+        }
+
+        LanceDirection = next;
+        _counterSweepAge = nextAge;
+        if (_counterSweepAge >= CounterSweepFrames)
+            _counterSweepActive = false;
+    }
+
+    private bool CounterSweepArcClear(Vector2 from, Vector2 to, Creature target)
+    {
+        float start = Custom.VecToDeg(from);
+        float end = Custom.VecToDeg(to);
+        for (int i = 1; i <= 6; i++)
+        {
+            Vector2 direction = Custom.DegToVec(Mathf.LerpAngle(start, end, i / 6f));
+            if (!CounterSweepPoseClear(direction, target)) return false;
+        }
+        return true;
+    }
+
+    private bool CounterSweepPoseClear(Vector2 direction, Creature target)
+    {
+        if (_owner.room == null || _owner.Lance == null) return false;
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Direction;
+        Vector2 grip = ChargeGrip(dir);
+        float length = _owner.Lance.Length;
+        float forward = LanceCombatMath.ForwardLength(length);
+        Vector2 tail = grip - dir * (length * LanceCombatMath.GripFraction);
+        if (_owner.room.GetTile(tail).Solid) return false;
+
+        Vector2 perp = Custom.PerpendicularVector(dir);
+        for (int i = 0; i < LanceCombatMath.BladeSweepSamples; i++)
+        {
+            float bladeT = LanceCombatMath.BladeSweepSamples == 1 ? 1f :
+                (float)i / (LanceCombatMath.BladeSweepSamples - 1);
+            Vector2 point = LanceCombatMath.BladePoint(grip, dir, forward, bladeT);
+            float halfWidth = LanceCombatMath.BladeHalfWidth(bladeT);
+            if (_owner.room.GetTile(point).Solid ||
+                _owner.room.GetTile(point + perp * halfWidth).Solid ||
+                _owner.room.GetTile(point - perp * halfWidth).Solid)
+                return false;
+        }
+
+        Vector2 bladeRoot = LanceCombatMath.BladePoint(grip, dir, forward, 0f);
+        Vector2 tip = LanceCombatMath.BladePoint(grip, dir, forward, 1f);
+        return !ChargeLanePlanner.FriendInPath(_owner, bladeRoot, tip, target);
+    }
+
+    private Vector2 ChargeGrip(Vector2 direction)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Direction;
+        return _owner.mainBodyChunk.pos + new Vector2(dir.x * 7f, -5f);
+    }
+
+    private void ResetCounterSweep()
+    {
+        _counterTarget = null;
+        _counterTargetLaunchPos = Vector2.zero;
+        _counterTargetLaunchVelocity = Vector2.zero;
+        _counterSweepAttempted = false;
+        _counterSweepActive = false;
+        _counterSweepAge = 0;
+        _counterSweepStartDirection = Vector2.right;
+        _counterSweepEndDirection = Vector2.right;
     }
 
     private bool BackstepBlocked()
