@@ -228,6 +228,14 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         LanceState state = Combat.State;
         bool forward = state == LanceState.Backstep || state == LanceState.Brace || state == LanceState.Charge ||
             state == LanceState.CloseDefense || state == LanceState.Threaten;
+
+        // Ordinary carrying should actually inherit the vanilla scavenger hand pose. The combat
+        // states below still own their deliberate forward/two-handed presentation, but Observe,
+        // movement, Recover, lane-seeking, etc. let hand 0 move naturally and make the lance follow it.
+        bool vanillaHandCarry = !forward && !SidearmInPrimary &&
+            grasps != null && grasps.Length > 0 && grasps[0]?.grabbed == lance &&
+            graphicsModule is ScavengerGraphics carryGraphics;
+
         Vector2 direction;
         if (state == LanceState.Charge)
         {
@@ -242,28 +250,45 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             Vector2 delta = Brain.Target.mainBodyChunk.pos - mainBodyChunk.pos;
             direction = new Vector2(Mathf.Sign(delta.x), Mathf.Clamp(delta.y / Mathf.Max(40f, Mathf.Abs(delta.x)), -0.25f, 0.3f)).normalized;
         }
+        else if (vanillaHandCarry)
+        {
+            var vanillaDirection = carryGraphics.ItemDirection(0);
+            direction = new Vector2(vanillaDirection.x, vanillaDirection.y);
+            if (direction.sqrMagnitude < 0.001f)
+                direction = Vector2.right;
+            else
+                direction.Normalize();
+        }
         else
         {
             float face = Mathf.Abs(mainBodyChunk.vel.x) > 0.3f ? Mathf.Sign(mainBodyChunk.vel.x) : Mathf.Sign(lookPoint.x - mainBodyChunk.pos.x);
             direction = new Vector2(face == 0f ? 1f : face, movMode == MovementMode.Climb ? 2.5f : 0.9f).normalized;
         }
 
-        // Enhanced hand-held lance: the hand/grip is an anchor, not a point that slides around the
-        // body as the weapon rotates. Counter-sweep may turn the blade through 80/120 degrees while
-        // the scavenger keeps flying forward; the grip therefore follows facing/charge direction,
-        // never direction.x from the rotating lance itself.
-        float gripFacing;
-        if (state == LanceState.Charge)
-            gripFacing = Mathf.Sign(Motor.Direction.x);
-        else if (forward && Brain?.Target != null)
-            gripFacing = Mathf.Sign(Brain.Target.mainBodyChunk.pos.x - mainBodyChunk.pos.x);
-        else if (Mathf.Abs(mainBodyChunk.vel.x) > 0.3f)
-            gripFacing = Mathf.Sign(mainBodyChunk.vel.x);
+        Vector2 position;
+        if (vanillaHandCarry)
+        {
+            var vanillaPosition = carryGraphics.ItemPosition(0);
+            position = new Vector2(vanillaPosition.x, vanillaPosition.y);
+        }
         else
-            gripFacing = Mathf.Sign(direction.x);
-        if (gripFacing == 0f) gripFacing = 1f;
+        {
+            // Combat presentation uses a fixed hand pivot. Counter-sweep may turn the blade through
+            // 80/120 degrees while the scavenger keeps flying forward; rotating the lance must not
+            // translate the whole weapon through the body.
+            float gripFacing;
+            if (state == LanceState.Charge)
+                gripFacing = Mathf.Sign(Motor.Direction.x);
+            else if (forward && Brain?.Target != null)
+                gripFacing = Mathf.Sign(Brain.Target.mainBodyChunk.pos.x - mainBodyChunk.pos.x);
+            else if (Mathf.Abs(mainBodyChunk.vel.x) > 0.3f)
+                gripFacing = Mathf.Sign(mainBodyChunk.vel.x);
+            else
+                gripFacing = Mathf.Sign(direction.x);
+            if (gripFacing == 0f) gripFacing = 1f;
+            position = mainBodyChunk.pos + new Vector2(gripFacing * 7f, forward ? -5f : 1f);
+        }
 
-        Vector2 position = mainBodyChunk.pos + new Vector2(gripFacing * 7f, forward ? -5f : 1f);
         grip = new LanceGrip(position, direction, forward,
             state == LanceState.Charge && Consious && grabbedBy.Count == 0,
             Motor.RunUp, state == LanceState.Charge && Motor.CounterSweepActive,
