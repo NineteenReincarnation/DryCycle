@@ -82,6 +82,9 @@ internal sealed partial class ScavengerLance
                 if (supportHand >= 0 && supportHand < graphics.hands.Length &&
                     supportHand < player.grasps.Length && player.grasps[supportHand] == null)
                 {
+                    // The support hand does not teleport into a binary two-hand pose. The controller
+                    // grows SupportHandDistance/SupportBlend across the brace, so the second hand
+                    // visibly slides along the shaft while the stance firms up.
                     Vector2 supportTarget = anchor + direction * pose.SupportHandDistance + Vector2.down * 0.75f;
                     Vector2 before = graphics.hands[supportHand].pos;
                     graphics.hands[supportHand].pos = Vector2.Lerp(before, supportTarget, pose.SupportBlend);
@@ -90,10 +93,70 @@ internal sealed partial class ScavengerLance
             }
         }
 
+        if (hasPose)
+        {
+            ApplyPlayerBodyPose(player, graphics, direction, pose);
+            ApplyPlayerWeaponTension(direction, pose.WeaponTension);
+        }
+
         rotation = direction;
         setRotation = direction;
         rotationSpeed = 0f;
         firstChunk.MoveFromOutsideMyUpdate(eu, anchor);
         firstChunk.vel = anchorVelocity;
+    }
+
+    private static void ApplyPlayerBodyPose(Player player, PlayerGraphics graphics,
+        Vector2 direction, PlayerLancePose pose)
+    {
+        if (graphics == null) return;
+
+        float face = Mathf.Abs(direction.x) > 0.12f ? Mathf.Sign(direction.x) : player.flipDirection;
+        if (face == 0f) face = 1f;
+        Vector2 horizontal = new(face, 0f);
+
+        // Keep this visual-only. The actual player physics remain in Player.Update; draw positions are
+        // displaced after vanilla has produced its animation so bracing reads as a compressed,
+        // staggered stance without replacing Rain World's locomotion state machine.
+        if (graphics.drawPositions != null && graphics.drawPositions.GetLength(0) >= 2)
+        {
+            graphics.drawPositions[0, 0] += horizontal * (pose.BodyLean * 0.55f) +
+                Vector2.down * pose.BodyCompression;
+            graphics.drawPositions[1, 0] += -horizontal * (pose.BodyLean * 0.58f) +
+                Vector2.down * (pose.BodyCompression * 0.76f);
+        }
+
+        float stance = Mathf.Clamp01((pose.BodyCompression + pose.BodyLean) / 7f);
+        if (stance > 0f)
+        {
+            Vector2 legTarget = new(-face * 0.42f, -1f);
+            graphics.legsDirection = Vector2.Lerp(graphics.legsDirection,
+                legTarget.normalized, stance * 0.42f);
+        }
+
+        if (pose.HeadAim > 0f)
+        {
+            Vector2 look = Vector2.Lerp(graphics.lookDirection, direction, pose.HeadAim);
+            if (look.sqrMagnitude > 0.001f)
+                graphics.lookDirection = look.normalized;
+            if (graphics.head != null)
+            {
+                graphics.head.vel += direction * (0.22f * pose.HeadAim);
+                graphics.head.vel += Vector2.down * (pose.BodyCompression * 0.035f);
+            }
+        }
+    }
+
+    private void ApplyPlayerWeaponTension(Vector2 direction, float tension)
+    {
+        if (Holder is not Player) return;
+        float face = Mathf.Abs(direction.x) > 0.12f ? Mathf.Sign(direction.x) : 1f;
+
+        // The existing lance mesh already supports a small handle bend. During the brace, pull it
+        // gently into tension; the attack pose then drives tension back toward zero over the first
+        // few frames, making the shaft visibly settle/straighten as stored force is released.
+        float targetBend = -face * Mathf.Clamp01(tension) * 1.55f;
+        _bend = Mathf.Lerp(_bend, targetBend, 0.32f);
+        _bendVelocity *= 0.58f;
     }
 }
