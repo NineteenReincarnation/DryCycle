@@ -63,7 +63,15 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public float LanceDirectionX { get; init; }
     public float LanceDirectionY { get; init; }
     public float LanceForwardLength { get; init; }
+    public float ActualBladeHitPadding { get; init; }
+    public float PlanningBladeHitPadding { get; init; }
+    public float BladeShoulderHalfWidth { get; init; }
+    public float BladeTipHalfWidth { get; init; }
     public LanceScavengerDebugChunkSnapshot[] TargetChunks { get; init; } = Array.Empty<LanceScavengerDebugChunkSnapshot>();
+    public float[] BodyPathX { get; init; } = Array.Empty<float>();
+    public float[] BodyPathY { get; init; } = Array.Empty<float>();
+    public float[] TipPathX { get; init; } = Array.Empty<float>();
+    public float[] TipPathY { get; init; } = Array.Empty<float>();
 
     public bool PathClear { get; init; }
     public string LaneReason { get; init; } = string.Empty;
@@ -104,7 +112,10 @@ public static class LanceScavengerDebugPresentationHub
 {
     private const int HistoryFrames = LanceCombatState.BraceFrames;
     private const uint LeaseTimeoutMilliseconds = 750;
-    private const uint EntryTimeoutMilliseconds = 750;
+    // Keep the last sample through normal pauses / frame stepping. Room changes and closing the
+    // page clear immediately; this longer timeout only prevents a paused simulation from making
+    // the diagnostic page appear as if the creature vanished.
+    private const uint EntryTimeoutMilliseconds = 30000;
 
     private sealed class EntryRecord
     {
@@ -266,13 +277,27 @@ public static class LanceScavengerDebugPresentationHub
             ? Vector2.zero
             : brain.MotionTracker.SmoothedVelocity(trackedChunk);
         float stability = trackedChunk == null ? 0f : brain.MotionTracker.Stability(trackedChunk);
-        Vector2 pitchDirection = aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
+
+        // During flight the motor owns the actual lance orientation (including counter-sweep).
+        // Before takeoff, visualize the current solver direction so the developer can see what is
+        // being evaluated for a possible commit.
+        Vector2 pitchDirection = owner.Combat.State == LanceState.Charge
+            ? owner.Motor.LanceDirection
+            : aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
         if (pitchDirection.sqrMagnitude < 0.001f) pitchDirection = Vector2.right;
         pitchDirection.Normalize();
         float pitch = Mathf.Atan2(pitchDirection.y, Mathf.Max(0.0001f, Mathf.Abs(pitchDirection.x))) * Mathf.Rad2Deg;
         Vector2 origin = owner.mainBodyChunk.pos;
         Vector2 grip = origin + new Vector2(pitchDirection.x * 7f, -5f);
         float lanceLength = owner.Lance?.Length ?? LanceCombatMath.DefaultLength;
+        float forwardLength = LanceCombatMath.ForwardLength(lanceLength);
+
+        int trajectoryFrames = aim.ImpactFrame > 0
+            ? Mathf.Min(LanceCombatState.MaxChargeFrames, aim.ImpactFrame + 3)
+            : LanceCombatState.MaxChargeFrames;
+        Vector2[] bodyPath = LanceAimSolver.BuildDebugBodyTrajectory(owner, origin, pitchDirection, trajectoryFrames);
+        BuildPathArrays(bodyPath, pitchDirection, forwardLength,
+            out float[] bodyPathX, out float[] bodyPathY, out float[] tipPathX, out float[] tipPathY);
 
         return new LanceScavengerDebugEntrySnapshot
         {
@@ -315,8 +340,16 @@ public static class LanceScavengerDebugPresentationHub
             GripY = grip.y,
             LanceDirectionX = pitchDirection.x,
             LanceDirectionY = pitchDirection.y,
-            LanceForwardLength = LanceCombatMath.ForwardLength(lanceLength),
+            LanceForwardLength = forwardLength,
+            ActualBladeHitPadding = LanceAimSolver.ActualBladeHitPadding,
+            PlanningBladeHitPadding = LanceAimSolver.PlanningBladeHitPadding,
+            BladeShoulderHalfWidth = LanceCombatMath.BladeShoulderHalfWidth,
+            BladeTipHalfWidth = LanceCombatMath.BladeTipHalfWidth,
             TargetChunks = CaptureChunks(target, targetChunkIndex, bestTargetChunkIndex),
+            BodyPathX = bodyPathX,
+            BodyPathY = bodyPathY,
+            TipPathX = tipPathX,
+            TipPathY = tipPathY,
 
             PathClear = lane.PathClear,
             LaneReason = lane.Reason ?? string.Empty,
@@ -336,6 +369,26 @@ public static class LanceScavengerDebugPresentationHub
             CounterSweepActive = owner.Motor.CounterSweepActive,
             CounterSweepChance = owner.Motor.CounterSweepChance
         };
+    }
+
+    private static void BuildPathArrays(Vector2[] bodyPath, Vector2 direction, float forwardLength,
+        out float[] bodyX, out float[] bodyY, out float[] tipX, out float[] tipY)
+    {
+        int count = bodyPath?.Length ?? 0;
+        bodyX = new float[count];
+        bodyY = new float[count];
+        tipX = new float[count];
+        tipY = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            Vector2 body = bodyPath[i];
+            Vector2 pathGrip = body + new Vector2(direction.x * 7f, -5f);
+            Vector2 tip = pathGrip + direction * forwardLength;
+            bodyX[i] = body.x;
+            bodyY[i] = body.y;
+            tipX[i] = tip.x;
+            tipY[i] = tip.y;
+        }
     }
 
     private static LanceScavengerDebugChunkSnapshot[] CaptureChunks(Creature target, int current, int best)
