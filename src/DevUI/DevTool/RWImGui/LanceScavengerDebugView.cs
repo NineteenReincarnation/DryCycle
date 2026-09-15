@@ -15,6 +15,8 @@ internal static class LanceScavengerDebugView
     private static int selectedSpawner = int.MinValue;
     private static int selectedNumber = int.MinValue;
     private static bool captureActive;
+    private static bool captureStateInitialized;
+    private static bool recordingEnabled;
 
     private static readonly Num.Vector4 Good = new(0.42f, 0.84f, 0.56f, 1f);
     private static readonly Num.Vector4 Warning = new(0.96f, 0.72f, 0.28f, 1f);
@@ -43,9 +45,10 @@ internal static class LanceScavengerDebugView
     internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
     {
         string room = string.IsNullOrEmpty(editor.RoomName) ? editor.Document : editor.RoomName;
-        captureActive = true;
-        LanceScavengerDebugPresentationHub.SetRequested(true, room);
-        LanceScavengerDebugSnapshot snapshot = LanceScavengerDebugPresentationHub.Current;
+        UpdateCaptureRequest(room);
+        LanceScavengerDebugSnapshot snapshot = recordingEnabled
+            ? LanceScavengerDebugPresentationHub.Current
+            : LanceScavengerDebugSnapshot.Empty;
 
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
         float leftRail = Math.Min(400f, Math.Max(190f, 230f * Math.Min(1.35f, scale)));
@@ -69,7 +72,13 @@ internal static class LanceScavengerDebugView
         }
 
         FloatingWindowSnap.TrackCurrentWindow("LanceScavengerDebug");
-        DrawHeader(snapshot, room);
+        if (DrawHeader(snapshot, room))
+        {
+            UpdateCaptureRequest(room);
+            snapshot = recordingEnabled
+                ? LanceScavengerDebugPresentationHub.Current
+                : LanceScavengerDebugSnapshot.Empty;
+        }
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -91,9 +100,13 @@ internal static class LanceScavengerDebugView
             if (selected == null)
             {
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("实时诊断", "LIVE DIAGNOSTICS"));
-                ImGui.TextWrapped(DevToolUiSettings.T(
-                    "当前房间没有已实现的长枪拾荒者，或调试采集刚刚开启。进入房间后通常下一帧就会出现。",
-                    "No realized Lance Scavenger is currently publishing in this room, or capture has just started. Data normally appears on the next simulation frame."));
+                ImGui.TextWrapped(recordingEnabled
+                    ? DevToolUiSettings.T(
+                        "当前房间没有已实现的长枪拾荒者，或调试采集刚刚开启。进入房间后通常下一帧就会出现。",
+                        "No realized Lance Scavenger is currently publishing in this room, or capture has just started. Data normally appears on the next simulation frame.")
+                    : DevToolUiSettings.T(
+                        "记录开关已关闭。当前不会采样、缓存或记录任何长枪拾荒者调试信息。",
+                        "Recording is OFF. No Lance Scavenger diagnostic samples, snapshots or creature records are being collected."));
             }
             else
             {
@@ -106,23 +119,55 @@ internal static class LanceScavengerDebugView
 
     internal static void StopCapture()
     {
-        if (!captureActive) return;
+        recordingEnabled = false;
         captureActive = false;
+        captureStateInitialized = true;
         LanceScavengerDebugPresentationHub.SetRequested(false, string.Empty);
         selectedSpawner = int.MinValue;
         selectedNumber = int.MinValue;
     }
 
-    private static void DrawHeader(LanceScavengerDebugSnapshot snapshot, string room)
+    private static void UpdateCaptureRequest(string room)
+    {
+        if (!recordingEnabled)
+        {
+            if (captureActive || !captureStateInitialized)
+                LanceScavengerDebugPresentationHub.SetRequested(false, string.Empty);
+            captureActive = false;
+            captureStateInitialized = true;
+            return;
+        }
+
+        captureActive = true;
+        captureStateInitialized = true;
+        LanceScavengerDebugPresentationHub.SetRequested(true, room);
+    }
+
+    private static bool DrawHeader(LanceScavengerDebugSnapshot snapshot, string room)
     {
         int count = snapshot.Entries?.Length ?? 0;
         ImGui.TextColored(Accent, DevToolUiSettings.T("长枪拾荒者战斗诊断", "Lance Scavenger Combat Diagnostics"));
         ImGui.SameLine();
         DevToolWidgets.MutedText("· " + room + " · " + count + DevToolUiSettings.T(" 个体", " units"));
         ImGui.Spacing();
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "只在本页打开时采样；关闭页面后自动停采，不给正常游戏增加持续调试开销。",
-            "Sampling is leased only while this page is visible; capture stops automatically when the page closes."));
+
+        bool changed = ImGui.Checkbox(
+            DevToolUiSettings.T("启用实时记录##LanceDebugRecording", "Enable live recording##LanceDebugRecording"),
+            ref recordingEnabled);
+        ImGui.SameLine();
+        ImGui.TextColored(recordingEnabled ? Good : Muted,
+            recordingEnabled
+                ? DevToolUiSettings.T("正在记录", "RECORDING")
+                : DevToolUiSettings.T("已关闭", "OFF"));
+
+        DevToolWidgets.MutedText(recordingEnabled
+            ? DevToolUiSettings.T(
+                "仅在这个开关开启且调试页可见时采样；离开本页会立即关闭记录。",
+                "Sampling occurs only while this switch is enabled and this debug page is visible; leaving the page stops it immediately.")
+            : DevToolUiSettings.T(
+                "关闭时不会请求调试快照，长枪拾荒者不会向调试中心发布个体记录。",
+                "When off, no debug snapshot is requested and Lance Scavengers do not publish creature records to the diagnostics hub."));
+        return changed;
     }
 
     private static void DrawRoster(LanceScavengerDebugSnapshot snapshot)
@@ -130,7 +175,9 @@ internal static class LanceScavengerDebugView
         LanceScavengerDebugEntrySnapshot[] entries = snapshot.Entries ?? Array.Empty<LanceScavengerDebugEntrySnapshot>();
         if (entries.Length == 0)
         {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("等待长枪拾荒者数据…", "Waiting for Lance Scavenger data..."));
+            DevToolWidgets.MutedText(recordingEnabled
+                ? DevToolUiSettings.T("等待长枪拾荒者数据…", "Waiting for Lance Scavenger data...")
+                : DevToolUiSettings.T("记录已关闭。", "Recording is off."));
             return;
         }
 
