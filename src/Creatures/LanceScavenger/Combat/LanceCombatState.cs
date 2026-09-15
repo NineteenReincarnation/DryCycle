@@ -5,7 +5,8 @@ internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane,
 internal readonly struct LanceSituation
 {
     internal LanceSituation(bool active, bool armed, bool sidearm, bool target, ScavengerAI.ViolenceType violence, bool afraid,
-        float distance, bool lane, bool backstepComplete = true, bool friendBlocked = false, bool chargePriority = true)
+        float distance, bool lane, bool backstepComplete = true, bool friendBlocked = false, bool chargePriority = true,
+        bool commitReady = false, bool hardBlocked = false)
     {
         Active = active;
         Armed = armed;
@@ -18,9 +19,12 @@ internal readonly struct LanceSituation
         BackstepComplete = backstepComplete;
         FriendBlocked = friendBlocked;
         ChargePriority = chargePriority;
+        CommitReady = commitReady;
+        HardBlocked = hardBlocked;
     }
 
-    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete, FriendBlocked, ChargePriority;
+    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete, FriendBlocked,
+        ChargePriority, CommitReady, HardBlocked;
     internal readonly float Distance;
     internal readonly ScavengerAI.ViolenceType Violence;
 }
@@ -30,7 +34,7 @@ internal sealed class LanceCombatState
 {
     // Rain World runs at roughly 40 simulation updates per second: 38 frames = 0.95 s.
     internal const int BraceFrames = 38;
-    internal const int BraceSolutionGraceFrames = 8;
+    internal const int CommitWindowFrames = 10; // roughly 0.25 s of recent aiming history
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
     internal const int FollowUpThrowTimeout = 60;
@@ -95,9 +99,8 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Backstep is a real movement phase. Once it completes, re-evaluate the current
-        // lane. A temporarily occupied friendly lane waits instead of starting another
-        // staging search, which prevents two lance scavengers from endlessly swapping sides.
+        // Backstep still requires a currently usable lane before the visible brace begins.
+        // Friendly occupancy waits in place instead of causing both scavengers to swap sides.
         if (State == LanceState.Backstep)
         {
             if (!s.BackstepComplete) return;
@@ -121,8 +124,10 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // A brace is allowed to survive short prediction jitter. The final brace frame
-        // still requires a live hit solution; there is no blind launch from a stale aim.
+        // Brace is a commitment window, not a requirement for 38 consecutive perfect
+        // ballistic intersections. Soft prediction misses are remembered but do not reset
+        // the wind-up. At release, a recent credible solution may be used. Only hard safety
+        // failures (terrain, range, friendly lane, etc.) abort immediately.
         if (State == LanceState.Brace)
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
@@ -135,18 +140,23 @@ internal sealed class LanceCombatState
                 Enter(LanceState.Threaten);
                 return;
             }
-
-            if (!s.Lane)
+            if (s.HardBlocked)
             {
-                _braceLostSolutionFrames++;
-                if (Age >= BraceFrames || _braceLostSolutionFrames > BraceSolutionGraceFrames)
-                    Enter(s.Afraid || s.FriendBlocked ? LanceState.Threaten : LanceState.AcquireChargeLane);
+                Enter(s.Afraid || s.FriendBlocked ? LanceState.Threaten : LanceState.AcquireChargeLane);
                 return;
             }
 
-            _braceLostSolutionFrames = 0;
+            if (s.Lane) _braceLostSolutionFrames = 0;
+            else _braceLostSolutionFrames++;
+
             if (Age >= BraceFrames)
             {
+                if (!s.CommitReady)
+                {
+                    Enter(s.Afraid || s.FriendBlocked ? LanceState.Threaten : LanceState.AcquireChargeLane);
+                    return;
+                }
+
                 _followUpReserved = s.Sidearm;
                 _chargeLanded = false;
                 AttackSerial++;
