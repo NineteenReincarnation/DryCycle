@@ -5,9 +5,8 @@ namespace DryCycle.Items.ScavengerLance;
 internal sealed partial class ScavengerLance
 {
     /// <summary>
-    /// Enhanced hand-held spear pose. The grip position still follows the wielder directly,
-    /// while the long weapon keeps its own angular velocity so turning, bracing and sweeping
-    /// read as a heavy hand-held object instead of a sprite rigidly welded to the body.
+    /// Combat-only angular rig. Normal carry follows the vanilla scavenger hand direction directly;
+    /// only authored attack poses keep extra angular smoothing for brace/charge/counter-sweep.
     /// </summary>
     private sealed class CarryRig
     {
@@ -32,6 +31,19 @@ internal sealed partial class ScavengerLance
                 ? grip.Direction.normalized
                 : currentRotation.sqrMagnitude > 0.001f ? currentRotation.normalized : Vector2.right;
 
+            // Vanilla-style carry must stay free in the hand. Do not add the heavy-weapon spring,
+            // acceleration lag or angular speed cap unless a deliberate combat pose owns the lance.
+            bool authoredCombatPose = grip.Braced || grip.Charging || grip.CounterSweep || grip.AimTracking;
+            if (!authoredCombatPose)
+            {
+                _initialized = true;
+                _holder = holder;
+                _angle = DirectionAngle(desired);
+                _angularVelocity = 0f;
+                _lastHolderVelocity = holder.mainBodyChunk.vel;
+                return desired;
+            }
+
             if (!_initialized || _holder != holder)
             {
                 _initialized = true;
@@ -48,15 +60,12 @@ internal sealed partial class ScavengerLance
 
             float desiredAngle = DirectionAngle(desired);
 
-            // Ordinary carry keeps a little movement lag. The effect is intentionally reduced while
-            // presenting the lance forward and almost removed during the half-second aiming brace.
-            // Charge and counter-sweep directions are combat-authored and receive no artificial sway.
             if (!grip.Charging && !grip.CounterSweep)
             {
                 float facing = Mathf.Sign(desired.x);
                 if (facing == 0f) facing = 1f;
-                float influence = grip.AimTracking ? 0.18f : grip.Braced ? 0.42f : 1f;
-                float limit = grip.AimTracking ? 1.5f : grip.Braced ? 3.5f : 8f;
+                float influence = grip.AimTracking ? 0.18f : 0.42f;
+                float limit = grip.AimTracking ? 1.5f : 3.5f;
                 float inertialOffset = (-acceleration.x * 1.35f + acceleration.y * 0.45f * facing) * influence;
                 desiredAngle += Mathf.Clamp(inertialOffset, -limit, limit);
             }
@@ -66,7 +75,6 @@ internal sealed partial class ScavengerLance
             float maximumAngularSpeed;
             if (grip.CounterSweep)
             {
-                // Counter-sweep must still cover its authored 80/120 degree arc in eight ticks.
                 stiffness = 0.75f;
                 damping = 0.45f;
                 maximumAngularSpeed = 30f;
@@ -83,17 +91,11 @@ internal sealed partial class ScavengerLance
                 damping = 0.55f;
                 maximumAngularSpeed = 14f;
             }
-            else if (grip.Braced)
+            else
             {
                 stiffness = 0.22f;
                 damping = 0.62f;
                 maximumAngularSpeed = 12f;
-            }
-            else
-            {
-                stiffness = 0.14f;
-                damping = 0.72f;
-                maximumAngularSpeed = 9f;
             }
 
             float error = Mathf.DeltaAngle(_angle, desiredAngle);
