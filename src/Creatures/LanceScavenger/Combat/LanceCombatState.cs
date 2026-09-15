@@ -13,7 +13,7 @@ internal readonly struct LanceSituation
 /// <summary>Decision timing only; body velocity and weapon impacts live in their own modules.</summary>
 internal sealed class LanceCombatState
 {
-    internal const int BraceFrames = 32;
+    internal const int BraceFrames = 60;
     internal const int MaxChargeFrames = 32;
     internal const int RecoveryFrames = 44;
     internal const int WallRecoveryFrames = 82;
