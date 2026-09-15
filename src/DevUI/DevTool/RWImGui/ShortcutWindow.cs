@@ -32,6 +32,12 @@ internal static class ShortcutWindow
     private static DevToolShortcutDescriptor[] cachedCommon = Array.Empty<DevToolShortcutDescriptor>();
     private static DevToolShortcutDescriptor[] cachedCurrentMode = Array.Empty<DevToolShortcutDescriptor>();
 
+    private static bool tabPresentationValid;
+    private static EditorToolMode projectedTabMode;
+    private static bool projectedTabChinese;
+    private static string commonTabButtonLabel = string.Empty;
+    private static string currentTabButtonLabel = string.Empty;
+
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         if (snapshot == null || !snapshot.Available) return;
@@ -114,23 +120,36 @@ internal static class ShortcutWindow
 
     private static void DrawTabs(EditorPresentationSnapshot snapshot)
     {
-        string common = DevToolUiSettings.T("通用快捷键", "Common");
-        string current = DevToolUiSettings.T(
-            "当前模式 · " + DevToolUiSettings.ToolMode(snapshot.ToolMode),
-            "Current · " + DevToolUiSettings.ToolMode(snapshot.ToolMode));
+        EnsureTabPresentation(snapshot.ToolMode);
 
         float available = ImGui.GetContentRegionAvail().X;
         float gap = Math.Max(6f, ImGui.GetStyle().ItemSpacing.X);
         float tabWidth = Math.Max(120f, (available - gap) * 0.5f);
 
-        if (DrawTabButton(common, "ShortcutCommonTab", tab == Tab.Common, tabWidth))
+        if (DrawTabButton(commonTabButtonLabel, tab == Tab.Common, tabWidth))
             tab = Tab.Common;
         ImGui.SameLine(0f, gap);
-        if (DrawTabButton(current, "ShortcutModeTab", tab == Tab.CurrentMode, tabWidth))
+        if (DrawTabButton(currentTabButtonLabel, tab == Tab.CurrentMode, tabWidth))
             tab = Tab.CurrentMode;
     }
 
-    private static bool DrawTabButton(string label, string id, bool active, float width)
+    private static void EnsureTabPresentation(EditorToolMode mode)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (tabPresentationValid && projectedTabMode == mode && projectedTabChinese == chinese)
+            return;
+
+        projectedTabMode = mode;
+        projectedTabChinese = chinese;
+        tabPresentationValid = true;
+
+        string common = DevToolUiSettings.T("通用快捷键", "Common");
+        string current = DevToolUiSettings.T("当前模式 · ", "Current · ") + DevToolUiSettings.ToolMode(mode);
+        commonTabButtonLabel = common + "##ShortcutCommonTab";
+        currentTabButtonLabel = current + "##ShortcutModeTab";
+    }
+
+    private static bool DrawTabButton(string label, bool active, float width)
     {
         Num.Vector4 normal = active
             ? new Num.Vector4(0.17f, 0.36f, 0.59f, 0.94f)
@@ -148,7 +167,7 @@ internal static class ShortcutWindow
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hover);
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, hover);
         ImGui.PushStyleColor(ImGuiCol.Border, border);
-        bool clicked = ImGui.Button(label + "##" + id, new Num.Vector2(width, 0f));
+        bool clicked = ImGui.Button(label, new Num.Vector2(width, 0f));
         ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(2);
         return clicked;
