@@ -156,14 +156,15 @@ RWImGui diagnostics views
 - Semantic Conformance 与 Compatibility Gate 不再从 ImGui Draw 中执行 `Evaluate()`。
 - Universal mirror capture、full audit、loaded-type inventory、page coverage、semantic audit 和 gate evaluation 只在 `DevUiDiagnosticsPolicy.Enabled` 时运行；正常编辑帧不承担这些反射扫描成本。
 - 删除已经没有真实调用链的 `UniversalDevUiProtocolAugmenter`。未知的非标准 `Clicked()` 控件不会再被一套未接线的代码“假装支持”，而是明确显示为协议缺口并走 fallback。
-- 删除重复的 `DevUiGenericProtocolBootstrap`；Page / Panel 容器协议与 Handle 场景协议已由 MigrationCoverage 直接结构分类，不再维护第二套注册器。
+- 删除重复的 `DevUiGenericProtocolBootstrap`；Page / Panel / Handle 已由 MigrationCoverage 的结构协议直接分类，不再维护第二套注册器。
 - `DevUiFullAudit` 删除重复 Handle 注册、无调用的 `Page → owner` 反射发现入口以及与旧 Draw 驱动模型不一致的注释。
 - MigrationCoverage 的 `RegisterExact / RegisterAssignable / RegisterTypeName` 已收回 internal；诊断层不能再作为第三方“声明已兼容”的公开 API。
 - Final Architecture Guard 已禁止 RWImGui 调用诊断 side-effect 入口，并阻止上述旧 bootstrap/augmenter 被重新引入。
+- 真联编阶段额外发现并移除 `LegacyUiPresentationController.Apply(Page)` 中遗留的 `DevUiFullAudit.ObserveAll(page)` 调用，FullAudit 现在只由 `DevUiDiagnosticsPublisher` 拥有。
 
 ## 工作流 E — 代码清债
 
-静态封板已完成。
+主体已完成。
 
 已处理：
 
@@ -176,7 +177,6 @@ RWImGui diagnostics views
 - 清理 `DevUiFullAudit` 的无调用 owner 发现链、重复 Handle 注册和过期注释。
 - 收紧 MigrationCoverage、Semantic Audit、Compatibility Gate 等诊断层可变入口的可见性。
 - 清理与当前 ownership 不一致的阶段性注释。
-- 完成 PR 全量静态架构终审；未发现 Generic DevInterface / Vanilla fallback 被误断、History 双提交、前端写模型旁路或生命周期顺序倒置。
 - README 已同步 Phase 6 的最终依赖方向、生命周期与兼容规则。
 - 与开发期间前进的 `main` 做过差异核对；并行 LanceScavenger / ScavengerLance 修改没有进入本 PR，PR 当前仍可自动合并。
 
@@ -189,6 +189,7 @@ RWImGui diagnostics views
 - Universal Presentation / PageCoverage / ProtocolInventory 的 `Current` 必须保持纯 detached snapshot getter。
 - RWImGui 禁止执行 Universal Command Queue、Universal Publish、FullAudit、Page Coverage Observe、Protocol Inventory Observe、Semantic Evaluate、Compatibility Gate Evaluate。
 - Compatibility diagnostics 必须通过单一 `DevUiDiagnosticsPublisher` 发布。
+- `LegacyUiPresentationController` 禁止直接执行 FullAudit。
 - 已删除的 Generic Protocol Bootstrap / Universal Protocol Augmenter 不得重新出现。
 - MigrationCoverage 的映射注册方法不得重新成为 public 第三方兼容声明入口。
 - DevTool Runtime 与 dormant cleanup 必须走统一 `DevToolSubsystemCoordinator`。
@@ -196,25 +197,28 @@ RWImGui diagnostics views
 - 删除的 POM / RegionKit 专用 Inspector 不得重新出现或留下悬空引用。
 - Compatibility 以外的功能模块禁止重新依赖第三方私有运行时类型。
 
-当前静态架构守卫、全量 diff 终审和真实联编已经完成。真实 `net48` 编译使用实际 Rain World / HookGen / Unity / RWImGui 程序集完成；`DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll` 均为 **0 warning / 0 error**。
+当前已完成的真实验证：
+
+- 使用实际 Rain World / HookGen / Unity / RWImGui 程序集完成 `DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll` 的 `net48` 联编。
+- 编译产物级 AssemblyRef 检查通过：`DryCycle.dll` 不引用 `ImGui.NET` / `rain-world-imgui-api`；只有 `DryCycle.DevTool.RWImGui.dll` 引用前端依赖。
+- Extension API 离线生命周期 smoke 通过：API 1.0、Capability mask、注册/发现、大小写不敏感 ID、重复 ID 拒绝、Dispose 幂等、释放后重注册、Major 版本不兼容拒绝均符合冻结语义。
+- 后端 reset smoke 通过：`DevToolSubsystemCoordinator.ResetRuntimeState()` 与 `LegacyUiPresentationController.Reset()` 在无活动 DevUI session 下连续执行两次均无异常，幂等清理语义成立。
+- 新增 `PHASE6_RUNTIME_VALIDATION.md`，把剩余 Rain World 进程内验证固定为可执行的 PASS/FAIL 规程。
 
 剩余验证只依赖真实 Rain World 运行环境：
 
-1. Rain World 内基本回归：
-   - New UI / Vanilla 切换
-   - Save / Undo / Redo
-   - Objects / Room / Sound / Triggers / Map / Dialog / Relationships
-   - Generic DevInterface 第三方控件回退
-   - Extension API 注册 / Dispose
-2. 性能回归：确认稳定帧没有重新出现整表扫描、重复 Snapshot rebuild 或重复 Synchronize。
+1. New UI / Vanilla 生命周期与七个 Workspace 的功能/Save/Undo/Redo 回归。
+2. Generic DevInterface / Vanilla fallback 的真实第三方对象回归。
+3. DevTools dormant → reopen 生命周期回归。
+4. 使用现有 Performance 窗口验证稳定帧 Hit/Partial/Full、240 样本 P95 与大数据 UI/Map 压力路径。
 
-真实联编依赖现已补齐并完成验证。编译通过只证明程序集/源码边界成立，仍不替代 Rain World 内功能回归和稳定帧性能回归。
+完整步骤见：`src/DevUI/DevTool/PHASE6_RUNTIME_VALIDATION.md`。
 
 ## 当前进度
 
-**第六阶段：约 98%。**
+**第六阶段：约 99%。**
 
-已经完成的主体架构清债：
+已经完成的主体：
 
 - 第三方专用适配器移除与依赖方向冻结。
 - Runtime / dormant backend lifecycle 收口。
@@ -227,10 +231,11 @@ RWImGui diagnostics views
 - README / PHASE6 文档与最终实现同步。
 - PR 全量静态 diff 终审完成。
 - Final Architecture Guard 已覆盖主要冻结边界并持续通过。
-- 使用真实 Rain World / HookGen / Unity / RWImGui 引用完成 `DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll` 的 `net48` 联编，两者均 0 warning / 0 error。
+- 真实 `net48` 后端 + RWImGui 前端联编完成。
+- 最终 DLL 依赖方向在 AssemblyRef 层验证通过。
+- Extension API 与 backend reset 的离线生命周期 smoke 通过。
+- 游戏内最终验收规程已固化。
 
-剩余约 2% 不再是架构重构，而是 Rain World 游戏内验证：
+剩余约 1% 不再包含架构或编译工作，只是必须在 Rain World 进程内完成的最终功能/兼容/性能验收。通过 `PHASE6_RUNTIME_VALIDATION.md` 的全部 PASS 条件后，Phase 6 才更新为 100%。
 
-1. Rain World 游戏内功能/兼容回归。
-2. 稳定帧性能回归。
-3. 验证完成后再决定是否把 PR 从 Draft 转为 Ready for Review；未经明确指示不合并。
+未经明确指示，不把 PR #47 标记 Ready for Review，也不合并。
