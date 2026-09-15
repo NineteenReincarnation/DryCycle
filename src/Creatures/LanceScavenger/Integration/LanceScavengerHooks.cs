@@ -41,16 +41,22 @@ internal static class LanceScavengerHooks
         if (self is not LanceScavenger lance || lance.Brain == null) { orig(self); return; }
         lance.Brain.Update();
         if (lance.Combat.State == LanceState.Charge && !self.safariControlled) { lance.Motor.Act(); return; }
+
         bool holdPosition = lance.Motor.OwnsMovement && !self.safariControlled;
+        bool runWeaponMotor = lance.Motor.OwnsWeaponAction && !self.safariControlled;
         if (holdPosition)
         {
             self.animation = null;
             self.commitToMoveCounter = 0;
             self.moving = false;
         }
+
         lance.Brain.SkipNextUpdate = true;
         try { orig(self); } finally { lance.Brain.SkipNextUpdate = false; }
-        if (holdPosition) lance.Motor.Act();
+
+        // CloseDefense reaches this path with holdPosition=false: vanilla Scavenger.Act therefore
+        // keeps all flee/turn/jump/pathing behavior, while LanceMotor owns only the weapon response.
+        if (runWeaponMotor) lance.Motor.Act();
     }
 
     private static void CombatUpdate(On.Scavenger.orig_CombatUpdate orig, Scavenger self)
