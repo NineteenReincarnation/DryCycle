@@ -37,6 +37,11 @@ internal readonly struct ChargeLane
 /// <summary>
 /// Hard route safety only. Target lead, BodyChunk selection and aim confidence intentionally
 /// live in LanceAimSolver so temporary prediction noise does not masquerade as terrain failure.
+///
+/// Important: route validation only proves the committed attack corridor up to the expected
+/// contact. It deliberately does not demand a perfectly safe landing after a miss. Crashing into
+/// terrain after the target dodges is a physical consequence of committing the charge, not a reason
+/// to make the signature attack unavailable in the first place.
 /// </summary>
 internal static class ChargeLanePlanner
 {
@@ -47,9 +52,6 @@ internal static class ChargeLanePlanner
 
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
-    // On ordinary flat ground a 7.3 vertical launch returns to support at roughly frame 16.
-    // Check slightly beyond that so a near target cannot hide a wall immediately after the miss.
-    private const int MinimumLandingSafetyFrames = 18;
 
     internal static float ChargeCommitment(LanceScavenger scav)
     {
@@ -105,8 +107,13 @@ internal static class ChargeLanePlanner
         float length = scav.Lance?.Length ?? LanceCombatMath.DefaultLength;
         float forwardLength = LanceCombatMath.ForwardLength(length);
         float rearLength = length * LanceCombatMath.GripFraction;
-        int frames = Mathf.Min(LanceCombatState.MaxChargeFrames,
-            Mathf.Max(Mathf.Max(impactFrame + 3, MinimumLandingSafetyFrames), 1));
+
+        // Validate the corridor through the expected contact, plus one frame for discretization.
+        // The previous landing-length validation simulated far beyond the target with a permanently
+        // extended wide blade. On ordinary ground that made the blade intersect the floor during the
+        // predicted descent, so valid 60-100 px charges were reported as "lance blocked" and the AI
+        // never reached Backstep/Brace/Charge. Post-contact terrain is now left to real charge physics.
+        int frames = Mathf.Clamp(impactFrame + 1, 1, LanceCombatState.MaxChargeFrames);
         Vector2 previousBody = body;
 
         for (int frame = 1; frame <= frames; frame++)
