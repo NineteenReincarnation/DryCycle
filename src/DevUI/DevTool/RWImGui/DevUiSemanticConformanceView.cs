@@ -6,9 +6,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class DevUiSemanticConformanceView
 {
-    internal static void Draw(UniversalDevUiPresentationSnapshot mirror)
+    internal static void Draw()
     {
-        DevUiSemanticConformanceSnapshot snapshot = DevUiSemanticConformanceAudit.Evaluate(mirror);
+        DevUiSemanticConformanceSnapshot snapshot = DevUiSemanticConformanceAudit.Current;
         if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.PageType)) return;
 
         string title = DevToolUiSettings.T("语义一致性", "SEMANTIC CONFORMANCE") +
