@@ -70,9 +70,10 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
             return;
         }
 
-        // With a normal spear in grasp 0, leave hand 0 to vanilla spear handling and
-        // carry the custom lance with hand 1. Without a sidearm, keep the old hand-0 pose.
-        int lanceHand = _owner.SidearmSpear != null ? 1 : 0;
+        // The lance is visibly hand-held, not body-mounted. It normally lives in
+        // grasp 0 / hand 0; only an active vanilla sidearm ThrowCharge temporarily
+        // moves it to grasp 1 / hand 1.
+        int lanceHand = _owner.SidearmInPrimary ? 1 : 0;
         Vector2 singleDesired = lance.firstChunk.pos + lance.rotation * (lanceHand == 0 ? 10f : -9f);
         hands[lanceHand].absoluteHuntPos = singleDesired;
         hands[lanceHand].pos = Vector2.Lerp(hands[lanceHand].pos, singleDesired, 0.55f);
