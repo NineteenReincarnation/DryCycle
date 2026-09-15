@@ -14,6 +14,36 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class DevToolOverlay
 {
+    private sealed class ObjectLibraryRow
+    {
+        internal EditorObjectTypeSnapshot Item;
+        internal string Category;
+        internal string DisplayName;
+        internal string Tooltip;
+    }
+
+    private sealed class ObjectLibraryGroup
+    {
+        internal string Source;
+        internal DevToolSourceMark SourceMark;
+        internal readonly List<ObjectLibraryRow> Rows = new();
+    }
+
+    private sealed class SceneObjectRow
+    {
+        internal EditorObjectSnapshot Item;
+        internal string Category;
+        internal string Label;
+        internal string Tooltip;
+    }
+
+    private sealed class SceneObjectGroup
+    {
+        internal string Source;
+        internal DevToolSourceMark SourceMark;
+        internal readonly List<SceneObjectRow> Rows = new();
+    }
+
     private static string objectSearch = string.Empty;
     private static string sceneSearch = string.Empty;
     private static bool sceneTab;
@@ -22,6 +52,36 @@ internal static class DevToolOverlay
     private static float browserInspectorSplit = 0.40f;
     private static bool browserInspectorSplitterDragging;
     private const float BrowserPaneFontScale = 1.22f;
+
+    private static EditorObjectTypeSnapshot[] projectedObjectLibrary;
+    private static string projectedObjectSearch = string.Empty;
+    private static bool projectedObjectChinese;
+    private static readonly Dictionary<string, ObjectLibraryGroup> ObjectLibraryGroupsBySource =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<ObjectLibraryGroup> ObjectLibraryGroups = new();
+    private static int objectLibraryMatchCount;
+
+    private static EditorObjectTypeSnapshot[] indexedMetadataLibrary;
+    private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType =
+        new(StringComparer.Ordinal);
+
+    private static EditorObjectSnapshot[] projectedSceneObjects;
+    private static EditorObjectTypeSnapshot[] projectedSceneLibrary;
+    private static string projectedSceneSearch = string.Empty;
+    private static bool projectedSceneChinese;
+    private static readonly Dictionary<string, SceneObjectGroup> SceneGroupsBySource =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<SceneObjectGroup> SceneGroups = new();
+    private static int sceneMatchCount;
+
+    private static int sceneStatusObjectCount = -1;
+    private static int sceneStatusSelectionCount = -1;
+    private static bool sceneStatusChinese;
+    private static string sceneStatusText = string.Empty;
+
+    private static string placementLabelType = string.Empty;
+    private static bool placementLabelChinese;
+    private static string placementLabelText = string.Empty;
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
@@ -136,13 +196,13 @@ internal static class DevToolOverlay
 
         FloatingWindowSnap.TrackCurrentWindow("Tools");
 
-        DrawModeButton(roomLabel, DevToolUiSettings.T("房间设置", "Room settings"), EditorToolMode.Room, snapshot.ToolMode);
-        DrawModeButton(objectsLabel, DevToolUiSettings.T("物件", "Objects"), EditorToolMode.Objects, snapshot.ToolMode);
-        DrawModeButton(soundLabel, DevToolUiSettings.T("声音", "Sound"), EditorToolMode.Sound, snapshot.ToolMode);
-        DrawModeButton(triggersLabel, DevToolUiSettings.T("触发器", "Triggers"), EditorToolMode.Triggers, snapshot.ToolMode);
-        DrawModeButton(mapLabel, DevToolUiSettings.T("地图", "Map"), EditorToolMode.Map, snapshot.ToolMode);
-        DrawModeButton(dialogLabel, DevToolUiSettings.T("对话", "Dialog"), EditorToolMode.Dialog, snapshot.ToolMode);
-        DrawModeButton(relationshipsLabel, DevToolUiSettings.T("关系", "Relationships"), EditorToolMode.Relationships, snapshot.ToolMode);
+        DrawModeButton(roomLabel, DevToolUiSettings.T("房间设置", "Room settings"), "DevToolModeRoom", EditorToolMode.Room, snapshot.ToolMode);
+        DrawModeButton(objectsLabel, DevToolUiSettings.T("物件", "Objects"), "DevToolModeObjects", EditorToolMode.Objects, snapshot.ToolMode);
+        DrawModeButton(soundLabel, DevToolUiSettings.T("声音", "Sound"), "DevToolModeSound", EditorToolMode.Sound, snapshot.ToolMode);
+        DrawModeButton(triggersLabel, DevToolUiSettings.T("触发器", "Triggers"), "DevToolModeTriggers", EditorToolMode.Triggers, snapshot.ToolMode);
+        DrawModeButton(mapLabel, DevToolUiSettings.T("地图", "Map"), "DevToolModeMap", EditorToolMode.Map, snapshot.ToolMode);
+        DrawModeButton(dialogLabel, DevToolUiSettings.T("对话", "Dialog"), "DevToolModeDialog", EditorToolMode.Dialog, snapshot.ToolMode);
+        DrawModeButton(relationshipsLabel, DevToolUiSettings.T("关系", "Relationships"), "DevToolModeRelationships", EditorToolMode.Relationships, snapshot.ToolMode);
 
         if (DevToolWidgets.NavItem(debugLabel, "DevToolLanceScavengerDebug", lanceDebugPage))
         {
@@ -184,9 +244,9 @@ internal static class DevToolOverlay
         ImGui.End();
     }
 
-    private static void DrawModeButton(string label, string tooltip, EditorToolMode mode, EditorToolMode current)
+    private static void DrawModeButton(string label, string tooltip, string id, EditorToolMode mode, EditorToolMode current)
     {
-        if (DevToolWidgets.NavItem(label, "DevToolMode" + mode, !lanceDebugPage && current == mode))
+        if (DevToolWidgets.NavItem(label, id, !lanceDebugPage && current == mode))
         {
             lanceDebugPage = false;
             LanceScavengerDebugView.StopCapture();
@@ -405,7 +465,7 @@ internal static class DevToolOverlay
         {
             ImGui.Spacing();
             DevToolWidgets.SectionHeader(DevToolUiSettings.T("放置", "PLACEMENT"), BrowserPaneFontScale);
-            ImGui.Text(DevToolUiSettings.T("正在放置 ", "Placing ") + snapshot.PlacementType);
+            ImGui.Text(GetPlacementLabel(snapshot.PlacementType));
             if (DevToolWidgets.ActionButton(
                     DevToolUiSettings.T("取消放置", "Cancel placement"),
                     "CancelObjectPlacement",
@@ -414,85 +474,134 @@ internal static class DevToolOverlay
         }
 
         ImGui.Spacing();
+        EnsureObjectLibraryProjection(snapshot);
+        for (int sourceIndex = 0; sourceIndex < ObjectLibraryGroups.Count; sourceIndex++)
+        {
+            ObjectLibraryGroup group = ObjectLibraryGroups[sourceIndex];
+            DevToolWidgets.SourceHeader(group.SourceMark, 1.42f * BrowserPaneFontScale, BrowserPaneFontScale);
+
+            string lastCategory = null;
+            List<ObjectLibraryRow> rows = group.Rows;
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                ObjectLibraryRow row = rows[rowIndex];
+                EditorObjectTypeSnapshot item = row.Item;
+                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
+                {
+                    if (lastCategory != null) ImGui.Spacing();
+                    lastCategory = row.Category;
+                    DevToolWidgets.MutedText(row.Category);
+                }
+
+                bool selected = snapshot.PlacementActive &&
+                                string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
+                ImGui.PushID(item.Type ?? string.Empty);
+                bool clicked = ImGui.Selectable(row.DisplayName, selected);
+                ImGui.PopID();
+                if (clicked)
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
+                if (ImGui.IsItemHovered()) DevToolTooltip.Show(row.Tooltip);
+            }
+        }
+
+        if (objectLibraryMatchCount == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
+    }
+
+    private static void EnsureObjectLibraryProjection(EditorPresentationSnapshot snapshot)
+    {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        List<string> sources = new();
-        int matches = 0;
+        string normalizedSearch = NormalizeSearch(objectSearch);
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedObjectLibrary, library) &&
+            string.Equals(projectedObjectSearch, normalizedSearch, StringComparison.Ordinal) &&
+            projectedObjectChinese == chinese)
+            return;
+
+        foreach (ObjectLibraryGroup cached in ObjectLibraryGroupsBySource.Values)
+            cached.Rows.Clear();
+        ObjectLibraryGroups.Clear();
+        objectLibraryMatchCount = 0;
+
+        char searchMode = '\0';
+        string needle = normalizedSearch;
+        if (normalizedSearch.Length > 0 &&
+            (normalizedSearch[0] == '@' || normalizedSearch[0] == ':' || normalizedSearch[0] == '#'))
+        {
+            searchMode = normalizedSearch[0];
+            needle = normalizedSearch.Substring(1);
+        }
 
         for (int i = 0; i < library.Length; i++)
         {
             EditorObjectTypeSnapshot item = library[i];
-            if (!Matches(item, objectSearch)) continue;
-            matches++;
+            if (item == null || !MatchesLibrary(item, normalizedSearch, searchMode, needle)) continue;
+
             string source = string.IsNullOrWhiteSpace(item.Source)
                 ? DevToolUiSettings.T("未知来源", "Unknown Source")
                 : item.Source;
-            if (!ContainsExact(sources, source)) sources.Add(source);
-        }
+            string category = string.IsNullOrWhiteSpace(item.Category)
+                ? DevToolUiSettings.T("未分类", "Unsorted")
+                : item.Category;
+            string displayName = item.DisplayName ?? string.Empty;
 
-        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
-        {
-            string source = sources[sourceIndex];
-            DevToolWidgets.SourceHeader(source, ObjectSourceColor(source), 1.42f * BrowserPaneFontScale, BrowserPaneFontScale);
-
-            string lastCategory = null;
-            for (int i = 0; i < library.Length; i++)
+            if (!ObjectLibraryGroupsBySource.TryGetValue(source, out ObjectLibraryGroup group))
             {
-                EditorObjectTypeSnapshot item = library[i];
-                if (!Matches(item, objectSearch)) continue;
-                string itemSource = string.IsNullOrWhiteSpace(item.Source)
-                    ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                    : item.Source;
-                if (!string.Equals(itemSource, source, StringComparison.OrdinalIgnoreCase)) continue;
-
-                string category = string.IsNullOrWhiteSpace(item.Category)
-                    ? DevToolUiSettings.T("未分类", "Unsorted")
-                    : item.Category;
-                if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+                group = new ObjectLibraryGroup
                 {
-                    if (lastCategory != null) ImGui.Spacing();
-                    lastCategory = category;
-                    DevToolWidgets.MutedText(category);
-                }
-
-                bool selected = snapshot.PlacementActive && string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
-                if (ImGui.Selectable(item.DisplayName + "##PlaceObject" + item.Type, selected))
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
-                if (ImGui.IsItemHovered()) DevToolTooltip.Show(item.Source + " · " + item.Type);
+                    Source = source,
+                    SourceMark = DevToolSourcePresentation.FromLabel(source)
+                };
+                ObjectLibraryGroupsBySource[source] = group;
             }
+            if (group.Rows.Count == 0)
+                ObjectLibraryGroups.Add(group);
+
+            group.Rows.Add(new ObjectLibraryRow
+            {
+                Item = item,
+                Category = category,
+                DisplayName = displayName,
+                Tooltip = (item.Source ?? string.Empty) + " · " + item.Type
+            });
+            objectLibraryMatchCount++;
         }
 
-        if (matches == 0)
-            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
+        projectedObjectLibrary = library;
+        projectedObjectSearch = normalizedSearch;
+        projectedObjectChinese = chinese;
     }
 
-    private static Num.Vector4 ObjectSourceColor(string source)
+    private static bool MatchesLibrary(
+        EditorObjectTypeSnapshot item,
+        string query,
+        char searchMode,
+        string needle)
     {
-        if (source.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
-            return new Num.Vector4(0.36f, 0.72f, 1f, 1f);
-        if (source.IndexOf("RegionKit", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            source.StartsWith("RK", StringComparison.OrdinalIgnoreCase))
-            return new Num.Vector4(1f, 0.70f, 0.34f, 1f);
-        if (source.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            source.IndexOf("Rain World", StringComparison.OrdinalIgnoreCase) >= 0)
-            return new Num.Vector4(0.88f, 0.88f, 0.88f, 1f);
-        return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
-    }
+        if (string.IsNullOrEmpty(query)) return true;
+        if (searchMode == '@') return Contains(item.Source, needle);
+        if (searchMode == ':') return Contains(item.Category, needle);
+        if (searchMode == '#')
+        {
+            string[] tags = item.Tags ?? Array.Empty<string>();
+            for (int i = 0; i < tags.Length; i++)
+                if (Contains(tags[i], needle)) return true;
+            return false;
+        }
 
-    private static bool ContainsExact(List<string> values, string value)
-    {
-        for (int i = 0; i < values.Count; i++)
-            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
+        return Contains(item.DisplayName, query) || Contains(item.Type, query) ||
+               Contains(item.Category, query) || Contains(item.Source, query) ||
+               Fuzzy(item.DisplayName, query) || Fuzzy(item.Type, query);
     }
 
     private static void DrawSceneObjectList(EditorPresentationSnapshot snapshot)
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
+        if (sceneSelectionAnchor >= objects.Length)
+            sceneSelectionAnchor = -1;
 
-        DevToolWidgets.MutedText(DevToolUiSettings.T(
-            $"已放置 {objects.Length} 个物件 · 已选 {selectedCount}",
-            $"{objects.Length} placed · {selectedCount} selected"));
+        DevToolWidgets.MutedText(GetSceneStatusText(objects.Length, selectedCount));
 
         if (selectedCount > 0)
         {
@@ -519,55 +628,32 @@ internal static class DevToolOverlay
         ImGui.Separator();
         ImGui.Spacing();
 
-        List<string> sources = new();
-        int matches = 0;
-        for (int i = 0; i < objects.Length; i++)
-        {
-            EditorObjectSnapshot item = objects[i];
-            EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
-            if (!MatchesSceneObject(item, metadata, sceneSearch)) continue;
-            matches++;
-            string source = string.IsNullOrWhiteSpace(metadata?.Source)
-                ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                : metadata.Source;
-            if (!ContainsExact(sources, source)) sources.Add(source);
-        }
-
+        EnsureSceneProjection(snapshot, objects);
         ImGuiIOPtr io = ImGui.GetIO();
-        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+        for (int sourceIndex = 0; sourceIndex < SceneGroups.Count; sourceIndex++)
         {
-            string source = sources[sourceIndex];
-            DevToolWidgets.SourceHeader(source, ObjectSourceColor(source), 1.34f * BrowserPaneFontScale, BrowserPaneFontScale);
+            SceneObjectGroup group = SceneGroups[sourceIndex];
+            DevToolWidgets.SourceHeader(group.SourceMark, 1.34f * BrowserPaneFontScale, BrowserPaneFontScale);
 
             string lastCategory = null;
-            for (int i = 0; i < objects.Length; i++)
+            List<SceneObjectRow> rows = group.Rows;
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
-                EditorObjectSnapshot item = objects[i];
-                EditorObjectTypeSnapshot metadata = FindObjectMetadata(snapshot, item.Type);
-                if (!MatchesSceneObject(item, metadata, sceneSearch)) continue;
-
-                string itemSource = string.IsNullOrWhiteSpace(metadata?.Source)
-                    ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                    : metadata.Source;
-                if (!string.Equals(itemSource, source, StringComparison.OrdinalIgnoreCase)) continue;
-
-                string category = string.IsNullOrWhiteSpace(metadata?.Category)
-                    ? DevToolUiSettings.T("未分类", "Unsorted")
-                    : metadata.Category;
-                if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+                SceneObjectRow row = rows[rowIndex];
+                EditorObjectSnapshot item = row.Item;
+                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
                 {
-                    lastCategory = category;
-                    DevToolWidgets.MutedText(category);
+                    lastCategory = row.Category;
+                    DevToolWidgets.MutedText(row.Category);
                 }
 
-                string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
-                    ? item.Type
-                    : metadata.DisplayName;
-                string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")##SceneObject" + item.Index;
-                if (!ImGui.Selectable(label, item.Selected))
+                ImGui.PushID(item.Index);
+                bool clicked = ImGui.Selectable(row.Label, item.Selected);
+                ImGui.PopID();
+                if (!clicked)
                 {
                     if (ImGui.IsItemHovered())
-                        DevToolTooltip.Show(source + " · " + item.Type + " · " + category);
+                        DevToolTooltip.Show(row.Tooltip);
                     continue;
                 }
 
@@ -592,28 +678,124 @@ internal static class DevToolOverlay
             }
         }
 
-        if (matches == 0)
+        if (sceneMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
     }
 
-    private static EditorObjectTypeSnapshot FindObjectMetadata(EditorPresentationSnapshot snapshot, string type)
+    private static void EnsureSceneProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
+        string normalizedSearch = NormalizeSearch(sceneSearch);
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedSceneObjects, objects) &&
+            ReferenceEquals(projectedSceneLibrary, library) &&
+            string.Equals(projectedSceneSearch, normalizedSearch, StringComparison.Ordinal) &&
+            projectedSceneChinese == chinese)
+            return;
+
+        EnsureMetadataIndex(library);
+        foreach (SceneObjectGroup cached in SceneGroupsBySource.Values)
+            cached.Rows.Clear();
+        SceneGroups.Clear();
+        sceneMatchCount = 0;
+
+        for (int i = 0; i < objects.Length; i++)
+        {
+            EditorObjectSnapshot item = objects[i];
+            if (item == null) continue;
+            MetadataByType.TryGetValue(item.Type ?? string.Empty, out EditorObjectTypeSnapshot metadata);
+            if (!MatchesSceneObject(item, metadata, normalizedSearch)) continue;
+
+            string source = string.IsNullOrWhiteSpace(metadata?.Source)
+                ? DevToolUiSettings.T("未知来源", "Unknown Source")
+                : metadata.Source;
+            string category = string.IsNullOrWhiteSpace(metadata?.Category)
+                ? DevToolUiSettings.T("未分类", "Unsorted")
+                : metadata.Category;
+            string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
+                ? item.Type
+                : metadata.DisplayName;
+
+            if (!SceneGroupsBySource.TryGetValue(source, out SceneObjectGroup group))
+            {
+                group = new SceneObjectGroup
+                {
+                    Source = source,
+                    SourceMark = DevToolSourcePresentation.FromLabel(source)
+                };
+                SceneGroupsBySource[source] = group;
+            }
+            if (group.Rows.Count == 0)
+                SceneGroups.Add(group);
+
+            group.Rows.Add(new SceneObjectRow
+            {
+                Item = item,
+                Category = category,
+                Label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")",
+                Tooltip = source + " · " + item.Type + " · " + category
+            });
+            sceneMatchCount++;
+        }
+
+        projectedSceneObjects = objects;
+        projectedSceneLibrary = library;
+        projectedSceneSearch = normalizedSearch;
+        projectedSceneChinese = chinese;
+    }
+
+    private static void EnsureMetadataIndex(EditorObjectTypeSnapshot[] library)
+    {
+        if (ReferenceEquals(indexedMetadataLibrary, library)) return;
+        MetadataByType.Clear();
         for (int i = 0; i < library.Length; i++)
-            if (string.Equals(library[i].Type, type, StringComparison.Ordinal)) return library[i];
-        return null;
+        {
+            EditorObjectTypeSnapshot metadata = library[i];
+            if (metadata == null || string.IsNullOrEmpty(metadata.Type)) continue;
+            MetadataByType[metadata.Type] = metadata;
+        }
+        indexedMetadataLibrary = library;
     }
 
     private static bool MatchesSceneObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
     {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        query = query.Trim();
+        if (string.IsNullOrEmpty(query)) return true;
         return Contains(item.Type, query) ||
                Contains(metadata?.DisplayName, query) ||
                Contains(metadata?.Source, query) ||
                Contains(metadata?.Category, query) ||
                Fuzzy(item.Type, query) ||
                Fuzzy(metadata?.DisplayName, query);
+    }
+
+    private static string GetSceneStatusText(int objectCount, int selectedCount)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (sceneStatusObjectCount == objectCount && sceneStatusSelectionCount == selectedCount &&
+            sceneStatusChinese == chinese && sceneStatusText.Length > 0)
+            return sceneStatusText;
+
+        sceneStatusObjectCount = objectCount;
+        sceneStatusSelectionCount = selectedCount;
+        sceneStatusChinese = chinese;
+        sceneStatusText = chinese
+            ? $"已放置 {objectCount} 个物件 · 已选 {selectedCount}"
+            : $"{objectCount} placed · {selectedCount} selected";
+        return sceneStatusText;
+    }
+
+    private static string GetPlacementLabel(string type)
+    {
+        type ??= string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (string.Equals(placementLabelType, type, StringComparison.Ordinal) &&
+            placementLabelChinese == chinese && placementLabelText.Length > 0)
+            return placementLabelText;
+
+        placementLabelType = type;
+        placementLabelChinese = chinese;
+        placementLabelText = (chinese ? "正在放置 " : "Placing ") + type;
+        return placementLabelText;
     }
 
     private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
@@ -654,7 +836,7 @@ internal static class DevToolOverlay
                                  ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoInputs;
         if (ImGui.Begin("##DevToolPlacementHint", flags))
         {
-            ImGui.Text(DevToolUiSettings.T("放置 ", "Place ") + snapshot.PlacementType);
+            ImGui.Text(GetPlacementLabel(snapshot.PlacementType));
             ImGui.TextDisabled(io.KeyShift
                 ? DevToolUiSettings.T("连续放置", "Continuous placement")
                 : DevToolUiSettings.T("单次放置", "Single placement"));
@@ -662,23 +844,7 @@ internal static class DevToolOverlay
         ImGui.End();
     }
 
-    private static bool Matches(EditorObjectTypeSnapshot item, string query)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        query = query.Trim();
-        if (query.StartsWith("@", StringComparison.Ordinal)) return Contains(item.Source, query.Substring(1));
-        if (query.StartsWith(":", StringComparison.Ordinal)) return Contains(item.Category, query.Substring(1));
-        if (query.StartsWith("#", StringComparison.Ordinal))
-        {
-            string needle = query.Substring(1);
-            string[] tags = item.Tags ?? Array.Empty<string>();
-            for (int i = 0; i < tags.Length; i++) if (Contains(tags[i], needle)) return true;
-            return false;
-        }
-        return Contains(item.DisplayName, query) || Contains(item.Type, query) ||
-               Contains(item.Category, query) || Contains(item.Source, query) ||
-               Fuzzy(item.DisplayName, query) || Fuzzy(item.Type, query);
-    }
+    private static string NormalizeSearch(string query) => query?.Trim() ?? string.Empty;
 
     private static bool Contains(string value, string query) =>
         !string.IsNullOrEmpty(value) && value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
