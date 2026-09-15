@@ -5,34 +5,46 @@ namespace DryCycle.Items.ScavengerLance;
 
 internal sealed partial class ScavengerLance
 {
-    private static readonly float[] BladeSections = { 0f, 0.18f, 0.42f, 0.66f, 0.86f, 1f };
-    private static readonly float[] CrackPositions = { 0.24f, 0.43f, 0.61f, 0.77f };
-    private static readonly float[] CrackTilts = { 21f, -17f, 24f, -19f };
+    private static readonly float[] BladeSections = { 0f, 0.22f, 0.50f, 0.74f, 0.90f, 1f };
+
+    // A clearly readable torn cloth strip tied to the leather wrap. The motion model follows the
+    // vanilla ExplosiveSpear rag idea: a short constrained point chain with gravity, drag and
+    // inertial lag, rendered as a jagged long mesh. It is cosmetic only.
+    private const int FabricSegments = 5;
+    private const float FabricSegmentLength = 5.6f;
+    private readonly Vector2[,] _fabric = new Vector2[FabricSegments, 3]; // pos / lastPos / vel
+    private bool _fabricInitialized;
+    private int _fabricUpdateClock = int.MinValue;
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
-        // 0/1: narrow bone handle + subdued facet
-        // 2/3: broad tapered bone blade + inner facet
-        // 4  : dark root seam where the handle disappears into the blade shoulder
-        // 5-8: main fractures across the bone surface
-        // 9-11: short fracture branches
+        // 0/1 : matte desert handle / weak dusty edge light
+        // 2/3 : asymmetric ochre wedge / very narrow sand-worn facet
+        // 4-6 : short abrasion / dirt marks
+        // 7-9 : broad leather turns at the blade-handle junction
+        // 10  : leather knot protruding from the wrap
+        // 11  : torn desert cloth streamer tied into that knot
         //
-        // The weapon is drawn procedurally so rendering and collision can share the same dimensions.
-        // No atlas outline is required and there is no decorative cloth/leather mass hiding the shape.
+        // No black exterior outline. The weapon is deliberately dominated by warm brown-yellow,
+        // dusty ochre and leather rather than bright grey or polished metal.
         sLeaser.sprites = new FSprite[12];
         sLeaser.sprites[0] = TriangleMesh.MakeLongMesh(5, false, false);
         sLeaser.sprites[1] = TriangleMesh.MakeLongMesh(5, false, false);
         sLeaser.sprites[2] = TriangleMesh.MakeLongMesh(5, true, false);
         sLeaser.sprites[3] = TriangleMesh.MakeLongMesh(5, true, false);
-        for (int i = 4; i < sLeaser.sprites.Length; i++)
-            sLeaser.sprites[i] = new FSprite("pixel");
+        for (int i = 4; i < 11; i++) sLeaser.sprites[i] = new FSprite("pixel");
+        sLeaser.sprites[11] = TriangleMesh.MakeLongMesh(FabricSegments, false, false);
+        sLeaser.sprites[11].shader = rCam.game.rainWorld.Shaders["JaggedSquare"];
+        sLeaser.sprites[11].alpha = Mathf.Lerp(0.88f, 0.95f,
+            rCam.game.SeededRandom(abstractPhysicalObject.ID.RandomSeed));
 
-        sLeaser.sprites[1].alpha = 0.42f;
-        sLeaser.sprites[3].alpha = 0.46f;
-        sLeaser.sprites[4].alpha = 0.90f;
-        for (int i = 5; i < sLeaser.sprites.Length; i++)
-            sLeaser.sprites[i].alpha = 0.86f;
+        // Secondary surfaces should read as dust and wear, never as specular metal.
+        sLeaser.sprites[1].alpha = 0.46f;
+        sLeaser.sprites[3].alpha = 0.36f;
+        for (int i = 4; i < 7; i++) sLeaser.sprites[i].alpha = 0.58f;
 
+        _fabricInitialized = false;
+        _fabricUpdateClock = int.MinValue;
         ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         AddToContainer(sLeaser, rCam, null);
     }
@@ -41,36 +53,64 @@ internal sealed partial class ScavengerLance
     {
         Vector2 direction = Vector2.Lerp(lastRotation, rotation, t).normalized;
         if (direction.sqrMagnitude < 0.001f) direction = Vector2.right;
-
         Vector2 grip = Vector2.Lerp(firstChunk.lastPos, firstChunk.pos, t);
         Vector2 perp = Custom.PerpendicularVector(direction);
         Vector2 tail = grip - direction * Length * LanceCombatMath.GripFraction;
         float forwardLength = LanceCombatMath.ForwardLength(Length);
         Vector2 bladeRoot = grip + direction * LanceCombatMath.BladeRootDistance(Length);
         Vector2 tip = grip + direction * forwardLength;
-        float bend = Mathf.Lerp(_lastBend, _bend, t) * 0.28f;
+        float bend = Mathf.Lerp(_lastBend, _bend, t) * 0.32f;
 
-        DrawHandle((TriangleMesh)sLeaser.sprites[0], tail, bladeRoot, direction, perp, bend,
-            1.72f, 0f, camPos);
-        DrawHandle((TriangleMesh)sLeaser.sprites[1], tail, bladeRoot, direction, perp, bend,
-            0.42f, 0.34f, camPos);
-        DrawBlade((TriangleMesh)sLeaser.sprites[2], bladeRoot, tip, perp, camPos);
-        DrawBladeFacet((TriangleMesh)sLeaser.sprites[3], bladeRoot, tip, perp, camPos);
+        // The whole weapon is treated as a dry, matte desert object. Any lighter layer is deliberately
+        // narrow and low-contrast so it reads as sand abrasion rather than polished steel.
+        DrawHandle((TriangleMesh)sLeaser.sprites[0], tail, bladeRoot, direction, perp, bend, 1.82f, 0f, camPos);
+        DrawHandle((TriangleMesh)sLeaser.sprites[1], tail, bladeRoot, direction, perp, bend, 0.26f, 0.24f, camPos);
+        DrawBlade((TriangleMesh)sLeaser.sprites[2], bladeRoot, tip, direction, perp, camPos);
+        DrawBladeHighlight((TriangleMesh)sLeaser.sprites[3], bladeRoot, tip, direction, perp, camPos);
 
-        // A narrow dark seam separates the harmless handle from the damaging front body. It also
-        // makes the exact collision boundary visually legible during play.
-        FSprite seam = sLeaser.sprites[4];
-        Vector2 seamPos = bladeRoot - direction * 0.45f;
-        seam.SetPosition(seamPos - camPos);
-        seam.rotation = Custom.VecToDeg(direction) + 90f;
-        seam.scaleX = LanceCombatMath.BladeShoulderHalfWidth * 1.62f;
-        seam.scaleY = 0.82f;
+        // Short earth-darkened abrasions break the face up without creating a glossy blade language.
+        float[] markT = { 0.29f, 0.53f, 0.73f };
+        float[] markTilt = { 13f, -10f, 16f };
+        float[] markLength = { 0.22f, 0.27f, 0.20f };
+        for (int i = 0; i < 3; i++)
+        {
+            float bladeT = markT[i];
+            FSprite mark = sLeaser.sprites[4 + i];
+            Vector2 position = Vector2.Lerp(bladeRoot, tip, bladeT);
+            GetBladeWidths(bladeT, out float left, out float right);
+            position += perp * (i == 1 ? -0.35f : 0.30f);
+            mark.SetPosition(position - camPos);
+            mark.rotation = Custom.VecToDeg(direction) + 90f + markTilt[i];
+            mark.scaleX = Mathf.Max(1.45f, (left + right) * markLength[i]);
+            mark.scaleY = i == 1 ? 0.34f : 0.30f;
+        }
 
-        DrawFractures(sLeaser, direction, perp, bladeRoot, tip, camPos);
+        // Make the leather junction a real visual feature. It sits immediately behind the blade
+        // shoulder, extends far enough outside the scavenger hand to remain visible, and is broad
+        // enough to read at Rain World's native pixel scale.
+        Vector2 wrapCenter = WrapCenter(direction, grip);
+        for (int i = 0; i < 3; i++)
+        {
+            FSprite band = sLeaser.sprites[7 + i];
+            Vector2 position = wrapCenter + direction * ((i - 1) * 2.75f);
+            band.SetPosition(position - camPos);
+            band.rotation = Custom.VecToDeg(direction) + 90f + (i == 1 ? -6f : 5f);
+            band.scaleX = i == 1 ? 8.35f : 7.65f;
+            band.scaleY = i == 1 ? 1.70f : 1.48f;
+        }
+
+        FSprite knot = sLeaser.sprites[10];
+        Vector2 knotPos = wrapCenter - perp * 3.15f + direction * 0.95f;
+        knot.SetPosition(knotPos - camPos);
+        knot.rotation = Custom.VecToDeg(direction) + 58f;
+        knot.scaleX = 4.25f;
+        knot.scaleY = 2.35f;
+
+        EnsureFabricPhysics();
+        DrawFabric((TriangleMesh)sLeaser.sprites[11], direction, grip, t, camPos);
 
         ApplyPalette(sLeaser, rCam, rCam.currentPalette);
-        if (slatedForDeletetion || room != rCam.room)
-            sLeaser.CleanSpritesAndRemove();
+        if (slatedForDeletetion || room != rCam.room) sLeaser.CleanSpritesAndRemove();
     }
 
     private static void DrawHandle(TriangleMesh mesh, Vector2 tail, Vector2 bladeRoot, Vector2 direction,
@@ -80,15 +120,10 @@ internal sealed partial class ScavengerLance
         {
             float a = i / 5f;
             float b = (i + 1) / 5f;
-            Vector2 start = Vector2.Lerp(tail, bladeRoot, a) +
-                perp * (Mathf.Sin(a * Mathf.PI) * bend + sideOffset);
-            Vector2 end = Vector2.Lerp(tail, bladeRoot, b) +
-                perp * (Mathf.Sin(b * Mathf.PI) * bend + sideOffset);
-
-            // Slight thickening near the shoulder makes the rear read as a bone tang rather than a
-            // metal spear shaft, while it remains narrow enough to be clearly non-damaging.
-            float startWidth = halfWidth * Mathf.Lerp(0.72f, 1.05f, a);
-            float endWidth = halfWidth * Mathf.Lerp(0.72f, 1.05f, b);
+            Vector2 start = Vector2.Lerp(tail, bladeRoot, a) + perp * (Mathf.Sin(a * Mathf.PI) * bend + sideOffset);
+            Vector2 end = Vector2.Lerp(tail, bladeRoot, b) + perp * (Mathf.Sin(b * Mathf.PI) * bend + sideOffset);
+            float startWidth = halfWidth * Mathf.Lerp(0.80f, 1f, Mathf.Sin(a * Mathf.PI));
+            float endWidth = halfWidth * Mathf.Lerp(0.80f, 1f, Mathf.Sin(b * Mathf.PI));
             mesh.MoveVertice(i * 4, start - perp * startWidth - camPos);
             mesh.MoveVertice(i * 4 + 1, start + perp * startWidth - camPos);
             mesh.MoveVertice(i * 4 + 2, end - perp * endWidth - camPos);
@@ -96,132 +131,224 @@ internal sealed partial class ScavengerLance
         }
     }
 
-    private static void DrawBlade(TriangleMesh mesh, Vector2 root, Vector2 tip, Vector2 perp, Vector2 camPos)
+    private static void DrawBlade(TriangleMesh mesh, Vector2 root, Vector2 tip, Vector2 direction,
+        Vector2 perp, Vector2 camPos)
     {
-        // The visual half-width is exactly LanceCombatMath.BladeHalfWidth(). This is deliberate:
-        // the broad shoulder and every point of the taper are the same shape used by SweepBlade.
+        // Broad asymmetric shoulder -> one uninterrupted taper -> point. Width never grows again,
+        // so the silhouette remains the requested long wedge rather than a diamond spearhead.
         for (int i = 0; i < 4; i++)
         {
             float a = BladeSections[i];
             float b = BladeSections[i + 1];
             Vector2 start = Vector2.Lerp(root, tip, a);
             Vector2 end = Vector2.Lerp(root, tip, b);
-            float startWidth = LanceCombatMath.BladeHalfWidth(a);
-            float endWidth = LanceCombatMath.BladeHalfWidth(b);
-            mesh.MoveVertice(i * 4, start - perp * startWidth - camPos);
-            mesh.MoveVertice(i * 4 + 1, start + perp * startWidth - camPos);
-            mesh.MoveVertice(i * 4 + 2, end - perp * endWidth - camPos);
-            mesh.MoveVertice(i * 4 + 3, end + perp * endWidth - camPos);
+            GetBladeWidths(a, out float startLeft, out float startRight);
+            GetBladeWidths(b, out float endLeft, out float endRight);
+            mesh.MoveVertice(i * 4, start - perp * startLeft - camPos);
+            mesh.MoveVertice(i * 4 + 1, start + perp * startRight - camPos);
+            mesh.MoveVertice(i * 4 + 2, end - perp * endLeft - camPos);
+            mesh.MoveVertice(i * 4 + 3, end + perp * endRight - camPos);
         }
 
-        float finalBaseT = BladeSections[4];
-        Vector2 finalBase = Vector2.Lerp(root, tip, finalBaseT);
-        float finalWidth = LanceCombatMath.BladeHalfWidth(finalBaseT);
+        float finalBase = BladeSections[4];
+        Vector2 basePoint = Vector2.Lerp(root, tip, finalBase);
+        GetBladeWidths(finalBase, out float baseLeft, out float baseRight);
         int index = 16;
-        mesh.MoveVertice(index, finalBase - perp * finalWidth - camPos);
-        mesh.MoveVertice(index + 1, finalBase + perp * finalWidth - camPos);
+        mesh.MoveVertice(index, basePoint - perp * baseLeft - camPos);
+        mesh.MoveVertice(index + 1, basePoint + perp * baseRight - camPos);
         mesh.MoveVertice(index + 2, tip - camPos);
     }
 
-    private static void DrawBladeFacet(TriangleMesh mesh, Vector2 root, Vector2 tip, Vector2 perp, Vector2 camPos)
+    private static void DrawBladeHighlight(TriangleMesh mesh, Vector2 root, Vector2 tip, Vector2 direction,
+        Vector2 perp, Vector2 camPos)
     {
-        // A narrow uneven light plane makes the object read as carved/broken bone rather than a
-        // flat white polygon. It stays inside the collision silhouette and never changes its width.
+        // Not a sheen strip: this is a faint dusty facet where sand abrasion has exposed a slightly
+        // lighter ochre surface. It stays deliberately thin and weak at native resolution.
         for (int i = 0; i < 4; i++)
         {
             float a = BladeSections[i];
             float b = BladeSections[i + 1];
-            MoveFacetPair(mesh, i * 4, root, tip, perp, a, camPos);
-            MoveFacetPair(mesh, i * 4 + 2, root, tip, perp, b, camPos);
+            MoveHighlightPair(mesh, i * 4, root, tip, perp, a, camPos);
+            MoveHighlightPair(mesh, i * 4 + 2, root, tip, perp, b, camPos);
         }
 
-        float finalBaseT = BladeSections[4];
-        Vector2 finalBase = Vector2.Lerp(root, tip, finalBaseT);
-        float width = LanceCombatMath.BladeHalfWidth(finalBaseT);
+        float finalBase = BladeSections[4];
+        Vector2 basePoint = Vector2.Lerp(root, tip, finalBase);
+        GetBladeWidths(finalBase, out float left, out float right);
         int index = 16;
-        mesh.MoveVertice(index, finalBase + perp * width * 0.12f - camPos);
-        mesh.MoveVertice(index + 1, finalBase + perp * width * 0.57f - camPos);
-        mesh.MoveVertice(index + 2, Vector2.Lerp(root, tip, 0.955f) + perp * 0.03f - camPos);
+        mesh.MoveVertice(index, basePoint + perp * right * 0.02f - camPos);
+        mesh.MoveVertice(index + 1, basePoint + perp * right * 0.13f - camPos);
+        mesh.MoveVertice(index + 2, Vector2.Lerp(root, tip, 0.945f) + perp * 0.02f - camPos);
     }
 
-    private static void MoveFacetPair(TriangleMesh mesh, int index, Vector2 root, Vector2 tip,
-        Vector2 perp, float bladeT, Vector2 camPos)
+    private static void MoveHighlightPair(TriangleMesh mesh, int index, Vector2 root, Vector2 tip,
+        Vector2 perp, float t, Vector2 camPos)
     {
-        Vector2 center = Vector2.Lerp(root, tip, bladeT);
-        float width = LanceCombatMath.BladeHalfWidth(bladeT);
-        float fade = Mathf.Lerp(1f, 0.42f, bladeT);
-        mesh.MoveVertice(index, center + perp * width * 0.10f * fade - camPos);
-        mesh.MoveVertice(index + 1, center + perp * width * 0.58f * fade - camPos);
+        Vector2 center = Vector2.Lerp(root, tip, t);
+        GetBladeWidths(t, out _, out float right);
+        float fade = Mathf.Lerp(1f, 0.38f, t);
+        float innerNear = right * 0.018f * fade;
+        float innerFar = right * 0.135f * fade;
+        mesh.MoveVertice(index, center + perp * innerNear - camPos);
+        mesh.MoveVertice(index + 1, center + perp * innerFar - camPos);
     }
 
-    private static void DrawFractures(RoomCamera.SpriteLeaser sLeaser, Vector2 direction, Vector2 perp,
-        Vector2 root, Vector2 tip, Vector2 camPos)
+    private static void GetBladeWidths(float t, out float left, out float right)
     {
-        float directionAngle = Custom.VecToDeg(direction);
-        for (int i = 0; i < CrackPositions.Length; i++)
+        float shaped = Mathf.Pow(Mathf.Clamp01(t), 0.82f);
+        left = Mathf.Lerp(4.55f, 0.10f, shaped);
+        right = Mathf.Lerp(6.85f, 0.10f, shaped);
+    }
+
+    private Vector2 WrapCenter(Vector2 direction, Vector2 grip)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.right;
+        Vector2 bladeRoot = grip + dir * LanceCombatMath.BladeRootDistance(Length);
+        // Put the binding at the actual blade/handle transition instead of burying it close to the
+        // hand. A small rear offset keeps the leather from covering the blade shoulder itself.
+        return bladeRoot - dir * 0.85f;
+    }
+
+    private Vector2 FabricAttachPos(Vector2 direction, Vector2 grip)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.right;
+        Vector2 perp = Custom.PerpendicularVector(dir);
+        // The rag visibly exits from the lower side of the leather knot rather than from the shaft.
+        return WrapCenter(dir, grip) - perp * 3.30f + dir * 1.05f;
+    }
+
+    private void ResetFabric(Vector2 attach)
+    {
+        for (int i = 0; i < FabricSegments; i++)
         {
-            float bladeT = CrackPositions[i];
-            float width = LanceCombatMath.BladeHalfWidth(bladeT);
-            Vector2 center = Vector2.Lerp(root, tip, bladeT) + perp * (i % 2 == 0 ? -width * 0.08f : width * 0.10f);
-            FSprite crack = sLeaser.sprites[5 + i];
-            crack.SetPosition(center - camPos);
-            crack.rotation = directionAngle + 90f + CrackTilts[i];
-            crack.scaleX = Mathf.Max(1.5f, width * (i == 1 ? 1.22f : 1.05f));
-            crack.scaleY = i == 2 ? 0.48f : 0.42f;
+            Vector2 position = attach + Vector2.down * FabricSegmentLength * (i + 1);
+            _fabric[i, 0] = position;
+            _fabric[i, 1] = position;
+            _fabric[i, 2] = Vector2.zero;
+        }
+        _fabricInitialized = true;
+    }
+
+    private void EnsureFabricPhysics()
+    {
+        if (room == null || _fabricUpdateClock == _clock) return;
+        _fabricUpdateClock = _clock;
+
+        Vector2 dir = rotation.sqrMagnitude > 0.001f ? rotation.normalized : Vector2.right;
+        Vector2 attach = FabricAttachPos(dir, firstChunk.pos);
+        if (!_fabricInitialized || Vector2.Distance(_fabric[0, 0], attach) > 80f)
+            ResetFabric(attach);
+
+        Vector2 weaponMotion = firstChunk.pos - firstChunk.lastPos;
+        Vector2 side = Custom.PerpendicularVector(dir);
+        for (int i = 0; i < FabricSegments; i++)
+        {
+            float progress = (i + 1f) / FabricSegments;
+            _fabric[i, 1] = _fabric[i, 0];
+            _fabric[i, 0] += _fabric[i, 2];
+
+            bool submerged = room.PointSubmerged(_fabric[i, 0]);
+            _fabric[i, 2] *= submerged ? 0.74f : Mathf.Lerp(0.92f, 0.875f, progress);
+            _fabric[i, 2].y -= room.gravity * (submerged ? 0.025f : Mathf.Lerp(0.14f, 0.27f, progress));
+
+            _fabric[i, 2] -= weaponMotion * (0.017f + 0.026f * progress);
+            float flutter = Mathf.Sin((_clock + i * 6.7f) * 0.22f) *
+                Mathf.Min(0.30f, 0.035f + weaponMotion.magnitude * 0.026f) * progress;
+            _fabric[i, 2] += side * flutter;
         }
 
-        // Small offshoots stop the marks from reading as painted stripes. They are kept short and
-        // sparse so the weapon still reads cleanly at Rain World's native sprite scale.
-        float[] branchT = { 0.30f, 0.55f, 0.73f };
-        float[] branchTilt = { -31f, 29f, -27f };
-        for (int i = 0; i < branchT.Length; i++)
+        for (int iteration = 0; iteration < 3; iteration++)
         {
-            float bladeT = branchT[i];
-            float width = LanceCombatMath.BladeHalfWidth(bladeT);
-            Vector2 center = Vector2.Lerp(root, tip, bladeT) + perp * (i == 1 ? width * 0.23f : -width * 0.20f);
-            FSprite branch = sLeaser.sprites[9 + i];
-            branch.SetPosition(center - camPos);
-            branch.rotation = directionAngle + 90f + branchTilt[i];
-            branch.scaleX = Mathf.Max(1.1f, width * 0.56f);
-            branch.scaleY = 0.36f;
+            ConstrainFabricToAnchor(attach);
+            for (int i = 1; i < FabricSegments; i++)
+                ConstrainFabricPair(i - 1, i);
+        }
+    }
+
+    private void ConstrainFabricToAnchor(Vector2 attach)
+    {
+        Vector2 delta = _fabric[0, 0] - attach;
+        float distance = delta.magnitude;
+        if (distance < 0.001f) return;
+        Vector2 correction = delta / distance * (distance - FabricSegmentLength);
+        _fabric[0, 0] -= correction;
+        _fabric[0, 2] -= correction * 0.55f;
+    }
+
+    private void ConstrainFabricPair(int previous, int current)
+    {
+        Vector2 delta = _fabric[current, 0] - _fabric[previous, 0];
+        float distance = delta.magnitude;
+        if (distance < 0.001f) return;
+        Vector2 correction = delta / distance * (distance - FabricSegmentLength) * 0.5f;
+        _fabric[current, 0] -= correction;
+        _fabric[current, 2] -= correction * 0.45f;
+        _fabric[previous, 0] += correction;
+        _fabric[previous, 2] += correction * 0.45f;
+    }
+
+    private void DrawFabric(TriangleMesh mesh, Vector2 direction, Vector2 grip, float timeStacker, Vector2 camPos)
+    {
+        Vector2 previous = FabricAttachPos(direction, grip);
+        float previousWidth = 3.35f;
+
+        for (int i = 0; i < FabricSegments; i++)
+        {
+            float progress = (i + 1f) / FabricSegments;
+            Vector2 current = Vector2.Lerp(_fabric[i, 1], _fabric[i, 0], timeStacker);
+            Vector2 tangent = current - previous;
+            if (tangent.sqrMagnitude < 0.001f) tangent = Vector2.down;
+            tangent.Normalize();
+            Vector2 clothPerp = Custom.PerpendicularVector(tangent);
+
+            float endWidth = Mathf.Lerp(3.05f, 0.72f, progress) +
+                Mathf.Sin(progress * Mathf.PI) * 0.42f;
+            int vertex = i * 4;
+            mesh.MoveVertice(vertex, previous - clothPerp * previousWidth - camPos);
+            mesh.MoveVertice(vertex + 1, previous + clothPerp * previousWidth - camPos);
+            mesh.MoveVertice(vertex + 2, current - clothPerp * endWidth - camPos);
+            mesh.MoveVertice(vertex + 3, current + clothPerp * endWidth - camPos);
+
+            previous = current;
+            previousWidth = endWidth;
         }
     }
 
     public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
     {
-        float darkness = room == null ? 0f :
-            room.Darkness(firstChunk.pos) * (1f - room.LightSourceExposure(firstChunk.pos));
+        float darkness = room == null ? 0f : room.Darkness(firstChunk.pos) * (1f - room.LightSourceExposure(firstChunk.pos));
 
-        // Neutral pale bone rather than ochre metal. The facet is not a metal sheen; it is a lighter
-        // fractured plane. Cracks and the root seam are intentionally close to palette black.
-        Color handle = Color.Lerp(new Color(0.57f, 0.58f, 0.54f), palette.blackColor, darkness * 0.92f);
-        Color handleFacet = Color.Lerp(new Color(0.73f, 0.74f, 0.69f), palette.blackColor, darkness * 0.90f);
-        Color blade = Color.Lerp(new Color(0.76f, 0.77f, 0.72f), palette.blackColor, darkness * 0.91f);
-        Color bladeFacet = Color.Lerp(new Color(0.92f, 0.92f, 0.86f), palette.blackColor, darkness * 0.88f);
-        Color fracture = Color.Lerp(new Color(0.12f, 0.115f, 0.105f), palette.blackColor, darkness * 0.55f);
-        Color seam = Color.Lerp(new Color(0.19f, 0.17f, 0.145f), palette.blackColor, darkness * 0.70f);
+        // Desert-first palette. The main read is dry ochre / brown-yellow; no cool silver is used.
+        // Lighter values are dusty abrasion, not reflected light, so contrast remains deliberately low.
+        Color handleBase = Color.Lerp(new Color(0.255f, 0.185f, 0.082f), palette.blackColor, darkness * 0.93f);
+        Color handleLight = Color.Lerp(new Color(0.365f, 0.275f, 0.125f), palette.blackColor, darkness * 0.91f);
+        Color bladeBase = Color.Lerp(new Color(0.405f, 0.300f, 0.145f), palette.blackColor, darkness * 0.92f);
+        Color bladeLight = Color.Lerp(new Color(0.515f, 0.405f, 0.215f), palette.blackColor, darkness * 0.90f);
+        Color wear = Color.Lerp(new Color(0.285f, 0.205f, 0.092f), palette.blackColor, darkness * 0.95f);
+        Color leather = Color.Lerp(new Color(0.205f, 0.108f, 0.045f), palette.blackColor, darkness * 0.94f);
+        Color leatherLight = Color.Lerp(new Color(0.340f, 0.205f, 0.082f), palette.blackColor, darkness * 0.92f);
+        Color fabric = Color.Lerp(new Color(0.525f, 0.315f, 0.085f), palette.blackColor, darkness * 0.91f);
 
-        sLeaser.sprites[0].color = handle;
-        sLeaser.sprites[1].color = handleFacet;
-        sLeaser.sprites[2].color = blade;
-        sLeaser.sprites[3].color = bladeFacet;
-        sLeaser.sprites[4].color = seam;
-        for (int i = 5; i < sLeaser.sprites.Length; i++)
-            sLeaser.sprites[i].color = fracture;
+        sLeaser.sprites[0].color = handleBase;
+        sLeaser.sprites[1].color = handleLight;
+        sLeaser.sprites[2].color = bladeBase;
+        sLeaser.sprites[3].color = bladeLight;
+        for (int i = 4; i < 7; i++) sLeaser.sprites[i].color = wear;
+        sLeaser.sprites[7].color = leather;
+        sLeaser.sprites[8].color = leatherLight;
+        sLeaser.sprites[9].color = leather;
+        sLeaser.sprites[10].color = leatherLight;
+        sLeaser.sprites[11].color = fabric;
     }
 
     public override void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer container)
     {
         container ??= rCam.ReturnFContainer("Items");
-        foreach (FSprite sprite in sLeaser.sprites)
-            sprite.RemoveFromContainer();
+        foreach (FSprite sprite in sLeaser.sprites) sprite.RemoveFromContainer();
 
-        // Main bone body first, then light facets, then the seam/fractures on top.
-        container.AddChild(sLeaser.sprites[0]);
-        container.AddChild(sLeaser.sprites[2]);
-        container.AddChild(sLeaser.sprites[1]);
-        container.AddChild(sLeaser.sprites[3]);
-        for (int i = 4; i < sLeaser.sprites.Length; i++)
-            container.AddChild(sLeaser.sprites[i]);
+        // Rag behind the weapon, then the matte ochre body, then the full leather wrap/knot on top.
+        container.AddChild(sLeaser.sprites[11]);
+        for (int i = 0; i < 7; i++) container.AddChild(sLeaser.sprites[i]);
+        for (int i = 7; i < 11; i++) container.AddChild(sLeaser.sprites[i]);
     }
 }
