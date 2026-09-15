@@ -49,7 +49,7 @@ fi
 # or evaluate compatibility state as a side effect.
 frontend_diagnostic_side_effect_hits="$(
   grep -RInE --include='*.cs' \
-    '(UniversalDevUiCommandQueue\.Process|UniversalDevUiPresentationHub\.Publish|DevUiGenericProtocolBootstrap\.Ensure|DevUiPageCoverageTracker\.Observe|DevUiProtocolInventory\.ObserveLoadedTypes|DevUiSemanticConformanceAudit\.Evaluate|DevUiCompatibilityGate\.Evaluate)' \
+    '(UniversalDevUiCommandQueue\.Process|UniversalDevUiPresentationHub\.Publish|DevUiGenericProtocolBootstrap\.Ensure|DevUiFullAudit\.ObserveAll|DevUiPageCoverageTracker\.Observe|DevUiProtocolInventory\.ObserveLoadedTypes|DevUiSemanticConformanceAudit\.Evaluate|DevUiCompatibilityGate\.Evaluate)' \
     "$frontend" || true
 )"
 if [[ -n "$frontend_diagnostic_side_effect_hits" ]]; then
@@ -82,14 +82,19 @@ if [[ ! -f "$diagnostics_publisher" ]]; then
   exit 1
 fi
 if ! grep -Fq 'DevUiDiagnosticsPolicy.Enabled && session?.Owner != null' "$coordinator" ||
-   ! grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator" ||
    ! grep -Fq 'DevUiDiagnosticsPublisher.Publish(session.Owner)' "$coordinator"; then
-  echo "Universal DevUI diagnostics capture/evaluation must be backend-owned and diagnostics-gated." >&2
+  echo "Compatibility diagnostics must be backend-owned and diagnostics-gated." >&2
+  exit 1
+fi
+if grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator"; then
+  echo "Coordinator must not split diagnostic publication ownership from DevUiDiagnosticsPublisher." >&2
   exit 1
 fi
 
 required_diagnostics_publisher_symbols=(
   'DevUiGenericProtocolBootstrap.Ensure()'
+  'DevUiFullAudit.ObserveAll(owner)'
+  'UniversalDevUiPresentationHub.Publish(owner)'
   'DevUiPageCoverageTracker.Observe(owner, mirror)'
   'DevUiProtocolInventory.ObserveLoadedTypes()'
   'DevUiSemanticConformanceAudit.Evaluate(mirror)'
