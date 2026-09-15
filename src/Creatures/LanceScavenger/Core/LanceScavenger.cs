@@ -76,9 +76,18 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             Combat.Tick(new LanceSituation(false, Lance != null, SidearmSpear != null, false,
                 ScavengerAI.ViolenceType.None, false, 999f, false));
         base.Update(eu);
-        if ((Combat.State == LanceState.Charge || Combat.State == LanceState.FollowUpThrow) &&
-            (bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0))
+
+        bool grounded = bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0;
+        if (Combat.State == LanceState.Charge)
+        {
+            if (grounded) Combat.MarkLanding();
+            else Combat.MarkAirborne();
+        }
+        else if (Combat.State == LanceState.FollowUpThrow && grounded)
+        {
             Combat.MarkLanding();
+        }
+
         if (room != null) Lance?.SynchronizeGrip(eu);
     }
 
