@@ -62,7 +62,11 @@ internal static class CombatTests
         Check(combo.State == LanceState.FollowUpThrow,
             "A predicted charge carrying a sidearm reserves a landing follow-up");
         for (int i = 0; i < LanceCombatState.FollowUpThrowFrames; i++) combo.Tick(Situation(sidearm: true));
-        Check(combo.FollowUpReady, "Follow-up spear becomes ready after the fast 8-frame settle");
+        Check(!combo.FollowUpReady,
+            "Follow-up spear cannot fire merely because the charge timer ended while still airborne");
+        combo.MarkLanding();
+        for (int i = 0; i < LanceCombatState.FollowUpThrowFrames; i++) combo.Tick(Situation(sidearm: true));
+        Check(combo.FollowUpReady, "Follow-up spear becomes ready 8 frames after actual landing");
         combo.CompleteFollowUp();
         Check(combo.State == LanceState.Recover, "A completed follow-up pays normal recovery");
 
