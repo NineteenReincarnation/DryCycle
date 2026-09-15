@@ -6,7 +6,6 @@ using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
-using DryCycle.DevUI.DevTool.RWImGui;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
 using UnityEngine;
@@ -297,19 +296,10 @@ internal static class LegacyUiPresentationController
         UniversalDevUiPresentationHub.Clear();
         DevUiPageCoverageTracker.Reset();
 
-        // RWImGui views retain pre-grouped rows and source indexes by snapshot identity. The
-        // presentation hubs above no longer own those arrays after Clear(), so release the view-side
-        // mirrors on the same dormant edge instead of keeping the last room alive until next open.
-        DevToolOverlay.ResetRetainedState();
-        ObjectInspectorView.ResetRetainedState();
-        SceneWorkspaceWindow.ResetRetainedState();
-        SoundEditorView.ResetRetainedState();
-        TriggerEditorView.ResetRetainedState();
-        WorldWorkspaceView.ResetRetainedState();
-        RelationshipEditorView.ResetRetainedState();
-        RoomSettingsView.ResetRetainedState();
-        DialogEditorView.ResetRetainedState();
-        UniversalDevUiMirrorView.ResetRetainedState();
+        // Frontend-specific retained UI state belongs to the optional RWImGui assembly. Core cannot
+        // reference that assembly because the frontend already depends on DryCycle.dll; doing so would
+        // create a circular compile-time dependency. The frontend retires those caches on its own
+        // live -> dormant transition.
 
         // Reset normally releases the observed/hidden page already. Keep the explicit release for
         // the case where presentation never hid the active page during this DevUI lifetime.
