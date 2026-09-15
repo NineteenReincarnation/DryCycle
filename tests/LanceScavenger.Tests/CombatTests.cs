@@ -9,15 +9,15 @@ internal static class CombatTests
 {
     internal static LanceSituation Situation(ScavengerAI.ViolenceType violence = null, bool afraid = false,
         float distance = 250f, bool lane = true, bool armed = true, bool sidearm = false, bool active = true,
-        bool target = true) =>
-        new(active, armed, sidearm, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane);
+        bool target = true, bool backstepComplete = true) =>
+        new(active, armed, sidearm, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane, backstepComplete);
 
     internal static LanceCombatState Charge(float distance = 250f, bool afraid = false, bool sidearm = false)
     {
         var combat = new LanceCombatState();
-        for (int i = 0; i < LanceCombatState.BraceFrames + 6 && combat.State != LanceState.Charge; i++)
+        for (int i = 0; i < LanceCombatState.BraceFrames + 8 && combat.State != LanceState.Charge; i++)
             combat.Tick(Situation(distance: distance, afraid: afraid, sidearm: sidearm));
-        Check(combat.State == LanceState.Charge, "A clear vanilla-Lethal encounter can reach Charge");
+        Check(combat.State == LanceState.Charge, "A clear vanilla-Lethal encounter can backstep, brace and reach Charge");
         return combat;
     }
 
@@ -40,6 +40,15 @@ internal static class CombatTests
             "Vanilla NonLethal is not upgraded into a lethal lance charge");
 
         combat = new LanceCombatState();
+        combat.Tick(Situation(backstepComplete: false));
+        Check(combat.State == LanceState.Backstep, "A valid charge opportunity enters the pre-brace backstep first");
+        for (int i = 0; i < 8; i++) combat.Tick(Situation(backstepComplete: false));
+        Check(combat.State == LanceState.Backstep && combat.AttackSerial == 0,
+            "Brace timing cannot begin while the physical backstep is still moving");
+        combat.Tick(Situation(backstepComplete: true));
+        Check(combat.State == LanceState.Brace && combat.Age == 0,
+            "Completing the backstep starts a fresh brace timer");
+
         int brace = 0;
         while (combat.AttackSerial == 0)
         {
@@ -48,7 +57,7 @@ internal static class CombatTests
             Check(combat.Age < 200, "Bounded charge preparation");
         }
         Check(brace >= LanceCombatState.BraceFrames,
-            "Every full charge has the configured 1.5-second brace interval");
+            "Every full charge has the configured 0.95-second brace interval after the backstep");
 
         int serial = combat.AttackSerial;
         for (int i = 0; i < LanceCombatState.MaxChargeFrames; i++) combat.Tick(Situation());
@@ -101,9 +110,15 @@ internal static class CombatTests
                 "Loss of commitment during a charge retains a recovery cost");
         }
 
+        var backstep = new LanceCombatState();
+        backstep.Tick(Situation(backstepComplete: false));
+        backstep.Tick(Situation(lane: false, backstepComplete: true));
+        Check(backstep.State == LanceState.AcquireChargeLane && backstep.AttackSerial == 0,
+            "Lane is revalidated after the backstep before brace begins");
+
         var brace = new LanceCombatState();
-        for (int i = 0; i < 30; i++) brace.Tick(Situation());
-        Check(brace.State == LanceState.Brace, "Test reaches brace");
+        for (int i = 0; i < 20; i++) brace.Tick(Situation());
+        Check(brace.State == LanceState.Brace, "Test reaches brace after the backstep");
         brace.Tick(Situation(lane: false));
         Check(brace.State == LanceState.AcquireChargeLane && brace.AttackSerial == 0,
             "An aggressive scavenger reacquires a lane when a friend or wall blocks launch");
@@ -115,7 +130,7 @@ internal static class CombatTests
 
         LanceCombatState counterCharge = Charge(250f, afraid: true);
         Check(counterCharge.AttackSerial == 1,
-            "A lethal Afraid scavenger may counter-charge when a safe lane already exists");
+            "A lethal Afraid scavenger may counter-charge after its backstep when a safe lane exists");
     }
 
     internal static void ImpactAndSweeps()
