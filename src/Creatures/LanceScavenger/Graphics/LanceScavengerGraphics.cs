@@ -1,6 +1,5 @@
 using System;
 using DryCycle.Items.ScavengerLance;
-using MoreSlugcats;
 using RWCustom;
 using UnityEngine;
 
@@ -10,28 +9,16 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
 {
     private const int EquipmentSprites = 25;
     private readonly LanceScavenger _owner;
-    private readonly VultureMaskGraphics _mask;
     private readonly int _start;
     private readonly int _shoulderSide;
     private readonly LanceAdornment[] _cords = { new(3, 5f), new(2, 6f), new(2, 5f) };
     private readonly LanceAdornment[] _ribbons = { new(5, 4.2f), new(4, 4f) };
-    private bool _maskAvailable;
 
     internal LanceScavengerGraphics(LanceScavenger owner) : base(owner)
     {
         _owner = owner;
         _start = TotalSprites;
         _shoulderSide = (owner.abstractCreature.ID.RandomSeed & 1) == 0 ? -1 : 1;
-        _mask = new VultureMaskGraphics(owner, VultureMask.MaskType.NORMAL, _start + EquipmentSprites, LanceScavengerAssets.Prefix)
-        {
-            ColorA = new HSLColor(0.115f, 0.42f, 0.62f), ColorB = new HSLColor(0.105f, 0.43f, 0.43f),
-            rotationA = Vector2.up, lastRotationA = Vector2.up,
-            rotationB = Vector2.up, lastRotationB = Vector2.up
-        };
-        // Preserve normal procedural branching while making it subordinate to the mask horn.
-        foreach (Eartlers.Vertex[] branch in eartlers.points)
-            for (int i = 0; i < branch.Length; i++)
-            { Eartlers.Vertex vertex = branch[i]; vertex.pos *= 0.58f; vertex.rad *= 0.78f; branch[i] = vertex; }
     }
 
     public override void Reset()
@@ -76,7 +63,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         base.InitiateSprites(sLeaser, rCam);
-        Array.Resize(ref sLeaser.sprites, _start + EquipmentSprites + _mask.TotalSprites);
+        Array.Resize(ref sLeaser.sprites, _start + EquipmentSprites);
         sLeaser.sprites[_start] = TriangleMesh.MakeLongMesh(6, false, false);
         sLeaser.sprites[_start + 1] = TriangleMesh.MakeLongMesh(6, false, false);
         sLeaser.sprites[_start + 2] = new TriangleMesh("Futile_White", new[] {
@@ -89,17 +76,6 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         sLeaser.sprites[_start + 12] = new FSprite("Circle20");
         for (int i = 13; i < EquipmentSprites; i++)
             sLeaser.sprites[_start + i] = new FSprite((i - 13) % 3 == 1 ? "Circle20" : "pixel");
-        _mask.InitiateSprites(sLeaser, rCam);
-        for (int i = 0; i < _mask.BaseTotalSprites; i++)
-            sLeaser.sprites[_mask.firstSprite + i].shader = rCam.game.rainWorld.Shaders["Basic"];
-        _maskAvailable = LanceScavengerAssets.EnsureLoaded();
-        _mask.overrideSprite = LanceScavengerAssets.ActivePrefix;
-        if (_mask.overrideSprite == LanceScavengerAssets.ColorPrefix)
-        {
-            // Preserve the atlas's ivory, gold and dark details. Vanilla mask
-            // graphics still apply room darkness and the two shadow layers.
-            _mask.ColorA = _mask.ColorB = new HSLColor(0f, 0f, 1f);
-        }
         ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         AddToContainer(sLeaser, rCam, null);
     }
@@ -117,7 +93,6 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         sLeaser.sprites[_start + 9].MoveBehindOtherNode(sLeaser.sprites[ChestSprite]);
         sLeaser.sprites[_start + 10].MoveBehindOtherNode(sLeaser.sprites[HipSprite]);
         for (int i = 0; i < 5; i++) sLeaser.sprites[_start + i].MoveBehindOtherNode(sLeaser.sprites[FirstInFrontLimbSprite + 2]);
-        _mask.AddToContainer(sLeaser, rCam, container);
     }
 
     public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float t, Vector2 cam)
@@ -160,26 +135,6 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
                 shine.SetPosition(position - cam + new Vector2(-0.6f, 0.6f)); shine.scale = 0.65f;
             }
         ApplyEquipmentPalette(sLeaser, rCam.currentPalette, _owner.room.Darkness(chest) * (1f - _owner.room.LightSourceExposure(chest)));
-        if (_maskAvailable)
-        {
-            // These atlas frames are authored upright and facing right. Feeding the
-            // negated Kraken-mask face vector both mirrors and rolls them backwards.
-            // Separate head roll from local gaze; native graphics still choose all
-            // nine frames, mirror, anchor and shade the three layers.
-            Vector2 headUp = (head - chest).normalized;
-            if (headUp.sqrMagnitude < 0.01f) headUp = Vector2.up;
-            Vector2 headRight = new(headUp.y, -headUp.x);
-            Vector2 gaze = Vector2.Lerp(ToVector(lastLookPoint), ToVector(lookPoint), t) - head;
-            Vector2 localGaze = new(Vector2.Dot(gaze, headRight), Vector2.Dot(gaze, headUp));
-            float neutral = Mathf.Lerp(lastNeutralFace, neutralFace, t);
-            Vector2 facing = Vector2.Lerp(localGaze.normalized, Vector2.up, neutral).normalized;
-            _mask.overrideRotationVector = headUp;
-            _mask.overrideAnchorVector = facing.sqrMagnitude > 0.01f ? facing : Vector2.up;
-            _mask.overrideDrawVector = head + headUp;
-            _mask.ApplyPalette(sLeaser, rCam, rCam.currentPalette);
-            _mask.DrawSprites(sLeaser, rCam, t, cam);
-        }
-        else _mask.SetVisible(sLeaser, false);
     }
 
     private Vector2 DrawPosition(int index, float t) => Vector2.Lerp(ToVector(drawPositions[index, 1]), ToVector(drawPositions[index, 0]), t);
@@ -207,7 +162,6 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         base.ApplyPalette(sLeaser, rCam, palette);
         if (sLeaser.sprites.Length <= _start) return;
         ApplyEquipmentPalette(sLeaser, palette, 0f);
-        _mask.ApplyPalette(sLeaser, rCam, palette);
     }
     private void ApplyEquipmentPalette(RoomCamera.SpriteLeaser sLeaser, RoomPalette palette, float darkness)
     {
