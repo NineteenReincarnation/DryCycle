@@ -20,13 +20,70 @@ internal static class WorldWorkspaceDataView
         Weather
     }
 
+    private sealed class WeatherMemberPresentation
+    {
+        internal WeatherSpatialMember Member;
+        internal WeatherSpatialTarget Target;
+        internal string Key = string.Empty;
+        internal string SpatialId = string.Empty;
+        internal string FriendlyName = string.Empty;
+        internal string TechnicalName = string.Empty;
+    }
+
+    private sealed class WeatherFamilyPresentation
+    {
+        internal WeatherSpatialFamily Family;
+        internal string FamilyId = string.Empty;
+        internal string PushId = string.Empty;
+        internal string FriendlyName = string.Empty;
+        internal string TechnicalName = string.Empty;
+        internal WeatherMemberPresentation[] Members = Array.Empty<WeatherMemberPresentation>();
+    }
+
+    private sealed class ScalarSummaryProjection
+    {
+        internal bool Valid;
+        internal bool Chinese;
+        internal bool Percentage;
+        internal float Value;
+        internal string Semantic = string.Empty;
+        internal string Text = string.Empty;
+    }
+
     private static readonly Num.Vector4 SyncedColor = new(0.48f, 0.78f, 0.60f, 1f);
     private static readonly Num.Vector4 DirtyColor = new(0.96f, 0.77f, 0.38f, 1f);
     private static readonly Num.Vector4 ErrorColor = new(0.92f, 0.42f, 0.42f, 1f);
     private static readonly Num.Vector4 TechnicalColor = new(0.56f, 0.62f, 0.70f, 1f);
+    private static readonly WeatherSpatialRule[] RuleValues =
+    {
+        WeatherSpatialRule.Inherit,
+        WeatherSpatialRule.Allow,
+        WeatherSpatialRule.Deny
+    };
+    private static readonly string[] RuleIds =
+    {
+        "Rule_Inherit",
+        "Rule_Allow",
+        "Rule_Deny"
+    };
+    private static readonly string[] PercentLabels = BuildPercentLabels();
+    private static readonly Dictionary<string, ScalarSummaryProjection> ScalarSummaries = new(StringComparer.Ordinal);
 
     private static DataPage currentPage = DataPage.Environment;
     private static string lastSaveStatus = string.Empty;
+
+    private static bool weatherPresentationValid;
+    private static bool projectedWeatherChinese;
+    private static WeatherFamilyPresentation[] weatherPresentation = Array.Empty<WeatherFamilyPresentation>();
+
+    private static bool roomHeaderProjectionValid;
+    private static string projectedRoomHeaderName = string.Empty;
+    private static string roomHeaderLabel = string.Empty;
+
+    private static bool roomRuleProjectionValid;
+    private static bool projectedRoomRuleChinese;
+    private static string projectedRoomRuleName = string.Empty;
+    private static string roomRuleLabel = string.Empty;
 
     internal static bool HasDirtyData =>
         TemperatureSetsLoader.Dirty || WeatherSpatialRegistry.Dirty;
@@ -95,7 +152,7 @@ internal static class WorldWorkspaceDataView
         if (room != null)
         {
             ImGui.SameLine();
-            ImGui.TextDisabled("/ " + room.Name);
+            ImGui.TextDisabled(GetRoomHeaderLabel(room.Name));
         }
 
         float actionX = rightX - saveWidth;
@@ -340,10 +397,7 @@ internal static class WorldWorkspaceDataView
         if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technicalName).X + 8f))
             ImGui.TextColored(TechnicalColor, technicalName);
 
-        string summary = percentage
-            ? Math.Round(value * 100f) + "% · " + semantic
-            : value.ToString("0.###") + " · " + semantic;
-        DevToolWidgets.MutedText(summary);
+        DevToolWidgets.MutedText(GetScalarSummary(id, value, semantic, percentage));
 
         float editValue = percentage ? value * 100f : value;
         float editMin = percentage ? min * 100f : min;
@@ -430,47 +484,48 @@ internal static class WorldWorkspaceDataView
 
     private static void DrawRegionSchedule(string region)
     {
-        IReadOnlyList<WeatherSpatialFamily> families = WeatherSpatialCatalog.AllFamilies;
+        WeatherFamilyPresentation[] families = GetWeatherPresentation();
         float rowHeight = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y;
 
-        for (int i = 0; i < families.Count; i++)
+        for (int i = 0; i < families.Length; i++)
         {
-            WeatherSpatialFamily family = families[i];
-            string familyId = family.Id ?? string.Empty;
+            WeatherFamilyPresentation binding = families[i];
+            WeatherSpatialFamily family = binding.Family;
             WeatherSpatialRegistry.TryGetFamilySchedule(
                 region,
-                familyId,
+                binding.FamilyId,
                 out bool familyEnabled,
                 out float familyChance);
 
-            ImGui.PushID("WeatherFamily_" + familyId);
-            float cardHeight = 92f + rowHeight * (family.Members.Count * 3 + 1);
+            ImGui.PushID(binding.PushId);
+            float cardHeight = 92f + rowHeight * (binding.Members.Length * 3 + 1);
             if (ImGui.BeginChild("##FamilyCard", new Num.Vector2(0f, cardHeight), ImGuiChildFlags.Borders))
             {
                 if (DrawToggleRow(
-                        FamilyFriendlyName(familyId),
-                        "FamWeather / " + familyId,
+                        binding.FriendlyName,
+                        binding.TechnicalName,
                         "FamilyToggle",
                         familyEnabled,
                         DevToolUiSettings.T("已启用", "Enabled"),
                         DevToolUiSettings.T("已关闭", "Disabled")))
                 {
-                    WeatherSpatialRegistry.SetFamilyScheduleEnabled(region, familyId, !familyEnabled);
+                    WeatherSpatialRegistry.SetFamilyScheduleEnabled(region, binding.FamilyId, !familyEnabled);
                 }
 
                 float chance = familyChance;
                 if (DrawPercentControl(
                         DevToolUiSettings.T("区域出现概率", "Region chance"),
-                        "FamilyChance",
+                        "##FamilyChance",
                         ref chance))
                 {
-                    WeatherSpatialRegistry.SetFamilyScheduleChance(region, familyId, chance);
+                    WeatherSpatialRegistry.SetFamilyScheduleChance(region, binding.FamilyId, chance);
                 }
 
                 ImGui.Separator();
-                for (int j = 0; j < family.Members.Count; j++)
+                for (int j = 0; j < binding.Members.Length; j++)
                 {
-                    WeatherSpatialMember member = family.Members[j];
+                    WeatherMemberPresentation memberBinding = binding.Members[j];
+                    WeatherSpatialMember member = memberBinding.Member;
                     WeatherSpatialRegistry.TryGetSubWeatherSchedule(
                         region,
                         member.Kind,
@@ -478,10 +533,10 @@ internal static class WorldWorkspaceDataView
                         out bool subEnabled,
                         out float subChance);
 
-                    ImGui.PushID(member.Key);
+                    ImGui.PushID(memberBinding.Key);
                     if (DrawToggleRow(
-                            WeatherFriendlyName(member.Id),
-                            WeatherTechnicalName(member.Kind.ToString(), member.Id),
+                            memberBinding.FriendlyName,
+                            memberBinding.TechnicalName,
                             "SubWeatherToggle",
                             subEnabled,
                             DevToolUiSettings.T("启用", "On"),
@@ -497,7 +552,7 @@ internal static class WorldWorkspaceDataView
                     float nextChance = subChance;
                     if (DrawPercentControl(
                             DevToolUiSettings.T("子天气概率", "Sub-weather chance"),
-                            "SubChance",
+                            "##SubChance",
                             ref nextChance))
                     {
                         WeatherSpatialRegistry.SetSubWeatherScheduleChance(
@@ -507,7 +562,7 @@ internal static class WorldWorkspaceDataView
                             nextChance);
                     }
 
-                    if (j < family.Members.Count - 1) ImGui.Separator();
+                    if (j < binding.Members.Length - 1) ImGui.Separator();
                     ImGui.PopID();
                 }
             }
@@ -547,35 +602,33 @@ internal static class WorldWorkspaceDataView
             enabled ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle);
     }
 
-    private static bool DrawPercentControl(string label, string id, ref float value)
+    private static bool DrawPercentControl(string label, string widgetId, ref float value)
     {
         ImGui.TextUnformatted(label);
         if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize("100%").X + 8f))
-            ImGui.TextDisabled(Math.Round(value) + "%");
+            ImGui.TextDisabled(GetPercentLabel(value));
         ImGui.SetNextItemWidth(-1f);
-        return ImGui.SliderFloat("##" + id, ref value, 0f, 100f, "%.0f%%");
+        return ImGui.SliderFloat(widgetId, ref value, 0f, 100f, "%.0f%%");
     }
 
     private static void DrawSpatialRuleMatrix(string region, EditorMapRoomSnapshot room)
     {
-        IReadOnlyList<WeatherSpatialFamily> families = WeatherSpatialCatalog.AllFamilies;
-        for (int familyIndex = 0; familyIndex < families.Count; familyIndex++)
+        WeatherFamilyPresentation[] families = GetWeatherPresentation();
+        for (int familyIndex = 0; familyIndex < families.Length; familyIndex++)
         {
-            WeatherSpatialFamily family = families[familyIndex];
-            ImGui.TextUnformatted(FamilyFriendlyName(family.Id));
+            WeatherFamilyPresentation family = families[familyIndex];
+            ImGui.TextUnformatted(family.FriendlyName);
             ImGui.SameLine();
-            ImGui.TextColored(TechnicalColor, "FamWeather / " + family.Id);
+            ImGui.TextColored(TechnicalColor, family.TechnicalName);
             ImGui.Separator();
 
-            for (int memberIndex = 0; memberIndex < family.Members.Count; memberIndex++)
+            for (int memberIndex = 0; memberIndex < family.Members.Length; memberIndex++)
             {
-                WeatherSpatialMember member = family.Members[memberIndex];
-                WeatherSpatialTarget target = new(member.Kind, member.Id, member.Id);
-                DrawSpatialRuleRow(region, room, target);
-                if (memberIndex < family.Members.Count - 1) ImGui.Spacing();
+                DrawSpatialRuleRow(region, room, family.Members[memberIndex]);
+                if (memberIndex < family.Members.Length - 1) ImGui.Spacing();
             }
 
-            if (familyIndex < families.Count - 1)
+            if (familyIndex < families.Length - 1)
             {
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -587,13 +640,13 @@ internal static class WorldWorkspaceDataView
     private static void DrawSpatialRuleRow(
         string region,
         EditorMapRoomSnapshot room,
-        WeatherSpatialTarget target)
+        WeatherMemberPresentation binding)
     {
-        ImGui.PushID("Spatial_" + target.Key);
-        ImGui.TextUnformatted(WeatherFriendlyName(target.WeatherId));
-        string technical = WeatherTechnicalName(target.Kind.ToString(), target.WeatherId);
-        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(technical).X + 8f))
-            ImGui.TextColored(TechnicalColor, technical);
+        WeatherSpatialTarget target = binding.Target;
+        ImGui.PushID(binding.SpatialId);
+        ImGui.TextUnformatted(binding.FriendlyName);
+        if (DevToolWidgets.SameLineIfFits(ImGui.CalcTextSize(binding.TechnicalName).X + 8f))
+            ImGui.TextColored(TechnicalColor, binding.TechnicalName);
 
         WeatherSpatialRule regionRule = WeatherSpatialRegistry.GetDefaultRule(region, target);
         if (DrawRuleEditor(
@@ -618,7 +671,7 @@ internal static class WorldWorkspaceDataView
                 ? NormalizeEffectiveRule(WeatherSpatialRegistry.GlobalDefault)
                 : regionRule;
             if (DrawRuleEditor(
-                    DevToolUiSettings.T("房间 · ", "Room · ") + room.Name,
+                    GetRoomRuleLabel(room.Name),
                     "RoomRule",
                     ref roomRule,
                     RoomInheritanceHint(roomRule, effectiveRegion)))
@@ -651,17 +704,11 @@ internal static class WorldWorkspaceDataView
     private static bool DrawRuleSegments(string id, ref WeatherSpatialRule rule)
     {
         bool changed = false;
-        WeatherSpatialRule[] values =
-        {
-            WeatherSpatialRule.Inherit,
-            WeatherSpatialRule.Allow,
-            WeatherSpatialRule.Deny
-        };
 
         ImGui.PushID(id);
-        for (int i = 0; i < values.Length; i++)
+        for (int i = 0; i < RuleValues.Length; i++)
         {
-            WeatherSpatialRule candidate = values[i];
+            WeatherSpatialRule candidate = RuleValues[i];
             bool selected = rule == candidate;
             DevToolButtonTone tone = selected
                 ? candidate switch
@@ -674,14 +721,14 @@ internal static class WorldWorkspaceDataView
 
             if (DevToolWidgets.ActionButton(
                     RuleLabel(candidate),
-                    "Rule_" + candidate,
+                    RuleIds[i],
                     tone))
             {
                 rule = candidate;
                 changed = true;
             }
 
-            if (i < values.Length - 1) ImGui.SameLine();
+            if (i < RuleValues.Length - 1) ImGui.SameLine();
         }
         ImGui.PopID();
         return changed;
@@ -704,7 +751,9 @@ internal static class WorldWorkspaceDataView
     {
         if (rule != WeatherSpatialRule.Inherit) return string.Empty;
         WeatherSpatialRule fallback = NormalizeEffectiveRule(WeatherSpatialRegistry.GlobalDefault);
-        return DevToolUiSettings.T("继承 → 全局默认：", "Inherit → global default: ") + RuleLabel(fallback);
+        return fallback == WeatherSpatialRule.Allow
+            ? DevToolUiSettings.T("继承 → 全局默认：允许", "Inherit → global default: Allow")
+            : DevToolUiSettings.T("继承 → 全局默认：禁止", "Inherit → global default: Forbidden");
     }
 
     private static string RoomInheritanceHint(
@@ -712,7 +761,126 @@ internal static class WorldWorkspaceDataView
         WeatherSpatialRule effectiveRegion)
     {
         if (roomRule != WeatherSpatialRule.Inherit) return string.Empty;
-        return DevToolUiSettings.T("继承 → 区域结果：", "Inherit → region result: ") + RuleLabel(effectiveRegion);
+        return effectiveRegion == WeatherSpatialRule.Allow
+            ? DevToolUiSettings.T("继承 → 区域结果：允许", "Inherit → region result: Allow")
+            : DevToolUiSettings.T("继承 → 区域结果：禁止", "Inherit → region result: Forbidden");
+    }
+
+    private static WeatherFamilyPresentation[] GetWeatherPresentation()
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (weatherPresentationValid && projectedWeatherChinese == chinese)
+            return weatherPresentation;
+
+        IReadOnlyList<WeatherSpatialFamily> families = WeatherSpatialCatalog.AllFamilies;
+        WeatherFamilyPresentation[] next = new WeatherFamilyPresentation[families.Count];
+        for (int i = 0; i < families.Count; i++)
+        {
+            WeatherSpatialFamily family = families[i];
+            string familyId = family.Id ?? string.Empty;
+            WeatherMemberPresentation[] members = new WeatherMemberPresentation[family.Members.Count];
+            for (int j = 0; j < family.Members.Count; j++)
+            {
+                WeatherSpatialMember member = family.Members[j];
+                string key = member.Key;
+                members[j] = new WeatherMemberPresentation
+                {
+                    Member = member,
+                    Target = new WeatherSpatialTarget(member.Kind, member.Id, member.Id),
+                    Key = key,
+                    SpatialId = "Spatial_" + key,
+                    FriendlyName = WeatherFriendlyName(member.Id),
+                    TechnicalName = WeatherTechnicalName(member.Kind.ToString(), member.Id)
+                };
+            }
+
+            next[i] = new WeatherFamilyPresentation
+            {
+                Family = family,
+                FamilyId = familyId,
+                PushId = "WeatherFamily_" + familyId,
+                FriendlyName = FamilyFriendlyName(familyId),
+                TechnicalName = "FamWeather / " + familyId,
+                Members = members
+            };
+        }
+
+        projectedWeatherChinese = chinese;
+        weatherPresentationValid = true;
+        weatherPresentation = next;
+        return weatherPresentation;
+    }
+
+    private static string GetRoomHeaderLabel(string roomName)
+    {
+        roomName ??= string.Empty;
+        if (roomHeaderProjectionValid && string.Equals(projectedRoomHeaderName, roomName, StringComparison.Ordinal))
+            return roomHeaderLabel;
+
+        projectedRoomHeaderName = roomName;
+        roomHeaderProjectionValid = true;
+        roomHeaderLabel = "/ " + roomName;
+        return roomHeaderLabel;
+    }
+
+    private static string GetRoomRuleLabel(string roomName)
+    {
+        roomName ??= string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (roomRuleProjectionValid &&
+            projectedRoomRuleChinese == chinese &&
+            string.Equals(projectedRoomRuleName, roomName, StringComparison.Ordinal))
+            return roomRuleLabel;
+
+        projectedRoomRuleName = roomName;
+        projectedRoomRuleChinese = chinese;
+        roomRuleProjectionValid = true;
+        roomRuleLabel = DevToolUiSettings.T("房间 · ", "Room · ") + roomName;
+        return roomRuleLabel;
+    }
+
+    private static string GetScalarSummary(string id, float value, string semantic, bool percentage)
+    {
+        semantic ??= string.Empty;
+        if (!ScalarSummaries.TryGetValue(id, out ScalarSummaryProjection projection))
+        {
+            projection = new ScalarSummaryProjection();
+            ScalarSummaries[id] = projection;
+        }
+
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (projection.Valid &&
+            projection.Chinese == chinese &&
+            projection.Percentage == percentage &&
+            projection.Value.Equals(value) &&
+            string.Equals(projection.Semantic, semantic, StringComparison.Ordinal))
+            return projection.Text;
+
+        projection.Valid = true;
+        projection.Chinese = chinese;
+        projection.Percentage = percentage;
+        projection.Value = value;
+        projection.Semantic = semantic;
+        projection.Text = percentage
+            ? Math.Round(value * 100f) + "% · " + semantic
+            : value.ToString("0.###") + " · " + semantic;
+        return projection.Text;
+    }
+
+    private static string[] BuildPercentLabels()
+    {
+        string[] labels = new string[101];
+        for (int i = 0; i < labels.Length; i++)
+            labels[i] = i + "%";
+        return labels;
+    }
+
+    private static string GetPercentLabel(float value)
+    {
+        int percent = (int)Math.Round(value);
+        if (percent < 0) percent = 0;
+        else if (percent > 100) percent = 100;
+        return PercentLabels[percent];
     }
 
     private static string FamilyFriendlyName(string id)
