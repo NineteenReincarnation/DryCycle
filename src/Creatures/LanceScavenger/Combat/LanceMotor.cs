@@ -1,3 +1,4 @@
+using DryCycle.Items.ScavengerLance;
 using RWCustom;
 using UnityEngine;
 
