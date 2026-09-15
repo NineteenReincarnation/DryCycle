@@ -41,10 +41,20 @@ if [[ -n "$frontend_action_hits" ]]; then
   exit 1
 fi
 
-# A Presentation getter may capture/read state, but must not process queued writes. Universal DevUI
-# commands follow the same backend command phase as native workspace commands.
+# Presentation access from RWImGui must be an O(1) detached snapshot read. Universal DevUI capture
+# and command execution are backend-owned and diagnostics capture is completely absent from normal
+# production frames when diagnostics are disabled.
+if ! grep -Fq 'public static UniversalDevUiPresentationSnapshot Current => current;' "$universal_presentation"; then
+  echo "Universal DevUI Current must remain a pure O(1) snapshot getter." >&2
+  exit 1
+fi
 if grep -Fq 'UniversalDevUiCommandQueue.Process' "$universal_presentation"; then
   echo "Universal DevUI Presentation is executing mutations from its read/publish path." >&2
+  exit 1
+fi
+if ! grep -Fq 'DevUiDiagnosticsPolicy.Enabled && session?.Owner != null' "$coordinator" ||
+   ! grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator"; then
+  echo "Universal DevUI diagnostics capture must be backend-owned and diagnostics-gated." >&2
   exit 1
 fi
 
