@@ -9,6 +9,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
 {
     private readonly LanceScavenger _owner;
     private readonly TargetMotionTracker _motionTracker = new();
+    private readonly LanceChargePlanCache _chargePlan = new();
     private int _planAge;
     private WorldCoordinate? _staging;
     private bool _sidearmThrowPass;
@@ -63,8 +64,10 @@ internal sealed class LanceScavengerAI : ScavengerAI
         DebugChargeOpportunity = false;
         _sidearmThrowPass = false;
         _sidearmDrawn = false;
+        _planAge = 0;
         _staging = null;
         _motionTracker.Reset();
+        _chargePlan.Reset();
         ResetRecentAimSolution();
         _owner.Combat.ResetForRoom();
         _owner.EnsureWeaponSlots();
@@ -103,10 +106,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         float distance = Target == null ? 999f : Vector2.Distance(_owner.mainBodyChunk.pos, Target.mainBodyChunk.pos);
         bool closeDanger = ImmediateCloseDanger(Target, distance);
 
-        AimSolution = Target == null ? default :
-            LanceAimSolver.Solve(_owner, _owner.mainBodyChunk.pos, Target, _motionTracker);
-        Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
-            ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target, AimSolution);
+        UpdateChargePlan(active, armed, distance, closeDanger);
 
         // Only the visible brace owns the commitment memory. Chasing aim may start the attack but
         // cannot silently satisfy a later brace window.
@@ -121,9 +121,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
             laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
                 _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target);
 
-        // On the actual release frame, choose the best solution seen in the brace window, apply the
-        // limited 6-degree release correction, and then run one final safety check using that exact
-        // direction. This prevents checking one angle and launching with another.
+        // Release is a correctness boundary, not a continuously scheduled planning step. Re-aim a
+        // few degrees and perform one authoritative terrain + ballistic friend check on the exact
+        // solution that will be passed to the motor.
         LanceAimSolution releaseSolution = default;
         bool releaseSolutionReady = false;
         bool releaseFrame = _owner.Combat.State == LanceState.Brace &&
@@ -173,6 +173,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         if (before != LanceState.Brace && state == LanceState.Brace)
         {
+            // Entering the visible commitment window is a dirty edge. Keep the just-computed solution
+            // for continuity/recent-aim memory, but force a fresh analytic plan on the next AI tick.
+            _chargePlan.MarkDirty();
             ResetRecentAimSolution();
             UpdateRecentAimSolution(Target, AimSolution);
         }
@@ -250,6 +253,78 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
 
         LanceScavengerDebugPresentationHub.Publish(_owner, this);
+    }
+
+    private void UpdateChargePlan(bool active, bool armed, float distance, bool closeDanger)
+    {
+        Vector2 origin = _owner.mainBodyChunk.pos;
+        if (Target == null)
+        {
+            AimSolution = default;
+            Lane = new ChargeLane(false, _owner.lookPoint, "no target");
+            _chargePlan.Reset();
+            return;
+        }
+
+        if (_chargePlan.HasPlan && _chargePlan.Target != Target)
+            _chargePlan.Reset();
+
+        LanceState state = _owner.Combat.State;
+        if (state == LanceState.Charge)
+        {
+            AimSolution = _chargePlan.Target == Target ? _chargePlan.Aim : default;
+            Lane = AimSolution.Valid
+                ? new ChargeLane(true, true, AimSolution.Aim, AimSolution.LanceDirection,
+                    AimSolution.ImpactFrame, AimSolution.Quality, "committed")
+                : new ChargeLane(false, Target.mainBodyChunk.pos, "committed");
+            return;
+        }
+
+        bool planningRelevant = active && armed && TargetViolence == ViolenceType.Lethal && !closeDanger &&
+            _owner.Combat.Cooldown == 0 && distance >= ChargeLanePlanner.MinimumChargeDistance &&
+            distance <= ChargeLanePlanner.MaximumChargeDistance(_owner) &&
+            state != LanceState.CloseDefense && state != LanceState.Recover &&
+            state != LanceState.FollowUpThrow && state != LanceState.Disarmed;
+
+        if (!planningRelevant)
+        {
+            AimSolution = default;
+            string reason = distance < ChargeLanePlanner.MinimumChargeDistance ||
+                distance > ChargeLanePlanner.MaximumChargeDistance(_owner) ? "distance" : "inactive";
+            Lane = new ChargeLane(false, false, Target.mainBodyChunk.pos, Vector2.right, 0, 0f, reason);
+            return;
+        }
+
+        int tick = _owner.room.game?.clock ?? 0;
+        if (_chargePlan.CanReuse(_owner, Target, _motionTracker, state, tick))
+        {
+            AimSolution = _chargePlan.Aim;
+            Lane = ChargeLanePlanner.ApplyDynamicSafety(_owner, origin, Target, AimSolution, _chargePlan.StaticLane);
+            return;
+        }
+
+        bool urgent = state == LanceState.Brace;
+        if (LancePlanningScheduler.TryAcquire(_owner, urgent))
+        {
+            AimSolution = LanceAimSolver.Solve(_owner, origin, Target, _motionTracker);
+            ChargeLane staticLane = ChargeLanePlanner.EvaluateStatic(_owner, origin, Target, AimSolution);
+            _chargePlan.Store(_owner, Target, _motionTracker, AimSolution, staticLane, tick);
+            Lane = ChargeLanePlanner.ApplyDynamicSafety(_owner, origin, Target, AimSolution, staticLane);
+            return;
+        }
+
+        // Room budget is already used by other lancers this tick. A bounded stale plan smooths the
+        // workload; otherwise wait one tick rather than doing an unscheduled full search.
+        if (_chargePlan.CanUseStale(_owner, Target, tick))
+        {
+            AimSolution = _chargePlan.Aim;
+            Lane = ChargeLanePlanner.ApplyDynamicSafety(_owner, origin, Target, AimSolution, _chargePlan.StaticLane);
+        }
+        else
+        {
+            AimSolution = default;
+            Lane = new ChargeLane(false, false, Target.mainBodyChunk.pos, Vector2.right, 0, 0f, "planner budget");
+        }
     }
 
     private LanceAimSolution SelectCommittedAim(Creature target)
