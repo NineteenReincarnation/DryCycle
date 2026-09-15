@@ -1,3 +1,4 @@
+using DryCycle.DevUI.DevTool.Debug;
 using DryCycle.Items.ScavengerLance;
 using RWCustom;
 using UnityEngine;
@@ -27,6 +28,13 @@ internal sealed class LanceScavengerAI : ScavengerAI
     internal bool SidearmDrawn => _sidearmDrawn;
     internal bool AllowVanillaSidearmCombat { get; private set; }
     internal TargetMotionTracker MotionTracker => _motionTracker;
+    internal LanceAimSolution DebugRecentAimSolution => _recentAimSolution;
+    internal int DebugRecentAimAge => _recentAimAge;
+    internal bool DebugRecentAimReady => RecentAimSolutionValid(Target);
+    internal bool DebugCommitReady { get; private set; }
+    internal bool DebugHardBlocked { get; private set; }
+    internal bool DebugFriendBlocked { get; private set; }
+    internal bool DebugChargeOpportunity { get; private set; }
     internal Vector2 Aim => Target != null
         ? (AimSolution.Valid ? AimSolution.Aim : Target.mainBodyChunk.pos)
         : _owner.lookPoint;
@@ -47,6 +55,10 @@ internal sealed class LanceScavengerAI : ScavengerAI
         Lane = default;
         ChargePriority = true;
         AllowVanillaSidearmCombat = false;
+        DebugCommitReady = false;
+        DebugHardBlocked = false;
+        DebugFriendBlocked = false;
+        DebugChargeOpportunity = false;
         _sidearmThrowPass = false;
         _sidearmDrawn = false;
         _staging = null;
@@ -100,6 +112,11 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool chargeOpportunity = active && armed && ChargePriority && Target != null && TargetViolence == ViolenceType.Lethal &&
             distance >= ChargeLanePlanner.MinimumChargeDistance && laneClear && _owner.Combat.Cooldown == 0;
 
+        DebugFriendBlocked = friendBlocked;
+        DebugHardBlocked = hardBlocked;
+        DebugCommitReady = commitReady;
+        DebugChargeOpportunity = chargeOpportunity;
+
         if (_sidearmDrawn && chargeOpportunity)
             CancelSidearmDraw();
 
@@ -134,6 +151,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         {
             if (_sidearmDrawn) CancelSidearmDraw();
             RecoverWeapon();
+            LanceScavengerDebugPresentationHub.Publish(_owner, this);
             return;
         }
 
@@ -141,6 +159,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         {
             if (TryFollowUpThrow())
                 _owner.Combat.CompleteFollowUp();
+            LanceScavengerDebugPresentationHub.Publish(_owner, this);
             return;
         }
 
@@ -182,6 +201,8 @@ internal sealed class LanceScavengerAI : ScavengerAI
         {
             _staging = null;
         }
+
+        LanceScavengerDebugPresentationHub.Publish(_owner, this);
     }
 
     private void UpdateRecentAimSolution(Creature target, LanceAimSolution aim)
