@@ -11,15 +11,15 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Dedicated LanceScavenger diagnostics writer.
 ///
-/// The file belongs to one complete game process, not to one UI-page visit:
-/// - it is truncated once when this plugin starts for a new game run;
-/// - opening/closing the realtime monitor only starts/ends a SESSION inside the same file;
-/// - changing rooms appends markers and never overwrites earlier samples;
-/// - shutdown closes the file but deliberately leaves it on disk so it can still be inspected;
-/// - the next game launch creates the next clean run log.
+/// Recording is strictly opt-in:
+/// - plugin startup does not create, truncate or open the diagnostic file;
+/// - the first explicit UI recording request starts a fresh log for this game run;
+/// - later recording sessions append to that same run log;
+/// - disabling the UI recording switch ends the session and closes the writer immediately;
+/// - while recording is disabled no LanceScavenger FRAME/EVENT data is written.
 ///
-/// Performance policy: poll cached presentation snapshots at 20 Hz, skip unchanged entry objects,
-/// buffer disk output, flush at 4 Hz, and perform the file-size check at 1 Hz.
+/// Performance policy while enabled: poll cached presentation snapshots at 20 Hz, skip unchanged
+/// entry objects, buffer disk output, flush at 4 Hz, and perform the file-size check at 1 Hz.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -49,6 +49,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
     private StreamWriter writer;
     private bool captureActive;
+    private bool runLogInitialized;
     private bool capped;
     private string activeRoom = string.Empty;
     private int processStartTick;
@@ -65,6 +66,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
     private void OnEnable()
     {
         captureActive = false;
+        runLogInitialized = false;
         capped = false;
         activeRoom = string.Empty;
         processStartTick = Environment.TickCount;
@@ -78,7 +80,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         lastPayload.Clear();
         previousStates.Clear();
         lastEntrySnapshots.Clear();
-        OpenRunLog();
+        CloseWriter();
     }
 
     private void Update()
@@ -86,7 +88,8 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         int now = Environment.TickCount;
         if (ElapsedMilliseconds(lastPollTick, now) < PollIntervalMilliseconds)
         {
-            MaybeFlush(now);
+            if (captureActive)
+                MaybeFlush(now);
             return;
         }
         lastPollTick = now;
@@ -105,9 +108,8 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         if (!snapshot.Requested)
         {
             if (captureActive)
-                EndCaptureSession("monitor closed");
-            lastSnapshot = snapshot;
-            MaybeFlush(now);
+                EndCaptureSession("recording disabled");
+            lastSnapshot = LanceScavengerDebugSnapshot.Empty;
             return;
         }
 
@@ -137,22 +139,9 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
     {
         if (captureActive)
             EndCaptureSession("game/plugin shutdown");
+        else
+            CloseWriter();
 
-        if (writer != null)
-        {
-            try
-            {
-                writer.WriteLine("# RUN END\t" + ProcessElapsedMilliseconds().ToString(CultureInfo.InvariantCulture) +
-                                 "\t" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-                writer.Flush();
-            }
-            catch
-            {
-                // Diagnostics must never interfere with shutdown.
-            }
-        }
-
-        CloseWriter();
         captureActive = false;
         activeRoom = string.Empty;
         lastSnapshot = LanceScavengerDebugSnapshot.Empty;
@@ -161,37 +150,46 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         lastEntrySnapshots.Clear();
     }
 
-    private void OpenRunLog()
+    private bool EnsureRunLogOpen()
     {
-        CloseWriter();
+        if (writer != null) return true;
+        if (capped) return false;
+
         try
         {
-            // This is the only truncate point. A new game/plugin run starts a fresh diagnostic file.
+            bool append = runLogInitialized;
             writer = new StreamWriter(
                 DiagnosticLogPath,
-                false,
+                append,
                 new UTF8Encoding(false),
                 64 * 1024)
             {
                 AutoFlush = false
             };
 
-            writer.WriteLine("# DryCycle LanceScavenger realtime AI diagnostic log");
-            writer.WriteLine("# format=tsv-v2");
-            writer.WriteLine("# run_opened_utc=" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteLine("# path=" + DiagnosticLogPath);
-            writer.WriteLine("# max_bytes=" + MaximumLogBytes.ToString(CultureInfo.InvariantCulture));
-            writer.WriteLine("# One file is retained for the complete game run. UI monitor reopen never truncates it.");
-            writer.WriteLine(BuildHeader());
+            if (!append)
+            {
+                writer.WriteLine("# DryCycle LanceScavenger realtime AI diagnostic log");
+                writer.WriteLine("# format=tsv-v2");
+                writer.WriteLine("# run_opened_utc=" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                writer.WriteLine("# path=" + DiagnosticLogPath);
+                writer.WriteLine("# max_bytes=" + MaximumLogBytes.ToString(CultureInfo.InvariantCulture));
+                writer.WriteLine("# Recording starts only after the explicit DevTool UI switch is enabled.");
+                writer.WriteLine(BuildHeader());
+                runLogInitialized = true;
+            }
+
             writer.Flush();
             lastFlushTick = Environment.TickCount;
-            Logger.LogInfo("LanceScavenger game-run AI log opened: " + DiagnosticLogPath);
+            Logger.LogInfo("LanceScavenger opt-in AI log opened: " + DiagnosticLogPath);
+            return true;
         }
         catch (Exception error)
         {
             writer = null;
             capped = true;
             Logger.LogWarning("Could not create LanceScavenger realtime AI log: " + error.Message);
+            return false;
         }
     }
 
@@ -206,7 +204,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         sessionStartTick = Environment.TickCount;
         sessionNumber++;
 
-        if (writer == null || capped) return;
+        if (!EnsureRunLogOpen()) return;
         writer.WriteLine("# SESSION START\t" + sessionNumber.ToString(CultureInfo.InvariantCulture) +
                          "\t" + ProcessElapsedMilliseconds().ToString(CultureInfo.InvariantCulture) +
                          "\t" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) +
@@ -214,7 +212,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         writer.Flush();
         lastFlushTick = Environment.TickCount;
         Logger.LogInfo("LanceScavenger realtime AI capture session " + sessionNumber.ToString(CultureInfo.InvariantCulture) +
-                       " started; existing game-run log preserved.");
+                       " started by the explicit UI recording switch.");
     }
 
     private void EndCaptureSession(string reason)
@@ -237,6 +235,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
             }
         }
 
+        CloseWriter();
         captureActive = false;
         activeRoom = string.Empty;
         lastSnapshot = LanceScavengerDebugSnapshot.Empty;
