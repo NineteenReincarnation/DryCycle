@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -49,6 +50,19 @@ internal static class DevToolWidgets
     private static readonly Num.Vector4 TertiaryGoldRelief = new(0.28f, 0.16f, 0.05f, 0.74f);
 
     private const float PrimaryPaneTitleScale = 1.82f;
+    private const int MaxShortcutLabelCache = 256;
+    private static readonly string[] ShortcutMarkers =
+    {
+        "  Ctrl+",
+        "  Cmd+",
+        "  Shift+",
+        "  Alt+",
+        "  Tab",
+        "  Esc",
+        "  Delete"
+    };
+    private static readonly Dictionary<string, string> ShortcutLabelCache = new(StringComparer.Ordinal);
+
     // Inspector content used to fall back to 1.15, which made controls inside framed sections
     // visibly smaller than the Browser and the surrounding editor chrome. Keep both language
     // modes readable; Chinese gets the slightly larger body scale it needs for dense CJK glyphs.
@@ -190,7 +204,12 @@ internal static class DevToolWidgets
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, AccentActive);
         ImGui.PushStyleColor(ImGuiCol.Border, active ? Accent : new Num.Vector4(0.35f, 0.38f, 0.44f, 0.7f));
 
-        bool pressed = ImGui.Button(label + "##" + id, new Num.Vector2(-1f, 0f));
+        // Scope the widget by the caller's stable id instead of materializing label + "##" + id
+        // on every frame. ImGui hashes the pushed id into the same local identity stack without a
+        // managed string allocation.
+        ImGui.PushID(id ?? string.Empty);
+        bool pressed = ImGui.Button(label ?? string.Empty, new Num.Vector2(-1f, 0f));
+        ImGui.PopID();
 
         ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(3);
@@ -257,7 +276,9 @@ internal static class DevToolWidgets
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, active);
         ImGui.PushStyleColor(ImGuiCol.Border, border);
 
-        bool pressed = ImGui.Button(label + "##" + id, fullWidth ? new Num.Vector2(-1f, 0f) : new Num.Vector2(0f, 0f));
+        ImGui.PushID(id ?? string.Empty);
+        bool pressed = ImGui.Button(label, fullWidth ? new Num.Vector2(-1f, 0f) : new Num.Vector2(0f, 0f));
+        ImGui.PopID();
 
         ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(3);
@@ -276,7 +297,10 @@ internal static class DevToolWidgets
     {
         MutedText(label);
         ImGui.SetNextItemWidth(-1f);
-        return ImGui.InputText("##" + id, ref value, maxLength);
+        ImGui.PushID(id ?? string.Empty);
+        bool changed = ImGui.InputText("##Value", ref value, maxLength);
+        ImGui.PopID();
+        return changed;
     }
 
     internal static float ButtonWidth(string label)
@@ -305,30 +329,32 @@ internal static class DevToolWidgets
     {
         if (string.IsNullOrEmpty(label)) return label ?? string.Empty;
 
+        // The overwhelming majority of button labels never contain inline shortcut text. Keep that
+        // path at O(length) with no dictionary access and, importantly, no temporary marker array.
+        if (label.IndexOf("  ", StringComparison.Ordinal) < 0) return label;
+        if (ShortcutLabelCache.TryGetValue(label, out string cached)) return cached;
+
         int idStart = label.IndexOf("##", StringComparison.Ordinal);
-        string visible = idStart >= 0 ? label.Substring(0, idStart) : label;
-        string idSuffix = idStart >= 0 ? label.Substring(idStart) : string.Empty;
-
-        string[] markers =
-        {
-            "  Ctrl+",
-            "  Cmd+",
-            "  Shift+",
-            "  Alt+",
-            "  Tab",
-            "  Esc",
-            "  Delete"
-        };
-
+        int visibleLength = idStart >= 0 ? idStart : label.Length;
         int cut = -1;
-        for (int i = 0; i < markers.Length; i++)
+        for (int i = 0; i < ShortcutMarkers.Length; i++)
         {
-            int index = visible.IndexOf(markers[i], StringComparison.OrdinalIgnoreCase);
-            if (index >= 0 && (cut < 0 || index < cut)) cut = index;
+            int index = label.IndexOf(ShortcutMarkers[i], StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 && index < visibleLength && (cut < 0 || index < cut)) cut = index;
         }
 
         if (cut < 0) return label;
-        return visible.Substring(0, cut).TrimEnd() + idSuffix;
+
+        int trimmedEnd = cut;
+        while (trimmedEnd > 0 && char.IsWhiteSpace(label[trimmedEnd - 1])) trimmedEnd--;
+        string result = idStart >= 0
+            ? label.Substring(0, trimmedEnd) + label.Substring(idStart)
+            : label.Substring(0, trimmedEnd);
+
+        if (ShortcutLabelCache.Count >= MaxShortcutLabelCache)
+            ShortcutLabelCache.Clear();
+        ShortcutLabelCache[label] = result;
+        return result;
     }
 
     private static float ResolvePaneBodyScale(float requestedRestoreScale)
