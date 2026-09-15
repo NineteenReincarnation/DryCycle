@@ -165,8 +165,11 @@ internal sealed class LanceScavengerAI : ScavengerAI
         for (int i = 0; i < _owner.room.abstractRoom.creatures.Count; i++)
         {
             if (_owner.room.abstractRoom.creatures[i].realizedCreature is not LanceScavenger other ||
-                other == _owner || other.dead || !other.Consious || other.room != _owner.room ||
-                other.Combat.State == LanceState.Recover || other.Combat.State == LanceState.Disarmed)
+                other == _owner || other.dead || !other.Consious || other.room != _owner.room || other.Lance == null ||
+                other.grabbedBy.Count > 0 || other.safariControlled || other.enteringShortCut.HasValue || other.inShortcut ||
+                other.Submersion >= 0.25f || other.Combat.Cooldown > 0 ||
+                other.Combat.State == LanceState.Recover || other.Combat.State == LanceState.FollowUpThrow ||
+                other.Combat.State == LanceState.Disarmed)
                 continue;
 
             LanceScavengerAI brain = other.Brain;
