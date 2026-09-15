@@ -14,13 +14,13 @@ jobs:
           ref: perf/devtool-frontend-stable-frame
           fetch-depth: 0
 
-      - name: Apply stable-frame cleanup
+      - name: Apply floating-window stable-frame cleanup
         shell: python
         run: |
           from pathlib import Path
 
-          snap = Path('src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs')
-          s = snap.read_text(encoding='utf-8')
+          p = Path('src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs')
+          s = p.read_text(encoding='utf-8')
 
           begin_old = '        Guides.Clear();\n        if (frame >= nextStaleAuditFrame)'
           assert begin_old in s
@@ -28,8 +28,8 @@ jobs:
               '        Guides.Clear();\n        PruneStaleInteractiveState();\n        if (frame >= nextStaleAuditFrame)', 1)
           s = s.replace('        ImGuiIOPtr io = frameContext.Io;\n', '', 1)
 
-          helper_marker = '\n    private static void DetectResizeEdges('
-          assert helper_marker in s
+          marker = '\n    private static void DetectResizeEdges('
+          assert marker in s
           helper = '''
           
           private static bool IsWindowRecentForInteractiveState(string id)
@@ -69,77 +69,18 @@ jobs:
               StaleKeys.Clear();
           }
           '''
-          s = s.replace(helper_marker, helper + helper_marker, 1)
+          s = s.replace(marker, helper + marker, 1)
 
-          origin_old = '                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)\n                    GroupDragOrigins[id] = state.Position;'
-          assert origin_old in s
-          s = s.replace(origin_old,
+          old = '                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)\n                    GroupDragOrigins[id] = state.Position;'
+          assert old in s
+          s = s.replace(old,
               '                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))\n                    GroupDragOrigins[id] = state.Position;', 1)
 
           tail = '                    GroupDragOrigins[id] = state.Position;\n            }\n        }\n\n        if (groupDragging)'
           assert tail in s
           s = s.replace(tail,
               '                    GroupDragOrigins[id] = state.Position;\n            }\n\n            if (GroupDragOrigins.Count < 2)\n            {\n                groupDragging = false;\n                GroupDragOrigins.Clear();\n            }\n        }\n\n        if (groupDragging)', 1)
-          snap.write_text(s, encoding='utf-8')
-
-          font = Path('src/DevUI/DevTool/RWImGui/FontSettingsWindow.cs')
-          s = font.read_text(encoding='utf-8')
-
-          class_old = 'internal static class FontSettingsWindow\n{\n'
-          assert class_old in s
-          s = s.replace(class_old, '''internal static class FontSettingsWindow
-          {
-              private static bool fontStatusProjectionValid;
-              private static bool projectedFontStatusChinese;
-              private static string projectedFontName = string.Empty;
-              private static int projectedActualWeight = int.MinValue;
-              private static int projectedWeightVariants = int.MinValue;
-              private static string projectedFontStatus = string.Empty;
-              private static string projectedResolvedWeightStatus = string.Empty;
-              private static string projectedFamilyWeightsStatus = string.Empty;
-          ''', 1)
-
-          status_old = '''        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
-          ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
-                             (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace));
-          ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);'''
-          assert status_old in s
-          s = s.replace(status_old, '''        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
-          ImGui.TextDisabled(projectedFontStatus);
-          ImGui.TextDisabled(projectedResolvedWeightStatus);''', 1)
-
-          family_old = '            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));'
-          assert family_old in s
-          s = s.replace(family_old, '            ImGui.TextDisabled(projectedFamilyWeightsStatus);', 1)
-
-          font_marker = '    private static void DrawChineseFontSelector()\n'
-          assert font_marker in s
-          font_helper = '''    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
-          {
-              bool chinese = DevToolUiSettings.IsChinese;
-              string stableFontName = fontName ?? string.Empty;
-              if (fontStatusProjectionValid &&
-                  projectedFontStatusChinese == chinese &&
-                  projectedActualWeight == actualWeight &&
-                  projectedWeightVariants == weightVariants &&
-                  string.Equals(projectedFontName, stableFontName, StringComparison.Ordinal))
-                  return;
-          
-              projectedFontStatusChinese = chinese;
-              projectedFontName = stableFontName;
-              projectedActualWeight = actualWeight;
-              projectedWeightVariants = weightVariants;
-              string friendlyFace = DevToolFontCatalog.FriendlyFaceName(stableFontName);
-              projectedFontStatus = DevToolUiSettings.T("当前字体：", "Font: ") +
-                                    (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace);
-              projectedResolvedWeightStatus = DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight;
-              projectedFamilyWeightsStatus = DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants);
-              fontStatusProjectionValid = true;
-          }
-          
-          '''
-          s = s.replace(font_marker, font_helper + font_marker, 1)
-          font.write_text(s, encoding='utf-8')
+          p.write_text(s, encoding='utf-8')
 
       - name: Run guards
         shell: bash
@@ -161,5 +102,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/DevUI/DevTool/RWImGui .github/workflows
-          git commit -m 'Preserve interaction lifetime and cache font status'
+          git commit -m 'Preserve floating-window interaction lifetime'
           git push origin HEAD:perf/devtool-frontend-stable-frame
