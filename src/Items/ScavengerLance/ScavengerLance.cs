@@ -118,7 +118,8 @@ internal sealed partial class ScavengerLance : Weapon
             if (holder is not Player || _thrustFrames > 0)
             {
                 Vector2 desired = _thrustFrames > 0 ? _thrustDirection : _gripValid ? _grip.Direction : GenericDirection(holder);
-                float turn = charging || _thrustFrames > 0 ? 180f : (_gripValid && _grip.Braced ? 12f : 8f);
+                float turn = charging || _thrustFrames > 0 ? 180f :
+                    (_gripValid && _grip.AimTracking ? 2.25f : _gripValid && _grip.Braced ? 12f : 8f);
                 float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
                 setRotation = Custom.DegToVec(angle);
             }
@@ -229,9 +230,6 @@ internal sealed partial class ScavengerLance : Weapon
                 victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust, _thrustMaxDamage);
         if (impact.Damage <= 0f) return;
 
-        // Counter-sweep is explicitly a full-charge correction attack: any part of the damaging
-        // bone blade that truly intersects receives the full tier. Ordinary attacks keep the
-        // shoulder-to-tip efficiency gradient.
         float bladeScale = counterSweep ? 1f : LanceCombatMath.BladeDamageMultiplier(firstBladeT);
         float damage = impact.Damage * bladeScale;
         float stun = impact.Stun * bladeScale;
@@ -255,7 +253,6 @@ internal sealed partial class ScavengerLance : Weapon
 
     private void ResolveShaft()
     {
-        // Only the narrow rear handle pushes. The broad forward bone wedge is handled by ResolveBlade.
         Vector2 shaftEnd = BladeRoot - rotation * 1.5f;
         Creature holder = Holder;
         foreach (AbstractCreature abstractTarget in room.abstractRoom.creatures)
