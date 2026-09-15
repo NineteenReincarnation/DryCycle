@@ -132,6 +132,19 @@ DevTool/
 - CreatureType 和 Relationship.Type 都从本体 ExtEnum 获取，因此 Mod 正常注册到本体的数据会自然进入面板，不需要依赖 Mod API。
 - 修改直接写入 `RelationshipPage.changedRelationships`，保存继续使用本体日志输出路径。
 
+## Phase 6 最终架构收口
+
+第六阶段不再扩张编辑功能，而是冻结前五阶段形成的长期边界：
+
+- `DevToolRuntime` 只负责 Hook 和帧顺序；跨 Workspace 的 Queue / Presentation / State / Revision / Session 生命周期统一由 `DevToolSubsystemCoordinator` 收口。
+- RWImGui 只读 detached Snapshot 并入队 Command；兼容诊断同样由后端 `DevUiDiagnosticsPublisher` 发布，Draw 不执行 live DevUI 扫描、审计或写操作。
+- POM / RegionKit 专用 Inspector 已从核心删除；第三方原生增强只通过 `DevToolApi 1.x`，未接 API 的内容继续走 Generic DevInterface / Rain World Data Model / Vanilla fallback。
+- 已删除未接线的 Universal Protocol Augmenter 与重复 Generic Protocol Bootstrap；未知协议必须明确显示为缺口并回退，而不是用未验证的特殊适配伪装兼容。
+- Extension Scope 属于外部 Mod 生命周期，不会因为 New UI / Vanilla 切换、房间切换或 DevUI runtime reset 被 DevTool 擅自释放。
+- `DevTool Final Architecture Guard` 持续检查后端/前端依赖方向、第三方私有类型、生命周期所有权和诊断纯读边界。
+
+完整封板契约与验证清单见 [`PHASE6.md`](PHASE6.md)。静态守卫通过不等价于实际 Rain World 联编或游戏内回归通过。
+
 ## 兼容策略
 
 ```text
@@ -151,20 +164,6 @@ Level 4  Vanilla fallback
 Level 1 是可选增强而不是兼容前提。第三方完全不引用 DryCycle 时，Level 2～4 仍然工作；主动接入 API 失败也不能破坏通用兼容或 Vanilla fallback。
 
 Effect Hover Preview 额外遵守一条规则：兼容对象是 Rain World 的运行时行为，而不是具体 Mod。代码中不建立 `RegionKitAdapter`、`POMAdapter` 或按程序集名称分支的 Effect 兼容表。
-
-## Phase 6 最终架构收口
-
-第六阶段不再扩功能，而是冻结长期维护边界。完整契约和当前验收状态见 [`PHASE6.md`](PHASE6.md)。
-
-- `DevToolRuntime` 只负责 Hook 与帧顺序；跨 Workspace 的 Queue processing、Presentation 清理、State / Revision / Session Reset 统一归 `DevToolSubsystemCoordinator`。
-- RWImGui Draw 只读取 detached Snapshot 并入队 Command；兼容诊断也不能从 Draw 推进 live DevInterface 扫描或状态计算。
-- `DevUiDiagnosticsPublisher` 是 FullAudit、Universal Mirror、Page Coverage、Loaded-Type Inventory、Semantic Conformance、Compatibility Gate 的唯一后端发布入口。
-- POM / RegionKit 专用反射 Inspector 已退出核心；未主动接入 API 的第三方继续依赖 Generic DevInterface / Rain World Data Model / Vanilla fallback。
-- 第三方原生增强只通过 Phase 5 `DevToolApi 1.x` 暴露。MigrationCoverage 等诊断注册不再作为外部“声明兼容”的第二套 API。
-- Extension Scope 生命周期属于注册它的外部 Mod，不随 New UI / Vanilla 切换、房间切换或 DevTool runtime reset 被清掉。
-- `DevTool Final Architecture Guard` 固化这些依赖方向，并禁止已删除的专用 Inspector、重复 diagnostics bootstrap 与孤立兼容桥重新进入核心。
-
-目前静态架构收口已进入最终审查；真实联编、游戏内回归和性能回归仍必须使用实际 Rain World / HookGen / RuntimeDetour / RWImGui 运行库完成，不能用静态守卫结果替代。
 
 ## 继续审查 / 完善的重点
 
