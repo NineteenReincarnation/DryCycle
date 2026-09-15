@@ -16,6 +16,7 @@ internal static class ScavengerLanceHooks
         ItemRegistry.Register(_definition);
         On.Player.Grabability += Grabability;
         On.Player.HeavyCarry += HeavyCarry;
+        On.Player.GetHeldItemDirection += GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
         On.Player.ThrowObject += ThrowObject;
         _enabled = true;
@@ -26,6 +27,7 @@ internal static class ScavengerLanceHooks
         ScavengerLanceDevConsoleSupport.ResetRegistration();
         On.Player.Grabability -= Grabability;
         On.Player.HeavyCarry -= HeavyCarry;
+        On.Player.GetHeldItemDirection -= GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
         On.Player.ThrowObject -= ThrowObject;
         ItemRegistry.Unregister(_definition);
@@ -35,18 +37,24 @@ internal static class ScavengerLanceHooks
         _enabled = false;
     }
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
-        obj is ScavengerLance ? Player.ObjectGrabability.TwoHands : orig(self, obj);
+        obj is ScavengerLance ? Player.ObjectGrabability.BigOneHand : orig(self, obj);
 
-    // Two hands describes the grip, not a dragged mass. The vanilla heavy-carry
-    // constraint pulls the player's body towards the extending tip during a stab.
+    // A carried lance must never pull the player's body towards its extending tip.
     private static bool HeavyCarry(On.Player.orig_HeavyCarry orig, Player self, PhysicalObject obj) =>
         obj is not ScavengerLance && orig(self, obj);
+
+    private static Vector2 GetHeldItemDirection(On.Player.orig_GetHeldItemDirection orig, Player self, int hand)
+    {
+        Vector2 direction = orig(self, hand);
+        return self.grasps[hand]?.grabbed is ScavengerLance lance ?
+            lance.PlayerCarryDirection(self, direction) : direction;
+    }
 
     private static void GraphicsModuleUpdated(On.Player.orig_GraphicsModuleUpdated orig, Player self, bool actuallyViewed, bool eu)
     {
         orig(self, actuallyViewed, eu);
         foreach (Creature.Grasp grasp in self.grasps)
-            if (grasp?.grabbed is ScavengerLance lance) lance.SynchronizeGrip(eu);
+            if (grasp?.grabbed is ScavengerLance lance) lance.SynchronizePlayerThrust(eu);
     }
 
     private static void ThrowObject(On.Player.orig_ThrowObject orig, Player self, int grasp, bool eu)

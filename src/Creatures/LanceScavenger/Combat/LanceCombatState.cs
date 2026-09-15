@@ -22,6 +22,7 @@ internal sealed class LanceCombatState
     internal int AttackSerial { get; private set; }
     private int _recoveryDuration;
     private int _hostileFrames;
+    private int _unstableFrames;
 
     internal void Tick(LanceSituation s)
     {
@@ -68,7 +69,20 @@ internal sealed class LanceCombatState
             return;
         }
         if (s.Distance < 155f) { Enter(LanceState.CreateDistance); return; }
-        if (!s.Lane || !s.Stable) { Enter(LanceState.AcquireChargeLane); return; }
+        if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
+        if (!s.Stable)
+        {
+            // Procedural legs can briefly lift the torso during a planted brace.
+            // Keep the wind-up through a short wobble, but never launch off balance.
+            if (State == LanceState.Brace && ++_unstableFrames <= 6)
+            {
+                if (Age >= BraceFrames) Age = BraceFrames - 1;
+                return;
+            }
+            Enter(LanceState.AcquireChargeLane);
+            return;
+        }
+        _unstableFrames = 0;
         if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
         if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
         if (Age >= BraceFrames) { AttackSerial++; Enter(LanceState.Charge); }
@@ -91,5 +105,5 @@ internal sealed class LanceCombatState
     }
 
     private void Enter(LanceState next)
-    { if (State == next) return; State = next; Age = 0; }
+    { if (State == next) return; State = next; Age = 0; _unstableFrames = 0; }
 }

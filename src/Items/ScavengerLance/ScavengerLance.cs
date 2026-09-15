@@ -100,16 +100,27 @@ internal sealed partial class ScavengerLance : Weapon
         Creature holder = Holder;
         _gripValid = holder is ILanceWielder wielder && wielder.TryGetLanceGrip(this, out _grip);
         bool charging = _gripValid && _grip.Charging && holder.Consious;
-        if (charging && !_wasCharging) _hitCreatures.Clear();
+        if (charging && !_wasCharging)
+        {
+            _hitCreatures.Clear();
+            // Align the old endpoint as well: only forward travel, not swinging
+            // the lance down into charge posture, may generate a piercing sweep.
+            if (_havePreviousPose)
+                _previousTip = _previousGrip + _grip.Direction.normalized * (Length * (1f - LanceCombatMath.GripFraction));
+        }
         _wasCharging = charging;
         if (holder != null)
         {
             if (mode != Mode.Carried) ChangeMode(Mode.Carried);
-            Vector2 desired = _gripValid ? _grip.Direction : GenericDirection(holder);
-            if (_thrustFrames > 0) desired = _thrustDirection;
-            float turn = charging || _thrustFrames > 0 ? 180f : (_gripValid && _grip.Braced ? 12f : 8f);
-            float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
-            setRotation = Custom.DegToVec(angle);
+            // Player.GraphicsModuleUpdated owns the hand position and normal
+            // weapon rotation, just as it does for a spear. Only a jab overrides it.
+            if (holder is not Player || _thrustFrames > 0)
+            {
+                Vector2 desired = _thrustFrames > 0 ? _thrustDirection : _gripValid ? _grip.Direction : GenericDirection(holder);
+                float turn = charging || _thrustFrames > 0 ? 180f : (_gripValid && _grip.Braced ? 12f : 8f);
+                float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
+                setRotation = Custom.DegToVec(angle);
+            }
             rotationSpeed = 0f;
         }
         else if (mode == Mode.Carried) ChangeMode(Mode.Free);
@@ -151,7 +162,7 @@ internal sealed partial class ScavengerLance : Weapon
     internal void SynchronizeGrip(bool eu)
     {
         Creature holder = Holder;
-        if (holder == null) return;
+        if (holder == null || holder is Player) return;
         _gripValid = holder is ILanceWielder wielder && wielder.TryGetLanceGrip(this, out _grip);
         Vector2 position = _gripValid ? _grip.Position : holder.mainBodyChunk.pos + rotation * 9f;
         if (_thrustFrames > 0)
@@ -163,8 +174,6 @@ internal sealed partial class ScavengerLance : Weapon
 
     private Vector2 GenericDirection(Creature holder)
     {
-        if (holder is Player player)
-            return new Vector2(player.ThrowDirection, player.bodyMode == Player.BodyModeIndex.Crawl ? 0.15f : 0.48f).normalized;
         float sign = Mathf.Abs(holder.mainBodyChunk.vel.x) > 0.3f ? Mathf.Sign(holder.mainBodyChunk.vel.x) : Mathf.Sign(rotation.x);
         return new Vector2(sign == 0f ? 1f : sign, 0.6f).normalized;
     }
@@ -268,8 +277,10 @@ internal sealed partial class ScavengerLance : Weapon
         else if (holder == null)
         { firstChunk.vel *= 0.6f; rotationSpeed *= -0.2f; }
 
-        // Rigid-rod terrain constraint: try the nearest fitting orientation, including
-        // a horizontal resting pose. This applies to the actual item, also when dropped.
+        // A held weapon keeps the wielder's pose, like an ordinary spear. Terrain
+        // can stop an attack but must not spin the player's hand or steer the holder.
+        if (holder != null) return;
+        // Dropped lances still settle as a rigid rod against terrain.
         float angle = Custom.VecToDeg(rotation);
         for (int step = 1; step <= 12; step++)
             for (int side = -1; side <= 1; side += 2)

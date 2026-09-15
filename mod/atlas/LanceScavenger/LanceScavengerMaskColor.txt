@@ -1,0 +1,195 @@
+{
+  "frames": {
+    "LanceScavengerMaskColor0.png": {
+      "frame": {
+        "x": 50,
+        "y": 251,
+        "w": 145,
+        "h": 219
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 20.6644,
+        "y": 15.7192,
+        "w": 19.863,
+        "h": 30.0
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor1.png": {
+      "frame": {
+        "x": 285,
+        "y": 258,
+        "w": 186,
+        "h": 212
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 16.6451,
+        "y": 15.9797,
+        "w": 25.4795,
+        "h": 29.0411
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor2.png": {
+      "frame": {
+        "x": 530,
+        "y": 258,
+        "w": 197,
+        "h": 212
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 15.214,
+        "y": 13.5864,
+        "w": 26.9863,
+        "h": 29.0411
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor3.png": {
+      "frame": {
+        "x": 786,
+        "y": 273,
+        "w": 216,
+        "h": 197
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 14.3712,
+        "y": 12.673,
+        "w": 29.589,
+        "h": 26.9863
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor4.png": {
+      "frame": {
+        "x": 1041,
+        "y": 287,
+        "w": 227,
+        "h": 173
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 14.1534,
+        "y": 10.437,
+        "w": 31.0959,
+        "h": 23.6986
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor5.png": {
+      "frame": {
+        "x": 1293,
+        "y": 312,
+        "w": 209,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 15.9328,
+        "y": 12.4415,
+        "w": 28.6301,
+        "h": 18.6301
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor6.png": {
+      "frame": {
+        "x": 1537,
+        "y": 326,
+        "w": 195,
+        "h": 81
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 17.1456,
+        "y": 15.3866,
+        "w": 26.7123,
+        "h": 11.0959
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor7.png": {
+      "frame": {
+        "x": 1768,
+        "y": 331,
+        "w": 156,
+        "h": 71
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 19.0149,
+        "y": 15.7839,
+        "w": 21.3699,
+        "h": 9.726
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    },
+    "LanceScavengerMaskColor8.png": {
+      "frame": {
+        "x": 1975,
+        "y": 307,
+        "w": 136,
+        "h": 133
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 21.2397,
+        "y": 11.7291,
+        "w": 18.6301,
+        "h": 18.2192
+      },
+      "sourceSize": {
+        "w": 61,
+        "h": 61
+      }
+    }
+  },
+  "meta": {
+    "app": "DryCycle / Rain World Futile atlas metadata",
+    "version": "1.0",
+    "image": "LanceScavengerMaskColor.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 2172,
+      "h": 724
+    },
+    "scale": "1"
+  }
+}

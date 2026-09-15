@@ -93,6 +93,13 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         for (int i = 0; i < _mask.BaseTotalSprites; i++)
             sLeaser.sprites[_mask.firstSprite + i].shader = rCam.game.rainWorld.Shaders["Basic"];
         _maskAvailable = LanceScavengerAssets.EnsureLoaded();
+        _mask.overrideSprite = LanceScavengerAssets.ActivePrefix;
+        if (_mask.overrideSprite == LanceScavengerAssets.ColorPrefix)
+        {
+            // Preserve the atlas's ivory, gold and dark details. Vanilla mask
+            // graphics still apply room darkness and the two shadow layers.
+            _mask.ColorA = _mask.ColorB = new HSLColor(0f, 0f, 1f);
+        }
         ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         AddToContainer(sLeaser, rCam, null);
     }

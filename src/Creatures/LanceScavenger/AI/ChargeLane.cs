@@ -79,12 +79,17 @@ internal static class ChargeLanePlanner
         float best = float.MaxValue;
         Vector2 origin = scav.mainBodyChunk.pos;
         for (int side = -1; side <= 1; side += 2)
-            for (int distance = 160; distance <= 320; distance += 80)
+            // Leave room for tile snapping and the body's stopping distance;
+            // a nominal 160px destination can settle below the 155px minimum.
+            for (int distance = 200; distance <= 280; distance += 40)
                 for (int height = -20; height <= 20; height += 20)
                 {
                     Vector2 candidate = target.mainBodyChunk.pos + new Vector2(side * distance, height);
                     WorldCoordinate coordinate = scav.room.GetWorldCoordinate(candidate);
-                    if (!scav.AI.pathFinder.CoordinateReachableAndGetbackable(coordinate) ||
+                    candidate = scav.room.MiddleOfTile(coordinate);
+                    // CoordinateViable honors vanilla's walkPastPointOfNoReturn
+                    // policy for stranded scavengers and rooms without an exit.
+                    if (!scav.AI.pathFinder.CoordinateViable(coordinate) ||
                         !Evaluate(scav, candidate, target).Clear) continue;
                     float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 2f + Mathf.Abs(distance - 240f) * 0.4f;
                     if (score >= best) continue;

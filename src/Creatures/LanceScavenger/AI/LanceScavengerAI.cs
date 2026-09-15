@@ -44,7 +44,15 @@ internal sealed class LanceScavengerAI : ScavengerAI
     public override void Update()
     {
         if (SkipNextUpdate) { SkipNextUpdate = false; return; }
-        base.Update();
+        // Perception/social modules still run, but vanilla flee/throw-position
+        // decisions must not replace the lance's staging point every frame.
+        AbstractCreatureAI abstractAI = creature.abstractAI;
+        bool frozen = abstractAI.freezeDestination;
+        if (_owner.Lance != null && !_owner.safariControlled &&
+            _owner.Combat.State != LanceState.Observe && _owner.Combat.State != LanceState.Disarmed)
+            abstractAI.freezeDestination = true;
+        try { base.Update(); }
+        finally { abstractAI.freezeDestination = frozen; }
         if (_owner.room == null) return;
         if (_hostilityMemory > 0) _hostilityMemory--;
         SelectTarget(out bool warning);
@@ -145,7 +153,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
                 lance.grabbedBy.Count != 0 || lance.room != _owner.room) continue;
             float d = Vector2.Distance(lance.firstChunk.pos, _owner.mainBodyChunk.pos);
             if (d >= distance || !_owner.room.VisualContact(_owner.mainBodyChunk.pos, lance.firstChunk.pos) ||
-                !pathFinder.CoordinateReachableAndGetbackable(_owner.room.GetWorldCoordinate(lance.firstChunk.pos))) continue;
+                !pathFinder.CoordinateViable(_owner.room.GetWorldCoordinate(lance.firstChunk.pos))) continue;
             nearest = lance; distance = d;
         }
         if (nearest == null)

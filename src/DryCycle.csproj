@@ -145,6 +145,15 @@
     <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile -" />
   </Target>
 
+  <Target Name="DeployLanceScavengerAtlases" AfterTargets="PostBuildEvent"
+          Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU' and '$(DeployToGame)' == 'true'">
+    <ItemGroup>
+      <LanceScavengerAtlas Include="$(MSBuildProjectDirectory)/../mod/atlas/LanceScavenger/*.png;$(MSBuildProjectDirectory)/../mod/atlas/LanceScavenger/*.txt" />
+    </ItemGroup>
+    <MakeDir Directories="$(GameModRootDir)/atlas/LanceScavenger" />
+    <Copy SourceFiles="@(LanceScavengerAtlas)" DestinationFolder="$(GameModRootDir)/atlas/LanceScavenger" SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="GenerateMod" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU' and '$(DeployToGame)' == 'true'">
     <ItemGroup>
       <RemovePlugins Include="$(GameModOutputDir)/*.pdb" />
