@@ -10,6 +10,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     private int _planAge;
     private WorldCoordinate? _staging;
     private bool _sidearmThrowPass;
+    private Creature _chargeTarget;
     internal bool SkipNextUpdate;
     internal Creature Target { get; private set; }
     internal ViolenceType TargetViolence { get; private set; } = ViolenceType.None;
@@ -28,6 +29,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     {
         base.NewRoom(room);
         Target = null;
+        _chargeTarget = null;
         TargetViolence = ViolenceType.None;
         TargetAfraid = false;
         AllowVanillaSidearmCombat = false;
@@ -40,9 +42,6 @@ internal sealed class LanceScavengerAI : ScavengerAI
     {
         if (SkipNextUpdate) { SkipNextUpdate = false; return; }
 
-        // Let vanilla own social memory, target selection, Attack/Flee choice and pursuit.
-        // CheckThrow is intercepted while base.Update runs; after the lance opportunity is
-        // evaluated below, we explicitly give vanilla one sidearm-throw pass if appropriate.
         _sidearmThrowPass = false;
         AllowVanillaSidearmCombat = false;
         base.Update();
@@ -50,6 +49,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         _owner.EnsureWeaponSlots();
         SelectVanillaCombatTarget();
+        if (_owner.Combat.State == LanceState.FollowUpThrow)
+            RestoreChargeTargetForFollowUp();
+
         bool armed = _owner.Lance != null;
         bool sidearm = _owner.SidearmSpear != null;
         bool active = _owner.Consious && _owner.grabbedBy.Count == 0 && !_owner.safariControlled &&
@@ -65,8 +67,11 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool chargeOpportunity = active && armed && Target != null && TargetViolence == ViolenceType.Lethal &&
             distance >= ChargeLanePlanner.MinimumChargeDistance && laneClear && _owner.Combat.Cooldown == 0;
 
+        LanceState before = _owner.Combat.State;
         _owner.Combat.Tick(new LanceSituation(active, armed, sidearm, Target != null, TargetViolence, TargetAfraid,
             distance, laneClear));
+        if (before != LanceState.Charge && _owner.Combat.State == LanceState.Charge)
+            _chargeTarget = Target;
 
         if (!armed) { RecoverWeapon(); return; }
 
@@ -81,9 +86,6 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool reserved = state == LanceState.Brace || state == LanceState.Charge ||
             state == LanceState.FollowUpThrow || state == LanceState.CloseDefense || state == LanceState.Recover;
 
-        // Lethal + Attacks: the lance wins whenever a valid charge window exists.
-        // Otherwise grasp-0's ordinary spear is handed back to the complete vanilla
-        // throwing logic. Under 3 tiles, CloseDefense keeps priority over the sidearm.
         AllowVanillaSidearmCombat = sidearm && behavior == Behavior.Attack && !TargetAfraid &&
             Target != null && TargetViolence == ViolenceType.Lethal &&
             distance >= ChargeLanePlanner.MinimumChargeDistance && !chargeOpportunity && !reserved &&
@@ -96,8 +98,6 @@ internal sealed class LanceScavengerAI : ScavengerAI
             finally { _sidearmThrowPass = false; }
         }
 
-        // Lethal + Attacks keeps pursuing with vanilla locomotion. A reachable staging
-        // point may refine that chase, but failing to find one never freezes pursuit.
         if (!TargetAfraid && TargetViolence == ViolenceType.Lethal &&
             (state == LanceState.CreateDistance || state == LanceState.AcquireChargeLane))
         {
@@ -125,11 +125,31 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
     }
 
+    private void RestoreChargeTargetForFollowUp()
+    {
+        Creature target = _chargeTarget;
+        if (target == null || target.dead || !target.Consious || target.room != _owner.room)
+            return;
+        Tracker.CreatureRepresentation rep = tracker.RepresentationForCreature(target.abstractCreature, false);
+        if (rep?.dynamicRelationship == null || rep.dynamicRelationship.state is not ScavengerTrackState)
+            return;
+        CreatureTemplate.Relationship relationship = rep.dynamicRelationship.currentRelationship;
+        if (relationship.type != CreatureTemplate.Relationship.Type.Attacks &&
+            relationship.type != CreatureTemplate.Relationship.Type.Afraid)
+            return;
+        ViolenceType violence = ViolenceTypeAgainstCreature(rep);
+        if (violence != ViolenceType.Lethal) return;
+        Target = target;
+        TargetViolence = violence;
+        TargetAfraid = relationship.type == CreatureTemplate.Relationship.Type.Afraid;
+        focusCreature = rep;
+    }
+
     private bool TryFollowUpThrow()
     {
         _owner.EnsureWeaponSlots();
         Spear spear = _owner.SidearmSpear;
-        Creature target = Target;
+        Creature target = _chargeTarget ?? Target;
         if (spear == null || _owner.grasps[0]?.grabbed != spear || target == null || target.dead || !target.Consious ||
             target.room != _owner.room || TargetViolence != ViolenceType.Lethal)
             return false;
@@ -143,6 +163,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         _owner.lookPoint = aim;
         _owner.Throw(direction);
+        _chargeTarget = null;
         return true;
     }
 
@@ -174,9 +195,6 @@ internal sealed class LanceScavengerAI : ScavengerAI
         if (candidate == null || candidate == _owner || candidate.room != _owner.room || candidate.dead || !candidate.Consious)
             return;
 
-        // No custom range or visibility gate here. Vanilla may pursue remembered targets
-        // across the whole room; ChargeLane and vanilla CheckThrow independently decide
-        // when their respective attacks are actually legal.
         Target = candidate;
         TargetViolence = violence;
         TargetAfraid = afraid;
