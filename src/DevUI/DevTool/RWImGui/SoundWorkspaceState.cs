@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using DryCycle.DevUI.DevTool.Sound;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -15,12 +14,17 @@ internal enum SoundLibraryDestination
 internal static class SoundWorkspaceState
 {
     private static readonly HashSet<int> SceneSelectionSet = new();
+    private static readonly List<int> InvalidSelectionScratch = new();
+
     private static string activeGroupId = string.Empty;
     private static string roomKey = string.Empty;
     private static int selectionAnchor = -1;
     private static int lastLegacySelectedIndex = -1;
     private static int expectedLegacySelection = int.MinValue;
+    private static int observedSoundCount = -1;
     private static bool sceneSelectionInitialized;
+    private static bool selectedIndicesDirty = true;
+    private static int[] selectedIndicesCache = Array.Empty<int>();
     private static SoundLibraryDestination libraryDestination = SoundLibraryDestination.Scene;
 
     internal static string ActiveGroupId => activeGroupId;
@@ -75,9 +79,10 @@ internal static class SoundWorkspaceState
     internal static bool GroupIdExists(string groupId)
     {
         if (string.IsNullOrWhiteSpace(groupId)) return false;
+        string value = groupId.Trim();
         SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
         for (int i = 0; i < groups.Length; i++)
-            if (string.Equals(groups[i].Id, groupId.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(groups[i].Id, value, StringComparison.OrdinalIgnoreCase))
                 return true;
         return false;
     }
@@ -143,28 +148,27 @@ internal static class SoundWorkspaceState
         if (!string.Equals(roomKey, nextRoom, StringComparison.Ordinal))
         {
             roomKey = nextRoom;
-            SceneSelectionSet.Clear();
+            ClearSelectionSet();
             selectionAnchor = -1;
             lastLegacySelectedIndex = -1;
             expectedLegacySelection = int.MinValue;
+            observedSoundCount = -1;
             sceneSelectionInitialized = false;
         }
 
         int count = snapshot?.Sounds?.Length ?? 0;
-        if (SceneSelectionSet.Count > 0)
+        if (count != observedSoundCount)
         {
-            int[] existing = SceneSelectionSet.ToArray();
-            for (int i = 0; i < existing.Length; i++)
-                if (existing[i] < 0 || existing[i] >= count)
-                    SceneSelectionSet.Remove(existing[i]);
+            observedSoundCount = count;
+            PruneSelection(count);
         }
 
         int legacyIndex = snapshot?.SelectedIndex ?? -1;
         bool legacyValid = legacyIndex >= 0 && legacyIndex < count;
         if (!sceneSelectionInitialized)
         {
-            SceneSelectionSet.Clear();
-            if (legacyValid) SceneSelectionSet.Add(legacyIndex);
+            ClearSelectionSet();
+            if (legacyValid) AddSelection(legacyIndex);
             selectionAnchor = legacyValid ? legacyIndex : -1;
             sceneSelectionInitialized = true;
             lastLegacySelectedIndex = legacyIndex;
@@ -180,8 +184,8 @@ internal static class SoundWorkspaceState
             }
             else
             {
-                SceneSelectionSet.Clear();
-                if (legacyValid) SceneSelectionSet.Add(legacyIndex);
+                ClearSelectionSet();
+                if (legacyValid) AddSelection(legacyIndex);
                 selectionAnchor = legacyValid ? legacyIndex : -1;
             }
             lastLegacySelectedIndex = legacyIndex;
@@ -192,7 +196,7 @@ internal static class SoundWorkspaceState
         }
 
         if (selectionAnchor >= count)
-            selectionAnchor = SceneSelectionSet.Count > 0 ? SceneSelectionSet.Min() : -1;
+            selectionAnchor = FindMinimumSelection();
     }
 
     internal static bool IsSceneSelected(int index) => SceneSelectionSet.Contains(index);
@@ -201,21 +205,22 @@ internal static class SoundWorkspaceState
     {
         if (shift && selectionAnchor >= 0)
         {
-            if (!ctrl) SceneSelectionSet.Clear();
+            if (!ctrl) ClearSelectionSet();
             int min = Math.Min(selectionAnchor, index);
             int max = Math.Max(selectionAnchor, index);
-            for (int i = min; i <= max; i++) SceneSelectionSet.Add(i);
+            for (int i = min; i <= max; i++) AddSelection(i);
         }
         else if (ctrl)
         {
             if (!SceneSelectionSet.Add(index))
                 SceneSelectionSet.Remove(index);
+            MarkSelectionDirty();
             selectionAnchor = index;
         }
         else
         {
-            SceneSelectionSet.Clear();
-            SceneSelectionSet.Add(index);
+            ClearSelectionSet();
+            AddSelection(index);
             selectionAnchor = index;
         }
 
@@ -225,8 +230,9 @@ internal static class SoundWorkspaceState
 
     internal static void SelectAll(int count)
     {
-        SceneSelectionSet.Clear();
+        ClearSelectionSet();
         for (int i = 0; i < count; i++) SceneSelectionSet.Add(i);
+        if (count > 0) MarkSelectionDirty();
         selectionAnchor = count > 0 ? 0 : -1;
         sceneSelectionInitialized = true;
         expectedLegacySelection = int.MinValue;
@@ -234,14 +240,28 @@ internal static class SoundWorkspaceState
 
     internal static int[] SelectedIndices()
     {
-        int[] result = SceneSelectionSet.ToArray();
-        Array.Sort(result);
-        return result;
+        if (!selectedIndicesDirty) return selectedIndicesCache;
+        if (SceneSelectionSet.Count == 0)
+        {
+            selectedIndicesCache = Array.Empty<int>();
+            selectedIndicesDirty = false;
+            return selectedIndicesCache;
+        }
+
+        if (selectedIndicesCache.Length != SceneSelectionSet.Count)
+            selectedIndicesCache = new int[SceneSelectionSet.Count];
+
+        int cursor = 0;
+        foreach (int index in SceneSelectionSet)
+            selectedIndicesCache[cursor++] = index;
+        Array.Sort(selectedIndicesCache);
+        selectedIndicesDirty = false;
+        return selectedIndicesCache;
     }
 
     internal static void ClearSelection()
     {
-        SceneSelectionSet.Clear();
+        ClearSelectionSet();
         selectionAnchor = -1;
         sceneSelectionInitialized = true;
         expectedLegacySelection = int.MinValue;
@@ -249,9 +269,57 @@ internal static class SoundWorkspaceState
 
     internal static void ResetSelectionFromLegacy()
     {
-        SceneSelectionSet.Clear();
+        ClearSelectionSet();
         selectionAnchor = -1;
         sceneSelectionInitialized = false;
         expectedLegacySelection = int.MinValue;
+    }
+
+    private static void PruneSelection(int count)
+    {
+        if (SceneSelectionSet.Count == 0)
+        {
+            if (selectionAnchor >= count) selectionAnchor = -1;
+            return;
+        }
+
+        InvalidSelectionScratch.Clear();
+        foreach (int index in SceneSelectionSet)
+            if (index < 0 || index >= count)
+                InvalidSelectionScratch.Add(index);
+
+        for (int i = 0; i < InvalidSelectionScratch.Count; i++)
+            SceneSelectionSet.Remove(InvalidSelectionScratch[i]);
+        if (InvalidSelectionScratch.Count > 0) MarkSelectionDirty();
+        InvalidSelectionScratch.Clear();
+
+        if (selectionAnchor >= count)
+            selectionAnchor = FindMinimumSelection();
+    }
+
+    private static int FindMinimumSelection()
+    {
+        if (SceneSelectionSet.Count == 0) return -1;
+        int minimum = int.MaxValue;
+        foreach (int index in SceneSelectionSet)
+            if (index < minimum) minimum = index;
+        return minimum == int.MaxValue ? -1 : minimum;
+    }
+
+    private static void AddSelection(int index)
+    {
+        if (SceneSelectionSet.Add(index)) MarkSelectionDirty();
+    }
+
+    private static void ClearSelectionSet()
+    {
+        if (SceneSelectionSet.Count == 0) return;
+        SceneSelectionSet.Clear();
+        MarkSelectionDirty();
+    }
+
+    private static void MarkSelectionDirty()
+    {
+        selectedIndicesDirty = true;
     }
 }
