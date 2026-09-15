@@ -13,11 +13,9 @@ internal static class UniversalDevUiMirrorWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
-        // This window used to be pumped from ActionToastOverlay on every frontend frame. Its body
-        // performs reflection-backed mirror capture, semantic validation, page coverage traversal
-        // and a loaded-type inventory, which made the first O/H frame compete with vanilla DevUI
-        // construction and RWImGui context activation. Keep the diagnostic implementation intact,
-        // but make it explicitly opt-in so production editor interaction never pays for auditing.
+        // All reflection-backed mirror capture and audit evaluation is pumped by the backend
+        // diagnostics phase. This frontend only renders detached snapshots and never advances audit
+        // state from Draw.
         if (!DevUiDiagnosticsPolicy.Enabled)
             return;
 
@@ -46,9 +44,9 @@ internal static class UniversalDevUiMirrorWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("UniversalDevUiMirror");
-        DevUiCompatibilityGateView.Draw(snapshot);
+        DevUiCompatibilityGateView.Draw();
         DevUiPageCoverageView.Draw();
-        DevUiSemanticConformanceView.Draw(snapshot);
+        DevUiSemanticConformanceView.Draw();
         UniversalDevUiMirrorView.Draw(snapshot);
         ImGui.End();
     }
