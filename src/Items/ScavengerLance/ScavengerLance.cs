@@ -6,6 +6,8 @@ namespace DryCycle.Items.ScavengerLance;
 
 internal sealed partial class ScavengerLance : Weapon
 {
+    private const float ActualBladeHitPadding = 1.5f;
+
     private readonly HashSet<Creature> _hitCreatures = new();
     private readonly Dictionary<Creature, int> _shaftContacts = new();
     private Vector2 _previousTip;
@@ -41,7 +43,8 @@ internal sealed partial class ScavengerLance : Weapon
 
     internal float Length => ((AbstractScavengerLance)abstractPhysicalObject).Length;
     internal Creature Holder => grabbedBy.Count > 0 ? grabbedBy[0].grabber : null;
-    internal Vector2 Tip => firstChunk.pos + rotation * (Length * (1f - LanceCombatMath.GripFraction));
+    internal Vector2 Tip => firstChunk.pos + rotation * LanceCombatMath.ForwardLength(Length);
+    internal Vector2 BladeRoot => firstChunk.pos + rotation * LanceCombatMath.BladeRootDistance(Length);
     internal Vector2 Tail => firstChunk.pos - rotation * (Length * LanceCombatMath.GripFraction);
     internal bool CanThrust => _thrustCooldown == 0 && Holder != null;
     public override bool HeavyWeapon => true;
@@ -105,7 +108,7 @@ internal sealed partial class ScavengerLance : Weapon
         {
             _hitCreatures.Clear();
             if (_havePreviousPose)
-                _previousTip = _previousGrip + _grip.Direction.normalized * (Length * (1f - LanceCombatMath.GripFraction));
+                _previousTip = _previousGrip + _grip.Direction.normalized * LanceCombatMath.ForwardLength(Length);
         }
         _wasCharging = charging;
         if (holder != null)
@@ -145,7 +148,7 @@ internal sealed partial class ScavengerLance : Weapon
         float speed = holder != null ? Vector2.Dot(holder.mainBodyChunk.vel, rotation) : Vector2.Dot(firstChunk.vel, rotation);
 
         if (charging || _thrustFrames > 0 || _flightFrames > 0)
-            ResolveTip(currentTip, sweptWall ? wallFraction : 1f, charging, speed);
+            ResolveBlade(sweptWall ? wallFraction : 1f, charging, speed);
         ResolveShaft();
         if (sweptWall || rodWall) ResolveTerrain(holder, speed, charging);
 
@@ -178,11 +181,16 @@ internal sealed partial class ScavengerLance : Weapon
         return new Vector2(sign == 0f ? 1f : sign, 0.6f).normalized;
     }
 
-    private void ResolveTip(Vector2 tip, float maxFraction, bool charging, float holderSpeed)
+    private void ResolveBlade(float maxFraction, bool charging, float holderSpeed)
     {
         Creature holder = Holder;
         BodyChunk nearest = null;
         float firstHit = maxFraction;
+        float firstBladeT = 1f;
+        float forwardLength = LanceCombatMath.ForwardLength(Length);
+        Vector2 previousDirection = (_previousTip - _previousGrip).sqrMagnitude > 0.001f
+            ? (_previousTip - _previousGrip).normalized : rotation;
+
         foreach (AbstractCreature abstractTarget in room.abstractRoom.creatures)
         {
             Creature target = abstractTarget.realizedCreature;
@@ -190,15 +198,23 @@ internal sealed partial class ScavengerLance : Weapon
                 _hitCreatures.Contains(target) || (holder == null && target == thrownBy && _flightFrames > 20)) continue;
             foreach (BodyChunk chunk in target.bodyChunks)
             {
-                if (LanceCombatMath.SweepTip(_previousTip, tip, chunk.lastPos, chunk.pos, chunk.rad + 2f, out float hit) &&
-                    hit <= firstHit && room.VisualContact(firstChunk.pos, chunk.pos))
-                { firstHit = hit; nearest = chunk; }
+                if (!LanceCombatMath.SweepBlade(_previousGrip, previousDirection, firstChunk.pos, rotation,
+                        forwardLength, chunk.lastPos, chunk.pos, chunk.rad, ActualBladeHitPadding,
+                        out float hit, out float bladeT) || hit > firstHit ||
+                    !room.VisualContact(firstChunk.pos, chunk.pos))
+                    continue;
+                firstHit = hit;
+                firstBladeT = bladeT;
+                nearest = chunk;
             }
         }
         if (nearest == null) return;
+
         Creature victim = (Creature)nearest.owner;
-        Vector2 contactTip = Vector2.Lerp(_previousTip, tip, firstHit);
-        Vector2 relative = tip - _previousTip - (nearest.pos - nearest.lastPos);
+        Vector2 oldBladePoint = LanceCombatMath.BladePoint(_previousGrip, previousDirection, forwardLength, firstBladeT);
+        Vector2 bladePoint = LanceCombatMath.BladePoint(firstChunk.pos, rotation, forwardLength, firstBladeT);
+        Vector2 contactPoint = Vector2.Lerp(oldBladePoint, bladePoint, firstHit);
+        Vector2 relative = bladePoint - oldBladePoint - (nearest.pos - nearest.lastPos);
         Vector2 targetDirection = Vector2.Lerp(nearest.lastPos, nearest.pos, firstHit) -
             Vector2.Lerp(_previousGrip, firstChunk.pos, firstHit);
         float alignment = Mathf.Min(Vector2.Dot(rotation, relative.normalized), Vector2.Dot(rotation, targetDirection.normalized));
@@ -207,10 +223,18 @@ internal sealed partial class ScavengerLance : Weapon
         LanceImpact impact = LanceCombatMath.Impact(speed, alignment, holder?.TotalMass ?? TotalMass,
             victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust, _thrustMaxDamage);
         if (impact.Damage <= 0f) return;
+
+        // The whole front wedge is dangerous. Hits nearer the shoulder are slightly less
+        // efficient than the point, but they are still real stab damage rather than shaft pushes.
+        float bladeScale = LanceCombatMath.BladeDamageMultiplier(firstBladeT);
+        float damage = impact.Damage * bladeScale;
+        float stun = impact.Stun * bladeScale;
+        float impulse = impact.Impulse * Mathf.Lerp(0.88f, 1f, bladeScale);
+
         _hitCreatures.Add(victim);
         victim.SetKillTag((holder ?? thrownBy)?.abstractCreature);
-        victim.Violence(firstChunk, rotation * impact.Impulse, nearest, null, Creature.DamageType.Stab, impact.Damage, impact.Stun);
-        nearest.vel += rotation * (impact.Impulse / Mathf.Max(0.25f, victim.TotalMass));
+        victim.Violence(firstChunk, rotation * impulse, nearest, null, Creature.DamageType.Stab, damage, stun);
+        nearest.vel += rotation * (impulse / Mathf.Max(0.25f, victim.TotalMass));
         if (charging && holder is ILanceWielder lanceWielder)
         {
             foreach (BodyChunk chunk in holder.bodyChunks)
@@ -218,14 +242,15 @@ internal sealed partial class ScavengerLance : Weapon
             lanceWielder.LanceImpact(false, speed, impact.RetainedSpeed);
         }
         else if (holder == null) { firstChunk.vel *= 0.35f; _flightFrames = 0; }
-        _bendVelocity += Mathf.Min(3.5f, impact.Impulse * 0.4f);
-        room.PlaySound(SoundID.Spear_Stick_In_Creature, contactTip, 0.75f, 0.85f);
+        _bendVelocity += Mathf.Min(3.5f, impulse * 0.4f);
+        room.PlaySound(SoundID.Spear_Stick_In_Creature, contactPoint, 0.75f, 0.85f);
         if (holder != null) room.socialEventRecognizer?.WeaponAttack(this, holder, victim, true);
     }
 
     private void ResolveShaft()
     {
-        Vector2 shaftEnd = Tip - rotation * 9f;
+        // Only the narrow rear handle pushes. The broad forward bone wedge is handled by ResolveBlade.
+        Vector2 shaftEnd = BladeRoot - rotation * 1.5f;
         Creature holder = Holder;
         foreach (AbstractCreature abstractTarget in room.abstractRoom.creatures)
         {
@@ -258,9 +283,24 @@ internal sealed partial class ScavengerLance : Weapon
         return false;
     }
 
-    private bool PoseFits(Vector2 grip, Vector2 direction) => !TraceSolid(
-        grip - direction * (Length * LanceCombatMath.GripFraction),
-        grip + direction * (Length * (1f - LanceCombatMath.GripFraction)), out _);
+    private bool PoseFits(Vector2 grip, Vector2 direction)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector2.right;
+        float forwardLength = LanceCombatMath.ForwardLength(Length);
+        if (TraceSolid(grip - dir * (Length * LanceCombatMath.GripFraction), grip + dir * forwardLength, out _))
+            return false;
+
+        Vector2 perp = Custom.PerpendicularVector(dir);
+        for (int i = 0; i < 6; i++)
+        {
+            float t = i / 5f;
+            Vector2 center = LanceCombatMath.BladePoint(grip, dir, forwardLength, t);
+            float halfWidth = LanceCombatMath.BladeHalfWidth(t);
+            if (room.GetTile(center + perp * halfWidth).Solid || room.GetTile(center - perp * halfWidth).Solid)
+                return false;
+        }
+        return true;
+    }
 
     private void ResolveTerrain(Creature holder, float speed, bool charging)
     {
