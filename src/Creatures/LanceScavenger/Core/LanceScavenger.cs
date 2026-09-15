@@ -56,7 +56,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     {
         EnsureBirthLance();
         if (!Consious || grabbedBy.Count > 0)
-            Combat.Tick(new LanceSituation(false, Lance != null, false, false, false, 999f, false, false));
+            Combat.Tick(new LanceSituation(false, Lance != null, false, ScavengerAI.ViolenceType.None, false,
+                999f, false, false));
         base.Update(eu);
         if (room != null) Lance?.SynchronizeGrip(eu);
     }
@@ -93,8 +94,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     public override void Violence(BodyChunk source, Vector2? directionAndMomentum, BodyChunk hitChunk,
         Appendage.Pos hitAppendage, DamageType type, float damage, float stunBonus)
     {
-        if (damage > 0f || stunBonus > 5f)
-            Brain?.AttackedBy(source?.owner is Weapon weapon ? weapon.thrownBy : source?.owner as Creature);
+        // Do not create a private "recent attacker" hostility path here. Vanilla
+        // ScavengerAI/social events own reputation, personal memory and retaliation.
         base.Violence(source, directionAndMomentum, hitChunk, hitAppendage, type, damage, stunBonus);
         if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace) Combat.Recover(false);
     }
