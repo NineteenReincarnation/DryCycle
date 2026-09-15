@@ -69,6 +69,28 @@ internal static class WorldWorkspaceView
         internal string Label = string.Empty;
     }
 
+    private readonly struct EndpointKey : IEquatable<EndpointKey>
+    {
+        internal EndpointKey(int roomIndex, int nodeIndex)
+        {
+            RoomIndex = roomIndex;
+            NodeIndex = nodeIndex;
+        }
+
+        private int RoomIndex { get; }
+        private int NodeIndex { get; }
+
+        public bool Equals(EndpointKey other) => RoomIndex == other.RoomIndex && NodeIndex == other.NodeIndex;
+        public override bool Equals(object obj) => obj is EndpointKey other && Equals(other);
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return RoomIndex * 397 ^ NodeIndex;
+            }
+        }
+    }
+
     private static WorkspaceMode workspaceMode = WorkspaceMode.WorldMap;
     private static ExplorerMode explorerMode = ExplorerMode.Rooms;
     private static SelectionKind selectionKind = SelectionKind.Region;
@@ -89,6 +111,10 @@ internal static class WorldWorkspaceView
     private static string mappingConnectionId = string.Empty;
     private static int mappingTargetNode = -1;
     private static WorldConnectionDirection mappingDirection = WorldConnectionDirection.Bidirectional;
+    private static readonly List<int> CandidatePreferredScratch = new();
+    private static readonly List<int> CandidateFreeScratch = new();
+    private static EditorMapConnectionSnapshot[] indexedExplicitEndpointConnections;
+    private static readonly HashSet<EndpointKey> ExplicitEndpoints = new();
 
     private static EditorMapRoomSnapshot[] indexedRooms;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> RoomsByIndex = new();
@@ -191,6 +217,69 @@ internal static class WorldWorkspaceView
         ImGui.Separator();
         DrawStatus(snapshot);
         ImGui.End();
+    }
+
+    internal static void ResetRetainedState()
+    {
+        indexedRooms = null;
+        RoomsByIndex.Clear();
+        RoomsByName.Clear();
+        indexedConnections = null;
+        ConnectionsById.Clear();
+        indexedExplicitEndpointConnections = null;
+        ExplicitEndpoints.Clear();
+        CandidatePreferredScratch.Clear();
+        CandidateFreeScratch.Clear();
+
+        projectedRoomRowsSource = null;
+        roomExplorerRows = Array.Empty<RoomExplorerRow>();
+        projectedConnectionRooms = null;
+        projectedConnectionSource = null;
+        connectionExplorerRows = Array.Empty<ConnectionExplorerRow>();
+        ConnectionLabels.Clear();
+        projectedSubregionRooms = null;
+        projectedSubregionChinese = false;
+        SubregionMap.Clear();
+        SubregionSummaries.Clear();
+        projectedIssueRooms = null;
+        projectedIssueConnections = null;
+        projectedIssueRegion = string.Empty;
+        projectedIssueTopologyRevision = -1;
+        projectedIssueChinese = false;
+        IssueDegree.Clear();
+        WorldIssues.Clear();
+
+        observedSearch = null;
+        normalizedSearch = string.Empty;
+        toolbarRoomCount = -1;
+        toolbarRoomCountChinese = false;
+        toolbarRoomCountText = string.Empty;
+        statusRooms = null;
+        statusConnections = null;
+        statusSelectionKind = default;
+        statusSelectedRoomIndex = int.MinValue;
+        statusConnectionId = null;
+        statusSubregion = null;
+        statusWorkspaceMode = default;
+        statusWorldTextDirty = false;
+        statusTopologyDirty = false;
+        statusWorldDataDirty = false;
+        statusChinese = false;
+        statusText = string.Empty;
+
+        selectionKind = SelectionKind.Region;
+        selectedSubregion = string.Empty;
+        selectedConnectionId = string.Empty;
+        lastObservedRoomIndex = -1;
+        inspectorRoom = -1;
+        inspectorPosition = default;
+        inspectorSubregion = string.Empty;
+        mappingConnectionId = string.Empty;
+        mappingTargetNode = -1;
+        mappingDirection = WorldConnectionDirection.Bidirectional;
+        draggingExplorerSplitter = false;
+        draggingInspectorSplitter = false;
+        WorldMapView.ClearConnectionSelection();
     }
 
     private static void DrawToolbar(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)
@@ -1191,23 +1280,25 @@ internal static class WorldWorkspaceView
 
     private static List<int> CandidateTargetNodes(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection, EditorMapRoomSnapshot targetRoom)
     {
-        List<int> preferred = new();
-        List<int> free = new();
+        CandidatePreferredScratch.Clear();
+        CandidateFreeScratch.Clear();
+        EnsureExplicitEndpointIndex(snapshot);
+
         EditorMapRoomNodeSnapshot[] nodes = targetRoom?.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
         for (int i = 0; i < nodes.Length; i++)
         {
             EditorMapRoomNodeSnapshot node = nodes[i];
             if (!node.Exit) continue;
-            if (EndpointOwnedByExplicitEdge(snapshot, targetRoom.RoomIndex, node.NodeIndex)) continue;
+            if (ExplicitEndpoints.Contains(new EndpointKey(targetRoom.RoomIndex, node.NodeIndex))) continue;
 
             if (node.ConnectedRoomIndex == connection.FromRoomIndex)
-                preferred.Add(node.NodeIndex);
+                CandidatePreferredScratch.Add(node.NodeIndex);
             else if (node.ConnectedRoomIndex < 0)
-                free.Add(node.NodeIndex);
+                CandidateFreeScratch.Add(node.NodeIndex);
         }
 
-        preferred.AddRange(free);
-        return preferred;
+        CandidatePreferredScratch.AddRange(CandidateFreeScratch);
+        return CandidatePreferredScratch;
     }
 
     private static int FirstCandidateTargetNode(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection, EditorMapRoomSnapshot targetRoom)
@@ -1216,18 +1307,22 @@ internal static class WorldWorkspaceView
         return candidates.Count > 0 ? candidates[0] : -1;
     }
 
-    private static bool EndpointOwnedByExplicitEdge(EditorMapPresentationSnapshot snapshot, int roomIndex, int nodeIndex)
+    private static void EnsureExplicitEndpointIndex(EditorMapPresentationSnapshot snapshot)
     {
-        EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        if (ReferenceEquals(indexedExplicitEndpointConnections, connections)) return;
+
+        ExplicitEndpoints.Clear();
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
-            if (!connection.Explicit) continue;
-            if ((connection.FromRoomIndex == roomIndex && connection.FromNodeIndex == nodeIndex) ||
-                (connection.ToRoomIndex == roomIndex && connection.ToNodeIndex == nodeIndex))
-                return true;
+            if (connection == null || !connection.Explicit) continue;
+            if (connection.FromRoomIndex >= 0 && connection.FromNodeIndex >= 0)
+                ExplicitEndpoints.Add(new EndpointKey(connection.FromRoomIndex, connection.FromNodeIndex));
+            if (connection.ToRoomIndex >= 0 && connection.ToNodeIndex >= 0)
+                ExplicitEndpoints.Add(new EndpointKey(connection.ToRoomIndex, connection.ToNodeIndex));
         }
-        return false;
+        indexedExplicitEndpointConnections = connections;
     }
 
     private static void SynchronizeSelection(EditorMapPresentationSnapshot snapshot)
