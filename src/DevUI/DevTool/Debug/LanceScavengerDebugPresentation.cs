@@ -91,8 +91,6 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public bool CounterSweepActive { get; init; }
     public float CounterSweepChance { get; init; }
 
-    // Oldest -> newest samples. They are attached before the snapshot is published,
-    // and are only allocated while this debug page owns an active capture lease.
     public float[] AimQualityHistory { get; internal set; } = Array.Empty<float>();
     public bool[] AimReadyHistory { get; internal set; } = Array.Empty<bool>();
     public bool[] HardBlockHistory { get; internal set; } = Array.Empty<bool>();
@@ -112,9 +110,6 @@ public static class LanceScavengerDebugPresentationHub
 {
     private const int HistoryFrames = LanceCombatState.BraceFrames;
     private const uint LeaseTimeoutMilliseconds = 750;
-    // Keep the last sample through normal pauses / frame stepping. Room changes and closing the
-    // page clear immediately; this longer timeout only prevents a paused simulation from making
-    // the diagnostic page appear as if the creature vanished.
     private const uint EntryTimeoutMilliseconds = 30000;
 
     private sealed class EntryRecord
@@ -167,11 +162,6 @@ public static class LanceScavengerDebugPresentationHub
     private static string requestedRoom = string.Empty;
     private static int lastLeaseTick;
 
-    /// <summary>
-    /// Called every ImGui frame while the page is visible. This is a short lease rather than a
-    /// permanent toggle: if DevTools/RWImGui disappears unexpectedly, gameplay stops paying the
-    /// debug capture cost automatically within a fraction of a second.
-    /// </summary>
     public static void SetRequested(bool value, string roomName)
     {
         string normalized = roomName ?? string.Empty;
@@ -225,7 +215,6 @@ public static class LanceScavengerDebugPresentationHub
 
     internal static void Publish(LanceScavenger owner, LanceScavengerAI brain)
     {
-        // Normal gameplay pays only one volatile read when the debug page is closed.
         if (!requestedFast || owner?.room == null || brain == null) return;
 
         string roomName = owner.room.abstractRoom?.name ?? string.Empty;
@@ -278,10 +267,8 @@ public static class LanceScavengerDebugPresentationHub
             : brain.MotionTracker.SmoothedVelocity(trackedChunk);
         float stability = trackedChunk == null ? 0f : brain.MotionTracker.Stability(trackedChunk);
 
-        // During flight the motor owns the actual lance orientation (including counter-sweep).
-        // Before takeoff, visualize the current solver direction so the developer can see what is
-        // being evaluated for a possible commit.
-        Vector2 pitchDirection = owner.Combat.State == LanceState.Charge
+        bool activeCharge = owner.Combat.State == LanceState.Charge;
+        Vector2 pitchDirection = activeCharge
             ? owner.Motor.LanceDirection
             : aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
         if (pitchDirection.sqrMagnitude < 0.001f) pitchDirection = Vector2.right;
@@ -292,10 +279,14 @@ public static class LanceScavengerDebugPresentationHub
         float lanceLength = owner.Lance?.Length ?? LanceCombatMath.DefaultLength;
         float forwardLength = LanceCombatMath.ForwardLength(lanceLength);
 
-        int trajectoryFrames = aim.ImpactFrame > 0
-            ? Mathf.Min(LanceCombatState.MaxChargeFrames, aim.ImpactFrame + 3)
-            : LanceCombatState.MaxChargeFrames;
-        Vector2[] bodyPath = LanceAimSolver.BuildDebugBodyTrajectory(owner, origin, pitchDirection, trajectoryFrames);
+        int trajectoryFrames = activeCharge
+            ? Mathf.Max(1, LanceCombatState.MaxChargeFrames - owner.Combat.Age)
+            : aim.ImpactFrame > 0
+                ? Mathf.Min(LanceCombatState.MaxChargeFrames, aim.ImpactFrame + 3)
+                : LanceCombatState.MaxChargeFrames;
+        Vector2[] bodyPath = activeCharge
+            ? LanceAimSolver.BuildDebugBodyTrajectory(origin, owner.mainBodyChunk.vel, trajectoryFrames)
+            : LanceAimSolver.BuildDebugBodyTrajectory(owner, origin, pitchDirection, trajectoryFrames);
         BuildPathArrays(bodyPath, pitchDirection, forwardLength,
             out float[] bodyPathX, out float[] bodyPathY, out float[] tipPathX, out float[] tipPathY);
 
