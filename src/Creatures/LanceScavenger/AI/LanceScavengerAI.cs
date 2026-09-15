@@ -61,6 +61,10 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool active = _owner.Consious && _owner.grabbedBy.Count == 0 && !_owner.safariControlled &&
             !_owner.enteringShortCut.HasValue && !_owner.inShortcut && _owner.Submersion < 0.25f;
         float distance = Target == null ? 999f : Vector2.Distance(_owner.mainBodyChunk.pos, Target.mainBodyChunk.pos);
+
+        // Re-solve every update. During the 0.95 s brace this continuously tracks the
+        // target's current velocity/body chunks; the solution on the final brace frame
+        // is the one committed to the airborne charge.
         Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
             ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target);
         bool laneClear = Lane.Clear;
@@ -81,7 +85,12 @@ internal sealed class LanceScavengerAI : ScavengerAI
         if (before != LanceState.Backstep && state == LanceState.Backstep)
             _owner.Motor.BeginBackstep(Target);
         if (before != LanceState.Charge && state == LanceState.Charge)
+        {
+            // Lane was solved immediately before Tick. Lock exactly this final solution;
+            // no target tracking or pitch correction is allowed once airborne.
+            _owner.Motor.CommitCharge(Lane);
             _chargeTarget = Target;
+        }
 
         if (!armed)
         {
