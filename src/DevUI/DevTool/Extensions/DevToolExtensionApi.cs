@@ -107,6 +107,23 @@ public sealed class DevToolRegistration : IDisposable
 /// </summary>
 public sealed class DevToolExtensionScope : IDisposable
 {
+    /// <summary>
+    /// Scope-owned proxy prevents disposing this scope from unregistering an adapter that the
+    /// caller may also have registered directly through the legacy registry API.
+    /// </summary>
+    private sealed class ScopedInspectorAdapter : IObjectInspectorAdapter
+    {
+        private readonly IObjectInspectorAdapter inner;
+
+        internal ScopedInspectorAdapter(IObjectInspectorAdapter inner) =>
+            this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
+
+        public bool CanInspect(PlacedObject target) => inner.CanInspect(target);
+        public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target) => inner.Capture(target);
+        public bool TrySetValue(PlacedObject target, string key, EditorPropertyValue value) =>
+            inner.TrySetValue(target, key, value);
+    }
+
     private readonly List<DevToolRegistration> registrations = new();
     private bool disposed;
 
@@ -135,15 +152,22 @@ public sealed class DevToolExtensionScope : IDisposable
 
     /// <summary>
     /// Registers richer library metadata for a PlacedObject type. Higher priority wins when
-    /// multiple extensions describe the same type.
+    /// multiple extensions describe the same type. The scope registers its own immutable copy so
+    /// cleanup never steals ownership of a descriptor that was registered through another API.
     /// </summary>
     public DevToolRegistration RegisterObjectDescriptor(ObjectDescriptor descriptor, int priority = 100)
     {
         ThrowIfDisposed();
         if (descriptor == null) throw new ArgumentNullException(nameof(descriptor));
 
-        ObjectCatalog.RegisterDescriptor(descriptor, priority);
-        return Track("ObjectDescriptor", () => ObjectCatalog.UnregisterDescriptor(descriptor));
+        ObjectDescriptor owned = new(
+            descriptor.Type,
+            descriptor.DisplayName,
+            descriptor.Category,
+            descriptor.Source,
+            descriptor.Tags);
+        ObjectCatalog.RegisterDescriptor(owned, priority);
+        return Track("ObjectDescriptor", () => ObjectCatalog.UnregisterDescriptor(owned));
     }
 
     /// <summary>
@@ -163,15 +187,16 @@ public sealed class DevToolExtensionScope : IDisposable
 
     /// <summary>
     /// Registers a custom object Inspector adapter. Third-party callbacks are invoked through
-    /// the existing fault-isolated Inspector registry.
+    /// the existing fault-isolated Inspector registry. A scope-owned proxy keeps ownership local.
     /// </summary>
     public DevToolRegistration RegisterInspector(IObjectInspectorAdapter adapter, int priority = 100)
     {
         ThrowIfDisposed();
         if (adapter == null) throw new ArgumentNullException(nameof(adapter));
 
-        ObjectInspectorRegistry.Register(adapter, priority);
-        return Track("ObjectInspector", () => ObjectInspectorRegistry.Unregister(adapter));
+        ScopedInspectorAdapter owned = new(adapter);
+        ObjectInspectorRegistry.Register(owned, priority);
+        return Track("ObjectInspector", () => ObjectInspectorRegistry.Unregister(owned));
     }
 
     /// <summary>
