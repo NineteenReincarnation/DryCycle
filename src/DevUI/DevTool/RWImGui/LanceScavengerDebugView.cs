@@ -14,6 +14,7 @@ internal static class LanceScavengerDebugView
 {
     private static int selectedSpawner = int.MinValue;
     private static int selectedNumber = int.MinValue;
+    private static bool captureActive;
 
     private static readonly Num.Vector4 Good = new(0.42f, 0.84f, 0.56f, 1f);
     private static readonly Num.Vector4 Warning = new(0.96f, 0.72f, 0.28f, 1f);
@@ -27,10 +28,18 @@ internal static class LanceScavengerDebugView
     private static readonly Num.Vector4 ReadyDot = new(0.45f, 0.90f, 0.58f, 1f);
     private static readonly Num.Vector4 HardBlockMark = new(0.96f, 0.34f, 0.34f, 0.55f);
     private static readonly Num.Vector4 BraceMark = new(0.35f, 0.58f, 0.94f, 0.16f);
+    private static readonly Num.Vector4 Grid = new(0.42f, 0.50f, 0.60f, 0.13f);
+    private static readonly Num.Vector4 OwnerMark = new(0.90f, 0.92f, 0.95f, 1f);
+    private static readonly Num.Vector4 TargetMark = new(0.55f, 0.62f, 0.72f, 0.64f);
+    private static readonly Num.Vector4 CurrentChunkMark = new(0.42f, 0.78f, 1.00f, 0.82f);
+    private static readonly Num.Vector4 BestChunkMark = new(0.98f, 0.72f, 0.30f, 0.92f);
+    private static readonly Num.Vector4 LanceMark = new(0.96f, 0.82f, 0.43f, 1f);
+    private static readonly Num.Vector4 AimMark = new(0.52f, 0.94f, 0.66f, 1f);
 
     internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
     {
         string room = string.IsNullOrEmpty(editor.RoomName) ? editor.Document : editor.RoomName;
+        captureActive = true;
         LanceScavengerDebugPresentationHub.SetRequested(true, room);
         LanceScavengerDebugSnapshot snapshot = LanceScavengerDebugPresentationHub.Current;
 
@@ -39,8 +48,8 @@ internal static class LanceScavengerDebugView
         float width = Math.Min(Math.Max(760f, display.X - 250f), Math.Max(560f, display.X - 32f));
         float height = Math.Min(Math.Max(500f, display.Y - 190f), Math.Max(360f, display.Y - 32f));
         Num.Vector2 pos = new(
-            Math.Max(176f, (display.X - width) * 0.56f),
-            Math.Max(118f, (display.Y - height) * 0.56f));
+            Math.Max(210f, (display.X - width) * 0.56f),
+            Math.Max(132f, (display.Y - height) * 0.56f));
 
         ImGui.SetNextWindowPos(pos, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
@@ -93,6 +102,8 @@ internal static class LanceScavengerDebugView
 
     internal static void StopCapture()
     {
+        if (!captureActive) return;
+        captureActive = false;
         LanceScavengerDebugPresentationHub.SetRequested(false, string.Empty);
         selectedSpawner = int.MinValue;
         selectedNumber = int.MinValue;
@@ -171,6 +182,7 @@ internal static class LanceScavengerDebugView
 
         DrawDecision(entry);
         DrawAim(entry);
+        DrawGeometry(entry);
         DrawAimHistory(entry);
         DrawSafety(entry);
         DrawTargetMotion(entry);
@@ -211,6 +223,125 @@ internal static class LanceScavengerDebugView
         KeyValue(DevToolUiSettings.T("枪角", "Lance pitch"), entry.LancePitchDegrees.ToString("+0.0;-0.0;0.0") + "°");
         KeyValue(DevToolUiSettings.T("精确解", "Exact solution"), YesNo(entry.ExactAim));
         KeyValue(DevToolUiSettings.T("瞄准点", "Aim point"), "(" + entry.AimX.ToString("0.0") + ", " + entry.AimY.ToString("0.0") + ")");
+    }
+
+    private static void DrawGeometry(LanceScavengerDebugEntrySnapshot entry)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("冲锋几何", "CHARGE GEOMETRY"));
+        LanceScavengerDebugChunkSnapshot[] chunks = entry.TargetChunks ?? Array.Empty<LanceScavengerDebugChunkSnapshot>();
+        if (chunks.Length == 0)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("当前没有可绘制目标。", "No target geometry is available."));
+            return;
+        }
+
+        float tipX = entry.GripX + entry.LanceDirectionX * entry.LanceForwardLength;
+        float tipY = entry.GripY + entry.LanceDirectionY * entry.LanceForwardLength;
+        float minX = Math.Min(entry.OriginX, Math.Min(entry.GripX, tipX));
+        float maxX = Math.Max(entry.OriginX, Math.Max(entry.GripX, tipX));
+        float minY = Math.Min(entry.OriginY, Math.Min(entry.GripY, tipY));
+        float maxY = Math.Max(entry.OriginY, Math.Max(entry.GripY, tipY));
+        bool showAim = entry.TargetChunkIndex >= 0;
+        if (showAim)
+        {
+            minX = Math.Min(minX, entry.AimX);
+            maxX = Math.Max(maxX, entry.AimX);
+            minY = Math.Min(minY, entry.AimY);
+            maxY = Math.Max(maxY, entry.AimY);
+        }
+
+        for (int i = 0; i < chunks.Length; i++)
+        {
+            LanceScavengerDebugChunkSnapshot chunk = chunks[i];
+            minX = Math.Min(minX, chunk.X - chunk.Radius);
+            maxX = Math.Max(maxX, chunk.X + chunk.Radius);
+            minY = Math.Min(minY, chunk.Y - chunk.Radius);
+            maxY = Math.Max(maxY, chunk.Y + chunk.Radius);
+        }
+
+        minX -= 24f;
+        maxX += 24f;
+        minY -= 24f;
+        maxY += 24f;
+
+        Num.Vector2 origin = ImGui.GetCursorScreenPos();
+        float width = Math.Max(260f, ImGui.GetContentRegionAvail().X);
+        float height = 230f;
+        Num.Vector2 size = new(width, height);
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(origin, origin + size, ImGui.GetColorU32(GraphBg), 4f);
+        draw.AddRect(origin, origin + size, ImGui.GetColorU32(GraphBorder), 4f);
+
+        float inner = 14f;
+        float worldWidth = Math.Max(1f, maxX - minX);
+        float worldHeight = Math.Max(1f, maxY - minY);
+        float scale = Math.Min((width - inner * 2f) / worldWidth, (height - inner * 2f) / worldHeight);
+        scale = Math.Max(0.05f, Math.Min(4f, scale));
+        float usedWidth = worldWidth * scale;
+        float usedHeight = worldHeight * scale;
+        float offsetX = origin.X + (width - usedWidth) * 0.5f;
+        float offsetY = origin.Y + (height - usedHeight) * 0.5f;
+
+        Num.Vector2 ToScreen(float x, float y) => new(
+            offsetX + (x - minX) * scale,
+            offsetY + (maxY - y) * scale);
+
+        int firstGridX = (int)Math.Floor(minX / 20f) * 20;
+        int lastGridX = (int)Math.Ceiling(maxX / 20f) * 20;
+        int firstGridY = (int)Math.Floor(minY / 20f) * 20;
+        int lastGridY = (int)Math.Ceiling(maxY / 20f) * 20;
+        uint gridColor = ImGui.GetColorU32(Grid);
+        if ((lastGridX - firstGridX) / 20 <= 64)
+        {
+            for (int x = firstGridX; x <= lastGridX; x += 20)
+            {
+                Num.Vector2 a = ToScreen(x, minY);
+                Num.Vector2 b = ToScreen(x, maxY);
+                draw.AddLine(a, b, gridColor, 1f);
+            }
+        }
+        if ((lastGridY - firstGridY) / 20 <= 64)
+        {
+            for (int y = firstGridY; y <= lastGridY; y += 20)
+            {
+                Num.Vector2 a = ToScreen(minX, y);
+                Num.Vector2 b = ToScreen(maxX, y);
+                draw.AddLine(a, b, gridColor, 1f);
+            }
+        }
+
+        Num.Vector2 owner = ToScreen(entry.OriginX, entry.OriginY);
+        Num.Vector2 grip = ToScreen(entry.GripX, entry.GripY);
+        Num.Vector2 tip = ToScreen(tipX, tipY);
+        draw.AddCircleFilled(owner, 5f, ImGui.GetColorU32(OwnerMark));
+        draw.AddLine(grip, tip, ImGui.GetColorU32(LanceMark), 3f);
+        draw.AddCircleFilled(grip, 3f, ImGui.GetColorU32(LanceMark));
+        draw.AddCircleFilled(tip, 4f, ImGui.GetColorU32(LanceMark));
+
+        for (int i = 0; i < chunks.Length; i++)
+        {
+            LanceScavengerDebugChunkSnapshot chunk = chunks[i];
+            Num.Vector2 center = ToScreen(chunk.X, chunk.Y);
+            float radius = Math.Max(4f, chunk.Radius * scale);
+            Num.Vector4 fill = chunk.CurrentAimChunk ? CurrentChunkMark : TargetMark;
+            draw.AddCircleFilled(center, radius, ImGui.GetColorU32(fill));
+            if (chunk.BestAimChunk)
+                draw.AddCircle(center, radius + 3f, ImGui.GetColorU32(BestChunkMark), 0, 2f);
+            draw.AddText(center + new Num.Vector2(radius + 3f, -7f), ImGui.GetColorU32(OwnerMark), "#" + chunk.Index);
+        }
+
+        if (showAim)
+        {
+            Num.Vector2 aim = ToScreen(entry.AimX, entry.AimY);
+            uint aimColor = ImGui.GetColorU32(AimMark);
+            draw.AddLine(aim - new Num.Vector2(6f, 0f), aim + new Num.Vector2(6f, 0f), aimColor, 2f);
+            draw.AddLine(aim - new Num.Vector2(0f, 6f), aim + new Num.Vector2(0f, 6f), aimColor, 2f);
+        }
+
+        ImGui.Dummy(size);
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "网格 = 1 tile / 20px · 白点 = 拾荒者中心 · 黄线 = 当前长枪方向 · 蓝色块 = 当前瞄准 BodyChunk · 橙圈 = 38帧最佳 BodyChunk · 绿十字 = 当前瞄准点",
+            "Grid = 1 tile / 20px · white = scavenger center · yellow = lance direction · blue = current aim BodyChunk · orange ring = best BodyChunk in 38f · green cross = current aim point"));
     }
 
     private static void DrawAimHistory(LanceScavengerDebugEntrySnapshot entry)
@@ -275,7 +406,8 @@ internal static class LanceScavengerDebugView
         float newestWidth = ImGui.CalcTextSize(newest).X;
         draw.AddText(new Num.Vector2(plotRight - newestWidth, plotBottom + 5f), ImGui.GetColorU32(Muted), newest);
         string threshold = DevToolUiSettings.T("阈值 ", "threshold ") + entry.AimThreshold.ToString("0.00");
-        draw.AddText(new Num.Vector2(plotLeft + 4f, Math.Max(plotTop, thresholdY - ImGui.GetTextLineHeight())), ImGui.GetColorU32(Threshold), threshold);
+        float textHeight = ImGui.CalcTextSize("Ag").Y;
+        draw.AddText(new Num.Vector2(plotLeft + 4f, Math.Max(plotTop, thresholdY - textHeight)), ImGui.GetColorU32(Threshold), threshold);
         ImGui.Dummy(size);
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
@@ -315,15 +447,17 @@ internal static class LanceScavengerDebugView
     {
         ImGui.TextUnformatted(label);
         Num.Vector2 origin = ImGui.GetCursorScreenPos();
-        float width = Math.Max(180f, ImGui.GetContentRegionAvail().X);
-        float height = 19f;
+        float width = Math.Max(160f, ImGui.GetContentRegionAvail().X);
+        float height = 21f;
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         draw.AddRectFilled(origin, origin + new Num.Vector2(width, height), ImGui.GetColorU32(GraphBg), 3f);
         draw.AddRectFilled(origin, origin + new Num.Vector2(width * Math.Min(1f, Math.Max(0f, fraction)), height), ImGui.GetColorU32(color), 3f);
         draw.AddRect(origin, origin + new Num.Vector2(width, height), ImGui.GetColorU32(GraphBorder), 3f);
+        string valueText = value.ToString("0.000") + " / " + threshold.ToString("0.000");
+        Num.Vector2 textSize = ImGui.CalcTextSize(valueText);
+        draw.AddText(new Num.Vector2(origin.X + Math.Max(5f, width - textSize.X - 6f), origin.Y + Math.Max(1f, (height - textSize.Y) * 0.5f)),
+            ImGui.GetColorU32(OwnerMark), valueText);
         ImGui.Dummy(new Num.Vector2(width, height));
-        ImGui.SameLine();
-        ImGui.TextUnformatted(value.ToString("0.000") + " / " + threshold.ToString("0.000"));
     }
 
     private static void KeyValue(string key, string value)
