@@ -248,13 +248,15 @@ internal static class SoundWorkspaceState
             return selectedIndicesCache;
         }
 
-        if (selectedIndicesCache.Length != SceneSelectionSet.Count)
-            selectedIndicesCache = new int[SceneSelectionSet.Count];
-
+        // Publish a fresh immutable snapshot only when selection actually changes. Commands queued
+        // from the UI may retain this array after the frame; reusing and refilling the same backing
+        // array would let a later selection mutation silently rewrite an already queued command.
+        int[] next = new int[SceneSelectionSet.Count];
         int cursor = 0;
         foreach (int index in SceneSelectionSet)
-            selectedIndicesCache[cursor++] = index;
-        Array.Sort(selectedIndicesCache);
+            next[cursor++] = index;
+        Array.Sort(next);
+        selectedIndicesCache = next;
         selectedIndicesDirty = false;
         return selectedIndicesCache;
     }
