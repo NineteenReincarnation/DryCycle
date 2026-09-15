@@ -40,7 +40,6 @@ internal static class LanceCombatMath
     internal static float BladeHalfWidth(float bladeT)
     {
         float t = Mathf.Clamp01(bladeT);
-        // A long wedge rather than a diamond: the profile only narrows as it approaches the point.
         return Mathf.Lerp(BladeShoulderHalfWidth, BladeTipHalfWidth, Mathf.Pow(t, 0.82f));
     }
 
@@ -56,7 +55,6 @@ internal static class LanceCombatMath
 
     internal static float CounterSweepChance(AbstractCreature.Personality personality)
     {
-        if (personality == null) return 0.2f;
         float commitment = Mathf.Clamp01(personality.energy * 0.40f +
             personality.aggression * 0.35f + personality.bravery * 0.25f);
         return Mathf.Lerp(0.20f, 0.55f, commitment);
@@ -78,11 +76,6 @@ internal static class LanceCombatMath
             Mathf.Clamp(1f / (1f + ratio * 0.6f), 0.12f, 0.9f));
     }
 
-    /// <summary>
-    /// Counter-sweep is an emergency correction inside an already committed charge. If the
-    /// rotating bone blade actually connects, it receives the full charge tier regardless of
-    /// the instantaneous blade-facing dot product; geometry still has to hit normally.
-    /// </summary>
     internal static LanceImpact CounterSweepImpact(float holderMass, float targetMass, float speed)
     {
         float resolvedSpeed = Mathf.Max(12f, Mathf.Abs(speed));
@@ -113,11 +106,6 @@ internal static class LanceCombatMath
         return fraction >= 0f && fraction <= 1f;
     }
 
-    /// <summary>
-    /// Sweeps the complete forward bone blade rather than only the mathematical tip.
-    /// The wedge is sampled along its length; every sample owns the local visual half-width,
-    /// so the shoulder is broad and the point becomes progressively narrower.
-    /// </summary>
     internal static bool SweepBlade(Vector2 oldGrip, Vector2 oldDirection, Vector2 grip, Vector2 direction,
         float forwardLength, Vector2 oldTarget, Vector2 target, float targetRadius, float padding,
         out float fraction, out float bladeT)
