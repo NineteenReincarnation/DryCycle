@@ -160,6 +160,13 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             else if (grasps[i]?.grabbed is Spear spear && IsOrdinarySpear(spear)) sidearm = i;
         }
 
+        // Identity-weapon invariant: as long as the custom lance exists, an ordinary spear may only
+        // become grasp 0 for the explicit post-charge FollowUpThrow. The old generic fallback let a
+        // temporary lane failure/cooldown draw the sidearm before the scavenger had ever attempted
+        // its signature attack, effectively turning the new creature back into an ordinary scavenger.
+        if (sidearmPrimary && lance >= 0 && Combat.State != LanceState.FollowUpThrow)
+            sidearmPrimary = false;
+
         if (sidearmPrimary && sidearm >= 0)
         {
             if (sidearm != 0) SwitchGrasps(sidearm, 0);
