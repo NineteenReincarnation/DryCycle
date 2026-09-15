@@ -65,9 +65,9 @@ internal sealed class LanceMotor
         ResetCounterSweep();
     }
 
-    internal void CommitCharge(ChargeLane solution)
+    internal void CommitCharge(LanceAimSolution solution)
     {
-        Vector2 solved = solution.CanHit ? solution.LanceDirection : Vector2.zero;
+        Vector2 solved = solution.Valid ? solution.LanceDirection : Vector2.zero;
         if (solved.sqrMagnitude < 0.001f)
         {
             float sign = Mathf.Sign((_owner.Brain?.Aim.x ?? _owner.lookPoint.x) - _owner.mainBodyChunk.pos.x);
@@ -162,7 +162,8 @@ internal sealed class LanceMotor
                 if (_counterTarget != null)
                 {
                     _counterTargetLaunchPos = _counterTarget.mainBodyChunk.pos;
-                    _counterTargetLaunchVelocity = _counterTarget.mainBodyChunk.vel;
+                    _counterTargetLaunchVelocity = _owner.Brain?.MotionTracker?.SmoothedVelocity(_counterTarget.mainBodyChunk)
+                        ?? _counterTarget.mainBodyChunk.vel;
                 }
                 _counterSweepAttempted = false;
                 _counterSweepActive = false;
@@ -234,7 +235,6 @@ internal sealed class LanceMotor
         if (Mathf.Abs(sweptDelta) < MinimumCounterSweepAngle)
             return;
 
-        // Only a dodge that actually requires an angular correction consumes the one roll.
         _counterSweepAttempted = true;
         if (UnityEngine.Random.value > CounterSweepChance)
             return;
@@ -255,23 +255,26 @@ internal sealed class LanceMotor
     {
         BodyChunk chunk = _counterTarget.mainBodyChunk;
         Vector2 expected = _counterTargetLaunchPos +
-            Vector2.ClampMagnitude(_counterTargetLaunchVelocity * chargeAge, 90f);
+            Vector2.ClampMagnitude(_counterTargetLaunchVelocity * chargeAge, 65f);
         Vector2 deviation = chunk.pos - expected;
         Vector2 perpendicular = Custom.PerpendicularVector(Direction);
         float lateral = Mathf.Abs(Vector2.Dot(deviation, perpendicular));
         float longitudinal = Mathf.Abs(Vector2.Dot(deviation, Direction));
-        bool escapedPrediction = lateral >= Mathf.Max(MinimumDodgeDeviation, chunk.rad + 5f) ||
-            longitudinal >= 18f;
+        bool escapedPrediction = lateral >= Mathf.Max(MinimumDodgeDeviation, chunk.rad + 5f) || longitudinal >= 18f;
         bool targetBehind = Vector2.Dot(chunk.pos - _owner.mainBodyChunk.pos, Direction) < -4f;
-        return escapedPrediction || TargetReversed() || targetBehind;
+        float trackedDodge = _owner.Brain?.MotionTracker?.DodgeSeverity ?? 0f;
+        return escapedPrediction || trackedDodge >= 0.55f || TargetReversed() || targetBehind;
     }
 
     private bool TargetReversed()
     {
-        Vector2 oldVelocity = _counterTargetLaunchVelocity;
+        TargetMotionTracker tracker = _owner.Brain?.MotionTracker;
+        if (tracker != null)
+            return tracker.ReversedFrom(_counterTargetLaunchVelocity, _counterTarget?.mainBodyChunk);
+
         Vector2 currentVelocity = _counterTarget?.mainBodyChunk.vel ?? Vector2.zero;
-        if (oldVelocity.magnitude < 1.5f || currentVelocity.magnitude < 1.5f) return false;
-        return Vector2.Dot(oldVelocity.normalized, currentVelocity.normalized) < -0.25f;
+        if (_counterTargetLaunchVelocity.magnitude < 1.5f || currentVelocity.magnitude < 1.5f) return false;
+        return Vector2.Dot(_counterTargetLaunchVelocity.normalized, currentVelocity.normalized) < -0.25f;
     }
 
     private void AdvanceCounterSweep()
