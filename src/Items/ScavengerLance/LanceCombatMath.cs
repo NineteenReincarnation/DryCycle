@@ -18,21 +18,25 @@ internal static class LanceCombatMath
 {
     internal const float DefaultLength = 80f;
     internal const float GripFraction = 0.34f;
+    internal const float StandardThrustMaxDamage = 0.42f;
+    internal const float PreviousChargeMaxDamage = 1.35f;
+    internal const float ChargeMaxDamage = PreviousChargeMaxDamage * 2.75f;
+    internal const float LanceScavengerCloseThrustMaxDamage = ChargeMaxDamage * 0.5f;
+
     internal static float ValidLength(float value) => float.IsNaN(value) || float.IsInfinity(value)
         ? DefaultLength : Math.Max(75f, Math.Min(90f, value));
 
     internal static LanceImpact Impact(float speed, float alignment, float holderMass,
-        float targetMass, bool charging, float runUp, bool thrusting)
+        float targetMass, bool charging, float runUp, bool thrusting,
+        float thrustMaxDamage = StandardThrustMaxDamage)
     {
         float facing = Mathf.InverseLerp(0.55f, 0.98f, alignment);
-        // A normal spear deals 1 damage. Reach that at the actual launch speed
-        // after a useful run-up, rather than requiring the initial speed to survive
-        // every air/ground/contact loss until impact.
         float momentum = Mathf.InverseLerp(3f, 12f, speed);
         float full = charging ? momentum * Mathf.InverseLerp(25f, 80f, runUp) : 0f;
-        float ordinary = thrusting ? Mathf.Lerp(0.12f, 0.42f, facing) : 0f;
-        // A thrown lance is awkward, and a passive stationary tip is harmless.
-        float damage = Mathf.Max(ordinary, charging ? Mathf.Lerp(0.12f, 1.35f, full) * facing : 0f);
+        float ordinary = thrusting ? Mathf.Lerp(0.12f, Mathf.Max(0.12f, thrustMaxDamage), facing) : 0f;
+        // Keep the old low-end charge floor, but raise the maximum charge damage to
+        // 2.75x the previous cap. Close-defense scavenger thrusts receive their own cap.
+        float damage = Mathf.Max(ordinary, charging ? Mathf.Lerp(0.12f, ChargeMaxDamage, full) * facing : 0f);
         if (speed < 2f || alignment < 0.55f) damage = 0f;
         float ratio = Mathf.Max(0.05f, targetMass) / Mathf.Max(0.1f, holderMass);
         return new LanceImpact(damage, damage * Mathf.Lerp(12f, 25f, full),
@@ -47,7 +51,6 @@ internal static class LanceCombatMath
             Mathf.Clamp01(Vector2.Dot(point - a, delta) / delta.sqrMagnitude));
     }
 
-    // Relative-motion sweep: catches a small moving target even between two fast frames.
     internal static bool SweepTip(Vector2 oldTip, Vector2 tip, Vector2 oldTarget,
         Vector2 target, float radius, out float fraction)
     {
