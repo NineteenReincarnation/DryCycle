@@ -48,22 +48,12 @@ internal static class ChargeLanePlanner
         for (int i = 0; i <= count; i++)
         {
             Vector2 at = Vector2.Lerp(origin, end, (float)i / count);
-            if (at.x < 20f || at.x > room.PixelWidth - 20f || at.y < 30f || at.y > room.PixelHeight - 20f)
-                return "room edge";
+            // Only hard body clearance remains a launch blocker. Room-edge margins,
+            // AI narrow-space tags, continuous ground support, water and a second
+            // VisualContact pass are intentionally not charge prerequisites.
             if (room.GetTile(at).Solid || room.GetTile(at + Vector2.up * 14f).Solid || room.GetTile(at - Vector2.up * 8f).Solid)
                 return "wall / ceiling";
-            if (room.aimap != null && room.aimap.getAItile(at).narrowSpace) return "narrow space";
-            bool supported = false;
-            for (int y = 16; y <= 56; y += 10)
-            {
-                Room.Tile tile = room.GetTile(at - new Vector2(0f, y));
-                if (tile.Solid || tile.Terrain == Room.Tile.TerrainType.Floor || tile.Terrain == Room.Tile.TerrainType.Slope)
-                { supported = true; break; }
-            }
-            if (!supported) return "unsafe landing";
-            if (room.GetTile(at).AnyWater) return "water";
         }
-        if (!room.VisualContact(origin, end)) return "tip path";
         return FriendInPath(scav, origin, end, target) ? "friend in lane" : null;
     }
 
@@ -105,8 +95,8 @@ internal static class ChargeLanePlanner
                     Vector2 candidate = target.mainBodyChunk.pos + new Vector2(side * distance, height);
                     WorldCoordinate coordinate = scav.room.GetWorldCoordinate(candidate);
                     candidate = scav.room.MiddleOfTile(coordinate);
-                    // CoordinateViable honors vanilla's walkPastPointOfNoReturn
-                    // policy for stranded scavengers and rooms without an exit.
+                    // CoordinateViable remains a locomotion/pathfinding concern for reaching
+                    // the staging point; it is not part of the actual launch-lane safety test.
                     if (!scav.AI.pathFinder.CoordinateViable(coordinate) ||
                         !Evaluate(scav, candidate, target).Clear) continue;
                     float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 2f +
