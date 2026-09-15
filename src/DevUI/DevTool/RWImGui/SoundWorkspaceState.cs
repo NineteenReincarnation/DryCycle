@@ -25,6 +25,9 @@ internal static class SoundWorkspaceState
     private static bool sceneSelectionInitialized;
     private static bool selectedIndicesDirty = true;
     private static int[] selectedIndicesCache = Array.Empty<int>();
+    private static SoundGroupSnapshot[] observedGroups;
+    private static SoundGroupSnapshot cachedActiveGroup;
+    private static bool groupsSynchronized;
     private static SoundLibraryDestination libraryDestination = SoundLibraryDestination.Scene;
 
     internal static string ActiveGroupId => activeGroupId;
@@ -39,16 +42,24 @@ internal static class SoundWorkspaceState
     internal static void SynchronizeGroups()
     {
         SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
+        if (groupsSynchronized && ReferenceEquals(observedGroups, groups)) return;
+
+        observedGroups = groups;
+        groupsSynchronized = true;
+        cachedActiveGroup = null;
+
         SoundGroupSnapshot firstLocal = null;
         for (int i = 0; i < groups.Length; i++)
         {
             SoundGroupSnapshot group = groups[i];
             if (!group.IsLocal) continue;
             firstLocal ??= group;
-            if (string.Equals(group.Id, activeGroupId, StringComparison.OrdinalIgnoreCase))
-                return;
+            if (!string.Equals(group.Id, activeGroupId, StringComparison.OrdinalIgnoreCase)) continue;
+            cachedActiveGroup = group;
+            return;
         }
 
+        cachedActiveGroup = firstLocal;
         activeGroupId = firstLocal?.Id ?? string.Empty;
         if (string.IsNullOrEmpty(activeGroupId) && libraryDestination != SoundLibraryDestination.Scene)
             libraryDestination = SoundLibraryDestination.Scene;
@@ -57,23 +68,16 @@ internal static class SoundWorkspaceState
     internal static bool TryGetActiveLocalGroup(out SoundGroupSnapshot group)
     {
         SynchronizeGroups();
-        SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
-        for (int i = 0; i < groups.Length; i++)
-        {
-            SoundGroupSnapshot candidate = groups[i];
-            if (!candidate.IsLocal) continue;
-            if (!string.Equals(candidate.Id, activeGroupId, StringComparison.OrdinalIgnoreCase)) continue;
-            group = candidate;
-            return true;
-        }
-
-        group = null;
-        return false;
+        group = cachedActiveGroup;
+        return group != null;
     }
 
     internal static void SetActiveGroup(string groupId)
     {
-        activeGroupId = groupId?.Trim() ?? string.Empty;
+        string next = groupId?.Trim() ?? string.Empty;
+        if (string.Equals(activeGroupId, next, StringComparison.OrdinalIgnoreCase)) return;
+        activeGroupId = next;
+        groupsSynchronized = false;
     }
 
     internal static bool GroupIdExists(string groupId)
