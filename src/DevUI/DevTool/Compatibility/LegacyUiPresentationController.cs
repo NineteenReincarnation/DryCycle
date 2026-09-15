@@ -309,6 +309,7 @@ internal static class LegacyUiPresentationController
         RelationshipEditorView.ResetRetainedState();
         RoomSettingsView.ResetRetainedState();
         DialogEditorView.ResetRetainedState();
+        UniversalDevUiMirrorView.ResetRetainedState();
 
         // Reset normally releases the observed/hidden page already. Keep the explicit release for
         // the case where presentation never hid the active page during this DevUI lifetime.
