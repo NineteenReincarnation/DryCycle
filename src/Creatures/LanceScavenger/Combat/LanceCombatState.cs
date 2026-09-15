@@ -8,7 +8,7 @@ internal readonly struct LanceSituation
 {
     internal LanceSituation(bool active, bool armed, bool sidearm, bool target, ScavengerAI.ViolenceType violence, bool afraid,
         float distance, bool lane, bool backstepComplete = true, bool friendBlocked = false, bool chargePriority = true,
-        bool commitReady = false, bool hardBlocked = false)
+        bool commitReady = false, bool hardBlocked = false, bool closeDanger = false)
     {
         Active = active;
         Armed = armed;
@@ -23,10 +23,11 @@ internal readonly struct LanceSituation
         ChargePriority = chargePriority;
         CommitReady = commitReady;
         HardBlocked = hardBlocked;
+        CloseDanger = closeDanger;
     }
 
     internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete, FriendBlocked,
-        ChargePriority, CommitReady, HardBlocked;
+        ChargePriority, CommitReady, HardBlocked, CloseDanger;
     internal readonly float Distance;
     internal readonly ScavengerAI.ViolenceType Violence;
 }
@@ -106,6 +107,16 @@ internal sealed class LanceCombatState
             else Enter(LanceState.Observe);
             return;
         }
+
+        // Self preservation comes before fear/charge tactics. A lethal creature already inside the
+        // defensive envelope must be answered with the lance even when vanilla relationship logic
+        // says the scavenger is afraid. Fear still decides what happens after distance is restored.
+        if (s.CloseDanger && s.Violence == ScavengerAI.ViolenceType.Lethal)
+        {
+            Enter(LanceState.CloseDefense);
+            return;
+        }
+
         if (s.Violence != ScavengerAI.ViolenceType.Lethal)
         {
             Enter(LanceState.Threaten);
@@ -116,7 +127,7 @@ internal sealed class LanceCombatState
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
             {
-                Enter(s.Afraid ? LanceState.Threaten : LanceState.CloseDefense);
+                Enter(LanceState.CloseDefense);
                 return;
             }
             if (!s.ChargePriority || Cooldown > 0)
@@ -152,6 +163,8 @@ internal sealed class LanceCombatState
 
         // Afraid remains a vanilla relationship result, but a lethal target with a valid lane no
         // longer spends another movement phase backing away. It braces immediately and commits.
+        // CloseDanger has already been handled above, so an afraid scavenger still defends itself
+        // before this branch is allowed to choose Threaten/Brace.
         if (s.Afraid)
         {
             if (!s.ChargePriority || s.Distance < ChargeLanePlanner.MinimumChargeDistance ||
@@ -170,11 +183,9 @@ internal sealed class LanceCombatState
             return;
         }
 
-        if (State == LanceState.CloseDefense && Age < 16) return;
         if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
         {
-            Enter(State == LanceState.CloseDefense || Cooldown > 0 ? LanceState.CreateDistance : LanceState.CloseDefense);
-            if (State == LanceState.CloseDefense) Cooldown = 48;
+            Enter(LanceState.CloseDefense);
             return;
         }
         if (s.FriendBlocked)
