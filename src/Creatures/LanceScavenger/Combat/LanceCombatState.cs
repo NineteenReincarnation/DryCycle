@@ -50,6 +50,7 @@ internal sealed class LanceCombatState
     private int _recoveryDuration;
     private bool _followUpReserved;
     private bool _chargeLanded;
+    private bool _chargeAirborne;
     private int _followUpLandingAge = -1;
     private int _braceLostSolutionFrames;
 
@@ -81,22 +82,25 @@ internal sealed class LanceCombatState
             else Enter(LanceState.Disarmed);
             return;
         }
+
+        // Once the body has actually launched, tactical target/lane changes must not cancel physics
+        // in mid-air. Terrain impacts and landing finish the charge through the physical callbacks;
+        // this 32-frame timeout is only a failsafe for unusual rooms/gaps.
+        if (State == LanceState.Charge)
+        {
+            if (Age >= MaxChargeFrames) FinishCharge(false);
+            return;
+        }
+
         if (!s.Target || s.Violence == ScavengerAI.ViolenceType.None)
         {
-            if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
+            if (State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
             else Enter(LanceState.Observe);
             return;
         }
         if (s.Violence != ScavengerAI.ViolenceType.Lethal)
         {
-            if (State == LanceState.Charge) Recover(false);
-            else Enter(LanceState.Threaten);
-            return;
-        }
-        if (State == LanceState.Charge)
-        {
-            if (Age >= MaxChargeFrames) FinishCharge(false);
-            else if (!s.Lane) Recover(false);
+            Enter(LanceState.Threaten);
             return;
         }
 
@@ -159,6 +163,7 @@ internal sealed class LanceCombatState
 
                 _followUpReserved = s.Sidearm;
                 _chargeLanded = false;
+                _chargeAirborne = false;
                 AttackSerial++;
                 Enter(LanceState.Charge);
             }
@@ -200,17 +205,32 @@ internal sealed class LanceCombatState
         Enter(LanceState.Backstep);
     }
 
+    internal void MarkAirborne()
+    {
+        if (State == LanceState.Charge)
+            _chargeAirborne = true;
+    }
+
     internal void MarkLanding()
     {
         if (State == LanceState.Charge)
+        {
+            // The launch frame can still report floor contact. Only a charge that has actually
+            // left support is allowed to finish from landing, otherwise it would cancel instantly.
+            if (!_chargeAirborne) return;
             _chargeLanded = true;
+            FinishCharge(false);
+        }
         else if (State == LanceState.FollowUpThrow && _followUpLandingAge < 0)
+        {
             _followUpLandingAge = Age;
+        }
     }
 
     internal void FinishCharge(bool wall)
     {
         if (State != LanceState.Charge) return;
+        _chargeAirborne = false;
         if (!wall && _followUpReserved)
         {
             bool alreadyLanded = _chargeLanded;
@@ -231,6 +251,7 @@ internal sealed class LanceCombatState
     {
         _followUpReserved = false;
         _chargeLanded = false;
+        _chargeAirborne = false;
         _followUpLandingAge = -1;
         _braceLostSolutionFrames = 0;
         _recoveryDuration = wall ? WallRecoveryFrames : RecoveryFrames;
@@ -243,6 +264,7 @@ internal sealed class LanceCombatState
     {
         _followUpReserved = false;
         _chargeLanded = false;
+        _chargeAirborne = false;
         _followUpLandingAge = -1;
         _braceLostSolutionFrames = 0;
         if (State == LanceState.Recover) return;
