@@ -65,11 +65,16 @@ internal static class ScavengerLancePlayerController
     private const float QuickExtension = 15f;
 
     private const float MinimumChargedDamage = 0.95f;
-    private const float MaximumChargedDamage = LanceCombatMath.PlayerThrustMaxDamage;
+    // Damage units are normalized against a standard spear = 1.0. A completed brace therefore
+    // reaches an explicit 1.95x spear hit before any extra relative-motion contribution.
+    private const float MaximumChargedDamage = 1.95f;
     private const float MinimumChargedExtension = 17f;
     private const float MaximumChargedExtension = 23f;
-    private const float FullChargeGroundBoost = 0.90f;
-    private const float FullChargeAirBoost = 0.70f;
+    // Full brace is supposed to feel like releasing stored body tension. These are deliberately
+    // much larger than the old 0.90/0.70 nudges: roughly another two-to-three velocity units of
+    // release assistance, while partial braces keep their existing progressive lunge.
+    private const float FullChargeGroundBoost = 3.25f;
+    private const float FullChargeAirBoost = 2.85f;
 
     private const float BraceBaseRetraction = 4f;
     private const float BraceFullRetraction = 7.5f;
