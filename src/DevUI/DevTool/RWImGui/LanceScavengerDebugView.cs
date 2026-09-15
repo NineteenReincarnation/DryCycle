@@ -35,6 +35,10 @@ internal static class LanceScavengerDebugView
     private static readonly Num.Vector4 BestChunkMark = new(0.98f, 0.72f, 0.30f, 0.92f);
     private static readonly Num.Vector4 LanceMark = new(0.96f, 0.82f, 0.43f, 1f);
     private static readonly Num.Vector4 AimMark = new(0.52f, 0.94f, 0.66f, 1f);
+    private static readonly Num.Vector4 BodyPathMark = new(0.45f, 0.78f, 1.00f, 0.78f);
+    private static readonly Num.Vector4 TipPathMark = new(1.00f, 0.78f, 0.34f, 0.58f);
+    private static readonly Num.Vector4 ActualToleranceMark = new(0.45f, 0.94f, 0.62f, 0.90f);
+    private static readonly Num.Vector4 PlanningToleranceMark = new(0.72f, 0.50f, 1.00f, 0.78f);
 
     internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
     {
@@ -229,6 +233,10 @@ internal static class LanceScavengerDebugView
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("冲锋几何", "CHARGE GEOMETRY"));
         LanceScavengerDebugChunkSnapshot[] chunks = entry.TargetChunks ?? Array.Empty<LanceScavengerDebugChunkSnapshot>();
+        float[] bodyX = entry.BodyPathX ?? Array.Empty<float>();
+        float[] bodyY = entry.BodyPathY ?? Array.Empty<float>();
+        float[] tipPathX = entry.TipPathX ?? Array.Empty<float>();
+        float[] tipPathY = entry.TipPathY ?? Array.Empty<float>();
         if (chunks.Length == 0)
         {
             DevToolWidgets.MutedText(DevToolUiSettings.T("当前没有可绘制目标。", "No target geometry is available."));
@@ -253,10 +261,28 @@ internal static class LanceScavengerDebugView
         for (int i = 0; i < chunks.Length; i++)
         {
             LanceScavengerDebugChunkSnapshot chunk = chunks[i];
-            minX = Math.Min(minX, chunk.X - chunk.Radius);
-            maxX = Math.Max(maxX, chunk.X + chunk.Radius);
-            minY = Math.Min(minY, chunk.Y - chunk.Radius);
-            maxY = Math.Max(maxY, chunk.Y + chunk.Radius);
+            float planningRadius = chunk.Radius + entry.PlanningBladeHitPadding;
+            minX = Math.Min(minX, chunk.X - planningRadius);
+            maxX = Math.Max(maxX, chunk.X + planningRadius);
+            minY = Math.Min(minY, chunk.Y - planningRadius);
+            maxY = Math.Max(maxY, chunk.Y + planningRadius);
+        }
+
+        int bodyCount = Math.Min(bodyX.Length, bodyY.Length);
+        for (int i = 0; i < bodyCount; i++)
+        {
+            minX = Math.Min(minX, bodyX[i]);
+            maxX = Math.Max(maxX, bodyX[i]);
+            minY = Math.Min(minY, bodyY[i]);
+            maxY = Math.Max(maxY, bodyY[i]);
+        }
+        int tipCount = Math.Min(tipPathX.Length, tipPathY.Length);
+        for (int i = 0; i < tipCount; i++)
+        {
+            minX = Math.Min(minX, tipPathX[i]);
+            maxX = Math.Max(maxX, tipPathX[i]);
+            minY = Math.Min(minY, tipPathY[i]);
+            maxY = Math.Max(maxY, tipPathY[i]);
         }
 
         minX -= 24f;
@@ -266,7 +292,7 @@ internal static class LanceScavengerDebugView
 
         Num.Vector2 origin = ImGui.GetCursorScreenPos();
         float width = Math.Max(260f, ImGui.GetContentRegionAvail().X);
-        float height = 230f;
+        float height = 260f;
         Num.Vector2 size = new(width, height);
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         draw.AddRectFilled(origin, origin + size, ImGui.GetColorU32(GraphBg), 4f);
@@ -294,20 +320,30 @@ internal static class LanceScavengerDebugView
         if ((lastGridX - firstGridX) / 20 <= 64)
         {
             for (int x = firstGridX; x <= lastGridX; x += 20)
-            {
-                Num.Vector2 a = ToScreen(x, minY);
-                Num.Vector2 b = ToScreen(x, maxY);
-                draw.AddLine(a, b, gridColor, 1f);
-            }
+                draw.AddLine(ToScreen(x, minY), ToScreen(x, maxY), gridColor, 1f);
         }
         if ((lastGridY - firstGridY) / 20 <= 64)
         {
             for (int y = firstGridY; y <= lastGridY; y += 20)
-            {
-                Num.Vector2 a = ToScreen(minX, y);
-                Num.Vector2 b = ToScreen(maxX, y);
-                draw.AddLine(a, b, gridColor, 1f);
-            }
+                draw.AddLine(ToScreen(minX, y), ToScreen(maxX, y), gridColor, 1f);
+        }
+
+        uint bodyPathColor = ImGui.GetColorU32(BodyPathMark);
+        for (int i = 1; i < bodyCount; i++)
+        {
+            Num.Vector2 a = ToScreen(bodyX[i - 1], bodyY[i - 1]);
+            Num.Vector2 b = ToScreen(bodyX[i], bodyY[i]);
+            draw.AddLine(a, b, bodyPathColor, 2f);
+            if (i % 4 == 0 || i == bodyCount - 1)
+                draw.AddCircleFilled(b, 2.5f, bodyPathColor);
+        }
+
+        uint tipPathColor = ImGui.GetColorU32(TipPathMark);
+        for (int i = 1; i < tipCount; i++)
+        {
+            Num.Vector2 a = ToScreen(tipPathX[i - 1], tipPathY[i - 1]);
+            Num.Vector2 b = ToScreen(tipPathX[i], tipPathY[i]);
+            draw.AddLine(a, b, tipPathColor, 1.5f);
         }
 
         Num.Vector2 owner = ToScreen(entry.OriginX, entry.OriginY);
@@ -318,6 +354,7 @@ internal static class LanceScavengerDebugView
         draw.AddCircleFilled(grip, 3f, ImGui.GetColorU32(LanceMark));
         draw.AddCircleFilled(tip, 4f, ImGui.GetColorU32(LanceMark));
 
+        LanceScavengerDebugChunkSnapshot currentChunk = null;
         for (int i = 0; i < chunks.Length; i++)
         {
             LanceScavengerDebugChunkSnapshot chunk = chunks[i];
@@ -325,6 +362,7 @@ internal static class LanceScavengerDebugView
             float radius = Math.Max(4f, chunk.Radius * scale);
             Num.Vector4 fill = chunk.CurrentAimChunk ? CurrentChunkMark : TargetMark;
             draw.AddCircleFilled(center, radius, ImGui.GetColorU32(fill));
+            if (chunk.CurrentAimChunk) currentChunk = chunk;
             if (chunk.BestAimChunk)
                 draw.AddCircle(center, radius + 3f, ImGui.GetColorU32(BestChunkMark), 0, 2f);
             draw.AddText(center + new Num.Vector2(radius + 3f, -7f), ImGui.GetColorU32(OwnerMark), "#" + chunk.Index);
@@ -333,6 +371,14 @@ internal static class LanceScavengerDebugView
         if (showAim)
         {
             Num.Vector2 aim = ToScreen(entry.AimX, entry.AimY);
+            if (currentChunk != null)
+            {
+                float actualRadius = Math.Max(3f, (currentChunk.Radius + entry.ActualBladeHitPadding) * scale);
+                float planningRadius = Math.Max(actualRadius + 1f,
+                    (currentChunk.Radius + entry.PlanningBladeHitPadding) * scale);
+                draw.AddCircle(aim, planningRadius, ImGui.GetColorU32(PlanningToleranceMark), 0, 1.5f);
+                draw.AddCircle(aim, actualRadius, ImGui.GetColorU32(ActualToleranceMark), 0, 2f);
+            }
             uint aimColor = ImGui.GetColorU32(AimMark);
             draw.AddLine(aim - new Num.Vector2(6f, 0f), aim + new Num.Vector2(6f, 0f), aimColor, 2f);
             draw.AddLine(aim - new Num.Vector2(0f, 6f), aim + new Num.Vector2(0f, 6f), aimColor, 2f);
@@ -340,8 +386,15 @@ internal static class LanceScavengerDebugView
 
         ImGui.Dummy(size);
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "网格 = 1 tile / 20px · 白点 = 拾荒者中心 · 黄线 = 当前长枪方向 · 蓝色块 = 当前瞄准 BodyChunk · 橙圈 = 38帧最佳 BodyChunk · 绿十字 = 当前瞄准点",
-            "Grid = 1 tile / 20px · white = scavenger center · yellow = lance direction · blue = current aim BodyChunk · orange ring = best BodyChunk in 38f · green cross = current aim point"));
+            "蓝线 = 预测身体轨迹 · 黄细线 = 预测枪尖轨迹 · 白点 = 当前身体中心 · 黄粗线 = 当前长枪 · 蓝色块 = 当前瞄准 BodyChunk · 橙圈 = 38帧最佳 BodyChunk · 绿十字 = 预测瞄准点",
+            "Blue = predicted body path · thin yellow = predicted tip path · white = current body center · thick yellow = current lance · blue chunk = current target BodyChunk · orange ring = best BodyChunk in 38f · green cross = predicted aim point"));
+        DevToolWidgets.MutedText(DevToolUiSettings.T(
+            "瞄准点周围：绿圈 = 目标半径 + 实际额外容差；紫圈 = 目标半径 + AI规划额外容差。枪刃自身宽度另算。",
+            "Around the aim point: green = target radius + real extra padding; purple = target radius + AI planning padding. Blade width is additional."));
+        KeyValue(DevToolUiSettings.T("实际额外容差", "Real extra padding"), "+" + entry.ActualBladeHitPadding.ToString("0.0") + " px");
+        KeyValue(DevToolUiSettings.T("AI规划额外容差", "AI planning padding"), "+" + entry.PlanningBladeHitPadding.ToString("0.0") + " px");
+        KeyValue(DevToolUiSettings.T("枪刃半宽", "Blade half-width"),
+            entry.BladeShoulderHalfWidth.ToString("0.00") + " → " + entry.BladeTipHalfWidth.ToString("0.00") + " px");
     }
 
     private static void DrawAimHistory(LanceScavengerDebugEntrySnapshot entry)
