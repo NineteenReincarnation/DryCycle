@@ -301,6 +301,7 @@ internal static class LegacyUiPresentationController
         // presentation hubs above no longer own those arrays after Clear(), so release the view-side
         // mirrors on the same dormant edge instead of keeping the last room alive until next open.
         DevToolOverlay.ResetRetainedState();
+        ObjectInspectorView.ResetRetainedState();
         SceneWorkspaceWindow.ResetRetainedState();
         SoundEditorView.ResetRetainedState();
         TriggerEditorView.ResetRetainedState();
