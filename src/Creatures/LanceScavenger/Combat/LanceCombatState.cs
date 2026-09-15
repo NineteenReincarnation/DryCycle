@@ -34,7 +34,8 @@ internal sealed class LanceCombatState
 {
     // Rain World runs at roughly 40 simulation updates per second: 38 frames = 0.95 s.
     internal const int BraceFrames = 38;
-    internal const int CommitWindowFrames = 10; // roughly 0.25 s of recent aiming history
+    // Any credible solution seen anywhere during the full 0.95-second brace may be used at release.
+    internal const int CommitWindowFrames = BraceFrames;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
     internal const int FollowUpThrowTimeout = 60;
@@ -124,10 +125,9 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Brace is a commitment window, not a requirement for 38 consecutive perfect
-        // ballistic intersections. Soft prediction misses are remembered but do not reset
-        // the wind-up. At release, a recent credible solution may be used. Only hard safety
-        // failures (terrain, range, friendly lane, etc.) abort immediately.
+        // Brace is one full commitment window. It does not need a perfect solution on the
+        // release frame: any credible solution observed during these 38 frames may be used.
+        // Only hard safety failures (terrain, range, friendly lane, etc.) abort immediately.
         if (State == LanceState.Brace)
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
