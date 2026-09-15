@@ -22,6 +22,8 @@ internal static class SceneWorkspaceWindow
         internal string Source;
         internal string Category;
         internal string DisplayName;
+        internal string Label;
+        internal string Tooltip;
     }
 
     private sealed class ObjectSceneGroup
@@ -158,12 +160,10 @@ internal static class SceneWorkspaceWindow
                     DevToolWidgets.MutedText(row.Category);
                 }
 
-                string label = row.DisplayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") +
-                               ")##CenterSceneObject" + item.Index;
-                if (!ImGui.Selectable(label, item.Selected))
+                if (!ImGui.Selectable(row.Label, item.Selected))
                 {
                     if (ImGui.IsItemHovered())
-                        DevToolTooltip.Show(group.Source + " · " + item.Type + " · " + row.Category);
+                        DevToolTooltip.Show(row.Tooltip);
                     continue;
                 }
 
@@ -245,13 +245,18 @@ internal static class SceneWorkspaceWindow
                 projectedGroups.Add(group);
             }
 
+            string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") +
+                           ")##CenterSceneObject" + item.Index;
+            string tooltip = source + " · " + item.Type + " · " + category;
             group.Rows.Add(new ObjectSceneRow
             {
                 Item = item,
                 Metadata = metadata,
                 Source = source,
                 Category = category,
-                DisplayName = displayName
+                DisplayName = displayName,
+                Label = label,
+                Tooltip = tooltip
             });
             projectedMatchCount++;
         }
