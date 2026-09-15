@@ -30,25 +30,10 @@ public static class UniversalDevUiPresentationHub
     private static int lastCaptureFrame = int.MinValue / 2;
 
     /// <summary>
-    /// Read/publish access for the RWImGui frontend. Mutations are processed earlier by
-    /// DevToolSubsystemCoordinator during the backend command phase; reading a presentation must
-    /// never execute queued writes as a side effect.
+    /// Pure O(1) snapshot read for the RWImGui frontend. Backend capture/publication is owned by
+    /// DevToolSubsystemCoordinator and occurs only while compatibility diagnostics are enabled.
     /// </summary>
-    public static UniversalDevUiPresentationSnapshot Current
-    {
-        get
-        {
-            EditorSession session = DevToolSessionHub.Current;
-            if (session?.Owner == null || !DevToolSessionHub.IsCurrentSessionLive)
-            {
-                if (current.Available) Clear();
-                return current;
-            }
-
-            Publish(session.Owner);
-            return current;
-        }
-    }
+    public static UniversalDevUiPresentationSnapshot Current => current;
 
     internal static void Publish(global::DevInterface.DevUI owner)
     {
