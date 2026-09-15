@@ -1,11 +1,11 @@
 namespace DryCycle.Creatures.LanceScavenger;
 
-internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane, Brace, Charge, FollowUpThrow, Recover, CloseDefense, Disarmed }
+internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane, Backstep, Brace, Charge, FollowUpThrow, Recover, CloseDefense, Disarmed }
 
 internal readonly struct LanceSituation
 {
     internal LanceSituation(bool active, bool armed, bool sidearm, bool target, ScavengerAI.ViolenceType violence, bool afraid,
-        float distance, bool lane)
+        float distance, bool lane, bool backstepComplete = true)
     {
         Active = active;
         Armed = armed;
@@ -15,9 +15,10 @@ internal readonly struct LanceSituation
         Afraid = afraid;
         Distance = distance;
         Lane = lane;
+        BackstepComplete = backstepComplete;
     }
 
-    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane;
+    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete;
     internal readonly float Distance;
     internal readonly ScavengerAI.ViolenceType Violence;
 }
@@ -25,7 +26,8 @@ internal readonly struct LanceSituation
 /// <summary>Decision timing only; body velocity and weapon impacts live in their own modules.</summary>
 internal sealed class LanceCombatState
 {
-    internal const int BraceFrames = 60;
+    // Rain World runs at roughly 40 simulation updates per second: 38 frames = 0.95 s.
+    internal const int BraceFrames = 38;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
     internal const int FollowUpThrowTimeout = 60;
@@ -60,19 +62,19 @@ internal sealed class LanceCombatState
         }
         if (!s.Active)
         {
-            if (State == LanceState.Charge || State == LanceState.Brace) Recover(false);
+            if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
             else Enter(LanceState.Observe);
             return;
         }
         if (!s.Armed)
         {
-            if (State == LanceState.Charge || State == LanceState.Brace) Recover(false);
+            if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
             else Enter(LanceState.Disarmed);
             return;
         }
         if (!s.Target || s.Violence == ScavengerAI.ViolenceType.None)
         {
-            if (State == LanceState.Charge) Recover(false);
+            if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
             else Enter(LanceState.Observe);
             return;
         }
@@ -89,6 +91,26 @@ internal sealed class LanceCombatState
             return;
         }
 
+        // The backstep is a real movement phase. Do not continually invalidate it while
+        // the body is moving; once it completes, re-evaluate the lane before bracing.
+        if (State == LanceState.Backstep)
+        {
+            if (!s.BackstepComplete) return;
+            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
+            {
+                Enter(s.Afraid ? LanceState.Threaten : LanceState.CloseDefense);
+                return;
+            }
+            if (!s.Lane)
+            {
+                Enter(s.Afraid ? LanceState.Threaten : LanceState.AcquireChargeLane);
+                return;
+            }
+            if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
+            Enter(LanceState.Brace);
+            return;
+        }
+
         if (s.Afraid)
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || Cooldown > 0)
@@ -96,7 +118,7 @@ internal sealed class LanceCombatState
                 Enter(LanceState.Threaten);
                 return;
             }
-            if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
+            if (State != LanceState.Brace) { Enter(LanceState.Backstep); return; }
             if (Age >= BraceFrames)
             {
                 _followUpReserved = s.Sidearm && s.Lane;
@@ -116,7 +138,7 @@ internal sealed class LanceCombatState
         }
         if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
         if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
-        if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
+        if (State != LanceState.Brace) { Enter(LanceState.Backstep); return; }
         if (Age >= BraceFrames)
         {
             _followUpReserved = s.Sidearm && s.Lane;
@@ -170,7 +192,8 @@ internal sealed class LanceCombatState
         _chargeLanded = false;
         _followUpLandingAge = -1;
         if (State == LanceState.Recover) return;
-        if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.FollowUpThrow) Recover(false);
+        if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep ||
+            State == LanceState.FollowUpThrow) Recover(false);
         else Enter(LanceState.Observe);
     }
 
