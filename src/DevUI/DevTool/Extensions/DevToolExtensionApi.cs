@@ -103,6 +103,7 @@ public sealed class DevToolRegistration : IDisposable
 /// <summary>
 /// Lifetime boundary for one third-party integration. Registrations made through this scope
 /// are removed together when the owning mod disables or reloads, preventing stale callbacks.
+/// Register and dispose scopes from the Rain World / BepInEx main thread.
 /// </summary>
 public sealed class DevToolExtensionScope : IDisposable
 {
@@ -120,7 +121,17 @@ public sealed class DevToolExtensionScope : IDisposable
     public string DisplayName { get; }
     public string Version { get; }
     public bool IsDisposed => disposed;
-    public int RegistrationCount => registrations.Count;
+
+    public int RegistrationCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < registrations.Count; i++)
+                if (!registrations[i].IsDisposed) count++;
+            return count;
+        }
+    }
 
     /// <summary>
     /// Registers richer library metadata for a PlacedObject type. Higher priority wins when
@@ -133,6 +144,21 @@ public sealed class DevToolExtensionScope : IDisposable
 
         ObjectCatalog.RegisterDescriptor(descriptor, priority);
         return Track("ObjectDescriptor", () => ObjectCatalog.UnregisterDescriptor(descriptor));
+    }
+
+    /// <summary>
+    /// Convenience overload that automatically uses this extension's display name as the source.
+    /// </summary>
+    public DevToolRegistration RegisterObjectDescriptor(
+        PlacedObject.Type type,
+        string displayName,
+        string category,
+        IEnumerable<string> tags = null,
+        int priority = 100)
+    {
+        ThrowIfDisposed();
+        ObjectDescriptor descriptor = new(type, displayName, category, DisplayName, tags);
+        return RegisterObjectDescriptor(descriptor, priority);
     }
 
     /// <summary>
@@ -160,7 +186,7 @@ public sealed class DevToolExtensionScope : IDisposable
         ThrowIfDisposed();
         if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-        ObjectInspectorDefinition<TData> definition = new(source ?? Id);
+        ObjectInspectorDefinition<TData> definition = new(source ?? DisplayName);
         configure(definition);
         return RegisterInspector(definition, priority);
     }
@@ -182,7 +208,7 @@ public sealed class DevToolExtensionScope : IDisposable
     }
 
     internal DevToolExtensionSnapshot Snapshot() =>
-        new(Id, DisplayName, Version, registrations.Count);
+        new(Id, DisplayName, Version, RegistrationCount);
 
     private DevToolRegistration Track(string kind, Action unregister)
     {
@@ -205,6 +231,7 @@ public sealed class DevToolExtensionScope : IDisposable
 /// </summary>
 public static class DevToolApi
 {
+    private static readonly object Gate = new();
     private static readonly DevToolApiVersion currentVersion = new(1, 0);
     private const DevToolCapability CurrentCapabilities =
         DevToolCapability.ObjectDescriptors |
@@ -236,26 +263,52 @@ public static class DevToolApi
         DevToolApiVersion? requiredApi = null,
         DevToolCapability requiredCapabilities = DevToolCapability.None)
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Extension ID cannot be empty.", nameof(id));
+        ValidateExtensionRequest(id, requiredApi, requiredCapabilities);
+        string normalizedId = id.Trim();
+
+        lock (Gate)
+        {
+            if (extensions.ContainsKey(normalizedId))
+                throw new InvalidOperationException("DevTool extension ID is already active: " + normalizedId);
+
+            DevToolExtensionScope scope = new(
+                normalizedId,
+                string.IsNullOrWhiteSpace(displayName) ? normalizedId : displayName.Trim(),
+                version?.Trim() ?? string.Empty);
+            extensions.Add(normalizedId, scope);
+            return scope;
+        }
+    }
+
+    /// <summary>
+    /// Non-throwing compatibility probe for optional integrations. False means the requested API
+    /// version/capabilities are unavailable or the extension ID is already active.
+    /// </summary>
+    public static bool TryRegisterExtension(
+        string id,
+        out DevToolExtensionScope scope,
+        string displayName = null,
+        string version = null,
+        DevToolApiVersion? requiredApi = null,
+        DevToolCapability requiredCapabilities = DevToolCapability.None)
+    {
+        scope = null;
+        if (string.IsNullOrWhiteSpace(id)) return false;
 
         DevToolApiVersion required = requiredApi ?? new DevToolApiVersion(currentVersion.Major, 0);
-        if (!Supports(required, requiredCapabilities))
-        {
-            throw new NotSupportedException(
-                "DevTool API " + currentVersion + " does not satisfy extension '" + id +
-                "' requirement " + required + " / " + requiredCapabilities + ".");
-        }
+        if (!Supports(required, requiredCapabilities)) return false;
 
         string normalizedId = id.Trim();
-        if (extensions.ContainsKey(normalizedId))
-            throw new InvalidOperationException("DevTool extension ID is already active: " + normalizedId);
-
-        DevToolExtensionScope scope = new(
-            normalizedId,
-            string.IsNullOrWhiteSpace(displayName) ? normalizedId : displayName.Trim(),
-            version?.Trim() ?? string.Empty);
-        extensions.Add(normalizedId, scope);
-        return scope;
+        lock (Gate)
+        {
+            if (extensions.ContainsKey(normalizedId)) return false;
+            scope = new DevToolExtensionScope(
+                normalizedId,
+                string.IsNullOrWhiteSpace(displayName) ? normalizedId : displayName.Trim(),
+                version?.Trim() ?? string.Empty);
+            extensions.Add(normalizedId, scope);
+            return true;
+        }
     }
 
     /// <summary>
@@ -263,18 +316,36 @@ public static class DevToolApi
     /// </summary>
     public static IReadOnlyList<DevToolExtensionSnapshot> GetExtensions()
     {
-        List<DevToolExtensionSnapshot> result = new(extensions.Count);
-        foreach (DevToolExtensionScope extension in extensions.Values)
-            result.Add(extension.Snapshot());
-        result.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
-        return result;
+        lock (Gate)
+        {
+            List<DevToolExtensionSnapshot> result = new(extensions.Count);
+            foreach (DevToolExtensionScope extension in extensions.Values)
+                result.Add(extension.Snapshot());
+            result.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+            return result;
+        }
+    }
+
+    public static bool TryGetExtension(string id, out DevToolExtensionSnapshot extension)
+    {
+        extension = null;
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        lock (Gate)
+        {
+            if (!extensions.TryGetValue(id.Trim(), out DevToolExtensionScope scope)) return false;
+            extension = scope.Snapshot();
+            return true;
+        }
     }
 
     internal static void Release(DevToolExtensionScope scope)
     {
         if (scope == null) return;
-        if (extensions.TryGetValue(scope.Id, out DevToolExtensionScope current) && ReferenceEquals(current, scope))
-            extensions.Remove(scope.Id);
+        lock (Gate)
+        {
+            if (extensions.TryGetValue(scope.Id, out DevToolExtensionScope current) && ReferenceEquals(current, scope))
+                extensions.Remove(scope.Id);
+        }
     }
 
     internal static void LogExtensionWarning(string message, Exception error)
@@ -286,6 +357,22 @@ public static class DevToolApi
         catch
         {
             // Cleanup must remain exception-safe even if the host logger is unavailable during unload.
+        }
+    }
+
+    private static void ValidateExtensionRequest(
+        string id,
+        DevToolApiVersion? requiredApi,
+        DevToolCapability requiredCapabilities)
+    {
+        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Extension ID cannot be empty.", nameof(id));
+
+        DevToolApiVersion required = requiredApi ?? new DevToolApiVersion(currentVersion.Major, 0);
+        if (!Supports(required, requiredCapabilities))
+        {
+            throw new NotSupportedException(
+                "DevTool API " + currentVersion + " does not satisfy extension '" + id +
+                "' requirement " + required + " / " + requiredCapabilities + ".");
         }
     }
 }
