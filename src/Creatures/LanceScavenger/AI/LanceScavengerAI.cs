@@ -17,6 +17,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     internal ViolenceType TargetViolence { get; private set; } = ViolenceType.None;
     internal bool TargetAfraid { get; private set; }
     internal ChargeLane Lane { get; private set; }
+    internal bool ChargePriority { get; private set; } = true;
     internal bool SidearmThrowPass => _sidearmThrowPass;
     internal bool SidearmDrawn => _sidearmDrawn;
     internal bool AllowVanillaSidearmCombat { get; private set; }
@@ -34,6 +35,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         _chargeTarget = null;
         TargetViolence = ViolenceType.None;
         TargetAfraid = false;
+        ChargePriority = true;
         AllowVanillaSidearmCombat = false;
         _sidearmThrowPass = false;
         _sidearmDrawn = false;
@@ -67,12 +69,14 @@ internal sealed class LanceScavengerAI : ScavengerAI
         // is the one committed to the airborne charge.
         Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
             ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target);
+        bool friendBlocked = Lane.Reason == "friend in lane";
         bool laneClear = Lane.Clear;
         if (_owner.Combat.State == LanceState.Charge)
             laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
                 _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target);
 
-        bool chargeOpportunity = active && armed && Target != null && TargetViolence == ViolenceType.Lethal &&
+        ChargePriority = HasChargePriorityFor(Target);
+        bool chargeOpportunity = active && armed && ChargePriority && Target != null && TargetViolence == ViolenceType.Lethal &&
             distance >= ChargeLanePlanner.MinimumChargeDistance && laneClear && _owner.Combat.Cooldown == 0;
 
         if (_sidearmDrawn && chargeOpportunity)
@@ -80,7 +84,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         LanceState before = _owner.Combat.State;
         _owner.Combat.Tick(new LanceSituation(active, armed, sidearm, Target != null, TargetViolence, TargetAfraid,
-            distance, laneClear, _owner.Motor.BackstepComplete));
+            distance, laneClear, _owner.Motor.BackstepComplete, friendBlocked, ChargePriority));
         LanceState state = _owner.Combat.State;
         if (before != LanceState.Backstep && state == LanceState.Backstep)
             _owner.Motor.BeginBackstep(Target);
@@ -119,7 +123,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         else if (_sidearmDrawn && state != LanceState.FollowUpThrow)
             CancelSidearmDraw();
 
-        if (!TargetAfraid && TargetViolence == ViolenceType.Lethal &&
+        if (ChargePriority && !TargetAfraid && TargetViolence == ViolenceType.Lethal &&
             (state == LanceState.CreateDistance || state == LanceState.AcquireChargeLane))
         {
             if (--_planAge <= 0 || !_staging.HasValue)
@@ -144,6 +148,58 @@ internal sealed class LanceScavengerAI : ScavengerAI
         {
             _staging = null;
         }
+    }
+
+    private bool HasChargePriorityFor(Creature target)
+    {
+        if (target == null || _owner.room?.abstractRoom?.creatures == null) return true;
+
+        int myIndex = int.MaxValue;
+        for (int i = 0; i < _owner.room.abstractRoom.creatures.Count; i++)
+            if (_owner.room.abstractRoom.creatures[i] == _owner.abstractCreature)
+            { myIndex = i; break; }
+
+        int myRank = IntentRank(_owner.Combat.State);
+        float myScore = IntentScore(_owner, Lane, target);
+
+        for (int i = 0; i < _owner.room.abstractRoom.creatures.Count; i++)
+        {
+            if (_owner.room.abstractRoom.creatures[i].realizedCreature is not LanceScavenger other ||
+                other == _owner || other.dead || !other.Consious || other.room != _owner.room ||
+                other.Combat.State == LanceState.Recover || other.Combat.State == LanceState.Disarmed)
+                continue;
+
+            LanceScavengerAI brain = other.Brain;
+            if (brain == null || brain.Target != target || brain.TargetViolence != ViolenceType.Lethal)
+                continue;
+
+            int otherRank = IntentRank(other.Combat.State);
+            if (otherRank > myRank) return false;
+            if (otherRank < myRank) continue;
+
+            float otherScore = IntentScore(other, brain.Lane, target);
+            if (otherScore < myScore - 0.25f) return false;
+            if (Mathf.Abs(otherScore - myScore) <= 0.25f && i < myIndex) return false;
+        }
+        return true;
+    }
+
+    private static int IntentRank(LanceState state) => state switch
+    {
+        LanceState.Charge => 3,
+        LanceState.Brace => 2,
+        LanceState.Backstep => 1,
+        _ => 0
+    };
+
+    private static float IntentScore(LanceScavenger scav, ChargeLane lane, Creature target)
+    {
+        float score = lane.CanHit ? 0f : 1000f;
+        if (!lane.PathClear) score += 500f;
+        score += lane.ImpactFrame > 0 ? lane.ImpactFrame : 40f;
+        float horizontal = Mathf.Abs(target.mainBodyChunk.pos.x - scav.mainBodyChunk.pos.x);
+        score += Mathf.Abs(horizontal - 180f) * 0.02f;
+        return score;
     }
 
     private void RunSidearmThrowPass()
