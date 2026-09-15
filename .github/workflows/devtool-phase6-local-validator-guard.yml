@@ -11,10 +11,11 @@ on:
       - '.github/workflows/devtool-phase6-local-validator-guard.yml'
 
 jobs:
-  powershell-syntax:
+  validator-guard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Parse local validation script
         shell: pwsh
         run: |
@@ -31,3 +32,88 @@ jobs:
           }
 
           Write-Host 'Phase 6 local validator PowerShell syntax passed.'
+
+      - name: Prepare synthetic validation environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          rw="$RUNNER_TEMP/fake-rain-world"
+          imgui="$RUNNER_TEMP/fake-rwimgui"
+          fakebin="$RUNNER_TEMP/fake-bin"
+
+          mkdir -p \
+            "$rw/BepInEx/core" \
+            "$rw/BepInEx/utils" \
+            "$rw/BepInEx/plugins" \
+            "$rw/RainWorld_Data/Managed" \
+            "$imgui" \
+            "$fakebin"
+
+          touch \
+            "$rw/BepInEx/core/BepInEx.dll" \
+            "$rw/BepInEx/core/MonoMod.RuntimeDetour.dll" \
+            "$rw/BepInEx/core/MonoMod.Utils.dll" \
+            "$rw/BepInEx/core/Mono.Cecil.dll" \
+            "$rw/BepInEx/utils/PUBLIC-Assembly-CSharp.dll" \
+            "$rw/BepInEx/plugins/HOOKS-Assembly-CSharp.dll" \
+            "$rw/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.CoreModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.AudioModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll" \
+            "$rw/RainWorld_Data/Managed/Unity.Mathematics.dll" \
+            "$imgui/rain-world-imgui-api.dll" \
+            "$imgui/ImGui.NET.dll"
+
+          cat > "$fakebin/dotnet" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          project=""
+          output=""
+          game_output=""
+          for arg in "$@"; do
+            case "$arg" in
+              *.csproj) project="$arg" ;;
+              -p:OutputPath=*) output="${arg#-p:OutputPath=}" ;;
+              -p:GameModOutputDir=*) game_output="${arg#-p:GameModOutputDir=}" ;;
+            esac
+          done
+
+          destination="${output:-$game_output}"
+          if [[ -z "$project" || -z "$destination" ]]; then
+            echo "fake dotnet: missing project/output arguments" >&2
+            exit 2
+          fi
+
+          mkdir -p "$destination"
+          if [[ "$project" == *"DryCycle.DevTool.RWImGui.csproj" ]]; then
+            touch "$destination/DryCycle.DevTool.RWImGui.dll"
+          else
+            touch "$destination/DryCycle.dll"
+          fi
+          SH
+          chmod +x "$fakebin/dotnet"
+
+          echo "PHASE6_FAKE_RW=$rw" >> "$GITHUB_ENV"
+          echo "PHASE6_FAKE_IMGUI=$imgui" >> "$GITHUB_ENV"
+          echo "$fakebin" >> "$GITHUB_PATH"
+
+      - name: Exercise validator control flow
+        shell: pwsh
+        run: |
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'phase6-validator-output'
+          & ./scripts/validate-devtool-phase6-local.ps1 `
+            -RainWorldDir $env:PHASE6_FAKE_RW `
+            -RWImGuiPluginDir $env:PHASE6_FAKE_IMGUI `
+            -BuildRoot $buildRoot
+
+          if (-not (Test-Path (Join-Path $buildRoot 'DryCycle.dll') -PathType Leaf)) {
+            throw 'Synthetic backend output was not produced.'
+          }
+          if (-not (Test-Path (Join-Path $buildRoot 'DryCycle.DevTool.RWImGui.dll') -PathType Leaf)) {
+            throw 'Synthetic frontend output was not produced.'
+          }
+
+          Write-Host 'Phase 6 local validator control-flow smoke test passed.'
