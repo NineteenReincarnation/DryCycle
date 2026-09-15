@@ -9,6 +9,9 @@ runtime="$root/Core/DevToolRuntime.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 legacy_controller="$root/Compatibility/LegacyUiPresentationController.cs"
 universal_presentation="$root/Compatibility/UniversalDevUiPresentation.cs"
+diagnostics_publisher="$root/Compatibility/DevUiDiagnosticsPublisher.cs"
+page_coverage="$root/Compatibility/DevUiPageCoverageTracker.cs"
+protocol_inventory="$root/Compatibility/DevUiProtocolInventory.cs"
 
 if [[ ! -d "$root" ]]; then
   echo "DevTool root is missing: $root" >&2
@@ -41,6 +44,20 @@ if [[ -n "$frontend_action_hits" ]]; then
   exit 1
 fi
 
+# Diagnostics follow the same one-way Presentation rule as normal workspaces. Draw code may read
+# detached snapshots, but must never process queues, register protocols, scan live DevUI trees/types,
+# or evaluate compatibility state as a side effect.
+frontend_diagnostic_side_effect_hits="$(
+  grep -RInE --include='*.cs' \
+    '(UniversalDevUiCommandQueue\.Process|UniversalDevUiPresentationHub\.Publish|DevUiGenericProtocolBootstrap\.Ensure|DevUiPageCoverageTracker\.Observe|DevUiProtocolInventory\.ObserveLoadedTypes|DevUiSemanticConformanceAudit\.Evaluate|DevUiCompatibilityGate\.Evaluate)' \
+    "$frontend" || true
+)"
+if [[ -n "$frontend_diagnostic_side_effect_hits" ]]; then
+  echo "RWImGui frontend is advancing compatibility diagnostics instead of reading published snapshots:" >&2
+  echo "$frontend_diagnostic_side_effect_hits" >&2
+  exit 1
+fi
+
 # Presentation access from RWImGui must be an O(1) detached snapshot read. Universal DevUI capture
 # and command execution are backend-owned and diagnostics capture is completely absent from normal
 # production frames when diagnostics are disabled.
@@ -48,15 +65,42 @@ if ! grep -Fq 'public static UniversalDevUiPresentationSnapshot Current => curre
   echo "Universal DevUI Current must remain a pure O(1) snapshot getter." >&2
   exit 1
 fi
+if ! grep -Fq 'public static DevUiPageCoverageSnapshot Current => current;' "$page_coverage"; then
+  echo "Page coverage Current must remain a pure detached snapshot getter." >&2
+  exit 1
+fi
+if ! grep -Fq 'public static DevUiProtocolInventorySnapshot Current => current;' "$protocol_inventory"; then
+  echo "Protocol inventory Current must remain a pure detached snapshot getter." >&2
+  exit 1
+fi
 if grep -Fq 'UniversalDevUiCommandQueue.Process' "$universal_presentation"; then
   echo "Universal DevUI Presentation is executing mutations from its read/publish path." >&2
   exit 1
 fi
-if ! grep -Fq 'DevUiDiagnosticsPolicy.Enabled && session?.Owner != null' "$coordinator" ||
-   ! grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator"; then
-  echo "Universal DevUI diagnostics capture must be backend-owned and diagnostics-gated." >&2
+if [[ ! -f "$diagnostics_publisher" ]]; then
+  echo "Backend compatibility diagnostics publisher is missing: $diagnostics_publisher" >&2
   exit 1
 fi
+if ! grep -Fq 'DevUiDiagnosticsPolicy.Enabled && session?.Owner != null' "$coordinator" ||
+   ! grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator" ||
+   ! grep -Fq 'DevUiDiagnosticsPublisher.Publish(session.Owner)' "$coordinator"; then
+  echo "Universal DevUI diagnostics capture/evaluation must be backend-owned and diagnostics-gated." >&2
+  exit 1
+fi
+
+required_diagnostics_publisher_symbols=(
+  'DevUiGenericProtocolBootstrap.Ensure()'
+  'DevUiPageCoverageTracker.Observe(owner, mirror)'
+  'DevUiProtocolInventory.ObserveLoadedTypes()'
+  'DevUiSemanticConformanceAudit.Evaluate(mirror)'
+  'DevUiCompatibilityGate.Evaluate('
+)
+for symbol in "${required_diagnostics_publisher_symbols[@]}"; do
+  if ! grep -Fq "$symbol" "$diagnostics_publisher"; then
+    echo "Backend diagnostics publication contract is incomplete: missing '$symbol'" >&2
+    exit 1
+  fi
+done
 
 # Phase 6 removes framework-specific native inspectors from core ownership. Unknown/third-party
 # controls must use the Extension API, generic DevInterface protocol bridge, data model, or Vanilla
