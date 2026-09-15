@@ -7,24 +7,29 @@ namespace DryCycle.Creatures.LanceScavenger;
 internal sealed class LanceScavengerAI : ScavengerAI
 {
     private readonly LanceScavenger _owner;
+    private readonly TargetMotionTracker _motionTracker = new();
     private int _planAge;
     private WorldCoordinate? _staging;
     private bool _sidearmThrowPass;
     private bool _sidearmDrawn;
     private Creature _chargeTarget;
-    private Creature _recentChargeSolutionTarget;
-    private ChargeLane _recentChargeSolution;
-    private int _recentChargeSolutionAge = int.MaxValue;
+    private Creature _recentAimTarget;
+    private LanceAimSolution _recentAimSolution;
+    private int _recentAimAge = int.MaxValue;
     internal bool SkipNextUpdate;
     internal Creature Target { get; private set; }
     internal ViolenceType TargetViolence { get; private set; } = ViolenceType.None;
     internal bool TargetAfraid { get; private set; }
+    internal LanceAimSolution AimSolution { get; private set; }
     internal ChargeLane Lane { get; private set; }
     internal bool ChargePriority { get; private set; } = true;
     internal bool SidearmThrowPass => _sidearmThrowPass;
     internal bool SidearmDrawn => _sidearmDrawn;
     internal bool AllowVanillaSidearmCombat { get; private set; }
-    internal Vector2 Aim => Target != null ? Lane.Aim : _owner.lookPoint;
+    internal TargetMotionTracker MotionTracker => _motionTracker;
+    internal Vector2 Aim => Target != null
+        ? (AimSolution.Valid ? AimSolution.Aim : Target.mainBodyChunk.pos)
+        : _owner.lookPoint;
 
     internal LanceScavengerAI(AbstractCreature creature, World world) : base(creature, world)
     {
@@ -38,12 +43,15 @@ internal sealed class LanceScavengerAI : ScavengerAI
         _chargeTarget = null;
         TargetViolence = ViolenceType.None;
         TargetAfraid = false;
+        AimSolution = default;
+        Lane = default;
         ChargePriority = true;
         AllowVanillaSidearmCombat = false;
         _sidearmThrowPass = false;
         _sidearmDrawn = false;
         _staging = null;
-        ResetRecentChargeSolution();
+        _motionTracker.Reset();
+        ResetRecentAimSolution();
         _owner.Combat.ResetForRoom();
         _owner.EnsureWeaponSlots();
     }
@@ -62,21 +70,27 @@ internal sealed class LanceScavengerAI : ScavengerAI
         if (_owner.Combat.State == LanceState.FollowUpThrow)
             RestoreChargeTargetForFollowUp();
 
+        _motionTracker.Update(Target);
+
         bool armed = _owner.Lance != null;
         bool sidearm = _owner.SidearmSpear != null;
         bool active = _owner.Consious && _owner.grabbedBy.Count == 0 && !_owner.safariControlled &&
             !_owner.enteringShortCut.HasValue && !_owner.inShortcut && _owner.Submersion < 0.25f;
         float distance = Target == null ? 999f : Vector2.Distance(_owner.mainBodyChunk.pos, Target.mainBodyChunk.pos);
 
-        // Re-solve every update. The planner now describes a probability corridor rather
-        // than demanding a mathematically perfect future BodyChunk intersection.
+        AimSolution = Target == null ? default :
+            LanceAimSolver.Solve(_owner, _owner.mainBodyChunk.pos, Target, _motionTracker);
         Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
-            ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target);
-        UpdateRecentChargeSolution(Target, Lane);
+            ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target, AimSolution);
+
+        // Only the visible 38-frame brace owns the commitment memory. Chasing/backstep aim
+        // may start the attack but cannot silently satisfy a later brace window.
+        if (_owner.Combat.State == LanceState.Brace)
+            UpdateRecentAimSolution(Target, AimSolution);
 
         bool friendBlocked = Lane.Reason == "friend in lane";
         bool hardBlocked = IsHardChargeBlock(Lane, friendBlocked);
-        bool commitReady = !hardBlocked && (Lane.Clear || RecentChargeSolutionValid(Target));
+        bool commitReady = !hardBlocked && (AimSolution.Ready || RecentAimSolutionValid(Target));
         bool laneClear = Lane.Clear;
         if (_owner.Combat.State == LanceState.Charge)
             laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
@@ -93,16 +107,27 @@ internal sealed class LanceScavengerAI : ScavengerAI
         _owner.Combat.Tick(new LanceSituation(active, armed, sidearm, Target != null, TargetViolence, TargetAfraid,
             distance, laneClear, _owner.Motor.BackstepComplete, friendBlocked, ChargePriority, commitReady, hardBlocked));
         LanceState state = _owner.Combat.State;
+
         if (before != LanceState.Backstep && state == LanceState.Backstep)
             _owner.Motor.BeginBackstep(Target);
+
+        if (before != LanceState.Brace && state == LanceState.Brace)
+        {
+            ResetRecentAimSolution();
+            UpdateRecentAimSolution(Target, AimSolution);
+        }
+
         if (before != LanceState.Charge && state == LanceState.Charge)
         {
-            // Prefer the current solution. If the release frame is only a soft prediction
-            // miss, use the strongest solution observed during the last quarter-second.
-            ChargeLane committed = Lane.Clear ? Lane : _recentChargeSolution;
+            LanceAimSolution committed = AimSolution.Ready ? AimSolution : _recentAimSolution;
+            committed = LanceAimSolver.CorrectForRelease(_owner, Target, _motionTracker, committed);
             _owner.Motor.CommitCharge(committed);
             _chargeTarget = Target;
-            ResetRecentChargeSolution();
+            ResetRecentAimSolution();
+        }
+        else if (before == LanceState.Brace && state != LanceState.Brace)
+        {
+            ResetRecentAimSolution();
         }
 
         if (!armed)
@@ -159,55 +184,50 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
     }
 
-    private void UpdateRecentChargeSolution(Creature target, ChargeLane lane)
+    private void UpdateRecentAimSolution(Creature target, LanceAimSolution aim)
     {
         if (target == null)
         {
-            ResetRecentChargeSolution();
+            ResetRecentAimSolution();
             return;
         }
-        if (_recentChargeSolutionTarget != target)
+        if (_recentAimTarget != target)
         {
-            ResetRecentChargeSolution();
-            _recentChargeSolutionTarget = target;
+            ResetRecentAimSolution();
+            _recentAimTarget = target;
         }
 
-        if (_recentChargeSolutionAge < int.MaxValue)
-            _recentChargeSolutionAge++;
+        if (_recentAimAge < int.MaxValue)
+            _recentAimAge++;
 
-        if (!lane.Clear) return;
+        if (!aim.Ready) return;
 
-        // Keep the strongest solution inside the rolling commitment window. Once the old
-        // best is too old, any current valid solution becomes the new anchor.
-        if (_recentChargeSolutionAge > LanceCombatState.CommitWindowFrames ||
-            _recentChargeSolutionTarget != target ||
-            lane.Confidence >= _recentChargeSolution.Confidence)
+        if (_recentAimAge > LanceCombatState.CommitWindowFrames ||
+            _recentAimTarget != target ||
+            aim.Quality >= _recentAimSolution.Quality)
         {
-            _recentChargeSolution = lane;
-            _recentChargeSolutionTarget = target;
-            _recentChargeSolutionAge = 0;
+            _recentAimSolution = aim;
+            _recentAimTarget = target;
+            _recentAimAge = 0;
         }
     }
 
-    private bool RecentChargeSolutionValid(Creature target) =>
-        target != null && _recentChargeSolutionTarget == target &&
-        _recentChargeSolutionAge <= LanceCombatState.CommitWindowFrames &&
-        _recentChargeSolution.Clear &&
-        _recentChargeSolution.Confidence >= ChargeLanePlanner.MinimumCommitConfidence;
+    private bool RecentAimSolutionValid(Creature target) =>
+        target != null && _recentAimTarget == target &&
+        _recentAimAge <= LanceCombatState.CommitWindowFrames &&
+        _recentAimSolution.Ready;
 
     private static bool IsHardChargeBlock(ChargeLane lane, bool friendBlocked)
     {
         if (friendBlocked) return true;
-        if (lane.Reason == "distance" || lane.Reason == "wall / ceiling" || lane.Reason == "lance blocked")
-            return true;
-        return false;
+        return lane.Reason == "distance" || lane.Reason == "wall / ceiling" || lane.Reason == "lance blocked";
     }
 
-    private void ResetRecentChargeSolution()
+    private void ResetRecentAimSolution()
     {
-        _recentChargeSolutionTarget = null;
-        _recentChargeSolution = default;
-        _recentChargeSolutionAge = int.MaxValue;
+        _recentAimTarget = null;
+        _recentAimSolution = default;
+        _recentAimAge = int.MaxValue;
     }
 
     private bool HasChargePriorityFor(Creature target)
