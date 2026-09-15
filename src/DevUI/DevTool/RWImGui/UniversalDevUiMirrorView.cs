@@ -18,6 +18,19 @@ internal static class UniversalDevUiMirrorView
     private static readonly Dictionary<string, Num.Vector2> Vector2Edits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector4> ColorEdits = new(StringComparer.Ordinal);
     private static string search = string.Empty;
+    private static string observedSearch;
+    private static string normalizedSearch = string.Empty;
+
+    internal static void ResetRetainedState()
+    {
+        FloatEdits.Clear();
+        StringEdits.Clear();
+        Vector2Edits.Clear();
+        ColorEdits.Clear();
+        search = string.Empty;
+        observedSearch = null;
+        normalizedSearch = string.Empty;
+    }
 
     internal static void Draw(UniversalDevUiPresentationSnapshot snapshot)
     {
@@ -67,11 +80,12 @@ internal static class UniversalDevUiMirrorView
         ImGui.InputText(DevToolUiSettings.T("搜索##UniversalDevUiSearch", "Search##UniversalDevUiSearch"), ref search, 256);
         ImGui.Spacing();
 
+        string query = SearchQuery();
         int visible = 0;
         for (int i = 0; i < controls.Length; i++)
         {
             LegacyControlSnapshot control = controls[i];
-            if (control == null || !Matches(control, search)) continue;
+            if (control == null || !Matches(control, query)) continue;
             visible++;
             DrawControl(snapshot, control);
         }
@@ -283,13 +297,20 @@ internal static class UniversalDevUiMirrorView
         DevToolTooltip.Show(text.Trim());
     }
 
-    private static bool Matches(LegacyControlSnapshot control, string query)
+    private static string SearchQuery()
     {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        query = query.Trim();
-        return Contains(control.Label, query) || Contains(control.Id, query) ||
-               Contains(control.RuntimeType, query) || Contains(control.Path, query) ||
-               Contains(control.ValueText, query) || Contains(control.Kind.ToString(), query);
+        if (string.Equals(observedSearch, search, StringComparison.Ordinal)) return normalizedSearch;
+        observedSearch = search;
+        normalizedSearch = search?.Trim() ?? string.Empty;
+        return normalizedSearch;
+    }
+
+    private static bool Matches(LegacyControlSnapshot control, string normalizedQuery)
+    {
+        if (string.IsNullOrEmpty(normalizedQuery)) return true;
+        return Contains(control.Label, normalizedQuery) || Contains(control.Id, normalizedQuery) ||
+               Contains(control.RuntimeType, normalizedQuery) || Contains(control.Path, normalizedQuery) ||
+               Contains(control.ValueText, normalizedQuery) || Contains(control.Kind.ToString(), normalizedQuery);
     }
 
     private static bool Contains(string value, string query) =>
