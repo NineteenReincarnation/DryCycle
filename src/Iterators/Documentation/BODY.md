@@ -119,10 +119,10 @@ public sealed class SingleBody : IteratorBody
 
 ConfigurePhysics 只能在 OnInitialize 调用；支持 1–64 个当前 Oracle 拥有且索引正确的 Chunk，连接必须引用该身体的不同 Chunk。数组会复制；初始尺寸、位置、连接和归属均会验证。自定义身体可通过覆盖 `UseGamePhysics => false` 完全自行推进物理，但仍须配置合法宿主结构。
 
-初始化顺序：Body 工厂 → Arm 工厂 → Body.OnInitialize → Arm.OnInitialize → Graphics 初始化 → Brain 初始化 → Runtime.OnCreate → 后续 Runtime 生命周期。Body 工厂可访问已绑定 Oracle，Arm 工厂可访问已创建但尚未初始化的 Body。Body.OnInitialize 中 Arm 尚未完成初始化，不应调用其 ConstrainTarget。
+初始化顺序：Body 工厂 → Arm 工厂 → Body.OnInitialize → Arm.OnInitialize → Graphics 初始化 → Brain 初始化 → Conversation 初始化 → Runtime.OnCreate → 后续 Runtime 生命周期。Body 工厂可访问已绑定 Oracle，Arm 工厂可访问已创建但尚未初始化的 Body。Body.OnInitialize 中 Arm 尚未完成初始化，不应调用其 ConstrainTarget。
 
-每帧顺序：Brain 感知与动作 → Runtime.OnUpdate → Body.OnUpdate → Arm.OnUpdate → 游戏 PhysicalObject.Update（可选择跳过）→ Arm.OnAfterPhysics → Body.OnAfterPhysics → Graphics 更新 → Runtime.OnLateUpdate。任一步销毁实例即停止后续步骤；递归更新被 Runtime 保护拦截。
+每帧顺序：Brain 感知与动作 → Conversation → Runtime.OnUpdate → Body.OnUpdate → Arm.OnUpdate → 游戏 PhysicalObject.Update（可选择跳过）→ Arm.OnAfterPhysics → Body.OnAfterPhysics → Graphics 更新 → Runtime.OnLateUpdate。任一步销毁实例即停止后续步骤；递归更新被 Runtime 保护拦截。
 
-销毁顺序：Runtime.OnDestroy → Brain 清理 → Graphics 清理 → Arm.OnDestroy → Body.OnDestroy → 宿主与索引清理 → Context 清空游戏引用。回调应能清理部分初始化的资源。Body / Arm 之后仍能查询 IsDestroyed，但不应继续持有外部复制的 Chunk 引用。身体或约束回调失败时结束当前 Runtime，因为继续运行无法保证其物理结构有效；其他实例不受影响。
+销毁顺序：Runtime.OnDestroy → Conversation 清理 → Brain 清理 → Graphics 清理 → Arm.OnDestroy → Body.OnDestroy → 宿主与索引清理 → Context 清空游戏引用。回调应能清理部分初始化的资源。Body / Arm 之后仍能查询 IsDestroyed，但不应继续持有外部复制的 Chunk 引用。身体或约束回调失败时结束当前 Runtime，因为继续运行无法保证其物理结构有效；其他实例不受影响。
 
 物理桥仅在 Hook 安装时创建一次非虚方法调用，直接复用游戏 PhysicalObject.Update，不复制游戏物理源码，也不修改原版 Oracle.Update。独立检查覆盖托管物理路径；Unity 原生水体/天气、实际房间流式加载及其他 Mod 交互仍需游戏内验证。

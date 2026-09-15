@@ -125,11 +125,11 @@ Left 回调中 Player 仍可用但 IsPresent 已为 false，全部通知结束�
 
 ## Runtime 顺序与隔离
 
-创建：Body / Arm → Graphics → 刷新 Context 玩家 → Brain / 模块 / 动作初始化与 Idle → Runtime.OnCreate 及其余初始化回调。首次感知在第一个游戏更新执行，不在注册或构造阶段执行。
+创建：Body / Arm → Graphics → 刷新 Context 玩家 → Brain / 模块 / 动作初始化与 Idle → Conversation → Runtime.OnCreate 及其余初始化回调。首次感知在第一个游戏更新执行，不在注册或构造阶段执行。
 
-每帧：刷新 Context 玩家 → Brain 感知/通知/OnSense → Brain 与模块 OnUpdate → StateMachine / Action → Runtime.OnUpdate → Body / Arm 控制与游戏物理 → Graphics → Runtime.OnLateUpdate。Runtime.OnUpdate 因此可以在同帧覆盖 Brain 的身体输入。
+每帧：刷新 Context 玩家 → Brain 感知/通知/OnSense → Brain 与模块 OnUpdate → StateMachine / Action → Conversation → Runtime.OnUpdate → Body / Arm 控制与游戏物理 → Graphics → Runtime.OnLateUpdate。对话可以覆盖 Brain 输入，Runtime.OnUpdate 可以在同帧覆盖二者。行为模块可在更新中通过 Context.Conversation 提交对话请求，见 [对话 API](CONVERSATION.md)。
 
-销毁：Runtime.OnDestroy → 当前 Action.Exit → 动作逆序销毁 → 模块逆序销毁 → Brain.OnDestroy / 感知清理 → Graphics → Arm → Body → 宿主和 Context 清理。销毁和回调重入受保护，不继续执行已经销毁实例的后续回调。
+销毁：Runtime.OnDestroy → Conversation 清理 → 当前 Action.Exit → 动作逆序销毁 → 模块逆序销毁 → Brain.OnDestroy / 感知清理 → Graphics → Arm → Body → 宿主和 Context 清理。销毁和回调重入受保护，不继续执行已经销毁实例的后续回调。
 
 行为模块失败只停用本模块及其注册的动作，其他模块继续。动作条件或回调失败停用该动作；若它正在运行，立即执行一次失败退出，下一帧可回到 Idle。Brain 工厂或整体初始化失败时清理已接管组件，使用被动 IteratorBrain 回退；整体 Brain 更新失败停用行为，保留 Runtime、Body 与 Graphics。停用的模块/动作仍在实例最终销毁时执行 OnDestroy。
 

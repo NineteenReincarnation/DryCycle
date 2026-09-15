@@ -82,11 +82,11 @@ IteratorMesh 构造时复制顶点、三角索引与可选 UV。Vertices、Color
 
 ## 生命周期与错误处理
 
-创建顺序：Body / Arm 初始化 → Graphics 工厂 → Graphics.OnInitialize 与各部件初始化 → 冻结 Sprite 布局 → 创建绘制适配器 → Brain 初始化 → Runtime.OnCreate 及后续回调。
+创建顺序：Body / Arm 初始化 → Graphics 工厂 → Graphics.OnInitialize 与各部件初始化 → 冻结 Sprite 布局 → 创建绘制适配器 → Brain 初始化 → Conversation 初始化 → Runtime.OnCreate 及后续回调。
 
-每帧：Brain 感知与动作 → Runtime.OnUpdate → Body / Arm 控制和游戏物理 → Graphics 捕获前后帧状态、OnUpdate 与部件更新 → Runtime.OnLateUpdate。相机绘制调用 Render(timeStacker) 进行插值，不推进逻辑时钟。自定义 OnDraw 应直接依据输入计算结果，避免以绘制次数累加动画状态。
+每帧：Brain 感知与动作 → Conversation → Runtime.OnUpdate → Body / Arm 控制和游戏物理 → Graphics 捕获前后帧状态、OnUpdate 与部件更新 → Runtime.OnLateUpdate。相机绘制调用 Render(timeStacker) 进行插值，不推进逻辑时钟。自定义 OnDraw 应直接依据输入计算结果，避免以绘制次数累加动画状态。
 
-房间不再被观看时移除相机 Sprite 和适配器，保留 Runtime.Graphics；再次观看时重建相机 Sprite。销毁顺序为 Runtime.OnDestroy → Brain 清理 → 移除所有相机 Sprite → 图形部件逆序清理 → Graphics.OnDestroy 与图集租约释放 → Arm / Body 清理 → 宿主、索引和 Context 清理。
+房间不再被观看时移除相机 Sprite 和适配器，保留 Runtime.Graphics；再次观看时重建相机 Sprite。销毁顺序为 Runtime.OnDestroy → Conversation 清理 → Brain 清理 → 移除所有相机 Sprite → 图形部件逆序清理 → Graphics.OnDestroy 与图集租约释放 → Arm / Body 清理 → 宿主、索引和 Context 清理。
 
 - 部件初始化、更新或绘制失败：记录 Iterator / Graphics.部件名 / Phase，停用该部件并隐藏其 Sprite，保留其他部件和 Runtime；失败部件仍参与最终清理。
 - Graphics 工厂或整体初始化失败：清理已接管的组件并尝试标准外观；外来或已复用的组件不会被接管、销毁。
@@ -124,6 +124,6 @@ D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/
 - `artifacts/iterator-framework/pwn-iterator-preview.png`：放大外观与 1:1 游戏像素尺寸。
 - `artifacts/iterator-framework/pwn-iterator-transparent.png`：透明 PNG。
 - `artifacts/iterator-framework/pwn-ai-placement.png`：实际房间实墙与样例位置。
-- `artifacts/iterator-framework/phase5-tests.log`：本机检查日志。
+- `artifacts/iterator-framework/phase6-tests.log`：本机检查日志。
 
 预览读取编译后 Runtime 的同一套网格和顶点色，通过 CPU 光栅化导出。相机检查使用真实 Futile TriangleMesh、SpriteLeaser 和未挂载 Stage 的容器，验证独立网格、相机偏移、调色板和清理；没有创建 Unity GPU 渲染环境。图集的原生加载、Shader 执行、真实房间光照、游戏内切换和最终视觉效果仍需 Unity 游戏内验收。

@@ -1,6 +1,6 @@
 # 定义与注册 API 约定
 
-公共类型统一位于 `DryCycle.Iterators`。本文说明定义、注册和日志；实例 API 见 [Runtime 与生命周期](RUNTIME.md)、[Body / Arm / Pose](BODY.md) 和 [Brain / 行为](BEHAVIOR.md)。未列出的内部类型不是外部扩展接口。
+公共类型统一位于 `DryCycle.Iterators`。本文说明定义、注册和日志；实例 API 见 [Runtime 与生命周期](RUNTIME.md)、[Body / Arm / Pose](BODY.md)、[Brain / 行为](BEHAVIOR.md) 和 [Conversation](CONVERSATION.md)。未列出的内部类型不是外部扩展接口。
 
 ## ID 与输入
 
@@ -30,6 +30,7 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 | `.Runtime(factory)` | 设置 `Func<IteratorContext, IteratorRuntime>`，不立即运行；null 抛出 `ArgumentNullException`。 |
 | `.Graphics(factory)` | 设置 `Func<IteratorContext, IteratorGraphics>`，每次实例创建独立图形组件；null 报错。 |
 | `.Brain(factory)` | 设置 `Func<IteratorContext, IteratorBrain>`；默认 StandardIteratorBrain，null 报错。 |
+| `.Conversation(factory)` | 设置 `Func<IteratorContext, ConversationController>`；默认 EmptyConversation，不自动说话，null 报错。 |
 | `.Body(factory)` / `.Arm(factory)` | 设置身体/机械臂工厂，类型分别为 `Func<IteratorContext, IteratorBody>` / `Func<IteratorContext, IteratorArm>`；null 报错。 |
 | `.Build()` | 返回新的、已验证的不可变 Descriptor；无全局状态副作用。 |
 | `.Register()` | 等价于 `IteratorRegistry.Register(Build())`。每次调用都会先创建新 Descriptor。 |
@@ -40,6 +41,7 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 | `descriptor.RuntimeFactory` | 只读工厂，每次生成时传入新 Context；须返回使用该 Context 构造的全新 Runtime。 |
 | `descriptor.GraphicsFactory` | 只读图形工厂；默认 StandardIteratorGraphics，图形失败不会结束 Runtime。 |
 | `descriptor.BrainFactory` | 只读行为工厂；每次创建独立 Brain，失败回退被动 Idle，不能复用外来实例。 |
+| `descriptor.ConversationFactory` | 只读对话工厂；每次创建独立控制器，失败回退 EmptyConversation。十参数完整构造在九参数签名末尾增加该工厂，保留此前全部签名。 |
 | `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory, brainFactory)` | 第五阶段完整重载；null Brain 工厂使用 StandardIteratorBrain，保留四、五、七、八参数签名。 |
 | `new IteratorDescriptor(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory)` | 第四阶段完整重载，保留四、五、七参数签名；null Graphics 工厂使用标准外观。 |
 | `descriptor.BodyFactory / ArmFactory` | 只读组件工厂，使用当前 Context 返回新组件，在 Runtime.OnCreate 前创建并初始化。 |
@@ -47,7 +49,7 @@ ID 和房间名使用 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`：1–128 个 ASCII �
 
 重复调用同一个 Builder 的 `Register()` 会遇到重复 ID 错误，因为每次 Build 都创建不同定义。需要幂等调用时保留返回的 Descriptor，再将同一对象传入 Registry。
 
-当前只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Descriptor 尚无 Conversation、Environment 或通用 Module 工厂；这些工厂随对应实现加入，不提前暴露 `object` 工厂或无功能占位接口。
+当前只提供精确房间绑定，尚无自定义谓词 `RoomRule`。Environment 或通用 Module 工厂随对应阶段实现加入，不提前暴露 `object` 工厂或无功能占位接口。
 
 Build 保存当时的工厂委托；之后修改 Builder 不会改变旧 Descriptor。委托捕获的对象不会被深拷贝，应只捕获可跨 Session 使用的配置。不要让长期注册的定义间接保存 Room、Oracle 或 Player。
 

@@ -40,6 +40,7 @@ public class IteratorRuntime
     public IteratorArm Arm { get; private set; }
     public IteratorGraphics Graphics { get; private set; }
     public IteratorBrain Brain { get; private set; }
+    public ConversationController Conversation { get; private set; }
     public IteratorLifecycle State { get; private set; } = IteratorLifecycle.RuntimeCreated;
     public bool IsInitialized => State == IteratorLifecycle.Initialized || State == IteratorLifecycle.Active;
     public bool IsActive => State == IteratorLifecycle.Active;
@@ -78,6 +79,8 @@ public class IteratorRuntime
             if (State != IteratorLifecycle.RuntimeCreated) return false;
             Context.RefreshPlayers();
             InitializeBrain();
+            if (State != IteratorLifecycle.RuntimeCreated) return false;
+            InitializeConversation();
             if (State != IteratorLifecycle.RuntimeCreated) return false;
             Context.Logger = _createLog;
             OnCreate();
@@ -154,6 +157,8 @@ public class IteratorRuntime
             Context.RefreshPlayers();
             Brain?.Update();
             if (!IsActive) return;
+            Conversation?.Update();
+            if (!IsActive) return;
             Context.Logger = _updateLog;
             OnUpdate();
             if (!IsActive) return;
@@ -203,6 +208,7 @@ public class IteratorRuntime
         {
             try
             {
+                Conversation?.Release();
                 Brain?.Release();
                 Graphics?.Release();
                 Arm?.Release();
@@ -269,6 +275,29 @@ public class IteratorRuntime
             Brain = new IteratorBrain(Context) { Claimed = true };
             try { Brain.Initialize(); }
             catch (Exception fallbackFailure) { Brain.Disable("Fallback", fallbackFailure); }
+        }
+    }
+
+    private void InitializeConversation()
+    {
+        try
+        {
+            Context.Logger = _initializeLog.ForModule("Conversation").ForPhase("Factory");
+            ConversationController conversation = Descriptor.ConversationFactory(Context);
+            if (conversation == null || !ReferenceEquals(conversation.Context, Context) || conversation.Claimed || conversation.IsDestroyed)
+                throw new InvalidOperationException("ConversationFactory must return a new controller built with the supplied Context.");
+            conversation.Claimed = true; Conversation = conversation;
+            if (State != IteratorLifecycle.RuntimeCreated) { conversation.Release(); return; }
+            conversation.Initialize();
+        }
+        catch (Exception exception)
+        {
+            _initializeLog.ForModule("Conversation").Error("Conversation initialization failed; using an empty controller.", exception);
+            Conversation?.Release();
+            if (State != IteratorLifecycle.RuntimeCreated) return;
+            Conversation = new EmptyConversation(Context) { Claimed = true };
+            try { Conversation.Initialize(); }
+            catch (Exception fallbackFailure) { Conversation.Disable(fallbackFailure); }
         }
     }
 }

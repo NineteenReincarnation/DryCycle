@@ -15,6 +15,7 @@ public class IteratorBuilder
     private Func<IteratorContext, IteratorArm> _armFactory;
     private Func<IteratorContext, IteratorGraphics> _graphicsFactory;
     private Func<IteratorContext, IteratorBrain> _brainFactory;
+    private Func<IteratorContext, ConversationController> _conversationFactory;
 
     /// <summary>创建一个独立 Builder；扩展 Mod 可通过扩展方法组合公共配置方法。</summary>
     public IteratorBuilder(IteratorID id) => _id = id ?? throw new ArgumentNullException(nameof(id));
@@ -61,7 +62,7 @@ public class IteratorBuilder
     }
 
     /// <summary>验证并创建定义快照；没有 Registry 或 Oracle ExtEnum 副作用。</summary>
-    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory, _graphicsFactory, _brainFactory);
+    public IteratorDescriptor Build() => new(_id, _rooms, _displayName, _metadata, _runtimeFactory, _bodyFactory, _armFactory, _graphicsFactory, _brainFactory, _conversationFactory);
 
     /// <summary>设置实例工厂，可注入参数或派生 Runtime；不在 Builder 阶段运行该工厂。</summary>
     public IteratorBuilder Runtime(Func<IteratorContext, IteratorRuntime> factory)
@@ -95,6 +96,13 @@ public class IteratorBuilder
     public IteratorBuilder Brain(Func<IteratorContext, IteratorBrain> factory)
     {
         _brainFactory = factory ?? throw new ArgumentNullException(nameof(factory));
+        return this;
+    }
+
+    /// <summary>替换默认空对话；每次生成必须用传入的 Context 创建新控制器。</summary>
+    public IteratorBuilder Conversation(Func<IteratorContext, ConversationController> factory)
+    {
+        _conversationFactory = factory ?? throw new ArgumentNullException(nameof(factory));
         return this;
     }
 

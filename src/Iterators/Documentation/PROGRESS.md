@@ -1,8 +1,8 @@
 # Iterator Framework 开发进度
 
-更新日期：2026-09-14。
+更新日期：2026-09-15。
 
-范围依据：《Iterator Framework 迭代器轮子开发任务书》第 81–85 节。前五阶段实现与托管验证已完成，真实游戏内验收待做。本轮完成 Brain、动作、状态机、行为模块、感知与 PWN_AI 玩家观察，只增加五组必要行为检查，未进入第六阶段。
+范围依据：《Iterator Framework 迭代器轮子开发任务书》第 81–86 节。前六阶段实现与托管验证已完成，真实游戏内验收待做。本轮完成独立对话、脚本、条件、命令、分支与打断，只增加三组必要检查，未进入第七阶段。按用户要求，本轮没有修改 PWN_AI，后续也不再给它追加阶段样例。
 
 ## 第一阶段已实现
 
@@ -68,13 +68,25 @@
 - PWN_AI 接入默认观察，维持第四阶段参考造型、展示姿势和悬停位置；玩家离开、死亡、在捷径中或被墙挡住时结束观察。
 - [行为 API 与扩展示例](BEHAVIOR.md)，并同步已有生命周期、Body、Graphics、快速开始与仓库入口文档。
 
+## 第六阶段已实现
+
+- `ConversationController` / `EmptyConversation`：每实例独立生命周期、排队控制、默认不自动说话；`.Conversation(...)`、ConversationFactory、Context.Conversation，保留此前构造签名。
+- `Dialogue` / `DialogueBuilder` / `DialogueSequence`：可共享不可变脚本，独占 DialogueRun 与命令状态；名称、长度、帧数、队列、树深度和每帧处理预算验证。
+- `DialogueCondition`、When、Conditional、Branch、Then、Random：条件进入时求值，分支返回父脚本，Controller 私有随机源不改动游戏随机状态。
+- Say、Wait、WaitUntil、Pause、Look、MoveTo、Gesture、Sound、Action、Callback 与可扩展 DialogueCommand / DialogueCommandExecution。
+- 暂停、打断栈、恢复、Cancel / CancelCurrent、替换、目标玩家失效取消；保留未完成的等待进度，只重显被撤回的未完成台词。
+- 原版 HUD.DialogBox 适配、按房间相机选择输出、游戏翻译器、等待 HUD 可用；按消息身份清理，保留其他系统的台词和顺序。
+- 对话身体输入在 Brain 之后、Runtime.OnUpdate 之前应用；暂停及结束时只回收自身仍持有的输入，保留外部覆盖。
+- 命令/条件/输出异常结束单次脚本，控制器异常只停用对话；工厂回退、重入销毁、迟到输出回收、当前/打断/排队引用清理。
+- [对话 API 与时序约定](CONVERSATION.md)，同步定义、生命周期及框架入口文档。没有添加对话示例或第七阶段 Interaction。
+
 ## 已运行的验证
 
-主项目及独立测试项目 Release 编译：**0 个警告，0 个错误**。
+主项目及独立测试项目 Release 编译成功。全量编译存在 **3 条已有 CS0162 警告，0 个错误**，均位于本阶段未修改的 LanceScavengerGraphics.cs；对话代码没有新增编译警告。
 
-当前检出的 DevTool 有两处同名命名空间与类型的解析冲突，阻塞整体 DLL 构建；已在两个 Compatibility 文件中将三处类型引用限定为 `global::DevInterface.DevUI`，没有修改其逻辑。
+第四阶段曾将两个 DevTool Compatibility 文件中的三处类型引用限定为 `global::DevInterface.DevUI`，以解决命名冲突；本阶段没有修改这些文件。
 
-检查共 **44/44 组通过，2059 项断言，0 个失败**：第一阶段 13 组 / 1564 项，第二阶段 18 组 / 331 项，第三阶段 4 组 / 52 项，第四阶段 4 组 / 42 项，第五阶段 5 组 / 70 项。
+检查共 **47/47 组通过，2123 项断言，0 个失败**：第一阶段 13 组 / 1564 项，第二阶段 18 组 / 331 项，第三阶段 4 组 / 52 项，第四阶段 4 组 / 42 项，第五阶段 5 组 / 70 项，第六阶段 3 组 / 64 项。
 
 测试项目引用实际编译的 `DryCycle.dll`，运行时加载本机安装的 `Assembly-CSharp.dll`，没有源文件链接副本或 Oracle 模拟类型。第二阶段用托管房间夹具准备游戏对象图，执行实际的 Room.ReadyForAI、Oracle 构造补丁、实体增删与 Runtime 更新。卸载和关闭处理使用替代原方法委托检查框架清理顺序，未调用完整 Unity 关闭流程。
 
@@ -130,30 +142,38 @@
 4. Brain 工厂或部分初始化失败、外来工厂结果、工厂中途销毁、动作 / 模块幂等清理、玩家引用和房间 Drawable 释放。
 5. PWN 样例的 Brain → Body 注视 → 编译后面部网格传递，确认姿势和位置保持稳定，离开后回到 Idle。
 
+第六阶段只新增三组关键检查：
+
+1. 脚本快照、计时、条件、分支及随机选择，HUD 缺失等待与输出完成同步。
+2. 打断与手动暂停、保留进度、台词恢复、回调取消、Body 姿势/移动控制与输入回收。
+3. 条件故障恢复、工厂回退/归属/部分初始化、输出创建期间销毁、目标离开、真实 HUD 队列交接及全部引用清理。
+
 复现命令（仓库根目录）：
 
 ```powershell
 dotnet build .\tests\IteratorFramework.Tests\IteratorFramework.Tests.csproj -c Release -p:DeployToGame=false -v minimal
 New-Item -ItemType Directory -Force .\artifacts\iterator-framework | Out-Null
-& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Application/Steam/steamapps/common/Rain World" > .\artifacts\iterator-framework\phase5-tests.log 2>&1
+& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Application/Steam/steamapps/common/Rain World" > .\artifacts\iterator-framework\phase6-tests.log 2>&1
 ```
 
 该构建会同时生成主项目。其他机器可传入 `-p:RainWorldDir="游戏目录"`，运行测试时传入同一个目录。测试项目默认关闭游戏部署；只编译主项目时同样应传入 `-p:DeployToGame=false` 以生成本地产物。
 
-本轮 DLL 输出：`src/bin/Release/DryCycle.dll`；检查日志：`artifacts/iterator-framework/phase5-tests.log`。预览位于同一 artifacts 目录的 `pwn-iterator-preview.png`、`pwn-iterator-transparent.png` 和 `pwn-ai-placement.png`。均为本地生成产物，不提交游戏程序集、测试生成的 CoreModule 或反编译代码。没有覆盖游戏目录的 DLL 或资源。
+本轮主 DLL 输出：`src/bin/Release/DryCycle.dll`；检查日志：`artifacts/iterator-framework/phase6-tests.log`。原有图形回归仍会导出 CPU 预览，没有新增 PWN_AI 样例或绘图测试。不提交游戏程序集、测试生成的 CoreModule 或反编译代码。
+
+沿用上一轮部署安排，主 DLL 与 AIObservatory.RWImGui、DevTool.RWImGui 两个界面 DLL 均已重新构建并更新至 `Ancient Site/newest/plugins`。主 DLL 与通过检查的测试用程序集哈希一致，两个界面构建均为 0 警告/0 错误；三个 DLL 及两个配套 PDB 的 5/5 项 SHA256 校验通过。旧文件备份和部署记录位于 `artifacts/iterator-framework/phase6-release`。本阶段没有修改 Shader 源码或重新构建资源包。
 
 ## 验证边界
 
-- 没有启动 Unity 游戏进程，也没有部署到游戏。真实房间流式加载、存档进入/退出、原版迭代器共存和其他 Mod 兼容仍需游戏内验收。
+- 没有启动 Unity 游戏进程。真实房间流式加载、存档进入/退出、原版迭代器共存和其他 Mod 兼容仍需游戏内验收。
 - 托管夹具和循环检查验证状态、绑定和释放行为，不等于真实游戏的场景或 Session 重启。
 - 当前宿主已具备身体、姿势与 Graphics；相机检查使用未挂载 Stage 的 Futile 容器，没有验证 GPU 上传、实际图集加载或 Shader 执行。
-- 行为、感知和图形部件已实现并独立隔离；尚无对话、物品/伤害交互或存档模块。
+- 行为、感知、图形及对话已实现并独立隔离；尚无物品/伤害交互或存档模块。对话调度使用可控输出验证，真实字体、翻译、逐字显示和多相机效果未在游戏内验证。
 - 感知是按间隔采样的地形视线和距离，不包含光照、伪装或完整潜行 AI；两次采样之间的短暂变化可能不被记录。
 - 外部注册者须按文档保留并注销自己的 Descriptor；不提供按外部 Mod 所有权自动清理或文件热重载。
 
 ## Public API 检查点
 
-公共接口无需传递 Hook；Builder 不拥有注册状态；Descriptor 不暴露可变集合；Registry 不缓存游戏实体；ID 映射不依赖可变 Index。前五阶段保持已有 Descriptor 构造签名，通过具名类型的 Runtime / Body / Arm / Graphics / Brain 工厂扩展。BodyProfile、IteratorPose、GraphicsProfile、IteratorSensorProfile 可安全共享，组件和网格实例不可复用；游戏引用、相机视图和部分初始化清理语义已记录。
+公共接口无需传递 Hook；Builder 不拥有注册状态；Descriptor 不暴露可变集合；Registry 不缓存游戏实体；ID 映射不依赖可变 Index。前六阶段保持已有 Descriptor 构造签名，通过具名类型的 Runtime / Body / Arm / Graphics / Brain / Conversation 工厂扩展。Profile、Pose 和 DialogueSequence 可共享，组件、命令执行状态和网格实例不可复用；游戏引用、相机视图和部分初始化清理语义已记录。
 
 ## 后续阶段
 
@@ -164,10 +184,10 @@ New-Item -ItemType Directory -Force .\artifacts\iterator-framework | Out-Null
 | 3 | Body、Arm 抽象、基础移动、Pose | 实现与托管验证完成；游戏内验收待做 |
 | 4 | Graphics、SpriteRegistry、Profile、Halo、Face、Gown、Cable | 实现、托管验证和 CPU 预览完成；游戏内验收待做 |
 | 5 | Brain、Action、StateMachine、BehaviorModule、Sensors、玩家观察 | 实现与托管验证完成；游戏内验收待做 |
-| 6 | Conversation、Sequence、Conditions、Commands、Branch、Interrupt | 未开始 |
+| 6 | Conversation、Sequence、Conditions、Commands、Branch、Interrupt | 实现与托管验证完成；游戏内验收待做 |
 | 7 | Player/Item/Creature/Pearl/Weapon Interaction | 未开始 |
 | 8 | Environment、Gravity、Neuron、Music、Projection、Room Effects | 未开始 |
 | 9 | Module、Dependency、Save、Persistent State、Migration | 未开始 |
 | 10 | DevConsole、Debug、Diagnostics、Compatibility、完整文档与示例 | 未开始 |
 
-下一开发阶段为 Conversation、Dialogue Sequence、Conditions、Commands、Branch 和 Interrupt。本次没有实现第六阶段。完整框架尚未达到任务书第 100 节最终验收标准。
+下一开发阶段为第七阶段 Player / Item / Creature / Pearl / Weapon Interaction；继续遵守不追加 PWN_AI 样例、非必要测试不写的约定。完整框架尚未达到任务书第 100 节最终验收标准。

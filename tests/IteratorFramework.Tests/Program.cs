@@ -52,7 +52,8 @@ internal static class Program
         int body = BodyTests.Run();
         int graphics = GraphicsTests.Run(_rainWorldDir);
         int brain = BrainTests.Run();
-        return Math.Max(brain, Math.Max(Math.Max(core, runtime), Math.Max(body, graphics)));
+        int conversation = ConversationTests.Run();
+        return Math.Max(conversation, Math.Max(brain, Math.Max(Math.Max(core, runtime), Math.Max(body, graphics))));
     }
 
     private static Assembly ResolveGameAssembly(object sender, ResolveEventArgs args)

@@ -58,6 +58,16 @@ public sealed class IteratorDescriptor
         IReadOnlyDictionary<string, string> metadata, Func<IteratorContext, IteratorRuntime> runtimeFactory,
         Func<IteratorContext, IteratorBody> bodyFactory, Func<IteratorContext, IteratorArm> armFactory,
         Func<IteratorContext, IteratorGraphics> graphicsFactory, Func<IteratorContext, IteratorBrain> brainFactory)
+        : this(id, rooms, displayName, metadata, runtimeFactory, bodyFactory, armFactory, graphicsFactory, brainFactory, null)
+    {
+    }
+
+    /// <summary>包含 Conversation 工厂的完整入口；保留前五阶段所有构造签名。</summary>
+    public IteratorDescriptor(IteratorID id, IEnumerable<string> rooms, string displayName,
+        IReadOnlyDictionary<string, string> metadata, Func<IteratorContext, IteratorRuntime> runtimeFactory,
+        Func<IteratorContext, IteratorBody> bodyFactory, Func<IteratorContext, IteratorArm> armFactory,
+        Func<IteratorContext, IteratorGraphics> graphicsFactory, Func<IteratorContext, IteratorBrain> brainFactory,
+        Func<IteratorContext, ConversationController> conversationFactory)
     {
         ID = id ?? throw new ArgumentNullException(nameof(id));
         if (rooms == null)
@@ -69,6 +79,7 @@ public sealed class IteratorDescriptor
         ArmFactory = armFactory ?? CreateDefaultArm;
         GraphicsFactory = graphicsFactory ?? CreateDefaultGraphics;
         BrainFactory = brainFactory ?? CreateDefaultBrain;
+        ConversationFactory = conversationFactory ?? CreateDefaultConversation;
         Rooms = new ReadOnlyCollection<string>(new List<string>(rooms));
         var metadataCopy = new Dictionary<string, string>(StringComparer.Ordinal);
         if (metadata != null)
@@ -105,12 +116,14 @@ public sealed class IteratorDescriptor
     public Func<IteratorContext, IteratorArm> ArmFactory { get; }
     public Func<IteratorContext, IteratorGraphics> GraphicsFactory { get; }
     public Func<IteratorContext, IteratorBrain> BrainFactory { get; }
+    public Func<IteratorContext, ConversationController> ConversationFactory { get; }
 
     private static IteratorRuntime CreateDefaultRuntime(IteratorContext context) => new(context);
     private static IteratorBody CreateDefaultBody(IteratorContext context) => new StandardIteratorBody(context);
     private static IteratorArm CreateDefaultArm(IteratorContext context) => new NoArm(context);
     private static IteratorGraphics CreateDefaultGraphics(IteratorContext context) => new StandardIteratorGraphics(context);
     private static IteratorBrain CreateDefaultBrain(IteratorContext context) => new StandardIteratorBrain(context);
+    private static ConversationController CreateDefaultConversation(IteratorContext context) => new EmptyConversation(context);
 
     /// <summary>验证定义本身。不会注册或检查全局冲突；全局冲突由 Registry.Register 检查。</summary>
     public void Validate()

@@ -169,9 +169,10 @@ D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/
 
 ## Iterator Framework
 
-The first five development phases provide immutable definitions, fluent registration,
+The first six development phases provide immutable definitions, fluent registration,
 per-room runtimes, replaceable bodies and arm constraints, movement, collision, poses,
-named sprites, modular mesh graphics, action arbitration and cached player sensing.
+named sprites, modular mesh graphics, action arbitration, cached player sensing,
+and dialogue sequences with conditions, commands, interruption and HUD output.
 PWN_AI includes a white and lavender sample iterator with a golden headdress that
 observes visible players while hovering. Managed validation and CPU mesh previews pass;
 Unity in-game validation is pending.
@@ -179,7 +180,8 @@ See the [Iterator Framework documentation](src/Iterators/Documentation/README.md
 [runtime lifecycle API](src/Iterators/Documentation/RUNTIME.md),
 [body, arm and pose API](src/Iterators/Documentation/BODY.md),
 [graphics and PWN_AI sample](src/Iterators/Documentation/GRAPHICS.md),
-[Brain, actions and behavior modules](src/Iterators/Documentation/BEHAVIOR.md), and
+[Brain, actions and behavior modules](src/Iterators/Documentation/BEHAVIOR.md),
+[conversation and dialogue API](src/Iterators/Documentation/CONVERSATION.md), and
 [phase progress and validation](src/Iterators/Documentation/PROGRESS.md).
 
 ## Source layout

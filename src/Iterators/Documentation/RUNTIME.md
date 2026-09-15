@@ -1,6 +1,6 @@
 # Runtime 与生命周期
 
-第二阶段提供实例创建、Context、Oracle / Room 绑定与销毁；第三阶段接入 [Body / Arm / Pose](BODY.md)，第四阶段接入 [Graphics](GRAPHICS.md)，第五阶段接入 [Brain 与行为](BEHAVIOR.md)。所有操作和回调在 Unity 主线程同步执行；不提供后台写入或异步生命周期保证。
+第二阶段提供实例创建、Context、Oracle / Room 绑定与销毁；第三阶段接入 [Body / Arm / Pose](BODY.md)，第四阶段接入 [Graphics](GRAPHICS.md)，第五阶段接入 [Brain 与行为](BEHAVIOR.md)，第六阶段接入 [Conversation](CONVERSATION.md)。所有操作和回调在 Unity 主线程同步执行；不提供后台写入或异步生命周期保证。
 
 ## 实例工厂
 
@@ -42,10 +42,10 @@ IteratorDescriptor definition = Iterator.Create("MYMOD_CHAMBER")
 
 | `State` | 框架行为与回调 |
 | --- | --- |
-| `RuntimeCreated` | 绑定 Runtime、Context、Oracle，将宿主加入 Room，创建并初始化 Body / Arm / Graphics / Brain，然后调用 `OnCreate`。 |
+| `RuntimeCreated` | 绑定 Runtime、Context、Oracle，将宿主加入 Room，依次初始化 Body / Arm、Graphics、Brain、Conversation，然后调用 `OnCreate`。 |
 | `Initializing` | 调用 `OnInitialize`。 |
 | `Initialized` | 调用 `OnRoomReady`。 |
-| `Active` | 调用一次 `OnActivate`；之后每次宿主 Update 调用 Brain、OnUpdate、Body / Arm 控制与物理、Graphics 更新、OnLateUpdate。 |
+| `Active` | 调用一次 `OnActivate`；之后每次宿主 Update 调用 Brain、Conversation、OnUpdate、Body / Arm 控制与物理、Graphics 更新、OnLateUpdate。 |
 | `Destroying` | 记录原因，调用一次 `OnDestroy`，随后执行框架清理。 |
 | `Destroyed` | 游戏引用已释放，不再执行更新和初始化。 |
 
@@ -56,7 +56,7 @@ IteratorDescriptor definition = Iterator.Create("MYMOD_CHAMBER")
 | Runtime 属性或方法 | 约定 |
 | --- | --- |
 | `Context / Descriptor / ID` | 当前实例的上下文与静态定义。 |
-| `Body / Arm / Graphics / Brain` | 当前身体、机械臂约束、图形和行为组件，在正常 OnCreate 前已初始化（图形或 Brain 整体失败时可能停用）；销毁后保留已释放组件供状态查询。 |
+| `Body / Arm / Graphics / Brain / Conversation` | 当前各组件，在正常 OnCreate 前已初始化（可选组件整体失败时可能停用）；销毁后保留已释放组件供状态查询。 |
 | `State / IsActive` | 当前生命周期状态；只有 Active 为活动实例。 |
 | `IsInitialized` | 仅在 Initialized 或 Active 为 true；销毁后为 false。 |
 | `UpdateCount` | 完整完成 OnUpdate 与 OnLateUpdate 的次数；失败、重入或中途销毁不计数。 |
@@ -70,7 +70,7 @@ IteratorDescriptor definition = Iterator.Create("MYMOD_CHAMBER")
 | 属性 | 内容与有效期 |
 | --- | --- |
 | `ID / Descriptor / Runtime` | 当前定义和绑定的 Runtime，销毁后仍可查询。Runtime 在工厂返回后绑定。 |
-| `Body / Arm / Graphics / Brain` | 与 Runtime 的组件属性相同；部分创建失败时可能为空，销毁后组件 IsDestroyed 为 true。 |
+| `Body / Arm / Graphics / Brain / Conversation` | 与 Runtime 的组件属性相同；部分创建失败时可能为空，销毁后组件 IsDestroyed 为 true。 |
 | `Oracle / Room / World / Game` | 本实例的游戏引用；正常 OnCreate 开始时全部可用，OnDestroy 结束后清空。 |
 | `StorySession` | 当前 Game 的 StoryGameSession；Arena 等其他模式返回 null，销毁后返回 null。 |
 | `Players` | 本房间内已实体化的 Session 玩家，只读视图；在 OnCreate 与每次 OnUpdate 之前刷新，销毁后清空。 |
@@ -119,7 +119,7 @@ IteratorRuntimes.TrySpawn(room, out IteratorRuntime spawned);
 | `UpdateFailed` | OnUpdate 或 OnLateUpdate 抛异常。 |
 | `HostUnavailable` | 更新前发现宿主已标记删除、Room 转移或游戏绑定失效。 |
 
-清理顺序：设置 Destroying 与原因 → Runtime.OnDestroy → Brain / 动作 / 行为模块清理 → Graphics 清理 → Arm.OnDestroy → Body.OnDestroy → 销毁并移除宿主 → 移除 Room / Oracle 索引和活动列表 → 清空 Context 的游戏引用 → Destroyed。
+清理顺序：设置 Destroying 与原因 → Runtime.OnDestroy → Conversation 及所有播放清理 → Brain / 动作 / 行为模块清理 → Graphics 清理 → Arm.OnDestroy → Body.OnDestroy → 销毁并移除宿主 → 移除 Room / Oracle 索引和活动列表 → 清空 Context 的游戏引用 → Destroyed。
 
 OnDestroy 抛异常仍会继续清理。Runtime、Body 或 Arm 的初始化与更新回调抛异常只结束当前实例，错误带有 ID 和阶段日志。工厂返回 null、外来 Context 或复用实例会被拒绝；框架不会销毁工厂错误返回的其他实例。插件内部清理先于原版房间卸载和 Session 关闭，原版流程仍继续执行。
 
@@ -131,4 +131,4 @@ OnDestroy 抛异常仍会继续清理。Runtime、Body 或 Arm 的初始化与�
 
 内部 IteratorHost 仅作 Oracle 适配。构造补丁在 PhysicalObject 基类初始化后识别框架专属宿主，再初始化基础 BodyChunk，跳过原版 Oracle 的行为、机械臂、神经元与房间副作用。其他 Oracle 继续原有构造路径；若找不到预期基类构造位置则拒绝安装补丁。
 
-Body / Arm / Pose 和 Graphics 已接入，宿主使用游戏物理与自定义绘制，不运行原版 Oracle AI，也不持久化进存档。可选图形错误只停用绘制或失败部件，不结束 Runtime；Brain 的基本 Idle、玩家感知、观察、动作及行为模块已实现；对话、交互、环境和存档属于后续阶段。当前托管检查调用实际游戏程序集及 Hook，但不能替代 Unity 内的房间加载、原版迭代器共存和其他 Mod 兼容验收。
+Body / Arm / Pose 和 Graphics 已接入，宿主使用游戏物理与自定义绘制，不运行原版 Oracle AI，也不持久化进存档。可选图形错误只停用绘制或失败部件，不结束 Runtime；Brain 的基本 Idle、感知、观察、动作及模块，以及 Conversation 的脚本、分支和打断已实现；交互、环境和存档属于后续阶段。当前托管检查调用实际游戏程序集及 Hook，但不能替代 Unity 内的房间加载、原版迭代器共存和其他 Mod 兼容验收。
