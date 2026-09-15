@@ -70,6 +70,9 @@ internal static class TriggerEditorView
 
     private static string[] projectedTriggerTypes;
     private static string[] projectedTriggerTypeLabels = Array.Empty<string>();
+    private static string[] projectedTriggerMatchTypes;
+    private static string projectedTriggerMatchSearch = string.Empty;
+    private static readonly List<int> ProjectedTriggerMatches = new();
     private static EditorTriggerSnapshot[] projectedSceneTriggers;
     private static string[] projectedSceneLabels = Array.Empty<string>();
     private static string[] projectedEventTypes;
@@ -98,6 +101,9 @@ internal static class TriggerEditorView
 
         projectedTriggerTypes = null;
         projectedTriggerTypeLabels = Array.Empty<string>();
+        projectedTriggerMatchTypes = null;
+        projectedTriggerMatchSearch = string.Empty;
+        ProjectedTriggerMatches.Clear();
         projectedSceneTriggers = null;
         projectedSceneLabels = Array.Empty<string>();
         projectedEventTypes = null;
@@ -220,19 +226,24 @@ internal static class TriggerEditorView
         string[] types = snapshot.TriggerTypes ?? Array.Empty<string>();
         EnsureTriggerTypeLabels(types);
         string query = SearchQuery();
-        int matches = 0;
-        for (int i = 0; i < types.Length; i++)
+        EnsureTriggerMatches(types, query);
+
+        using DevToolListClipper clipper = new(ProjectedTriggerMatches.Count);
+        while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
         {
-            string type = types[i];
-            if (!Matches(type, query)) continue;
-            matches++;
-            if (ImGui.Selectable(projectedTriggerTypeLabels[i], false))
-                TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
-                    TriggerEditorCommandKind.Create,
-                    text: type));
+            for (int visibleIndex = firstVisible; visibleIndex < lastVisibleExclusive; visibleIndex++)
+            {
+                int sourceIndex = ProjectedTriggerMatches[visibleIndex];
+                string type = types[sourceIndex];
+                if (ImGui.Selectable(projectedTriggerTypeLabels[sourceIndex], false))
+                    TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
+                        TriggerEditorCommandKind.Create,
+                        text: type));
+            }
         }
 
-        if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."), true);
+        if (ProjectedTriggerMatches.Count == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的触发器类型。", "No matching trigger types."), true);
     }
 
     internal static void DrawSceneWorkspace(EditorTriggerPresentationSnapshot snapshot)
@@ -248,11 +259,15 @@ internal static class TriggerEditorView
         ImGui.TextDisabled(DevToolUiSettings.T($"{triggers.Length} 个触发器", $"{triggers.Length} triggers"));
         ImGui.Separator();
 
-        for (int i = 0; i < triggers.Length; i++)
+        using DevToolListClipper clipper = new(triggers.Length);
+        while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
         {
-            EditorTriggerSnapshot trigger = triggers[i];
-            if (ImGui.Selectable(projectedSceneLabels[i], trigger.Selected))
-                TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Select, trigger.Index));
+            for (int i = firstVisible; i < lastVisibleExclusive; i++)
+            {
+                EditorTriggerSnapshot trigger = triggers[i];
+                if (ImGui.Selectable(projectedSceneLabels[i], trigger.Selected))
+                    TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Select, trigger.Index));
+            }
         }
     }
 
@@ -665,6 +680,24 @@ internal static class TriggerEditorView
             labels[i] = (types[i] ?? string.Empty) + "##CreateTrigger" + i;
         projectedTriggerTypes = types;
         projectedTriggerTypeLabels = labels;
+    }
+
+    private static void EnsureTriggerMatches(string[] types, string query)
+    {
+        query ??= string.Empty;
+        if (ReferenceEquals(projectedTriggerMatchTypes, types) &&
+            string.Equals(projectedTriggerMatchSearch, query, StringComparison.Ordinal))
+            return;
+
+        ProjectedTriggerMatches.Clear();
+        for (int i = 0; i < types.Length; i++)
+        {
+            if (Matches(types[i], query))
+                ProjectedTriggerMatches.Add(i);
+        }
+
+        projectedTriggerMatchTypes = types;
+        projectedTriggerMatchSearch = query;
     }
 
     private static void EnsureSceneLabels(EditorTriggerSnapshot[] triggers)

@@ -32,6 +32,9 @@ internal static class RelationshipEditorView
     private static string[] projectedCreatureLabels = Array.Empty<string>();
     private static EditorRelationshipRowSnapshot[] projectedRowsSource;
     private static MatrixRowPresentation[] projectedRows = Array.Empty<MatrixRowPresentation>();
+    private static string projectedMatrixFilter = string.Empty;
+    private static bool projectedMatrixChangedOnly;
+    private static MatrixRowPresentation[] projectedVisibleRows = Array.Empty<MatrixRowPresentation>();
     private static string inspectorEditKey = string.Empty;
     private static string inspectorEditPrimary = string.Empty;
     private static string inspectorEditOther = string.Empty;
@@ -44,6 +47,9 @@ internal static class RelationshipEditorView
         projectedCreatureLabels = Array.Empty<string>();
         projectedRowsSource = null;
         projectedRows = Array.Empty<MatrixRowPresentation>();
+        projectedMatrixFilter = string.Empty;
+        projectedMatrixChangedOnly = false;
+        projectedVisibleRows = Array.Empty<MatrixRowPresentation>();
         inspectorEditKey = string.Empty;
         inspectorEditPrimary = string.Empty;
         inspectorEditOther = string.Empty;
@@ -139,32 +145,39 @@ internal static class RelationshipEditorView
 
         EditorRelationshipRowSnapshot[] rows = snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
         EnsureMatrixRows(rows);
-        string matrixQuery = MatrixSearchQuery();
-        int visible = 0;
-        for (int i = 0; i < projectedRows.Length; i++)
+        EnsureVisibleMatrixRows(MatrixSearchQuery(), changedOnly);
+
+        if (projectedVisibleRows.Length == 0)
         {
-            MatrixRowPresentation presentation = projectedRows[i];
-            EditorRelationshipRowSnapshot row = presentation.Row;
-            if (!Matches(row.CreatureType, matrixQuery) && !Matches(row.DisplayName, matrixQuery)) continue;
-            if (changedOnly && !presentation.Forward.DirectOverride && !presentation.Reverse.DirectOverride) continue;
-            visible++;
-
-            float startX = ImGui.GetCursorPosX();
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(presentation.Name);
-            if (ImGui.IsItemHovered() && !string.Equals(presentation.Name, row.CreatureType, StringComparison.Ordinal))
-                DevToolTooltip.Show(row.CreatureType);
-
-            ImGui.SameLine(startX + nameWidth);
-            DrawRelationButton(snapshot, row, presentation.ForwardLabel,
-                EditorRelationshipDirection.PrimaryToOther, relationWidth);
-            ImGui.SameLine(startX + nameWidth + relationWidth + 12f);
-            DrawRelationButton(snapshot, row, presentation.ReverseLabel,
-                EditorRelationshipDirection.OtherToPrimary, relationWidth);
+            ImGui.TextDisabled(DevToolUiSettings.T("没有关系符合当前过滤条件。", "No relationships match the current filter."));
+            ImGui.End();
+            return;
         }
 
-        if (visible == 0)
-            ImGui.TextDisabled(DevToolUiSettings.T("没有关系符合当前过滤条件。", "No relationships match the current filter."));
+        using (DevToolListClipper clipper = new(projectedVisibleRows.Length))
+        {
+            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
+            {
+                for (int i = firstVisible; i < lastVisibleExclusive; i++)
+                {
+                    MatrixRowPresentation presentation = projectedVisibleRows[i];
+                    EditorRelationshipRowSnapshot row = presentation.Row;
+
+                    float startX = ImGui.GetCursorPosX();
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.TextUnformatted(presentation.Name);
+                    if (ImGui.IsItemHovered() && !string.Equals(presentation.Name, row.CreatureType, StringComparison.Ordinal))
+                        DevToolTooltip.Show(row.CreatureType);
+
+                    ImGui.SameLine(startX + nameWidth);
+                    DrawRelationButton(snapshot, row, presentation.ForwardLabel,
+                        EditorRelationshipDirection.PrimaryToOther, relationWidth);
+                    ImGui.SameLine(startX + nameWidth + relationWidth + 12f);
+                    DrawRelationButton(snapshot, row, presentation.ReverseLabel,
+                        EditorRelationshipDirection.OtherToPrimary, relationWidth);
+                }
+            }
+        }
 
         ImGui.End();
     }
@@ -329,6 +342,43 @@ internal static class RelationshipEditorView
         }
         projectedRowsSource = rows;
         projectedRows = next;
+        projectedMatrixFilter = null;
+        projectedVisibleRows = Array.Empty<MatrixRowPresentation>();
+    }
+
+    private static void EnsureVisibleMatrixRows(string matrixQuery, bool onlyChanged)
+    {
+        matrixQuery ??= string.Empty;
+        if (string.Equals(projectedMatrixFilter, matrixQuery, StringComparison.Ordinal) &&
+            projectedMatrixChangedOnly == onlyChanged)
+            return;
+
+        int count = 0;
+        for (int i = 0; i < projectedRows.Length; i++)
+        {
+            MatrixRowPresentation presentation = projectedRows[i];
+            EditorRelationshipRowSnapshot row = presentation.Row;
+            if (row == null) continue;
+            if (!Matches(row.CreatureType, matrixQuery) && !Matches(row.DisplayName, matrixQuery)) continue;
+            if (onlyChanged && !presentation.Forward.DirectOverride && !presentation.Reverse.DirectOverride) continue;
+            count++;
+        }
+
+        MatrixRowPresentation[] next = new MatrixRowPresentation[count];
+        int write = 0;
+        for (int i = 0; i < projectedRows.Length; i++)
+        {
+            MatrixRowPresentation presentation = projectedRows[i];
+            EditorRelationshipRowSnapshot row = presentation.Row;
+            if (row == null) continue;
+            if (!Matches(row.CreatureType, matrixQuery) && !Matches(row.DisplayName, matrixQuery)) continue;
+            if (onlyChanged && !presentation.Forward.DirectOverride && !presentation.Reverse.DirectOverride) continue;
+            next[write++] = presentation;
+        }
+
+        projectedMatrixFilter = matrixQuery;
+        projectedMatrixChangedOnly = onlyChanged;
+        projectedVisibleRows = next;
     }
 
     private static string BuildRelationLabel(

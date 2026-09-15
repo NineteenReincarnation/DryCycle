@@ -305,19 +305,25 @@ internal static class SoundEditorView
         ImGui.Separator();
 
         EnsureSceneProjection(sounds);
-        for (int i = 0; i < SceneRows.Count; i++)
         {
-            SoundSceneRow row = SceneRows[i];
-            EditorSoundSnapshot sound = row.Sound;
-            bool selected = SoundWorkspaceState.IsSceneSelected(sound.Index);
-
-            ImGui.PushID(sound.Index);
-            bool clicked = ImGui.Selectable(selected ? row.SelectedLabel : row.NormalLabel, selected);
-            ImGui.PopID();
-            if (clicked)
+            using DevToolListClipper clipper = new(SceneRows.Count);
+            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
             {
-                SoundWorkspaceState.HandleSceneClick(sound.Index, ctrl, shift);
-                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
+                for (int i = firstVisible; i < lastVisibleExclusive; i++)
+                {
+                    SoundSceneRow row = SceneRows[i];
+                    EditorSoundSnapshot sound = row.Sound;
+                    bool selected = SoundWorkspaceState.IsSceneSelected(sound.Index);
+
+                    ImGui.PushID(sound.Index);
+                    bool clicked = ImGui.Selectable(selected ? row.SelectedLabel : row.NormalLabel, selected);
+                    ImGui.PopID();
+                    if (clicked)
+                    {
+                        SoundWorkspaceState.HandleSceneClick(sound.Index, ctrl, shift);
+                        SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
+                    }
+                }
             }
         }
 

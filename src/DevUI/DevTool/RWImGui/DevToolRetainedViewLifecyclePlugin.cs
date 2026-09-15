@@ -75,7 +75,9 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
         ObjectInspectorView.ResetRetainedState();
         SceneWorkspaceWindow.ResetRetainedState();
         SoundEditorView.ResetRetainedState();
+        SoundLibraryGroupsView.ResetRetainedState();
         TriggerEditorView.ResetRetainedState();
+        MapEditorView.ResetRetainedState();
         WorldWorkspaceView.ResetRetainedState();
         RelationshipEditorView.ResetRetainedState();
         RoomSettingsView.ResetRetainedState();
