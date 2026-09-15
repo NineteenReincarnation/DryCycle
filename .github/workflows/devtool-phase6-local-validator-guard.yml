@@ -135,3 +135,17 @@ jobs:
           }
 
           Write-Host 'Phase 6 full validator smoke test passed.'
+
+      - name: Package source snapshot for real local compile validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-source-snapshot-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            Directory.Build.props
+            DryCycle.sln
+            src/**
+            scripts/validate-devtool-phase6-local.ps1
+            mod/modify/**
+            mod/world/**
