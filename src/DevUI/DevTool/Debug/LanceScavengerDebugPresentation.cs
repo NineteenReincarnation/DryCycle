@@ -18,8 +18,7 @@ public sealed class LanceScavengerDebugChunkSnapshot
 
 /// <summary>
 /// Detached, render-thread-safe snapshot used by the rebuilt DevTool UI.
-/// LanceScavengerAI publishes these records from the simulation thread only while
-/// the dedicated debug page is visible.
+/// Expensive geometry is intentionally sampled at a lower rate than simulation history.
 /// </summary>
 public sealed class LanceScavengerDebugEntrySnapshot
 {
@@ -106,40 +105,92 @@ public sealed class LanceScavengerDebugSnapshot
     public LanceScavengerDebugEntrySnapshot[] Entries { get; init; } = Array.Empty<LanceScavengerDebugEntrySnapshot>();
 }
 
+/// <summary>
+/// Simulation-to-UI bridge for the dedicated LanceScavenger monitor.
+///
+/// Performance policy:
+/// - the 38-frame aim history is sampled at the native simulation rate with zero per-sample arrays;
+/// - expensive BodyChunk / trajectory geometry is captured at 10 Hz, plus immediately on important transitions;
+/// - aggregate snapshots are cached so the UI and logger can poll without re-sorting/reallocating every frame.
+/// </summary>
 public static class LanceScavengerDebugPresentationHub
 {
     private const int HistoryFrames = LanceCombatState.BraceFrames;
-    private const uint LeaseTimeoutMilliseconds = 750;
+    private const uint LeaseTimeoutMilliseconds = 2000;
     private const uint EntryTimeoutMilliseconds = 30000;
+    private const uint FullCaptureIntervalMilliseconds = 100;
+    private const uint SnapshotCacheIntervalMilliseconds = 50;
 
     private sealed class EntryRecord
     {
         internal LanceScavengerDebugEntrySnapshot Snapshot;
         internal int LastSeenTick;
+        internal int LastCaptureTick;
         internal readonly float[] Quality = new float[HistoryFrames];
         internal readonly byte[] Flags = new byte[HistoryFrames];
         internal int Next;
         internal int Count;
+        internal LanceState LastState;
+        internal bool HasState;
+        internal int LastAttackSerial;
+        internal bool LastCounterSweepAttempted;
+        internal bool LastCounterSweepActive;
 
-        internal void Append(LanceScavengerDebugEntrySnapshot snapshot, int now)
+        internal void AppendHistory(float quality, bool aimReady, bool hardBlocked, bool brace, int now)
         {
-            Snapshot = snapshot;
             LastSeenTick = now;
-            Quality[Next] = snapshot.AimQuality;
+            Quality[Next] = quality;
             byte flags = 0;
-            if (snapshot.AimReady) flags |= 1;
-            if (snapshot.HardBlocked) flags |= 2;
-            if (string.Equals(snapshot.State, LanceState.Brace.ToString(), StringComparison.Ordinal)) flags |= 4;
+            if (aimReady) flags |= 1;
+            if (hardBlocked) flags |= 2;
+            if (brace) flags |= 4;
             Flags[Next] = flags;
             Next = (Next + 1) % HistoryFrames;
             if (Count < HistoryFrames) Count++;
+        }
 
-            float[] quality = new float[Count];
-            bool[] ready = new bool[Count];
-            bool[] hard = new bool[Count];
-            bool[] brace = new bool[Count];
-            int start = (Next - Count + HistoryFrames) % HistoryFrames;
-            for (int i = 0; i < Count; i++)
+        internal bool NeedsFullCapture(int now, LanceState state, int attackSerial,
+            bool counterSweepAttempted, bool counterSweepActive)
+        {
+            if (Snapshot == null || !HasState) return true;
+            if (state != LastState || attackSerial != LastAttackSerial ||
+                counterSweepAttempted != LastCounterSweepAttempted ||
+                counterSweepActive != LastCounterSweepActive)
+                return true;
+            return ElapsedMilliseconds(LastCaptureTick, now) >= FullCaptureIntervalMilliseconds;
+        }
+
+        internal void MarkCapture(int now, LanceState state, int attackSerial,
+            bool counterSweepAttempted, bool counterSweepActive)
+        {
+            LastCaptureTick = now;
+            LastState = state;
+            HasState = true;
+            LastAttackSerial = attackSerial;
+            LastCounterSweepAttempted = counterSweepAttempted;
+            LastCounterSweepActive = counterSweepActive;
+        }
+
+        internal void ApplyHistory(LanceScavengerDebugEntrySnapshot snapshot)
+        {
+            int count = Count;
+            if (count <= 0)
+            {
+                snapshot.AimQualityHistory = Array.Empty<float>();
+                snapshot.AimReadyHistory = Array.Empty<bool>();
+                snapshot.HardBlockHistory = Array.Empty<bool>();
+                snapshot.BraceHistory = Array.Empty<bool>();
+                return;
+            }
+
+            // These four arrays are now created only when a full UI snapshot is published,
+            // not on every 40 Hz AI tick.
+            float[] quality = new float[count];
+            bool[] ready = new bool[count];
+            bool[] hard = new bool[count];
+            bool[] brace = new bool[count];
+            int start = (Next - count + HistoryFrames) % HistoryFrames;
+            for (int i = 0; i < count; i++)
             {
                 int source = (start + i) % HistoryFrames;
                 quality[i] = Quality[source];
@@ -161,24 +212,47 @@ public static class LanceScavengerDebugPresentationHub
     private static bool requested;
     private static string requestedRoom = string.Empty;
     private static int lastLeaseTick;
+    private static int lastSnapshotBuildTick;
+    private static bool snapshotDirty = true;
+    private static LanceScavengerDebugSnapshot cachedSnapshot = LanceScavengerDebugSnapshot.Empty;
 
     public static void SetRequested(bool value, string roomName)
     {
         string normalized = roomName ?? string.Empty;
         lock (Sync)
         {
-            if (!string.Equals(requestedRoom, normalized, StringComparison.Ordinal))
+            bool roomChanged = !string.Equals(requestedRoom, normalized, StringComparison.Ordinal);
+            if (roomChanged)
             {
                 Entries.Clear();
                 requestedRoom = normalized;
+                snapshotDirty = true;
             }
 
-            requested = value;
-            requestedFast = value;
             if (value)
+            {
+                if (!requested)
+                {
+                    requested = true;
+                    requestedFast = true;
+                    snapshotDirty = true;
+                    cachedSnapshot = new LanceScavengerDebugSnapshot
+                    {
+                        Requested = true,
+                        RoomName = requestedRoom,
+                        Entries = Array.Empty<LanceScavengerDebugEntrySnapshot>()
+                    };
+                }
                 lastLeaseTick = Environment.TickCount;
+            }
             else
+            {
+                requested = false;
+                requestedFast = false;
                 Entries.Clear();
+                snapshotDirty = false;
+                cachedSnapshot = LanceScavengerDebugSnapshot.Empty;
+            }
         }
     }
 
@@ -193,22 +267,44 @@ public static class LanceScavengerDebugPresentationHub
                 if (!requested)
                     return LanceScavengerDebugSnapshot.Empty;
 
-                RemoveStaleEntriesUnsafe(now);
+                if (RemoveStaleEntriesUnsafe(now))
+                    snapshotDirty = true;
+
+                if (!snapshotDirty)
+                    return cachedSnapshot;
+
+                // UI and logger can both poll every presentation frame. Rebuild at most 20 Hz.
+                if (cachedSnapshot.Requested &&
+                    ElapsedMilliseconds(lastSnapshotBuildTick, now) < SnapshotCacheIntervalMilliseconds)
+                    return cachedSnapshot;
+
                 LanceScavengerDebugEntrySnapshot[] values = new LanceScavengerDebugEntrySnapshot[Entries.Count];
                 int index = 0;
                 foreach (EntryRecord record in Entries.Values)
-                    values[index++] = record.Snapshot;
-                Array.Sort(values, static (a, b) =>
+                    if (record.Snapshot != null)
+                        values[index++] = record.Snapshot;
+
+                if (index != values.Length)
+                    Array.Resize(ref values, index);
+
+                if (values.Length > 1)
                 {
-                    int spawner = a.Spawner.CompareTo(b.Spawner);
-                    return spawner != 0 ? spawner : a.Number.CompareTo(b.Number);
-                });
-                return new LanceScavengerDebugSnapshot
+                    Array.Sort(values, static (a, b) =>
+                    {
+                        int spawner = a.Spawner.CompareTo(b.Spawner);
+                        return spawner != 0 ? spawner : a.Number.CompareTo(b.Number);
+                    });
+                }
+
+                cachedSnapshot = new LanceScavengerDebugSnapshot
                 {
                     Requested = true,
                     RoomName = requestedRoom,
                     Entries = values
                 };
+                lastSnapshotBuildTick = now;
+                snapshotDirty = false;
+                return cachedSnapshot;
             }
         }
     }
@@ -219,36 +315,63 @@ public static class LanceScavengerDebugPresentationHub
 
         string roomName = owner.room.abstractRoom?.name ?? string.Empty;
         int now = Environment.TickCount;
+        long key = EntityKey(owner.abstractCreature.ID.spawner, owner.abstractCreature.ID.number);
+        LanceState state = owner.Combat.State;
+        LanceAimSolution aim = brain.AimSolution;
+        bool counterSweepAttempted = owner.Motor.CounterSweepAttempted;
+        bool counterSweepActive = owner.Motor.CounterSweepActive;
+        bool doFullCapture;
+
         lock (Sync)
         {
             ExpireLeaseUnsafe(now);
             if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal))
                 return;
+
+            if (!Entries.TryGetValue(key, out EntryRecord record))
+            {
+                record = new EntryRecord();
+                Entries[key] = record;
+                snapshotDirty = true;
+            }
+
+            // Cheap 40 Hz path: scalar writes into fixed ring buffers only.
+            record.AppendHistory(aim.Quality, aim.Ready, brain.DebugHardBlocked,
+                state == LanceState.Brace, now);
+
+            doFullCapture = record.NeedsFullCapture(now, state, owner.Combat.AttackSerial,
+                counterSweepAttempted, counterSweepActive);
+            if (doFullCapture)
+                record.MarkCapture(now, state, owner.Combat.AttackSerial,
+                    counterSweepAttempted, counterSweepActive);
         }
 
-        LanceScavengerDebugEntrySnapshot snapshot = Capture(owner, brain, roomName);
+        if (!doFullCapture)
+            return;
+
+        // Expensive work stays outside the shared lock and runs at 10 Hz / transition edges.
+        LanceScavengerDebugEntrySnapshot snapshot = Capture(owner, brain, roomName, state);
 
         lock (Sync)
         {
             now = Environment.TickCount;
             ExpireLeaseUnsafe(now);
-            if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal))
+            if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal) ||
+                !Entries.TryGetValue(key, out EntryRecord record))
                 return;
 
-            long key = EntityKey(owner.abstractCreature.ID.spawner, owner.abstractCreature.ID.number);
-            if (!Entries.TryGetValue(key, out EntryRecord record))
-            {
-                record = new EntryRecord();
-                Entries[key] = record;
-            }
-            record.Append(snapshot, now);
+            record.ApplyHistory(snapshot);
+            record.Snapshot = snapshot;
+            record.LastSeenTick = now;
+            snapshotDirty = true;
         }
     }
 
     private static LanceScavengerDebugEntrySnapshot Capture(
         LanceScavenger owner,
         LanceScavengerAI brain,
-        string roomName)
+        string roomName,
+        LanceState state)
     {
         Creature target = brain.Target;
         LanceAimSolution aim = brain.AimSolution;
@@ -267,7 +390,7 @@ public static class LanceScavengerDebugPresentationHub
             : brain.MotionTracker.SmoothedVelocity(trackedChunk);
         float stability = trackedChunk == null ? 0f : brain.MotionTracker.Stability(trackedChunk);
 
-        bool activeCharge = owner.Combat.State == LanceState.Charge;
+        bool activeCharge = state == LanceState.Charge;
         Vector2 pitchDirection = activeCharge
             ? owner.Motor.LanceDirection
             : aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
@@ -279,16 +402,26 @@ public static class LanceScavengerDebugPresentationHub
         float lanceLength = owner.Lance?.Length ?? LanceCombatMath.DefaultLength;
         float forwardLength = LanceCombatMath.ForwardLength(lanceLength);
 
-        int trajectoryFrames = activeCharge
-            ? Mathf.Max(1, LanceCombatState.MaxChargeFrames - owner.Combat.Age)
-            : aim.ImpactFrame > 0
-                ? Mathf.Min(LanceCombatState.MaxChargeFrames, aim.ImpactFrame + 3)
-                : LanceCombatState.MaxChargeFrames;
-        Vector2[] bodyPath = activeCharge
-            ? LanceAimSolver.BuildDebugBodyTrajectory(origin, owner.mainBodyChunk.vel, trajectoryFrames)
-            : LanceAimSolver.BuildDebugBodyTrajectory(owner, origin, pitchDirection, trajectoryFrames);
-        BuildPathArrays(bodyPath, pitchDirection, forwardLength,
-            out float[] bodyPathX, out float[] bodyPathY, out float[] tipPathX, out float[] tipPathY);
+        LanceScavengerDebugChunkSnapshot[] targetChunks = Array.Empty<LanceScavengerDebugChunkSnapshot>();
+        float[] bodyPathX = Array.Empty<float>();
+        float[] bodyPathY = Array.Empty<float>();
+        float[] tipPathX = Array.Empty<float>();
+        float[] tipPathY = Array.Empty<float>();
+
+        if (NeedsGeometry(state))
+        {
+            targetChunks = CaptureChunks(target, targetChunkIndex, bestTargetChunkIndex);
+            int trajectoryFrames = activeCharge
+                ? Mathf.Max(1, LanceCombatState.MaxChargeFrames - owner.Combat.Age)
+                : aim.ImpactFrame > 0
+                    ? Mathf.Min(LanceCombatState.MaxChargeFrames, aim.ImpactFrame + 3)
+                    : LanceCombatState.MaxChargeFrames;
+            Vector2[] bodyPath = activeCharge
+                ? LanceAimSolver.BuildDebugBodyTrajectory(origin, owner.mainBodyChunk.vel, trajectoryFrames)
+                : LanceAimSolver.BuildDebugBodyTrajectory(owner, origin, pitchDirection, trajectoryFrames);
+            BuildPathArrays(bodyPath, pitchDirection, forwardLength,
+                out bodyPathX, out bodyPathY, out tipPathX, out tipPathY);
+        }
 
         return new LanceScavengerDebugEntrySnapshot
         {
@@ -297,7 +430,7 @@ public static class LanceScavengerDebugPresentationHub
             EntityId = owner.abstractCreature.ID.ToString(),
             RoomName = roomName,
 
-            State = owner.Combat.State.ToString(),
+            State = state.ToString(),
             StateAge = owner.Combat.Age,
             Cooldown = owner.Combat.Cooldown,
             AttackSerial = owner.Combat.AttackSerial,
@@ -336,7 +469,7 @@ public static class LanceScavengerDebugPresentationHub
             PlanningBladeHitPadding = LanceAimSolver.PlanningBladeHitPadding,
             BladeShoulderHalfWidth = LanceCombatMath.BladeShoulderHalfWidth,
             BladeTipHalfWidth = LanceCombatMath.BladeTipHalfWidth,
-            TargetChunks = CaptureChunks(target, targetChunkIndex, bestTargetChunkIndex),
+            TargetChunks = targetChunks,
             BodyPathX = bodyPathX,
             BodyPathY = bodyPathY,
             TipPathX = tipPathX,
@@ -362,10 +495,21 @@ public static class LanceScavengerDebugPresentationHub
         };
     }
 
+    private static bool NeedsGeometry(LanceState state) =>
+        state == LanceState.AcquireChargeLane || state == LanceState.Backstep ||
+        state == LanceState.Brace || state == LanceState.Charge ||
+        state == LanceState.CloseDefense;
+
     private static void BuildPathArrays(Vector2[] bodyPath, Vector2 direction, float forwardLength,
         out float[] bodyX, out float[] bodyY, out float[] tipX, out float[] tipY)
     {
         int count = bodyPath?.Length ?? 0;
+        if (count == 0)
+        {
+            bodyX = bodyY = tipX = tipY = Array.Empty<float>();
+            return;
+        }
+
         bodyX = new float[count];
         bodyY = new float[count];
         tipX = new float[count];
@@ -453,11 +597,13 @@ public static class LanceScavengerDebugPresentationHub
         requested = false;
         requestedFast = false;
         Entries.Clear();
+        snapshotDirty = false;
+        cachedSnapshot = LanceScavengerDebugSnapshot.Empty;
     }
 
-    private static void RemoveStaleEntriesUnsafe(int now)
+    private static bool RemoveStaleEntriesUnsafe(int now)
     {
-        if (Entries.Count == 0) return;
+        if (Entries.Count == 0) return false;
         List<long> stale = null;
         foreach (KeyValuePair<long, EntryRecord> pair in Entries)
         {
@@ -466,9 +612,10 @@ public static class LanceScavengerDebugPresentationHub
             stale.Add(pair.Key);
         }
 
-        if (stale == null) return;
+        if (stale == null) return false;
         for (int i = 0; i < stale.Count; i++)
             Entries.Remove(stale[i]);
+        return true;
     }
 
     private static long EntityKey(int spawner, int number) =>
