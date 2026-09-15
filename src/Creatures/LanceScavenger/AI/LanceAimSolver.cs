@@ -113,18 +113,28 @@ internal static class LanceAimSolver
     }
 
     /// <summary>
-    /// Builds the same body trajectory used by the aim solver. This helper is only consumed by
+    /// Builds the same launch trajectory used by the aim solver. This helper is only consumed by
     /// the opt-in debug presentation, so normal combat continues to use the allocation-free loop.
     /// </summary>
     internal static Vector2[] BuildDebugBodyTrajectory(LanceScavenger scav, Vector2 origin,
         Vector2 lanceDirection, int frames)
     {
         if (scav == null || frames <= 0) return System.Array.Empty<Vector2>();
-        frames = Mathf.Clamp(frames, 1, LanceCombatState.MaxChargeFrames);
         float sign = Mathf.Sign(lanceDirection.x);
         if (sign == 0f) sign = 1f;
-        Vector2 body = origin;
         Vector2 velocity = new(sign * ChargeLanePlanner.ChargeSpeed(scav), ChargeLanePlanner.ChargeLaunchY);
+        return BuildDebugBodyTrajectory(origin, velocity, frames);
+    }
+
+    /// <summary>
+    /// Continues the same ballistic model from a live velocity. During an already-active charge
+    /// the debugger uses this overload instead of pretending the scavenger launches again.
+    /// </summary>
+    internal static Vector2[] BuildDebugBodyTrajectory(Vector2 origin, Vector2 velocity, int frames)
+    {
+        if (frames <= 0) return System.Array.Empty<Vector2>();
+        frames = Mathf.Clamp(frames, 1, LanceCombatState.MaxChargeFrames);
+        Vector2 body = origin;
         Vector2[] result = new Vector2[frames + 1];
         result[0] = body;
         for (int frame = 1; frame <= frames; frame++)
