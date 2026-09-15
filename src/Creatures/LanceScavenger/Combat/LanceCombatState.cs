@@ -43,6 +43,7 @@ internal sealed class LanceCombatState
     internal const int FollowUpThrowTimeout = 60;
     internal const int RecoveryFrames = 44;
     internal const int WallRecoveryFrames = 82;
+    private const int MinimumRecoveryBeforeEmergencyDefense = 6;
     internal LanceState State { get; private set; }
     internal int Age { get; private set; }
     internal int Cooldown { get; private set; }
@@ -62,11 +63,29 @@ internal sealed class LanceCombatState
         if (Cooldown > 0) Cooldown--;
         if (State == LanceState.Recover)
         {
+            // Recovery still has a short physical commitment, but it must not make the creature
+            // helpless for a full second while a lethal predator is already on top of it.
+            if (Age >= MinimumRecoveryBeforeEmergencyDefense && s.Active && s.Armed && s.Target &&
+                s.CloseDanger && s.Violence == ScavengerAI.ViolenceType.Lethal)
+            {
+                Enter(LanceState.CloseDefense);
+                return;
+            }
             if (Age >= _recoveryDuration) Enter(s.Armed ? LanceState.Observe : LanceState.Disarmed);
             return;
         }
         if (State == LanceState.FollowUpThrow)
         {
+            // The ordinary spear follow-up is optional. If the target has closed the distance,
+            // survival with the identity lance takes precedence over finishing the throw sequence.
+            if (s.Active && s.Armed && s.Target && s.CloseDanger &&
+                s.Violence == ScavengerAI.ViolenceType.Lethal)
+            {
+                _followUpReserved = false;
+                _followUpLandingAge = -1;
+                Enter(LanceState.CloseDefense);
+                return;
+            }
             if (!s.Active || !s.Armed || !s.Sidearm || !s.Target || s.Violence != ScavengerAI.ViolenceType.Lethal ||
                 Age >= FollowUpThrowTimeout)
                 Recover(false);
