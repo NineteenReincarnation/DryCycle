@@ -4,10 +4,22 @@ internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane,
 
 internal readonly struct LanceSituation
 {
-    internal LanceSituation(bool active, bool armed, bool target, bool hostile, bool warning, float distance, bool lane, bool stable)
-    { Active = active; Armed = armed; Target = target; Hostile = hostile; Warning = warning; Distance = distance; Lane = lane; Stable = stable; }
-    internal readonly bool Active, Armed, Target, Hostile, Warning, Lane, Stable;
+    internal LanceSituation(bool active, bool armed, bool target, ScavengerAI.ViolenceType violence, bool afraid,
+        float distance, bool lane, bool stable)
+    {
+        Active = active;
+        Armed = armed;
+        Target = target;
+        Violence = violence ?? ScavengerAI.ViolenceType.None;
+        Afraid = afraid;
+        Distance = distance;
+        Lane = lane;
+        Stable = stable;
+    }
+
+    internal readonly bool Active, Armed, Target, Afraid, Lane, Stable;
     internal readonly float Distance;
+    internal readonly ScavengerAI.ViolenceType Violence;
 }
 
 /// <summary>Decision timing only; body velocity and weapon impacts live in their own modules.</summary>
@@ -22,7 +34,6 @@ internal sealed class LanceCombatState
     internal int Cooldown { get; private set; }
     internal int AttackSerial { get; private set; }
     private int _recoveryDuration;
-    private int _hostileFrames;
     private int _unstableFrames;
 
     internal void Tick(LanceSituation s)
@@ -36,32 +47,51 @@ internal sealed class LanceCombatState
         }
         if (!s.Active)
         {
-            _hostileFrames = 0;
             if (State == LanceState.Charge || State == LanceState.Brace) Recover(false);
             else Enter(LanceState.Observe);
             return;
         }
         if (!s.Armed)
         {
-            _hostileFrames = 0;
             if (State == LanceState.Charge || State == LanceState.Brace) Recover(false);
             else Enter(LanceState.Disarmed);
             return;
         }
-        if (!s.Target || !s.Hostile)
+        if (!s.Target || s.Violence == ScavengerAI.ViolenceType.None)
         {
-            _hostileFrames = 0;
             if (State == LanceState.Charge) Recover(false);
-            else Enter(s.Target && s.Warning ? LanceState.Threaten : LanceState.Observe);
+            else Enter(LanceState.Observe);
             return;
         }
-        _hostileFrames++;
+        if (s.Violence != ScavengerAI.ViolenceType.Lethal)
+        {
+            // Vanilla Warning / NonLethal / ForFun remain non-lethal social states.
+            // The lance may be presented as a threat, but never upgrades them into a charge.
+            if (State == LanceState.Charge) Recover(false);
+            else Enter(LanceState.Threaten);
+            return;
+        }
         if (State == LanceState.Charge)
         {
             if (Age >= MaxChargeFrames || !s.Lane) Recover(false);
             return;
         }
-        if (_hostileFrames < 18) { Enter(LanceState.Threaten); return; }
+
+        // A vanilla Afraid relationship keeps ownership of locomotion. The lance can
+        // opportunistically counter-charge only when a safe lane already exists;
+        // otherwise the ordinary scavenger flee behavior remains untouched.
+        if (s.Afraid)
+        {
+            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || !s.Stable || Cooldown > 0)
+            {
+                Enter(LanceState.Threaten);
+                return;
+            }
+            if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
+            if (Age >= BraceFrames) { AttackSerial++; Enter(LanceState.Charge); }
+            return;
+        }
+
         if (State == LanceState.CloseDefense && Age < 16) return;
         if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
         {
@@ -98,7 +128,6 @@ internal sealed class LanceCombatState
 
     internal void ResetForRoom()
     {
-        _hostileFrames = 0;
         if (State == LanceState.Recover) return;
         if (State == LanceState.Charge || State == LanceState.Brace) Recover(false);
         else Enter(LanceState.Observe);
