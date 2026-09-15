@@ -47,6 +47,9 @@ internal static class ChargeLanePlanner
 
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
+    // On ordinary flat ground a 7.3 vertical launch returns to support at roughly frame 16.
+    // Check slightly beyond that so a near target cannot hide a wall immediately after the miss.
+    private const int MinimumLandingSafetyFrames = 18;
 
     internal static float ChargeCommitment(LanceScavenger scav)
     {
@@ -102,7 +105,8 @@ internal static class ChargeLanePlanner
         float length = scav.Lance?.Length ?? LanceCombatMath.DefaultLength;
         float forwardLength = LanceCombatMath.ForwardLength(length);
         float rearLength = length * LanceCombatMath.GripFraction;
-        int frames = Mathf.Min(LanceCombatState.MaxChargeFrames, Mathf.Max(impactFrame + 3, 1));
+        int frames = Mathf.Min(LanceCombatState.MaxChargeFrames,
+            Mathf.Max(Mathf.Max(impactFrame + 3, MinimumLandingSafetyFrames), 1));
         Vector2 previousBody = body;
 
         for (int frame = 1; frame <= frames; frame++)
