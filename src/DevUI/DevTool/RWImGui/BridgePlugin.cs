@@ -448,10 +448,20 @@ internal static class DevToolFrontend
                         FontSettingsWindow.Draw(io.DisplaySize);
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
                         DevToolOverlay.Draw(snapshot);
-                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
-                        SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
-                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
-                        ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
+                    // Gate structurally inactive Scene surfaces before entering their timing scopes.
+                    // The windows retain their own defensive guards, but stable frames in Focus mode,
+                    // unsupported tools, or Left placement should not pay measurement/call overhead.
+                    bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
+                    if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
+                    {
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
+                            SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
+                    }
+                    if (sceneSurfaceSupported)
+                    {
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
+                            ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
+                    }
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
                         ActionToastOverlay.Draw(snapshot, io.DisplaySize);
                 }
