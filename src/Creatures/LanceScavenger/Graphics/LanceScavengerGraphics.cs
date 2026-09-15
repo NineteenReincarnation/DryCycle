@@ -7,6 +7,9 @@ namespace DryCycle.Creatures.LanceScavenger;
 
 internal sealed class LanceScavengerGraphics : ScavengerGraphics
 {
+    // Keep the decoration implementation and resources intact, but do not create,
+    // simulate or draw them while this switch is disabled.
+    private const bool DecorationsEnabled = false;
     private const int EquipmentSprites = 25;
     private readonly LanceScavenger _owner;
     private readonly int _start;
@@ -24,7 +27,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void Reset()
     {
         base.Reset();
-        if (_cords == null) return;
+        if (!DecorationsEnabled || _cords == null) return;
         foreach (LanceAdornment cord in _cords) cord.Reset(_owner.mainBodyChunk.pos);
         foreach (LanceAdornment ribbon in _ribbons) ribbon.Reset(_owner.mainBodyChunk.pos);
     }
@@ -33,17 +36,20 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     {
         base.Update();
         if (_owner.room == null) return;
-        Vector2 head = DrawPosition(headDrawPos, 1f);
-        Vector2 chest = DrawPosition(chestDrawPos, 1f);
-        Vector2 hips = DrawPosition(hipsDrawPos, 1f);
-        Vector2 axis = (head - hips).normalized;
-        Vector2 across = Custom.PerpendicularVector(axis);
-        Vector2 shoulder = chest + across * (_shoulderSide * 8f) + axis * 3f;
-        _cords[0].Update(head - across * 7f - axis * 3f, _owner.mainBodyChunk.vel, _owner.gravity);
-        _cords[1].Update(head + across * 7f - axis * 2f, _owner.mainBodyChunk.vel, _owner.gravity);
-        _cords[2].Update(shoulder - axis * 4f, _owner.mainBodyChunk.vel, _owner.gravity);
-        _ribbons[0].Update(chest - axis * 4f + across * _shoulderSide * 6f, _owner.mainBodyChunk.vel, _owner.gravity);
-        _ribbons[1].Update(hips + across * _shoulderSide * 5f, _owner.mainBodyChunk.vel, _owner.gravity);
+        if (DecorationsEnabled)
+        {
+            Vector2 head = DrawPosition(headDrawPos, 1f);
+            Vector2 chest = DrawPosition(chestDrawPos, 1f);
+            Vector2 hips = DrawPosition(hipsDrawPos, 1f);
+            Vector2 axis = (head - hips).normalized;
+            Vector2 across = Custom.PerpendicularVector(axis);
+            Vector2 shoulder = chest + across * (_shoulderSide * 8f) + axis * 3f;
+            _cords[0].Update(head - across * 7f - axis * 3f, _owner.mainBodyChunk.vel, _owner.gravity);
+            _cords[1].Update(head + across * 7f - axis * 2f, _owner.mainBodyChunk.vel, _owner.gravity);
+            _cords[2].Update(shoulder - axis * 4f, _owner.mainBodyChunk.vel, _owner.gravity);
+            _ribbons[0].Update(chest - axis * 4f + across * _shoulderSide * 6f, _owner.mainBodyChunk.vel, _owner.gravity);
+            _ribbons[1].Update(hips + across * _shoulderSide * 5f, _owner.mainBodyChunk.vel, _owner.gravity);
+        }
 
         ScavengerLance lance = _owner.Lance;
         if (lance == null || !_owner.Consious) return;
@@ -63,6 +69,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         base.InitiateSprites(sLeaser, rCam);
+        if (!DecorationsEnabled) return;
         Array.Resize(ref sLeaser.sprites, _start + EquipmentSprites);
         sLeaser.sprites[_start] = TriangleMesh.MakeLongMesh(6, false, false);
         sLeaser.sprites[_start + 1] = TriangleMesh.MakeLongMesh(6, false, false);
@@ -83,7 +90,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void AddToContainer(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, FContainer container)
     {
         base.AddToContainer(sLeaser, rCam, container);
-        if (sLeaser.sprites.Length <= _start) return;
+        if (!DecorationsEnabled || sLeaser.sprites.Length <= _start) return;
         container ??= rCam.ReturnFContainer("Midground");
         for (int i = _start; i < _start + EquipmentSprites; i++)
         {
@@ -98,6 +105,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float t, Vector2 cam)
     {
         base.DrawSprites(sLeaser, rCam, t, cam);
+        if (!DecorationsEnabled) return;
         if (_owner.room != rCam.room || _owner.slatedForDeletetion) { sLeaser.CleanSpritesAndRemove(); return; }
         Vector2 head = DrawPosition(headDrawPos, t), chest = DrawPosition(chestDrawPos, t), hips = DrawPosition(hipsDrawPos, t);
         Vector2 axis = (head - hips).normalized, across = Custom.PerpendicularVector(axis);
@@ -160,7 +168,7 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
     public override void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
     {
         base.ApplyPalette(sLeaser, rCam, palette);
-        if (sLeaser.sprites.Length <= _start) return;
+        if (!DecorationsEnabled || sLeaser.sprites.Length <= _start) return;
         ApplyEquipmentPalette(sLeaser, palette, 0f);
     }
     private void ApplyEquipmentPalette(RoomCamera.SpriteLeaser sLeaser, RoomPalette palette, float darkness)
