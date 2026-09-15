@@ -8,6 +8,7 @@ phase_doc="$root/PHASE6.md"
 runtime="$root/Core/DevToolRuntime.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 legacy_controller="$root/Compatibility/LegacyUiPresentationController.cs"
+universal_presentation="$root/Compatibility/UniversalDevUiPresentation.cs"
 
 if [[ ! -d "$root" ]]; then
   echo "DevTool root is missing: $root" >&2
@@ -37,6 +38,13 @@ frontend_action_hits="$(
 if [[ -n "$frontend_action_hits" ]]; then
   echo "RWImGui frontend directly invokes a backend mutation service instead of enqueueing a command:" >&2
   echo "$frontend_action_hits" >&2
+  exit 1
+fi
+
+# A Presentation getter may capture/read state, but must not process queued writes. Universal DevUI
+# commands follow the same backend command phase as native workspace commands.
+if grep -Fq 'UniversalDevUiCommandQueue.Process' "$universal_presentation"; then
+  echo "Universal DevUI Presentation is executing mutations from its read/publish path." >&2
   exit 1
 fi
 
@@ -101,15 +109,16 @@ if [[ -n "$runtime_fanout_hits" ]]; then
   exit 1
 fi
 
-# The dormant DevUI lifetime edge used to duplicate the same seven queues and presentation hubs.
+# The dormant DevUI lifetime edge used to duplicate feature queues and presentation hubs.
 # Compatibility owns only compatibility cleanup; backend runtime cleanup must delegate to Core.
 dormant_fanout_hits="$(
-  grep -nE '(EditorUi|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor)CommandQueue\.Clear|\
-(Editor|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor)PresentationHub\.Clear' \
-    "$legacy_controller" || true
+  {
+    grep -nE '(EditorUi|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor|UniversalDevUi)CommandQueue\.Clear' "$legacy_controller" || true
+    grep -nE '(Editor|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor|UniversalDevUi)PresentationHub\.Clear' "$legacy_controller" || true
+  }
 )"
 if [[ -n "$dormant_fanout_hits" ]]; then
-  echo "LegacyUiPresentationController duplicated feature runtime cleanup again:" >&2
+  echo "LegacyUiPresentationController duplicated backend runtime cleanup again:" >&2
   echo "$dormant_fanout_hits" >&2
   exit 1
 fi
@@ -121,7 +130,10 @@ required_coordinator_symbols=(
   'EditorUiCommandQueue.Process'
   'RoomEditorCommandQueue.Process'
   'RelationshipEditorCommandQueue.Process'
+  'UniversalDevUiCommandQueue.Process'
+  'UniversalDevUiCommandQueue.Clear'
   'EditorPresentationHub.Clear'
+  'UniversalDevUiPresentationHub.Clear'
   'DevToolSessionHub.Reset'
 )
 for symbol in "${required_coordinator_symbols[@]}"; do
@@ -148,6 +160,22 @@ if ! grep -Fq 'DevToolSubsystemCoordinator.ResetRuntimeState()' "$legacy_control
   echo "Dormant DevUI cleanup is not routing backend lifecycle reset through the subsystem coordinator." >&2
   exit 1
 fi
+
+# Compatibility diagnostics are session/lifetime state and must be reset together. The loaded-type
+# inventory is intentionally process-level and is therefore not required here.
+required_diagnostic_resets=(
+  'DevUiFullAudit.Reset()'
+  'DevUiMigrationCoverage.Reset()'
+  'DevUiSemanticConformanceAudit.Reset()'
+  'DevUiCompatibilityGate.Reset()'
+  'DevUiPageCoverageTracker.Reset()'
+)
+for symbol in "${required_diagnostic_resets[@]}"; do
+  if ! grep -Fq "$symbol" "$legacy_controller"; then
+    echo "Compatibility lifecycle reset is incomplete: missing '$symbol'" >&2
+    exit 1
+  fi
+done
 
 if [[ ! -f "$phase_doc" ]]; then
   echo "Phase 6 architecture contract is missing: $phase_doc" >&2
