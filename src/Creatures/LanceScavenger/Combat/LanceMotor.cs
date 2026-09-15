@@ -14,7 +14,8 @@ internal sealed class LanceMotor
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
     internal bool OwnsMovement => _owner.Combat.State == LanceState.Brace || _owner.Combat.State == LanceState.Charge ||
-        _owner.Combat.State == LanceState.Recover || _owner.Combat.State == LanceState.CloseDefense;
+        _owner.Combat.State == LanceState.FollowUpThrow || _owner.Combat.State == LanceState.Recover ||
+        _owner.Combat.State == LanceState.CloseDefense;
 
     internal LanceMotor(LanceScavenger owner) { _owner = owner; }
     internal void Reset() { _launchPoint = _owner.mainBodyChunk.pos; }
@@ -48,7 +49,7 @@ internal sealed class LanceMotor
         }
         Vector2 aim = _owner.Brain.Target == null ? Vector2.right :
             Custom.DirVec(_owner.mainBodyChunk.pos, _owner.Brain.Target.mainBodyChunk.pos);
-        foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= 0.65f;
+        foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= state == LanceState.FollowUpThrow ? 0.78f : 0.65f;
         _owner.WeightedPush(1, 0, new Vector2(aim.x, 0f), state == LanceState.Brace ? 0.15f : 0.08f);
         if (state == LanceState.Brace && _owner.Combat.Age == 1)
             _owner.room.PlaySound(SoundID.Scavenger_Knuckle_Hit_Ground, _owner.mainBodyChunk.pos, 0.55f, 0.7f);
