@@ -58,25 +58,46 @@ internal static class IntegrationTests
         RuntimeScene scene = Scene();
         LanceCreature lance = Add<LanceCreature>(scene, new Vector2(100, 90), 0.85f);
         ProbeCreature target = Add<ProbeCreature>(scene, new Vector2(350, 90), 0.8f);
-        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Clear horizontal lane accepted");
+
+        ChargeLane sameHeight = ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target);
+        Check(sameHeight.Clear && sameHeight.PathClear && sameHeight.CanHit,
+            "A clear lane is accepted only when the simulated lance tip can actually hit");
+        Check(sameHeight.LanceDirection.y < 0f,
+            "The raised ballistic arc automatically depresses the lance for a same-height target");
+        float pitch = Mathf.Abs(Mathf.Asin(sameHeight.LanceDirection.y) * Mathf.Rad2Deg);
+        Check(pitch <= 15.01f, "Solved lance pitch stays inside the +/-15 degree aiming cone");
+        Check(sameHeight.ImpactFrame > 0 && sameHeight.ImpactFrame <= LanceCombatState.MaxChargeFrames,
+            "Ballistic solution records a bounded predicted impact frame");
+
         target.mainBodyChunk.vel = new Vector2(3,0);
-        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Aim.x > target.mainBodyChunk.pos.x, "Lane leads a moving target");
+        ChargeLane moving = ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target);
+        Check(moving.Clear && moving.Aim.x > target.mainBodyChunk.pos.x,
+            "Ballistic solver leads a horizontally moving target");
+
         target.mainBodyChunk.vel = Vector2.zero;
         target.mainBodyChunk.pos.y = 170;
-        Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Vertical target rejected");
+        ChargeLane unreachable = ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target);
+        Check(!unreachable.Clear && !unreachable.CanHit && unreachable.Reason == "no ballistic hit",
+            "A target outside the limited pitch/trajectory solution is rejected rather than hard-tracked");
+
         target.mainBodyChunk.pos.y = 90;
         Scavenger friend = Add<Scavenger>(scene, new Vector2(220,90), 0.85f);
-        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Reason == "friend in lane", "Scavenger allies block initiation");
+        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Reason == "friend in lane",
+            "Scavenger allies block a valid ballistic initiation");
         scene.AbstractRoom.creatures.Remove(friend.abstractCreature);
-        scene.Room.Tiles[12,4].Terrain = Room.Tile.TerrainType.Solid;
-        Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Wall blocks body and tip corridor");
-        scene.Room.Tiles[12,4].Terrain = Room.Tile.TerrainType.Air;
+
         scene.Room.Tiles[12,5].Terrain = Room.Tile.TerrainType.Solid;
-        Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Low ceiling blocks lane");
+        Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear,
+            "A wall intersecting the simulated body arc blocks the charge");
         scene.Room.Tiles[12,5].Terrain = Room.Tile.TerrainType.Air;
+        scene.Room.Tiles[12,6].Terrain = Room.Tile.TerrainType.Solid;
+        Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear,
+            "A low ceiling intersecting the simulated ballistic arc blocks the lane");
+        scene.Room.Tiles[12,6].Terrain = Room.Tile.TerrainType.Air;
+
         for (int x = 10; x <= 16; x++) for (int y = 0; y < 3; y++) scene.Room.Tiles[x,y].Terrain = Room.Tile.TerrainType.Air;
         Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear,
-            "Unsupported gaps no longer veto a charge when the body corridor itself is clear");
+            "Unsupported gaps remain chargeable when the ballistic body/tip corridor itself is clear");
     }
 
     internal static void WeaponContacts()
