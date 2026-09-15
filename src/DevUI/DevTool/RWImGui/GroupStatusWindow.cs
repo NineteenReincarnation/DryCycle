@@ -11,9 +11,26 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class GroupStatusWindow
 {
+    private sealed class GroupPresentationBinding
+    {
+        internal int Id;
+        internal string Header = string.Empty;
+        internal string SelectLabel = string.Empty;
+        internal string DissolveLabel = string.Empty;
+        internal string[] Members = Array.Empty<string>();
+    }
+
     private const int SnapshotRefreshFrames = 8;
     private static FloatingWindowSnap.WindowGroupSnapshot[] cachedGroups = Array.Empty<FloatingWindowSnap.WindowGroupSnapshot>();
     private static int nextSnapshotRefreshFrame;
+
+    private static FloatingWindowSnap.WindowGroupSnapshot[] projectedGroups;
+    private static bool projectedChinese;
+    private static GroupPresentationBinding[] groupBindings = Array.Empty<GroupPresentationBinding>();
+
+    private static int projectedSelectedCount = -1;
+    private static bool projectedSelectedCountChinese;
+    private static string selectedCountLabel = string.Empty;
 
     internal static void Draw(Num.Vector2 display)
     {
@@ -40,9 +57,7 @@ internal static class GroupStatusWindow
         FloatingWindowSnap.TrackCurrentWindow("Groups");
         ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.20f : 1.14f);
 
-        ImGui.TextDisabled(DevToolUiSettings.T(
-            $"当前选择：{FloatingWindowSnap.SelectedWindowCount} 个窗口",
-            $"Selected: {FloatingWindowSnap.SelectedWindowCount} windows"));
+        ImGui.TextDisabled(GetSelectedCountLabel());
         ImGui.Separator();
 
         FloatingWindowSnap.WindowGroupSnapshot[] groups = GetCachedGroups();
@@ -55,30 +70,26 @@ internal static class GroupStatusWindow
             return;
         }
 
-        for (int i = 0; i < groups.Length; i++)
+        GroupPresentationBinding[] bindings = GetGroupBindings(groups);
+        for (int i = 0; i < bindings.Length; i++)
         {
-            FloatingWindowSnap.WindowGroupSnapshot group = groups[i];
-            string title = DevToolUiSettings.T(
-                $"组 {group.Id} · {group.Members.Length} 个窗口",
-                $"Group {group.Id} · {group.Members.Length} windows");
-
-            if (!ImGui.CollapsingHeader(title + "##DevToolGroup" + group.Id, ImGuiTreeNodeFlags.DefaultOpen))
+            GroupPresentationBinding binding = bindings[i];
+            if (!ImGui.CollapsingHeader(binding.Header, ImGuiTreeNodeFlags.DefaultOpen))
                 continue;
 
-            if (ImGui.SmallButton(DevToolUiSettings.T("选中整组##SelectGroup", "Select Group##SelectGroup") + group.Id))
-                FloatingWindowSnap.SelectGroup(group.Id);
+            if (ImGui.SmallButton(binding.SelectLabel))
+                FloatingWindowSnap.SelectGroup(binding.Id);
 
             ImGui.SameLine();
-            if (ImGui.SmallButton(DevToolUiSettings.T("解散##DissolveGroup", "Dissolve##DissolveGroup") + group.Id))
+            if (ImGui.SmallButton(binding.DissolveLabel))
             {
-                FloatingWindowSnap.DissolveGroup(group.Id);
+                FloatingWindowSnap.DissolveGroup(binding.Id);
                 InvalidateGroupCache();
                 continue;
             }
 
-            string[] members = group.Members ?? Array.Empty<string>();
-            for (int member = 0; member < members.Length; member++)
-                ImGui.BulletText(FriendlyWindowName(members[member]));
+            for (int member = 0; member < binding.Members.Length; member++)
+                ImGui.BulletText(binding.Members[member]);
         }
 
         ImGui.End();
@@ -94,9 +105,59 @@ internal static class GroupStatusWindow
         return cachedGroups;
     }
 
+    private static GroupPresentationBinding[] GetGroupBindings(FloatingWindowSnap.WindowGroupSnapshot[] groups)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedGroups, groups) && projectedChinese == chinese)
+            return groupBindings;
+
+        GroupPresentationBinding[] next = new GroupPresentationBinding[groups.Length];
+        for (int i = 0; i < groups.Length; i++)
+        {
+            FloatingWindowSnap.WindowGroupSnapshot group = groups[i];
+            string[] members = group.Members ?? Array.Empty<string>();
+            string[] friendlyMembers = new string[members.Length];
+            for (int member = 0; member < members.Length; member++)
+                friendlyMembers[member] = FriendlyWindowName(members[member]);
+
+            next[i] = new GroupPresentationBinding
+            {
+                Id = group.Id,
+                Header = DevToolUiSettings.T(
+                             $"组 {group.Id} · {members.Length} 个窗口",
+                             $"Group {group.Id} · {members.Length} windows") +
+                         "##DevToolGroup" + group.Id,
+                SelectLabel = DevToolUiSettings.T("选中整组##SelectGroup", "Select Group##SelectGroup") + group.Id,
+                DissolveLabel = DevToolUiSettings.T("解散##DissolveGroup", "Dissolve##DissolveGroup") + group.Id,
+                Members = friendlyMembers
+            };
+        }
+
+        projectedGroups = groups;
+        projectedChinese = chinese;
+        groupBindings = next;
+        return groupBindings;
+    }
+
+    private static string GetSelectedCountLabel()
+    {
+        int count = FloatingWindowSnap.SelectedWindowCount;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (projectedSelectedCount == count && projectedSelectedCountChinese == chinese)
+            return selectedCountLabel;
+
+        projectedSelectedCount = count;
+        projectedSelectedCountChinese = chinese;
+        selectedCountLabel = DevToolUiSettings.T(
+            $"当前选择：{count} 个窗口",
+            $"Selected: {count} windows");
+        return selectedCountLabel;
+    }
+
     private static void InvalidateGroupCache()
     {
         nextSnapshotRefreshFrame = 0;
+        projectedGroups = null;
     }
 
     private static string FriendlyWindowName(string id)
