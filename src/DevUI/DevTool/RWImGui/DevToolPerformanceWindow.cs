@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
@@ -13,6 +14,24 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class DevToolPerformanceWindow
 {
+    private sealed class MetricReadback
+    {
+        internal bool HasSamples;
+        internal string Last = "-";
+        internal string Average = "-";
+        internal string P95 = "-";
+        internal string Max = "-";
+    }
+
+    private sealed class CacheReadback
+    {
+        internal bool HasSamples;
+        internal string Hit = "-";
+        internal string Partial = "-";
+        internal string Full = "-";
+        internal string HitRate = "-";
+    }
+
     private const float LastColumn = 286f;
     private const float AverageColumn = 374f;
     private const float P95Column = 462f;
@@ -22,6 +41,48 @@ internal static class DevToolPerformanceWindow
     private const float PartialColumn = 374f;
     private const float FullColumn = 462f;
     private const float HitRateColumn = 550f;
+    private const int ReadbackRefreshFrames = 6;
+
+    private static readonly DevToolPerformanceMetric[] Metrics =
+    {
+        DevToolPerformanceMetric.DevUiUpdateTotal,
+        DevToolPerformanceMetric.SessionSynchronization,
+        DevToolPerformanceMetric.DeferredWorkspaceRestore,
+        DevToolPerformanceMetric.LegacyTransactionBefore,
+        DevToolPerformanceMetric.InputShortcuts,
+        DevToolPerformanceMetric.VanillaDevUiUpdate,
+        DevToolPerformanceMetric.LegacyQuiescenceBackend,
+        DevToolPerformanceMetric.PostLegacySynchronization,
+        DevToolPerformanceMetric.CommandProcessing,
+        DevToolPerformanceMetric.LegacyPresentation,
+        DevToolPerformanceMetric.ObjectGizmoPresentation,
+        DevToolPerformanceMetric.CorePresentation,
+        DevToolPerformanceMetric.RoomPresentation,
+        DevToolPerformanceMetric.SoundPresentation,
+        DevToolPerformanceMetric.TriggerPresentation,
+        DevToolPerformanceMetric.MapPresentation,
+        DevToolPerformanceMetric.DialogPresentation,
+        DevToolPerformanceMetric.RelationshipPresentation
+    };
+
+    private static readonly DevToolPresentationChannel[] Channels =
+    {
+        DevToolPresentationChannel.Core,
+        DevToolPresentationChannel.Room,
+        DevToolPresentationChannel.Sound,
+        DevToolPresentationChannel.Triggers,
+        DevToolPresentationChannel.Map,
+        DevToolPresentationChannel.Dialog,
+        DevToolPresentationChannel.Relationships
+    };
+
+    private static readonly Dictionary<DevToolPerformanceMetric, MetricReadback> MetricReadbacks = new();
+    private static readonly Dictionary<DevToolPresentationChannel, CacheReadback> CacheReadbacks = new();
+    private static int nextReadbackFrame;
+    private static bool readbackValid;
+    private static int rollingCapacity = -1;
+    private static bool rollingChinese;
+    private static string rollingDescription = string.Empty;
 
     internal static void Draw(Num.Vector2 display)
     {
@@ -46,17 +107,19 @@ internal static class DevToolPerformanceWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("Performance");
+        EnsureReadback();
 
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T(
-                $"最近 {DevToolPerformanceMonitor.RollingSampleCapacity} 个样本的滚动统计；P95 仅在本窗口读取时计算。",
-                $"Rolling {DevToolPerformanceMonitor.RollingSampleCapacity}-sample window; P95 is computed only when this window reads it."));
+        DevToolWidgets.MutedText(GetRollingDescription());
 
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("重置样本", "Reset Samples"),
                 "PerformanceReset",
                 DevToolButtonTone.Subtle))
+        {
             DevToolPerformanceMonitor.Reset();
+            InvalidateReadback();
+            EnsureReadback();
+        }
 
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
@@ -122,6 +185,82 @@ internal static class DevToolPerformanceWindow
         ImGui.End();
     }
 
+    private static void EnsureReadback()
+    {
+        int frame = ImGui.GetFrameCount();
+        if (readbackValid && frame < nextReadbackFrame) return;
+
+        for (int i = 0; i < Metrics.Length; i++)
+        {
+            DevToolPerformanceMetric metric = Metrics[i];
+            DevToolPerformanceStats stats = DevToolPerformanceMonitor.GetStats(metric);
+            if (!MetricReadbacks.TryGetValue(metric, out MetricReadback display))
+            {
+                display = new MetricReadback();
+                MetricReadbacks.Add(metric, display);
+            }
+
+            display.HasSamples = stats.HasSamples;
+            if (!stats.HasSamples)
+            {
+                display.Last = display.Average = display.P95 = display.Max = "-";
+                continue;
+            }
+
+            display.Last = FormatMilliseconds(stats.LastMilliseconds);
+            display.Average = FormatMilliseconds(stats.AverageMilliseconds);
+            display.P95 = FormatMilliseconds(stats.P95Milliseconds);
+            display.Max = FormatMilliseconds(stats.MaxMilliseconds);
+        }
+
+        for (int i = 0; i < Channels.Length; i++)
+        {
+            DevToolPresentationChannel channel = Channels[i];
+            DevToolPresentationCounters stats = DevToolPerformanceMonitor.GetPresentationCounters(channel);
+            if (!CacheReadbacks.TryGetValue(channel, out CacheReadback display))
+            {
+                display = new CacheReadback();
+                CacheReadbacks.Add(channel, display);
+            }
+
+            display.HasSamples = stats.Total > 0;
+            if (!display.HasSamples)
+            {
+                display.Hit = display.Partial = display.Full = display.HitRate = "-";
+                continue;
+            }
+
+            display.Hit = FormatCount(stats.CacheHits);
+            display.Partial = FormatCount(stats.PartialRebuilds);
+            display.Full = FormatCount(stats.FullRebuilds);
+            display.HitRate = (stats.CacheHitRate * 100d).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        }
+
+        readbackValid = true;
+        nextReadbackFrame = frame + ReadbackRefreshFrames;
+    }
+
+    private static void InvalidateReadback()
+    {
+        readbackValid = false;
+        nextReadbackFrame = 0;
+    }
+
+    private static string GetRollingDescription()
+    {
+        int capacity = DevToolPerformanceMonitor.RollingSampleCapacity;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (rollingCapacity == capacity && rollingChinese == chinese && rollingDescription.Length > 0)
+            return rollingDescription;
+
+        rollingCapacity = capacity;
+        rollingChinese = chinese;
+        rollingDescription = chinese
+            ? $"最近 {capacity} 个样本的滚动统计；P95 每 {ReadbackRefreshFrames} 帧读取一次。"
+            : $"Rolling {capacity}-sample window; P95 is sampled every {ReadbackRefreshFrames} frames.";
+        return rollingDescription;
+    }
+
     private static void DrawColumns()
     {
         ImGui.TextUnformatted(DevToolUiSettings.T("阶段", "Stage"));
@@ -147,10 +286,8 @@ internal static class DevToolPerformanceWindow
 
     private static void DrawMetric(DevToolPerformanceMetric metric, string label)
     {
-        DevToolPerformanceStats stats = DevToolPerformanceMonitor.GetStats(metric);
         ImGui.TextUnformatted(label);
-
-        if (!stats.HasSamples)
+        if (!MetricReadbacks.TryGetValue(metric, out MetricReadback stats) || !stats.HasSamples)
         {
             DrawAt(LastColumn, "-");
             DrawAt(AverageColumn, "-");
@@ -159,17 +296,16 @@ internal static class DevToolPerformanceWindow
             return;
         }
 
-        DrawAt(LastColumn, FormatMilliseconds(stats.LastMilliseconds));
-        DrawAt(AverageColumn, FormatMilliseconds(stats.AverageMilliseconds));
-        DrawAt(P95Column, FormatMilliseconds(stats.P95Milliseconds));
-        DrawAt(MaxColumn, FormatMilliseconds(stats.MaxMilliseconds));
+        DrawAt(LastColumn, stats.Last);
+        DrawAt(AverageColumn, stats.Average);
+        DrawAt(P95Column, stats.P95);
+        DrawAt(MaxColumn, stats.Max);
     }
 
     private static void DrawCacheRow(DevToolPresentationChannel channel, string label)
     {
-        DevToolPresentationCounters stats = DevToolPerformanceMonitor.GetPresentationCounters(channel);
         ImGui.TextUnformatted(label);
-        if (stats.Total <= 0)
+        if (!CacheReadbacks.TryGetValue(channel, out CacheReadback stats) || !stats.HasSamples)
         {
             DrawAt(CacheHitColumn, "-");
             DrawAt(PartialColumn, "-");
@@ -178,10 +314,10 @@ internal static class DevToolPerformanceWindow
             return;
         }
 
-        DrawAt(CacheHitColumn, FormatCount(stats.CacheHits));
-        DrawAt(PartialColumn, FormatCount(stats.PartialRebuilds));
-        DrawAt(FullColumn, FormatCount(stats.FullRebuilds));
-        DrawAt(HitRateColumn, (stats.CacheHitRate * 100d).ToString("0.0", CultureInfo.InvariantCulture) + "%");
+        DrawAt(CacheHitColumn, stats.Hit);
+        DrawAt(PartialColumn, stats.Partial);
+        DrawAt(FullColumn, stats.Full);
+        DrawAt(HitRateColumn, stats.HitRate);
     }
 
     private static void DrawAt(float x, string text)
