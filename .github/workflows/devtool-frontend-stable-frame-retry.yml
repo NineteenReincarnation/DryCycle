@@ -21,25 +21,18 @@ jobs:
 
           snap = Path('src/DevUI/DevTool/RWImGui/FloatingWindowSnap.cs')
           s = snap.read_text(encoding='utf-8')
+          s = s.replace(
+              '        Guides.Clear();\n        if (frame >= nextStaleAuditFrame)',
+              '        Guides.Clear();\n        PruneStaleInteractiveState();\n        if (frame >= nextStaleAuditFrame)',
+              1)
+          s = s.replace('        ImGuiIOPtr io = frameContext.Io;\n', '', 1)
 
-          old = "        Guides.Clear();\n        if (frame >= nextStaleAuditFrame)"
-          new = "        Guides.Clear();\n        PruneStaleInteractiveState();\n        if (frame >= nextStaleAuditFrame)"
-          assert old in s
-          s = s.replace(old, new, 1)
-          s = s.replace("        ImGuiIOPtr io = frameContext.Io;\n", "", 1)
-
-          live = """    private static bool IsWindowLive(string id)
-          {
-              return !string.IsNullOrEmpty(id) &&
-                     Windows.TryGetValue(id, out WindowState state) &&
-                     state.Initialized && state.LastSeenFrame >= frame - 1;
-          }
-          """
-          helper = """
+          marker = '\n    private static void DetectResizeEdges('
+          assert marker in s
+          helper = '''
           
           private static bool IsWindowRecentForInteractiveState(string id)
           {
-              // Preserve the old two-frame stale-state tolerance without scanning all windows.
               return !string.IsNullOrEmpty(id) &&
                      Windows.TryGetValue(id, out WindowState state) &&
                      state.Initialized && state.LastSeenFrame >= frame - 2;
@@ -73,40 +66,39 @@ jobs:
                       GroupDragOrigins.Clear();
                   }
               }
-          
               StaleKeys.Clear();
           }
-          """
-          assert live in s
-          s = s.replace(live, live + helper, 1)
+          '''
+          s = s.replace(marker, helper + marker, 1)
 
-          old = """                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)
+          old = '                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)\n                    GroupDragOrigins[id] = state.Position;'
+          new = '                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))\n                    GroupDragOrigins[id] = state.Position;'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          group_end = '''            foreach (string id in Selected)
+              {
+                  if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
                       GroupDragOrigins[id] = state.Position;
               }
-          }
-          
-          if (groupDragging)"""
-          new = """                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
-                      GroupDragOrigins[id] = state.Position;
-              }
+          }'''
+          group_end_new = group_end[:-1] + '''
           
               if (GroupDragOrigins.Count < 2)
               {
                   groupDragging = false;
                   GroupDragOrigins.Clear();
               }
-          }
-          
-          if (groupDragging)"""
-          assert old in s
-          s = s.replace(old, new, 1)
+          }'''
+          assert group_end in s
+          s = s.replace(group_end, group_end_new, 1)
           snap.write_text(s, encoding='utf-8')
 
           font = Path('src/DevUI/DevTool/RWImGui/FontSettingsWindow.cs')
           s = font.read_text(encoding='utf-8')
-
-          old = "internal static class FontSettingsWindow\n{\n"
-          new = """internal static class FontSettingsWindow
+          s = s.replace(
+              'internal static class FontSettingsWindow\n{\n',
+              '''internal static class FontSettingsWindow
           {
               private static bool fontStatusProjectionValid;
               private static bool projectedFontStatusChinese;
@@ -116,26 +108,26 @@ jobs:
               private static string projectedFontStatus = string.Empty;
               private static string projectedResolvedWeightStatus = string.Empty;
               private static string projectedFamilyWeightsStatus = string.Empty;
-          """
-          assert old in s
-          s = s.replace(old, new, 1)
+          ''',
+              1)
 
-          old = """        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
-          ImGui.TextDisabled(DevToolUiSettings.T(\"当前字体：\", \"Font: \") +
-                             (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T(\"默认\", \"Default\") : friendlyFace));
-          ImGui.TextDisabled(DevToolUiSettings.T(\"实际字重：\", \"Resolved weight: \") + actualWeight);"""
-          new = """        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
+          old = '''        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
+          ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
+                             (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace));
+          ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);'''
+          new = '''        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
           ImGui.TextDisabled(projectedFontStatus);
-          ImGui.TextDisabled(projectedResolvedWeightStatus);"""
+          ImGui.TextDisabled(projectedResolvedWeightStatus);'''
           assert old in s
           s = s.replace(old, new, 1)
-
-          old = '            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));'
-          assert old in s
-          s = s.replace(old, '            ImGui.TextDisabled(projectedFamilyWeightsStatus);', 1)
+          s = s.replace(
+              '            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));',
+              '            ImGui.TextDisabled(projectedFamilyWeightsStatus);',
+              1)
 
           marker = '    private static void DrawChineseFontSelector()\n'
-          helper = """    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
+          assert marker in s
+          helper = '''    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
           {
               bool chinese = DevToolUiSettings.IsChinese;
               string stableFontName = fontName ?? string.Empty;
@@ -152,21 +144,18 @@ jobs:
               projectedWeightVariants = weightVariants;
           
               string friendlyFace = DevToolFontCatalog.FriendlyFaceName(stableFontName);
-              projectedFontStatus = DevToolUiSettings.T(\"当前字体：\", \"Font: \") +
-                                    (string.IsNullOrEmpty(friendlyFace)
-                                        ? DevToolUiSettings.T(\"默认\", \"Default\")
-                                        : friendlyFace);
-              projectedResolvedWeightStatus = DevToolUiSettings.T(\"实际字重：\", \"Resolved weight: \") + actualWeight;
-              projectedFamilyWeightsStatus = DevToolUiSettings.T(\"当前字体族字重：\", \"Family weights: \") + Math.Max(1, weightVariants);
+              projectedFontStatus = DevToolUiSettings.T("当前字体：", "Font: ") +
+                                    (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace);
+              projectedResolvedWeightStatus = DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight;
+              projectedFamilyWeightsStatus = DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants);
               fontStatusProjectionValid = true;
           }
           
-          """
-          assert marker in s
+          '''
           s = s.replace(marker, helper + marker, 1)
           font.write_text(s, encoding='utf-8')
 
-      - name: Run architecture and stable-frame guards
+      - name: Guard architecture and stable-frame invariants
         shell: bash
         run: |
           set -euo pipefail
