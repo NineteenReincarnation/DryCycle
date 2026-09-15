@@ -109,19 +109,19 @@ if ((Same-Path $BuildRoot $buildDriveRoot) -or
 }
 
 $requiredRainWorldFiles = [ordered]@{
-    "BepInEx" = "BepInEx\core\BepInEx.dll"
-    "MonoMod.RuntimeDetour" = "BepInEx\core\MonoMod.RuntimeDetour.dll"
-    "MonoMod.Utils" = "BepInEx\core\MonoMod.Utils.dll"
-    "Mono.Cecil" = "BepInEx\core\Mono.Cecil.dll"
-    "PUBLIC-Assembly-CSharp" = "BepInEx\utils\PUBLIC-Assembly-CSharp.dll"
-    "HOOKS-Assembly-CSharp" = "BepInEx\plugins\HOOKS-Assembly-CSharp.dll"
-    "Assembly-CSharp-firstpass" = "RainWorld_Data\Managed\Assembly-CSharp-firstpass.dll"
-    "UnityEngine" = "RainWorld_Data\Managed\UnityEngine.dll"
-    "UnityEngine.CoreModule" = "RainWorld_Data\Managed\UnityEngine.CoreModule.dll"
-    "UnityEngine.AssetBundleModule" = "RainWorld_Data\Managed\UnityEngine.AssetBundleModule.dll"
-    "UnityEngine.AudioModule" = "RainWorld_Data\Managed\UnityEngine.AudioModule.dll"
-    "UnityEngine.InputLegacyModule" = "RainWorld_Data\Managed\UnityEngine.InputLegacyModule.dll"
-    "Unity.Mathematics" = "RainWorld_Data\Managed\Unity.Mathematics.dll"
+    "BepInEx" = "BepInEx/core/BepInEx.dll"
+    "MonoMod.RuntimeDetour" = "BepInEx/core/MonoMod.RuntimeDetour.dll"
+    "MonoMod.Utils" = "BepInEx/core/MonoMod.Utils.dll"
+    "Mono.Cecil" = "BepInEx/core/Mono.Cecil.dll"
+    "PUBLIC-Assembly-CSharp" = "BepInEx/utils/PUBLIC-Assembly-CSharp.dll"
+    "HOOKS-Assembly-CSharp" = "BepInEx/plugins/HOOKS-Assembly-CSharp.dll"
+    "Assembly-CSharp-firstpass" = "RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll"
+    "UnityEngine" = "RainWorld_Data/Managed/UnityEngine.dll"
+    "UnityEngine.CoreModule" = "RainWorld_Data/Managed/UnityEngine.CoreModule.dll"
+    "UnityEngine.AssetBundleModule" = "RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll"
+    "UnityEngine.AudioModule" = "RainWorld_Data/Managed/UnityEngine.AudioModule.dll"
+    "UnityEngine.InputLegacyModule" = "RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll"
+    "Unity.Mathematics" = "RainWorld_Data/Managed/Unity.Mathematics.dll"
 }
 
 Write-Host "=== Rain World references ===" -ForegroundColor Cyan
@@ -131,9 +131,9 @@ foreach ($entry in $requiredRainWorldFiles.GetEnumerator()) {
 
 if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
     $candidates = @(
-        (Join-Path $RainWorldDir "..\..\workshop\content\312520\3417372413\plugins"),
-        (Join-Path $RainWorldDir "..\..\workshop\content\312520\3417372413\rwimgui\plugins"),
-        (Join-Path $RainWorldDir "RainWorld_Data\StreamingAssets\mods\rwimgui\plugins")
+        (Join-Path $RainWorldDir "../../workshop/content/312520/3417372413/plugins"),
+        (Join-Path $RainWorldDir "../../workshop/content/312520/3417372413/rwimgui/plugins"),
+        (Join-Path $RainWorldDir "RainWorld_Data/StreamingAssets/mods/rwimgui/plugins")
     )
 
     foreach ($candidate in $candidates) {
@@ -158,8 +158,8 @@ Require-Directory $RWImGuiPluginDir "RWImGui plugin directory"
 Require-File (Join-Path $RWImGuiPluginDir "rain-world-imgui-api.dll") "rain-world-imgui-api"
 Require-File (Join-Path $RWImGuiPluginDir "ImGui.NET.dll") "RWImGui ImGui.NET"
 
-$mainProject = Join-Path $RepoRoot "src\DryCycle.csproj"
-$frontendProject = Join-Path $RepoRoot "src\DevUI\DevTool\RWImGui\DryCycle.DevTool.RWImGui.csproj"
+$mainProject = Join-Path $RepoRoot "src/DryCycle.csproj"
+$frontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
 Require-File $mainProject "DryCycle project"
 Require-File $frontendProject "DevTool RWImGui project"
 
