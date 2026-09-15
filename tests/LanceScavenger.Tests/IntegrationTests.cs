@@ -57,7 +57,7 @@ internal static class IntegrationTests
         RuntimeScene scene = Scene();
         LanceCreature lance = Add<LanceCreature>(scene, new Vector2(100, 90), 0.85f);
         ProbeCreature target = Add<ProbeCreature>(scene, new Vector2(350, 90), 0.8f);
-        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Clear supported horizontal lane accepted");
+        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Clear horizontal lane accepted");
         target.mainBodyChunk.vel = new Vector2(3,0);
         Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Aim.x > target.mainBodyChunk.pos.x, "Lane leads a moving target");
         target.mainBodyChunk.vel = Vector2.zero;
@@ -74,7 +74,8 @@ internal static class IntegrationTests
         Check(!ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear, "Low ceiling blocks lane");
         scene.Room.Tiles[12,5].Terrain = Room.Tile.TerrainType.Air;
         for (int x = 10; x <= 16; x++) for (int y = 0; y < 3; y++) scene.Room.Tiles[x,y].Terrain = Room.Tile.TerrainType.Air;
-        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Reason == "unsafe landing", "Deep unsupported gap rejected");
+        Check(ChargeLanePlanner.Evaluate(lance, lance.mainBodyChunk.pos, target).Clear,
+            "Unsupported gaps no longer veto a charge when the body corridor itself is clear");
     }
 
     internal static void WeaponContacts()
@@ -115,7 +116,6 @@ internal static class IntegrationTests
             Invoke(weapon, "ResolveTerrain", holder, 19f, true);
             Check(holder.Impacts == impacts + 1 && holder.LastWall, "Wall collision reaches the wielder's failure response");
 
-            // Birth provisioning must not replace a stolen/dropped weapon on realization.
             LanceCreature scavenger = Add<LanceCreature>(scene, new Vector2(300,90), 0.85f);
             scavenger.abstractCreature.state = new LanceScavengerState(scavenger.abstractCreature) { GearIssued = true };
             int count = scene.AbstractRoom.entities.Count;
