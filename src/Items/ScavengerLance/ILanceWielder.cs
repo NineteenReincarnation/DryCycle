@@ -12,7 +12,7 @@ internal interface ILanceWielder
 internal readonly struct LanceGrip
 {
     internal LanceGrip(Vector2 position, Vector2 direction, bool braced, bool charging, float runUp,
-        bool counterSweep = false)
+        bool counterSweep = false, bool aimTracking = false)
     {
         Position = position;
         Direction = direction;
@@ -20,6 +20,7 @@ internal readonly struct LanceGrip
         Charging = charging;
         RunUp = runUp;
         CounterSweep = counterSweep;
+        AimTracking = aimTracking;
     }
 
     internal Vector2 Position { get; }
@@ -32,4 +33,6 @@ internal readonly struct LanceGrip
     /// This is still the same charge attack, not a separate thrust.
     /// </summary>
     internal bool CounterSweep { get; }
+    /// <summary>Visible pre-launch aim should turn gradually rather than snap to each solver refresh.</summary>
+    internal bool AimTracking { get; }
 }
