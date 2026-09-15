@@ -22,6 +22,21 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             return null;
         }
     }
+
+    internal Spear SidearmSpear
+    {
+        get
+        {
+            if (grasps == null) return null;
+            foreach (Grasp grasp in grasps)
+                if (grasp?.grabbed is Spear spear && IsOrdinarySpear(spear)) return spear;
+            return null;
+        }
+    }
+
+    private static bool IsOrdinarySpear(Spear spear) =>
+        spear?.abstractPhysicalObject is AbstractSpear data && !data.explosive && !data.electric && !data.needle;
+
     internal bool IsStableForBrace
     {
         get
@@ -41,7 +56,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     }
 
     public override void PlaceInRoom(Room placeRoom)
-    { base.PlaceInRoom(placeRoom); EnsureBirthLance(); }
+    { base.PlaceInRoom(placeRoom); EnsureBirthGear(); }
 
     public override void NewRoom(Room newRoom)
     {
@@ -52,30 +67,87 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
 
     public override void Update(bool eu)
     {
-        EnsureBirthLance();
+        EnsureBirthGear();
+        EnsureWeaponSlots();
         if (!Consious || grabbedBy.Count > 0)
-            Combat.Tick(new LanceSituation(false, Lance != null, false, ScavengerAI.ViolenceType.None, false,
-                999f, false));
+            Combat.Tick(new LanceSituation(false, Lance != null, SidearmSpear != null, false,
+                ScavengerAI.ViolenceType.None, false, 999f, false));
         base.Update(eu);
         if (room != null) Lance?.SynchronizeGrip(eu);
     }
 
-    private void EnsureBirthLance()
+    private void EnsureBirthGear()
     {
-        if (room == null || abstractCreature.state is not LanceScavengerState state || state.GearIssued) return;
-        foreach (AbstractPhysicalObject.AbstractObjectStick stick in abstractCreature.stuckObjects)
-            if (stick.A is AbstractScavengerLance || stick.B is AbstractScavengerLance)
-            { state.GearIssued = true; return; }
-        state.GearIssued = true;
-        if (dead || (abstractCreature.spawnData?.IndexOf("disarmed", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) return;
-        var data = new AbstractScavengerLance(room.world, abstractCreature.pos, room.game.GetNewID());
-        room.abstractRoom.AddEntity(data);
-        data.RealizeInRoom();
-        if (data.realizedObject is ScavengerLance lance)
+        if (room == null || abstractCreature.state is not LanceScavengerState state) return;
+        bool suppress = dead || (abstractCreature.spawnData?.IndexOf("disarmed", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
+
+        if (!state.SidearmIssued)
         {
-            lance.firstChunk.HardSetPosition(mainBodyChunk.pos);
-            if (grasps[0] == null) Grab(lance, 0, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
+            bool alreadyHasSidearm = false;
+            foreach (AbstractPhysicalObject.AbstractObjectStick stick in abstractCreature.stuckObjects)
+                if ((stick.A is AbstractSpear a && !a.explosive && !a.electric && !a.needle) ||
+                    (stick.B is AbstractSpear b && !b.explosive && !b.electric && !b.needle))
+                { alreadyHasSidearm = true; break; }
+            state.SidearmIssued = true;
+            if (!suppress && !alreadyHasSidearm)
+            {
+                var data = new AbstractSpear(room.world, null, abstractCreature.pos, room.game.GetNewID(), explosive: false);
+                room.abstractRoom.AddEntity(data);
+                data.RealizeInRoom();
+                if (data.realizedObject is Spear spear)
+                {
+                    spear.firstChunk.HardSetPosition(mainBodyChunk.pos);
+                    int slot = PreferredFreeGrasp(0);
+                    if (slot >= 0) Grab(spear, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
+                }
+            }
         }
+
+        if (!state.GearIssued)
+        {
+            bool alreadyHasLance = false;
+            foreach (AbstractPhysicalObject.AbstractObjectStick stick in abstractCreature.stuckObjects)
+                if (stick.A is AbstractScavengerLance || stick.B is AbstractScavengerLance)
+                { alreadyHasLance = true; break; }
+            state.GearIssued = true;
+            if (!suppress && !alreadyHasLance)
+            {
+                var data = new AbstractScavengerLance(room.world, abstractCreature.pos, room.game.GetNewID());
+                room.abstractRoom.AddEntity(data);
+                data.RealizeInRoom();
+                if (data.realizedObject is ScavengerLance lance)
+                {
+                    lance.firstChunk.HardSetPosition(mainBodyChunk.pos);
+                    int slot = PreferredFreeGrasp(1);
+                    if (slot >= 0) Grab(lance, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
+                }
+            }
+        }
+
+        EnsureWeaponSlots();
+    }
+
+    private int PreferredFreeGrasp(int preferred)
+    {
+        if (grasps == null || grasps.Length == 0) return -1;
+        if (preferred >= 0 && preferred < grasps.Length && grasps[preferred] == null) return preferred;
+        for (int i = 0; i < grasps.Length; i++) if (grasps[i] == null) return i;
+        return -1;
+    }
+
+    internal void EnsureWeaponSlots()
+    {
+        if (grasps == null || grasps.Length < 2) return;
+        int sidearm = -1, lance = -1;
+        for (int i = 0; i < grasps.Length; i++)
+        {
+            if (grasps[i]?.grabbed is ScavengerLance) lance = i;
+            else if (grasps[i]?.grabbed is Spear spear && IsOrdinarySpear(spear)) sidearm = i;
+        }
+        // Vanilla Scavenger.CheckThrow and Scavenger.Throw operate on grasp 0.
+        // Keep the disposable spear there and the custom lance in the secondary slot.
+        if (sidearm > 0 && lance == 0) SwitchGrasps(0, sidearm);
+        else if (sidearm > 0 && grasps[0] == null) SwitchGrasps(sidearm, 0);
     }
 
     public override void InitiateGraphicsModule()
@@ -85,13 +157,33 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     }
 
     public override void GraphicsModuleUpdated(bool actuallyViewed, bool eu)
-    { base.GraphicsModuleUpdated(actuallyViewed, eu); Lance?.SynchronizeGrip(eu); }
+    {
+        base.GraphicsModuleUpdated(actuallyViewed, eu);
+        Lance?.SynchronizeGrip(eu);
+        SynchronizeSidearmCarry(eu);
+    }
+
+    private void SynchronizeSidearmCarry(bool eu)
+    {
+        Spear spear = SidearmSpear;
+        if (spear == null || Combat.State == LanceState.FollowUpThrow) return;
+        if (Combat.State != LanceState.Brace && Combat.State != LanceState.Charge &&
+            Combat.State != LanceState.CloseDefense) return;
+        float face = Motor.Direction.x != 0f ? Motor.Direction.x : Mathf.Sign(lookPoint.x - mainBodyChunk.pos.x);
+        if (face == 0f) face = 1f;
+        Vector2 direction = new Vector2(-face * 0.45f, 0.9f).normalized;
+        spear.firstChunk.MoveFromOutsideMyUpdate(eu, bodyChunks[1].pos - direction * 3f);
+        spear.rotation = direction;
+        spear.setRotation = direction;
+        spear.firstChunk.vel = mainBodyChunk.vel;
+    }
 
     public override void Violence(BodyChunk source, Vector2? directionAndMomentum, BodyChunk hitChunk,
         Appendage.Pos hitAppendage, DamageType type, float damage, float stunBonus)
     {
         base.Violence(source, directionAndMomentum, hitChunk, hitAppendage, type, damage, stunBonus);
-        if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace) Combat.Recover(false);
+        if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace || Combat.State == LanceState.FollowUpThrow)
+            Combat.Recover(false);
     }
 
     public override void TerrainImpact(int chunk, IntVector2 direction, float speed, bool firstContact)
@@ -125,7 +217,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     void ILanceWielder.LanceImpact(bool wall, float speed, float retainedSpeed)
     {
         if (Combat.State != LanceState.Charge) return;
-        Combat.Recover(wall);
+        Combat.FinishCharge(wall);
         if (wall)
         {
             foreach (BodyChunk chunk in bodyChunks)
