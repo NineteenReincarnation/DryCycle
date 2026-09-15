@@ -10,12 +10,64 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class ObjectInspectorView
 {
+    private sealed class PropertyBinding
+    {
+        internal EditorPropertySnapshot Property;
+        internal bool Mixed;
+        internal string StateKey;
+        internal string DisplayName;
+        internal string Label;
+        internal string ActionId;
+        internal string EnumFilterKey;
+        internal string EnumSearchLabel;
+        internal string[] EnumOptionLabels = Array.Empty<string>();
+    }
+
+    private sealed class LegacyBinding
+    {
+        internal LegacyControlSnapshot Control;
+        internal string StateKey;
+        internal string VisibleLabel;
+        internal string BooleanLabel;
+        internal string ButtonId;
+        internal string SliderLabel;
+        internal string ResetId;
+        internal string ChoiceLabel;
+        internal string[] ChoiceOptionLabels = Array.Empty<string>();
+        internal string IntegerDisplay;
+        internal string IntegerLessId;
+        internal string IntegerMoreId;
+        internal string TextLabel;
+        internal string DirectionEditKey;
+        internal string DirectionLabel;
+        internal string ColorEditKey;
+        internal string ColorLabel;
+    }
+
     private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> StringEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> Vector2Edits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector4> ColorEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, float> LegacySliderEdits = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> MixedKeyScratch = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType = new(StringComparer.Ordinal);
+
+    private static EditorPropertySnapshot[] projectedProperties;
+    private static string[] projectedMixedKeys;
+    private static int projectedPropertyObjectIndex = int.MinValue;
+    private static int projectedPropertySelectionCount = -1;
+    private static bool projectedPropertyChinese;
+    private static PropertyBinding[] propertyBindings = Array.Empty<PropertyBinding>();
+
+    private static LegacyControlSnapshot[] projectedLegacyControls;
+    private static int projectedLegacyObjectIndex = int.MinValue;
+    private static LegacyBinding[] legacyBindings = Array.Empty<LegacyBinding>();
+
+    private static EditorObjectTypeSnapshot[] metadataSource;
+    private static EditorObjectTypeSnapshot identityMetadata;
+    private static bool identityChinese;
+    private static string identitySubtitle = string.Empty;
 
     private static int objectIndex = -1;
     private static int selectionCount;
@@ -73,13 +125,20 @@ internal static class ObjectInspectorView
 
         if (metadata != null)
         {
-            string source = string.IsNullOrWhiteSpace(metadata.Source)
-                ? DevToolUiSettings.T("未知来源", "Unknown source")
-                : metadata.Source;
-            string category = string.IsNullOrWhiteSpace(metadata.Category)
-                ? DevToolUiSettings.T("未分类", "Unsorted")
-                : metadata.Category;
-            DevToolWidgets.MutedText(source + "  ·  " + category);
+            bool chinese = DevToolUiSettings.IsChinese;
+            if (!ReferenceEquals(identityMetadata, metadata) || identityChinese != chinese)
+            {
+                string source = string.IsNullOrWhiteSpace(metadata.Source)
+                    ? DevToolUiSettings.T("未知来源", "Unknown source")
+                    : metadata.Source;
+                string category = string.IsNullOrWhiteSpace(metadata.Category)
+                    ? DevToolUiSettings.T("未分类", "Unsorted")
+                    : metadata.Category;
+                identityMetadata = metadata;
+                identityChinese = chinese;
+                identitySubtitle = source + "  ·  " + category;
+            }
+            DevToolWidgets.MutedText(identitySubtitle);
         }
         else if (inspector.SelectionCount > 1)
         {
@@ -131,11 +190,14 @@ internal static class ObjectInspectorView
             return;
         }
 
+        EnsurePropertyBindings(inspector, properties);
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("属性", "PROPERTIES"));
         string group = null;
-        for (int i = 0; i < properties.Length; i++)
+        for (int i = 0; i < propertyBindings.Length; i++)
         {
-            EditorPropertySnapshot property = properties[i];
+            PropertyBinding binding = propertyBindings[i];
+            EditorPropertySnapshot property = binding?.Property;
+            if (property == null) continue;
             if (!string.Equals(group, property.Group, StringComparison.Ordinal))
             {
                 group = property.Group;
@@ -145,18 +207,19 @@ internal static class ObjectInspectorView
                     DevToolWidgets.MutedText(group);
                 }
             }
-            DrawProperty(inspector, property);
+            DrawProperty(inspector, binding);
         }
     }
 
-    private static void DrawProperty(EditorInspectorSnapshot inspector, EditorPropertySnapshot property)
+    private static void DrawProperty(EditorInspectorSnapshot inspector, PropertyBinding binding)
     {
+        EditorPropertySnapshot property = binding?.Property;
         if (property == null || string.IsNullOrEmpty(property.Key)) return;
 
-        bool mixed = IsMixed(inspector, property.Key);
-        string stateKey = inspector.ObjectIndex + ":" + inspector.SelectionCount + ":" + property.Key;
-        string displayName = property.DisplayName + (mixed ? DevToolUiSettings.T("  [混合]", "  [Mixed]") : string.Empty);
-        string label = displayName + "##DevToolProperty_" + stateKey;
+        bool mixed = binding.Mixed;
+        string stateKey = binding.StateKey;
+        string displayName = binding.DisplayName;
+        string label = binding.Label;
 
         switch (property.Kind)
         {
@@ -242,11 +305,11 @@ internal static class ObjectInspectorView
             }
 
             case EditorPropertyKind.Enum:
-                DrawEnum(inspector, property, label, mixed);
+                DrawEnum(inspector, binding);
                 break;
 
             case EditorPropertyKind.Action:
-                if (DevToolWidgets.ActionButton(displayName, "InspectorAction_" + stateKey, DevToolButtonTone.Normal, true))
+                if (DevToolWidgets.ActionButton(displayName, binding.ActionId, DevToolButtonTone.Normal, true))
                     SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Action));
                 break;
         }
@@ -262,24 +325,24 @@ internal static class ObjectInspectorView
         }
     }
 
-    private static void DrawEnum(EditorInspectorSnapshot inspector, EditorPropertySnapshot property, string label, bool mixed)
+    private static void DrawEnum(EditorInspectorSnapshot inspector, PropertyBinding binding)
     {
+        EditorPropertySnapshot property = binding.Property;
         string[] options = property.Options ?? Array.Empty<string>();
-        string preview = mixed
+        string preview = binding.Mixed
             ? DevToolUiSettings.T("<混合>", "<Mixed>")
             : property.IntegerValue >= 0 && property.IntegerValue < options.Length
                 ? options[property.IntegerValue]
                 : property.StringValue ?? string.Empty;
 
-        if (!ImGui.BeginCombo(label, preview)) return;
+        if (!ImGui.BeginCombo(binding.Label, preview)) return;
 
-        string filterKey = "enum-search:" + inspector.ObjectIndex + ":" + property.Key;
-        string filter = Get(StringEdits, filterKey, string.Empty);
+        string filter = Get(StringEdits, binding.EnumFilterKey, string.Empty);
         if (options.Length >= 24)
         {
             ImGui.SetNextItemWidth(-1f);
-            ImGui.InputText(DevToolUiSettings.T("搜索##", "Search##") + filterKey, ref filter, 256);
-            StringEdits[filterKey] = filter;
+            ImGui.InputText(binding.EnumSearchLabel, ref filter, 256);
+            StringEdits[binding.EnumFilterKey] = filter;
             ImGui.Separator();
         }
 
@@ -290,8 +353,8 @@ internal static class ObjectInspectorView
                 option.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
                 continue;
 
-            bool selected = !mixed && i == property.IntegerValue;
-            if (ImGui.Selectable(option + "##" + label + i, selected))
+            bool selected = !binding.Mixed && i == property.IntegerValue;
+            if (ImGui.Selectable(binding.EnumOptionLabels[i], selected))
                 SendProperty(inspector, property.Key,
                     new EditorPropertyValue(EditorPropertyKind.Enum, integer: i));
             if (selected) ImGui.SetItemDefaultFocus();
@@ -321,46 +384,39 @@ internal static class ObjectInspectorView
             "通过原控件行为边界驱动布尔、Button、Slider、Cycler、ExtEnum、Integer、Select、文本、方向与颜色控件；无法证明等价的复合控件仍保持未映射。",
             "Booleans, buttons, sliders, cyclers, ExtEnums, integers, selects, text, direction and color controls are delegated through their original behavior boundaries; composite controls without proven equivalence remain unmapped."), true);
 
-        for (int i = 0; i < controls.Length; i++)
+        EnsureLegacyBindings(inspector, controls);
+        for (int i = 0; i < legacyBindings.Length; i++)
         {
-            LegacyControlSnapshot control = controls[i];
-            string stateKey = inspector.ObjectIndex + ":legacy:" + control.Path;
-            string visibleLabel = string.IsNullOrEmpty(control.Label) ? control.Id : control.Label;
-
+            LegacyBinding binding = legacyBindings[i];
+            LegacyControlSnapshot control = binding.Control;
             switch (control.Kind)
             {
                 case LegacyControlKind.Boolean:
-                    DrawLegacyBoolean(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyBoolean(inspector, binding);
                     break;
                 case LegacyControlKind.Button:
-                    DrawLegacyButton(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyButton(inspector, binding);
                     break;
                 case LegacyControlKind.Slider:
-                    DrawLegacySlider(inspector, control, stateKey, visibleLabel);
+                    DrawLegacySlider(inspector, binding);
                     break;
                 case LegacyControlKind.Cycler:
-                    DrawLegacyCycler(inspector, control, stateKey, visibleLabel);
-                    break;
                 case LegacyControlKind.ExtEnum:
-                    DrawLegacyExtEnum(inspector, control, stateKey, visibleLabel);
+                case LegacyControlKind.Select:
+                case LegacyControlKind.PanelSelect:
+                    DrawLegacyChoice(inspector, binding);
                     break;
                 case LegacyControlKind.Integer:
-                    DrawLegacyInteger(inspector, control, stateKey, visibleLabel);
-                    break;
-                case LegacyControlKind.Select:
-                    DrawLegacySelect(inspector, control, stateKey, visibleLabel);
-                    break;
-                case LegacyControlKind.PanelSelect:
-                    DrawLegacyPanelSelect(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyInteger(inspector, binding);
                     break;
                 case LegacyControlKind.Text:
-                    DrawLegacyText(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyText(inspector, binding);
                     break;
                 case LegacyControlKind.Direction:
-                    DrawLegacyDirection(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyDirection(inspector, binding);
                     break;
                 case LegacyControlKind.Color:
-                    DrawLegacyColor(inspector, control, stateKey, visibleLabel);
+                    DrawLegacyColor(inspector, binding);
                     break;
             }
         }
@@ -368,15 +424,11 @@ internal static class ObjectInspectorView
         DrawLegacyFallbackButton(inspector);
     }
 
-    private static void DrawLegacyBoolean(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyBoolean(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
+        LegacyControlSnapshot control = binding.Control;
         bool value = control.BooleanValue;
-        string label = visibleLabel + "##DevToolLegacyBoolean_" + stateKey;
-        if (ImGui.Checkbox(label, ref value))
+        if (ImGui.Checkbox(binding.BooleanLabel, ref value))
         {
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
@@ -391,29 +443,22 @@ internal static class ObjectInspectorView
         }
     }
 
-    private static void DrawLegacyButton(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyButton(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        if (DevToolWidgets.ActionButton(visibleLabel, "LegacyButton_" + stateKey, DevToolButtonTone.Normal))
+        LegacyControlSnapshot control = binding.Control;
+        if (DevToolWidgets.ActionButton(binding.VisibleLabel, binding.ButtonId, DevToolButtonTone.Normal))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
                 text: control.Path));
     }
 
-    private static void DrawLegacySlider(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacySlider(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        string label = visibleLabel + "##DevToolLegacy_" + stateKey;
-        float factor = Get(LegacySliderEdits, stateKey, control.Factor);
-        bool changed = ImGui.SliderFloat(label, ref factor, 0f, 1f, "%.3f");
-        LegacySliderEdits[stateKey] = factor;
+        LegacyControlSnapshot control = binding.Control;
+        float factor = Get(LegacySliderEdits, binding.StateKey, control.Factor);
+        bool changed = ImGui.SliderFloat(binding.SliderLabel, ref factor, 0f, 1f, "%.3f");
+        LegacySliderEdits[binding.StateKey] = factor;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
@@ -424,7 +469,7 @@ internal static class ObjectInspectorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            LegacySliderEdits[stateKey] = control.Factor;
+            LegacySliderEdits[binding.StateKey] = control.Factor;
         }
 
         if (!string.IsNullOrWhiteSpace(control.ValueText))
@@ -438,7 +483,7 @@ internal static class ObjectInspectorView
             ImGui.SameLine();
             if (DevToolWidgets.ActionButton(
                     DevToolUiSettings.T("重置", "Reset"),
-                    "LegacyReset_" + stateKey,
+                    binding.ResetId,
                     DevToolButtonTone.Subtle))
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.ResetLegacySlider,
@@ -447,117 +492,58 @@ internal static class ObjectInspectorView
         }
     }
 
-    private static void DrawLegacyCycler(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyChoice(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        DrawLegacyChoice(
-            inspector,
-            control,
-            stateKey,
-            visibleLabel,
-            "LegacyCyclerOption_",
-            i => LegacyDevInterfaceBridge.CyclerAction(control.Path, i));
-    }
-
-    private static void DrawLegacyExtEnum(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
-    {
-        DrawLegacyChoice(
-            inspector,
-            control,
-            stateKey,
-            visibleLabel,
-            "LegacyExtEnumOption_",
-            i => LegacyDevInterfaceBridge.ExtEnumAction(control.Path, i));
-    }
-
-    private static void DrawLegacySelect(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
-    {
-        DrawLegacyChoice(
-            inspector,
-            control,
-            stateKey,
-            visibleLabel,
-            "LegacySelectOption_",
-            i => LegacyDevInterfaceBridge.SelectAction(control.Path, i));
-    }
-
-    private static void DrawLegacyPanelSelect(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
-    {
-        DrawLegacyChoice(
-            inspector,
-            control,
-            stateKey,
-            visibleLabel,
-            "LegacyPanelSelectOption_",
-            i => LegacyDevInterfaceBridge.PanelSelectAction(control.Path, i));
-    }
-
-    private static void DrawLegacyChoice(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel,
-        string optionIdPrefix,
-        Func<int, string> actionFactory)
-    {
+        LegacyControlSnapshot control = binding.Control;
         string[] options = control.Options ?? Array.Empty<string>();
         string preview = control.SelectedIndex >= 0 && control.SelectedIndex < options.Length
             ? options[control.SelectedIndex]
             : control.ValueText ?? string.Empty;
-        string label = visibleLabel + "##DevToolLegacyChoice_" + stateKey;
 
-        if (!ImGui.BeginCombo(label, preview)) return;
+        if (!ImGui.BeginCombo(binding.ChoiceLabel, preview)) return;
         for (int i = 0; i < options.Length; i++)
         {
             bool selected = i == control.SelectedIndex;
-            if (ImGui.Selectable(options[i] + "##" + optionIdPrefix + stateKey + "_" + i, selected))
+            if (ImGui.Selectable(binding.ChoiceOptionLabels[i], selected))
             {
-                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                    EditorUiCommandKind.InvokeLegacyButton,
-                    inspector.ObjectIndex,
-                    text: actionFactory(i)));
+                string action = control.Kind switch
+                {
+                    LegacyControlKind.Cycler => LegacyDevInterfaceBridge.CyclerAction(control.Path, i),
+                    LegacyControlKind.ExtEnum => LegacyDevInterfaceBridge.ExtEnumAction(control.Path, i),
+                    LegacyControlKind.Select => LegacyDevInterfaceBridge.SelectAction(control.Path, i),
+                    LegacyControlKind.PanelSelect => LegacyDevInterfaceBridge.PanelSelectAction(control.Path, i),
+                    _ => string.Empty
+                };
+                if (!string.IsNullOrEmpty(action))
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.InvokeLegacyButton,
+                        inspector.ObjectIndex,
+                        text: action));
+                }
             }
             if (selected) ImGui.SetItemDefaultFocus();
         }
         ImGui.EndCombo();
     }
 
-    private static void DrawLegacyInteger(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyInteger(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        string value = string.IsNullOrWhiteSpace(control.ValueText) ? "-" : control.ValueText;
-        DevToolWidgets.MutedText(visibleLabel + ":  " + value);
+        LegacyControlSnapshot control = binding.Control;
+        DevToolWidgets.MutedText(binding.IntegerDisplay);
 
         ImGuiIOPtr io = ImGui.GetIO();
         int step = io.KeyCtrl
             ? (io.KeyShift ? 1000 : 100)
             : (io.KeyShift ? 10 : 1);
 
-        if (DevToolWidgets.ActionButton("-", "LegacyIntegerLess_" + stateKey, DevToolButtonTone.Subtle))
+        if (DevToolWidgets.ActionButton("-", binding.IntegerLessId, DevToolButtonTone.Subtle))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
                 text: LegacyDevInterfaceBridge.IntegerAction(control.Path, -step)));
         ImGui.SameLine();
-        if (DevToolWidgets.ActionButton("+", "LegacyIntegerMore_" + stateKey, DevToolButtonTone.Normal))
+        if (DevToolWidgets.ActionButton("+", binding.IntegerMoreId, DevToolButtonTone.Normal))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
@@ -569,17 +555,13 @@ internal static class ObjectInspectorView
                 "Step: 1 by default, Shift=10, Ctrl=100, Ctrl+Shift=1000."));
     }
 
-    private static void DrawLegacyText(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyText(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        string label = visibleLabel + "##DevToolLegacyText_" + stateKey;
-        string value = Get(StringEdits, stateKey, control.ValueText ?? string.Empty);
+        LegacyControlSnapshot control = binding.Control;
+        string value = Get(StringEdits, binding.StateKey, control.ValueText ?? string.Empty);
         ImGui.SetNextItemWidth(-1f);
-        bool changed = ImGui.InputText(label, ref value, 1024);
-        StringEdits[stateKey] = value;
+        bool changed = ImGui.InputText(binding.TextLabel, ref value, 1024);
+        StringEdits[binding.StateKey] = value;
 
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -591,22 +573,17 @@ internal static class ObjectInspectorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            StringEdits[stateKey] = control.ValueText ?? string.Empty;
+            StringEdits[binding.StateKey] = control.ValueText ?? string.Empty;
         }
     }
 
-    private static void DrawLegacyDirection(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyDirection(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        string editKey = "legacy-direction:" + stateKey;
-        Num.Vector2 value = Get(Vector2Edits, editKey, new Num.Vector2(control.X, control.Y));
-        string label = visibleLabel + "##DevToolLegacyDirection_" + stateKey;
+        LegacyControlSnapshot control = binding.Control;
+        Num.Vector2 value = Get(Vector2Edits, binding.DirectionEditKey, new Num.Vector2(control.X, control.Y));
         ImGui.SetNextItemWidth(-1f);
-        bool changed = ImGui.InputFloat2(label, ref value, "%.3f");
-        Vector2Edits[editKey] = value;
+        bool changed = ImGui.InputFloat2(binding.DirectionLabel, ref value, "%.3f");
+        Vector2Edits[binding.DirectionEditKey] = value;
 
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -619,7 +596,7 @@ internal static class ObjectInspectorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            Vector2Edits[editKey] = new Num.Vector2(control.X, control.Y);
+            Vector2Edits[binding.DirectionEditKey] = new Num.Vector2(control.X, control.Y);
         }
 
         if (ImGui.IsItemHovered())
@@ -628,20 +605,15 @@ internal static class ObjectInspectorView
                 "Normalized to a unit direction on commit; a zero vector becomes up."));
     }
 
-    private static void DrawLegacyColor(
-        EditorInspectorSnapshot inspector,
-        LegacyControlSnapshot control,
-        string stateKey,
-        string visibleLabel)
+    private static void DrawLegacyColor(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
-        string editKey = "legacy-color:" + stateKey;
+        LegacyControlSnapshot control = binding.Control;
         Num.Vector4 value = Get(
             ColorEdits,
-            editKey,
+            binding.ColorEditKey,
             new Num.Vector4(control.X, control.Y, control.Z, control.W));
-        string label = visibleLabel + "##DevToolLegacyColor_" + stateKey;
-        bool changed = ImGui.ColorEdit4(label, ref value, ImGuiColorEditFlags.NoAlpha);
-        ColorEdits[editKey] = value;
+        bool changed = ImGui.ColorEdit4(binding.ColorLabel, ref value, ImGuiColorEditFlags.NoAlpha);
+        ColorEdits[binding.ColorEditKey] = value;
 
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -658,7 +630,7 @@ internal static class ObjectInspectorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            ColorEdits[editKey] = new Num.Vector4(control.X, control.Y, control.Z, control.W);
+            ColorEdits[binding.ColorEditKey] = new Num.Vector4(control.X, control.Y, control.Z, control.W);
         }
     }
 
@@ -707,12 +679,139 @@ internal static class ObjectInspectorView
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
     }
 
+    private static void EnsurePropertyBindings(EditorInspectorSnapshot inspector, EditorPropertySnapshot[] properties)
+    {
+        string[] mixedKeys = inspector.MixedPropertyKeys ?? Array.Empty<string>();
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedProperties, properties) &&
+            ReferenceEquals(projectedMixedKeys, mixedKeys) &&
+            projectedPropertyObjectIndex == inspector.ObjectIndex &&
+            projectedPropertySelectionCount == inspector.SelectionCount &&
+            projectedPropertyChinese == chinese)
+            return;
+
+        MixedKeyScratch.Clear();
+        for (int i = 0; i < mixedKeys.Length; i++)
+            if (!string.IsNullOrEmpty(mixedKeys[i])) MixedKeyScratch.Add(mixedKeys[i]);
+
+        PropertyBinding[] next = new PropertyBinding[properties.Length];
+        for (int i = 0; i < properties.Length; i++)
+        {
+            EditorPropertySnapshot property = properties[i];
+            if (property == null || string.IsNullOrEmpty(property.Key))
+            {
+                next[i] = new PropertyBinding { Property = property };
+                continue;
+            }
+
+            bool mixed = MixedKeyScratch.Contains(property.Key);
+            string stateKey = inspector.ObjectIndex + ":" + inspector.SelectionCount + ":" + property.Key;
+            string displayName = (property.DisplayName ?? property.Key) +
+                                 (mixed ? DevToolUiSettings.T("  [混合]", "  [Mixed]") : string.Empty);
+            string label = displayName + "##DevToolProperty_" + stateKey;
+            string enumFilterKey = "enum-search:" + inspector.ObjectIndex + ":" + property.Key;
+            string[] options = property.Options ?? Array.Empty<string>();
+            string[] optionLabels = new string[options.Length];
+            for (int optionIndex = 0; optionIndex < options.Length; optionIndex++)
+                optionLabels[optionIndex] = (options[optionIndex] ?? string.Empty) + "##" + label + optionIndex;
+
+            next[i] = new PropertyBinding
+            {
+                Property = property,
+                Mixed = mixed,
+                StateKey = stateKey,
+                DisplayName = displayName,
+                Label = label,
+                ActionId = "InspectorAction_" + stateKey,
+                EnumFilterKey = enumFilterKey,
+                EnumSearchLabel = DevToolUiSettings.T("搜索##", "Search##") + enumFilterKey,
+                EnumOptionLabels = optionLabels
+            };
+        }
+
+        projectedProperties = properties;
+        projectedMixedKeys = mixedKeys;
+        projectedPropertyObjectIndex = inspector.ObjectIndex;
+        projectedPropertySelectionCount = inspector.SelectionCount;
+        projectedPropertyChinese = chinese;
+        propertyBindings = next;
+        MixedKeyScratch.Clear();
+    }
+
+    private static void EnsureLegacyBindings(EditorInspectorSnapshot inspector, LegacyControlSnapshot[] controls)
+    {
+        if (ReferenceEquals(projectedLegacyControls, controls) &&
+            projectedLegacyObjectIndex == inspector.ObjectIndex)
+            return;
+
+        LegacyBinding[] next = new LegacyBinding[controls.Length];
+        for (int i = 0; i < controls.Length; i++)
+        {
+            LegacyControlSnapshot control = controls[i];
+            string path = control?.Path ?? string.Empty;
+            string stateKey = inspector.ObjectIndex + ":legacy:" + path;
+            string visibleLabel = string.IsNullOrEmpty(control?.Label) ? control?.Id ?? string.Empty : control.Label;
+            string[] options = control?.Options ?? Array.Empty<string>();
+            string optionPrefix = control?.Kind switch
+            {
+                LegacyControlKind.Cycler => "LegacyCyclerOption_",
+                LegacyControlKind.ExtEnum => "LegacyExtEnumOption_",
+                LegacyControlKind.Select => "LegacySelectOption_",
+                LegacyControlKind.PanelSelect => "LegacyPanelSelectOption_",
+                _ => "LegacyChoiceOption_"
+            };
+            string[] optionLabels = new string[options.Length];
+            for (int optionIndex = 0; optionIndex < options.Length; optionIndex++)
+                optionLabels[optionIndex] = (options[optionIndex] ?? string.Empty) + "##" +
+                                            optionPrefix + stateKey + "_" + optionIndex;
+
+            string integerValue = string.IsNullOrWhiteSpace(control?.ValueText) ? "-" : control.ValueText;
+            next[i] = new LegacyBinding
+            {
+                Control = control,
+                StateKey = stateKey,
+                VisibleLabel = visibleLabel,
+                BooleanLabel = visibleLabel + "##DevToolLegacyBoolean_" + stateKey,
+                ButtonId = "LegacyButton_" + stateKey,
+                SliderLabel = visibleLabel + "##DevToolLegacy_" + stateKey,
+                ResetId = "LegacyReset_" + stateKey,
+                ChoiceLabel = visibleLabel + "##DevToolLegacyChoice_" + stateKey,
+                ChoiceOptionLabels = optionLabels,
+                IntegerDisplay = visibleLabel + ":  " + integerValue,
+                IntegerLessId = "LegacyIntegerLess_" + stateKey,
+                IntegerMoreId = "LegacyIntegerMore_" + stateKey,
+                TextLabel = visibleLabel + "##DevToolLegacyText_" + stateKey,
+                DirectionEditKey = "legacy-direction:" + stateKey,
+                DirectionLabel = visibleLabel + "##DevToolLegacyDirection_" + stateKey,
+                ColorEditKey = "legacy-color:" + stateKey,
+                ColorLabel = visibleLabel + "##DevToolLegacyColor_" + stateKey
+            };
+        }
+
+        projectedLegacyControls = controls;
+        projectedLegacyObjectIndex = inspector.ObjectIndex;
+        legacyBindings = next;
+    }
+
     private static EditorObjectTypeSnapshot FindMetadata(string type)
     {
         EditorObjectTypeSnapshot[] library = EditorPresentationHub.Current.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        for (int i = 0; i < library.Length; i++)
-            if (string.Equals(library[i].Type, type, StringComparison.Ordinal)) return library[i];
-        return null;
+        if (!ReferenceEquals(metadataSource, library))
+        {
+            MetadataByType.Clear();
+            for (int i = 0; i < library.Length; i++)
+            {
+                EditorObjectTypeSnapshot item = library[i];
+                if (item == null || string.IsNullOrEmpty(item.Type)) continue;
+                MetadataByType[item.Type] = item;
+            }
+            metadataSource = library;
+            identityMetadata = null;
+        }
+
+        return !string.IsNullOrEmpty(type) && MetadataByType.TryGetValue(type, out EditorObjectTypeSnapshot metadata)
+            ? metadata
+            : null;
     }
 
     private static Num.Vector4 ObjectSourceColor(string source)
@@ -754,14 +853,6 @@ internal static class ObjectInspectorView
             inspector.ObjectIndex,
             text: key,
             propertyValue: value));
-    }
-
-    private static bool IsMixed(EditorInspectorSnapshot inspector, string key)
-    {
-        string[] mixed = inspector?.MixedPropertyKeys ?? Array.Empty<string>();
-        for (int i = 0; i < mixed.Length; i++)
-            if (string.Equals(mixed[i], key, StringComparison.Ordinal)) return true;
-        return false;
     }
 
     private static void SynchronizePosition(EditorInspectorSnapshot inspector)
