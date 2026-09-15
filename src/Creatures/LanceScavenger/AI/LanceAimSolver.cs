@@ -48,6 +48,9 @@ internal static class LanceAimSolver
     internal const float PlanningBladeHitPadding = 5.5f;
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
+    private const float MaximumPredictedTargetTravel = 65f;
+    private const int CoarsePitchStep = 3;
+    private const int FinePitchRadius = 2;
 
     internal static LanceAimSolution Solve(LanceScavenger scav, Vector2 origin, Creature target,
         TargetMotionTracker motion)
@@ -59,23 +62,50 @@ internal static class LanceAimSolver
         float horizontalSign = Mathf.Sign(dx);
         if (horizontalSign == 0f) return default;
 
+        float horizontalDistance = Mathf.Abs(dx);
+        if (horizontalDistance < ChargeLanePlanner.MinimumChargeDistance ||
+            horizontalDistance > ChargeLanePlanner.MaximumChargeDistance(scav))
+            return default;
+
         float length = scav.Lance?.Length ?? LanceCombatMath.DefaultLength;
         float forwardLength = LanceCombatMath.ForwardLength(length);
         Vector2 targetCenter = AverageBodyPosition(target);
+        float speed = ChargeLanePlanner.ChargeSpeed(scav);
+        SearchFrameRange(target, horizontalDistance, length, forwardLength, speed,
+            out int firstSearchFrame, out int lastSearchFrame);
+
         LanceAimSolution best = default;
 
-        // Height is part of the attack solution now. The old fixed 7.3 launch remains the hard cap,
-        // but the scavenger tries a small set of lower ballistic arcs and prefers the lowest viable
-        // one when hit quality is otherwise comparable. This keeps low targets as low lunges while
-        // still allowing the full original jump for high targets or terrain that requires it.
+        // Adaptive jump height is still searched across the full 2.0..7.3 capability range, but the
+        // old brute-force solver multiplied seven heights by every single degree, every charge frame,
+        // and a full terrain-envelope test. One realized lancer could therefore execute well over
+        // one hundred thousand tile lookups per AI tick. Search geometry first at 3-degree spacing,
+        // restrict collision work to the only horizontal frames where contact can physically occur,
+        // and validate terrain only for the best one/two candidates produced by each pitch.
         foreach (float launchY in ChargeLanePlanner.ChargeLaunchYCandidates)
         {
-            for (int pitchMagnitude = 0; pitchMagnitude <= 15; pitchMagnitude++)
+            EvaluatePitch(0f, launchY);
+            for (int pitch = CoarsePitchStep; pitch <= 15; pitch += CoarsePitchStep)
             {
-                EvaluatePitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude, launchY);
-                if (pitchMagnitude > 0) EvaluatePitch(pitchMagnitude, launchY);
+                EvaluatePitch(-pitch, launchY);
+                EvaluatePitch(pitch, launchY);
             }
         }
+
+        // Recover one-degree visual/aim precision around the winning coarse solution without going
+        // back to a 31-angle x 7-height exhaustive search.
+        if (best.Valid)
+        {
+            float winningPitch = Mathf.Atan2(best.LanceDirection.y,
+                Mathf.Max(0.0001f, Mathf.Abs(best.LanceDirection.x))) * Mathf.Rad2Deg;
+            float winningHeight = best.LaunchY;
+            for (int offset = 1; offset <= FinePitchRadius; offset++)
+            {
+                EvaluatePitch(Mathf.Clamp(winningPitch - offset, MinimumLancePitch, MaximumLancePitch), winningHeight);
+                EvaluatePitch(Mathf.Clamp(winningPitch + offset, MinimumLancePitch, MaximumLancePitch), winningHeight);
+            }
+        }
+
         return best;
 
         void EvaluatePitch(float pitchDegrees, float launchY)
@@ -83,49 +113,110 @@ internal static class LanceAimSolver
             float radians = pitchDegrees * Mathf.Deg2Rad;
             Vector2 direction = new(horizontalSign * Mathf.Cos(radians), Mathf.Sin(radians));
             Vector2 body = origin;
-            Vector2 velocity = new(horizontalSign * ChargeLanePlanner.ChargeSpeed(scav), launchY);
+            Vector2 velocity = new(horizontalSign * speed, launchY);
             Vector2 previousGrip = GripPosition(body, direction);
+            LanceAimSolution pitchBest = default;
+            LanceAimSolution pitchSecond = default;
 
-            for (int frame = 1; frame <= LanceCombatState.MaxChargeFrames; frame++)
+            for (int frame = 1; frame <= lastSearchFrame; frame++)
             {
                 StepBody(ref body, ref velocity);
-
-                // Terrain is a hard feasibility constraint, not part of aim quality. Stop evaluating
-                // this arc as soon as the body or the real lance envelope cannot occupy the pose.
-                // The final ChargeLanePlanner pass still re-checks the committed solution and friends.
-                if (ChargeLanePlanner.PoseBlocked(scav, body, direction))
-                    break;
-
                 Vector2 grip = GripPosition(body, direction);
 
-                foreach (BodyChunk chunk in target.bodyChunks)
+                if (frame >= firstSearchFrame)
                 {
-                    Vector2 smoothVelocity = motion?.SmoothedVelocity(chunk) ?? chunk.vel;
-                    Vector2 oldTarget = Predict(chunk.pos, smoothVelocity, frame - 1);
-                    Vector2 newTarget = Predict(chunk.pos, smoothVelocity, frame);
+                    foreach (BodyChunk chunk in target.bodyChunks)
+                    {
+                        Vector2 smoothVelocity = motion?.SmoothedVelocity(chunk) ?? chunk.vel;
+                        Vector2 oldTarget = Predict(chunk.pos, smoothVelocity, frame - 1);
+                        Vector2 newTarget = Predict(chunk.pos, smoothVelocity, frame);
 
-                    bool exact = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
-                        forwardLength, oldTarget, newTarget, chunk.rad, ActualBladeHitPadding,
-                        out float exactFraction, out float exactBladeT);
+                        bool exact = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
+                            forwardLength, oldTarget, newTarget, chunk.rad, ActualBladeHitPadding,
+                            out float exactFraction, out float exactBladeT);
 
-                    float hitFraction = exactFraction;
-                    float bladeT = exactBladeT;
-                    bool probable = exact;
-                    if (!probable)
-                        probable = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
-                            forwardLength, oldTarget, newTarget, chunk.rad, PlanningBladeHitPadding,
-                            out hitFraction, out bladeT);
-                    if (!probable) continue;
+                        float hitFraction = exactFraction;
+                        float bladeT = exactBladeT;
+                        bool probable = exact;
+                        if (!probable)
+                            probable = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
+                                forwardLength, oldTarget, newTarget, chunk.rad, PlanningBladeHitPadding,
+                                out hitFraction, out bladeT);
+                        if (!probable) continue;
 
-                    Vector2 aim = Vector2.Lerp(oldTarget, newTarget, hitFraction);
-                    float quality = AimQuality(exact, pitchDegrees, frame, launchY, bladeT, chunk,
-                        targetCenter, smoothVelocity, motion);
-                    if (best.Valid && quality <= best.Quality + 0.001f) continue;
-                    best = new LanceAimSolution(true, aim, direction, frame, launchY, quality, chunk, exact);
+                        Vector2 aim = Vector2.Lerp(oldTarget, newTarget, hitFraction);
+                        float quality = AimQuality(exact, pitchDegrees, frame, launchY, bladeT, chunk,
+                            targetCenter, smoothVelocity, motion);
+                        LanceAimSolution candidate = new(true, aim, direction, frame, launchY, quality, chunk, exact);
+                        InsertPitchCandidate(candidate, ref pitchBest, ref pitchSecond);
+                    }
                 }
+
                 previousGrip = grip;
             }
+
+            TryAccept(pitchBest);
+            TryAccept(pitchSecond);
         }
+
+        void TryAccept(LanceAimSolution candidate)
+        {
+            if (!candidate.Valid || (best.Valid && candidate.Quality <= best.Quality + 0.001f))
+                return;
+            if (!ChargeLanePlanner.TerrainClear(scav, origin, target, candidate))
+                return;
+            best = candidate;
+        }
+    }
+
+    private static void InsertPitchCandidate(LanceAimSolution candidate,
+        ref LanceAimSolution best, ref LanceAimSolution second)
+    {
+        if (!candidate.Valid) return;
+
+        // Same pitch/height and same impact frame means the terrain path is identical even if a
+        // different BodyChunk supplied the score. Keep only the higher-quality representative.
+        if (best.Valid && best.ImpactFrame == candidate.ImpactFrame)
+        {
+            if (candidate.Quality > best.Quality) best = candidate;
+            return;
+        }
+        if (second.Valid && second.ImpactFrame == candidate.ImpactFrame)
+        {
+            if (candidate.Quality > second.Quality) second = candidate;
+            return;
+        }
+
+        if (!best.Valid || candidate.Quality > best.Quality)
+        {
+            second = best;
+            best = candidate;
+        }
+        else if (!second.Valid || candidate.Quality > second.Quality)
+        {
+            second = candidate;
+        }
+    }
+
+    private static void SearchFrameRange(Creature target, float horizontalDistance, float length,
+        float forwardLength, float speed, out int firstFrame, out int lastFrame)
+    {
+        float largestRadius = 0f;
+        foreach (BodyChunk chunk in target.bodyChunks)
+            if (chunk != null) largestRadius = Mathf.Max(largestRadius, chunk.rad);
+
+        // Predict() deliberately caps target lead at 65 px. Use the same bound to derive a safe
+        // horizontal contact window. The window includes the whole damaging blade from root to tip,
+        // target radius/planning slack, and one simulation frame on either side for discretization.
+        float margin = largestRadius + PlanningBladeHitPadding + 4f;
+        float bladeRoot = LanceCombatMath.BladeRootDistance(length);
+        float earliestTravel = horizontalDistance - MaximumPredictedTargetTravel - forwardLength - margin;
+        float latestTravel = horizontalDistance + MaximumPredictedTargetTravel - bladeRoot + margin;
+
+        firstFrame = Mathf.Clamp(Mathf.FloorToInt(earliestTravel / Mathf.Max(1f, speed)) - 1,
+            1, LanceCombatState.MaxChargeFrames);
+        lastFrame = Mathf.Clamp(Mathf.CeilToInt(latestTravel / Mathf.Max(1f, speed)) + 1,
+            firstFrame, LanceCombatState.MaxChargeFrames);
     }
 
     /// <summary>
@@ -234,7 +325,7 @@ internal static class LanceAimSolver
     }
 
     private static Vector2 Predict(Vector2 position, Vector2 velocity, int frames) =>
-        position + Vector2.ClampMagnitude(velocity * Mathf.Max(0, frames), 65f);
+        position + Vector2.ClampMagnitude(velocity * Mathf.Max(0, frames), MaximumPredictedTargetTravel);
 
     private static Vector2 GripPosition(Vector2 bodyPosition, Vector2 lanceDirection)
     {
