@@ -18,6 +18,7 @@ internal sealed class LanceMotor
     internal const float CloseDefenseGuardRange = 106f;
     internal const float CloseDefenseApproachSpeed = 2.5f;
     private const float CloseLiftRange = 32f;
+    private const float LizardHeadLiftRange = 48f;
     private const float CloseLiftDamage = 0.50f;
     private const int CloseLiftFrames = 8;
     private const int CloseLiftCooldown = 22;
@@ -189,16 +190,26 @@ internal sealed class LanceMotor
         if (!lance.CanThrust) return;
 
         float surfaceDistance = Mathf.Max(0f, toTarget.magnitude - aimChunk.rad);
-        if (surfaceDistance <= CloseLiftRange)
+        bool armoredLizardHead = target.abstractCreature?.creatureTemplate?.IsLizard == true &&
+            aimChunk.index == 0 && target.bodyChunks.Length > 1;
+
+        if (surfaceDistance <= CloseLiftRange || (armoredLizardHead && surfaceDistance <= LizardHeadLiftRange))
         {
-            // When the attacker has entered inside the long blade's comfortable straight-thrust
-            // distance, pick the weapon upward/outward instead of trying to spear through its body.
-            // This is still a real short thrust so collision remains in ScavengerLance's normal path.
-            Vector2 lift = new Vector2(face * 0.72f, Mathf.Clamp(aim.y + 0.68f, 0.38f, 1.05f)).normalized;
-            if (!DefensiveLaneClear(lance, lift, target)) return;
-            lance.RequestDefensiveThrust(lift, CloseLiftDamage, CloseLiftFrames, CloseLiftCooldown);
+            // An attacker inside the blade's comfortable straight-thrust distance gets picked
+            // upward/outward. The weapon itself rotates through this arc over eight live collision
+            // frames, so the visible sweep and the damaging sweep are the same physical motion.
+            Vector2 liftStart = new Vector2(face,
+                Mathf.Clamp(aim.y - 0.22f, -0.28f, 0.10f)).normalized;
+            Vector2 liftEnd = new Vector2(face * 0.52f,
+                Mathf.Clamp(0.86f + Mathf.Max(0f, aim.y) * 0.12f, 0.78f, 0.96f)).normalized;
+            if (!DefensiveSweepClear(lance, liftStart, liftEnd, target)) return;
+            lance.RequestDefensiveLift(liftStart, liftEnd, CloseLiftDamage, CloseLiftFrames, CloseLiftCooldown);
             return;
         }
+
+        // Do not repeatedly stab the armored lizard head just because it is the only visible chunk.
+        // Keep guarding and let vanilla movement expose neck/body, or use the lift once it gets close.
+        if (armoredLizardHead) return;
 
         if (surfaceDistance <= CloseDefenseRange)
         {
@@ -211,25 +222,45 @@ internal sealed class LanceMotor
     private BodyChunk SelectCloseDefenseChunk(Creature target)
     {
         if (target?.bodyChunks == null || target.bodyChunks.Length == 0) return null;
-        BodyChunk best = target.mainBodyChunk;
-        float bestScore = float.MaxValue;
         bool lizard = target.abstractCreature?.creatureTemplate?.IsLizard == true;
 
+        // For lizards first make a strict pass over non-head chunks. This mirrors vanilla scavenger
+        // spear discipline: body/neck is worth attacking, while chunk 0 is the armored head and is a
+        // poor straight-thrust target. Only fall back to the head when no body chunk is reasonably
+        // available, allowing the close-range lift to create space instead of wasting a stab.
+        BodyChunk preferred = BestCloseChunk(target, skipLizardHead: lizard && target.bodyChunks.Length > 1);
+        return preferred ?? BestCloseChunk(target, skipLizardHead: false) ?? target.mainBodyChunk;
+    }
+
+    private BodyChunk BestCloseChunk(Creature target, bool skipLizardHead)
+    {
+        BodyChunk best = null;
+        float bestScore = float.MaxValue;
         foreach (BodyChunk chunk in target.bodyChunks)
         {
-            if (chunk == null) continue;
+            if (chunk == null || (skipLizardHead && chunk.index == 0)) continue;
             float score = Vector2.Distance(_owner.mainBodyChunk.pos, chunk.pos);
             if (!_owner.room.VisualContact(_owner.mainBodyChunk.pos, chunk.pos)) score += 100f;
-
-            // Lizard body chunk 0 is the armored head. Prefer neck/body chunks whenever one is
-            // reasonably available so close defense does not repeatedly waste the lance on the mask.
-            if (lizard && chunk.index == 0 && target.bodyChunks.Length > 1) score += 42f;
-
             if (score >= bestScore) continue;
             bestScore = score;
             best = chunk;
         }
-        return best;
+
+        // A completely occluded body chunk should not beat a visible fallback head merely because it
+        // is geometrically a little closer.
+        return bestScore < 100f + CloseDefenseGuardRange ? best : null;
+    }
+
+    private bool DefensiveSweepClear(ScavengerLance lance, Vector2 from, Vector2 to, Creature target)
+    {
+        float start = Custom.VecToDeg(from);
+        float end = Custom.VecToDeg(to);
+        for (int i = 0; i <= 5; i++)
+        {
+            Vector2 direction = Custom.DegToVec(Mathf.LerpAngle(start, end, i / 5f));
+            if (!DefensiveLaneClear(lance, direction, target)) return false;
+        }
+        return true;
     }
 
     private bool DefensiveLaneClear(ScavengerLance lance, Vector2 direction, Creature target)
