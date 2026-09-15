@@ -149,3 +149,63 @@ jobs:
             scripts/validate-devtool-phase6-local.ps1
             mod/modify/**
             mod/world/**
+
+  restore-bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Prepare placeholder Rain World references for restore only
+        shell: bash
+        run: |
+          set -euo pipefail
+          rw="$RUNNER_TEMP/fake-rain-world"
+          mkdir -p "$rw/BepInEx/core" "$rw/BepInEx/utils" "$rw/BepInEx/plugins" "$rw/RainWorld_Data/Managed"
+          touch \
+            "$rw/BepInEx/core/BepInEx.dll" \
+            "$rw/BepInEx/core/MonoMod.RuntimeDetour.dll" \
+            "$rw/BepInEx/core/MonoMod.Utils.dll" \
+            "$rw/BepInEx/core/Mono.Cecil.dll" \
+            "$rw/BepInEx/utils/PUBLIC-Assembly-CSharp.dll" \
+            "$rw/BepInEx/plugins/HOOKS-Assembly-CSharp.dll" \
+            "$rw/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.CoreModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.AudioModule.dll" \
+            "$rw/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll" \
+            "$rw/RainWorld_Data/Managed/Unity.Mathematics.dll"
+          echo "PHASE6_RESTORE_RW=$rw" >> "$GITHUB_ENV"
+
+      - name: Restore public NuGet build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore src/DryCycle.csproj \
+            -p:RainWorldDir="$PHASE6_RESTORE_RW" \
+            -p:DeployToGame=false \
+            --nologo
+
+          out="$RUNNER_TEMP/phase6-nuget"
+          mkdir -p "$out"
+          for pattern in \
+            "$HOME/.nuget/packages/polysharp" \
+            "$HOME/.nuget/packages/microsoft.netframework.referenceassemblies" \
+            "$HOME/.nuget/packages/microsoft.netframework.referenceassemblies.net48"; do
+            if [ -e "$pattern" ]; then
+              cp -a "$pattern" "$out/"
+            fi
+          done
+          find "$out" -maxdepth 3 -type f | sort | head -100
+          test -d "$out/polysharp"
+
+      - name: Publish public NuGet restore cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-nuget-bootstrap-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ runner.temp }}/phase6-nuget/**
