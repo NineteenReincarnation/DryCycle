@@ -10,6 +10,8 @@ coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 legacy_controller="$root/Compatibility/LegacyUiPresentationController.cs"
 universal_presentation="$root/Compatibility/UniversalDevUiPresentation.cs"
 diagnostics_publisher="$root/Compatibility/DevUiDiagnosticsPublisher.cs"
+full_audit="$root/Compatibility/DevUiFullAudit.cs"
+migration_coverage="$root/Compatibility/DevUiMigrationCoverage.cs"
 page_coverage="$root/Compatibility/DevUiPageCoverageTracker.cs"
 protocol_inventory="$root/Compatibility/DevUiProtocolInventory.cs"
 
@@ -92,7 +94,6 @@ if grep -Fq 'UniversalDevUiPresentationHub.Publish(session.Owner)' "$coordinator
 fi
 
 required_diagnostics_publisher_symbols=(
-  'DevUiGenericProtocolBootstrap.Ensure()'
   'DevUiFullAudit.ObserveAll(owner)'
   'UniversalDevUiPresentationHub.Publish(owner)'
   'DevUiPageCoverageTracker.Observe(owner, mirror)'
@@ -106,6 +107,32 @@ for symbol in "${required_diagnostics_publisher_symbols[@]}"; do
     exit 1
   fi
 done
+
+# Phase 6 removed two stage-era compatibility helpers. Container protocols are already classified
+# structurally by MigrationCoverage, and unknown non-Button Clicked() controls must remain visible as
+# protocol gaps until the generic action bridge actually supports them.
+if [[ -e "$root/Compatibility/DevUiGenericProtocolBootstrap.cs" ||
+      -e "$root/Compatibility/UniversalDevUiProtocolAugmenter.cs" ]]; then
+  echo "Obsolete generic compatibility bootstrap/augmenter was reintroduced." >&2
+  exit 1
+fi
+if grep -Fq 'static DevUiFullAudit()' "$full_audit" ||
+   grep -Fq 'DevUiMigrationCoverage.RegisterAssignable(' "$full_audit"; then
+  echo "DevUiFullAudit must not own a second protocol-registration bootstrap." >&2
+  exit 1
+fi
+
+# MigrationCoverage is diagnostics, not a public extension-registration surface. Third parties that
+# want native behavior must use the Phase 5 DevTool Extension API; they may not declare a type mapped
+# merely by calling a public coverage-registration helper.
+public_migration_registration_hits="$(
+  grep -nE 'public static void Register(Exact|Assignable|TypeName)\(' "$migration_coverage" || true
+)"
+if [[ -n "$public_migration_registration_hits" ]]; then
+  echo "MigrationCoverage compatibility declarations became public again:" >&2
+  echo "$public_migration_registration_hits" >&2
+  exit 1
+fi
 
 # Phase 6 removes framework-specific native inspectors from core ownership. Unknown/third-party
 # controls must use the Extension API, generic DevInterface protocol bridge, data model, or Vanilla
