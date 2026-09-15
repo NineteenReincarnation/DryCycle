@@ -35,6 +35,7 @@ internal static class LanceScavengerHooks
         On.ScavengerAbstractAI.InitGearUp -= InitGear;
         _enabled = false;
     }
+
     private static void Act(On.Scavenger.orig_Act orig, Scavenger self)
     {
         if (self is not LanceScavenger lance || lance.Brain == null) { orig(self); return; }
@@ -47,52 +48,77 @@ internal static class LanceScavengerHooks
             self.commitToMoveCounter = 0;
             self.moving = false;
         }
-        // Vanilla Act calls AI.Update. It must not tick a second time this frame.
         lance.Brain.SkipNextUpdate = true;
         try { orig(self); } finally { lance.Brain.SkipNextUpdate = false; }
-        // Brace/recovery still need vanilla leg support and torso stabilization.
-        // Only the airborne charge replaces locomotion completely.
         if (holdPosition) lance.Motor.Act();
     }
+
     private static void CombatUpdate(On.Scavenger.orig_CombatUpdate orig, Scavenger self)
     {
-        // While the custom lance is held, its own physical attack owns the actual strike.
-        // If disarmed, fall all the way back to ordinary scavenger CombatUpdate.
-        if (self is LanceScavenger lance && lance.Lance != null) return;
+        if (self is LanceScavenger lance && lance.Lance != null)
+        {
+            // Vanilla combat is permitted only for the disposable grasp-0 spear while
+            // the lance planner currently has no valid charge opportunity.
+            if (lance.Brain?.AllowVanillaSidearmCombat == true &&
+                lance.SidearmSpear != null && self.grasps[0]?.grabbed == lance.SidearmSpear)
+            {
+                orig(self);
+            }
+            return;
+        }
         orig(self);
     }
+
     private static void Throw(On.Scavenger.orig_Throw orig, Scavenger self, Vector2 direction)
     {
-        if (self is LanceScavenger && self.grasps[0]?.grabbed is ScavengerLance) return;
+        if (self is LanceScavenger lance)
+        {
+            if (self.grasps[0]?.grabbed is ScavengerLance) return;
+            if (lance.Lance != null && self.grasps[0]?.grabbed is Spear &&
+                lance.Combat.State != LanceState.FollowUpThrow && lance.Brain?.AllowVanillaSidearmCombat != true)
+                return;
+        }
         orig(self, direction);
     }
+
     private static void CheckThrow(On.ScavengerAI.orig_CheckThrow orig, ScavengerAI self)
     {
-        // AttackBehavior calls this independently of Scavenger.CombatUpdate.
-        // A ThrowChargeAnimation otherwise competes with the lance's brace.
-        if (self.scavenger is LanceScavenger lance && lance.Lance != null) return;
+        if (self.scavenger is LanceScavenger lance && lance.Lance != null)
+        {
+            // base ScavengerAI.Update may call CheckThrow several times. Suppress those
+            // passes and let LanceScavengerAI call one explicit pass after deciding that
+            // no charge is currently available.
+            if (lance.Brain?.SidearmThrowPass == true &&
+                lance.SidearmSpear != null && lance.grasps[0]?.grabbed == lance.SidearmSpear)
+                orig(self);
+            return;
+        }
         orig(self);
     }
+
     private static int WeaponScore(On.ScavengerAI.orig_WeaponScore orig, ScavengerAI self,
         PhysicalObject obj, bool pickupDropInsteadOfWeaponSelection, bool reallyWantsSpear)
     {
         if (obj is ScavengerLance) return self.scavenger is LanceScavenger ? 12 : 3;
         return orig(self, obj, pickupDropInsteadOfWeaponSelection, reallyWantsSpear);
     }
+
     private static void InitGear(On.ScavengerAbstractAI.orig_InitGearUp orig, ScavengerAbstractAI self)
     {
         if (self.parent.creatureTemplate.type != LanceScavengerDefinition.Type) orig(self);
     }
+
     private static int CollectScore(On.ScavengerAI.orig_CollectScore_PhysicalObject_bool orig, ScavengerAI self, PhysicalObject obj, bool weaponFiltered)
     {
         if (obj is not ScavengerLance) return orig(self, obj, weaponFiltered);
-        // Preserve vanilla ownership checks before granting this independent item value.
         SocialEventRecognizer.OwnedItemOnGround owned = self.scavenger.room?.socialEventRecognizer?.ItemOwnership(obj);
         if (owned?.offeredTo != null && owned.offeredTo != self.scavenger) return 0;
         return self.scavenger is LanceScavenger ? 12 : 3;
     }
+
     private static bool RealWeapon(On.ScavengerAI.orig_RealWeapon orig, ScavengerAI self, PhysicalObject obj) =>
         obj is ScavengerLance || orig(self, obj);
+
     private static void Relationships(On.StaticWorld.orig_InitStaticWorld orig)
     {
         orig();
