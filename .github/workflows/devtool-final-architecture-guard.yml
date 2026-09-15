@@ -1,0 +1,22 @@
+name: DevTool Final Architecture Guard
+
+on:
+  pull_request:
+    paths:
+      - 'src/DevUI/DevTool/**'
+      - 'scripts/validate-devtool-final-architecture.sh'
+      - '.github/workflows/devtool-final-architecture-guard.yml'
+  push:
+    paths:
+      - 'src/DevUI/DevTool/**'
+      - 'scripts/validate-devtool-final-architecture.sh'
+      - '.github/workflows/devtool-final-architecture-guard.yml'
+
+jobs:
+  architecture-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate final DevTool architecture boundaries
+        shell: bash
+        run: bash scripts/validate-devtool-final-architecture.sh
