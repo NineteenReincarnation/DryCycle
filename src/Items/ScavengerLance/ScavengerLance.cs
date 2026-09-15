@@ -23,6 +23,7 @@ internal sealed partial class ScavengerLance : Weapon
     private float _lastBend;
     private float _bendVelocity;
     private Vector2 _thrustDirection;
+    private float _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
 
     internal ScavengerLance(AbstractScavengerLance data, World world) : base(data, world)
     {
@@ -52,18 +53,19 @@ internal sealed partial class ScavengerLance : Weapon
         _gripValid = false;
         _wasCharging = false;
         _thrustFrames = _flightFrames = 0;
+        _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
         _hitCreatures.Clear();
         _shaftContacts.Clear();
     }
 
-    internal void RequestThrust(Vector2 direction)
+    internal void RequestThrust(Vector2 direction, float maxDamage = LanceCombatMath.StandardThrustMaxDamage)
     {
         if (!CanThrust || Holder == null || !Holder.Consious) return;
         _thrustDirection = direction.sqrMagnitude > 0.01f ? direction.normalized : rotation;
         _thrustFrames = 12;
         _thrustCooldown = 44;
+        _thrustMaxDamage = Mathf.Max(0.12f, maxDamage);
         _hitCreatures.Clear();
-        // Orient before recording the attack sweep: turning the shaft is not a stab.
         rotation = _thrustDirection;
         setRotation = rotation;
         _previousTip = Tip;
@@ -75,14 +77,13 @@ internal sealed partial class ScavengerLance : Weapon
         IntVector2 direction, float force, bool eu)
     {
         base.Thrown(thrower, pos, traceFrom, direction, Mathf.Min(force, 0.38f), eu);
-        // Free-mode rigid-rod flight owns all collisions. Weapon's center projectile
-        // trace would otherwise turn a shaft hit into the same event as a tip hit.
         ChangeMode(Mode.Free);
         rotation = direction.ToVector2().normalized;
         lastRotation = rotation;
         rotationSpeed = 0f;
         _flightFrames = 28;
         _thrustFrames = 0;
+        _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
         _hitCreatures.Clear();
         _havePreviousPose = false;
     }
@@ -103,8 +104,6 @@ internal sealed partial class ScavengerLance : Weapon
         if (charging && !_wasCharging)
         {
             _hitCreatures.Clear();
-            // Align the old endpoint as well: only forward travel, not swinging
-            // the lance down into charge posture, may generate a piercing sweep.
             if (_havePreviousPose)
                 _previousTip = _previousGrip + _grip.Direction.normalized * (Length * (1f - LanceCombatMath.GripFraction));
         }
@@ -112,8 +111,6 @@ internal sealed partial class ScavengerLance : Weapon
         if (holder != null)
         {
             if (mode != Mode.Carried) ChangeMode(Mode.Carried);
-            // Player.GraphicsModuleUpdated owns the hand position and normal
-            // weapon rotation, just as it does for a spear. Only a jab overrides it.
             if (holder is not Player || _thrustFrames > 0)
             {
                 Vector2 desired = _thrustFrames > 0 ? _thrustDirection : _gripValid ? _grip.Direction : GenericDirection(holder);
@@ -131,6 +128,7 @@ internal sealed partial class ScavengerLance : Weapon
         if (holder != null && (!holder.Consious || holder.enteringShortCut.HasValue || holder.inShortcut))
         {
             _thrustFrames = 0;
+            _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
             _havePreviousPose = false;
             return;
         }
@@ -151,14 +149,16 @@ internal sealed partial class ScavengerLance : Weapon
         ResolveShaft();
         if (sweptWall || rodWall) ResolveTerrain(holder, speed, charging);
 
-        if (_thrustFrames > 0) _thrustFrames--;
+        if (_thrustFrames > 0)
+        {
+            _thrustFrames--;
+            if (_thrustFrames == 0) _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
+        }
         _previousTip = Tip;
         _previousGrip = firstChunk.pos;
         if (_clock % 240 == 0) _shaftContacts.Clear();
     }
 
-    // Scavenger's vanilla graphics callback also positions held items. This method
-    // restores the authoritative physical grip after that callback, without ticking AI.
     internal void SynchronizeGrip(bool eu)
     {
         Creature holder = Holder;
@@ -205,17 +205,17 @@ internal sealed partial class ScavengerLance : Weapon
         bool thrust = _thrustFrames > 0 || _flightFrames > 0;
         float speed = charging ? Mathf.Max(0f, holderSpeed) : Mathf.Max(0f, Vector2.Dot(relative, rotation));
         LanceImpact impact = LanceCombatMath.Impact(speed, alignment, holder?.TotalMass ?? TotalMass,
-            victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust);
+            victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust, _thrustMaxDamage);
         if (impact.Damage <= 0f) return;
         _hitCreatures.Add(victim);
         victim.SetKillTag((holder ?? thrownBy)?.abstractCreature);
         victim.Violence(firstChunk, rotation * impact.Impulse, nearest, null, Creature.DamageType.Stab, impact.Damage, impact.Stun);
         nearest.vel += rotation * (impact.Impulse / Mathf.Max(0.25f, victim.TotalMass));
-        if (charging && holder is ILanceWielder wielder)
+        if (charging && holder is ILanceWielder lanceWielder)
         {
             foreach (BodyChunk chunk in holder.bodyChunks)
                 chunk.vel -= rotation * Mathf.Max(0f, Vector2.Dot(chunk.vel, rotation)) * (1f - impact.RetainedSpeed);
-            wielder.LanceImpact(false, speed, impact.RetainedSpeed);
+            lanceWielder.LanceImpact(false, speed, impact.RetainedSpeed);
         }
         else if (holder == null) { firstChunk.vel *= 0.35f; _flightFrames = 0; }
         _bendVelocity += Mathf.Min(3.5f, impact.Impulse * 0.4f);
@@ -243,7 +243,7 @@ internal sealed partial class ScavengerLance : Weapon
                     motion / Mathf.Max(0.5f, target.TotalMass);
                 if (_thrustFrames > 0 && target.TotalMass < 1.5f) target.Stun(3);
                 _shaftContacts[target] = _clock;
-                break; // Shaft and butt only push; they never call Violence.
+                break;
             }
         }
     }
@@ -272,15 +272,13 @@ internal sealed partial class ScavengerLance : Weapon
             _wallCooldown = 14;
         }
         _flightFrames = _thrustFrames = 0;
+        _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
         if (charging && holder != null && speed > 0f)
             foreach (BodyChunk chunk in holder.bodyChunks) chunk.vel -= rotation * Vector2.Dot(chunk.vel, rotation) * 0.35f;
         else if (holder == null)
         { firstChunk.vel *= 0.6f; rotationSpeed *= -0.2f; }
 
-        // A held weapon keeps the wielder's pose, like an ordinary spear. Terrain
-        // can stop an attack but must not spin the player's hand or steer the holder.
         if (holder != null) return;
-        // Dropped lances still settle as a rigid rod against terrain.
         float angle = Custom.VecToDeg(rotation);
         for (int step = 1; step <= 12; step++)
             for (int side = -1; side <= 1; side += 2)
