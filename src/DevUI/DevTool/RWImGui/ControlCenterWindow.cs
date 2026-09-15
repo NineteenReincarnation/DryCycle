@@ -37,10 +37,12 @@ internal static class ControlCenterWindow
     private static bool projectedHeaderChinese;
     private static string headerModeLabel = string.Empty;
 
+    private static bool placementProjectionValid;
     private static string projectedPlacementType = string.Empty;
     private static bool projectedPlacementChinese;
     private static string placementLabel = string.Empty;
 
+    private static bool commandProjectionValid;
     private static string projectedUndoSource = string.Empty;
     private static string projectedRedoSource = string.Empty;
     private static bool projectedCommandChinese;
@@ -352,12 +354,14 @@ internal static class ControlCenterWindow
     {
         string source = placementType ?? string.Empty;
         bool chinese = DevToolUiSettings.IsChinese;
-        if (projectedPlacementChinese == chinese &&
+        if (placementProjectionValid &&
+            projectedPlacementChinese == chinese &&
             string.Equals(projectedPlacementType, source, StringComparison.Ordinal))
             return placementLabel;
 
         projectedPlacementChinese = chinese;
         projectedPlacementType = source;
+        placementProjectionValid = true;
         placementLabel = DevToolUiSettings.T("放置：", "Place: ") + source;
         return placementLabel;
     }
@@ -367,7 +371,8 @@ internal static class ControlCenterWindow
         undoSource ??= string.Empty;
         redoSource ??= string.Empty;
         bool chinese = DevToolUiSettings.IsChinese;
-        if (projectedCommandChinese == chinese &&
+        if (commandProjectionValid &&
+            projectedCommandChinese == chinese &&
             string.Equals(projectedUndoSource, undoSource, StringComparison.Ordinal) &&
             string.Equals(projectedRedoSource, redoSource, StringComparison.Ordinal))
             return;
@@ -375,6 +380,7 @@ internal static class ControlCenterWindow
         projectedCommandChinese = chinese;
         projectedUndoSource = undoSource;
         projectedRedoSource = redoSource;
+        commandProjectionValid = true;
         undoCommandLabel = string.IsNullOrEmpty(undoSource)
             ? DevToolUiSettings.T("撤销", "Undo")
             : DevToolUiSettings.T("撤销 ", "Undo ") + undoSource;
