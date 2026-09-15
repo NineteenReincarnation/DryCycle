@@ -129,8 +129,6 @@ internal sealed class LanceMotor
             Custom.DirVec(_owner.mainBodyChunk.pos, _owner.Brain.Target.mainBodyChunk.pos);
         foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= state == LanceState.FollowUpThrow ? 0.78f : 0.65f;
         _owner.WeightedPush(1, 0, new Vector2(aim.x, 0f), state == LanceState.Brace ? 0.15f : 0.08f);
-        if (state == LanceState.Brace && _owner.Combat.Age == 1)
-            _owner.room.PlaySound(SoundID.Scavenger_Knuckle_Hit_Ground, _owner.mainBodyChunk.pos, 0.55f, 0.7f);
         if (state == LanceState.CloseDefense)
             _owner.Lance?.RequestThrust(aim, LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
     }
