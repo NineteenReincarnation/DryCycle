@@ -21,6 +21,10 @@ internal static class RelationshipEditorView
     private static readonly EditorRelationshipValueSnapshot EmptyRelationship = new();
     private static string primarySearch = string.Empty;
     private static string matrixSearch = string.Empty;
+    private static string observedPrimarySearch;
+    private static string normalizedPrimarySearch = string.Empty;
+    private static string observedMatrixSearch;
+    private static string normalizedMatrixSearch = string.Empty;
     private static bool changedOnly;
     private static readonly Dictionary<string, float> IntensityEdits = new(StringComparer.Ordinal);
 
@@ -32,6 +36,26 @@ internal static class RelationshipEditorView
     private static string inspectorEditPrimary = string.Empty;
     private static string inspectorEditOther = string.Empty;
     private static EditorRelationshipDirection inspectorEditDirection;
+
+    internal static void ResetRetainedState()
+    {
+        IntensityEdits.Clear();
+        projectedCreatureTypes = null;
+        projectedCreatureLabels = Array.Empty<string>();
+        projectedRowsSource = null;
+        projectedRows = Array.Empty<MatrixRowPresentation>();
+        inspectorEditKey = string.Empty;
+        inspectorEditPrimary = string.Empty;
+        inspectorEditOther = string.Empty;
+        inspectorEditDirection = default;
+        primarySearch = string.Empty;
+        matrixSearch = string.Empty;
+        observedPrimarySearch = null;
+        normalizedPrimarySearch = string.Empty;
+        observedMatrixSearch = null;
+        normalizedMatrixSearch = string.Empty;
+        changedOnly = false;
+    }
 
     internal static void DrawBrowser(EditorRelationshipPresentationSnapshot snapshot)
     {
@@ -47,7 +71,7 @@ internal static class RelationshipEditorView
 
         string[] creatures = snapshot.CreatureTypes ?? Array.Empty<string>();
         EnsureCreatureLabels(creatures);
-        string primaryQuery = NormalizeSearch(primarySearch);
+        string primaryQuery = PrimarySearchQuery();
         int matches = 0;
         for (int i = 0; i < creatures.Length; i++)
         {
@@ -115,7 +139,7 @@ internal static class RelationshipEditorView
 
         EditorRelationshipRowSnapshot[] rows = snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
         EnsureMatrixRows(rows);
-        string matrixQuery = NormalizeSearch(matrixSearch);
+        string matrixQuery = MatrixSearchQuery();
         int visible = 0;
         for (int i = 0; i < projectedRows.Length; i++)
         {
@@ -337,7 +361,21 @@ internal static class RelationshipEditorView
         return inspectorEditKey;
     }
 
-    private static string NormalizeSearch(string query) => query?.Trim() ?? string.Empty;
+    private static string PrimarySearchQuery()
+    {
+        if (string.Equals(observedPrimarySearch, primarySearch, StringComparison.Ordinal)) return normalizedPrimarySearch;
+        observedPrimarySearch = primarySearch;
+        normalizedPrimarySearch = primarySearch?.Trim() ?? string.Empty;
+        return normalizedPrimarySearch;
+    }
+
+    private static string MatrixSearchQuery()
+    {
+        if (string.Equals(observedMatrixSearch, matrixSearch, StringComparison.Ordinal)) return normalizedMatrixSearch;
+        observedMatrixSearch = matrixSearch;
+        normalizedMatrixSearch = matrixSearch?.Trim() ?? string.Empty;
+        return normalizedMatrixSearch;
+    }
 
     private static bool Matches(string value, string normalizedQuery) =>
         string.IsNullOrEmpty(normalizedQuery) ||
