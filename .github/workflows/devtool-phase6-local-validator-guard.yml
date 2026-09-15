@@ -100,10 +100,28 @@ jobs:
           echo "PHASE6_FAKE_IMGUI=$imgui" >> "$GITHUB_ENV"
           echo "$fakebin" >> "$GITHUB_PATH"
 
-      - name: Exercise validator control flow
+      - name: Exercise backend-only validator flow
         shell: pwsh
         run: |
-          $buildRoot = Join-Path $env:RUNNER_TEMP 'phase6-validator-output'
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'phase6-validator-backend-only'
+          & ./scripts/validate-devtool-phase6-local.ps1 `
+            -RainWorldDir $env:PHASE6_FAKE_RW `
+            -BuildRoot $buildRoot `
+            -BackendOnly
+
+          if (-not (Test-Path (Join-Path $buildRoot 'DryCycle.dll') -PathType Leaf)) {
+            throw 'Synthetic backend-only output was not produced.'
+          }
+          if (Test-Path (Join-Path $buildRoot 'DryCycle.DevTool.RWImGui.dll') -PathType Leaf) {
+            throw 'Backend-only mode unexpectedly produced the frontend output.'
+          }
+
+          Write-Host 'Phase 6 backend-only validator smoke test passed.'
+
+      - name: Exercise full validator flow
+        shell: pwsh
+        run: |
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'phase6-validator-full'
           & ./scripts/validate-devtool-phase6-local.ps1 `
             -RainWorldDir $env:PHASE6_FAKE_RW `
             -RWImGuiPluginDir $env:PHASE6_FAKE_IMGUI `
@@ -116,4 +134,4 @@ jobs:
             throw 'Synthetic frontend output was not produced.'
           }
 
-          Write-Host 'Phase 6 local validator control-flow smoke test passed.'
+          Write-Host 'Phase 6 full validator smoke test passed.'
