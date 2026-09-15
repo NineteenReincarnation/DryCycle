@@ -20,12 +20,77 @@ internal static class RoomSettingsView
         Effects
     }
 
+    private sealed class EffectBrowserRow
+    {
+        internal string Type;
+        internal string Category;
+        internal string Label;
+        internal Num.Vector4 SourceColor;
+    }
+
+    private sealed class EffectSliderBinding
+    {
+        internal string StateKey;
+        internal string WidgetId;
+        internal string DisplayName;
+    }
+
+    private sealed class EffectBinding
+    {
+        internal EditorRoomEffectSnapshot Effect;
+        internal string Header;
+        internal string RemoveId;
+        internal EffectSliderBinding[] Sliders = Array.Empty<EffectSliderBinding>();
+    }
+
+    private sealed class TemplateBinding
+    {
+        internal string Name;
+        internal string ComboLabel;
+        internal string SaveLabel;
+        internal string SaveId;
+    }
+
+    private sealed class FadeBinding
+    {
+        internal string StateKey;
+        internal string Label;
+        internal string WidgetId;
+    }
+
     private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> SettingWidgetIds = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> InheritanceWidgetIds = new(StringComparer.Ordinal);
+
     private static Section section = Section.Environment;
     private static string effectSearch = string.Empty;
     private static bool effectsExpanded = true;
     private const float BrowserBodyFontScale = 1.22f;
+
+    private static string[] projectedAvailableEffects;
+    private static string[] projectedEffectCategories;
+    private static string projectedEffectSearch = string.Empty;
+    private static readonly List<EffectBrowserRow> effectBrowserRows = new();
+
+    private static EditorRoomEffectSnapshot[] projectedEffects;
+    private static bool projectedEffectsChinese;
+    private static EffectBinding[] effectBindings = Array.Empty<EffectBinding>();
+
+    private static string[] projectedTemplateNames;
+    private static string projectedTemplateRegion = string.Empty;
+    private static bool projectedTemplateChinese;
+    private static TemplateBinding[] templateBindings = Array.Empty<TemplateBinding>();
+    private static string templatePreviewRegion = string.Empty;
+    private static string templatePreviewName = string.Empty;
+    private static string templatePreview = string.Empty;
+
+    private static int projectedFadeCount = -1;
+    private static bool projectedFadeChinese;
+    private static FadeBinding[] fadeBindings = Array.Empty<FadeBinding>();
+    private static int projectedTerrainFadeCount = -1;
+    private static bool projectedTerrainFadeChinese;
+    private static FadeBinding[] terrainFadeBindings = Array.Empty<FadeBinding>();
 
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
     {
@@ -50,46 +115,40 @@ internal static class RoomSettingsView
         ImGui.InputText("##RoomEffectSearch", ref effectSearch, 128);
         ImGui.Spacing();
 
-        string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
-        string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
+        EnsureEffectBrowserProjection(snapshot);
         string lastCategory = null;
-        int matches = 0;
         bool effectHovered = false;
-        for (int i = 0; i < available.Length; i++)
+        for (int i = 0; i < effectBrowserRows.Count; i++)
         {
-            string type = available[i];
-            if (!Matches(type, effectSearch)) continue;
-            matches++;
-
-            string category = i < categories.Length ? categories[i] : string.Empty;
-            if (!string.Equals(lastCategory, category, StringComparison.Ordinal))
+            EffectBrowserRow row = effectBrowserRows[i];
+            if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
             {
-                lastCategory = category;
-                if (!string.IsNullOrEmpty(category))
-                    DevToolWidgets.SourceHeader(category, EffectSourceColor(category), 1.52f, BrowserBodyFontScale);
+                lastCategory = row.Category;
+                if (!string.IsNullOrEmpty(row.Category))
+                    DevToolWidgets.SourceHeader(row.Category, row.SourceColor, 1.52f, BrowserBodyFontScale);
             }
 
-            bool clicked = ImGui.Selectable(type + "##RoomAddEffect" + type, false);
+            bool clicked = ImGui.Selectable(row.Label, false);
             bool hovered = ImGui.IsItemHovered();
             if (clicked)
             {
                 effectHovered = true;
-                EffectPreviewIntentHub.SuppressForCommit(type);
+                EffectPreviewIntentHub.SuppressForCommit(row.Type);
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                     RoomEditorCommandKind.AddEffect,
-                    key: type));
+                    key: row.Type));
             }
             else if (hovered)
             {
                 effectHovered = true;
-                EffectPreviewIntentHub.Hover(type);
+                EffectPreviewIntentHub.Hover(row.Type);
             }
         }
 
         if (!effectHovered)
             EffectPreviewIntentHub.ClearHover();
 
-        if (matches == 0)
+        if (effectBrowserRows.Count == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的效果。", "No matching effects."));
     }
 
@@ -295,10 +354,9 @@ internal static class RoomSettingsView
             return;
         }
 
+        EnsureTemplateBindings(snapshot);
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("继承自模板", "INHERIT FROM TEMPLATE"));
-        string preview = string.Equals(snapshot.CurrentTemplate, "NONE", StringComparison.OrdinalIgnoreCase)
-            ? "NONE"
-            : snapshot.RegionName + " - " + snapshot.CurrentTemplate;
+        string preview = GetTemplatePreview(snapshot);
 
         BeginSettingRow(DevToolUiSettings.T("当前模板", "Current Template"), 0f, out _);
         if (ImGui.BeginCombo("##RoomTemplate", preview))
@@ -308,13 +366,12 @@ internal static class RoomSettingsView
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SetTemplate, key: "NONE"));
             if (none) ImGui.SetItemDefaultFocus();
 
-            string[] names = snapshot.TemplateNames ?? Array.Empty<string>();
-            for (int i = 0; i < names.Length; i++)
+            for (int i = 0; i < templateBindings.Length; i++)
             {
-                string name = names[i];
-                bool selected = string.Equals(snapshot.CurrentTemplate, name, StringComparison.OrdinalIgnoreCase);
-                if (ImGui.Selectable(snapshot.RegionName + " - " + name + "##RoomTemplate" + i, selected))
-                    RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SetTemplate, key: name));
+                TemplateBinding binding = templateBindings[i];
+                bool selected = string.Equals(snapshot.CurrentTemplate, binding.Name, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable(binding.ComboLabel, selected))
+                    RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SetTemplate, key: binding.Name));
                 if (selected) ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
@@ -325,17 +382,16 @@ internal static class RoomSettingsView
             "与原版一致：点击后会立即覆盖对应区域模板文件，并重置当前房间的本地 RoomSettings。",
             "Vanilla behavior: clicking immediately overwrites the selected region template file and resets the room's local RoomSettings."), true);
 
-        string[] templates = snapshot.TemplateNames ?? Array.Empty<string>();
-        for (int i = 0; i < templates.Length; i++)
+        for (int i = 0; i < templateBindings.Length; i++)
         {
-            string name = templates[i];
+            TemplateBinding binding = templateBindings[i];
             if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("写入 ", "Save to ") + snapshot.RegionName + " - " + name,
-                    "SaveRoomTemplate" + i,
+                    binding.SaveLabel,
+                    binding.SaveId,
                     DevToolButtonTone.Primary,
                     true))
             {
-                RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SaveAsTemplate, key: name));
+                RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.SaveAsTemplate, key: binding.Name));
             }
         }
     }
@@ -349,36 +405,29 @@ internal static class RoomSettingsView
             return;
         }
 
-        for (int i = 0; i < effects.Length; i++)
+        EnsureEffectBindings(effects);
+        for (int i = 0; i < effectBindings.Length; i++)
         {
-            EditorRoomEffectSnapshot effect = effects[i];
-            string header = effect.Type;
-            if (!string.IsNullOrEmpty(effect.Category)) header += "  ·  " + effect.Category;
-            if (effect.Inherited) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
-            else if (effect.OverWrite) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
-
+            EffectBinding binding = effectBindings[i];
+            EditorRoomEffectSnapshot effect = binding.Effect;
             if (switchAll)
                 ImGui.SetNextItemOpen(effectsExpanded, ImGuiCond.Always);
             ImGui.PushStyleColor(ImGuiCol.Header, new Num.Vector4(0.18f, 0.34f, 0.54f, 0.72f));
             ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Num.Vector4(0.24f, 0.45f, 0.72f, 0.88f));
             ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Num.Vector4(0.30f, 0.56f, 0.90f, 0.95f));
-            bool open = ImGui.CollapsingHeader(header + "##RoomEffect" + effect.Index, ImGuiTreeNodeFlags.DefaultOpen);
+            bool open = ImGui.CollapsingHeader(binding.Header, ImGuiTreeNodeFlags.DefaultOpen);
             ImGui.PopStyleColor(3);
             if (!open) continue;
 
-            string[] names = effect.SliderNames ?? Array.Empty<string>();
             float[] values = effect.Values ?? Array.Empty<float>();
-            int count = Math.Min(names.Length, values.Length);
+            int count = Math.Min(binding.Sliders.Length, values.Length);
             for (int slider = 0; slider < count; slider++)
             {
-                string key = "effect:" + effect.Index + ":" + slider;
-                float value = Get(FloatEdits, key, values[slider]);
-                string sliderLabel = string.IsNullOrEmpty(names[slider])
-                    ? DevToolUiSettings.T("数值 ", "Value ") + (slider + 1)
-                    : names[slider];
-                BeginSettingRow(sliderLabel, 0f, out _);
-                bool changed = ImGui.SliderFloat("##" + key, ref value, 0f, 1f, "%.3f");
-                FloatEdits[key] = value;
+                EffectSliderBinding sliderBinding = binding.Sliders[slider];
+                float value = Get(FloatEdits, sliderBinding.StateKey, values[slider]);
+                BeginSettingRow(sliderBinding.DisplayName, 0f, out _);
+                bool changed = ImGui.SliderFloat(sliderBinding.WidgetId, ref value, 0f, 1f, "%.3f");
+                FloatEdits[sliderBinding.StateKey] = value;
 
                 if (!effect.Inherited && ImGui.IsItemDeactivatedAfterEdit())
                 {
@@ -390,7 +439,7 @@ internal static class RoomSettingsView
                 }
                 else if (!changed && !ImGui.IsItemActive())
                 {
-                    FloatEdits[key] = values[slider];
+                    FloatEdits[sliderBinding.StateKey] = values[slider];
                 }
             }
 
@@ -400,7 +449,7 @@ internal static class RoomSettingsView
             }
             else if (DevToolWidgets.ActionButton(
                          DevToolUiSettings.T("移除", "Remove"),
-                         "RoomEffectRemove" + effect.Index,
+                         binding.RemoveId,
                          DevToolButtonTone.Danger))
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
@@ -415,18 +464,19 @@ internal static class RoomSettingsView
     private static void DrawScreenFades(float[] fades, bool terrain)
     {
         fades ??= Array.Empty<float>();
+        FadeBinding[] bindings = EnsureFadeBindings(fades.Length, terrain);
         for (int i = 0; i < fades.Length; i++)
         {
-            string stateKey = (terrain ? "terrainFade:" : "fade:") + i;
-            float value = Get(FloatEdits, stateKey, fades[i]);
-            BeginSettingRow(DevToolUiSettings.T("屏幕 ", "Screen ") + i, 0f, out _);
+            FadeBinding binding = bindings[i];
+            float value = Get(FloatEdits, binding.StateKey, fades[i]);
+            BeginSettingRow(binding.Label, 0f, out _);
             bool changed = ImGui.SliderFloat(
-                "##" + stateKey,
+                binding.WidgetId,
                 ref value,
                 0f,
                 1f,
                 "%.3f");
-            FloatEdits[stateKey] = value;
+            FloatEdits[binding.StateKey] = value;
             if (ImGui.IsItemDeactivatedAfterEdit())
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
@@ -436,9 +486,172 @@ internal static class RoomSettingsView
             }
             else if (!changed && !ImGui.IsItemActive())
             {
-                FloatEdits[stateKey] = fades[i];
+                FloatEdits[binding.StateKey] = fades[i];
             }
         }
+    }
+
+    private static void EnsureEffectBrowserProjection(EditorRoomSettingsSnapshot snapshot)
+    {
+        string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
+        string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
+        string normalizedSearch = effectSearch?.Trim() ?? string.Empty;
+        if (ReferenceEquals(projectedAvailableEffects, available) &&
+            ReferenceEquals(projectedEffectCategories, categories) &&
+            string.Equals(projectedEffectSearch, normalizedSearch, StringComparison.Ordinal))
+            return;
+
+        effectBrowserRows.Clear();
+        for (int i = 0; i < available.Length; i++)
+        {
+            string type = available[i] ?? string.Empty;
+            if (!Matches(type, normalizedSearch)) continue;
+            string category = i < categories.Length ? categories[i] ?? string.Empty : string.Empty;
+            effectBrowserRows.Add(new EffectBrowserRow
+            {
+                Type = type,
+                Category = category,
+                Label = type + "##RoomAddEffect" + type,
+                SourceColor = string.IsNullOrEmpty(category)
+                    ? new Num.Vector4(0.78f, 0.72f, 1f, 1f)
+                    : EffectSourceColor(category)
+            });
+        }
+
+        projectedAvailableEffects = available;
+        projectedEffectCategories = categories;
+        projectedEffectSearch = normalizedSearch;
+    }
+
+    private static void EnsureEffectBindings(EditorRoomEffectSnapshot[] effects)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedEffects, effects) && projectedEffectsChinese == chinese) return;
+
+        EffectBinding[] next = new EffectBinding[effects.Length];
+        for (int i = 0; i < effects.Length; i++)
+        {
+            EditorRoomEffectSnapshot effect = effects[i];
+            string header = effect?.Type ?? string.Empty;
+            if (!string.IsNullOrEmpty(effect?.Category)) header += "  ·  " + effect.Category;
+            if (effect?.Inherited == true) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
+            else if (effect?.OverWrite == true) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
+            header += "##RoomEffect" + (effect?.Index ?? i);
+
+            string[] names = effect?.SliderNames ?? Array.Empty<string>();
+            float[] values = effect?.Values ?? Array.Empty<float>();
+            int count = Math.Min(names.Length, values.Length);
+            EffectSliderBinding[] sliders = new EffectSliderBinding[count];
+            for (int slider = 0; slider < count; slider++)
+            {
+                string stateKey = "effect:" + effect.Index + ":" + slider;
+                sliders[slider] = new EffectSliderBinding
+                {
+                    StateKey = stateKey,
+                    WidgetId = "##" + stateKey,
+                    DisplayName = string.IsNullOrEmpty(names[slider])
+                        ? DevToolUiSettings.T("数值 ", "Value ") + (slider + 1)
+                        : names[slider]
+                };
+            }
+
+            next[i] = new EffectBinding
+            {
+                Effect = effect,
+                Header = header,
+                RemoveId = "RoomEffectRemove" + (effect?.Index ?? i),
+                Sliders = sliders
+            };
+        }
+
+        projectedEffects = effects;
+        projectedEffectsChinese = chinese;
+        effectBindings = next;
+    }
+
+    private static void EnsureTemplateBindings(EditorRoomSettingsSnapshot snapshot)
+    {
+        string[] names = snapshot.TemplateNames ?? Array.Empty<string>();
+        string region = snapshot.RegionName ?? string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedTemplateNames, names) &&
+            string.Equals(projectedTemplateRegion, region, StringComparison.Ordinal) &&
+            projectedTemplateChinese == chinese)
+            return;
+
+        TemplateBinding[] next = new TemplateBinding[names.Length];
+        string savePrefix = DevToolUiSettings.T("写入 ", "Save to ");
+        for (int i = 0; i < names.Length; i++)
+        {
+            string name = names[i] ?? string.Empty;
+            next[i] = new TemplateBinding
+            {
+                Name = name,
+                ComboLabel = region + " - " + name + "##RoomTemplate" + i,
+                SaveLabel = savePrefix + region + " - " + name,
+                SaveId = "SaveRoomTemplate" + i
+            };
+        }
+
+        projectedTemplateNames = names;
+        projectedTemplateRegion = region;
+        projectedTemplateChinese = chinese;
+        templateBindings = next;
+        templatePreviewRegion = string.Empty;
+        templatePreviewName = string.Empty;
+    }
+
+    private static string GetTemplatePreview(EditorRoomSettingsSnapshot snapshot)
+    {
+        string current = snapshot.CurrentTemplate ?? string.Empty;
+        if (string.Equals(current, "NONE", StringComparison.OrdinalIgnoreCase)) return "NONE";
+        string region = snapshot.RegionName ?? string.Empty;
+        if (string.Equals(templatePreviewRegion, region, StringComparison.Ordinal) &&
+            string.Equals(templatePreviewName, current, StringComparison.Ordinal))
+            return templatePreview;
+
+        templatePreviewRegion = region;
+        templatePreviewName = current;
+        templatePreview = region + " - " + current;
+        return templatePreview;
+    }
+
+    private static FadeBinding[] EnsureFadeBindings(int count, bool terrain)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (terrain)
+        {
+            if (projectedTerrainFadeCount == count && projectedTerrainFadeChinese == chinese)
+                return terrainFadeBindings;
+            terrainFadeBindings = BuildFadeBindings(count, true);
+            projectedTerrainFadeCount = count;
+            projectedTerrainFadeChinese = chinese;
+            return terrainFadeBindings;
+        }
+
+        if (projectedFadeCount == count && projectedFadeChinese == chinese)
+            return fadeBindings;
+        fadeBindings = BuildFadeBindings(count, false);
+        projectedFadeCount = count;
+        projectedFadeChinese = chinese;
+        return fadeBindings;
+    }
+
+    private static FadeBinding[] BuildFadeBindings(int count, bool terrain)
+    {
+        FadeBinding[] result = new FadeBinding[count];
+        string prefix = DevToolUiSettings.T("屏幕 ", "Screen ");
+        for (int i = 0; i < count; i++)
+        {
+            string stateKey = (terrain ? "terrainFade:" : "fade:") + i;
+            result[i] = new FadeBinding
+            {
+                StateKey = stateKey,
+                Label = prefix + i,
+                WidgetId = "##" + stateKey
+            };
+        }
+        return result;
     }
 
     private static Num.Vector4 EffectSourceColor(string category)
@@ -548,7 +761,7 @@ internal static class RoomSettingsView
         {
             if (DevToolWidgets.ActionButton(
                     DevToolUiSettings.T("继承", "Inherit"),
-                    "RoomInherit" + key,
+                    CachedId(InheritanceWidgetIds, key, "RoomInherit"),
                     DevToolButtonTone.Subtle))
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(RoomEditorCommandKind.ResetSetting, key: key));
@@ -563,7 +776,7 @@ internal static class RoomSettingsView
     private static void DrawFloat(string key, float current, float min, float max)
     {
         float value = Get(FloatEdits, key, current);
-        bool changed = ImGui.SliderFloat("##RoomSetting" + key, ref value, min, max, "%.3f");
+        bool changed = ImGui.SliderFloat(CachedId(SettingWidgetIds, key, "##RoomSetting"), ref value, min, max, "%.3f");
         FloatEdits[key] = value;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -578,7 +791,7 @@ internal static class RoomSettingsView
     private static void DrawInt(string key, int current)
     {
         int value = Get(IntEdits, key, current);
-        bool changed = ImGui.InputInt("##RoomSetting" + key, ref value, 1, 10);
+        bool changed = ImGui.InputInt(CachedId(SettingWidgetIds, key, "##RoomSetting"), ref value, 1, 10);
         IntEdits[key] = value;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -598,10 +811,19 @@ internal static class RoomSettingsView
             value: value));
     }
 
-    private static bool Matches(string value, string query)
+    private static bool Matches(string value, string normalizedQuery)
     {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        return value?.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+        if (string.IsNullOrEmpty(normalizedQuery)) return true;
+        return value?.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string CachedId(Dictionary<string, string> cache, string key, string prefix)
+    {
+        key ??= string.Empty;
+        if (cache.TryGetValue(key, out string value)) return value;
+        value = prefix + key;
+        cache[key] = value;
+        return value;
     }
 
     private static TValue Get<TValue>(Dictionary<string, TValue> dictionary, string key, TValue fallback)
