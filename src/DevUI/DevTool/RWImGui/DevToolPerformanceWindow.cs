@@ -65,6 +65,17 @@ internal static class DevToolPerformanceWindow
         DevToolPerformanceMetric.RelationshipPresentation
     };
 
+    private static readonly DevToolFrontendPerformanceMetric[] FrontendMetrics =
+    {
+        DevToolFrontendPerformanceMetric.FrontendFrameTotal,
+        DevToolFrontendPerformanceMetric.UiModeSwitch,
+        DevToolFrontendPerformanceMetric.FontSettings,
+        DevToolFrontendPerformanceMetric.Overlay,
+        DevToolFrontendPerformanceMetric.SceneWorkspace,
+        DevToolFrontendPerformanceMetric.ScenePlacement,
+        DevToolFrontendPerformanceMetric.ActionToast
+    };
+
     private static readonly DevToolPresentationChannel[] Channels =
     {
         DevToolPresentationChannel.Core,
@@ -77,6 +88,7 @@ internal static class DevToolPerformanceWindow
     };
 
     private static readonly Dictionary<DevToolPerformanceMetric, MetricReadback> MetricReadbacks = new();
+    private static readonly Dictionary<DevToolFrontendPerformanceMetric, MetricReadback> FrontendMetricReadbacks = new();
     private static readonly Dictionary<DevToolPresentationChannel, CacheReadback> CacheReadbacks = new();
     private static int nextReadbackFrame;
     private static bool readbackValid;
@@ -117,6 +129,7 @@ internal static class DevToolPerformanceWindow
                 DevToolButtonTone.Subtle))
         {
             DevToolPerformanceMonitor.Reset();
+            DevToolFrontendPerformanceMonitor.Reset();
             InvalidateReadback();
             EnsureReadback();
         }
@@ -128,6 +141,7 @@ internal static class DevToolPerformanceWindow
                 DevToolButtonTone.Normal))
         {
             DevToolPerformanceMonitor.SetEnabled(false);
+            DevToolFrontendPerformanceMonitor.SetEnabled(false);
             ImGui.End();
             return;
         }
@@ -148,6 +162,16 @@ internal static class DevToolPerformanceWindow
         DrawMetric(DevToolPerformanceMetric.CommandProcessing, DevToolUiSettings.T("命令处理", "Command processing"));
         DrawMetric(DevToolPerformanceMetric.LegacyPresentation, DevToolUiSettings.T("Legacy 表现层", "Legacy presentation"));
         DrawMetric(DevToolPerformanceMetric.ObjectGizmoPresentation, DevToolUiSettings.T("Object Gizmo", "Object gizmo"));
+
+        ImGui.Spacing();
+        DrawSection(DevToolUiSettings.T("前端绘制耗时", "FRONTEND DRAW"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.FrontendFrameTotal, DevToolUiSettings.T("前端总帧", "Frontend total"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.UiModeSwitch, DevToolUiSettings.T("界面模式开关", "Mode switch"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.FontSettings, DevToolUiSettings.T("字体设置", "Font settings"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.Overlay, DevToolUiSettings.T("主 Overlay", "Main overlay"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.SceneWorkspace, DevToolUiSettings.T("场景工作区", "Scene workspace"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.ScenePlacement, DevToolUiSettings.T("场景放置", "Scene placement"));
+        DrawFrontendMetric(DevToolFrontendPerformanceMetric.ActionToast, DevToolUiSettings.T("操作提示", "Action toast"));
 
         ImGui.Spacing();
         DrawSection(DevToolUiSettings.T("数据发布耗时", "PRESENTATION TIME"));
@@ -198,6 +222,29 @@ internal static class DevToolPerformanceWindow
             {
                 display = new MetricReadback();
                 MetricReadbacks.Add(metric, display);
+            }
+
+            display.HasSamples = stats.HasSamples;
+            if (!stats.HasSamples)
+            {
+                display.Last = display.Average = display.P95 = display.Max = "-";
+                continue;
+            }
+
+            display.Last = FormatMilliseconds(stats.LastMilliseconds);
+            display.Average = FormatMilliseconds(stats.AverageMilliseconds);
+            display.P95 = FormatMilliseconds(stats.P95Milliseconds);
+            display.Max = FormatMilliseconds(stats.MaxMilliseconds);
+        }
+
+        for (int i = 0; i < FrontendMetrics.Length; i++)
+        {
+            DevToolFrontendPerformanceMetric metric = FrontendMetrics[i];
+            DevToolFrontendPerformanceStats stats = DevToolFrontendPerformanceMonitor.GetStats(metric);
+            if (!FrontendMetricReadbacks.TryGetValue(metric, out MetricReadback display))
+            {
+                display = new MetricReadback();
+                FrontendMetricReadbacks.Add(metric, display);
             }
 
             display.HasSamples = stats.HasSamples;
@@ -288,6 +335,24 @@ internal static class DevToolPerformanceWindow
     {
         ImGui.TextUnformatted(label);
         if (!MetricReadbacks.TryGetValue(metric, out MetricReadback stats) || !stats.HasSamples)
+        {
+            DrawAt(LastColumn, "-");
+            DrawAt(AverageColumn, "-");
+            DrawAt(P95Column, "-");
+            DrawAt(MaxColumn, "-");
+            return;
+        }
+
+        DrawAt(LastColumn, stats.Last);
+        DrawAt(AverageColumn, stats.Average);
+        DrawAt(P95Column, stats.P95);
+        DrawAt(MaxColumn, stats.Max);
+    }
+
+    private static void DrawFrontendMetric(DevToolFrontendPerformanceMetric metric, string label)
+    {
+        ImGui.TextUnformatted(label);
+        if (!FrontendMetricReadbacks.TryGetValue(metric, out MetricReadback stats) || !stats.HasSamples)
         {
             DrawAt(LastColumn, "-");
             DrawAt(AverageColumn, "-");

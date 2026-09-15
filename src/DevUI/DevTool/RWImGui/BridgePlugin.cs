@@ -406,6 +406,9 @@ internal static class DevToolFrontend
             return;
         }
 
+        using DevToolFrontendPerformanceMonitor.Scope frontendFrameScope =
+            DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FrontendFrameTotal);
+
         try
         {
             ImGuiIOPtr io = ImGui.GetIO();
@@ -436,15 +439,21 @@ internal static class DevToolFrontend
             {
                 // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
                 // presentation hides rebuilt editor panels, not the control used to return.
-                UiModeSwitch.Draw();
+                using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.UiModeSwitch))
+                    UiModeSwitch.Draw();
 
                 if (!EditorUiModeState.UseVanilla)
                 {
-                    FontSettingsWindow.Draw(io.DisplaySize);
-                    DevToolOverlay.Draw(snapshot);
-                    SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
-                    ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
-                    ActionToastOverlay.Draw(snapshot, io.DisplaySize);
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
+                        FontSettingsWindow.Draw(io.DisplaySize);
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
+                        DevToolOverlay.Draw(snapshot);
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
+                        SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
+                        ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
+                        ActionToastOverlay.Draw(snapshot, io.DisplaySize);
                 }
 
                 FloatingWindowSnap.EndFrame();
