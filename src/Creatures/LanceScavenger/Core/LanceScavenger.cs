@@ -73,6 +73,9 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             Combat.Tick(new LanceSituation(false, Lance != null, SidearmSpear != null, false,
                 ScavengerAI.ViolenceType.None, false, 999f, false));
         base.Update(eu);
+        if ((Combat.State == LanceState.Charge || Combat.State == LanceState.FollowUpThrow) &&
+            (bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0))
+            Combat.MarkLanding();
         if (room != null) Lance?.SynchronizeGrip(eu);
     }
 
@@ -226,9 +229,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         }
         else if (retainedSpeed < 0.25f)
         {
-            // A heavy impact may still knock the lancer out of the combo, but a normal
-            // creature hit does not trigger the follow-up in mid-air. The charge timer
-            // owns the landing/finish point and enters FollowUpThrow there.
             Stun(12);
         }
     }
