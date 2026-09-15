@@ -65,6 +65,8 @@ internal static class TriggerEditorView
 
     private static bool sceneTab;
     private static string search = string.Empty;
+    private static string observedSearch;
+    private static string normalizedSearch = string.Empty;
 
     private static string[] projectedTriggerTypes;
     private static string[] projectedTriggerTypeLabels = Array.Empty<string>();
@@ -80,6 +82,35 @@ internal static class TriggerEditorView
     private static int projectedEntranceCount = -1;
     private static bool projectedEntranceChinese;
     private static string[] projectedEntranceLabels = Array.Empty<string>();
+
+    internal static void ResetRetainedState()
+    {
+        IntEdits.Clear();
+        FloatEdits.Clear();
+        VectorEdits.Clear();
+        StringEdits.Clear();
+        EditBindings.Clear();
+
+        sceneTab = false;
+        search = string.Empty;
+        observedSearch = null;
+        normalizedSearch = string.Empty;
+
+        projectedTriggerTypes = null;
+        projectedTriggerTypeLabels = Array.Empty<string>();
+        projectedSceneTriggers = null;
+        projectedSceneLabels = Array.Empty<string>();
+        projectedEventTypes = null;
+        projectedEventTypeLabels = Array.Empty<string>();
+        projectedSongs = null;
+        projectedSongKey = string.Empty;
+        projectedSongLabels = Array.Empty<string>();
+        projectedSlugcats = null;
+        projectedSlugcatLabels = Array.Empty<string>();
+        projectedEntranceCount = -1;
+        projectedEntranceChinese = false;
+        projectedEntranceLabels = Array.Empty<string>();
+    }
 
     internal static void DrawBrowser(EditorTriggerPresentationSnapshot snapshot)
     {
@@ -188,7 +219,7 @@ internal static class TriggerEditorView
 
         string[] types = snapshot.TriggerTypes ?? Array.Empty<string>();
         EnsureTriggerTypeLabels(types);
-        string query = NormalizeSearch(search);
+        string query = SearchQuery();
         int matches = 0;
         for (int i = 0; i < types.Length; i++)
         {
@@ -721,7 +752,13 @@ internal static class TriggerEditorView
         return binding;
     }
 
-    private static string NormalizeSearch(string query) => query?.Trim() ?? string.Empty;
+    private static string SearchQuery()
+    {
+        if (string.Equals(observedSearch, search, StringComparison.Ordinal)) return normalizedSearch;
+        observedSearch = search;
+        normalizedSearch = search?.Trim() ?? string.Empty;
+        return normalizedSearch;
+    }
 
     private static bool Matches(string value, string normalizedQuery) =>
         string.IsNullOrEmpty(normalizedQuery) ||
