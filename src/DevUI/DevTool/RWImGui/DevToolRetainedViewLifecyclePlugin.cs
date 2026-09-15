@@ -66,7 +66,7 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
         if (!game.processActive || !game.devToolsActive) return true;
 
         return game.manager?.currentMainLoop != null &&
-               !ReferenceEquals(game.manager.currentMainLoop, game);
+               !object.ReferenceEquals(game.manager.currentMainLoop, game);
     }
 
     private static void ReleaseRetainedState()
