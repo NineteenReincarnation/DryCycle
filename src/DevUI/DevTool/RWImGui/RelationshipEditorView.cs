@@ -8,10 +8,30 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class RelationshipEditorView
 {
+    private sealed class MatrixRowPresentation
+    {
+        internal EditorRelationshipRowSnapshot Row;
+        internal EditorRelationshipValueSnapshot Forward;
+        internal EditorRelationshipValueSnapshot Reverse;
+        internal string Name;
+        internal string ForwardLabel;
+        internal string ReverseLabel;
+    }
+
+    private static readonly EditorRelationshipValueSnapshot EmptyRelationship = new();
     private static string primarySearch = string.Empty;
     private static string matrixSearch = string.Empty;
     private static bool changedOnly;
     private static readonly Dictionary<string, float> IntensityEdits = new(StringComparer.Ordinal);
+
+    private static string[] projectedCreatureTypes;
+    private static string[] projectedCreatureLabels = Array.Empty<string>();
+    private static EditorRelationshipRowSnapshot[] projectedRowsSource;
+    private static MatrixRowPresentation[] projectedRows = Array.Empty<MatrixRowPresentation>();
+    private static string inspectorEditKey = string.Empty;
+    private static string inspectorEditPrimary = string.Empty;
+    private static string inspectorEditOther = string.Empty;
+    private static EditorRelationshipDirection inspectorEditDirection;
 
     internal static void DrawBrowser(EditorRelationshipPresentationSnapshot snapshot)
     {
@@ -26,14 +46,16 @@ internal static class RelationshipEditorView
         ImGui.Separator();
 
         string[] creatures = snapshot.CreatureTypes ?? Array.Empty<string>();
+        EnsureCreatureLabels(creatures);
+        string primaryQuery = NormalizeSearch(primarySearch);
         int matches = 0;
         for (int i = 0; i < creatures.Length; i++)
         {
             string type = creatures[i];
-            if (!Matches(type, primarySearch)) continue;
+            if (!Matches(type, primaryQuery)) continue;
             matches++;
             bool selected = string.Equals(type, snapshot.PrimaryCreature, StringComparison.Ordinal);
-            if (ImGui.Selectable(type + "##RelationshipPrimary" + i, selected))
+            if (ImGui.Selectable(projectedCreatureLabels[i], selected))
             {
                 RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                     RelationshipEditorCommandKind.SelectPrimary,
@@ -92,25 +114,29 @@ internal static class RelationshipEditorView
         ImGui.Separator();
 
         EditorRelationshipRowSnapshot[] rows = snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
+        EnsureMatrixRows(rows);
+        string matrixQuery = NormalizeSearch(matrixSearch);
         int visible = 0;
-        for (int i = 0; i < rows.Length; i++)
+        for (int i = 0; i < projectedRows.Length; i++)
         {
-            EditorRelationshipRowSnapshot row = rows[i];
-            if (!Matches(row.CreatureType, matrixSearch) && !Matches(row.DisplayName, matrixSearch)) continue;
-            if (changedOnly && row.PrimaryToOther?.DirectOverride != true && row.OtherToPrimary?.DirectOverride != true) continue;
+            MatrixRowPresentation presentation = projectedRows[i];
+            EditorRelationshipRowSnapshot row = presentation.Row;
+            if (!Matches(row.CreatureType, matrixQuery) && !Matches(row.DisplayName, matrixQuery)) continue;
+            if (changedOnly && !presentation.Forward.DirectOverride && !presentation.Reverse.DirectOverride) continue;
             visible++;
 
             float startX = ImGui.GetCursorPosX();
             ImGui.AlignTextToFramePadding();
-            string name = string.IsNullOrEmpty(row.DisplayName) ? row.CreatureType : row.DisplayName;
-            ImGui.TextUnformatted(name);
-            if (ImGui.IsItemHovered() && !string.Equals(name, row.CreatureType, StringComparison.Ordinal))
+            ImGui.TextUnformatted(presentation.Name);
+            if (ImGui.IsItemHovered() && !string.Equals(presentation.Name, row.CreatureType, StringComparison.Ordinal))
                 DevToolTooltip.Show(row.CreatureType);
 
             ImGui.SameLine(startX + nameWidth);
-            DrawRelationButton(snapshot, row, EditorRelationshipDirection.PrimaryToOther, relationWidth);
+            DrawRelationButton(snapshot, row, presentation.ForwardLabel,
+                EditorRelationshipDirection.PrimaryToOther, relationWidth);
             ImGui.SameLine(startX + nameWidth + relationWidth + 12f);
-            DrawRelationButton(snapshot, row, EditorRelationshipDirection.OtherToPrimary, relationWidth);
+            DrawRelationButton(snapshot, row, presentation.ReverseLabel,
+                EditorRelationshipDirection.OtherToPrimary, relationWidth);
         }
 
         if (visible == 0)
@@ -137,7 +163,8 @@ internal static class RelationshipEditorView
         bool forward = snapshot.SelectedDirection == EditorRelationshipDirection.PrimaryToOther;
         string from = forward ? snapshot.PrimaryCreature : row.CreatureType;
         string to = forward ? row.CreatureType : snapshot.PrimaryCreature;
-        EditorRelationshipValueSnapshot relationship = forward ? row.PrimaryToOther : row.OtherToPrimary;
+        EditorRelationshipValueSnapshot relationship =
+            (forward ? row.PrimaryToOther : row.OtherToPrimary) ?? EmptyRelationship;
 
         ImGui.Text(from);
         ImGui.SameLine();
@@ -164,7 +191,7 @@ internal static class RelationshipEditorView
             ImGui.EndCombo();
         }
 
-        string editKey = snapshot.PrimaryCreature + ">" + row.CreatureType + ":" + snapshot.SelectedDirection;
+        string editKey = GetInspectorEditKey(snapshot.PrimaryCreature, row.CreatureType, snapshot.SelectedDirection);
         float intensity = GetIntensity(editKey, relationship.Intensity);
         bool changed = ImGui.SliderFloat(DevToolUiSettings.T("强度##RelationshipIntensity", "Intensity##RelationshipIntensity"), ref intensity, 0f, 1f, "%.3f");
         IntensityEdits[editKey] = intensity;
@@ -204,20 +231,13 @@ internal static class RelationshipEditorView
     private static void DrawRelationButton(
         EditorRelationshipPresentationSnapshot snapshot,
         EditorRelationshipRowSnapshot row,
+        string label,
         EditorRelationshipDirection direction,
         float width)
     {
-        EditorRelationshipValueSnapshot value = direction == EditorRelationshipDirection.PrimaryToOther
-            ? row.PrimaryToOther
-            : row.OtherToPrimary;
-        value ??= new EditorRelationshipValueSnapshot();
-
         bool selected = row.Selected && snapshot.SelectedDirection == direction;
         if (selected) ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 2f);
-        string text = (string.IsNullOrEmpty(value.Type) ? "?" : value.Type) + "  " + value.Intensity.ToString("0.00");
-        if (value.DirectOverride) text += "  *";
-        string id = direction == EditorRelationshipDirection.PrimaryToOther ? "F" : "R";
-        if (ImGui.Button(text + "##Relationship" + id + row.CreatureType, new Num.Vector2(width, 0f)))
+        if (ImGui.Button(label, new Num.Vector2(width, 0f)))
         {
             RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                 RelationshipEditorCommandKind.SelectPair,
@@ -253,7 +273,73 @@ internal static class RelationshipEditorView
         return fallback;
     }
 
-    private static bool Matches(string value, string query) =>
-        string.IsNullOrWhiteSpace(query) ||
-        (!string.IsNullOrEmpty(value) && value.IndexOf(query.Trim(), StringComparison.OrdinalIgnoreCase) >= 0);
+    private static void EnsureCreatureLabels(string[] creatures)
+    {
+        if (ReferenceEquals(projectedCreatureTypes, creatures)) return;
+        string[] labels = new string[creatures.Length];
+        for (int i = 0; i < creatures.Length; i++)
+            labels[i] = (creatures[i] ?? string.Empty) + "##RelationshipPrimary" + i;
+        projectedCreatureTypes = creatures;
+        projectedCreatureLabels = labels;
+    }
+
+    private static void EnsureMatrixRows(EditorRelationshipRowSnapshot[] rows)
+    {
+        if (ReferenceEquals(projectedRowsSource, rows)) return;
+        MatrixRowPresentation[] next = new MatrixRowPresentation[rows.Length];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            EditorRelationshipRowSnapshot row = rows[i];
+            EditorRelationshipValueSnapshot forward = row?.PrimaryToOther ?? EmptyRelationship;
+            EditorRelationshipValueSnapshot reverse = row?.OtherToPrimary ?? EmptyRelationship;
+            string creatureType = row?.CreatureType ?? string.Empty;
+            next[i] = new MatrixRowPresentation
+            {
+                Row = row,
+                Forward = forward,
+                Reverse = reverse,
+                Name = string.IsNullOrEmpty(row?.DisplayName) ? creatureType : row.DisplayName,
+                ForwardLabel = BuildRelationLabel(forward, "F", creatureType),
+                ReverseLabel = BuildRelationLabel(reverse, "R", creatureType)
+            };
+        }
+        projectedRowsSource = rows;
+        projectedRows = next;
+    }
+
+    private static string BuildRelationLabel(
+        EditorRelationshipValueSnapshot value,
+        string directionId,
+        string creatureType)
+    {
+        string text = (string.IsNullOrEmpty(value.Type) ? "?" : value.Type) + "  " + value.Intensity.ToString("0.00");
+        if (value.DirectOverride) text += "  *";
+        return text + "##Relationship" + directionId + creatureType;
+    }
+
+    private static string GetInspectorEditKey(
+        string primary,
+        string other,
+        EditorRelationshipDirection direction)
+    {
+        primary ??= string.Empty;
+        other ??= string.Empty;
+        if (string.Equals(inspectorEditPrimary, primary, StringComparison.Ordinal) &&
+            string.Equals(inspectorEditOther, other, StringComparison.Ordinal) &&
+            inspectorEditDirection == direction &&
+            !string.IsNullOrEmpty(inspectorEditKey))
+            return inspectorEditKey;
+
+        inspectorEditPrimary = primary;
+        inspectorEditOther = other;
+        inspectorEditDirection = direction;
+        inspectorEditKey = primary + ">" + other + ":" + direction;
+        return inspectorEditKey;
+    }
+
+    private static string NormalizeSearch(string query) => query?.Trim() ?? string.Empty;
+
+    private static bool Matches(string value, string normalizedQuery) =>
+        string.IsNullOrEmpty(normalizedQuery) ||
+        (!string.IsNullOrEmpty(value) && value.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) >= 0);
 }
