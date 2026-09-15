@@ -29,17 +29,21 @@ jobs:
 
           legacy = Path('src/DevUI/DevTool/Compatibility/LegacyUiPresentationController.cs')
           text = legacy.read_text(encoding='utf-8')
-          old = '''        // Compatibility verification is diagnostic work, not presentation work. A full audit walks
-          // instantiated DevInterface trees, mirrors controls and exercises reflection-backed action
-          // routes. Running it from Apply meant the same frame that H constructed vanilla DevUI also
-          // paid for the audit. Keep the audit available for explicit development sessions only.
-          if (DevUiDiagnosticsPolicy.Enabled)
-              DevUiFullAudit.ObserveAll(page);
-
-          '''
-          if old not in text:
-              raise SystemExit('verified LegacyUiPresentationController block was not found')
-          legacy.write_text(text.replace(old, ''), encoding='utf-8')
+          start_token = '// Compatibility verification is diagnostic work, not presentation work.'
+          call_token = 'DevUiFullAudit.ObserveAll(page);'
+          start_at = text.find(start_token)
+          call_at = text.find(call_token, start_at if start_at >= 0 else 0)
+          if start_at < 0 or call_at < 0:
+              raise SystemExit('verified LegacyUiPresentationController markers were not found')
+          line_start = text.rfind('\n', 0, start_at) + 1
+          line_end = text.find('\n', call_at)
+          if line_end < 0:
+              line_end = len(text)
+          else:
+              line_end += 1
+              if line_end < len(text) and text[line_end:line_end + 1] == '\n':
+                  line_end += 1
+          legacy.write_text(text[:line_start] + text[line_end:], encoding='utf-8')
 
           guard = Path('scripts/validate-devtool-final-architecture.sh')
           text = guard.read_text(encoding='utf-8')
