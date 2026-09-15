@@ -2,12 +2,7 @@ using System;
 using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Dialog;
 using DryCycle.DevUI.DevTool.Map;
-using DryCycle.DevUI.DevTool.Relationships;
-using DryCycle.DevUI.DevTool.Room;
-using DryCycle.DevUI.DevTool.Sound;
-using DryCycle.DevUI.DevTool.Triggers;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
@@ -268,33 +263,19 @@ internal static class LegacyUiPresentationController
         EditorSession session = DevToolSessionHub.Current;
         Page retiredPage = session?.Owner?.activePage;
 
-        // Finish/cancel transient editor ownership first so nothing stale can execute against a new
-        // DevUI owner if the editor is reopened later.
+        // Finish/cancel transient editor ownership before clearing backend state. Extension scopes
+        // are not part of this lifetime; they remain owned by the external mod that registered them.
         session?.LegacyTransactions.Reset();
         session?.CancelPlacement();
-        EditorUiCommandQueue.Clear();
-        RoomEditorCommandQueue.Clear();
-        SoundEditorCommandQueue.Clear();
-        TriggerEditorCommandQueue.Clear();
-        MapEditorCommandQueue.Clear();
-        DialogEditorCommandQueue.Clear();
-        RelationshipEditorCommandQueue.Clear();
-        UniversalDevUiCommandQueue.Clear();
 
-        // Restore any temporarily hidden legacy visuals before dropping the strong node/page roots.
-        // Reset also removes this lifetime hook; Apply installs it again on the next DevUI lifetime.
+        // Restore temporarily hidden legacy visuals and clear Compatibility-owned caches first.
+        // Reset removes this lifetime hook; Apply installs it again on the next DevUI lifetime.
         Reset();
         ObjectGizmoPresentationController.Reset();
 
-        EditorPresentationHub.Clear();
-        RoomEditorPresentationHub.Clear();
-        SoundEditorPresentationHub.Clear();
-        TriggerEditorPresentationHub.Clear();
-        MapEditorPresentationHub.Clear();
-        DialogEditorPresentationHub.Clear();
-        RelationshipEditorPresentationHub.Clear();
-        UniversalDevUiPresentationHub.Clear();
-        DevUiPageCoverageTracker.Reset();
+        // Queue/Presentation/State/Revision/Session ownership is centralized here rather than
+        // duplicated in the dormant compatibility path and DevToolRuntime.Disable().
+        DevToolSubsystemCoordinator.ResetRuntimeState();
 
         // Frontend-specific retained UI state belongs to the optional RWImGui assembly. Core cannot
         // reference that assembly because the frontend already depends on DryCycle.dll; doing so would
