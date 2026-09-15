@@ -149,7 +149,7 @@ public static class DevUiMigrationCoverage
     public static DevUiMigrationCoverageSnapshot CurrentPage => currentPage;
     public static DevUiMigrationCoverageSnapshot Observed => observed;
 
-    public static void RegisterExact(Type type, DevUiMigrationState state, string note = null)
+    internal static void RegisterExact(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
         Register(new Registration
@@ -162,7 +162,7 @@ public static class DevUiMigrationCoverage
         });
     }
 
-    public static void RegisterAssignable(Type type, DevUiMigrationState state, string note = null)
+    internal static void RegisterAssignable(Type type, DevUiMigrationState state, string note = null)
     {
         if (type == null) throw new ArgumentNullException(nameof(type));
         Register(new Registration
@@ -175,7 +175,7 @@ public static class DevUiMigrationCoverage
         });
     }
 
-    public static void RegisterTypeName(string fullTypeName, DevUiMigrationState state, string note = null)
+    internal static void RegisterTypeName(string fullTypeName, DevUiMigrationState state, string note = null)
     {
         if (string.IsNullOrWhiteSpace(fullTypeName))
             throw new ArgumentException("Type name is required.", nameof(fullTypeName));
