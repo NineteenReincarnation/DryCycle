@@ -29,8 +29,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             if (room == null || !Consious || grabbedBy.Count > 0 || Submersion >= 0.2f ||
                 movMode == MovementMode.Climb || movMode == MovementMode.Swim ||
                 Mathf.Abs(mainBodyChunk.vel.x) > 6f || Mathf.Abs(mainBodyChunk.vel.y) > 4f) return false;
-            // Scavengers stand on procedural limbs; their chest need not touch terrain.
-            // Test support below the hips, including one-way floors and slopes.
             if (bodyChunks[0].ContactPoint.y < 0 || bodyChunks[1].ContactPoint.y < 0) return true;
             for (float below = bodyChunks[1].rad; below <= bodyChunks[1].rad + 24f; below += 6f)
             {
@@ -57,7 +55,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         EnsureBirthLance();
         if (!Consious || grabbedBy.Count > 0)
             Combat.Tick(new LanceSituation(false, Lance != null, false, ScavengerAI.ViolenceType.None, false,
-                999f, false, false));
+                999f, false));
         base.Update(eu);
         if (room != null) Lance?.SynchronizeGrip(eu);
     }
@@ -68,8 +66,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         foreach (AbstractPhysicalObject.AbstractObjectStick stick in abstractCreature.stuckObjects)
             if (stick.A is AbstractScavengerLance || stick.B is AbstractScavengerLance)
             { state.GearIssued = true; return; }
-        // This flag belongs to birth provisioning, not to the weapon's physical state.
-        // Death, theft, another room and another realization cannot issue another lance.
         state.GearIssued = true;
         if (dead || (abstractCreature.spawnData?.IndexOf("disarmed", StringComparison.OrdinalIgnoreCase) ?? -1) >= 0) return;
         var data = new AbstractScavengerLance(room.world, abstractCreature.pos, room.game.GetNewID());
@@ -94,8 +90,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     public override void Violence(BodyChunk source, Vector2? directionAndMomentum, BodyChunk hitChunk,
         Appendage.Pos hitAppendage, DamageType type, float damage, float stunBonus)
     {
-        // Do not create a private "recent attacker" hostility path here. Vanilla
-        // ScavengerAI/social events own reputation, personal memory and retaliation.
         base.Violence(source, directionAndMomentum, hitChunk, hitAppendage, type, damage, stunBonus);
         if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace) Combat.Recover(false);
     }
