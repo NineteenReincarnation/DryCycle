@@ -17,6 +17,7 @@ internal static class DevToolOverlay
     private static string objectSearch = string.Empty;
     private static string sceneSearch = string.Empty;
     private static bool sceneTab;
+    private static bool lanceDebugPage;
     private static int sceneSelectionAnchor = -1;
     private static float browserInspectorSplit = 0.40f;
     private static bool browserInspectorSplitterDragging;
@@ -29,15 +30,20 @@ internal static class DevToolOverlay
         if (display.X < 1f) display.X = 1366f;
         if (display.Y < 1f) display.Y = 768f;
 
-        // Map no longer opens an independent floating graph on top of the Browser/Inspector panel.
-        // In normal mode it gets one coherent World Workspace below. Focus mode intentionally
-        // keeps only the graph itself.
-        if (snapshot.FocusMode && snapshot.ToolMode == EditorToolMode.Map)
-            DrawMapCanvas(snapshot, display);
-        else if (snapshot.ToolMode == EditorToolMode.Dialog)
-            DrawDialogPreview(snapshot, display);
-        else if (snapshot.ToolMode == EditorToolMode.Relationships)
-            DrawRelationshipMatrix(snapshot, display);
+        // The LanceScavenger debugger is a true New-UI workspace. Do not render the normal page
+        // workspace under it; only the shared editor chrome remains visible.
+        if (!lanceDebugPage)
+        {
+            // Map no longer opens an independent floating graph on top of the Browser/Inspector panel.
+            // In normal mode it gets one coherent World Workspace below. Focus mode intentionally
+            // keeps only the graph itself.
+            if (snapshot.FocusMode && snapshot.ToolMode == EditorToolMode.Map)
+                DrawMapCanvas(snapshot, display);
+            else if (snapshot.ToolMode == EditorToolMode.Dialog)
+                DrawDialogPreview(snapshot, display);
+            else if (snapshot.ToolMode == EditorToolMode.Relationships)
+                DrawRelationshipMatrix(snapshot, display);
+        }
 
         // The shared Control Center is part of the editor chrome, not a page-specific panel.
         // Keep it alive while switching into Map/World so the developer's current view does not
@@ -45,15 +51,28 @@ internal static class DevToolOverlay
         ControlCenterWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
-        {
             DrawActivityBar(snapshot, display);
-            if (snapshot.ToolMode == EditorToolMode.Map)
-                WorldWorkspaceView.Draw(snapshot, display);
-            else if (snapshot.BrowserOpen || snapshot.InspectorOpen)
-                DrawBrowserInspectorPanel(snapshot, display);
-        }
 
-        HandlePlacement(snapshot, display, io);
+        if (lanceDebugPage)
+        {
+            // Entering diagnostics must not leave Objects placement armed underneath the debug
+            // workspace, otherwise a click outside an ImGui window could place an object.
+            if (snapshot.PlacementActive)
+                Send(EditorUiCommandKind.CancelPlacement);
+            LanceScavengerDebugView.Draw(snapshot, display);
+        }
+        else
+        {
+            LanceScavengerDebugView.StopCapture();
+            if (!snapshot.FocusMode)
+            {
+                if (snapshot.ToolMode == EditorToolMode.Map)
+                    WorldWorkspaceView.Draw(snapshot, display);
+                else if (snapshot.BrowserOpen || snapshot.InspectorOpen)
+                    DrawBrowserInspectorPanel(snapshot, display);
+            }
+            HandlePlacement(snapshot, display, io);
+        }
     }
 
     private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -93,12 +112,14 @@ internal static class DevToolOverlay
         string mapLabel = DevToolUiSettings.T("地图", "Map");
         string dialogLabel = DevToolUiSettings.T("对话", "Dialog");
         string relationshipsLabel = DevToolUiSettings.T("关系", "Relationships");
+        string debugLabel = DevToolUiSettings.T("调试", "Debug");
 
         float widest = ImGui.CalcTextSize(relationshipsLabel).X;
         widest = Math.Max(widest, ImGui.CalcTextSize(triggersLabel).X);
         widest = Math.Max(widest, ImGui.CalcTextSize(objectsLabel).X);
+        widest = Math.Max(widest, ImGui.CalcTextSize(debugLabel).X);
         float defaultWidth = Math.Min(380f, Math.Max(190f, widest + 64f));
-        float defaultHeight = Math.Min(Math.Max(470f, 430f * Math.Max(1f, DevToolUiSettings.UiScale)), Math.Max(260f, display.Y - 32f));
+        float defaultHeight = Math.Min(Math.Max(500f, 460f * Math.Max(1f, DevToolUiSettings.UiScale)), Math.Max(260f, display.Y - 32f));
 
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 120f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
@@ -123,9 +144,29 @@ internal static class DevToolOverlay
         DrawModeButton(dialogLabel, DevToolUiSettings.T("对话", "Dialog"), EditorToolMode.Dialog, snapshot.ToolMode);
         DrawModeButton(relationshipsLabel, DevToolUiSettings.T("关系", "Relationships"), EditorToolMode.Relationships, snapshot.ToolMode);
 
+        if (DevToolWidgets.NavItem(debugLabel, "DevToolLanceScavengerDebug", lanceDebugPage))
+        {
+            lanceDebugPage = true;
+            if (snapshot.PlacementActive)
+                Send(EditorUiCommandKind.CancelPlacement);
+        }
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "长枪拾荒者：实时状态、瞄准质量、38帧架枪历史、路径阻断与反扫诊断",
+                "Lance Scavenger: live state, aim quality, 38-frame brace history, path blocks and counter-sweep diagnostics"));
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
+
+        if (lanceDebugPage)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T(
+                "调试页使用独立工作区。选择上方任一常规工具即可返回。",
+                "Debug uses its own workspace. Select any normal tool above to return."));
+            ImGui.End();
+            return;
+        }
 
         string browserLabel = snapshot.BrowserOpen
             ? DevToolUiSettings.T("隐藏浏览器", "Hide Browser")
@@ -145,8 +186,12 @@ internal static class DevToolOverlay
 
     private static void DrawModeButton(string label, string tooltip, EditorToolMode mode, EditorToolMode current)
     {
-        if (DevToolWidgets.NavItem(label, "DevToolMode" + mode, current == mode))
+        if (DevToolWidgets.NavItem(label, "DevToolMode" + mode, !lanceDebugPage && current == mode))
+        {
+            lanceDebugPage = false;
+            LanceScavengerDebugView.StopCapture();
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: mode));
+        }
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
