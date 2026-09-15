@@ -1,9 +1,20 @@
 using System;
 using System.Collections.Generic;
 using DryCycle.Creatures.LanceScavenger;
+using DryCycle.Items.ScavengerLance;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Debug;
+
+public sealed class LanceScavengerDebugChunkSnapshot
+{
+    public int Index { get; init; }
+    public float X { get; init; }
+    public float Y { get; init; }
+    public float Radius { get; init; }
+    public bool CurrentAimChunk { get; init; }
+    public bool BestAimChunk { get; init; }
+}
 
 /// <summary>
 /// Detached, render-thread-safe snapshot used by the rebuilt DevTool UI.
@@ -44,6 +55,15 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public float AimX { get; init; }
     public float AimY { get; init; }
     public float LancePitchDegrees { get; init; }
+
+    public float OriginX { get; init; }
+    public float OriginY { get; init; }
+    public float GripX { get; init; }
+    public float GripY { get; init; }
+    public float LanceDirectionX { get; init; }
+    public float LanceDirectionY { get; init; }
+    public float LanceForwardLength { get; init; }
+    public LanceScavengerDebugChunkSnapshot[] TargetChunks { get; init; } = Array.Empty<LanceScavengerDebugChunkSnapshot>();
 
     public bool PathClear { get; init; }
     public string LaneReason { get; init; } = string.Empty;
@@ -130,7 +150,8 @@ public static class LanceScavengerDebugPresentationHub
     }
 
     private static readonly object Sync = new();
-    private static readonly Dictionary<int, EntryRecord> Entries = new();
+    private static readonly Dictionary<long, EntryRecord> Entries = new();
+    private static volatile bool requestedFast;
     private static bool requested;
     private static string requestedRoom = string.Empty;
     private static int lastLeaseTick;
@@ -152,6 +173,7 @@ public static class LanceScavengerDebugPresentationHub
             }
 
             requested = value;
+            requestedFast = value;
             if (value)
                 lastLeaseTick = Environment.TickCount;
             else
@@ -175,7 +197,11 @@ public static class LanceScavengerDebugPresentationHub
                 int index = 0;
                 foreach (EntryRecord record in Entries.Values)
                     values[index++] = record.Snapshot;
-                Array.Sort(values, static (a, b) => a.Number.CompareTo(b.Number));
+                Array.Sort(values, static (a, b) =>
+                {
+                    int spawner = a.Spawner.CompareTo(b.Spawner);
+                    return spawner != 0 ? spawner : a.Number.CompareTo(b.Number);
+                });
                 return new LanceScavengerDebugSnapshot
                 {
                     Requested = true,
@@ -188,7 +214,8 @@ public static class LanceScavengerDebugPresentationHub
 
     internal static void Publish(LanceScavenger owner, LanceScavengerAI brain)
     {
-        if (owner?.room == null || brain == null) return;
+        // Normal gameplay pays only one volatile read when the debug page is closed.
+        if (!requestedFast || owner?.room == null || brain == null) return;
 
         string roomName = owner.room.abstractRoom?.name ?? string.Empty;
         int now = Environment.TickCount;
@@ -208,7 +235,7 @@ public static class LanceScavengerDebugPresentationHub
             if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal))
                 return;
 
-            int key = owner.abstractCreature.ID.number;
+            long key = EntityKey(owner.abstractCreature.ID.spawner, owner.abstractCreature.ID.number);
             if (!Entries.TryGetValue(key, out EntryRecord record))
             {
                 record = new EntryRecord();
@@ -240,7 +267,12 @@ public static class LanceScavengerDebugPresentationHub
             : brain.MotionTracker.SmoothedVelocity(trackedChunk);
         float stability = trackedChunk == null ? 0f : brain.MotionTracker.Stability(trackedChunk);
         Vector2 pitchDirection = aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
+        if (pitchDirection.sqrMagnitude < 0.001f) pitchDirection = Vector2.right;
+        pitchDirection.Normalize();
         float pitch = Mathf.Atan2(pitchDirection.y, Mathf.Max(0.0001f, Mathf.Abs(pitchDirection.x))) * Mathf.Rad2Deg;
+        Vector2 origin = owner.mainBodyChunk.pos;
+        Vector2 grip = origin + new Vector2(pitchDirection.x * 7f, -5f);
+        float lanceLength = owner.Lance?.Length ?? LanceCombatMath.DefaultLength;
 
         return new LanceScavengerDebugEntrySnapshot
         {
@@ -277,6 +309,15 @@ public static class LanceScavengerDebugPresentationHub
             AimY = aim.Aim.y,
             LancePitchDegrees = pitch,
 
+            OriginX = origin.x,
+            OriginY = origin.y,
+            GripX = grip.x,
+            GripY = grip.y,
+            LanceDirectionX = pitchDirection.x,
+            LanceDirectionY = pitchDirection.y,
+            LanceForwardLength = LanceCombatMath.ForwardLength(lanceLength),
+            TargetChunks = CaptureChunks(target, targetChunkIndex, bestTargetChunkIndex),
+
             PathClear = lane.PathClear,
             LaneReason = lane.Reason ?? string.Empty,
             ChargePriority = brain.ChargePriority,
@@ -295,6 +336,28 @@ public static class LanceScavengerDebugPresentationHub
             CounterSweepActive = owner.Motor.CounterSweepActive,
             CounterSweepChance = owner.Motor.CounterSweepChance
         };
+    }
+
+    private static LanceScavengerDebugChunkSnapshot[] CaptureChunks(Creature target, int current, int best)
+    {
+        if (target?.bodyChunks == null || target.bodyChunks.Length == 0)
+            return Array.Empty<LanceScavengerDebugChunkSnapshot>();
+
+        LanceScavengerDebugChunkSnapshot[] chunks = new LanceScavengerDebugChunkSnapshot[target.bodyChunks.Length];
+        for (int i = 0; i < chunks.Length; i++)
+        {
+            BodyChunk chunk = target.bodyChunks[i];
+            chunks[i] = new LanceScavengerDebugChunkSnapshot
+            {
+                Index = i,
+                X = chunk.pos.x,
+                Y = chunk.pos.y,
+                Radius = chunk.rad,
+                CurrentAimChunk = i == current,
+                BestAimChunk = i == best
+            };
+        }
+        return chunks;
     }
 
     private static int FindChunkIndex(Creature target, BodyChunk chunk)
@@ -344,17 +407,18 @@ public static class LanceScavengerDebugPresentationHub
         if (!requested) return;
         if (ElapsedMilliseconds(lastLeaseTick, now) <= LeaseTimeoutMilliseconds) return;
         requested = false;
+        requestedFast = false;
         Entries.Clear();
     }
 
     private static void RemoveStaleEntriesUnsafe(int now)
     {
         if (Entries.Count == 0) return;
-        List<int> stale = null;
-        foreach (KeyValuePair<int, EntryRecord> pair in Entries)
+        List<long> stale = null;
+        foreach (KeyValuePair<long, EntryRecord> pair in Entries)
         {
             if (ElapsedMilliseconds(pair.Value.LastSeenTick, now) <= EntryTimeoutMilliseconds) continue;
-            stale ??= new List<int>();
+            stale ??= new List<long>();
             stale.Add(pair.Key);
         }
 
@@ -362,6 +426,9 @@ public static class LanceScavengerDebugPresentationHub
         for (int i = 0; i < stale.Count; i++)
             Entries.Remove(stale[i]);
     }
+
+    private static long EntityKey(int spawner, int number) =>
+        ((long)spawner << 32) ^ (uint)number;
 
     private static uint ElapsedMilliseconds(int then, int now) =>
         unchecked((uint)(now - then));
