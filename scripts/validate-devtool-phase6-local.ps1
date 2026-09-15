@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Split-Path -Parent $ScriptRoot
+$RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptRoot))
 
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
     $BuildRoot = Join-Path $RepoRoot ".phase6-validation"
@@ -38,6 +38,12 @@ function Require-Directory([string]$Path, [string]$Label) {
         Fail "$Label not found: $Path"
     }
     Pass "$Label"
+}
+
+function Same-Path([string]$Left, [string]$Right) {
+    $leftNormalized = [System.IO.Path]::GetFullPath($Left).TrimEnd('\', '/')
+    $rightNormalized = [System.IO.Path]::GetFullPath($Right).TrimEnd('\', '/')
+    return [string]::Equals($leftNormalized, $rightNormalized, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Invoke-DotNetBuild(
@@ -80,6 +86,13 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 }
 
 Require-Directory $RainWorldDir "Rain World directory"
+
+$buildDriveRoot = [System.IO.Path]::GetPathRoot($BuildRoot)
+if ((Same-Path $BuildRoot $RepoRoot) -or
+    (Same-Path $BuildRoot $RainWorldDir) -or
+    (Same-Path $BuildRoot $buildDriveRoot)) {
+    Fail "Unsafe BuildRoot. Use a dedicated temporary directory, not the repository, Rain World, or drive root."
+}
 
 $requiredRainWorldFiles = [ordered]@{
     "BepInEx" = "BepInEx\core\BepInEx.dll"
@@ -143,28 +156,24 @@ New-Item -ItemType Directory -Path $BuildRoot | Out-Null
 
 # Build the backend into an isolated directory. DeployToGame=false guarantees that the validation
 # run does not overwrite the user's active Rain World mod installation.
-Invoke-DotNetBuild \
-    $mainProject \
-    @(
-        "RainWorldDir=$RainWorldDir",
-        "DeployToGame=false",
-        "OutputPath=$BuildRoot\"
-    ) \
-    "DryCycle.dll"
+$backendProperties = @(
+    "RainWorldDir=$RainWorldDir",
+    "DeployToGame=false",
+    "OutputPath=$BuildRoot\"
+)
+Invoke-DotNetBuild $mainProject $backendProperties "DryCycle.dll"
 
 $dryCycleDll = Join-Path $BuildRoot "DryCycle.dll"
 Require-File $dryCycleDll "compiled DryCycle.dll"
 
 # The frontend project resolves DryCycle.dll through GameModOutputDir. Point that property at the
 # isolated validation output so it compiles against the exact backend produced above.
-Invoke-DotNetBuild \
-    $frontendProject \
-    @(
-        "RainWorldDir=$RainWorldDir",
-        "GameModOutputDir=$BuildRoot",
-        "RWImGuiPluginDir=$RWImGuiPluginDir"
-    ) \
-    "DryCycle.DevTool.RWImGui.dll"
+$frontendProperties = @(
+    "RainWorldDir=$RainWorldDir",
+    "GameModOutputDir=$BuildRoot",
+    "RWImGuiPluginDir=$RWImGuiPluginDir"
+)
+Invoke-DotNetBuild $frontendProject $frontendProperties "DryCycle.DevTool.RWImGui.dll"
 
 $frontendDll = Join-Path $BuildRoot "DryCycle.DevTool.RWImGui.dll"
 Require-File $frontendDll "compiled DryCycle.DevTool.RWImGui.dll"
