@@ -101,14 +101,15 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool active = _owner.Consious && _owner.grabbedBy.Count == 0 && !_owner.safariControlled &&
             !_owner.enteringShortCut.HasValue && !_owner.inShortcut && _owner.Submersion < 0.25f;
         float distance = Target == null ? 999f : Vector2.Distance(_owner.mainBodyChunk.pos, Target.mainBodyChunk.pos);
+        bool closeDanger = ImmediateCloseDanger(Target, distance);
 
         AimSolution = Target == null ? default :
             LanceAimSolver.Solve(_owner, _owner.mainBodyChunk.pos, Target, _motionTracker);
         Lane = Target == null ? new ChargeLane(false, _owner.lookPoint, "no target") :
             ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target, AimSolution);
 
-        // Only the visible 38-frame brace owns the commitment memory. Chasing/backstep aim
-        // may start the attack but cannot silently satisfy a later brace window.
+        // Only the visible brace owns the commitment memory. Chasing aim may start the attack but
+        // cannot silently satisfy a later brace window.
         if (_owner.Combat.State == LanceState.Brace)
             UpdateRecentAimSolution(Target, AimSolution);
 
@@ -149,8 +150,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
 
         ChargePriority = HasChargePriorityFor(Target);
-        bool chargeOpportunity = active && armed && ChargePriority && Target != null && TargetViolence == ViolenceType.Lethal &&
-            distance >= ChargeLanePlanner.MinimumChargeDistance && laneClear && _owner.Combat.Cooldown == 0;
+        bool chargeOpportunity = active && armed && !closeDanger && ChargePriority && Target != null &&
+            TargetViolence == ViolenceType.Lethal && distance >= ChargeLanePlanner.MinimumChargeDistance &&
+            laneClear && _owner.Combat.Cooldown == 0;
 
         DebugFriendBlocked = friendBlocked;
         DebugHardBlocked = hardBlocked;
@@ -162,7 +164,8 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         LanceState before = _owner.Combat.State;
         _owner.Combat.Tick(new LanceSituation(active, armed, sidearm, Target != null, TargetViolence, TargetAfraid,
-            distance, laneClear, _owner.Motor.BackstepComplete, friendBlocked, ChargePriority, commitReady, hardBlocked));
+            distance, laneClear, _owner.Motor.BackstepComplete, friendBlocked, ChargePriority, commitReady, hardBlocked,
+            closeDanger));
         LanceState state = _owner.Combat.State;
 
         if (before != LanceState.Backstep && state == LanceState.Backstep)
@@ -234,13 +237,15 @@ internal sealed class LanceScavengerAI : ScavengerAI
             }
         }
         else if (state == LanceState.Backstep || state == LanceState.Brace || state == LanceState.Recover ||
-                 state == LanceState.CloseDefense || state == LanceState.FollowUpThrow)
+                 state == LanceState.FollowUpThrow)
         {
             creature.abstractAI.SetDestination(creature.pos);
             _staging = null;
         }
         else
         {
+            // In CloseDefense we deliberately keep the destination chosen by vanilla ScavengerAI.
+            // That lets an afraid scavenger flee/path while the lance motor independently guards it.
             _staging = null;
         }
 
@@ -292,6 +297,25 @@ internal sealed class LanceScavengerAI : ScavengerAI
     {
         if (friendBlocked) return true;
         return lane.Reason == "distance" || lane.Reason == "wall / ceiling" || lane.Reason == "lance blocked";
+    }
+
+    private bool ImmediateCloseDanger(Creature target, float distance)
+    {
+        if (target == null || target.dead || !target.Consious || target.room != _owner.room)
+            return false;
+        if (distance <= LanceMotor.CloseDefenseRange)
+            return true;
+        if (distance > LanceMotor.CloseDefenseGuardRange)
+            return false;
+
+        Vector2 toTarget = target.mainBodyChunk.pos - _owner.mainBodyChunk.pos;
+        if (toTarget.sqrMagnitude < 0.001f) return true;
+        Vector2 targetVelocity = _motionTracker.Target == target
+            ? _motionTracker.SmoothedVelocity(target.mainBodyChunk)
+            : target.mainBodyChunk.vel;
+        Vector2 relativeVelocity = targetVelocity - _owner.mainBodyChunk.vel;
+        float closingSpeed = -Vector2.Dot(relativeVelocity, toTarget.normalized);
+        return closingSpeed >= LanceMotor.CloseDefenseApproachSpeed;
     }
 
     private void ResetRecentAimSolution()
