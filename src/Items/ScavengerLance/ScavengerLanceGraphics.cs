@@ -19,14 +19,14 @@ internal sealed partial class ScavengerLance
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
     {
         // 0/1 : matte desert handle / weak dusty edge light
-        // 2/3 : asymmetric ochre wedge / very narrow sand-polished facet
+        // 2/3 : asymmetric ochre wedge / very narrow sand-worn facet
         // 4-6 : short abrasion / dirt marks
         // 7-9 : broad leather turns at the blade-handle junction
         // 10  : leather knot protruding from the wrap
         // 11  : torn desert cloth streamer tied into that knot
         //
-        // The weapon deliberately uses no black exterior outline. Its visual language is now
-        // primarily dry ochre / brown-yellow rather than bright grey metal.
+        // No black exterior outline. The weapon is deliberately dominated by warm brown-yellow,
+        // dusty ochre and leather rather than bright grey or polished metal.
         sLeaser.sprites = new FSprite[12];
         sLeaser.sprites[0] = TriangleMesh.MakeLongMesh(5, false, false);
         sLeaser.sprites[1] = TriangleMesh.MakeLongMesh(5, false, false);
@@ -35,14 +35,13 @@ internal sealed partial class ScavengerLance
         for (int i = 4; i < 11; i++) sLeaser.sprites[i] = new FSprite("pixel");
         sLeaser.sprites[11] = TriangleMesh.MakeLongMesh(FabricSegments, false, false);
         sLeaser.sprites[11].shader = rCam.game.rainWorld.Shaders["JaggedSquare"];
-        sLeaser.sprites[11].alpha = Mathf.Lerp(0.90f, 0.98f,
+        sLeaser.sprites[11].alpha = Mathf.Lerp(0.88f, 0.95f,
             rCam.game.SeededRandom(abstractPhysicalObject.ID.RandomSeed));
 
-        // Keep the secondary surfaces subdued. The previous implementation let these layers read as
-        // specular steel; lower alpha makes them feel like dusty wear instead of polished highlights.
-        sLeaser.sprites[1].alpha = 0.72f;
-        sLeaser.sprites[3].alpha = 0.62f;
-        for (int i = 4; i < 7; i++) sLeaser.sprites[i].alpha = 0.72f;
+        // Secondary surfaces should read as dust and wear, never as specular metal.
+        sLeaser.sprites[1].alpha = 0.46f;
+        sLeaser.sprites[3].alpha = 0.36f;
+        for (int i = 4; i < 7; i++) sLeaser.sprites[i].alpha = 0.58f;
 
         _fabricInitialized = false;
         _fabricUpdateClock = int.MinValue;
@@ -62,15 +61,14 @@ internal sealed partial class ScavengerLance
         Vector2 tip = grip + direction * forwardLength;
         float bend = Mathf.Lerp(_lastBend, _bend, t) * 0.32f;
 
-        // Most of the weapon is a dry, matte brown-yellow mass. Secondary layers are deliberately
-        // narrow and low-contrast, so the lance reads as something weathered by the desert rather
-        // than as a clean silver weapon imported from another visual style.
+        // The whole weapon is treated as a dry, matte desert object. Any lighter layer is deliberately
+        // narrow and low-contrast so it reads as sand abrasion rather than polished steel.
         DrawHandle((TriangleMesh)sLeaser.sprites[0], tail, bladeRoot, direction, perp, bend, 1.82f, 0f, camPos);
-        DrawHandle((TriangleMesh)sLeaser.sprites[1], tail, bladeRoot, direction, perp, bend, 0.30f, 0.28f, camPos);
+        DrawHandle((TriangleMesh)sLeaser.sprites[1], tail, bladeRoot, direction, perp, bend, 0.26f, 0.24f, camPos);
         DrawBlade((TriangleMesh)sLeaser.sprites[2], bladeRoot, tip, direction, perp, camPos);
         DrawBladeHighlight((TriangleMesh)sLeaser.sprites[3], bladeRoot, tip, direction, perp, camPos);
 
-        // Short, low-contrast marks break up the face without making it glossy or bone-like.
+        // Short earth-darkened abrasions break the face up without creating a glossy blade language.
         float[] markT = { 0.29f, 0.53f, 0.73f };
         float[] markTilt = { 13f, -10f, 16f };
         float[] markLength = { 0.22f, 0.27f, 0.20f };
@@ -164,9 +162,8 @@ internal sealed partial class ScavengerLance
     private static void DrawBladeHighlight(TriangleMesh mesh, Vector2 root, Vector2 tip, Vector2 direction,
         Vector2 perp, Vector2 camPos)
     {
-        // This is no longer a metallic sheen strip. It is a very narrow, dusty facet where repeated
-        // sand abrasion has made the surface slightly lighter. Keeping it thin is what removes most
-        // of the polished-metal read at native resolution.
+        // Not a sheen strip: this is a faint dusty facet where sand abrasion has exposed a slightly
+        // lighter ochre surface. It stays deliberately thin and weak at native resolution.
         for (int i = 0; i < 4; i++)
         {
             float a = BladeSections[i];
@@ -179,9 +176,9 @@ internal sealed partial class ScavengerLance
         Vector2 basePoint = Vector2.Lerp(root, tip, finalBase);
         GetBladeWidths(finalBase, out float left, out float right);
         int index = 16;
-        mesh.MoveVertice(index, basePoint + perp * right * 0.03f - camPos);
-        mesh.MoveVertice(index + 1, basePoint + perp * right * 0.17f - camPos);
-        mesh.MoveVertice(index + 2, Vector2.Lerp(root, tip, 0.945f) + perp * 0.03f - camPos);
+        mesh.MoveVertice(index, basePoint + perp * right * 0.02f - camPos);
+        mesh.MoveVertice(index + 1, basePoint + perp * right * 0.13f - camPos);
+        mesh.MoveVertice(index + 2, Vector2.Lerp(root, tip, 0.945f) + perp * 0.02f - camPos);
     }
 
     private static void MoveHighlightPair(TriangleMesh mesh, int index, Vector2 root, Vector2 tip,
@@ -189,9 +186,9 @@ internal sealed partial class ScavengerLance
     {
         Vector2 center = Vector2.Lerp(root, tip, t);
         GetBladeWidths(t, out _, out float right);
-        float fade = Mathf.Lerp(1f, 0.45f, t);
-        float innerNear = right * 0.025f * fade;
-        float innerFar = right * 0.18f * fade;
+        float fade = Mathf.Lerp(1f, 0.38f, t);
+        float innerNear = right * 0.018f * fade;
+        float innerFar = right * 0.135f * fade;
         mesh.MoveVertice(index, center + perp * innerNear - camPos);
         mesh.MoveVertice(index + 1, center + perp * innerFar - camPos);
     }
@@ -254,8 +251,6 @@ internal sealed partial class ScavengerLance
             _fabric[i, 2] *= submerged ? 0.74f : Mathf.Lerp(0.92f, 0.875f, progress);
             _fabric[i, 2].y -= room.gravity * (submerged ? 0.025f : Mathf.Lerp(0.14f, 0.27f, progress));
 
-            // More readable than the previous thread-like implementation: the rag trails clearly
-            // during backstep/charge and has a small irregular flutter while the weapon is held.
             _fabric[i, 2] -= weaponMotion * (0.017f + 0.026f * progress);
             float flutter = Mathf.Sin((_clock + i * 6.7f) * 0.22f) *
                 Mathf.Min(0.30f, 0.035f + weaponMotion.magnitude * 0.026f) * progress;
@@ -306,8 +301,6 @@ internal sealed partial class ScavengerLance
             tangent.Normalize();
             Vector2 clothPerp = Custom.PerpendicularVector(tangent);
 
-            // A compact torn strip: broad enough to read as cloth, but short enough not to become a
-            // flag. JaggedSquare supplies the broken edge while the width falls toward a torn tip.
             float endWidth = Mathf.Lerp(3.05f, 0.72f, progress) +
                 Mathf.Sin(progress * Mathf.PI) * 0.42f;
             int vertex = i * 4;
@@ -325,17 +318,16 @@ internal sealed partial class ScavengerLance
     {
         float darkness = room == null ? 0f : room.Darkness(firstChunk.pos) * (1f - room.LightSourceExposure(firstChunk.pos));
 
-        // Matte desert palette. Brown-yellow / ochre is now the dominant read; contrast stays low so
-        // the weapon sits inside Rain World's dusty environments instead of presenting as polished
-        // silver metal. The lighter colors represent sand abrasion, not specular shine.
-        Color handleBase = Color.Lerp(new Color(0.285f, 0.225f, 0.120f), palette.blackColor, darkness * 0.92f);
-        Color handleLight = Color.Lerp(new Color(0.420f, 0.335f, 0.175f), palette.blackColor, darkness * 0.89f);
-        Color bladeBase = Color.Lerp(new Color(0.465f, 0.365f, 0.190f), palette.blackColor, darkness * 0.91f);
-        Color bladeLight = Color.Lerp(new Color(0.585f, 0.475f, 0.265f), palette.blackColor, darkness * 0.89f);
-        Color wear = Color.Lerp(new Color(0.335f, 0.265f, 0.135f), palette.blackColor, darkness * 0.94f);
-        Color leather = Color.Lerp(new Color(0.235f, 0.135f, 0.060f), palette.blackColor, darkness * 0.93f);
-        Color leatherLight = Color.Lerp(new Color(0.405f, 0.255f, 0.105f), palette.blackColor, darkness * 0.91f);
-        Color fabric = Color.Lerp(new Color(0.565f, 0.355f, 0.105f), palette.blackColor, darkness * 0.90f);
+        // Desert-first palette. The main read is dry ochre / brown-yellow; no cool silver is used.
+        // Lighter values are dusty abrasion, not reflected light, so contrast remains deliberately low.
+        Color handleBase = Color.Lerp(new Color(0.255f, 0.185f, 0.082f), palette.blackColor, darkness * 0.93f);
+        Color handleLight = Color.Lerp(new Color(0.365f, 0.275f, 0.125f), palette.blackColor, darkness * 0.91f);
+        Color bladeBase = Color.Lerp(new Color(0.405f, 0.300f, 0.145f), palette.blackColor, darkness * 0.92f);
+        Color bladeLight = Color.Lerp(new Color(0.515f, 0.405f, 0.215f), palette.blackColor, darkness * 0.90f);
+        Color wear = Color.Lerp(new Color(0.285f, 0.205f, 0.092f), palette.blackColor, darkness * 0.95f);
+        Color leather = Color.Lerp(new Color(0.205f, 0.108f, 0.045f), palette.blackColor, darkness * 0.94f);
+        Color leatherLight = Color.Lerp(new Color(0.340f, 0.205f, 0.082f), palette.blackColor, darkness * 0.92f);
+        Color fabric = Color.Lerp(new Color(0.525f, 0.315f, 0.085f), palette.blackColor, darkness * 0.91f);
 
         sLeaser.sprites[0].color = handleBase;
         sLeaser.sprites[1].color = handleLight;
@@ -355,7 +347,6 @@ internal sealed partial class ScavengerLance
         foreach (FSprite sprite in sLeaser.sprites) sprite.RemoveFromContainer();
 
         // Rag behind the weapon, then the matte ochre body, then the full leather wrap/knot on top.
-        // The wrap remains the foreground part so the hand-built material change stays readable.
         container.AddChild(sLeaser.sprites[11]);
         for (int i = 0; i < 7; i++) container.AddChild(sLeaser.sprites[i]);
         for (int i = 7; i < 11; i++) container.AddChild(sLeaser.sprites[i]);
