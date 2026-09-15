@@ -5,7 +5,7 @@ internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane,
 internal readonly struct LanceSituation
 {
     internal LanceSituation(bool active, bool armed, bool sidearm, bool target, ScavengerAI.ViolenceType violence, bool afraid,
-        float distance, bool lane, bool backstepComplete = true)
+        float distance, bool lane, bool backstepComplete = true, bool friendBlocked = false, bool chargePriority = true)
     {
         Active = active;
         Armed = armed;
@@ -16,9 +16,11 @@ internal readonly struct LanceSituation
         Distance = distance;
         Lane = lane;
         BackstepComplete = backstepComplete;
+        FriendBlocked = friendBlocked;
+        ChargePriority = chargePriority;
     }
 
-    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete;
+    internal readonly bool Active, Armed, Sidearm, Target, Afraid, Lane, BackstepComplete, FriendBlocked, ChargePriority;
     internal readonly float Distance;
     internal readonly ScavengerAI.ViolenceType Violence;
 }
@@ -28,6 +30,7 @@ internal sealed class LanceCombatState
 {
     // Rain World runs at roughly 40 simulation updates per second: 38 frames = 0.95 s.
     internal const int BraceFrames = 38;
+    internal const int BraceSolutionGraceFrames = 8;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
     internal const int FollowUpThrowTimeout = 60;
@@ -43,6 +46,7 @@ internal sealed class LanceCombatState
     private bool _followUpReserved;
     private bool _chargeLanded;
     private int _followUpLandingAge = -1;
+    private int _braceLostSolutionFrames;
 
     internal void Tick(LanceSituation s)
     {
@@ -91,14 +95,20 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // The backstep is a real movement phase. Do not continually invalidate it while
-        // the body is moving; once it completes, re-evaluate the lane before bracing.
+        // Backstep is a real movement phase. Once it completes, re-evaluate the current
+        // lane. A temporarily occupied friendly lane waits instead of starting another
+        // staging search, which prevents two lance scavengers from endlessly swapping sides.
         if (State == LanceState.Backstep)
         {
             if (!s.BackstepComplete) return;
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
             {
                 Enter(s.Afraid ? LanceState.Threaten : LanceState.CloseDefense);
+                return;
+            }
+            if (!s.ChargePriority || s.FriendBlocked)
+            {
+                Enter(LanceState.Threaten);
                 return;
             }
             if (!s.Lane)
@@ -111,21 +121,55 @@ internal sealed class LanceCombatState
             return;
         }
 
-        if (s.Afraid)
+        // A brace is allowed to survive short prediction jitter. The final brace frame
+        // still requires a live hit solution; there is no blind launch from a stale aim.
+        if (State == LanceState.Brace)
         {
-            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || Cooldown > 0)
+            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
+            {
+                Enter(s.Afraid ? LanceState.Threaten : LanceState.CloseDefense);
+                return;
+            }
+            if (!s.ChargePriority || Cooldown > 0)
             {
                 Enter(LanceState.Threaten);
                 return;
             }
-            if (State != LanceState.Brace) { Enter(LanceState.Backstep); return; }
+
+            if (!s.Lane)
+            {
+                _braceLostSolutionFrames++;
+                if (Age >= BraceFrames || _braceLostSolutionFrames > BraceSolutionGraceFrames)
+                    Enter(s.Afraid || s.FriendBlocked ? LanceState.Threaten : LanceState.AcquireChargeLane);
+                return;
+            }
+
+            _braceLostSolutionFrames = 0;
             if (Age >= BraceFrames)
             {
-                _followUpReserved = s.Sidearm && s.Lane;
+                _followUpReserved = s.Sidearm;
                 _chargeLanded = false;
                 AttackSerial++;
                 Enter(LanceState.Charge);
             }
+            return;
+        }
+
+        if (s.Afraid)
+        {
+            if (!s.ChargePriority || s.Distance < ChargeLanePlanner.MinimumChargeDistance ||
+                !s.Lane || Cooldown > 0)
+            {
+                Enter(LanceState.Threaten);
+                return;
+            }
+            Enter(LanceState.Backstep);
+            return;
+        }
+
+        if (!s.ChargePriority)
+        {
+            Enter(LanceState.Threaten);
             return;
         }
 
@@ -136,16 +180,14 @@ internal sealed class LanceCombatState
             if (State == LanceState.CloseDefense) Cooldown = 48;
             return;
         }
+        if (s.FriendBlocked)
+        {
+            Enter(LanceState.Threaten);
+            return;
+        }
         if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
         if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
-        if (State != LanceState.Brace) { Enter(LanceState.Backstep); return; }
-        if (Age >= BraceFrames)
-        {
-            _followUpReserved = s.Sidearm && s.Lane;
-            _chargeLanded = false;
-            AttackSerial++;
-            Enter(LanceState.Charge);
-        }
+        Enter(LanceState.Backstep);
     }
 
     internal void MarkLanding()
@@ -180,6 +222,7 @@ internal sealed class LanceCombatState
         _followUpReserved = false;
         _chargeLanded = false;
         _followUpLandingAge = -1;
+        _braceLostSolutionFrames = 0;
         _recoveryDuration = wall ? WallRecoveryFrames : RecoveryFrames;
         Cooldown = wall ? 115 : 76;
         State = LanceState.Recover;
@@ -191,6 +234,7 @@ internal sealed class LanceCombatState
         _followUpReserved = false;
         _chargeLanded = false;
         _followUpLandingAge = -1;
+        _braceLostSolutionFrames = 0;
         if (State == LanceState.Recover) return;
         if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.Backstep ||
             State == LanceState.FollowUpThrow) Recover(false);
@@ -198,5 +242,10 @@ internal sealed class LanceCombatState
     }
 
     private void Enter(LanceState next)
-    { if (State == next) return; State = next; Age = 0; }
+    {
+        if (State == next) return;
+        State = next;
+        Age = 0;
+        _braceLostSolutionFrames = 0;
+    }
 }
