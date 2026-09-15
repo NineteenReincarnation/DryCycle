@@ -5,6 +5,7 @@ namespace DryCycle.Creatures.LanceScavenger;
 
 internal sealed class LanceMotor
 {
+    private const float ChargeLaunchY = 7.3f;
     private readonly LanceScavenger _owner;
     private int _launchedSerial = -1;
     private Vector2 _launchPoint;
@@ -32,7 +33,9 @@ internal sealed class LanceMotor
                 _launchPoint = _owner.mainBodyChunk.pos;
                 Direction = new Vector2(Mathf.Sign(_owner.Brain.Aim.x - _launchPoint.x), 0f);
                 float speed = Mathf.Lerp(17f, 19.5f, _owner.abstractCreature.personality.energy);
-                foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel = new Vector2(Direction.x * speed, 4.2f);
+                // Vanilla scavenger gravity is 0.9. Raising 4.2 -> 7.3 adds roughly
+                // one Rain World tile (20 px) to the ballistic apex without teleporting the body.
+                foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel = new Vector2(Direction.x * speed, ChargeLaunchY);
                 _owner.room.PlaySound(SoundID.Slugcat_Throw_Spear, _owner.mainBodyChunk.pos, 0.75f, 0.7f);
             }
             // A single launch impulse. No per-frame speed reset or airborne steering.
