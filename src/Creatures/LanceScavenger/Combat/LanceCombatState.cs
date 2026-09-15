@@ -1,5 +1,7 @@
 namespace DryCycle.Creatures.LanceScavenger;
 
+// Backstep remains as a legacy enum value so old debug/state consumers do not break during hot reload,
+// but the combat state machine no longer enters or waits on it.
 internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane, Backstep, Brace, Charge, FollowUpThrow, Recover, CloseDefense, Disarmed }
 
 internal readonly struct LanceSituation
@@ -32,7 +34,8 @@ internal readonly struct LanceSituation
 /// <summary>Decision timing only; body velocity and weapon impacts live in their own modules.</summary>
 internal sealed class LanceCombatState
 {
-    internal const int BraceFrames = 38;
+    // Rain World updates gameplay at roughly 40 ticks/s. 20 ticks = 0.5 second visible brace.
+    internal const int BraceFrames = 20;
     internal const int CommitWindowFrames = BraceFrames;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
@@ -81,46 +84,31 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // A launched charge is now a physical commitment. Soft target/relationship changes do not
-        // cancel it in mid-air; landing, wall impact, interruption or this timeout ends the motion.
+        // A launched charge is a physical commitment. Soft target/relationship changes do not
+        // cancel it in mid-air; landing, wall impact, interruption or timeout ends the motion.
         if (State == LanceState.Charge)
         {
             if (Age >= MaxChargeFrames) FinishCharge(false);
             return;
         }
 
+        // Backstep was removed from the combat chain. If an old live instance survives a hot reload
+        // while still carrying that state, migrate it straight into the new half-second brace.
+        if (State == LanceState.Backstep)
+        {
+            Enter(LanceState.Brace);
+            return;
+        }
+
         if (!s.Target || s.Violence == ScavengerAI.ViolenceType.None)
         {
-            if (State == LanceState.Brace || State == LanceState.Backstep) Recover(false);
+            if (State == LanceState.Brace) Recover(false);
             else Enter(LanceState.Observe);
             return;
         }
         if (s.Violence != ScavengerAI.ViolenceType.Lethal)
         {
             Enter(LanceState.Threaten);
-            return;
-        }
-
-        if (State == LanceState.Backstep)
-        {
-            if (!s.BackstepComplete) return;
-            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance)
-            {
-                Enter(s.Afraid ? LanceState.Threaten : LanceState.CloseDefense);
-                return;
-            }
-            if (!s.ChargePriority || s.FriendBlocked)
-            {
-                Enter(LanceState.Threaten);
-                return;
-            }
-            if (!s.Lane)
-            {
-                Enter(s.Afraid ? LanceState.Threaten : LanceState.AcquireChargeLane);
-                return;
-            }
-            if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
-            Enter(LanceState.Brace);
             return;
         }
 
@@ -162,6 +150,8 @@ internal sealed class LanceCombatState
             return;
         }
 
+        // Afraid remains a vanilla relationship result, but a lethal target with a valid lane no
+        // longer spends another movement phase backing away. It braces immediately and commits.
         if (s.Afraid)
         {
             if (!s.ChargePriority || s.Distance < ChargeLanePlanner.MinimumChargeDistance ||
@@ -170,7 +160,7 @@ internal sealed class LanceCombatState
                 Enter(LanceState.Threaten);
                 return;
             }
-            Enter(LanceState.Backstep);
+            Enter(LanceState.Brace);
             return;
         }
 
@@ -194,7 +184,9 @@ internal sealed class LanceCombatState
         }
         if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
         if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
-        Enter(LanceState.Backstep);
+
+        // Valid attack lane -> stop and brace immediately. There is no preparatory backstep.
+        Enter(LanceState.Brace);
     }
 
     internal void MarkAirborne()
