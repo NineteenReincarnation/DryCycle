@@ -21,6 +21,7 @@ internal static class ScavengerLanceHooks
         On.Player.GetHeldItemDirection += GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
         On.Player.ThrowObject += ThrowObject;
+        On.Player.Update += PlayerUpdate;
         _enabled = true;
     }
     internal static void Disable()
@@ -33,6 +34,7 @@ internal static class ScavengerLanceHooks
         On.Player.GetHeldItemDirection -= GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
         On.Player.ThrowObject -= ThrowObject;
+        On.Player.Update -= PlayerUpdate;
         ItemRegistry.Unregister(_definition);
         _definition = null;
         ObjectType.Unregister();
@@ -69,15 +71,26 @@ internal static class ScavengerLanceHooks
     private static void GraphicsModuleUpdated(On.Player.orig_GraphicsModuleUpdated orig, Player self, bool actuallyViewed, bool eu)
     {
         orig(self, actuallyViewed, eu);
-        foreach (Creature.Grasp grasp in self.grasps)
-            if (grasp?.grabbed is ScavengerLance lance) lance.SynchronizePlayerThrust(eu);
+        for (int hand = 0; hand < self.grasps.Length; hand++)
+            if (self.grasps[hand]?.grabbed is ScavengerLance lance)
+                lance.SynchronizePlayerPose(self, hand, eu);
     }
 
     private static void ThrowObject(On.Player.orig_ThrowObject orig, Player self, int grasp, bool eu)
     {
-        if (self.grasps[grasp]?.grabbed is not ScavengerLance lance || self.input[0].y < 0)
-        { orig(self, grasp, eu); return; }
-        lance.RequestThrust(new Vector2(self.ThrowDirection, self.input[0].y * 0.35f).normalized,
-            LanceCombatMath.PlayerThrustMaxDamage);
+        if (self.grasps[grasp]?.grabbed is ScavengerLance lance &&
+            ScavengerLancePlayerController.BeginThrowInput(self, grasp, lance))
+        {
+            // Throw is the lance attack input. The normal pickup/drop controls still release the
+            // item, but pressing Throw never ejects the identity weapon from the player's hand.
+            return;
+        }
+        orig(self, grasp, eu);
+    }
+
+    private static void PlayerUpdate(On.Player.orig_Update orig, Player self, bool eu)
+    {
+        orig(self, eu);
+        ScavengerLancePlayerController.Update(self, eu);
     }
 }
