@@ -141,16 +141,32 @@ internal static class DevToolUiSettings
 
     internal static string ToolMode(EditorToolMode mode)
     {
-        if (!IsChinese) return mode.ToString();
+        // Do not use Enum.ToString() for the seven stable editor modes. ToolMode is queried by
+        // several always-visible windows every frame; fixed literals keep both languages allocation-free.
+        if (IsChinese)
+        {
+            return mode switch
+            {
+                EditorToolMode.Room => "房间",
+                EditorToolMode.Objects => "物件",
+                EditorToolMode.Sound => "声音",
+                EditorToolMode.Triggers => "触发器",
+                EditorToolMode.Map => "地图",
+                EditorToolMode.Dialog => "对话",
+                EditorToolMode.Relationships => "关系",
+                _ => mode.ToString()
+            };
+        }
+
         return mode switch
         {
-            EditorToolMode.Room => "房间",
-            EditorToolMode.Objects => "物件",
-            EditorToolMode.Sound => "声音",
-            EditorToolMode.Triggers => "触发器",
-            EditorToolMode.Map => "地图",
-            EditorToolMode.Dialog => "对话",
-            EditorToolMode.Relationships => "关系",
+            EditorToolMode.Room => "Room",
+            EditorToolMode.Objects => "Objects",
+            EditorToolMode.Sound => "Sound",
+            EditorToolMode.Triggers => "Triggers",
+            EditorToolMode.Map => "Map",
+            EditorToolMode.Dialog => "Dialog",
+            EditorToolMode.Relationships => "Relationships",
             _ => mode.ToString()
         };
     }
