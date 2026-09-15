@@ -13,8 +13,8 @@ internal static class UniversalDevUiMirrorWindow
 {
     internal static void Draw(Num.Vector2 display)
     {
-        // All reflection-backed mirror capture, protocol bootstrap and audit evaluation is pumped by
-        // the backend diagnostics phase. This frontend only renders detached snapshots.
+        // All reflection-backed full audit, mirror capture and downstream diagnostic publication is
+        // pumped by the backend diagnostics phase. This frontend only renders detached snapshots.
         if (!DevUiDiagnosticsPolicy.Enabled)
             return;
 
