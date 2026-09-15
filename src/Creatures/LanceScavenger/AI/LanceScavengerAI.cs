@@ -14,6 +14,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     private bool _sidearmThrowPass;
     private bool _sidearmDrawn;
     private Creature _chargeTarget;
+    private bool _chargeTargetAfraid;
     private Creature _recentAimTarget;
     private LanceAimSolution _recentAimSolution;
     private int _recentAimAge = int.MaxValue;
@@ -49,6 +50,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         base.NewRoom(room);
         Target = null;
         _chargeTarget = null;
+        _chargeTargetAfraid = false;
         TargetViolence = ViolenceType.None;
         TargetAfraid = false;
         AimSolution = default;
@@ -78,9 +80,19 @@ internal sealed class LanceScavengerAI : ScavengerAI
         base.Update();
         if (_owner.room == null) return;
 
-        SelectVanillaCombatTarget();
-        if (_owner.Combat.State == LanceState.FollowUpThrow)
-            RestoreChargeTargetForFollowUp();
+        // Vanilla may change focus while the scavenger is already airborne. Once a charge has
+        // launched, keep the attack target fixed for diagnostics/counter-sweep/follow-up purposes;
+        // tactical relationship changes no longer rewrite an attack that is physically in flight.
+        if (_owner.Combat.State == LanceState.Charge)
+        {
+            RestoreLockedChargeTarget();
+        }
+        else
+        {
+            SelectVanillaCombatTarget();
+            if (_owner.Combat.State == LanceState.FollowUpThrow)
+                RestoreChargeTargetForFollowUp();
+        }
 
         _motionTracker.Update(Target);
 
@@ -107,6 +119,34 @@ internal sealed class LanceScavengerAI : ScavengerAI
         if (_owner.Combat.State == LanceState.Charge)
             laneClear = !ChargeLanePlanner.FriendInPath(_owner, _owner.mainBodyChunk.pos,
                 _owner.mainBodyChunk.pos + _owner.Motor.Direction * 65f, Target);
+
+        // On the actual release frame, choose the best solution seen in the brace window, apply the
+        // limited 6-degree release correction, and then run one final safety check using that exact
+        // direction. This prevents checking one angle and launching with another.
+        LanceAimSolution releaseSolution = default;
+        bool releaseSolutionReady = false;
+        bool releaseFrame = _owner.Combat.State == LanceState.Brace &&
+            _owner.Combat.Age + 1 >= LanceCombatState.BraceFrames;
+        if (releaseFrame && commitReady && Target != null)
+        {
+            releaseSolution = SelectCommittedAim(Target);
+            if (releaseSolution.Ready)
+            {
+                releaseSolution = LanceAimSolver.CorrectForRelease(_owner, Target, _motionTracker, releaseSolution);
+                ChargeLane releaseLane = ChargeLanePlanner.Evaluate(_owner, _owner.mainBodyChunk.pos, Target, releaseSolution);
+                Lane = releaseLane;
+                friendBlocked = releaseLane.Reason == "friend in lane";
+                hardBlocked = IsHardChargeBlock(releaseLane, friendBlocked);
+                laneClear = releaseLane.Clear;
+                commitReady = releaseLane.Clear && !hardBlocked;
+                releaseSolutionReady = commitReady;
+            }
+            else
+            {
+                commitReady = false;
+                laneClear = false;
+            }
+        }
 
         ChargePriority = HasChargePriorityFor(Target);
         bool chargeOpportunity = active && armed && ChargePriority && Target != null && TargetViolence == ViolenceType.Lethal &&
@@ -136,10 +176,12 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         if (before != LanceState.Charge && state == LanceState.Charge)
         {
-            LanceAimSolution committed = AimSolution.Ready ? AimSolution : _recentAimSolution;
-            committed = LanceAimSolver.CorrectForRelease(_owner, Target, _motionTracker, committed);
+            LanceAimSolution committed = releaseSolutionReady ? releaseSolution : SelectCommittedAim(Target);
+            if (!releaseSolutionReady)
+                committed = LanceAimSolver.CorrectForRelease(_owner, Target, _motionTracker, committed);
             _owner.Motor.CommitCharge(committed);
             _chargeTarget = Target;
+            _chargeTargetAfraid = TargetAfraid;
             ResetRecentAimSolution();
         }
         else if (before == LanceState.Brace && state != LanceState.Brace)
@@ -203,6 +245,14 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
 
         LanceScavengerDebugPresentationHub.Publish(_owner, this);
+    }
+
+    private LanceAimSolution SelectCommittedAim(Creature target)
+    {
+        bool recentReady = RecentAimSolutionValid(target);
+        if (recentReady && (!AimSolution.Ready || _recentAimSolution.Quality >= AimSolution.Quality))
+            return _recentAimSolution;
+        return AimSolution;
     }
 
     private void UpdateRecentAimSolution(Creature target, LanceAimSolution aim)
@@ -345,6 +395,23 @@ internal sealed class LanceScavengerAI : ScavengerAI
         _owner.EnsureWeaponSlots();
     }
 
+    private void RestoreLockedChargeTarget()
+    {
+        Target = null;
+        TargetViolence = ViolenceType.None;
+        TargetAfraid = false;
+
+        Creature target = _chargeTarget;
+        if (target == null || target.dead || !target.Consious || target.room != _owner.room)
+            return;
+
+        Target = target;
+        TargetViolence = ViolenceType.Lethal;
+        TargetAfraid = _chargeTargetAfraid;
+        Tracker.CreatureRepresentation rep = tracker.RepresentationForCreature(target.abstractCreature, false);
+        if (rep != null) focusCreature = rep;
+    }
+
     private void RestoreChargeTargetForFollowUp()
     {
         Creature target = _chargeTarget;
@@ -392,6 +459,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         _owner.Throw(direction);
         _owner.EnsureWeaponSlots();
         _chargeTarget = null;
+        _chargeTargetAfraid = false;
         return true;
     }
 
