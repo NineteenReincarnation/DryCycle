@@ -8,8 +8,9 @@ namespace DryCycle.Creatures.LanceScavenger;
 internal sealed class LanceScavengerGraphics : ScavengerGraphics
 {
     // Keep the decoration implementation and resources intact, but do not create,
-    // simulate or draw them while this switch is disabled.
-    private const bool DecorationsEnabled = false;
+    // simulate or draw them while this switch is disabled. Keep this runtime-valued
+    // instead of const so the compiler does not mark the preserved implementation unreachable.
+    private static readonly bool DecorationsEnabled = false;
     private const int EquipmentSprites = 25;
     private readonly LanceScavenger _owner;
     private readonly int _start;
