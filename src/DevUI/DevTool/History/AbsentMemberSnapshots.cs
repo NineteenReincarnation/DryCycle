@@ -46,9 +46,11 @@ internal static class AbsentMemberSnapshots
 
             bool removed = settings.ambientSounds.Remove(target);
             if (removed)
+            {
                 SoundPresentationChangeHintHub.MarkCollection(session);
-            if (session.Owner?.activePage is SoundPage page)
-                page.Refresh();
+                if (session.Owner?.activePage is SoundPage page)
+                    page.Refresh();
+            }
             return true;
         }
     }
@@ -79,9 +81,11 @@ internal static class AbsentMemberSnapshots
 
             bool removed = settings.triggers.Remove(target);
             if (removed)
+            {
                 TriggerPresentationChangeHintHub.MarkCollection(session);
-            if (session.Owner?.activePage is TriggersPage page)
-                page.Refresh();
+                if (session.Owner?.activePage is TriggersPage page)
+                    page.Refresh();
+            }
             return true;
         }
     }
