@@ -24,14 +24,12 @@ internal static class LanceCombatMath
     internal const float ChargeMaxDamage = PreviousChargeMaxDamage * 2.75f;
     internal const float LanceScavengerCloseThrustMaxDamage = ChargeMaxDamage * 0.20f;
 
-    // Bone-nail geometry. Everything from BladeStartForwardFraction to the point is the damaging
-    // front body; the rear section remains a harmless handle. These values are also consumed by
-    // rendering and route checks so the visible silhouette, AI safety envelope and real hit volume
-    // stay on the same geometry instead of drifting apart.
-    internal const float BladeStartForwardFraction = 0.14f;
-    internal const float BladeShoulderHalfWidth = 7.0f;
-    internal const float BladeTipHalfWidth = 0.55f;
-    internal const int BladeSweepSamples = 12;
+    // Bone-nail geometry. The narrow rear section is a handle; almost the entire forward
+    // section is a broad tapered damaging blade. Width decreases monotonically toward the tip.
+    internal const float BladeStartForwardFraction = 0.16f;
+    internal const float BladeShoulderHalfWidth = 6.4f;
+    internal const float BladeTipHalfWidth = 0.65f;
+    internal const int BladeSweepSamples = 8;
 
     internal static float ValidLength(float value) => float.IsNaN(value) || float.IsInfinity(value)
         ? DefaultLength : Math.Max(75f, Math.Min(90f, value));
@@ -42,10 +40,7 @@ internal static class LanceCombatMath
     internal static float BladeHalfWidth(float bladeT)
     {
         float t = Mathf.Clamp01(bladeT);
-        // A long, almost triangular bone wedge: broad shoulder, continuous taper, needle point.
-        // The slightly sub-linear exponent preserves useful width through the first half without
-        // introducing a spear-head bulge farther forward.
-        return Mathf.Lerp(BladeShoulderHalfWidth, BladeTipHalfWidth, Mathf.Pow(t, 0.84f));
+        return Mathf.Lerp(BladeShoulderHalfWidth, BladeTipHalfWidth, Mathf.Pow(t, 0.82f));
     }
 
     internal static float BladeDamageMultiplier(float bladeT) =>
@@ -111,12 +106,6 @@ internal static class LanceCombatMath
         return fraction >= 0f && fraction <= 1f;
     }
 
-    /// <summary>
-    /// Sweeps the complete tapered front body against a moving BodyChunk. Each cross-section is a
-    /// circle whose radius is the real visible half-width at that position; twelve longitudinal
-    /// samples keep the narrow forward half continuous enough that small chunks cannot slip through
-    /// gaps between samples at charge speed.
-    /// </summary>
     internal static bool SweepBlade(Vector2 oldGrip, Vector2 oldDirection, Vector2 grip, Vector2 direction,
         float forwardLength, Vector2 oldTarget, Vector2 target, float targetRadius, float padding,
         out float fraction, out float bladeT)
