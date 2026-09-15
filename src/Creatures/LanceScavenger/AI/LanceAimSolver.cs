@@ -40,8 +40,10 @@ internal static class LanceAimSolver
     internal const float MaximumLancePitch = 15f;
     internal const float ReleaseCorrectionDegrees = 6f;
 
-    private const float ActualBladeHitPadding = 1.5f;
-    private const float PlanningBladeHitPadding = 5.5f;
+    // Kept internal because the dedicated DevTool diagnostics visualize the two tolerances.
+    // The real weapon still uses the same 1.5 px blade padding; 5.5 px is planning-only slack.
+    internal const float ActualBladeHitPadding = 1.5f;
+    internal const float PlanningBladeHitPadding = 5.5f;
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
 
@@ -108,6 +110,29 @@ internal static class LanceAimSolver
                 previousGrip = grip;
             }
         }
+    }
+
+    /// <summary>
+    /// Builds the same body trajectory used by the aim solver. This helper is only consumed by
+    /// the opt-in debug presentation, so normal combat continues to use the allocation-free loop.
+    /// </summary>
+    internal static Vector2[] BuildDebugBodyTrajectory(LanceScavenger scav, Vector2 origin,
+        Vector2 lanceDirection, int frames)
+    {
+        if (scav == null || frames <= 0) return System.Array.Empty<Vector2>();
+        frames = Mathf.Clamp(frames, 1, LanceCombatState.MaxChargeFrames);
+        float sign = Mathf.Sign(lanceDirection.x);
+        if (sign == 0f) sign = 1f;
+        Vector2 body = origin;
+        Vector2 velocity = new(sign * ChargeLanePlanner.ChargeSpeed(scav), ChargeLanePlanner.ChargeLaunchY);
+        Vector2[] result = new Vector2[frames + 1];
+        result[0] = body;
+        for (int frame = 1; frame <= frames; frame++)
+        {
+            StepBody(ref body, ref velocity);
+            result[frame] = body;
+        }
+        return result;
     }
 
     /// <summary>
