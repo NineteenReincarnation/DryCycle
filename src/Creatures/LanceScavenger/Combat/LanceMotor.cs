@@ -6,7 +6,6 @@ namespace DryCycle.Creatures.LanceScavenger;
 
 internal sealed class LanceMotor
 {
-    private const float ChargeLaunchY = 7.3f;
     private const float MinimumBackstepDistance = 10f; // 0.5 tile
     private const float MaximumBackstepDistance = 30f; // 1.5 tiles
     private const int MaximumBackstepFrames = 18;
@@ -19,7 +18,12 @@ internal sealed class LanceMotor
     private float _backstepDistance;
     private float _backstepDirection;
     private int _backstepFrames;
+    private Vector2 _committedLanceDirection = Vector2.right;
+
+    /// <summary>Horizontal body travel direction. Airborne steering remains intentionally absent.</summary>
     internal Vector2 Direction { get; private set; } = Vector2.right;
+    /// <summary>One-shot lance pitch solved before takeoff and locked for the whole charge.</summary>
+    internal Vector2 LanceDirection { get; private set; } = Vector2.right;
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
     internal bool BackstepComplete => _backstepActive && _backstepComplete;
@@ -35,6 +39,20 @@ internal sealed class LanceMotor
         _backstepActive = false;
         _backstepComplete = false;
         _backstepFrames = 0;
+        Direction = Vector2.right;
+        LanceDirection = Vector2.right;
+        _committedLanceDirection = Vector2.right;
+    }
+
+    internal void CommitCharge(ChargeLane solution)
+    {
+        Vector2 solved = solution.CanHit ? solution.LanceDirection : Vector2.zero;
+        if (solved.sqrMagnitude < 0.001f)
+        {
+            float sign = Mathf.Sign((_owner.Brain?.Aim.x ?? _owner.lookPoint.x) - _owner.mainBodyChunk.pos.x);
+            solved = new Vector2(sign == 0f ? 1f : sign, 0f);
+        }
+        _committedLanceDirection = solved.normalized;
     }
 
     internal void BeginBackstep(Creature target)
@@ -57,13 +75,10 @@ internal sealed class LanceMotor
         _backstepDirection = away;
 
         AbstractCreature.Personality personality = _owner.abstractCreature.personality;
-        // Nervous/cautious individuals take the longer retreat; brave/aggressive ones only
-        // make a short spacing step before lowering the lance.
         float caution = Mathf.Clamp01(personality.nervous * 0.55f +
             (1f - personality.bravery) * 0.25f + (1f - personality.aggression) * 0.20f);
         float desired = Mathf.Lerp(MinimumBackstepDistance, MaximumBackstepDistance, caution);
 
-        // Do not deliberately walk beyond this individual's maximum charge range.
         float currentHorizontal = Mathf.Abs(target.mainBodyChunk.pos.x - _owner.mainBodyChunk.pos.x);
         float rangeRoom = ChargeLanePlanner.MaximumChargeDistance(_owner) - currentHorizontal - 4f;
         _backstepDistance = Mathf.Min(desired, Mathf.Max(0f, rangeRoom));
@@ -110,11 +125,16 @@ internal sealed class LanceMotor
             {
                 _launchedSerial = _owner.Combat.AttackSerial;
                 _launchPoint = _owner.mainBodyChunk.pos;
-                Direction = new Vector2(Mathf.Sign(_owner.Brain.Aim.x - _launchPoint.x), 0f);
-                float speed = Mathf.Lerp(17f, 19.5f, _owner.abstractCreature.personality.energy);
-                foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel = new Vector2(Direction.x * speed, ChargeLaunchY);
+                LanceDirection = _committedLanceDirection.sqrMagnitude > 0.001f
+                    ? _committedLanceDirection.normalized : Vector2.right;
+                float sign = Mathf.Sign(LanceDirection.x);
+                Direction = new Vector2(sign == 0f ? 1f : sign, 0f);
+                float speed = ChargeLanePlanner.ChargeSpeed(_owner);
+                foreach (BodyChunk chunk in _owner.bodyChunks)
+                    chunk.vel = new Vector2(Direction.x * speed, ChargeLanePlanner.ChargeLaunchY);
                 _owner.room.PlaySound(SoundID.Slugcat_Throw_Spear, _owner.mainBodyChunk.pos, 0.75f, 0.7f);
             }
+            // Body travel stays horizontal; LanceDirection is visual/weapon pitch only.
             _owner.WeightedPush(1, 0, Direction, 0.32f);
             return;
         }
