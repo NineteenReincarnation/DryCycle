@@ -25,6 +25,7 @@ DevTool/
 ├── Input/             键鼠所有权、世界 Handle 与游戏输入隔离
 ├── Preview/           临时运行时预览、回滚、所有权传播和安全探测
 ├── Objects/           Object Catalog、Inspector、属性描述、多选
+├── Extensions/        第三方公开 API、版本/能力协商、注册生命周期
 ├── Room/              RoomSettings 与 RoomEffect 编辑
 ├── Sound/             环境音浏览、放置和参数编辑
 ├── Triggers/          Trigger 与 TriggeredEvent 编辑
@@ -58,6 +59,17 @@ DevTool/
 - 自有 PropertyDescriptor / Inspector 注册体系。
 - 标准 `DevInterface.Button / Slider / PlacedObjectRepresentation / Handle` 自动兼容。
 - 原版/其他 Mod 的世界 Handle 保留；无法翻译的自定义控件可回退原始 DevUI。
+
+### 第三方扩展 API
+
+- `DryCycle.DevUI.DevTool.Extensions.DevToolApi` 作为统一公共入口，当前契约版本为 `1.0`。
+- `DevToolApiVersion` + `DevToolCapability` 提供显式 Major/Minor 与能力协商，外部 Mod 不必靠版本字符串猜功能。
+- `DevToolExtensionScope` 把一个 Mod 的全部 DevTool 注册收进同一生命周期；Disable / Reload 时一次 `Dispose()` 即可逆序清理。
+- `DevToolRegistration` 支持单项提前释放且重复 Dispose 安全；Discovery 中只统计仍有效的注册。
+- Scope 直接接入 Object Descriptor 与强类型/自定义 Inspector，且不向第三方暴露 RWImGui 类型。
+- `GetExtensions()` / `TryGetExtension(...)` 只返回只读快照，不把内部 Registry 或 Scope 暴露给其他扩展。
+- 原有 `DevToolObjectApi`、`ObjectCatalog`、`ObjectInspectorRegistry` 保留，避免为了新 API 强迫已有接入立即迁移。
+- 完整契约、示例和兼容保证见 [`PHASE5.md`](PHASE5.md)。
 
 ### Room
 
@@ -123,8 +135,8 @@ DevTool/
 ## 兼容策略
 
 ```text
-Level 1  DevTool 原生 API
-         完整 Inspector / 元数据 / 后续自定义 Gizmo
+Level 1  DevTool Extension API 1.x
+         原生 Metadata / Inspector / Scope 生命周期 / Capability 协商
 
 Level 2  Rain World 标准 DevInterface
          自动投影常见 Button / Slider / Representation / Handle
@@ -136,15 +148,19 @@ Level 4  Vanilla fallback
          无法理解的特殊控件完整退回原版 DevUI
 ```
 
+Level 1 是可选增强而不是兼容前提。第三方完全不引用 DryCycle 时，Level 2～4 仍然工作；主动接入 API 失败也不能破坏通用兼容或 Vanilla fallback。
+
 Effect Hover Preview 额外遵守一条规则：兼容对象是 Rain World 的运行时行为，而不是具体 Mod。代码中不建立 `RegionKitAdapter`、`POMAdapter` 或按程序集名称分支的 Effect 兼容表。
 
 ## 继续审查 / 完善的重点
 
 - 真正使用游戏安装中的 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、RuntimeDetour 和 RWImGui 进行完整联编、进游戏运行测试与错误清理；当前仓库没有覆盖这套环境的编译 CI。
+- 用最小外部测试 Mod 对 `DevToolApi 1.x` 做 Enable / Disable / Reload 回归，确认 Scope 清理、Catalog 回落和 Inspector fallback。
 - Effect Preview 的 IL Recipe 后续只扩展“能从 IL 明确证明来源”的参数表达式，例如多个标量参数、局部变量回传或 helper 返回值；复杂条件仍然保持 fail closed，不通过默认值猜测第三方语义。
 - Effect Preview 继续审查 Camera / Futile / 全局 shader 等不经过 `Room.AddObject` 的运行时副作用；只有能建立可证明所有权和可逆性的通用 Journal 后才扩大自动预览范围。
 - Objects 框选、吸附、网格、对齐/分布等高效场景编辑工具。
 - 更多本体常用 PlacedObject 的语义化 Inspector 与我们自己的 Gizmo。
+- 自定义 Gizmo 的公共 ABI 仍未冻结；在 Input Router、History Transaction、scene-space snapshot 与前端绘制协议稳定前不向第三方发布半成品接口。
 - Map 的连接端口编辑、房间 attractiveness/default material 等高级数据编辑。
 - Command Palette、History 面板、Problems/Console 等编辑器级工具。
 - Overlay 自动避让、拖动时弱化、窄屏自动折叠和布局持久化。
