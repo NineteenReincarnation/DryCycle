@@ -69,6 +69,8 @@ internal static class LanceScavengerHooks
     {
         if (self is LanceScavenger lance)
         {
+            // The identity lance is never fed into vanilla Throw. Only the reserve
+            // ordinary spear may temporarily occupy grasp 0 for an approved throw.
             if (self.grasps[0]?.grabbed is ScavengerLance) return;
             if (lance.Lance != null && self.grasps[0]?.grabbed is Spear &&
                 lance.Combat.State != LanceState.FollowUpThrow && lance.Brain?.AllowVanillaSidearmCombat != true)
@@ -95,10 +97,12 @@ internal static class LanceScavengerHooks
         if (obj is ScavengerLance)
         {
             if (self.scavenger is LanceScavenger lance)
-                // ArrangeInventory promotes the highest WeaponScore to grasp 0. A normal
-                // spear scores 3, so score the reserved lance below it while a sidearm is
-                // carried. Without a sidearm the lance remains the primary held weapon.
-                return lance.SidearmSpear != null ? 2 : 12;
+            {
+                // Default: make the lance the unequivocal primary weapon so vanilla
+                // ArrangeInventory keeps it in grasp 0. During a real ThrowCharge only,
+                // temporarily let the ordinary spear outrank it until that throw ends.
+                return lance.Brain?.SidearmDrawn == true ? 2 : 12;
+            }
             return 3;
         }
         return orig(self, obj, pickupDropInsteadOfWeaponSelection, reallyWantsSpear);
