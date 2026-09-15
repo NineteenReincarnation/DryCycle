@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using DevInterface;
 
@@ -10,56 +11,154 @@ internal static class SoundSampleCatalog
     private const string DownpourModId = "moreslugcats";
     private const string WatcherModId = "watcher";
 
-    private static readonly Dictionary<string, EditorSoundSampleSnapshot> samples =
+    private enum BuildPhase
+    {
+        Idle = 0,
+        LooseAmbient = 1,
+        ModAmbient = 2,
+        Samples = 3,
+        Finalize = 4
+    }
+
+    private static Dictionary<string, EditorSoundSampleSnapshot> samples =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, string> looseAmbientFiles =
+    private static Dictionary<string, string> looseAmbientFiles =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, ModManager.Mod> modAmbientOwners =
+    private static Dictionary<string, ModManager.Mod> modAmbientOwners =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, ModManager.Mod> officialDlcAmbientOwners =
+    private static Dictionary<string, ModManager.Mod> officialDlcAmbientOwners =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private static SoundPage observedPage;
-    private static string[] observedNames;
+    private static SoundPage publishedPage;
+    private static string[] publishedNames;
     private static EditorSoundSampleSnapshot[] sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
     private static bool sortedDirty;
+
+    private static SoundPage requestedPage;
+    private static string[] requestedNames;
+    private static Dictionary<string, EditorSoundSampleSnapshot> buildingSamples;
+    private static Dictionary<string, string> buildingLooseAmbientFiles;
+    private static Dictionary<string, ModManager.Mod> buildingModAmbientOwners;
+    private static Dictionary<string, ModManager.Mod> buildingOfficialDlcAmbientOwners;
+    private static BuildPhase buildPhase;
+    private static int buildSampleIndex;
+    private static int buildModIndex;
+    private static ModManager.Mod buildMod;
+    private static string[] buildModDirectories = Array.Empty<string>();
+    private static int buildModDirectoryIndex;
+
+    internal static int ProcessedSampleCount => buildPhase == BuildPhase.Idle
+        ? publishedNames?.Length ?? 0
+        : Math.Min(buildSampleIndex, requestedNames?.Length ?? 0);
+
+    internal static int TotalSampleCount => requestedNames?.Length ?? publishedNames?.Length ?? 0;
+
+    internal static float Progress
+    {
+        get
+        {
+            if (buildPhase == BuildPhase.Idle)
+                return publishedNames != null ? 1f : 0f;
+
+            return buildPhase switch
+            {
+                BuildPhase.LooseAmbient => 0.03f,
+                BuildPhase.ModAmbient => 0.08f + 0.22f * ModProgress(),
+                BuildPhase.Samples => 0.30f + 0.67f * SampleProgress(),
+                BuildPhase.Finalize => 0.99f,
+                _ => 0f
+            };
+        }
+    }
 
     internal static EditorSoundSampleSnapshot[] Refresh(SoundPage page)
     {
         if (page == null)
         {
-            Reset();
+            ResetRuntimeState();
             return Array.Empty<EditorSoundSampleSnapshot>();
         }
 
-        string[] names = page.fileNames ?? Array.Empty<string>();
-        bool pageChanged = !ReferenceEquals(observedPage, page);
-        bool namesChanged = !ReferenceEquals(observedNames, names);
-        if (pageChanged || namesChanged)
-        {
-            observedPage = page;
-            observedNames = names;
-            samples.Clear();
-            sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
-            sortedDirty = true;
-
-            // The old implementation called AssetManager.ListDirectory and repeatedly probed every
-            // active mod once per sample. A large ambient library therefore produced hundreds or
-            // thousands of filesystem scans on the first Sound-page frame. Build those lookup
-            // indexes once for the page instead, then resolve each sample with O(1) fallbacks.
-            BuildAmbientIndexes();
-
-            for (int i = 0; i < names.Length; i++)
-            {
-                string sample = names[i];
-                if (string.IsNullOrWhiteSpace(sample) || samples.ContainsKey(sample)) continue;
-                samples[sample] = ResolveCore(sample, knownAvailable: true);
-            }
-        }
-
-        if (sortedDirty)
+        BeginRefresh(page);
+        if (buildPhase == BuildPhase.Idle && sortedDirty)
             RebuildSortedCache();
         return sortedCache;
+    }
+
+    internal static void BeginRefresh(SoundPage page)
+    {
+        if (page == null)
+            return;
+
+        string[] names = page.fileNames ?? Array.Empty<string>();
+        if (buildPhase == BuildPhase.Idle && ReferenceEquals(publishedNames, names))
+        {
+            publishedPage = page;
+            return;
+        }
+
+        if (buildPhase != BuildPhase.Idle &&
+            ReferenceEquals(requestedPage, page) &&
+            ReferenceEquals(requestedNames, names))
+            return;
+
+        requestedPage = page;
+        requestedNames = names;
+        buildingSamples = new Dictionary<string, EditorSoundSampleSnapshot>(StringComparer.OrdinalIgnoreCase);
+        buildingLooseAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        buildingModAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        buildingOfficialDlcAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        buildSampleIndex = 0;
+        buildModIndex = ModManager.ActiveMods.Count - 1;
+        buildMod = null;
+        buildModDirectories = Array.Empty<string>();
+        buildModDirectoryIndex = 0;
+        buildPhase = BuildPhase.LooseAmbient;
+    }
+
+    internal static bool IsReadyFor(SoundPage page)
+    {
+        if (page == null || buildPhase != BuildPhase.Idle)
+            return false;
+        return ReferenceEquals(publishedNames, page.fileNames ?? Array.Empty<string>());
+    }
+
+    internal static bool StepRefresh(double budgetMilliseconds)
+    {
+        if (buildPhase == BuildPhase.Idle)
+            return true;
+        if (budgetMilliseconds <= 0d)
+            return false;
+
+        long started = Stopwatch.GetTimestamp();
+        do
+        {
+            switch (buildPhase)
+            {
+                case BuildPhase.LooseAmbient:
+                    BuildLooseAmbientIndex();
+                    buildPhase = BuildPhase.ModAmbient;
+                    break;
+
+                case BuildPhase.ModAmbient:
+                    StepModAmbientIndex();
+                    break;
+
+                case BuildPhase.Samples:
+                    StepSampleResolution();
+                    break;
+
+                case BuildPhase.Finalize:
+                    PublishBuild();
+                    break;
+            }
+
+            if (buildPhase == BuildPhase.Idle)
+                return true;
+        }
+        while (ElapsedMilliseconds(started) < budgetMilliseconds);
+
+        return false;
     }
 
     internal static EditorSoundSampleSnapshot Resolve(string sample)
@@ -77,41 +176,66 @@ internal static class SoundSampleCatalog
 
         if (samples.TryGetValue(sample, out EditorSoundSampleSnapshot known))
             return known;
+        if (buildingSamples != null && buildingSamples.TryGetValue(sample, out known))
+            return known;
 
-        EditorSoundSampleSnapshot resolved = ResolveCore(sample, knownAvailable: false);
-        samples[sample] = resolved;
-        sortedDirty = true;
+        Dictionary<string, string> loose = buildPhase == BuildPhase.Idle
+            ? looseAmbientFiles
+            : buildingLooseAmbientFiles ?? looseAmbientFiles;
+        Dictionary<string, ModManager.Mod> modOwners = buildPhase == BuildPhase.Idle
+            ? modAmbientOwners
+            : buildingModAmbientOwners ?? modAmbientOwners;
+        Dictionary<string, ModManager.Mod> officialOwners = buildPhase == BuildPhase.Idle
+            ? officialDlcAmbientOwners
+            : buildingOfficialDlcAmbientOwners ?? officialDlcAmbientOwners;
+
+        EditorSoundSampleSnapshot resolved = ResolveCore(
+            sample,
+            knownAvailable: false,
+            loose,
+            modOwners,
+            officialOwners);
+
+        if (buildPhase == BuildPhase.Idle)
+        {
+            samples[sample] = resolved;
+            sortedDirty = true;
+        }
+        else
+        {
+            buildingSamples[sample] = resolved;
+        }
+
         return resolved;
     }
 
-    private static void Reset()
+    internal static void ResetRuntimeState()
     {
-        observedPage = null;
-        observedNames = null;
-        samples.Clear();
-        looseAmbientFiles.Clear();
-        modAmbientOwners.Clear();
-        officialDlcAmbientOwners.Clear();
+        samples = new Dictionary<string, EditorSoundSampleSnapshot>(StringComparer.OrdinalIgnoreCase);
+        looseAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        modAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        officialDlcAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        publishedPage = null;
+        publishedNames = null;
         sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
         sortedDirty = false;
+
+        requestedPage = null;
+        requestedNames = null;
+        buildingSamples = null;
+        buildingLooseAmbientFiles = null;
+        buildingModAmbientOwners = null;
+        buildingOfficialDlcAmbientOwners = null;
+        buildPhase = BuildPhase.Idle;
+        buildSampleIndex = 0;
+        buildModIndex = -1;
+        buildMod = null;
+        buildModDirectories = Array.Empty<string>();
+        buildModDirectoryIndex = 0;
     }
 
-    private static void RebuildSortedCache()
+    private static void BuildLooseAmbientIndex()
     {
-        sortedCache = new EditorSoundSampleSnapshot[samples.Count];
-        int index = 0;
-        foreach (EditorSoundSampleSnapshot value in samples.Values)
-            sortedCache[index++] = value;
-        Array.Sort(sortedCache, CompareSamples);
-        sortedDirty = false;
-    }
-
-    private static void BuildAmbientIndexes()
-    {
-        looseAmbientFiles.Clear();
-        modAmbientOwners.Clear();
-        officialDlcAmbientOwners.Clear();
-
         try
         {
             string[] loose = AssetManager.ListDirectory("soundeffects/ambient") ?? Array.Empty<string>();
@@ -119,38 +243,65 @@ internal static class SoundSampleCatalog
             {
                 string path = loose[i];
                 string key = SampleKey(path);
-                if (string.IsNullOrEmpty(key) || looseAmbientFiles.ContainsKey(key)) continue;
-                looseAmbientFiles[key] = path;
+                if (string.IsNullOrEmpty(key) || buildingLooseAmbientFiles.ContainsKey(key)) continue;
+                buildingLooseAmbientFiles[key] = path;
             }
         }
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning("DevTool sound ambient index failed: " + error.Message);
         }
-
-        // Walk in the same priority direction used elsewhere in the catalog. The first owner wins,
-        // so mergedmods provenance and official-DLC fallback become dictionary lookups instead of
-        // repeated File.Exists calls for every sample and every active mod.
-        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
-        {
-            ModManager.Mod mod = ModManager.ActiveMods[i];
-            if (mod == null) continue;
-            IndexModAmbient(mod);
-        }
     }
 
-    private static void IndexModAmbient(ModManager.Mod mod)
+    private static void StepModAmbientIndex()
+    {
+        if (buildModDirectoryIndex < buildModDirectories.Length)
+        {
+            IndexAmbientDirectory(
+                buildMod,
+                buildModDirectories[buildModDirectoryIndex++],
+                buildingModAmbientOwners,
+                buildingOfficialDlcAmbientOwners);
+            return;
+        }
+
+        while (buildModIndex >= 0)
+        {
+            ModManager.Mod mod = ModManager.ActiveMods[buildModIndex--];
+            if (mod == null) continue;
+
+            buildMod = mod;
+            buildModDirectories = BuildAmbientDirectories(mod);
+            buildModDirectoryIndex = 0;
+            if (buildModDirectories.Length == 0)
+                continue;
+            return;
+        }
+
+        buildMod = null;
+        buildModDirectories = Array.Empty<string>();
+        buildModDirectoryIndex = 0;
+        buildPhase = BuildPhase.Samples;
+    }
+
+    private static string[] BuildAmbientDirectories(ModManager.Mod mod)
     {
         HashSet<string> roots = new(StringComparer.OrdinalIgnoreCase);
         AddRoot(roots, mod.TargetedPath);
         AddRoot(roots, mod.NewestPath);
         AddRoot(roots, mod.path);
 
+        if (roots.Count == 0)
+            return Array.Empty<string>();
+
+        string[] directories = new string[roots.Count * 2];
+        int index = 0;
         foreach (string root in roots)
         {
-            IndexAmbientDirectory(mod, Path.Combine(root, "loadedsoundeffects", "ambient"));
-            IndexAmbientDirectory(mod, Path.Combine(root, "soundeffects", "ambient"));
+            directories[index++] = Path.Combine(root, "loadedsoundeffects", "ambient");
+            directories[index++] = Path.Combine(root, "soundeffects", "ambient");
         }
+        return directories;
     }
 
     private static void AddRoot(HashSet<string> roots, string root)
@@ -166,7 +317,11 @@ internal static class SoundSampleCatalog
         }
     }
 
-    private static void IndexAmbientDirectory(ModManager.Mod mod, string directory)
+    private static void IndexAmbientDirectory(
+        ModManager.Mod mod,
+        string directory,
+        Dictionary<string, ModManager.Mod> owners,
+        Dictionary<string, ModManager.Mod> officialOwners)
     {
         try
         {
@@ -176,10 +331,10 @@ internal static class SoundSampleCatalog
             {
                 string key = SampleKey(files[i]);
                 if (string.IsNullOrEmpty(key)) continue;
-                if (!modAmbientOwners.ContainsKey(key))
-                    modAmbientOwners[key] = mod;
-                if (IsOfficialDlc(mod.id) && !officialDlcAmbientOwners.ContainsKey(key))
-                    officialDlcAmbientOwners[key] = mod;
+                if (!owners.ContainsKey(key))
+                    owners[key] = mod;
+                if (IsOfficialDlc(mod.id) && !officialOwners.ContainsKey(key))
+                    officialOwners[key] = mod;
             }
         }
         catch (Exception error)
@@ -189,18 +344,72 @@ internal static class SoundSampleCatalog
         }
     }
 
-    private static EditorSoundSampleSnapshot ResolveCore(string sample, bool knownAvailable)
+    private static void StepSampleResolution()
     {
-        string resolved = TryResolveAmbientFile(sample);
+        string[] names = requestedNames ?? Array.Empty<string>();
+        while (buildSampleIndex < names.Length)
+        {
+            string sample = names[buildSampleIndex++];
+            if (string.IsNullOrWhiteSpace(sample) || buildingSamples.ContainsKey(sample))
+                return;
+
+            buildingSamples[sample] = ResolveCore(
+                sample,
+                knownAvailable: true,
+                buildingLooseAmbientFiles,
+                buildingModAmbientOwners,
+                buildingOfficialDlcAmbientOwners);
+            return;
+        }
+
+        buildPhase = BuildPhase.Finalize;
+    }
+
+    private static void PublishBuild()
+    {
+        samples = buildingSamples ?? new Dictionary<string, EditorSoundSampleSnapshot>(StringComparer.OrdinalIgnoreCase);
+        looseAmbientFiles = buildingLooseAmbientFiles ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        modAmbientOwners = buildingModAmbientOwners ?? new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        officialDlcAmbientOwners = buildingOfficialDlcAmbientOwners ?? new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        publishedPage = requestedPage;
+        publishedNames = requestedNames ?? Array.Empty<string>();
+        sortedDirty = true;
+        RebuildSortedCache();
+
+        buildingSamples = null;
+        buildingLooseAmbientFiles = null;
+        buildingModAmbientOwners = null;
+        buildingOfficialDlcAmbientOwners = null;
+        buildMod = null;
+        buildModDirectories = Array.Empty<string>();
+        buildModDirectoryIndex = 0;
+        buildPhase = BuildPhase.Idle;
+    }
+
+    private static void RebuildSortedCache()
+    {
+        sortedCache = new EditorSoundSampleSnapshot[samples.Count];
+        int index = 0;
+        foreach (EditorSoundSampleSnapshot value in samples.Values)
+            sortedCache[index++] = value;
+        Array.Sort(sortedCache, CompareSamples);
+        sortedDirty = false;
+    }
+
+    private static EditorSoundSampleSnapshot ResolveCore(
+        string sample,
+        bool knownAvailable,
+        Dictionary<string, string> looseFiles,
+        Dictionary<string, ModManager.Mod> owners,
+        Dictionary<string, ModManager.Mod> officialOwners)
+    {
+        string resolved = TryResolveAmbientFile(sample, looseFiles);
         if (!string.IsNullOrEmpty(resolved) && File.Exists(resolved))
         {
-            if (TryIdentifyMod(resolved, out ModManager.Mod mod))
+            if (TryIdentifyMod(resolved, owners, out ModManager.Mod mod))
                 return FromMod(sample, mod);
 
-            // Official DLC assets may be served by Rain World's combined consolefiles directory,
-            // so the effective path is not always physically beneath the DLC mod root. Recover
-            // provenance from the pre-indexed official package roots.
-            if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
+            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
 
             return Vanilla(sample);
@@ -208,7 +417,7 @@ internal static class SoundSampleCatalog
 
         if (knownAvailable)
         {
-            if (TryIdentifyOfficialDlcBySample(sample, out ModManager.Mod officialDlc))
+            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
 
             return Vanilla(sample);
@@ -262,7 +471,7 @@ internal static class SoundSampleCatalog
         return EditorSoundSourceKind.Mod;
     }
 
-    private static string TryResolveAmbientFile(string sample)
+    private static string TryResolveAmbientFile(string sample, Dictionary<string, string> looseFiles)
     {
         try
         {
@@ -273,7 +482,8 @@ internal static class SoundSampleCatalog
 
             string key = SampleKey(sample);
             if (!string.IsNullOrEmpty(key) &&
-                looseAmbientFiles.TryGetValue(key, out string loosePath) &&
+                looseFiles != null &&
+                looseFiles.TryGetValue(key, out string loosePath) &&
                 File.Exists(loosePath))
                 return loosePath;
         }
@@ -285,7 +495,10 @@ internal static class SoundSampleCatalog
         return string.Empty;
     }
 
-    private static bool TryIdentifyMod(string filePath, out ModManager.Mod owner)
+    private static bool TryIdentifyMod(
+        string filePath,
+        Dictionary<string, ModManager.Mod> owners,
+        out ModManager.Mod owner)
     {
         owner = null;
         if (string.IsNullOrEmpty(filePath)) return false;
@@ -305,13 +518,18 @@ internal static class SoundSampleCatalog
 
         if (!IsMergedModsPath(filePath)) return false;
         string key = SampleKey(filePath);
-        return !string.IsNullOrEmpty(key) && modAmbientOwners.TryGetValue(key, out owner);
+        return !string.IsNullOrEmpty(key) && owners != null && owners.TryGetValue(key, out owner);
     }
 
-    private static bool TryIdentifyOfficialDlcBySample(string sample, out ModManager.Mod owner)
+    private static bool TryIdentifyOfficialDlcBySample(
+        string sample,
+        Dictionary<string, ModManager.Mod> officialOwners,
+        out ModManager.Mod owner)
     {
         string key = SampleKey(sample);
-        if (!string.IsNullOrEmpty(key) && officialDlcAmbientOwners.TryGetValue(key, out owner))
+        if (!string.IsNullOrEmpty(key) &&
+            officialOwners != null &&
+            officialOwners.TryGetValue(key, out owner))
             return true;
         owner = null;
         return false;
@@ -384,4 +602,21 @@ internal static class SoundSampleCatalog
         int source = string.Compare(a.SourceName, b.SourceName, StringComparison.OrdinalIgnoreCase);
         return source != 0 ? source : string.Compare(a.Sample, b.Sample, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static float ModProgress()
+    {
+        int total = ModManager.ActiveMods.Count;
+        if (total <= 0) return 1f;
+        int remaining = Math.Max(0, buildModIndex + 1);
+        return Math.Max(0f, Math.Min(1f, (total - remaining) / (float)total));
+    }
+
+    private static float SampleProgress()
+    {
+        int total = requestedNames?.Length ?? 0;
+        return total <= 0 ? 1f : Math.Max(0f, Math.Min(1f, buildSampleIndex / (float)total));
+    }
+
+    private static double ElapsedMilliseconds(long startedTimestamp) =>
+        (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
 }
