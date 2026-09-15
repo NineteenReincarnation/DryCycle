@@ -14,6 +14,16 @@ internal sealed class LanceMotor
     private const float ReversalCounterSweepArc = 120f;
     private const float CounterSweepOvershoot = 10f;
 
+    internal const float CloseDefenseRange = 86f;
+    internal const float CloseDefenseGuardRange = 106f;
+    internal const float CloseDefenseApproachSpeed = 2.5f;
+    private const float CloseLiftRange = 32f;
+    private const float CloseLiftDamage = 0.50f;
+    private const int CloseLiftFrames = 8;
+    private const int CloseLiftCooldown = 22;
+    private const int CloseThrustFrames = 10;
+    private const int CloseThrustCooldown = 26;
+
     private readonly LanceScavenger _owner;
     private int _launchedSerial = -1;
     private Vector2 _launchPoint;
@@ -43,9 +53,13 @@ internal sealed class LanceMotor
     internal bool CounterSweepActive => _counterSweepActive;
     internal bool CounterSweepAttempted => _counterSweepAttempted;
     internal float CounterSweepChance => LanceCombatMath.CounterSweepChance(_owner.abstractCreature.personality);
+
+    // CloseDefense owns only the weapon. Vanilla Scavenger.Act must keep the body free to flee,
+    // turn, jump and path around a predator instead of being pinned in StandStill while stabbing.
     internal bool OwnsMovement => _owner.Combat.State == LanceState.Brace ||
         _owner.Combat.State == LanceState.Charge || _owner.Combat.State == LanceState.FollowUpThrow ||
-        _owner.Combat.State == LanceState.Recover || _owner.Combat.State == LanceState.CloseDefense;
+        _owner.Combat.State == LanceState.Recover;
+    internal bool OwnsWeaponAction => OwnsMovement || _owner.Combat.State == LanceState.CloseDefense;
 
     internal LanceMotor(LanceScavenger owner) { _owner = owner; }
 
@@ -85,10 +99,14 @@ internal sealed class LanceMotor
     internal void Act()
     {
         LanceState state = _owner.Combat.State;
-        _owner.animation = null;
-        _owner.swingPos = null;
-        _owner.movMode = Scavenger.MovementMode.StandStill;
-        _owner.moving = false;
+
+        if (state != LanceState.CloseDefense)
+        {
+            _owner.animation = null;
+            _owner.swingPos = null;
+            _owner.movMode = Scavenger.MovementMode.StandStill;
+            _owner.moving = false;
+        }
 
         if (state == LanceState.Charge)
         {
@@ -129,6 +147,12 @@ internal sealed class LanceMotor
         else if (_committedLanceDirection.sqrMagnitude > 0.001f)
             LanceDirection = _committedLanceDirection;
 
+        if (state == LanceState.CloseDefense)
+        {
+            UpdateCloseDefense();
+            return;
+        }
+
         if (state == LanceState.Recover)
         {
             if (_owner.IsStableForBrace)
@@ -140,8 +164,82 @@ internal sealed class LanceMotor
             Custom.DirVec(_owner.mainBodyChunk.pos, _owner.Brain.Target.mainBodyChunk.pos);
         foreach (BodyChunk chunk in _owner.bodyChunks) chunk.vel.x *= state == LanceState.FollowUpThrow ? 0.78f : 0.65f;
         _owner.WeightedPush(1, 0, new Vector2(aim.x, 0f), state == LanceState.Brace ? 0.15f : 0.08f);
-        if (state == LanceState.CloseDefense)
-            _owner.Lance?.RequestThrust(aim, LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
+    }
+
+    private void UpdateCloseDefense()
+    {
+        Creature target = _owner.Brain?.Target;
+        ScavengerLance lance = _owner.Lance;
+        if (target == null || lance == null || target.dead || !target.Consious || target.room != _owner.room)
+            return;
+
+        BodyChunk aimChunk = SelectCloseDefenseChunk(target);
+        if (aimChunk == null) return;
+
+        Vector2 toTarget = aimChunk.pos - _owner.mainBodyChunk.pos;
+        if (toTarget.sqrMagnitude < 0.001f) return;
+        Vector2 aim = toTarget.normalized;
+        float face = Mathf.Sign(aim.x);
+        if (face == 0f) face = Mathf.Sign(target.mainBodyChunk.pos.x - _owner.mainBodyChunk.pos.x);
+        if (face == 0f) face = 1f;
+        Direction = new Vector2(face, 0f);
+        LanceDirection = aim;
+        _owner.lookPoint = aimChunk.pos;
+
+        if (!lance.CanThrust) return;
+
+        float surfaceDistance = Mathf.Max(0f, toTarget.magnitude - aimChunk.rad);
+        if (surfaceDistance <= CloseLiftRange)
+        {
+            // When the attacker has entered inside the long blade's comfortable straight-thrust
+            // distance, pick the weapon upward/outward instead of trying to spear through its body.
+            // This is still a real short thrust so collision remains in ScavengerLance's normal path.
+            Vector2 lift = new Vector2(face * 0.72f, Mathf.Clamp(aim.y + 0.68f, 0.38f, 1.05f)).normalized;
+            if (!DefensiveLaneClear(lance, lift, target)) return;
+            lance.RequestDefensiveThrust(lift, CloseLiftDamage, CloseLiftFrames, CloseLiftCooldown);
+            return;
+        }
+
+        if (surfaceDistance <= CloseDefenseRange)
+        {
+            if (!DefensiveLaneClear(lance, aim, target)) return;
+            lance.RequestDefensiveThrust(aim, LanceCombatMath.LanceScavengerCloseThrustMaxDamage,
+                CloseThrustFrames, CloseThrustCooldown);
+        }
+    }
+
+    private BodyChunk SelectCloseDefenseChunk(Creature target)
+    {
+        if (target?.bodyChunks == null || target.bodyChunks.Length == 0) return null;
+        BodyChunk best = target.mainBodyChunk;
+        float bestScore = float.MaxValue;
+        bool lizard = target.abstractCreature?.creatureTemplate?.IsLizard == true;
+
+        foreach (BodyChunk chunk in target.bodyChunks)
+        {
+            if (chunk == null) continue;
+            float score = Vector2.Distance(_owner.mainBodyChunk.pos, chunk.pos);
+            if (!_owner.room.VisualContact(_owner.mainBodyChunk.pos, chunk.pos)) score += 100f;
+
+            // Lizard body chunk 0 is the armored head. Prefer neck/body chunks whenever one is
+            // reasonably available so close defense does not repeatedly waste the lance on the mask.
+            if (lizard && chunk.index == 0 && target.bodyChunks.Length > 1) score += 42f;
+
+            if (score >= bestScore) continue;
+            bestScore = score;
+            best = chunk;
+        }
+        return best;
+    }
+
+    private bool DefensiveLaneClear(ScavengerLance lance, Vector2 direction, Creature target)
+    {
+        Vector2 dir = direction.sqrMagnitude > 0.001f ? direction.normalized : Direction;
+        float face = Mathf.Sign(dir.x);
+        if (face == 0f) face = Direction.x == 0f ? 1f : Mathf.Sign(Direction.x);
+        Vector2 grip = _owner.mainBodyChunk.pos + new Vector2(face * 7f, -5f);
+        Vector2 tip = grip + dir * LanceCombatMath.ForwardLength(lance.Length);
+        return !ChargeLanePlanner.FriendInPath(_owner, grip, tip, target);
     }
 
     private void UpdateCounterSweep()
