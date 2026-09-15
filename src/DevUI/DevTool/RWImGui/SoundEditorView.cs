@@ -63,6 +63,8 @@ internal static class SoundEditorView
     private static EditorSoundSnapshot[] projectedSceneSounds;
     private static string projectedSceneSearch = string.Empty;
     private static bool projectedSceneChinese;
+    private static string observedSceneSearch;
+    private static string normalizedSceneSearch = string.Empty;
 
     private static int sceneCountValue = -1;
     private static bool sceneCountChinese;
@@ -222,6 +224,34 @@ internal static class SoundEditorView
         }
     }
 
+    internal static void ResetRetainedState()
+    {
+        RoomFloatEdits.Clear();
+        SoundFloatEdits.Clear();
+        SoundVectorEdits.Clear();
+        SceneRows.Clear();
+        projectedSceneSounds = null;
+        projectedSceneSearch = string.Empty;
+        projectedSceneChinese = false;
+        observedSceneSearch = null;
+        normalizedSceneSearch = string.Empty;
+        stateSound = null;
+        stateChinese = false;
+        stateText = string.Empty;
+        sceneCountValue = -1;
+        sceneCountText = string.Empty;
+        inspectorSelectionCount = -1;
+        inspectorSelectionText = string.Empty;
+        sceneSelectionCount = -1;
+        sceneSelectionText = string.Empty;
+        activeGroupButtonId = string.Empty;
+        activeGroupButtonName = string.Empty;
+        activeGroupButtonText = string.Empty;
+        selectionGroupName = string.Empty;
+        selectionGroupId = string.Empty;
+        selectionGroupIdManual = false;
+    }
+
     private static void DrawTabButton(BrowserTab tab, string label, string id)
     {
         bool active = browserTab == tab;
@@ -341,7 +371,7 @@ internal static class SoundEditorView
 
     private static void EnsureSceneProjection(EditorSoundSnapshot[] sounds)
     {
-        string normalizedSearch = sceneSearch?.Trim() ?? string.Empty;
+        string normalizedSearch = SceneSearchQuery();
         bool chinese = DevToolUiSettings.IsChinese;
         if (ReferenceEquals(projectedSceneSounds, sounds) &&
             string.Equals(projectedSceneSearch, normalizedSearch, StringComparison.Ordinal) &&
@@ -378,6 +408,15 @@ internal static class SoundEditorView
         projectedSceneSounds = sounds;
         projectedSceneSearch = normalizedSearch;
         projectedSceneChinese = chinese;
+    }
+
+    private static string SceneSearchQuery()
+    {
+        if (string.Equals(observedSceneSearch, sceneSearch, StringComparison.Ordinal))
+            return normalizedSceneSearch;
+        observedSceneSearch = sceneSearch;
+        normalizedSceneSearch = sceneSearch?.Trim() ?? string.Empty;
+        return normalizedSceneSearch;
     }
 
     private static string GetSceneCountText(int count)
