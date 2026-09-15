@@ -30,7 +30,6 @@ internal static class DevUiDiagnosticsPublisher
 
         DevUiSemanticConformanceSnapshot semantic = DevUiSemanticConformanceAudit.Evaluate(mirror);
         DevUiCompatibilityGate.Evaluate(
-            mirror,
             DevUiPageCoverageTracker.Current,
             semantic,
             DevUiProtocolInventory.Current);
