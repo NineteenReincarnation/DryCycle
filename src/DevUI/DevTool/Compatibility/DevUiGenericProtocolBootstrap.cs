@@ -8,11 +8,11 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// widgets. Registering the base contract keeps coverage generic: every vanilla/RK/DryCycle/mod
 /// subclass inherits the same result without naming concrete feature types.
 /// </summary>
-public static class DevUiGenericProtocolBootstrap
+internal static class DevUiGenericProtocolBootstrap
 {
     private static int initialized;
 
-    public static void Ensure()
+    internal static void Ensure()
     {
         if (Interlocked.Exchange(ref initialized, 1) != 0) return;
 
