@@ -74,6 +74,29 @@ internal static class ObjectInspectorView
     private static float positionX;
     private static float positionY;
 
+    internal static void ResetRetainedState()
+    {
+        Reset(-1);
+        MixedKeyScratch.Clear();
+        MetadataByType.Clear();
+
+        projectedProperties = null;
+        projectedMixedKeys = null;
+        projectedPropertyObjectIndex = int.MinValue;
+        projectedPropertySelectionCount = -1;
+        projectedPropertyChinese = false;
+        propertyBindings = Array.Empty<PropertyBinding>();
+
+        projectedLegacyControls = null;
+        projectedLegacyObjectIndex = int.MinValue;
+        legacyBindings = Array.Empty<LegacyBinding>();
+
+        metadataSource = null;
+        identityMetadata = null;
+        identityChinese = false;
+        identitySubtitle = string.Empty;
+    }
+
     internal static void Draw(EditorInspectorSnapshot inspector)
     {
         inspector ??= new EditorInspectorSnapshot();
