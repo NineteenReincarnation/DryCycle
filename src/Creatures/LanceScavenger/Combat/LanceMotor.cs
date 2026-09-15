@@ -203,6 +203,11 @@ internal sealed class LanceMotor
     {
         if (_counterSweepActive)
         {
+            if (_counterSweepAge >= CounterSweepFrames)
+            {
+                _counterSweepActive = false;
+                return;
+            }
             AdvanceCounterSweep();
             return;
         }
@@ -294,8 +299,8 @@ internal sealed class LanceMotor
 
         LanceDirection = next;
         _counterSweepAge = nextAge;
-        if (_counterSweepAge >= CounterSweepFrames)
-            _counterSweepActive = false;
+        // Stay active for the complete eighth sweep frame. The next charge update closes
+        // the window, after the weapon collision code has had a chance to resolve this pose.
     }
 
     private bool CounterSweepArcClear(Vector2 from, Vector2 to, Creature target)
