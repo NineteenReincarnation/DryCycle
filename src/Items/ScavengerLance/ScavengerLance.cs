@@ -148,11 +148,19 @@ internal sealed partial class ScavengerLance : Weapon
         bool sweptWall = TraceSolid(_previousTip, currentTip, out float wallFraction);
         bool rodWall = !PoseFits(firstChunk.pos, rotation);
         float speed = holder != null ? Vector2.Dot(holder.mainBodyChunk.vel, rotation) : Vector2.Dot(firstChunk.vel, rotation);
+        bool attackTerrainActive = charging || _thrustFrames > 0 || _flightFrames > 0;
 
-        if (charging || _thrustFrames > 0 || _flightFrames > 0)
+        if (attackTerrainActive)
             ResolveBlade(sweptWall ? wallFraction : 1f, charging, speed);
         ResolveShaft();
-        if (sweptWall || rodWall) ResolveTerrain(holder, speed, charging);
+
+        // A carried lance is repositioned directly to the wielder's grip every update. During normal
+        // carry/brace this can momentarily overlap a floor edge or wall even though no attack is being
+        // made. Treating those passive overlaps as real impacts caused repeated Spear_Bounce_Off_Wall
+        // sounds and could poison the transition into a real charge. Terrain impacts are therefore
+        // authoritative only while the lance is actually charging, thrusting or in free flight.
+        if (attackTerrainActive && (sweptWall || rodWall))
+            ResolveTerrain(holder, speed, charging);
 
         if (_thrustFrames > 0)
         {
