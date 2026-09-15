@@ -54,16 +54,30 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
         ScavengerLance lance = _owner.Lance;
         if (lance == null || !_owner.Consious) return;
         bool twoHands = _owner.Combat.State == LanceState.Brace || _owner.Combat.State == LanceState.Charge ||
-            _owner.Combat.State == LanceState.CloseDefense || _owner.Combat.State == LanceState.Threaten;
+            _owner.Combat.State == LanceState.CloseDefense;
         if (_owner.movMode == Scavenger.MovementMode.Climb) return;
-        for (int i = 0; i < (twoHands ? 2 : 1); i++)
+
+        if (twoHands)
         {
-            Vector2 desired = lance.firstChunk.pos + lance.rotation * (i == 0 ? 10f : -9f);
-            hands[i].absoluteHuntPos = desired;
-            hands[i].pos = Vector2.Lerp(hands[i].pos, desired, twoHands ? 0.8f : 0.55f);
-            hands[i].vel *= 0.35f;
-            hands[i].spearPosAdd = new Unity.Mathematics.float2(0f, 0f);
+            for (int i = 0; i < 2; i++)
+            {
+                Vector2 desired = lance.firstChunk.pos + lance.rotation * (i == 0 ? 10f : -9f);
+                hands[i].absoluteHuntPos = desired;
+                hands[i].pos = Vector2.Lerp(hands[i].pos, desired, 0.8f);
+                hands[i].vel *= 0.35f;
+                hands[i].spearPosAdd = new Unity.Mathematics.float2(0f, 0f);
+            }
+            return;
         }
+
+        // With a normal spear in grasp 0, leave hand 0 to vanilla spear handling and
+        // carry the custom lance with hand 1. Without a sidearm, keep the old hand-0 pose.
+        int lanceHand = _owner.SidearmSpear != null ? 1 : 0;
+        Vector2 singleDesired = lance.firstChunk.pos + lance.rotation * (lanceHand == 0 ? 10f : -9f);
+        hands[lanceHand].absoluteHuntPos = singleDesired;
+        hands[lanceHand].pos = Vector2.Lerp(hands[lanceHand].pos, singleDesired, 0.55f);
+        hands[lanceHand].vel *= 0.35f;
+        hands[lanceHand].spearPosAdd = new Unity.Mathematics.float2(0f, 0f);
     }
 
     public override void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
