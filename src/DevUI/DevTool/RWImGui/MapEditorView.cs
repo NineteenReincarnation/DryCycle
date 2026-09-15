@@ -512,7 +512,8 @@ internal static class MapEditorView
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         if (ReferenceEquals(synchronizedPositionRooms, rooms)) return;
 
-        bool preserveDragged = draggingRoom >= 0 && LocalPositions.TryGetValue(draggingRoom, out Num.Vector2 draggedPosition);
+        Num.Vector2 draggedPosition = default;
+        bool preserveDragged = draggingRoom >= 0 && LocalPositions.TryGetValue(draggingRoom, out draggedPosition);
         LocalPositions.Clear();
         for (int i = 0; i < rooms.Length; i++)
         {
