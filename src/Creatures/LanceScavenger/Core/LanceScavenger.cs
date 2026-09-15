@@ -34,6 +34,9 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         }
     }
 
+    internal bool SidearmInPrimary => grasps != null && grasps.Length > 0 &&
+        grasps[0]?.grabbed is Spear spear && IsOrdinarySpear(spear);
+
     private static bool IsOrdinarySpear(Spear spear) =>
         spear?.abstractPhysicalObject is AbstractSpear data && !data.explosive && !data.electric && !data.needle;
 
@@ -68,7 +71,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     public override void Update(bool eu)
     {
         EnsureBirthGear();
-        EnsureWeaponSlots();
+        EnsureWeaponSlots(Brain?.SidearmDrawn == true);
         if (!Consious || grabbedBy.Count > 0)
             Combat.Tick(new LanceSituation(false, Lance != null, SidearmSpear != null, false,
                 ScavengerAI.ViolenceType.None, false, 999f, false));
@@ -100,7 +103,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
                 if (data.realizedObject is Spear spear)
                 {
                     spear.firstChunk.HardSetPosition(mainBodyChunk.pos);
-                    int slot = PreferredFreeGrasp(0);
+                    // The ordinary spear is reserve equipment. Keep grasp 0 free for the lance.
+                    int slot = PreferredFreeGrasp(1);
                     if (slot >= 0) Grab(spear, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
                 }
             }
@@ -121,7 +125,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
                 if (data.realizedObject is ScavengerLance lance)
                 {
                     lance.firstChunk.HardSetPosition(mainBodyChunk.pos);
-                    int slot = PreferredFreeGrasp(1);
+                    // The lance is the identity weapon and is held in the primary hand by default.
+                    int slot = PreferredFreeGrasp(0);
                     if (slot >= 0) Grab(lance, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
                 }
             }
@@ -138,7 +143,11 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         return -1;
     }
 
-    internal void EnsureWeaponSlots()
+    /// <summary>
+    /// The lance owns grasp 0 by default. The ordinary spear may temporarily take grasp 0
+    /// only while the vanilla ThrowCharge/Throw sequence is actively being executed.
+    /// </summary>
+    internal void EnsureWeaponSlots(bool sidearmPrimary = false)
     {
         if (grasps == null || grasps.Length < 2) return;
         int sidearm = -1, lance = -1;
@@ -147,9 +156,18 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
             if (grasps[i]?.grabbed is ScavengerLance) lance = i;
             else if (grasps[i]?.grabbed is Spear spear && IsOrdinarySpear(spear)) sidearm = i;
         }
-        if (sidearm > 0 && lance == 0) SwitchGrasps(0, sidearm);
-        else if (sidearm > 0 && grasps[0] == null) SwitchGrasps(sidearm, 0);
-        else if (sidearm < 0 && lance > 0 && grasps[0] == null) SwitchGrasps(lance, 0);
+
+        if (sidearmPrimary && sidearm >= 0)
+        {
+            if (sidearm != 0) SwitchGrasps(sidearm, 0);
+            return;
+        }
+
+        if (lance > 0)
+            SwitchGrasps(lance, 0);
+        else if (lance < 0 && sidearm > 0 && grasps[0] == null)
+            // If the lance has genuinely been lost, fall back to ordinary scavenger spear handling.
+            SwitchGrasps(sidearm, 0);
     }
 
     public override void InitiateGraphicsModule()
@@ -168,7 +186,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     private void SynchronizeSidearmCarry(bool eu)
     {
         Spear spear = SidearmSpear;
-        if (spear == null || Combat.State == LanceState.FollowUpThrow) return;
+        if (spear == null || SidearmInPrimary || Combat.State == LanceState.FollowUpThrow) return;
         if (Combat.State != LanceState.Brace && Combat.State != LanceState.Charge &&
             Combat.State != LanceState.CloseDefense) return;
         float face = Motor.Direction.x != 0f ? Motor.Direction.x : Mathf.Sign(lookPoint.x - mainBodyChunk.pos.x);
