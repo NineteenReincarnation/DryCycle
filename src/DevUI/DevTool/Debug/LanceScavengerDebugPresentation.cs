@@ -38,6 +38,7 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public int BestAimAge { get; init; }
     public bool BestAimReady { get; init; }
     public int TargetChunkIndex { get; init; }
+    public int BestTargetChunkIndex { get; init; }
     public int ImpactFrame { get; init; }
     public bool ExactAim { get; init; }
     public float AimX { get; init; }
@@ -49,6 +50,8 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public bool ChargePriority { get; init; }
     public bool CommitReady { get; init; }
     public bool HardBlocked { get; init; }
+    public bool FriendBlocked { get; init; }
+    public bool ChargeOpportunity { get; init; }
     public string DecisionReason { get; init; } = string.Empty;
 
     public float TargetStability { get; init; }
@@ -59,6 +62,13 @@ public sealed class LanceScavengerDebugEntrySnapshot
     public bool CounterSweepAttempted { get; init; }
     public bool CounterSweepActive { get; init; }
     public float CounterSweepChance { get; init; }
+
+    // Oldest -> newest samples. They are attached before the snapshot is published,
+    // and are only allocated while this debug page owns an active capture lease.
+    public float[] AimQualityHistory { get; internal set; } = Array.Empty<float>();
+    public bool[] AimReadyHistory { get; internal set; } = Array.Empty<bool>();
+    public bool[] HardBlockHistory { get; internal set; } = Array.Empty<bool>();
+    public bool[] BraceHistory { get; internal set; } = Array.Empty<bool>();
 }
 
 public sealed class LanceScavengerDebugSnapshot
@@ -72,14 +82,63 @@ public sealed class LanceScavengerDebugSnapshot
 
 public static class LanceScavengerDebugPresentationHub
 {
+    private const int HistoryFrames = LanceCombatState.BraceFrames;
+    private const uint LeaseTimeoutMilliseconds = 750;
+    private const uint EntryTimeoutMilliseconds = 750;
+
+    private sealed class EntryRecord
+    {
+        internal LanceScavengerDebugEntrySnapshot Snapshot;
+        internal int LastSeenTick;
+        internal readonly float[] Quality = new float[HistoryFrames];
+        internal readonly byte[] Flags = new byte[HistoryFrames];
+        internal int Next;
+        internal int Count;
+
+        internal void Append(LanceScavengerDebugEntrySnapshot snapshot, int now)
+        {
+            Snapshot = snapshot;
+            LastSeenTick = now;
+            Quality[Next] = snapshot.AimQuality;
+            byte flags = 0;
+            if (snapshot.AimReady) flags |= 1;
+            if (snapshot.HardBlocked) flags |= 2;
+            if (string.Equals(snapshot.State, LanceState.Brace.ToString(), StringComparison.Ordinal)) flags |= 4;
+            Flags[Next] = flags;
+            Next = (Next + 1) % HistoryFrames;
+            if (Count < HistoryFrames) Count++;
+
+            float[] quality = new float[Count];
+            bool[] ready = new bool[Count];
+            bool[] hard = new bool[Count];
+            bool[] brace = new bool[Count];
+            int start = (Next - Count + HistoryFrames) % HistoryFrames;
+            for (int i = 0; i < Count; i++)
+            {
+                int source = (start + i) % HistoryFrames;
+                quality[i] = Quality[source];
+                ready[i] = (Flags[source] & 1) != 0;
+                hard[i] = (Flags[source] & 2) != 0;
+                brace[i] = (Flags[source] & 4) != 0;
+            }
+
+            snapshot.AimQualityHistory = quality;
+            snapshot.AimReadyHistory = ready;
+            snapshot.HardBlockHistory = hard;
+            snapshot.BraceHistory = brace;
+        }
+    }
+
     private static readonly object Sync = new();
-    private static readonly Dictionary<int, LanceScavengerDebugEntrySnapshot> Entries = new();
+    private static readonly Dictionary<int, EntryRecord> Entries = new();
     private static bool requested;
     private static string requestedRoom = string.Empty;
+    private static int lastLeaseTick;
 
     /// <summary>
-    /// Called by the ImGui page. A room change starts a fresh capture set so stale
-    /// creatures from the previous room can never leak into the new page.
+    /// Called every ImGui frame while the page is visible. This is a short lease rather than a
+    /// permanent toggle: if DevTools/RWImGui disappears unexpectedly, gameplay stops paying the
+    /// debug capture cost automatically within a fraction of a second.
     /// </summary>
     public static void SetRequested(bool value, string roomName)
     {
@@ -93,7 +152,9 @@ public static class LanceScavengerDebugPresentationHub
             }
 
             requested = value;
-            if (!value)
+            if (value)
+                lastLeaseTick = Environment.TickCount;
+            else
                 Entries.Clear();
         }
     }
@@ -104,11 +165,16 @@ public static class LanceScavengerDebugPresentationHub
         {
             lock (Sync)
             {
+                int now = Environment.TickCount;
+                ExpireLeaseUnsafe(now);
                 if (!requested)
                     return LanceScavengerDebugSnapshot.Empty;
 
+                RemoveStaleEntriesUnsafe(now);
                 LanceScavengerDebugEntrySnapshot[] values = new LanceScavengerDebugEntrySnapshot[Entries.Count];
-                Entries.Values.CopyTo(values, 0);
+                int index = 0;
+                foreach (EntryRecord record in Entries.Values)
+                    values[index++] = record.Snapshot;
                 Array.Sort(values, static (a, b) => a.Number.CompareTo(b.Number));
                 return new LanceScavengerDebugSnapshot
                 {
@@ -125,8 +191,10 @@ public static class LanceScavengerDebugPresentationHub
         if (owner?.room == null || brain == null) return;
 
         string roomName = owner.room.abstractRoom?.name ?? string.Empty;
+        int now = Environment.TickCount;
         lock (Sync)
         {
+            ExpireLeaseUnsafe(now);
             if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal))
                 return;
         }
@@ -135,9 +203,18 @@ public static class LanceScavengerDebugPresentationHub
 
         lock (Sync)
         {
+            now = Environment.TickCount;
+            ExpireLeaseUnsafe(now);
             if (!requested || !string.Equals(requestedRoom, roomName, StringComparison.Ordinal))
                 return;
-            Entries[owner.abstractCreature.ID.number] = snapshot;
+
+            int key = owner.abstractCreature.ID.number;
+            if (!Entries.TryGetValue(key, out EntryRecord record))
+            {
+                record = new EntryRecord();
+                Entries[key] = record;
+            }
+            record.Append(snapshot, now);
         }
     }
 
@@ -149,35 +226,21 @@ public static class LanceScavengerDebugPresentationHub
         Creature target = brain.Target;
         LanceAimSolution aim = brain.AimSolution;
         LanceAimSolution best = brain.DebugRecentAimSolution;
-        bool bestReady = brain.DebugRecentAimReady;
         ChargeLane lane = brain.Lane;
 
         float distance = target == null
             ? 0f
             : Vector2.Distance(owner.mainBodyChunk.pos, target.mainBodyChunk.pos);
-        bool friendBlocked = lane.Reason == "friend in lane";
-        bool hardBlocked = friendBlocked || lane.Reason == "distance" ||
-                           lane.Reason == "wall / ceiling" || lane.Reason == "lance blocked";
-        bool commitReady = !hardBlocked && (aim.Ready || bestReady);
 
-        int targetChunkIndex = -1;
-        if (target?.bodyChunks != null && aim.TargetChunk != null)
-        {
-            for (int i = 0; i < target.bodyChunks.Length; i++)
-            {
-                if (!ReferenceEquals(target.bodyChunks[i], aim.TargetChunk)) continue;
-                targetChunkIndex = i;
-                break;
-            }
-        }
-
-        BodyChunk trackedChunk = aim.TargetChunk ?? target?.mainBodyChunk;
+        int targetChunkIndex = FindChunkIndex(target, aim.TargetChunk);
+        int bestTargetChunkIndex = FindChunkIndex(target, best.TargetChunk);
+        BodyChunk trackedChunk = aim.TargetChunk ?? best.TargetChunk ?? target?.mainBodyChunk;
         Vector2 targetVelocity = trackedChunk == null
             ? Vector2.zero
             : brain.MotionTracker.SmoothedVelocity(trackedChunk);
         float stability = trackedChunk == null ? 0f : brain.MotionTracker.Stability(trackedChunk);
-        float pitch = Mathf.Atan2(aim.Valid ? aim.LanceDirection.y : owner.Motor.LanceDirection.y,
-            Mathf.Max(0.0001f, Mathf.Abs(aim.Valid ? aim.LanceDirection.x : owner.Motor.LanceDirection.x))) * Mathf.Rad2Deg;
+        Vector2 pitchDirection = aim.Valid ? aim.LanceDirection : owner.Motor.LanceDirection;
+        float pitch = Mathf.Atan2(pitchDirection.y, Mathf.Max(0.0001f, Mathf.Abs(pitchDirection.x))) * Mathf.Rad2Deg;
 
         return new LanceScavengerDebugEntrySnapshot
         {
@@ -205,8 +268,9 @@ public static class LanceScavengerDebugPresentationHub
             AimReady = aim.Ready,
             BestAimQuality = best.Quality,
             BestAimAge = brain.DebugRecentAimAge,
-            BestAimReady = bestReady,
+            BestAimReady = brain.DebugRecentAimReady,
             TargetChunkIndex = targetChunkIndex,
+            BestTargetChunkIndex = bestTargetChunkIndex,
             ImpactFrame = aim.ImpactFrame,
             ExactAim = aim.Exact,
             AimX = aim.Aim.x,
@@ -216,9 +280,11 @@ public static class LanceScavengerDebugPresentationHub
             PathClear = lane.PathClear,
             LaneReason = lane.Reason ?? string.Empty,
             ChargePriority = brain.ChargePriority,
-            CommitReady = commitReady,
-            HardBlocked = hardBlocked,
-            DecisionReason = DecisionReason(owner, brain, target, distance, lane, aim, bestReady, hardBlocked),
+            CommitReady = brain.DebugCommitReady,
+            HardBlocked = brain.DebugHardBlocked,
+            FriendBlocked = brain.DebugFriendBlocked,
+            ChargeOpportunity = brain.DebugChargeOpportunity,
+            DecisionReason = DecisionReason(owner, brain, target, distance, lane, aim),
 
             TargetStability = stability,
             DodgeSeverity = brain.MotionTracker.DodgeSeverity,
@@ -229,6 +295,14 @@ public static class LanceScavengerDebugPresentationHub
             CounterSweepActive = owner.Motor.CounterSweepActive,
             CounterSweepChance = owner.Motor.CounterSweepChance
         };
+    }
+
+    private static int FindChunkIndex(Creature target, BodyChunk chunk)
+    {
+        if (target?.bodyChunks == null || chunk == null) return -1;
+        for (int i = 0; i < target.bodyChunks.Length; i++)
+            if (ReferenceEquals(target.bodyChunks[i], chunk)) return i;
+        return -1;
     }
 
     private static string TargetLabel(Creature target)
@@ -244,9 +318,7 @@ public static class LanceScavengerDebugPresentationHub
         Creature target,
         float distance,
         ChargeLane lane,
-        LanceAimSolution aim,
-        bool bestReady,
-        bool hardBlocked)
+        LanceAimSolution aim)
     {
         if (!owner.Consious || owner.grabbedBy.Count > 0) return "inactive";
         if (owner.Lance == null) return "no lance";
@@ -255,15 +327,42 @@ public static class LanceScavengerDebugPresentationHub
         if (!brain.ChargePriority) return "yielding priority";
         if (distance < ChargeLanePlanner.MinimumChargeDistance) return "too close";
         if (distance > ChargeLanePlanner.MaximumChargeDistance(owner)) return "too far";
-        if (hardBlocked) return lane.Reason ?? "hard block";
+        if (brain.DebugHardBlocked) return lane.Reason ?? "hard block";
         if (owner.Combat.Cooldown > 0) return "cooldown";
         if (owner.Combat.State == LanceState.Charge)
             return owner.Motor.CounterSweepActive ? "counter sweep" : "charging";
         if (owner.Combat.State == LanceState.Brace)
-            return aim.Ready || bestReady ? "brace ready" : "aim quality";
+            return brain.DebugCommitReady ? "brace ready" : "aim quality";
         if (!aim.Valid) return "no aim opportunity";
         if (!aim.Ready) return "aim quality";
         if (!lane.PathClear) return lane.Reason ?? "path blocked";
-        return "ready";
+        return brain.DebugChargeOpportunity ? "ready" : "waiting state";
     }
+
+    private static void ExpireLeaseUnsafe(int now)
+    {
+        if (!requested) return;
+        if (ElapsedMilliseconds(lastLeaseTick, now) <= LeaseTimeoutMilliseconds) return;
+        requested = false;
+        Entries.Clear();
+    }
+
+    private static void RemoveStaleEntriesUnsafe(int now)
+    {
+        if (Entries.Count == 0) return;
+        List<int> stale = null;
+        foreach (KeyValuePair<int, EntryRecord> pair in Entries)
+        {
+            if (ElapsedMilliseconds(pair.Value.LastSeenTick, now) <= EntryTimeoutMilliseconds) continue;
+            stale ??= new List<int>();
+            stale.Add(pair.Key);
+        }
+
+        if (stale == null) return;
+        for (int i = 0; i < stale.Count; i++)
+            Entries.Remove(stale[i]);
+    }
+
+    private static uint ElapsedMilliseconds(int then, int now) =>
+        unchecked((uint)(now - then));
 }
