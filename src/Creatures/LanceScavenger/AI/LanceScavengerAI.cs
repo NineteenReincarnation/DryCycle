@@ -109,6 +109,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
         Creature previous = Target;
         Target = null; Hostile = false; warning = false;
         float best = float.MinValue;
+        float targetRange = Mathf.Max(480f, ChargeLanePlanner.MaximumChargeDistance(_owner) + 40f);
         for (int i = 0; i < tracker.CreaturesCount; i++)
         {
             Tracker.CreatureRepresentation rep = tracker.GetRep(i);
@@ -118,7 +119,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
             if (!rep.VisualContact && (candidate != previous ||
                 !_owner.room.VisualContact(_owner.mainBodyChunk.pos, candidate.mainBodyChunk.pos))) continue;
             float distance = Vector2.Distance(candidate.mainBodyChunk.pos, _owner.mainBodyChunk.pos);
-            if (distance > 480f) continue;
+            if (distance > targetRange) continue;
             bool recent = candidate == _recentAttacker && _hostilityMemory > 0;
             ScavengerTrackState tracked = rep.dynamicRelationship?.state as ScavengerTrackState;
             bool lethal = tracked?.taggedViolenceType == ViolenceType.Lethal ||
