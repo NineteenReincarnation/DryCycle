@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -30,8 +31,72 @@ internal readonly struct DevToolSourceMark
 /// </summary>
 internal static class DevToolSourcePresentation
 {
+    private readonly struct SoundSourceCacheKey : IEquatable<SoundSourceCacheKey>
+    {
+        internal SoundSourceCacheKey(EditorSoundSourceKind kind, string id, string name, bool chinese)
+        {
+            Kind = kind;
+            Id = id ?? string.Empty;
+            Name = name ?? string.Empty;
+            Chinese = chinese;
+        }
+
+        private EditorSoundSourceKind Kind { get; }
+        private string Id { get; }
+        private string Name { get; }
+        private bool Chinese { get; }
+
+        public bool Equals(SoundSourceCacheKey other) =>
+            Kind == other.Kind && Chinese == other.Chinese &&
+            string.Equals(Id, other.Id, StringComparison.Ordinal) &&
+            string.Equals(Name, other.Name, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) => obj is SoundSourceCacheKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = (int)Kind;
+                hash = hash * 397 ^ (Chinese ? 1 : 0);
+                hash = hash * 397 ^ StringComparer.Ordinal.GetHashCode(Id);
+                hash = hash * 397 ^ StringComparer.Ordinal.GetHashCode(Name);
+                return hash;
+            }
+        }
+    }
+
+    private readonly struct LabelSourceCacheKey : IEquatable<LabelSourceCacheKey>
+    {
+        internal LabelSourceCacheKey(string label, bool chinese)
+        {
+            Label = label ?? string.Empty;
+            Chinese = chinese;
+        }
+
+        private string Label { get; }
+        private bool Chinese { get; }
+
+        public bool Equals(LabelSourceCacheKey other) =>
+            Chinese == other.Chinese && string.Equals(Label, other.Label, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) => obj is LabelSourceCacheKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return StringComparer.Ordinal.GetHashCode(Label) * 397 ^ (Chinese ? 1 : 0);
+            }
+        }
+    }
+
     internal const string DownpourModId = "moreslugcats";
     internal const string WatcherModId = "watcher";
+
+    private const int MaxCachedSources = 512;
+    private const string DownpourKey = "official:moreslugcats";
+    private const string WatcherKey = "official:watcher";
 
     // Official-family colours are intentionally semantic rather than random-hash colours:
     // base game = crimson/red, Downpour = water/cyan, Watcher = charcoal/black.
@@ -39,32 +104,21 @@ internal static class DevToolSourcePresentation
     private static readonly Num.Vector4 DownpourColor = new(0.18f, 0.72f, 0.92f, 1f);
     private static readonly Num.Vector4 WatcherColor = new(0.13f, 0.15f, 0.19f, 1f);
     private static readonly Num.Vector4 MissingColor = new(0.96f, 0.43f, 0.24f, 1f);
+    private static readonly Dictionary<SoundSourceCacheKey, DevToolSourceMark> SoundCache = new();
+    private static readonly Dictionary<LabelSourceCacheKey, DevToolSourceMark> LabelCache = new();
 
     internal static DevToolSourceMark FromSound(
         EditorSoundSourceKind kind,
         string sourceId,
         string sourceName)
     {
-        string id = Normalize(sourceId);
-        string name = string.IsNullOrWhiteSpace(sourceName) ? string.Empty : sourceName.Trim();
+        SoundSourceCacheKey cacheKey = new(kind, sourceId, sourceName, DevToolUiSettings.IsChinese);
+        if (SoundCache.TryGetValue(cacheKey, out DevToolSourceMark cached)) return cached;
 
-        if (kind == EditorSoundSourceKind.Vanilla)
-            return Vanilla();
-        if (kind == EditorSoundSourceKind.Downpour || IsDownpour(id, name))
-            return Downpour();
-        if (kind == EditorSoundSourceKind.Watcher || IsWatcher(id, name))
-            return Watcher();
-        if (kind == EditorSoundSourceKind.Missing)
-            return Missing();
-
-        // Keep legacy/unknown DLC records source-specific instead of collapsing every DLC into
-        // one colour. This also makes the presentation forward-compatible with future official
-        // packages until the catalog learns an explicit semantic kind for them.
-        string key = !string.IsNullOrEmpty(id) ? id : Normalize(name);
-        string label = !string.IsNullOrWhiteSpace(name)
-            ? name
-            : kind == EditorSoundSourceKind.Dlc ? "DLC" : "MOD";
-        return Named(key, label);
+        DevToolSourceMark resolved = ResolveSound(kind, sourceId, sourceName);
+        TrimCacheIfNeeded(SoundCache);
+        SoundCache[cacheKey] = resolved;
+        return resolved;
     }
 
     /// <summary>
@@ -73,15 +127,22 @@ internal static class DevToolSourcePresentation
     /// </summary>
     internal static DevToolSourceMark FromLabel(string label)
     {
+        LabelSourceCacheKey cacheKey = new(label, DevToolUiSettings.IsChinese);
+        if (LabelCache.TryGetValue(cacheKey, out DevToolSourceMark cached)) return cached;
+
         string value = string.IsNullOrWhiteSpace(label) ? "Unknown" : label.Trim();
         string normalized = Normalize(value);
 
-        if (IsVanilla(normalized)) return Vanilla();
-        if (IsDownpour(normalized, value)) return Downpour();
-        if (IsWatcher(normalized, value)) return Watcher();
-        if (normalized.Contains("missing") || normalized.Contains("缺失")) return Missing();
+        DevToolSourceMark resolved;
+        if (IsVanilla(normalized)) resolved = Vanilla();
+        else if (IsDownpour(normalized, value)) resolved = Downpour();
+        else if (IsWatcher(normalized, value)) resolved = Watcher();
+        else if (normalized.Contains("missing") || normalized.Contains("缺失")) resolved = Missing();
+        else resolved = Named(normalized, value);
 
-        return Named(normalized, value);
+        TrimCacheIfNeeded(LabelCache);
+        LabelCache[cacheKey] = resolved;
+        return resolved;
     }
 
     internal static bool SameSource(in DevToolSourceMark a, in DevToolSourceMark b) =>
@@ -134,18 +195,45 @@ internal static class DevToolSourcePresentation
         ImGui.TextColored(ReadableTextColor(source.Color), source.Label);
     }
 
+    private static DevToolSourceMark ResolveSound(
+        EditorSoundSourceKind kind,
+        string sourceId,
+        string sourceName)
+    {
+        string id = Normalize(sourceId);
+        string name = string.IsNullOrWhiteSpace(sourceName) ? string.Empty : sourceName.Trim();
+
+        if (kind == EditorSoundSourceKind.Vanilla)
+            return Vanilla();
+        if (kind == EditorSoundSourceKind.Downpour || IsDownpour(id, name))
+            return Downpour();
+        if (kind == EditorSoundSourceKind.Watcher || IsWatcher(id, name))
+            return Watcher();
+        if (kind == EditorSoundSourceKind.Missing)
+            return Missing();
+
+        // Keep legacy/unknown DLC records source-specific instead of collapsing every DLC into
+        // one colour. This also makes the presentation forward-compatible with future official
+        // packages until the catalog learns an explicit semantic kind for them.
+        string key = !string.IsNullOrEmpty(id) ? id : Normalize(name);
+        string label = !string.IsNullOrWhiteSpace(name)
+            ? name
+            : kind == EditorSoundSourceKind.Dlc ? "DLC" : "MOD";
+        return Named(key, label);
+    }
+
     private static DevToolSourceMark Vanilla() => new(
         "official:vanilla",
         DevToolUiSettings.T("原版", "VANILLA"),
         VanillaColor);
 
     private static DevToolSourceMark Downpour() => new(
-        "official:" + DownpourModId,
+        DownpourKey,
         DevToolUiSettings.T("倾盆大雨", "DOWNPOUR"),
         DownpourColor);
 
     private static DevToolSourceMark Watcher() => new(
-        "official:" + WatcherModId,
+        WatcherKey,
         DevToolUiSettings.T("守望者", "WATCHER"),
         WatcherColor);
 
@@ -236,5 +324,10 @@ internal static class DevToolSourcePresentation
             Math.Min(1f, Math.Max(floor, color.Y + lift)),
             Math.Min(1f, Math.Max(floor, color.Z + lift)),
             Math.Max(0.94f, color.W));
+    }
+
+    private static void TrimCacheIfNeeded<TKey>(Dictionary<TKey, DevToolSourceMark> cache)
+    {
+        if (cache.Count >= MaxCachedSources) cache.Clear();
     }
 }
