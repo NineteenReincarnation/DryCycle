@@ -60,6 +60,7 @@ internal sealed partial class ScavengerLance : Weapon
         _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
         _hitCreatures.Clear();
         _shaftContacts.Clear();
+        ResetCarryRig();
     }
 
     internal void RequestThrust(Vector2 direction, float maxDamage = LanceCombatMath.StandardThrustMaxDamage)
@@ -75,6 +76,7 @@ internal sealed partial class ScavengerLance : Weapon
         _previousTip = Tip;
         _previousGrip = firstChunk.pos;
         _havePreviousPose = true;
+        ResetCarryRig();
     }
 
     public override void Thrown(Creature thrower, Vector2 pos, Vector2? traceFrom,
@@ -90,6 +92,7 @@ internal sealed partial class ScavengerLance : Weapon
         _thrustMaxDamage = LanceCombatMath.StandardThrustMaxDamage;
         _hitCreatures.Clear();
         _havePreviousPose = false;
+        ResetCarryRig();
     }
 
     public override void Update(bool eu)
@@ -115,17 +118,34 @@ internal sealed partial class ScavengerLance : Weapon
         if (holder != null)
         {
             if (mode != Mode.Carried) ChangeMode(Mode.Carried);
-            if (holder is not Player || _thrustFrames > 0)
+
+            bool enhancedScavengerCarry = holder is Scavenger && _gripValid && _thrustFrames <= 0;
+            if (enhancedScavengerCarry)
             {
+                Vector2 carriedRotation = UpdateCarryRig(holder, _grip, rotation);
+                rotation = carriedRotation;
+                setRotation = carriedRotation;
+            }
+            else if (holder is not Player || _thrustFrames > 0)
+            {
+                ResetCarryRig();
                 Vector2 desired = _thrustFrames > 0 ? _thrustDirection : _gripValid ? _grip.Direction : GenericDirection(holder);
                 float turn = charging || _thrustFrames > 0 ? 180f :
                     (_gripValid && _grip.AimTracking ? 2.25f : _gripValid && _grip.Braced ? 12f : 8f);
                 float angle = Mathf.MoveTowardsAngle(Custom.VecToDeg(rotation), Custom.VecToDeg(desired), turn);
                 setRotation = Custom.DegToVec(angle);
             }
+            else
+            {
+                ResetCarryRig();
+            }
             rotationSpeed = 0f;
         }
-        else if (mode == Mode.Carried) ChangeMode(Mode.Free);
+        else
+        {
+            ResetCarryRig();
+            if (mode == Mode.Carried) ChangeMode(Mode.Free);
+        }
 
         base.Update(eu);
         if (room == null) { _havePreviousPose = false; return; }
@@ -145,22 +165,15 @@ internal sealed partial class ScavengerLance : Weapon
             _previousGrip = firstChunk.pos;
             _havePreviousPose = true;
         }
-        bool sweptWall = TraceSolid(_previousTip, currentTip, out float wallFraction);
-        bool rodWall = !PoseFits(firstChunk.pos, rotation);
+        bool activeTerrainCollision = charging || _thrustFrames > 0 || _flightFrames > 0;
+        bool sweptWall = activeTerrainCollision && TraceSolid(_previousTip, currentTip, out float wallFraction);
+        bool rodWall = activeTerrainCollision && !PoseFits(firstChunk.pos, rotation);
         float speed = holder != null ? Vector2.Dot(holder.mainBodyChunk.vel, rotation) : Vector2.Dot(firstChunk.vel, rotation);
-        bool attackTerrainActive = charging || _thrustFrames > 0 || _flightFrames > 0;
 
-        if (attackTerrainActive)
+        if (charging || _thrustFrames > 0 || _flightFrames > 0)
             ResolveBlade(sweptWall ? wallFraction : 1f, charging, speed);
         ResolveShaft();
-
-        // A carried lance is repositioned directly to the wielder's grip every update. During normal
-        // carry/brace this can momentarily overlap a floor edge or wall even though no attack is being
-        // made. Treating those passive overlaps as real impacts caused repeated Spear_Bounce_Off_Wall
-        // sounds and could poison the transition into a real charge. Terrain impacts are therefore
-        // authoritative only while the lance is actually charging, thrusting or in free flight.
-        if (attackTerrainActive && (sweptWall || rodWall))
-            ResolveTerrain(holder, speed, charging);
+        if (activeTerrainCollision && (sweptWall || rodWall)) ResolveTerrain(holder, speed, charging);
 
         if (_thrustFrames > 0)
         {
