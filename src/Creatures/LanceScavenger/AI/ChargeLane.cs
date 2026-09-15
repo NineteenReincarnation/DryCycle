@@ -4,8 +4,8 @@ using UnityEngine;
 namespace DryCycle.Creatures.LanceScavenger;
 
 /// <summary>
-/// Combined view consumed by the existing combat state machine. Aim quality comes from
-/// LanceAimSolver; PathClear and Reason come from the hard route planner.
+/// Combined view consumed by the combat state machine. Aim quality comes from LanceAimSolver;
+/// PathClear/Reason come from the hard route planner.
 /// </summary>
 internal readonly struct ChargeLane
 {
@@ -35,29 +35,29 @@ internal readonly struct ChargeLane
 }
 
 /// <summary>
-/// Hard route safety only. Target lead, BodyChunk selection and aim confidence intentionally
-/// live in LanceAimSolver so temporary prediction noise does not masquerade as terrain failure.
-///
-/// Important: route validation only proves the committed attack corridor up to the expected
-/// contact. It deliberately does not demand a perfectly safe landing after a miss. Crashing into
-/// terrain after the target dodges is a physical consequence of committing the charge, not a reason
-/// to make the signature attack unavailable in the first place.
+/// Hard route safety. Static terrain proof is separable from dynamic friendly occupancy so an AI can
+/// cache the expensive ballistic corridor while still reacting to creatures entering the lane every
+/// tick. Post-contact terrain is intentionally not validated; a miss may still crash physically.
 /// </summary>
 internal static class ChargeLanePlanner
 {
     internal const float MinimumChargeDistance = 60f;
     internal const float MinimumMaximumChargeDistance = 300f;
     internal const float MaximumMaximumChargeDistance = 500f;
-
-    // The original 7.3 vertical launch remains the absolute capability ceiling. The aim solver is
-    // allowed to choose a lower arc, but never a stronger jump than the old implementation.
     internal const float MinimumChargeLaunchY = 2f;
     internal const float MaximumChargeLaunchY = 7.3f;
     internal const float ChargeLaunchY = MaximumChargeLaunchY; // compatibility for diagnostics/old callers
+
+    // Retained for compatibility with tests/older debug consumers. Runtime aiming no longer searches
+    // these discrete heights; LanceAimSolver produces a continuous solved launch height.
     internal static readonly float[] ChargeLaunchYCandidates = { 2f, 3f, 4f, 5f, 6f, 7f, 7.3f };
+
+    private static readonly int[] StagingDistances = { 120, 180, 240 };
+    private static readonly int[] StagingHeights = { 0, -20, 20 };
 
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
+    private const float DynamicFriendCorridorPadding = 40f;
 
     internal static float ClampChargeLaunchY(float launchY) =>
         Mathf.Clamp(launchY, MinimumChargeLaunchY, MaximumChargeLaunchY);
@@ -74,7 +74,25 @@ internal static class ChargeLanePlanner
     internal static float ChargeSpeed(LanceScavenger scav) =>
         Mathf.Lerp(17f, 19.5f, scav.abstractCreature.personality.energy);
 
+    /// <summary>
+    /// One-shot authoritative validation used for release and compatibility callers. Static geometry
+    /// is proved first, then friendly occupancy is checked along the actual ballistic segments.
+    /// </summary>
     internal static ChargeLane Evaluate(LanceScavenger scav, Vector2 origin, Creature target, LanceAimSolution aim)
+    {
+        ChargeLane staticLane = EvaluateStatic(scav, origin, target, aim);
+        if (!staticLane.PathClear || !aim.Valid || scav?.room == null || target == null)
+            return staticLane;
+        return FriendInTrajectory(scav, origin, target, aim)
+            ? WithReason(staticLane, false, "friend in lane")
+            : staticLane;
+    }
+
+    /// <summary>
+    /// Expensive but cacheable part of planning: distance + body/tail/blade terrain corridor only.
+    /// No creature occupancy is consulted here.
+    /// </summary>
+    internal static ChargeLane EvaluateStatic(LanceScavenger scav, Vector2 origin, Creature target, LanceAimSolution aim)
     {
         if (scav?.room == null || target?.bodyChunks == null || target.bodyChunks.Length == 0)
             return new ChargeLane(false, false, origin, Vector2.right, 0, 0f, "no target");
@@ -91,10 +109,11 @@ internal static class ChargeLanePlanner
         float launchY = aim.Valid ? ClampChargeLaunchY(aim.LaunchY) : MaximumChargeLaunchY;
         int impactFrame = aim.Valid && aim.ImpactFrame > 0
             ? aim.ImpactFrame
-            : Mathf.Clamp(Mathf.RoundToInt(distance / Mathf.Max(1f, ChargeSpeed(scav))), 1, LanceCombatState.MaxChargeFrames);
+            : Mathf.Clamp(Mathf.RoundToInt(distance / Mathf.Max(1f, ChargeSpeed(scav))),
+                1, LanceCombatState.MaxChargeFrames);
 
         string block = TrajectoryBlock(scav, origin, Mathf.Sign(dx), ChargeSpeed(scav), launchY, impactFrame,
-            lanceDirection, target, checkFriends: true);
+            lanceDirection, checkFriends: false, target: target);
         bool pathClear = block == null;
         string reason = block ?? (aim.Ready ? "clear" : aim.Valid ? "aim low" : "no aim opportunity");
         return new ChargeLane(pathClear, aim.Valid, aim.Valid ? aim.Aim : targetPos,
@@ -102,12 +121,22 @@ internal static class ChargeLanePlanner
     }
 
     /// <summary>
-    /// Terrain-only validation used by the optimized aim solver. Geometry search no longer performs
-    /// a full body/tail/blade tile envelope test for every pitch on every simulated frame. Instead it
-    /// produces one or two good contact candidates per pitch and asks this method to prove only those
-    /// trajectories. Friendly-fire checks remain in Evaluate() so the final committed lane is still
-    /// validated against live room occupancy.
+    /// Cheap live safety layer for a cached static lane. It uses one conservative swept corridor
+    /// around the target/aim segment instead of repeating tile queries or the full ballistic proof.
+    /// The exact ballistic friend check is still repeated on the release frame by Evaluate().
     /// </summary>
+    internal static ChargeLane ApplyDynamicSafety(LanceScavenger scav, Vector2 origin, Creature target,
+        LanceAimSolution aim, ChargeLane staticLane)
+    {
+        if (!staticLane.PathClear || scav?.room == null || target?.mainBodyChunk == null || !aim.Valid)
+            return staticLane;
+
+        Vector2 end = aim.Aim;
+        if (FriendInCorridor(scav, origin, end, target, DynamicFriendCorridorPadding))
+            return WithReason(staticLane, false, "friend in lane");
+        return staticLane;
+    }
+
     internal static bool TerrainClear(LanceScavenger scav, Vector2 origin, Creature target, LanceAimSolution aim)
     {
         if (!aim.Valid || scav?.room == null || target?.mainBodyChunk == null)
@@ -117,28 +146,24 @@ internal static class ChargeLanePlanner
         if (Mathf.Sign(dx) == 0f) return false;
         return TrajectoryBlock(scav, origin, Mathf.Sign(dx), ChargeSpeed(scav),
             ClampChargeLaunchY(aim.LaunchY), Mathf.Max(1, aim.ImpactFrame), aim.LanceDirection,
-            target, checkFriends: false) == null;
+            checkFriends: false, target: target) == null;
     }
 
-    // Compatibility overload for diagnostics/tests that do not own a motion tracker.
     internal static ChargeLane Evaluate(LanceScavenger scav, Vector2 origin, Creature target)
     {
         LanceAimSolution aim = LanceAimSolver.Solve(scav, origin, target, null);
         return Evaluate(scav, origin, target, aim);
     }
 
+    private static ChargeLane WithReason(ChargeLane lane, bool pathClear, string reason) =>
+        new(pathClear, lane.CanHit, lane.Aim, lane.LanceDirection, lane.ImpactFrame, lane.Confidence, reason);
+
     private static string TrajectoryBlock(LanceScavenger scav, Vector2 origin, float horizontalSign, float speed,
-        float launchY, int impactFrame, Vector2 lanceDirection, Creature target, bool checkFriends)
+        float launchY, int impactFrame, Vector2 lanceDirection, bool checkFriends, Creature target)
     {
         Room room = scav.room;
         Vector2 body = origin;
         Vector2 velocity = new(horizontalSign * speed, ClampChargeLaunchY(launchY));
-
-        // Validate the corridor through the expected contact, plus one frame for discretization.
-        // The previous landing-length validation simulated far beyond the target with a permanently
-        // extended wide blade. On ordinary ground that made the blade intersect the floor during the
-        // predicted descent, so valid charges were reported as blocked. Post-contact terrain remains
-        // a physical consequence handled by the live charge instead of a pre-launch prohibition.
         int frames = Mathf.Clamp(impactFrame + 1, 1, LanceCombatState.MaxChargeFrames);
         Vector2 previousBody = body;
 
@@ -156,11 +181,26 @@ internal static class ChargeLanePlanner
         return null;
     }
 
-    /// <summary>
-    /// Shared hard geometry test used by both the height-aware aim solver and the final route pass.
-    /// Keeping this in one place guarantees that a low/high arc selected by aiming is tested against
-    /// the same body, tail and blade envelope that can later veto the committed launch.
-    /// </summary>
+    private static bool FriendInTrajectory(LanceScavenger scav, Vector2 origin, Creature target, LanceAimSolution aim)
+    {
+        float sign = Mathf.Sign(aim.LanceDirection.x);
+        if (sign == 0f) sign = Mathf.Sign(target.mainBodyChunk.pos.x - origin.x);
+        if (sign == 0f) return false;
+
+        Vector2 body = origin;
+        Vector2 previousBody = body;
+        Vector2 velocity = new(sign * ChargeSpeed(scav), ClampChargeLaunchY(aim.LaunchY));
+        int frames = Mathf.Clamp(aim.ImpactFrame + 1, 1, LanceCombatState.MaxChargeFrames);
+        for (int frame = 1; frame <= frames; frame++)
+        {
+            StepBody(ref body, ref velocity);
+            if (FriendInPath(scav, previousBody, body + new Vector2(sign * 24f, 0f), target))
+                return true;
+            previousBody = body;
+        }
+        return false;
+    }
+
     internal static bool PoseBlocked(LanceScavenger scav, Vector2 body, Vector2 lanceDirection)
     {
         if (scav?.room == null) return true;
@@ -218,13 +258,17 @@ internal static class ChargeLanePlanner
         for (int i = 0; i <= count; i++)
         {
             Vector2 at = Vector2.Lerp(origin, end, (float)i / count);
-            if (room.GetTile(at).Solid || room.GetTile(at + Vector2.up * 14f).Solid || room.GetTile(at - Vector2.up * 8f).Solid)
+            if (room.GetTile(at).Solid || room.GetTile(at + Vector2.up * 14f).Solid ||
+                room.GetTile(at - Vector2.up * 8f).Solid)
                 return "wall / ceiling";
         }
         return FriendInPath(scav, origin, end, target) ? "friend in lane" : null;
     }
 
-    internal static bool FriendInPath(LanceScavenger scav, Vector2 origin, Vector2 end, Creature target)
+    internal static bool FriendInPath(LanceScavenger scav, Vector2 origin, Vector2 end, Creature target) =>
+        FriendInCorridor(scav, origin, end, target, 21f);
+
+    private static bool FriendInCorridor(LanceScavenger scav, Vector2 origin, Vector2 end, Creature target, float padding)
     {
         if (scav?.room?.abstractRoom?.creatures == null) return false;
         foreach (AbstractCreature abstractOther in scav.room.abstractRoom.creatures)
@@ -233,8 +277,11 @@ internal static class ChargeLanePlanner
             if (other == null || other == scav || other == target || other.dead || other.room != scav.room) continue;
             if (!IsFriend(scav, other)) continue;
             foreach (BodyChunk chunk in other.bodyChunks)
-                if ((chunk.pos - LanceCombatMath.ClosestPoint(origin, end, chunk.pos)).sqrMagnitude <
-                    (chunk.rad + 21f) * (chunk.rad + 21f)) return true;
+            {
+                float radius = chunk.rad + padding;
+                if ((chunk.pos - LanceCombatMath.ClosestPoint(origin, end, chunk.pos)).sqrMagnitude < radius * radius)
+                    return true;
+            }
         }
         return false;
     }
@@ -247,10 +294,9 @@ internal static class ChargeLanePlanner
     }
 
     /// <summary>
-    /// Navigation seeks a broadly useful launch area, not a pre-proven hit. Temporary target
-    /// animation and friendly occupancy must not make both lance scavengers endlessly swap sides.
-    /// A staging point is acceptable when at least one permitted launch height has a clear terrain
-    /// corridor; the final aim solver will later choose the height that actually hits the target.
+    /// Navigation chooses a broadly useful tactical launch area only. It no longer solves seven
+    /// ballistic heights for every candidate point; exact weapon geometry belongs to the charge
+    /// planner once the scavenger actually reaches the area.
     /// </summary>
     internal static bool FindStagingPosition(LanceScavenger scav, Creature target, out WorldCoordinate destination)
     {
@@ -259,47 +305,42 @@ internal static class ChargeLanePlanner
 
         float best = float.MaxValue;
         Vector2 origin = scav.mainBodyChunk.pos;
-        float commitment = ChargeCommitment(scav);
-        float preferredDistance = Mathf.Lerp(120f, 260f, commitment);
-        int maximumStagingDistance = Mathf.FloorToInt(Mathf.Min(MaximumChargeDistance(scav) - 20f, 300f) / 20f) * 20;
+        float preferredDistance = Mathf.Lerp(120f, 240f, ChargeCommitment(scav));
+        float maximumDistance = MaximumChargeDistance(scav);
 
         for (int side = -1; side <= 1; side += 2)
-            for (int distance = 80; distance <= maximumStagingDistance; distance += 40)
-                for (int height = -20; height <= 20; height += 20)
+        {
+            for (int distanceIndex = 0; distanceIndex < StagingDistances.Length; distanceIndex++)
+            {
+                int distance = StagingDistances[distanceIndex];
+                if (distance > maximumDistance - 10f) continue;
+                for (int heightIndex = 0; heightIndex < StagingHeights.Length; heightIndex++)
                 {
-                    Vector2 candidate = target.mainBodyChunk.pos + new Vector2(side * distance, height);
-                    WorldCoordinate coordinate = scav.room.GetWorldCoordinate(candidate);
+                    int height = StagingHeights[heightIndex];
+                    Vector2 requested = target.mainBodyChunk.pos + new Vector2(side * distance, height);
+                    WorldCoordinate coordinate = scav.room.GetWorldCoordinate(requested);
                     if (!scav.AI.pathFinder.CoordinateViable(coordinate)) continue;
-                    candidate = scav.room.MiddleOfTile(coordinate);
 
+                    Vector2 candidate = scav.room.MiddleOfTile(coordinate);
                     float dx = target.mainBodyChunk.pos.x - candidate.x;
                     float horizontalDistance = Mathf.Abs(dx);
-                    if (horizontalDistance < MinimumChargeDistance || horizontalDistance > MaximumChargeDistance(scav))
+                    if (horizontalDistance < MinimumChargeDistance || horizontalDistance > maximumDistance ||
+                        Mathf.Sign(dx) == 0f)
                         continue;
 
-                    Vector2 direction = HorizontalDirection(dx);
-                    int estimate = Mathf.Clamp(Mathf.RoundToInt(horizontalDistance / Mathf.Max(1f, ChargeSpeed(scav))),
-                        1, LanceCombatState.MaxChargeFrames);
+                    // Only prove that the lancer can occupy the starting pose. Full ballistic terrain
+                    // validation is deferred to the analytic attack planner and is therefore done for
+                    // one solved trajectory rather than for every navigation candidate.
+                    if (PoseBlocked(scav, candidate, HorizontalDirection(dx))) continue;
 
-                    bool terrainRoute = false;
-                    foreach (float launchY in ChargeLaunchYCandidates)
-                    {
-                        string block = TrajectoryBlock(scav, candidate, Mathf.Sign(dx), ChargeSpeed(scav), launchY,
-                            estimate, direction, target, checkFriends: false);
-                        if (block == null)
-                        {
-                            terrainRoute = true;
-                            break;
-                        }
-                    }
-                    if (!terrainRoute) continue;
-
-                    float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 1.4f +
-                        Mathf.Abs(distance - preferredDistance) * 0.4f;
+                    float score = Vector2.Distance(origin, candidate) + Mathf.Abs(height) * 1.2f +
+                        Mathf.Abs(horizontalDistance - preferredDistance) * 0.45f;
                     if (score >= best) continue;
                     best = score;
                     destination = coordinate;
                 }
+            }
+        }
         return best < float.MaxValue;
     }
 }
