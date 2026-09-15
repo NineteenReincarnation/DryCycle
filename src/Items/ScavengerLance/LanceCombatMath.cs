@@ -54,6 +54,14 @@ internal static class LanceCombatMath
         return grip + dir * distance;
     }
 
+    internal static float CounterSweepChance(AbstractCreature.Personality personality)
+    {
+        if (personality == null) return 0.2f;
+        float commitment = Mathf.Clamp01(personality.energy * 0.40f +
+            personality.aggression * 0.35f + personality.bravery * 0.25f);
+        return Mathf.Lerp(0.20f, 0.55f, commitment);
+    }
+
     internal static LanceImpact Impact(float speed, float alignment, float holderMass,
         float targetMass, bool charging, float runUp, bool thrusting,
         float thrustMaxDamage = StandardThrustMaxDamage)
@@ -68,6 +76,17 @@ internal static class LanceCombatMath
         return new LanceImpact(damage, damage * Mathf.Lerp(12f, 25f, full),
             damage > 0f ? Mathf.Min(11f, speed * holderMass * (0.2f + 0.5f * full)) : 0f,
             Mathf.Clamp(1f / (1f + ratio * 0.6f), 0.12f, 0.9f));
+    }
+
+    /// <summary>
+    /// Counter-sweep is an emergency correction inside an already committed charge. If the
+    /// rotating bone blade actually connects, it receives the full charge tier regardless of
+    /// the instantaneous blade-facing dot product; geometry still has to hit normally.
+    /// </summary>
+    internal static LanceImpact CounterSweepImpact(float holderMass, float targetMass, float speed)
+    {
+        float resolvedSpeed = Mathf.Max(12f, Mathf.Abs(speed));
+        return Impact(resolvedSpeed, 1f, holderMass, targetMass, true, 80f, true, ChargeMaxDamage);
     }
 
     internal static Vector2 ClosestPoint(Vector2 a, Vector2 b, Vector2 point)
