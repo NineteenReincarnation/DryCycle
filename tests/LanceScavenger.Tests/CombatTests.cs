@@ -9,8 +9,9 @@ internal static class CombatTests
 {
     internal static LanceSituation Situation(ScavengerAI.ViolenceType violence = null, bool afraid = false,
         float distance = 250f, bool lane = true, bool armed = true, bool sidearm = false, bool active = true,
-        bool target = true, bool backstepComplete = true) =>
-        new(active, armed, sidearm, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane, backstepComplete);
+        bool target = true, bool backstepComplete = true, bool friendBlocked = false, bool chargePriority = true) =>
+        new(active, armed, sidearm, target, violence ?? ScavengerAI.ViolenceType.Lethal, afraid, distance, lane,
+            backstepComplete, friendBlocked, chargePriority);
 
     internal static LanceCombatState Charge(float distance = 250f, bool afraid = false, bool sidearm = false)
     {
@@ -114,14 +115,50 @@ internal static class CombatTests
         backstep.Tick(Situation(backstepComplete: false));
         backstep.Tick(Situation(lane: false, backstepComplete: true));
         Check(backstep.State == LanceState.AcquireChargeLane && backstep.AttackSerial == 0,
-            "Lane is revalidated after the backstep before brace begins");
+            "A real post-backstep miss reacquires a lane");
+
+        var friendWait = new LanceCombatState();
+        friendWait.Tick(Situation(backstepComplete: false));
+        friendWait.Tick(Situation(lane: false, friendBlocked: true, backstepComplete: true));
+        Check(friendWait.State == LanceState.Threaten && friendWait.AttackSerial == 0,
+            "A friendly body in the lane waits instead of triggering another staging search");
+
+        var noPriority = new LanceCombatState();
+        noPriority.Tick(Situation(chargePriority: false));
+        Check(noPriority.State == LanceState.Threaten && noPriority.AttackSerial == 0,
+            "A second lance scavenger without charge priority yields instead of competing for the same lane");
 
         var brace = new LanceCombatState();
-        for (int i = 0; i < 20; i++) brace.Tick(Situation());
+        brace.Tick(Situation(backstepComplete: true));
+        Check(brace.State == LanceState.Backstep, "Test enters backstep");
+        brace.Tick(Situation(backstepComplete: true));
         Check(brace.State == LanceState.Brace, "Test reaches brace after the backstep");
-        brace.Tick(Situation(lane: false));
-        Check(brace.State == LanceState.AcquireChargeLane && brace.AttackSerial == 0,
-            "An aggressive scavenger reacquires a lane when a friend or wall blocks launch");
+        for (int i = 0; i < 5; i++) brace.Tick(Situation());
+        int ageBeforeJitter = brace.Age;
+        for (int i = 0; i < LanceCombatState.BraceSolutionGraceFrames; i++)
+            brace.Tick(Situation(lane: false));
+        Check(brace.State == LanceState.Brace && brace.Age > ageBeforeJitter && brace.AttackSerial == 0,
+            "Short ballistic-solution jitter does not reset the brace timer");
+        brace.Tick(Situation());
+        Check(brace.State == LanceState.Brace,
+            "A recovered hit solution continues the same brace instead of starting over");
+
+        var lostBrace = new LanceCombatState();
+        lostBrace.Tick(Situation());
+        lostBrace.Tick(Situation());
+        Check(lostBrace.State == LanceState.Brace, "Second brace test reaches brace");
+        for (int i = 0; i <= LanceCombatState.BraceSolutionGraceFrames; i++)
+            lostBrace.Tick(Situation(lane: false));
+        Check(lostBrace.State == LanceState.AcquireChargeLane && lostBrace.AttackSerial == 0,
+            "A genuinely lost ballistic solution eventually abandons the brace");
+
+        var finalFrameMiss = new LanceCombatState();
+        finalFrameMiss.Tick(Situation());
+        finalFrameMiss.Tick(Situation());
+        for (int i = 0; i < LanceCombatState.BraceFrames - 1; i++) finalFrameMiss.Tick(Situation());
+        finalFrameMiss.Tick(Situation(lane: false));
+        Check(finalFrameMiss.State == LanceState.AcquireChargeLane && finalFrameMiss.AttackSerial == 0,
+            "The final brace frame still requires a live hit solution and never launches blind");
 
         var afraid = new LanceCombatState();
         for (int i = 0; i < 180; i++) afraid.Tick(Situation(afraid: true, lane: false));
