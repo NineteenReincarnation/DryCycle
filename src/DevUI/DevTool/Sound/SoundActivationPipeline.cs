@@ -54,14 +54,6 @@ internal readonly struct SoundActivationStatusSnapshot
     internal bool IsReady => Phase == SoundActivationPhase.Ready;
 }
 
-/// <summary>
-/// Owns the cold-start lifecycle of the Sound workspace.
-///
-/// Rain World/AssetManager work deliberately stays on the game thread. The important change is
-/// that game-thread-only no longer means same-frame-only: expensive discovery and parsing are
-/// resumed in small units under a strict frame budget, then immutable/public snapshots are swapped
-/// only after each builder has finished.
-/// </summary>
 internal static class SoundActivationPipeline
 {
     private const double ActiveFrameBudgetMilliseconds = 0.85d;
@@ -92,8 +84,6 @@ internal static class SoundActivationPipeline
         if (session?.Owner == null)
             return;
 
-        // Keep completed caches alive while other workspaces are active. A workspace switch must
-        // never throw away the expensive Sound indexes and make the next visit cold again.
         if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage page)
             return;
 
@@ -101,8 +91,6 @@ internal static class SoundActivationPipeline
         if (!ReferenceEquals(requestedPage, page) || !ReferenceEquals(requestedNames, names))
             BeginActivation(page, names);
 
-        // Explicit group refreshes can happen while the overall Sound activation is already Ready.
-        // Re-enter the group stage without invalidating the sample catalog.
         if (phase == SoundActivationPhase.Ready && !SoundGroupLibrary.IsReady)
         {
             phase = SoundActivationPhase.LoadingGroups;
@@ -115,6 +103,7 @@ internal static class SoundActivationPipeline
             return;
 
         long frameStarted = Stopwatch.GetTimestamp();
+        bool completedThisFrame = false;
         try
         {
             double remaining = ActiveFrameBudgetMilliseconds;
@@ -136,8 +125,7 @@ internal static class SoundActivationPipeline
                 SoundGroupLibrary.StepReload(remaining);
             }
 
-            if (SoundSampleCatalog.IsReadyFor(page) && SoundGroupLibrary.IsReady)
-                CompleteActivation(session);
+            completedThisFrame = SoundSampleCatalog.IsReadyFor(page) && SoundGroupLibrary.IsReady;
         }
         catch (Exception error)
         {
@@ -151,6 +139,9 @@ internal static class SoundActivationPipeline
             if (lastFrameWorkMilliseconds > maxFrameWorkMilliseconds)
                 maxFrameWorkMilliseconds = lastFrameWorkMilliseconds;
         }
+
+        if (completedThisFrame && phase != SoundActivationPhase.Failed)
+            CompleteActivation(session);
     }
 
     internal static void Reset()
@@ -179,9 +170,6 @@ internal static class SoundActivationPipeline
         detail = "Preparing Sound workspace";
 
         SoundSampleCatalog.BeginRefresh(page);
-        // Group definitions contain sample metadata, so rebuild them against the catalog that is
-        // about to become authoritative. BeginReload only prepares a resumable builder; it performs
-        // no XML parsing here.
         SoundGroupLibrary.BeginReload(force: true);
     }
 
@@ -193,10 +181,6 @@ internal static class SoundActivationPipeline
             ? 0d
             : ElapsedMilliseconds(activationStartedTimestamp);
 
-        // The first lightweight Sound presentation may have been published while the bootstrap was
-        // still in progress. Clear its retained identity so the next presentation pass consumes the
-        // newly published full catalog/group snapshots instead of treating the temporary arrays as
-        // stable forever.
         SoundEditorPresentationHub.Clear();
         EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
         SoundPresentationChangeHintHub.MarkFull(session);
