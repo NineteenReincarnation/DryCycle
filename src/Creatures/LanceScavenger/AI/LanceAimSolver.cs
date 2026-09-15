@@ -210,8 +210,15 @@ internal static class LanceAimSolver
     private static Vector2 Predict(Vector2 position, Vector2 velocity, int frames) =>
         position + Vector2.ClampMagnitude(velocity * Mathf.Max(0, frames), 65f);
 
-    private static Vector2 GripPosition(Vector2 bodyPosition, Vector2 lanceDirection) =>
-        bodyPosition + new Vector2(lanceDirection.x * 7f, -5f);
+    private static Vector2 GripPosition(Vector2 bodyPosition, Vector2 lanceDirection)
+    {
+        // Planning uses the same fixed hand pivot as the live weapon. Pitch changes rotate the lance
+        // around the hand; they do not slide the hand left/right by cos(pitch), and a later counter-
+        // sweep can rotate far beyond the launch pitch without invalidating the launch geometry.
+        float face = Mathf.Sign(lanceDirection.x);
+        if (face == 0f) face = 1f;
+        return bodyPosition + new Vector2(face * 7f, -5f);
+    }
 
     private static void StepBody(ref Vector2 position, ref Vector2 velocity)
     {
