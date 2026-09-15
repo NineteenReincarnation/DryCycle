@@ -56,7 +56,9 @@ internal static class LanceScavengerHooks
     }
     private static void CombatUpdate(On.Scavenger.orig_CombatUpdate orig, Scavenger self)
     {
-        if (self is LanceScavenger lance && (lance.Lance != null || lance.Brain?.Hostile != true)) return;
+        // While the custom lance is held, its own physical attack owns the actual strike.
+        // If disarmed, fall all the way back to ordinary scavenger CombatUpdate.
+        if (self is LanceScavenger lance && lance.Lance != null) return;
         orig(self);
     }
     private static void Throw(On.Scavenger.orig_Throw orig, Scavenger self, Vector2 direction)
