@@ -101,6 +101,25 @@ internal static class ChargeLanePlanner
             lanceDirection, impactFrame, aim.Quality, reason);
     }
 
+    /// <summary>
+    /// Terrain-only validation used by the optimized aim solver. Geometry search no longer performs
+    /// a full body/tail/blade tile envelope test for every pitch on every simulated frame. Instead it
+    /// produces one or two good contact candidates per pitch and asks this method to prove only those
+    /// trajectories. Friendly-fire checks remain in Evaluate() so the final committed lane is still
+    /// validated against live room occupancy.
+    /// </summary>
+    internal static bool TerrainClear(LanceScavenger scav, Vector2 origin, Creature target, LanceAimSolution aim)
+    {
+        if (!aim.Valid || scav?.room == null || target?.mainBodyChunk == null)
+            return false;
+
+        float dx = target.mainBodyChunk.pos.x - origin.x;
+        if (Mathf.Sign(dx) == 0f) return false;
+        return TrajectoryBlock(scav, origin, Mathf.Sign(dx), ChargeSpeed(scav),
+            ClampChargeLaunchY(aim.LaunchY), Mathf.Max(1, aim.ImpactFrame), aim.LanceDirection,
+            target, checkFriends: false) == null;
+    }
+
     // Compatibility overload for diagnostics/tests that do not own a motion tracker.
     internal static ChargeLane Evaluate(LanceScavenger scav, Vector2 origin, Creature target)
     {
