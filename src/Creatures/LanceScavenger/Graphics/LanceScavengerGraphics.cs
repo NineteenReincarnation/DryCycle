@@ -71,16 +71,13 @@ internal sealed class LanceScavengerGraphics : ScavengerGraphics
             return;
         }
 
-        // Ordinary carry is intentionally left to vanilla ScavengerGraphics. The lance now reads the
-        // vanilla hand-0 ItemPosition/ItemDirection and follows that hand, so walking, stopping and
-        // turning retain the original scavenger limb motion instead of welding the hand to the lance.
-        // Only Threaten still presents the custom weapon forward, and grasp-1 carry is maintained while
-        // a temporary sidearm throw occupies hand 0.
-        bool forceSingleHand = _owner.Combat.State == LanceState.Threaten || _owner.SidearmInPrimary;
-        if (!forceSingleHand) return;
+        // Ordinary carry, including Threaten, is intentionally left to vanilla ScavengerGraphics.
+        // This keeps hand 0 free to move the lance exactly like a normal spear. Only the temporary
+        // sidearm-primary state needs an explicit grasp-1 hand presentation for the lance.
+        if (!_owner.SidearmInPrimary) return;
 
-        int lanceHand = _owner.SidearmInPrimary ? 1 : 0;
-        Vector2 singleDesired = lance.firstChunk.pos + lance.rotation * (lanceHand == 0 ? 10f : -9f);
+        const int lanceHand = 1;
+        Vector2 singleDesired = lance.firstChunk.pos - lance.rotation * 9f;
         hands[lanceHand].absoluteHuntPos = singleDesired;
         hands[lanceHand].pos = Vector2.Lerp(hands[lanceHand].pos, singleDesired, 0.55f);
         hands[lanceHand].vel *= 0.35f;
