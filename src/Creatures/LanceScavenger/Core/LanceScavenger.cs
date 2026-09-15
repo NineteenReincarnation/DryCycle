@@ -215,15 +215,11 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         Vector2 direction;
         if (state == LanceState.Charge)
         {
-            // Launch aim is fixed, except for the one-shot dodge counter-sweep. The body never
-            // steers toward the target in the air; only the weapon performs the precomputed arc.
             direction = Motor.LanceDirection;
         }
-        else if (state == LanceState.Brace && Brain?.Lane.CanHit == true)
+        else if (state == LanceState.Brace && Brain?.AimSolution.Valid == true)
         {
-            // During the 0.95 s brace, visibly follow the continuously refreshed ballistic
-            // solution inside the limited +/-15 degree aiming cone.
-            direction = Brain.Lane.LanceDirection;
+            direction = Brain.AimSolution.LanceDirection;
         }
         else if (forward && Brain?.Target != null)
         {
@@ -238,7 +234,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         Vector2 position = mainBodyChunk.pos + new Vector2(direction.x * 7f, forward ? -5f : 1f);
         grip = new LanceGrip(position, direction, forward,
             state == LanceState.Charge && Consious && grabbedBy.Count == 0,
-            Motor.RunUp, state == LanceState.Charge && Motor.CounterSweepActive);
+            Motor.RunUp, state == LanceState.Charge && Motor.CounterSweepActive,
+            state == LanceState.Brace);
         return Lance == lance && !enteringShortCut.HasValue && !inShortcut;
     }
 
