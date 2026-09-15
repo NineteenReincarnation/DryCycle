@@ -39,13 +39,14 @@ internal static class IntegrationTests
             Throws(() => ScavengerLanceDevConsoleSupport.ParseLength(new[] { "broken=yes" }));
 
             AbstractCreature abstractCreature = Abstract(CreatureTemplate.Type.Scavenger);
-            var state = new LanceScavengerState(abstractCreature) { GearIssued = true, health = 0.55f };
+            var state = new LanceScavengerState(abstractCreature) { GearIssued = true, SidearmIssued = true, health = 0.55f };
             abstractCreature.state = state;
             state.unrecognizedSaveStrings["foreignFlag"] = "keep";
             string saved = state.ToString();
             var restored = new LanceScavengerState(abstractCreature);
             restored.LoadFromString(saved.Split(new[] { "<cB>" }, StringSplitOptions.RemoveEmptyEntries));
-            Check(restored.GearIssued && Math.Abs(restored.health - 0.55f) < 0.001f, "Birth ownership and health survive load");
+            Check(restored.GearIssued && restored.SidearmIssued && Math.Abs(restored.health - 0.55f) < 0.001f,
+                "Lance, sidearm birth ownership and health survive load");
             Check(restored.unrecognizedSaveStrings["foreignFlag"] == "keep" && restored.socialMemory != null, "Social and foreign creature state preserved");
             Check(restored.ToString() == saved, "Repeated creature serialization does not duplicate birth markers");
         }
@@ -85,7 +86,7 @@ internal static class IntegrationTests
         {
             RuntimeScene scene = Scene();
             ProbeCreature holder = Add<ProbeCreature>(scene, new Vector2(120,90), 0.85f);
-            ProbeCreature victim = Add<ProbeCreature>(scene, new Vector2(190,90), 0.85f);
+            ProbeCreature victim = Add<ProbeCreature>(scene, new Vector2(190,90), 0.8f);
             ScavengerLance weapon = Weapon(scene, holder);
             Set(weapon, "_previousTip", new Vector2(160,90));
             Set(weapon, "_previousGrip", new Vector2(107,90));
@@ -117,15 +118,18 @@ internal static class IntegrationTests
             Check(holder.Impacts == impacts + 1 && holder.LastWall, "Wall collision reaches the wielder's failure response");
 
             LanceCreature scavenger = Add<LanceCreature>(scene, new Vector2(300,90), 0.85f);
-            scavenger.abstractCreature.state = new LanceScavengerState(scavenger.abstractCreature) { GearIssued = true };
+            scavenger.abstractCreature.state = new LanceScavengerState(scavenger.abstractCreature)
+                { GearIssued = true, SidearmIssued = true };
             int count = scene.AbstractRoom.entities.Count;
-            Invoke(scavenger, "EnsureBirthLance"); Invoke(scavenger, "EnsureBirthLance");
-            Check(scene.AbstractRoom.entities.Count == count, "Already issued equipment never respawns");
-            ((LanceScavengerState)scavenger.abstractCreature.state).GearIssued = false;
+            Invoke(scavenger, "EnsureBirthGear"); Invoke(scavenger, "EnsureBirthGear");
+            Check(scene.AbstractRoom.entities.Count == count, "Already issued lance and sidearm never respawn");
+            LanceScavengerState gearState = (LanceScavengerState)scavenger.abstractCreature.state;
+            gearState.GearIssued = false;
+            gearState.SidearmIssued = false;
             scavenger.abstractCreature.spawnData = "{disarmed}";
-            Invoke(scavenger, "EnsureBirthLance");
-            Check(((LanceScavengerState)scavenger.abstractCreature.state).GearIssued && scene.AbstractRoom.entities.Count == count,
-                "Console disarmed state is persistent rather than waiting to spawn a weapon");
+            Invoke(scavenger, "EnsureBirthGear");
+            Check(gearState.GearIssued && gearState.SidearmIssued && scene.AbstractRoom.entities.Count == count,
+                "Console disarmed state consumes both one-time gear issues without spawning weapons");
         }
         finally { ScavengerLanceHooks.Disable(); }
     }
