@@ -48,6 +48,9 @@ internal static class SceneWorkspaceWindow
     private static readonly List<ObjectSceneGroup> projectedGroups = new();
     private static int projectedMatchCount;
 
+    private static string observedObjectSceneSearch;
+    private static string normalizedObjectSceneSearch = string.Empty;
+
     private static int statusObjectCount = -1;
     private static int statusSelectionCount = -1;
     private static bool statusChinese;
@@ -102,6 +105,26 @@ internal static class SceneWorkspaceWindow
         }
 
         ImGui.End();
+    }
+
+    internal static void ResetRetainedState()
+    {
+        projectedObjects = null;
+        projectedLibrary = null;
+        projectedSearch = string.Empty;
+        projectedChinese = false;
+        metadataByType.Clear();
+        groupsBySource.Clear();
+        projectedGroups.Clear();
+        projectedMatchCount = 0;
+        observedObjectSceneSearch = null;
+        normalizedObjectSceneSearch = string.Empty;
+        objectSelectionAnchor = -1;
+        statusObjectCount = -1;
+        statusSelectionCount = -1;
+        statusChinese = false;
+        statusValid = false;
+        statusText = string.Empty;
     }
 
     private static void DrawObjectScene(EditorPresentationSnapshot snapshot)
@@ -215,7 +238,7 @@ internal static class SceneWorkspaceWindow
     private static void EnsureObjectProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        string normalizedSearch = objectSceneSearch?.Trim() ?? string.Empty;
+        string normalizedSearch = ObjectSceneSearchQuery();
         bool chinese = DevToolUiSettings.IsChinese;
 
         bool libraryChanged = !ReferenceEquals(projectedLibrary, library);
@@ -285,6 +308,15 @@ internal static class SceneWorkspaceWindow
         projectedLibrary = library;
         projectedSearch = normalizedSearch;
         projectedChinese = chinese;
+    }
+
+    private static string ObjectSceneSearchQuery()
+    {
+        if (string.Equals(observedObjectSceneSearch, objectSceneSearch, StringComparison.Ordinal))
+            return normalizedObjectSceneSearch;
+        observedObjectSceneSearch = objectSceneSearch;
+        normalizedObjectSceneSearch = objectSceneSearch?.Trim() ?? string.Empty;
+        return normalizedObjectSceneSearch;
     }
 
     private static bool MatchesObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
