@@ -18,6 +18,7 @@ internal sealed class LanceMotor
     private int _launchedSerial = -1;
     private Vector2 _launchPoint;
     private Vector2 _committedLanceDirection = Vector2.right;
+    private float _committedLaunchY = ChargeLanePlanner.MaximumChargeLaunchY;
 
     private Creature _counterTarget;
     private Vector2 _counterTargetLaunchPos;
@@ -30,6 +31,7 @@ internal sealed class LanceMotor
 
     internal Vector2 Direction { get; private set; } = Vector2.right;
     internal Vector2 LanceDirection { get; private set; } = Vector2.right;
+    internal float ChargeLaunchY => _committedLaunchY;
     internal float RunUp => _owner.Combat.State == LanceState.Charge ?
         Mathf.Max(0f, Vector2.Dot(_owner.mainBodyChunk.pos - _launchPoint, Direction)) : 0f;
 
@@ -53,6 +55,7 @@ internal sealed class LanceMotor
         Direction = Vector2.right;
         LanceDirection = Vector2.right;
         _committedLanceDirection = Vector2.right;
+        _committedLaunchY = ChargeLanePlanner.MaximumChargeLaunchY;
         ResetCounterSweep();
     }
 
@@ -65,6 +68,9 @@ internal sealed class LanceMotor
             solved = new Vector2(sign == 0f ? 1f : sign, 0f);
         }
         _committedLanceDirection = solved.normalized;
+        _committedLaunchY = solution.Valid
+            ? ChargeLanePlanner.ClampChargeLaunchY(solution.LaunchY)
+            : ChargeLanePlanner.MaximumChargeLaunchY;
         LanceDirection = _committedLanceDirection;
         _counterTarget = _owner.Brain?.Target;
         _counterSweepAttempted = false;
@@ -96,7 +102,7 @@ internal sealed class LanceMotor
                 Direction = new Vector2(sign == 0f ? 1f : sign, 0f);
                 float speed = ChargeLanePlanner.ChargeSpeed(_owner);
                 foreach (BodyChunk chunk in _owner.bodyChunks)
-                    chunk.vel = new Vector2(Direction.x * speed, ChargeLanePlanner.ChargeLaunchY);
+                    chunk.vel = new Vector2(Direction.x * speed, _committedLaunchY);
 
                 _counterTarget ??= _owner.Brain?.Target;
                 if (_counterTarget != null)

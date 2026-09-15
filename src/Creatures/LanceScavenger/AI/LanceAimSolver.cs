@@ -6,13 +6,14 @@ namespace DryCycle.Creatures.LanceScavenger;
 
 internal readonly struct LanceAimSolution
 {
-    internal LanceAimSolution(bool valid, Vector2 aim, Vector2 lanceDirection, int impactFrame,
+    internal LanceAimSolution(bool valid, Vector2 aim, Vector2 lanceDirection, int impactFrame, float launchY,
         float quality, BodyChunk targetChunk, bool exact)
     {
         Valid = valid;
         Aim = aim;
         LanceDirection = lanceDirection.sqrMagnitude > 0.001f ? lanceDirection.normalized : Vector2.right;
         ImpactFrame = impactFrame;
+        LaunchY = launchY;
         Quality = Mathf.Clamp01(quality);
         TargetChunk = targetChunk;
         Exact = exact;
@@ -23,6 +24,7 @@ internal readonly struct LanceAimSolution
     internal Vector2 Aim { get; }
     internal Vector2 LanceDirection { get; }
     internal int ImpactFrame { get; }
+    internal float LaunchY { get; }
     internal float Quality { get; }
     internal BodyChunk TargetChunk { get; }
     internal bool Exact { get; }
@@ -62,24 +64,38 @@ internal static class LanceAimSolver
         Vector2 targetCenter = AverageBodyPosition(target);
         LanceAimSolution best = default;
 
-        for (int pitchMagnitude = 0; pitchMagnitude <= 15; pitchMagnitude++)
+        // Height is part of the attack solution now. The old fixed 7.3 launch remains the hard cap,
+        // but the scavenger tries a small set of lower ballistic arcs and prefers the lowest viable
+        // one when hit quality is otherwise comparable. This keeps low targets as low lunges while
+        // still allowing the full original jump for high targets or terrain that requires it.
+        foreach (float launchY in ChargeLanePlanner.ChargeLaunchYCandidates)
         {
-            EvaluatePitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude);
-            if (pitchMagnitude > 0) EvaluatePitch(pitchMagnitude);
+            for (int pitchMagnitude = 0; pitchMagnitude <= 15; pitchMagnitude++)
+            {
+                EvaluatePitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude, launchY);
+                if (pitchMagnitude > 0) EvaluatePitch(pitchMagnitude, launchY);
+            }
         }
         return best;
 
-        void EvaluatePitch(float pitchDegrees)
+        void EvaluatePitch(float pitchDegrees, float launchY)
         {
             float radians = pitchDegrees * Mathf.Deg2Rad;
             Vector2 direction = new(horizontalSign * Mathf.Cos(radians), Mathf.Sin(radians));
             Vector2 body = origin;
-            Vector2 velocity = new(horizontalSign * ChargeLanePlanner.ChargeSpeed(scav), ChargeLanePlanner.ChargeLaunchY);
+            Vector2 velocity = new(horizontalSign * ChargeLanePlanner.ChargeSpeed(scav), launchY);
             Vector2 previousGrip = GripPosition(body, direction);
 
             for (int frame = 1; frame <= LanceCombatState.MaxChargeFrames; frame++)
             {
                 StepBody(ref body, ref velocity);
+
+                // Terrain is a hard feasibility constraint, not part of aim quality. Stop evaluating
+                // this arc as soon as the body or the real lance envelope cannot occupy the pose.
+                // The final ChargeLanePlanner pass still re-checks the committed solution and friends.
+                if (ChargeLanePlanner.PoseBlocked(scav, body, direction))
+                    break;
+
                 Vector2 grip = GripPosition(body, direction);
 
                 foreach (BodyChunk chunk in target.bodyChunks)
@@ -102,10 +118,10 @@ internal static class LanceAimSolver
                     if (!probable) continue;
 
                     Vector2 aim = Vector2.Lerp(oldTarget, newTarget, hitFraction);
-                    float quality = AimQuality(exact, pitchDegrees, frame, bladeT, chunk,
+                    float quality = AimQuality(exact, pitchDegrees, frame, launchY, bladeT, chunk,
                         targetCenter, smoothVelocity, motion);
                     if (best.Valid && quality <= best.Quality + 0.001f) continue;
-                    best = new LanceAimSolution(true, aim, direction, frame, quality, chunk, exact);
+                    best = new LanceAimSolution(true, aim, direction, frame, launchY, quality, chunk, exact);
                 }
                 previousGrip = grip;
             }
@@ -115,14 +131,21 @@ internal static class LanceAimSolver
     /// <summary>
     /// Builds the same launch trajectory used by the aim solver. This helper is only consumed by
     /// the opt-in debug presentation, so normal combat continues to use the allocation-free loop.
+    /// The legacy overload keeps showing the old maximum-height arc unless the caller supplies the
+    /// selected launch height explicitly.
     /// </summary>
     internal static Vector2[] BuildDebugBodyTrajectory(LanceScavenger scav, Vector2 origin,
-        Vector2 lanceDirection, int frames)
+        Vector2 lanceDirection, int frames) =>
+        BuildDebugBodyTrajectory(scav, origin, lanceDirection, ChargeLanePlanner.MaximumChargeLaunchY, frames);
+
+    internal static Vector2[] BuildDebugBodyTrajectory(LanceScavenger scav, Vector2 origin,
+        Vector2 lanceDirection, float launchY, int frames)
     {
         if (scav == null || frames <= 0) return System.Array.Empty<Vector2>();
         float sign = Mathf.Sign(lanceDirection.x);
         if (sign == 0f) sign = 1f;
-        Vector2 velocity = new(sign * ChargeLanePlanner.ChargeSpeed(scav), ChargeLanePlanner.ChargeLaunchY);
+        Vector2 velocity = new(sign * ChargeLanePlanner.ChargeSpeed(scav),
+            ChargeLanePlanner.ClampChargeLaunchY(launchY));
         return BuildDebugBodyTrajectory(origin, velocity, frames);
     }
 
@@ -146,9 +169,9 @@ internal static class LanceAimSolver
     }
 
     /// <summary>
-    /// A stored brace solution keeps its commitment, but release may turn a few degrees toward
-    /// the target's current smoothed lead. This avoids using a stale early-brace angle without
-    /// requiring the final frame to solve another perfect intercept.
+    /// A stored brace solution keeps its commitment, including launch height, but release may turn
+    /// a few degrees toward the target's current smoothed lead. This avoids using a stale early-brace
+    /// angle without changing the ballistic arc that the planner already approved.
     /// </summary>
     internal static LanceAimSolution CorrectForRelease(LanceScavenger scav, Creature target,
         TargetMotionTracker motion, LanceAimSolution stored)
@@ -182,11 +205,12 @@ internal static class LanceAimSolver
         corrected = horizontalAngle + Mathf.Clamp(offset, MinimumLancePitch, MaximumLancePitch);
         float radians = corrected * Mathf.Deg2Rad;
         Vector2 direction = new(Mathf.Cos(radians), Mathf.Sin(radians));
-        return new LanceAimSolution(true, aim, direction, stored.ImpactFrame, stored.Quality, chunk, stored.Exact);
+        return new LanceAimSolution(true, aim, direction, stored.ImpactFrame, stored.LaunchY,
+            stored.Quality, chunk, stored.Exact);
     }
 
-    private static float AimQuality(bool exact, float pitchDegrees, int frame, float bladeT, BodyChunk chunk,
-        Vector2 targetCenter, Vector2 smoothVelocity, TargetMotionTracker motion)
+    private static float AimQuality(bool exact, float pitchDegrees, int frame, float launchY, float bladeT,
+        BodyChunk chunk, Vector2 targetCenter, Vector2 smoothVelocity, TargetMotionTracker motion)
     {
         float baseQuality = exact ? 0.83f : 0.66f;
         float centrality = 1f - Mathf.InverseLerp(4f, 38f, Vector2.Distance(chunk.pos, targetCenter));
@@ -195,8 +219,10 @@ internal static class LanceAimSolver
         float framePenalty = (float)frame / LanceCombatState.MaxChargeFrames * 0.08f;
         float speedPenalty = Mathf.Clamp01(smoothVelocity.magnitude / 12f) * 0.05f;
         float shoulderPenalty = (1f - bladeT) * 0.04f;
+        float heightPenalty = Mathf.InverseLerp(ChargeLanePlanner.MinimumChargeLaunchY,
+            ChargeLanePlanner.MaximumChargeLaunchY, launchY) * 0.06f;
         float quality = baseQuality + centrality * 0.08f + stability * 0.09f -
-            pitchPenalty - framePenalty - speedPenalty - shoulderPenalty;
+            pitchPenalty - framePenalty - speedPenalty - shoulderPenalty - heightPenalty;
         return Mathf.Clamp01(quality);
     }
 
