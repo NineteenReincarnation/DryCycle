@@ -103,7 +103,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
                 if (data.realizedObject is Spear spear)
                 {
                     spear.firstChunk.HardSetPosition(mainBodyChunk.pos);
-                    // The ordinary spear is reserve equipment. Keep grasp 0 free for the lance.
                     int slot = PreferredFreeGrasp(1);
                     if (slot >= 0) Grab(spear, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
                 }
@@ -125,7 +124,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
                 if (data.realizedObject is ScavengerLance lance)
                 {
                     lance.firstChunk.HardSetPosition(mainBodyChunk.pos);
-                    // The lance is the identity weapon and is held in the primary hand by default.
                     int slot = PreferredFreeGrasp(0);
                     if (slot >= 0) Grab(lance, slot, 0, Grasp.Shareability.CanOnlyShareWithNonExclusive, 0.5f, false, false);
                 }
@@ -143,10 +141,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         return -1;
     }
 
-    /// <summary>
-    /// The lance owns grasp 0 by default. The ordinary spear may temporarily take grasp 0
-    /// only while the vanilla ThrowCharge/Throw sequence is actively being executed.
-    /// </summary>
     internal void EnsureWeaponSlots(bool sidearmPrimary = false)
     {
         if (grasps == null || grasps.Length < 2) return;
@@ -166,7 +160,6 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         if (lance > 0)
             SwitchGrasps(lance, 0);
         else if (lance < 0 && sidearm > 0 && grasps[0] == null)
-            // If the lance has genuinely been lost, fall back to ordinary scavenger spear handling.
             SwitchGrasps(sidearm, 0);
     }
 
@@ -187,9 +180,9 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     {
         Spear spear = SidearmSpear;
         if (spear == null || SidearmInPrimary || Combat.State == LanceState.FollowUpThrow) return;
-        if (Combat.State != LanceState.Brace && Combat.State != LanceState.Charge &&
+        if (Combat.State != LanceState.Backstep && Combat.State != LanceState.Brace && Combat.State != LanceState.Charge &&
             Combat.State != LanceState.CloseDefense) return;
-        float face = Motor.Direction.x != 0f ? Motor.Direction.x : Mathf.Sign(lookPoint.x - mainBodyChunk.pos.x);
+        float face = Brain?.Target != null ? Mathf.Sign(Brain.Target.mainBodyChunk.pos.x - mainBodyChunk.pos.x) : Motor.Direction.x;
         if (face == 0f) face = 1f;
         Vector2 direction = new Vector2(-face * 0.45f, 0.9f).normalized;
         spear.firstChunk.MoveFromOutsideMyUpdate(eu, bodyChunks[1].pos - direction * 3f);
@@ -202,7 +195,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         Appendage.Pos hitAppendage, DamageType type, float damage, float stunBonus)
     {
         base.Violence(source, directionAndMomentum, hitChunk, hitAppendage, type, damage, stunBonus);
-        if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace || Combat.State == LanceState.FollowUpThrow)
+        if (Combat.State == LanceState.Charge || Combat.State == LanceState.Brace || Combat.State == LanceState.Backstep ||
+            Combat.State == LanceState.FollowUpThrow)
             Combat.Recover(false);
     }
 
@@ -216,7 +210,8 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     bool ILanceWielder.TryGetLanceGrip(ScavengerLance lance, out LanceGrip grip)
     {
         LanceState state = Combat.State;
-        bool forward = state == LanceState.Brace || state == LanceState.Charge || state == LanceState.CloseDefense || state == LanceState.Threaten;
+        bool forward = state == LanceState.Backstep || state == LanceState.Brace || state == LanceState.Charge ||
+            state == LanceState.CloseDefense || state == LanceState.Threaten;
         Vector2 direction;
         if (state == LanceState.Charge) direction = Motor.Direction;
         else if (forward && Brain?.Target != null)
