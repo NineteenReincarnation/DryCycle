@@ -30,9 +30,9 @@ public static class UniversalDevUiPresentationHub
     private static int lastCaptureFrame = int.MinValue / 2;
 
     /// <summary>
-    /// The RWImGui frontend reads this once per frame. Use that read as the page-agnostic pump for
-    /// queued generic edits and snapshot refreshes, avoiding a second DevUI.Update hook and keeping
-    /// all third-party interaction behind the same semantic bridge.
+    /// Read/publish access for the RWImGui frontend. Mutations are processed earlier by
+    /// DevToolSubsystemCoordinator during the backend command phase; reading a presentation must
+    /// never execute queued writes as a side effect.
     /// </summary>
     public static UniversalDevUiPresentationSnapshot Current
     {
@@ -45,7 +45,6 @@ public static class UniversalDevUiPresentationHub
                 return current;
             }
 
-            UniversalDevUiCommandQueue.Process(session);
             Publish(session.Owner);
             return current;
         }
@@ -160,8 +159,8 @@ public readonly struct UniversalDevUiCommand
 
 /// <summary>
 /// Page-agnostic mutation queue used by the RWImGui frontend. Every command resolves its target
-/// against the active DevInterface tree at execution time, so dynamic panels can appear/disappear
-/// without the frontend retaining raw DevUINode references.
+/// against the active DevInterface tree during the backend command phase, so dynamic panels can
+/// appear/disappear without the frontend retaining raw DevUINode references.
 /// </summary>
 public static class UniversalDevUiCommandQueue
 {
