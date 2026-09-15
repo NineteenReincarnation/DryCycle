@@ -14,6 +14,13 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class DevToolOverlay
 {
+    private sealed class CategoryRun
+    {
+        internal string Category;
+        internal int Start;
+        internal int Count;
+    }
+
     private sealed class ObjectLibraryRow
     {
         internal EditorObjectTypeSnapshot Item;
@@ -27,6 +34,7 @@ internal static class DevToolOverlay
         internal string Source;
         internal DevToolSourceMark SourceMark;
         internal readonly List<ObjectLibraryRow> Rows = new();
+        internal readonly List<CategoryRun> CategoryRuns = new();
     }
 
     private sealed class SceneObjectRow
@@ -42,6 +50,7 @@ internal static class DevToolOverlay
         internal string Source;
         internal DevToolSourceMark SourceMark;
         internal readonly List<SceneObjectRow> Rows = new();
+        internal readonly List<CategoryRun> CategoryRuns = new();
     }
 
     private static string objectSearch = string.Empty;
@@ -142,7 +151,10 @@ internal static class DevToolOverlay
     internal static void ResetRetainedState()
     {
         foreach (ObjectLibraryGroup group in ObjectLibraryGroupsBySource.Values)
+        {
             group.Rows.Clear();
+            group.CategoryRuns.Clear();
+        }
         ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
         projectedObjectLibrary = null;
@@ -156,7 +168,10 @@ internal static class DevToolOverlay
         MetadataByType.Clear();
 
         foreach (SceneObjectGroup group in SceneGroupsBySource.Values)
+        {
             group.Rows.Clear();
+            group.CategoryRuns.Clear();
+        }
         SceneGroupsBySource.Clear();
         SceneGroups.Clear();
         projectedSceneObjects = null;
@@ -524,27 +539,31 @@ internal static class DevToolOverlay
             ObjectLibraryGroup group = ObjectLibraryGroups[sourceIndex];
             DevToolWidgets.SourceHeader(group.SourceMark, 1.42f * BrowserPaneFontScale, BrowserPaneFontScale);
 
-            string lastCategory = null;
             List<ObjectLibraryRow> rows = group.Rows;
-            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            List<CategoryRun> categoryRuns = group.CategoryRuns;
+            for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
             {
-                ObjectLibraryRow row = rows[rowIndex];
-                EditorObjectTypeSnapshot item = row.Item;
-                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
-                {
-                    if (lastCategory != null) ImGui.Spacing();
-                    lastCategory = row.Category;
-                    DevToolWidgets.MutedText(row.Category);
-                }
+                CategoryRun run = categoryRuns[categoryIndex];
+                if (categoryIndex > 0) ImGui.Spacing();
+                DevToolWidgets.MutedText(run.Category);
 
-                bool selected = snapshot.PlacementActive &&
-                                string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
-                ImGui.PushID(item.Type ?? string.Empty);
-                bool clicked = ImGui.Selectable(row.DisplayName, selected);
-                ImGui.PopID();
-                if (clicked)
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
-                if (ImGui.IsItemHovered()) DevToolTooltip.Show(row.Tooltip);
+                using DevToolListClipper clipper = new(run.Count);
+                while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
+                {
+                    for (int localIndex = firstVisible; localIndex < lastVisibleExclusive; localIndex++)
+                    {
+                        ObjectLibraryRow row = rows[run.Start + localIndex];
+                        EditorObjectTypeSnapshot item = row.Item;
+                        bool selected = snapshot.PlacementActive &&
+                                        string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
+                        ImGui.PushID(item.Type ?? string.Empty);
+                        bool clicked = ImGui.Selectable(row.DisplayName, selected);
+                        ImGui.PopID();
+                        if (clicked)
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
+                        if (ImGui.IsItemHovered()) DevToolTooltip.Show(row.Tooltip);
+                    }
+                }
             }
         }
 
@@ -563,7 +582,10 @@ internal static class DevToolOverlay
             return;
 
         foreach (ObjectLibraryGroup cached in ObjectLibraryGroupsBySource.Values)
+        {
             cached.Rows.Clear();
+            cached.CategoryRuns.Clear();
+        }
         ObjectLibraryGroups.Clear();
         objectLibraryMatchCount = 0;
 
@@ -600,6 +622,22 @@ internal static class DevToolOverlay
             }
             if (group.Rows.Count == 0)
                 ObjectLibraryGroups.Add(group);
+
+            int rowIndex = group.Rows.Count;
+            if (group.CategoryRuns.Count == 0 ||
+                !string.Equals(group.CategoryRuns[group.CategoryRuns.Count - 1].Category, category, StringComparison.Ordinal))
+            {
+                group.CategoryRuns.Add(new CategoryRun
+                {
+                    Category = category,
+                    Start = rowIndex,
+                    Count = 1
+                });
+            }
+            else
+            {
+                group.CategoryRuns[group.CategoryRuns.Count - 1].Count++;
+            }
 
             group.Rows.Add(new ObjectLibraryRow
             {
@@ -679,45 +717,50 @@ internal static class DevToolOverlay
             SceneObjectGroup group = SceneGroups[sourceIndex];
             DevToolWidgets.SourceHeader(group.SourceMark, 1.34f * BrowserPaneFontScale, BrowserPaneFontScale);
 
-            string lastCategory = null;
             List<SceneObjectRow> rows = group.Rows;
-            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            List<CategoryRun> categoryRuns = group.CategoryRuns;
+            for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
             {
-                SceneObjectRow row = rows[rowIndex];
-                EditorObjectSnapshot item = row.Item;
-                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
-                {
-                    lastCategory = row.Category;
-                    DevToolWidgets.MutedText(row.Category);
-                }
+                CategoryRun run = categoryRuns[categoryIndex];
+                DevToolWidgets.MutedText(run.Category);
 
-                ImGui.PushID(item.Index);
-                bool clicked = ImGui.Selectable(row.Label, item.Selected);
-                ImGui.PopID();
-                if (!clicked)
+                using DevToolListClipper clipper = new(run.Count);
+                while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
                 {
-                    if (ImGui.IsItemHovered())
-                        DevToolTooltip.Show(row.Tooltip);
-                    continue;
-                }
+                    for (int localIndex = firstVisible; localIndex < lastVisibleExclusive; localIndex++)
+                    {
+                        SceneObjectRow row = rows[run.Start + localIndex];
+                        EditorObjectSnapshot item = row.Item;
 
-                if (io.KeyShift && sceneSelectionAnchor >= 0)
-                {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.SelectObjectRange,
-                        index: item.Index,
-                        secondaryIndex: sceneSelectionAnchor,
-                        flag: io.KeyCtrl));
-                }
-                else if (io.KeyCtrl)
-                {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
-                    sceneSelectionAnchor = item.Index;
-                }
-                else
-                {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
-                    sceneSelectionAnchor = item.Index;
+                        ImGui.PushID(item.Index);
+                        bool clicked = ImGui.Selectable(row.Label, item.Selected);
+                        ImGui.PopID();
+                        if (!clicked)
+                        {
+                            if (ImGui.IsItemHovered())
+                                DevToolTooltip.Show(row.Tooltip);
+                            continue;
+                        }
+
+                        if (io.KeyShift && sceneSelectionAnchor >= 0)
+                        {
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                                EditorUiCommandKind.SelectObjectRange,
+                                index: item.Index,
+                                secondaryIndex: sceneSelectionAnchor,
+                                flag: io.KeyCtrl));
+                        }
+                        else if (io.KeyCtrl)
+                        {
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
+                            sceneSelectionAnchor = item.Index;
+                        }
+                        else
+                        {
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
+                            sceneSelectionAnchor = item.Index;
+                        }
+                    }
                 }
             }
         }
@@ -739,7 +782,10 @@ internal static class DevToolOverlay
 
         EnsureMetadataIndex(library);
         foreach (SceneObjectGroup cached in SceneGroupsBySource.Values)
+        {
             cached.Rows.Clear();
+            cached.CategoryRuns.Clear();
+        }
         SceneGroups.Clear();
         sceneMatchCount = 0;
 
@@ -771,6 +817,22 @@ internal static class DevToolOverlay
             }
             if (group.Rows.Count == 0)
                 SceneGroups.Add(group);
+
+            int rowIndex = group.Rows.Count;
+            if (group.CategoryRuns.Count == 0 ||
+                !string.Equals(group.CategoryRuns[group.CategoryRuns.Count - 1].Category, category, StringComparison.Ordinal))
+            {
+                group.CategoryRuns.Add(new CategoryRun
+                {
+                    Category = category,
+                    Start = rowIndex,
+                    Count = 1
+                });
+            }
+            else
+            {
+                group.CategoryRuns[group.CategoryRuns.Count - 1].Count++;
+            }
 
             group.Rows.Add(new SceneObjectRow
             {
