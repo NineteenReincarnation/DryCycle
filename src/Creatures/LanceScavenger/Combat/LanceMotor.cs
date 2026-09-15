@@ -162,8 +162,10 @@ internal sealed class LanceMotor
                 if (_counterTarget != null)
                 {
                     _counterTargetLaunchPos = _counterTarget.mainBodyChunk.pos;
-                    _counterTargetLaunchVelocity = _owner.Brain?.MotionTracker?.SmoothedVelocity(_counterTarget.mainBodyChunk)
-                        ?? _counterTarget.mainBodyChunk.vel;
+                    TargetMotionTracker tracker = _owner.Brain?.MotionTracker;
+                    _counterTargetLaunchVelocity = tracker != null && tracker.Target == _counterTarget
+                        ? tracker.SmoothedVelocity(_counterTarget.mainBodyChunk)
+                        : _counterTarget.mainBodyChunk.vel;
                 }
                 _counterSweepAttempted = false;
                 _counterSweepActive = false;
@@ -262,15 +264,16 @@ internal sealed class LanceMotor
         float longitudinal = Mathf.Abs(Vector2.Dot(deviation, Direction));
         bool escapedPrediction = lateral >= Mathf.Max(MinimumDodgeDeviation, chunk.rad + 5f) || longitudinal >= 18f;
         bool targetBehind = Vector2.Dot(chunk.pos - _owner.mainBodyChunk.pos, Direction) < -4f;
-        float trackedDodge = _owner.Brain?.MotionTracker?.DodgeSeverity ?? 0f;
+        TargetMotionTracker tracker = _owner.Brain?.MotionTracker;
+        float trackedDodge = tracker != null && tracker.Target == _counterTarget ? tracker.DodgeSeverity : 0f;
         return escapedPrediction || trackedDodge >= 0.55f || TargetReversed() || targetBehind;
     }
 
     private bool TargetReversed()
     {
         TargetMotionTracker tracker = _owner.Brain?.MotionTracker;
-        if (tracker != null)
-            return tracker.ReversedFrom(_counterTargetLaunchVelocity, _counterTarget?.mainBodyChunk);
+        if (tracker != null && tracker.Target == _counterTarget)
+            return tracker.ReversedFrom(_counterTargetLaunchVelocity, _counterTarget.mainBodyChunk);
 
         Vector2 currentVelocity = _counterTarget?.mainBodyChunk.vel ?? Vector2.zero;
         if (_counterTargetLaunchVelocity.magnitude < 1.5f || currentVelocity.magnitude < 1.5f) return false;
