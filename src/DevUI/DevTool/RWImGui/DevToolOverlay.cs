@@ -60,6 +60,8 @@ internal static class DevToolOverlay
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<ObjectLibraryGroup> ObjectLibraryGroups = new();
     private static int objectLibraryMatchCount;
+    private static string observedObjectSearch;
+    private static string normalizedObjectSearch = string.Empty;
 
     private static EditorObjectTypeSnapshot[] indexedMetadataLibrary;
     private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType =
@@ -73,6 +75,8 @@ internal static class DevToolOverlay
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<SceneObjectGroup> SceneGroups = new();
     private static int sceneMatchCount;
+    private static string observedSceneSearch;
+    private static string normalizedSceneSearch = string.Empty;
 
     private static int sceneStatusObjectCount = -1;
     private static int sceneStatusSelectionCount = -1;
@@ -133,6 +137,46 @@ internal static class DevToolOverlay
             }
             HandlePlacement(snapshot, display, io);
         }
+    }
+
+    internal static void ResetRetainedState()
+    {
+        foreach (ObjectLibraryGroup group in ObjectLibraryGroupsBySource.Values)
+            group.Rows.Clear();
+        ObjectLibraryGroupsBySource.Clear();
+        ObjectLibraryGroups.Clear();
+        projectedObjectLibrary = null;
+        projectedObjectSearch = string.Empty;
+        projectedObjectChinese = false;
+        objectLibraryMatchCount = 0;
+        observedObjectSearch = null;
+        normalizedObjectSearch = string.Empty;
+
+        indexedMetadataLibrary = null;
+        MetadataByType.Clear();
+
+        foreach (SceneObjectGroup group in SceneGroupsBySource.Values)
+            group.Rows.Clear();
+        SceneGroupsBySource.Clear();
+        SceneGroups.Clear();
+        projectedSceneObjects = null;
+        projectedSceneLibrary = null;
+        projectedSceneSearch = string.Empty;
+        projectedSceneChinese = false;
+        sceneMatchCount = 0;
+        observedSceneSearch = null;
+        normalizedSceneSearch = string.Empty;
+
+        sceneSelectionAnchor = -1;
+        sceneStatusObjectCount = -1;
+        sceneStatusSelectionCount = -1;
+        sceneStatusChinese = false;
+        sceneStatusText = string.Empty;
+        placementLabelType = string.Empty;
+        placementLabelText = string.Empty;
+        browserInspectorSplitterDragging = false;
+        lanceDebugPage = false;
+        LanceScavengerDebugView.StopCapture();
     }
 
     private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -511,7 +555,7 @@ internal static class DevToolOverlay
     private static void EnsureObjectLibraryProjection(EditorPresentationSnapshot snapshot)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        string normalizedSearch = NormalizeSearch(objectSearch);
+        string normalizedSearch = NormalizeObjectSearch();
         bool chinese = DevToolUiSettings.IsChinese;
         if (ReferenceEquals(projectedObjectLibrary, library) &&
             string.Equals(projectedObjectSearch, normalizedSearch, StringComparison.Ordinal) &&
@@ -685,7 +729,7 @@ internal static class DevToolOverlay
     private static void EnsureSceneProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
     {
         EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
-        string normalizedSearch = NormalizeSearch(sceneSearch);
+        string normalizedSearch = NormalizeSceneSearch();
         bool chinese = DevToolUiSettings.IsChinese;
         if (ReferenceEquals(projectedSceneObjects, objects) &&
             ReferenceEquals(projectedSceneLibrary, library) &&
@@ -844,7 +888,23 @@ internal static class DevToolOverlay
         ImGui.End();
     }
 
-    private static string NormalizeSearch(string query) => query?.Trim() ?? string.Empty;
+    private static string NormalizeObjectSearch()
+    {
+        if (string.Equals(observedObjectSearch, objectSearch, StringComparison.Ordinal))
+            return normalizedObjectSearch;
+        observedObjectSearch = objectSearch;
+        normalizedObjectSearch = objectSearch?.Trim() ?? string.Empty;
+        return normalizedObjectSearch;
+    }
+
+    private static string NormalizeSceneSearch()
+    {
+        if (string.Equals(observedSceneSearch, sceneSearch, StringComparison.Ordinal))
+            return normalizedSceneSearch;
+        observedSceneSearch = sceneSearch;
+        normalizedSceneSearch = sceneSearch?.Trim() ?? string.Empty;
+        return normalizedSceneSearch;
+    }
 
     private static bool Contains(string value, string query) =>
         !string.IsNullOrEmpty(value) && value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
