@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="src/DevUI/DevTool"
 objects="$root/Objects"
+frontend="$root/RWImGui"
 phase_doc="$root/PHASE6.md"
 runtime="$root/Core/DevToolRuntime.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
@@ -21,6 +22,20 @@ backend_imgui_hits="$(
 if [[ -n "$backend_imgui_hits" ]]; then
   echo "DevTool backend contains a forbidden ImGui/RWImGui dependency:" >&2
   echo "$backend_imgui_hits" >&2
+  exit 1
+fi
+
+# The frontend may render snapshots and enqueue commands, but it must not call backend mutation
+# services directly. Keeping this boundary mechanical prevents Draw code from bypassing History,
+# Revision hints or the main-thread command ordering contract.
+frontend_action_hits="$(
+  grep -RInE --include='*.cs' \
+    '(EditorActions|RoomEditorActions|SoundEditorActions|TriggerEditorActions|MapEditorActions|DialogEditorActions|RelationshipEditorActions)\.' \
+    "$frontend" || true
+)"
+if [[ -n "$frontend_action_hits" ]]; then
+  echo "RWImGui frontend directly invokes a backend mutation service instead of enqueueing a command:" >&2
+  echo "$frontend_action_hits" >&2
   exit 1
 fi
 
