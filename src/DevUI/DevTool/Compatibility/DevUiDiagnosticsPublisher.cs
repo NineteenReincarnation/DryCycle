@@ -14,13 +14,11 @@ internal static class DevUiDiagnosticsPublisher
         if (!DevUiDiagnosticsPolicy.Enabled || owner == null)
             return;
 
-        // Generic protocol registration is backend infrastructure, not presentation work. Keep the
-        // one-time bootstrap here so an ImGui Draw call never mutates compatibility registries.
-        DevUiGenericProtocolBootstrap.Ensure();
-
         // Migration coverage is the source for the universal mirror's unmapped count. Run the
         // throttled full audit first so the mirror and every downstream diagnostic snapshot describe
         // the same backend observation instead of mixing current-frame UI with prior-frame coverage.
+        // Page / Panel / Handle container protocols are classified structurally by MigrationCoverage;
+        // there is no separate compatibility registration bootstrap to advance here.
         DevUiFullAudit.ObserveAll(owner);
         UniversalDevUiPresentationHub.Publish(owner);
         UniversalDevUiPresentationSnapshot mirror = UniversalDevUiPresentationHub.Current;
