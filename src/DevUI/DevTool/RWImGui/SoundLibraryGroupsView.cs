@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -55,11 +56,20 @@ internal static class SoundLibraryGroupsView
     private static bool quickGroupIdManual;
     private const float BrowserBodyFontScale = 1.22f;
 
+    private const double SampleProjectionBudgetMilliseconds = 0.35d;
     private static EditorSoundSampleSnapshot[] projectedSampleSource;
     private static string projectedSampleSearch = string.Empty;
     private static bool projectedSampleChinese;
-    private static readonly List<SampleRow> projectedSamples = new();
-    private static readonly List<SampleRun> projectedSampleRuns = new();
+    private static List<SampleRow> projectedSamples = new();
+    private static List<SampleRun> projectedSampleRuns = new();
+
+    private static EditorSoundSampleSnapshot[] buildingSampleSource;
+    private static string buildingSampleSearch = string.Empty;
+    private static bool buildingSampleChinese;
+    private static List<SampleRow> buildingSamples = new();
+    private static List<SampleRun> buildingSampleRuns = new();
+    private static int buildingSampleIndex;
+    private static bool sampleProjectionBuilding;
 
     private static SoundGroupSnapshot[] projectedGroupSource;
     private static bool projectedGroupChinese;
@@ -99,6 +109,13 @@ internal static class SoundLibraryGroupsView
         projectedSampleChinese = false;
         projectedSamples.Clear();
         projectedSampleRuns.Clear();
+        buildingSampleSource = null;
+        buildingSampleSearch = string.Empty;
+        buildingSampleChinese = false;
+        buildingSamples.Clear();
+        buildingSampleRuns.Clear();
+        buildingSampleIndex = 0;
+        sampleProjectionBuilding = false;
 
         projectedGroupSource = null;
         projectedGroupChinese = false;
@@ -125,6 +142,10 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawWorkingGroupBar()
     {
+        SoundActivationStatusSnapshot activation = SoundActivationPipeline.Current;
+        if (activation.IsActive && !activation.IsReady)
+            return;
+
         SoundWorkspaceState.SynchronizeGroups();
         SoundGroupSnapshot[] groups = SoundGroupLibrary.Current.Groups ?? Array.Empty<SoundGroupSnapshot>();
         EnsureGroupPresentations(groups);
@@ -177,6 +198,13 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
     {
+        SoundActivationStatusSnapshot activation = SoundActivationPipeline.Current;
+        if (activation.IsActive && !activation.IsReady)
+        {
+            DrawActivationShell(activation);
+            return;
+        }
+
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("创建声音", "CREATE SOUND"), BrowserBodyFontScale);
         string omni = DevToolUiSettings.T("全向", "Omni");
         string directional = DevToolUiSettings.T("定向", "Directional");
@@ -195,7 +223,12 @@ internal static class SoundLibraryGroupsView
         ImGui.Spacing();
 
         EditorSoundSampleSnapshot[] samples = snapshot.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
-        EnsureSampleProjection(samples);
+        if (!EnsureSampleProjection(samples))
+        {
+            DrawProjectionShell(samples.Length);
+            return;
+        }
+
         for (int runIndex = 0; runIndex < projectedSampleRuns.Count; runIndex++)
         {
             SampleRun run = projectedSampleRuns[runIndex];
@@ -246,6 +279,13 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawGroups()
     {
+        SoundActivationStatusSnapshot activation = SoundActivationPipeline.Current;
+        if (activation.IsActive && !activation.IsReady)
+        {
+            DrawActivationShell(activation);
+            return;
+        }
+
         SoundGroupLibrarySnapshot library = SoundGroupLibrary.Current;
         SynchronizeGroupPath(library);
 
@@ -566,54 +606,126 @@ internal static class SoundLibraryGroupsView
         ImGui.Spacing();
     }
 
-    private static void EnsureSampleProjection(EditorSoundSampleSnapshot[] samples)
+    private static bool EnsureSampleProjection(EditorSoundSampleSnapshot[] samples)
     {
         string normalizedSearch = search?.Trim() ?? string.Empty;
         bool chinese = DevToolUiSettings.IsChinese;
         if (ReferenceEquals(projectedSampleSource, samples) &&
             string.Equals(projectedSampleSearch, normalizedSearch, StringComparison.Ordinal) &&
             projectedSampleChinese == chinese)
-            return;
+            return true;
 
-        projectedSamples.Clear();
-        projectedSampleRuns.Clear();
-        for (int i = 0; i < samples.Length; i++)
+        if (!sampleProjectionBuilding ||
+            !ReferenceEquals(buildingSampleSource, samples) ||
+            !string.Equals(buildingSampleSearch, normalizedSearch, StringComparison.Ordinal) ||
+            buildingSampleChinese != chinese)
         {
-            EditorSoundSampleSnapshot sample = samples[i];
-            if (!MatchesSample(sample, normalizedSearch)) continue;
-            DevToolSourceMark source = DevToolSourcePresentation.FromSound(
-                sample.SourceKind,
-                sample.SourceId,
-                sample.SourceName);
+            buildingSampleSource = samples;
+            buildingSampleSearch = normalizedSearch;
+            buildingSampleChinese = chinese;
+            buildingSamples.Clear();
+            buildingSampleRuns.Clear();
+            buildingSampleIndex = 0;
+            sampleProjectionBuilding = true;
+        }
 
-            int rowIndex = projectedSamples.Count;
-            if (projectedSampleRuns.Count == 0 ||
-                !DevToolSourcePresentation.SameSource(projectedSampleRuns[projectedSampleRuns.Count - 1].Source, source))
+        long started = Stopwatch.GetTimestamp();
+        while (buildingSampleIndex < samples.Length)
+        {
+            int sourceIndex = buildingSampleIndex++;
+            EditorSoundSampleSnapshot sample = samples[sourceIndex];
+            if (MatchesSample(sample, normalizedSearch))
             {
-                projectedSampleRuns.Add(new SampleRun
+                DevToolSourceMark source = DevToolSourcePresentation.FromSound(
+                    sample.SourceKind,
+                    sample.SourceId,
+                    sample.SourceName);
+
+                int rowIndex = buildingSamples.Count;
+                if (buildingSampleRuns.Count == 0 ||
+                    !DevToolSourcePresentation.SameSource(buildingSampleRuns[buildingSampleRuns.Count - 1].Source, source))
                 {
+                    buildingSampleRuns.Add(new SampleRun
+                    {
+                        Source = source,
+                        Start = rowIndex,
+                        Count = 1
+                    });
+                }
+                else
+                {
+                    buildingSampleRuns[buildingSampleRuns.Count - 1].Count++;
+                }
+
+                buildingSamples.Add(new SampleRow
+                {
+                    Sample = sample,
                     Source = source,
-                    Start = rowIndex,
-                    Count = 1
+                    SelectableLabel = (sample.Sample ?? string.Empty) + "##CreateSound" + sourceIndex
                 });
             }
-            else
-            {
-                projectedSampleRuns[projectedSampleRuns.Count - 1].Count++;
-            }
 
-            projectedSamples.Add(new SampleRow
-            {
-                Sample = sample,
-                Source = source,
-                SelectableLabel = (sample.Sample ?? string.Empty) + "##CreateSound" + i
-            });
+            if (ElapsedMilliseconds(started) >= SampleProjectionBudgetMilliseconds)
+                return false;
         }
+
+        List<SampleRow> oldRows = projectedSamples;
+        projectedSamples = buildingSamples;
+        buildingSamples = oldRows;
+        buildingSamples.Clear();
+
+        List<SampleRun> oldRuns = projectedSampleRuns;
+        projectedSampleRuns = buildingSampleRuns;
+        buildingSampleRuns = oldRuns;
+        buildingSampleRuns.Clear();
 
         projectedSampleSource = samples;
         projectedSampleSearch = normalizedSearch;
         projectedSampleChinese = chinese;
+        buildingSampleSource = null;
+        buildingSampleSearch = string.Empty;
+        buildingSampleIndex = 0;
+        sampleProjectionBuilding = false;
+        return true;
     }
+
+    private static void DrawActivationShell(SoundActivationStatusSnapshot status)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("正在准备声音工作区", "PREPARING SOUND WORKSPACE"), BrowserBodyFontScale);
+        ImGui.TextWrapped(DevToolUiSettings.T(
+            "声音资源正在按帧预算建立索引；场景不会等待完整资源库加载。",
+            "Sound resources are being indexed under a per-frame budget; the scene is not blocked on the full library."));
+        ImGui.ProgressBar(Math.Max(0f, Math.Min(1f, status.Progress)), new Num.Vector2(-1f, 0f));
+        ImGui.TextDisabled(status.Detail ?? string.Empty);
+
+        if (status.TotalSamples > 0)
+            ImGui.TextDisabled(DevToolUiSettings.T(
+                $"声音资源：{status.ProcessedSamples}/{status.TotalSamples}",
+                $"Samples: {status.ProcessedSamples}/{status.TotalSamples}"));
+        if (status.TotalGroupFiles > 0)
+            ImGui.TextDisabled(DevToolUiSettings.T(
+                $"音效组文件：{status.ProcessedGroupFiles}/{status.TotalGroupFiles}",
+                $"Group files: {status.ProcessedGroupFiles}/{status.TotalGroupFiles}"));
+
+        ImGui.TextDisabled(DevToolUiSettings.T(
+            $"本帧加载 {status.LastFrameWorkMilliseconds:0.00} ms · 峰值 {status.MaxFrameWorkMilliseconds:0.00} ms",
+            $"Frame work {status.LastFrameWorkMilliseconds:0.00} ms · peak {status.MaxFrameWorkMilliseconds:0.00} ms"));
+    }
+
+    private static void DrawProjectionShell(int totalSamples)
+    {
+        float progress = totalSamples <= 0
+            ? 1f
+            : Math.Max(0f, Math.Min(1f, buildingSampleIndex / (float)totalSamples));
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("正在准备声音列表", "PREPARING SOUND LIST"), BrowserBodyFontScale);
+        ImGui.ProgressBar(progress, new Num.Vector2(-1f, 0f));
+        ImGui.TextDisabled(DevToolUiSettings.T(
+            $"界面索引：{buildingSampleIndex}/{totalSamples}",
+            $"UI rows: {buildingSampleIndex}/{totalSamples}"));
+    }
+
+    private static double ElapsedMilliseconds(long startedTimestamp) =>
+        (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
 
     private static void EnsureGroupPresentations(SoundGroupSnapshot[] groups)
     {
