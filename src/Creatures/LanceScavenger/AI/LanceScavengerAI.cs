@@ -10,6 +10,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     private int _planAge;
     private WorldCoordinate? _staging;
     private bool _sidearmThrowPass;
+    private bool _sidearmDrawn;
     private Creature _chargeTarget;
     internal bool SkipNextUpdate;
     internal Creature Target { get; private set; }
@@ -17,6 +18,7 @@ internal sealed class LanceScavengerAI : ScavengerAI
     internal bool TargetAfraid { get; private set; }
     internal ChargeLane Lane { get; private set; }
     internal bool SidearmThrowPass => _sidearmThrowPass;
+    internal bool SidearmDrawn => _sidearmDrawn;
     internal bool AllowVanillaSidearmCombat { get; private set; }
     internal Vector2 Aim => Target != null ? Lane.Aim : _owner.lookPoint;
 
@@ -34,8 +36,10 @@ internal sealed class LanceScavengerAI : ScavengerAI
         TargetAfraid = false;
         AllowVanillaSidearmCombat = false;
         _sidearmThrowPass = false;
+        _sidearmDrawn = false;
         _staging = null;
         _owner.Combat.ResetForRoom();
+        _owner.EnsureWeaponSlots();
     }
 
     public override void Update()
@@ -44,10 +48,12 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         _sidearmThrowPass = false;
         AllowVanillaSidearmCombat = false;
+        // The lance is the default primary weapon. Only preserve grasp-0 sidearm while
+        // a vanilla ThrowCharge sequence from the previous frame is genuinely active.
+        _owner.EnsureWeaponSlots(_sidearmDrawn);
         base.Update();
         if (_owner.room == null) return;
 
-        _owner.EnsureWeaponSlots();
         SelectVanillaCombatTarget();
         if (_owner.Combat.State == LanceState.FollowUpThrow)
             RestoreChargeTargetForFollowUp();
@@ -67,13 +73,23 @@ internal sealed class LanceScavengerAI : ScavengerAI
         bool chargeOpportunity = active && armed && Target != null && TargetViolence == ViolenceType.Lethal &&
             distance >= ChargeLanePlanner.MinimumChargeDistance && laneClear && _owner.Combat.Cooldown == 0;
 
+        // A newly opened charge lane always wins over a pending ordinary-spear wind-up.
+        // Cancel ThrowCharge and put the lance back in the main hand before Brace starts.
+        if (_sidearmDrawn && chargeOpportunity)
+            CancelSidearmDraw();
+
         LanceState before = _owner.Combat.State;
         _owner.Combat.Tick(new LanceSituation(active, armed, sidearm, Target != null, TargetViolence, TargetAfraid,
             distance, laneClear));
         if (before != LanceState.Charge && _owner.Combat.State == LanceState.Charge)
             _chargeTarget = Target;
 
-        if (!armed) { RecoverWeapon(); return; }
+        if (!armed)
+        {
+            if (_sidearmDrawn) CancelSidearmDraw();
+            RecoverWeapon();
+            return;
+        }
 
         if (_owner.Combat.FollowUpReady)
         {
@@ -88,15 +104,12 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
         AllowVanillaSidearmCombat = sidearm && behavior == Behavior.Attack && !TargetAfraid &&
             Target != null && TargetViolence == ViolenceType.Lethal &&
-            distance >= ChargeLanePlanner.MinimumChargeDistance && !chargeOpportunity && !reserved &&
-            _owner.grasps[0]?.grabbed == _owner.SidearmSpear;
+            distance >= ChargeLanePlanner.MinimumChargeDistance && !chargeOpportunity && !reserved;
 
         if (AllowVanillaSidearmCombat)
-        {
-            _sidearmThrowPass = true;
-            try { CheckThrow(); }
-            finally { _sidearmThrowPass = false; }
-        }
+            RunSidearmThrowPass();
+        else if (_sidearmDrawn && state != LanceState.FollowUpThrow)
+            CancelSidearmDraw();
 
         if (!TargetAfraid && TargetViolence == ViolenceType.Lethal &&
             (state == LanceState.CreateDistance || state == LanceState.AcquireChargeLane))
@@ -125,6 +138,46 @@ internal sealed class LanceScavengerAI : ScavengerAI
         }
     }
 
+    private void RunSidearmThrowPass()
+    {
+        Spear spear = _owner.SidearmSpear;
+        if (spear == null)
+        {
+            CancelSidearmDraw();
+            return;
+        }
+
+        // Switch only for the actual vanilla throw decision/wind-up. This lets
+        // Scavenger.TryThrow keep all of its original aim, timing and friend checks.
+        _sidearmDrawn = true;
+        _owner.EnsureWeaponSlots(sidearmPrimary: true);
+        if (_owner.grasps[0]?.grabbed != spear)
+        {
+            CancelSidearmDraw();
+            return;
+        }
+
+        _sidearmThrowPass = true;
+        try { CheckThrow(); }
+        finally { _sidearmThrowPass = false; }
+
+        bool stillHoldingSidearm = _owner.SidearmSpear != null && _owner.grasps[0]?.grabbed == _owner.SidearmSpear;
+        bool chargingThrow = _owner.animation != null && _owner.animation.id == Scavenger.ScavengerAnimation.ID.ThrowCharge;
+        if (!stillHoldingSidearm || !chargingThrow)
+        {
+            _sidearmDrawn = false;
+            _owner.EnsureWeaponSlots();
+        }
+    }
+
+    private void CancelSidearmDraw()
+    {
+        if (_owner.animation != null && _owner.animation.id == Scavenger.ScavengerAnimation.ID.ThrowCharge)
+            _owner.animation = null;
+        _sidearmDrawn = false;
+        _owner.EnsureWeaponSlots();
+    }
+
     private void RestoreChargeTargetForFollowUp()
     {
         Creature target = _chargeTarget;
@@ -147,10 +200,9 @@ internal sealed class LanceScavengerAI : ScavengerAI
 
     private bool TryFollowUpThrow()
     {
-        _owner.EnsureWeaponSlots();
         Spear spear = _owner.SidearmSpear;
         Creature target = _chargeTarget ?? Target;
-        if (spear == null || _owner.grasps[0]?.grabbed != spear || target == null || target.dead || !target.Consious ||
+        if (spear == null || target == null || target.dead || !target.Consious ||
             target.room != _owner.room || TargetViolence != ViolenceType.Lethal)
             return false;
 
@@ -161,8 +213,19 @@ internal sealed class LanceScavengerAI : ScavengerAI
         Vector2 direction = Custom.DirVec(_owner.mainBodyChunk.pos, aim);
         if (Mathf.Abs(direction.x) < 0.1f) return false;
 
+        // The follow-up is intentionally fast: draw the reserve spear only now,
+        // throw it immediately, then restore the lance to grasp 0 in the same frame.
+        _owner.EnsureWeaponSlots(sidearmPrimary: true);
+        spear = _owner.SidearmSpear;
+        if (spear == null || _owner.grasps[0]?.grabbed != spear)
+        {
+            _owner.EnsureWeaponSlots();
+            return false;
+        }
+
         _owner.lookPoint = aim;
         _owner.Throw(direction);
+        _owner.EnsureWeaponSlots();
         _chargeTarget = null;
         return true;
     }
