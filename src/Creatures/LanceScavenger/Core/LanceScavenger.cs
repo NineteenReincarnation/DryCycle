@@ -232,9 +232,9 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         // Ordinary carrying should actually inherit the vanilla scavenger hand pose. The combat
         // states below still own their deliberate forward/two-handed presentation, but Observe,
         // movement, Recover, lane-seeking, etc. let hand 0 move naturally and make the lance follow it.
+        ScavengerGraphics carryGraphics = graphicsModule as ScavengerGraphics;
         bool vanillaHandCarry = !forward && !SidearmInPrimary &&
-            grasps != null && grasps.Length > 0 && grasps[0]?.grabbed == lance &&
-            graphicsModule is ScavengerGraphics carryGraphics;
+            grasps != null && grasps.Length > 0 && grasps[0]?.grabbed == lance && carryGraphics != null;
 
         Vector2 direction;
         if (state == LanceState.Charge)
