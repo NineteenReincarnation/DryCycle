@@ -306,6 +306,9 @@ internal static class DevToolFrontend
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
     private static int resolvedFontWeightVariantCount = 1;
+    private static bool cjkSelectionValid;
+    private static string projectedCjkFamily = string.Empty;
+    private static int projectedCjkWeight = int.MinValue;
 
     internal static string ResolvedFontName => resolvedFontName;
     internal static int ResolvedFontWeight => resolvedFontWeight;
@@ -412,13 +415,14 @@ internal static class DevToolFrontend
         try
         {
             ImGuiIOPtr io = ImGui.GetIO();
+            DevToolUiFrameContext frameContext = new(io);
 
             // Rain World's developer cursor remains authoritative. Do not toggle Unity's cursor
             // visibility and do not draw a second ImGui software cursor; both approaches fight
             // the vanilla DevUI and cause visible flicker. Tooltip placement is handled separately.
             io.MouseDrawCursor = false;
 
-            FloatingWindowSnap.BeginFrame(io.DisplaySize);
+            FloatingWindowSnap.BeginFrame(frameContext);
 
             bool pushedChineseFont = TryPushChineseFont();
             float oldGlobalScale = io.FontGlobalScale;
@@ -445,9 +449,9 @@ internal static class DevToolFrontend
                 if (!EditorUiModeState.UseVanilla)
                 {
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
-                        FontSettingsWindow.Draw(io.DisplaySize);
+                        FontSettingsWindow.Draw(frameContext.DisplaySize);
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
-                        DevToolOverlay.Draw(snapshot);
+                        DevToolOverlay.Draw(snapshot, frameContext);
                     // Gate structurally inactive Scene surfaces before entering their timing scopes.
                     // The windows retain their own defensive guards, but stable frames in Focus mode,
                     // unsupported tools, or Left placement should not pay measurement/call overhead.
@@ -455,15 +459,15 @@ internal static class DevToolFrontend
                     if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
                     {
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
-                            SceneWorkspaceWindow.Draw(snapshot, io.DisplaySize);
+                            SceneWorkspaceWindow.Draw(snapshot, frameContext.DisplaySize);
                     }
                     if (sceneSurfaceSupported)
                     {
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
-                            ScenePlacementWindow.Draw(snapshot, io.DisplaySize);
+                            ScenePlacementWindow.Draw(snapshot, frameContext.DisplaySize);
                     }
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
-                        ActionToastOverlay.Draw(snapshot, io.DisplaySize);
+                        ActionToastOverlay.Draw(snapshot, frameContext);
                 }
 
                 FloatingWindowSnap.EndFrame();
@@ -562,7 +566,17 @@ internal static class DevToolFrontend
             return;
         }
 
-        string preferredFamily = DevToolUiSettings.ChineseFontFamily;
+        string preferredFamily = DevToolUiSettings.ChineseFontFamily ?? string.Empty;
+        int preferredWeight = DevToolUiSettings.FontWeight;
+        if (cjkSelectionValid &&
+            projectedCjkWeight == preferredWeight &&
+            string.Equals(projectedCjkFamily, preferredFamily, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        projectedCjkFamily = preferredFamily;
+        projectedCjkWeight = preferredWeight;
+        cjkSelectionValid = true;
+
         bool preferredAvailable = false;
         for (int i = 0; i < CjkFonts.Count; i++)
         {
@@ -586,7 +600,7 @@ internal static class DevToolFrontend
             // size slider. Family selection is applied first, weight picks the nearest family
             // variant, and baked size only breaks equal-weight ties against the stable reference
             // size. Visual size is handled exclusively by scale.
-            int weightDistance = Math.Abs(candidate.Weight - DevToolUiSettings.FontWeight);
+            int weightDistance = Math.Abs(candidate.Weight - preferredWeight);
             float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.ReferenceFontSize);
             if (weightDistance > bestWeightDistance ||
                 (weightDistance == bestWeightDistance && sizeDistance >= bestSizeDistance))

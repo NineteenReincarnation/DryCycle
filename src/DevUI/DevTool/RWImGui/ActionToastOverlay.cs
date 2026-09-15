@@ -28,14 +28,16 @@ internal static class ActionToastOverlay
     private static bool toastActive;
     private static double shownAt = -1000d;
 
-    internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
+        Num.Vector2 display = frameContext.DisplaySize;
+
         // ActionToastOverlay is already part of the guaranteed per-frame frontend render chain.
         // Pump the standalone universal DevUI mirror here so every active DevInterface page is
         // testable through the same generic renderer without adding another frontend callback.
         UniversalDevUiMirrorWindow.Draw(display);
 
-        ObserveShortcuts(snapshot);
+        ObserveShortcuts(snapshot, frameContext);
 
         // Most stable frames have no toast. Keep the common path free of ImGui time queries and
         // fade/layout work until an action actually activates the overlay.
@@ -116,15 +118,14 @@ internal static class ActionToastOverlay
         toastActive = true;
     }
 
-    private static void ObserveShortcuts(EditorPresentationSnapshot snapshot)
+    private static void ObserveShortcuts(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
         // Shortcut acknowledgements only react to key-down edges. On the overwhelmingly common
         // stable frame no key transitioned down, so avoid crossing into ImGui IO and avoid all
         // modifier GetKey calls. This also keeps held Ctrl/Command alone at zero polling cost here.
-        if (!global::UnityEngine.Input.anyKeyDown) return;
+        if (!frameContext.AnyKeyDown) return;
 
-        ImGuiIOPtr io = ImGui.GetIO();
-        if (io.WantTextInput || EditorInputRouter.WantsTextInput) return;
+        if (frameContext.WantTextInput || EditorInputRouter.WantsTextInput) return;
 
         bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightControl) ||

@@ -17,6 +17,7 @@ internal static class FloatingWindowSnap
     private const float AlignmentReach = 240f;
     private const float MarqueeDragThreshold = 5f;
     private const float GeometryEpsilon = 0.25f;
+    private const int StaleAuditIntervalFrames = 60;
 
     private enum GuideAxis
     {
@@ -81,6 +82,8 @@ internal static class FloatingWindowSnap
     private static Num.Vector2 displaySize;
     private static int frame;
     private static int nextGroupId = 1;
+    private static int nextStaleAuditFrame;
+    private static bool leftMouseDownThisFrame;
 
     private static bool marqueeActive;
     private static bool marqueeReleasePending;
@@ -137,31 +140,34 @@ internal static class FloatingWindowSnap
         return false;
     }
 
-    internal static void BeginFrame(Num.Vector2 currentDisplaySize)
+    internal static void BeginFrame(DevToolUiFrameContext frameContext)
     {
         frame++;
-        displaySize = currentDisplaySize;
-        if (displaySize.X < 1f) displaySize.X = 1366f;
-        if (displaySize.Y < 1f) displaySize.Y = 768f;
+        displaySize = frameContext.DisplaySize;
 
         Guides.Clear();
-        RemoveStaleWindows();
+        if (frame >= nextStaleAuditFrame)
+        {
+            RemoveStaleWindows();
+            nextStaleAuditFrame = frame + StaleAuditIntervalFrames;
+        }
 
-        ImGuiIOPtr io = ImGui.GetIO();
-        bool leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+        ImGuiIOPtr io = frameContext.Io;
+        bool leftDown = frameContext.LeftMouseDown;
+        leftMouseDownThisFrame = leftDown;
 
         // Ctrl+G turns the current marquee selection into a persistent layout group.
         // Text input owns Ctrl+G while an ImGui text field is active.
-        if (!io.WantTextInput && io.KeyCtrl && !io.KeyShift && ImGui.IsKeyPressed(ImGuiKey.G))
+        if (frameContext.GroupShortcutPressed)
             CreateGroupFromSelection();
 
         // Shift + left click/drag is reserved for panel selection. Starting on empty space creates
         // a marquee; starting on a panel toggles that panel in the current selection.
-        if (io.KeyShift && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        if (frameContext.KeyShift && frameContext.LeftMouseClicked)
         {
-            if (TryFindWindowAtPoint(io.MousePos, selectedOnly: false, titleOnly: false, out string hit))
+            if (TryFindWindowAtPoint(frameContext.MousePosition, selectedOnly: false, titleOnly: false, out string hit))
             {
-                if (!io.KeyCtrl) Selected.Clear();
+                if (!frameContext.KeyCtrl) Selected.Clear();
                 if (!Selected.Add(hit)) Selected.Remove(hit);
                 marqueeActive = false;
                 marqueeReleasePending = false;
@@ -170,17 +176,17 @@ internal static class FloatingWindowSnap
             {
                 marqueeActive = true;
                 marqueeReleasePending = false;
-                marqueeAdditive = io.KeyCtrl;
-                marqueeStart = io.MousePos;
-                marqueeCurrent = io.MousePos;
+                marqueeAdditive = frameContext.KeyCtrl;
+                marqueeStart = frameContext.MousePosition;
+                marqueeCurrent = frameContext.MousePosition;
                 if (!marqueeAdditive) Selected.Clear();
             }
         }
 
         if (marqueeActive)
         {
-            marqueeCurrent = io.MousePos;
-            if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) || !leftDown)
+            marqueeCurrent = frameContext.MousePosition;
+            if (frameContext.LeftMouseReleased || !leftDown)
             {
                 marqueeActive = false;
                 marqueeReleasePending = true;
@@ -189,8 +195,8 @@ internal static class FloatingWindowSnap
 
         // Clicking the title bar of a persistent group member restores the whole group selection.
         // This makes a group behave as one layout unit without changing any editor document data.
-        if (!io.KeyShift && !groupDragging && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
-            TryFindWindowAtPoint(io.MousePos, selectedOnly: false, titleOnly: true, out string groupHit) &&
+        if (!frameContext.KeyShift && !groupDragging && frameContext.LeftMouseClicked &&
+            TryFindWindowAtPoint(frameContext.MousePosition, selectedOnly: false, titleOnly: true, out string groupHit) &&
             TryFindGroupByMember(groupHit, out WindowGroup clickedGroup))
         {
             Selected.Clear();
@@ -201,12 +207,12 @@ internal static class FloatingWindowSnap
         }
 
         // A normal left drag on the title bar of any selected window moves the entire selection.
-        if (!io.KeyShift && !groupDragging && Selected.Count > 1 &&
-            ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
-            TryFindWindowAtPoint(io.MousePos, selectedOnly: true, titleOnly: true, out _))
+        if (!frameContext.KeyShift && !groupDragging && Selected.Count > 1 &&
+            frameContext.LeftMouseClicked &&
+            TryFindWindowAtPoint(frameContext.MousePosition, selectedOnly: true, titleOnly: true, out _))
         {
             groupDragging = true;
-            groupDragStartMouse = io.MousePos;
+            groupDragStartMouse = frameContext.MousePosition;
             groupDragDelta = Num.Vector2.Zero;
             GroupDragOrigins.Clear();
             foreach (string id in Selected)
@@ -220,7 +226,7 @@ internal static class FloatingWindowSnap
         {
             if (leftDown)
             {
-                groupDragDelta = io.MousePos - groupDragStartMouse;
+                groupDragDelta = frameContext.MousePosition - groupDragStartMouse;
                 groupDragDelta = SnapGroupDelta(groupDragDelta);
             }
             else
@@ -242,7 +248,7 @@ internal static class FloatingWindowSnap
 
         Num.Vector2 position = ImGui.GetWindowPos();
         Num.Vector2 size = ImGui.GetWindowSize();
-        bool mouseDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+        bool mouseDown = leftMouseDownThisFrame;
 
         if (!Windows.TryGetValue(id, out WindowState state))
         {
