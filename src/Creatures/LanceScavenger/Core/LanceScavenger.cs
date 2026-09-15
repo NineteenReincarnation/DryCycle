@@ -149,6 +149,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         }
         if (sidearm > 0 && lance == 0) SwitchGrasps(0, sidearm);
         else if (sidearm > 0 && grasps[0] == null) SwitchGrasps(sidearm, 0);
+        else if (sidearm < 0 && lance > 0 && grasps[0] == null) SwitchGrasps(lance, 0);
     }
 
     public override void InitiateGraphicsModule()
