@@ -19,9 +19,10 @@ internal static class LanceCombatMath
     internal const float DefaultLength = 80f;
     internal const float GripFraction = 0.34f;
     internal const float StandardThrustMaxDamage = 0.42f;
+    internal const float PlayerThrustMaxDamage = 1.35f;
     internal const float PreviousChargeMaxDamage = 1.35f;
     internal const float ChargeMaxDamage = PreviousChargeMaxDamage * 2.75f;
-    internal const float LanceScavengerCloseThrustMaxDamage = ChargeMaxDamage * 0.5f;
+    internal const float LanceScavengerCloseThrustMaxDamage = ChargeMaxDamage * 0.20f;
 
     internal static float ValidLength(float value) => float.IsNaN(value) || float.IsInfinity(value)
         ? DefaultLength : Math.Max(75f, Math.Min(90f, value));
@@ -34,8 +35,8 @@ internal static class LanceCombatMath
         float momentum = Mathf.InverseLerp(3f, 12f, speed);
         float full = charging ? momentum * Mathf.InverseLerp(25f, 80f, runUp) : 0f;
         float ordinary = thrusting ? Mathf.Lerp(0.12f, Mathf.Max(0.12f, thrustMaxDamage), facing) : 0f;
-        // Keep the old low-end charge floor, but raise the maximum charge damage to
-        // 2.75x the previous cap. Close-defense scavenger thrusts receive their own cap.
+        // Full charge remains the highest-damage attack. Player thrust and the
+        // lance-scavenger close poke use independent caps supplied by their callers.
         float damage = Mathf.Max(ordinary, charging ? Mathf.Lerp(0.12f, ChargeMaxDamage, full) * facing : 0f);
         if (speed < 2f || alignment < 0.55f) damage = 0f;
         float ratio = Mathf.Max(0.05f, targetMass) / Mathf.Max(0.1f, holderMass);
