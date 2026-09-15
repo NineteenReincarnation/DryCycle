@@ -20,11 +20,6 @@ internal readonly struct ChargeLane
         Reason = reason;
     }
 
-    /// <summary>
-    /// Planning-valid charge opportunity. The planner is deliberately slightly more tolerant
-    /// than the real lance-tip collision so moving creatures do not require a mathematically
-    /// perfect frame prediction before the scavenger is willing to commit.
-    /// </summary>
     internal bool Clear => PathClear && CanHit && Confidence >= ChargeLanePlanner.MinimumCommitConfidence;
     internal bool PathClear { get; }
     internal bool CanHit { get; }
@@ -37,20 +32,19 @@ internal readonly struct ChargeLane
 
 internal static class ChargeLanePlanner
 {
-    internal const float MinimumChargeDistance = 60f;   // 3 tiles
-    internal const float MinimumMaximumChargeDistance = 300f; // 15 tiles
-    internal const float MaximumMaximumChargeDistance = 500f; // 25 tiles
+    internal const float MinimumChargeDistance = 60f;
+    internal const float MinimumMaximumChargeDistance = 300f;
+    internal const float MaximumMaximumChargeDistance = 500f;
     internal const float MinimumLancePitch = -15f;
     internal const float MaximumLancePitch = 15f;
     internal const float MinimumCommitConfidence = 0.55f;
 
-    // Keep the solver matched to the actual launch motor and vanilla scavenger physics.
     internal const float ChargeLaunchY = 7.3f;
     private const float ScavengerGravity = 0.9f;
     private const float ScavengerAirFriction = 0.999f;
     private const float PredictionTargetTravelLimit = 90f;
-    private const float ActualTipHitPadding = 2f;
-    private const float PlanningTipHitPadding = 10f;
+    private const float ActualBladeHitPadding = 1.5f;
+    private const float PlanningBladeHitPadding = 5.5f;
 
     internal static float ChargeCommitment(LanceScavenger scav)
     {
@@ -99,8 +93,6 @@ internal static class ChargeLanePlanner
         bestFrame = 0;
         bestConfidence = 0f;
 
-        // Prefer the smallest required correction from horizontal. Within the same pitch,
-        // exact tip intersections outrank the looser planning corridor.
         for (int pitchMagnitude = 0; pitchMagnitude <= 15; pitchMagnitude++)
         {
             if (TryPitch(pitchMagnitude == 0 ? 0f : -pitchMagnitude, out bestDirection, out bestAim,
@@ -121,41 +113,48 @@ internal static class ChargeLanePlanner
             impactFrame = 0;
             confidence = 0f;
 
-            float forwardLength = (scav.Lance?.Length ?? LanceCombatMath.DefaultLength) * (1f - LanceCombatMath.GripFraction);
+            float length = scav.Lance?.Length ?? LanceCombatMath.DefaultLength;
+            float forwardLength = LanceCombatMath.ForwardLength(length);
             Vector2 body = origin;
             Vector2 velocity = new(horizontalSign * ChargeSpeed(scav), ChargeLaunchY);
-            Vector2 previousTip = TipPosition(body, direction, forwardLength);
+            Vector2 previousGrip = GripPosition(body, direction);
 
             for (int frame = 1; frame <= LanceCombatState.MaxChargeFrames; frame++)
             {
                 StepBody(ref body, ref velocity);
-                Vector2 tip = TipPosition(body, direction, forwardLength);
+                Vector2 grip = GripPosition(body, direction);
 
                 foreach (BodyChunk chunk in target.bodyChunks)
                 {
                     Vector2 oldTarget = PredictedTargetPosition(chunk, frame - 1);
                     Vector2 newTarget = PredictedTargetPosition(chunk, frame);
-                    bool exact = LanceCombatMath.SweepTip(previousTip, tip, oldTarget, newTarget,
-                        chunk.rad + ActualTipHitPadding, out float exactFraction);
-                    bool probable = exact || LanceCombatMath.SweepTip(previousTip, tip, oldTarget, newTarget,
-                        chunk.rad + PlanningTipHitPadding, out float probableFraction);
+                    bool exact = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
+                        forwardLength, oldTarget, newTarget, chunk.rad, ActualBladeHitPadding,
+                        out float exactFraction, out float exactBladeT);
+
+                    float probableFraction = exactFraction;
+                    float probableBladeT = exactBladeT;
+                    bool probable = exact;
+                    if (!probable)
+                        probable = LanceCombatMath.SweepBlade(previousGrip, direction, grip, direction,
+                            forwardLength, oldTarget, newTarget, chunk.rad, PlanningBladeHitPadding,
+                            out probableFraction, out probableBladeT);
                     if (!probable) continue;
 
                     float fraction = exact ? exactFraction : probableFraction;
+                    float bladeT = exact ? exactBladeT : probableBladeT;
                     impactFrame = frame;
                     aim = Vector2.Lerp(oldTarget, newTarget, fraction);
 
-                    // The confidence score is intentionally conservative but not binary.
-                    // Exact intersections are very strong; a near corridor still counts as
-                    // a valid tactical opportunity, especially at small pitch and short lead time.
-                    float baseConfidence = exact ? 0.98f : 0.76f;
-                    float pitchPenalty = Mathf.Abs(pitchDegrees) / 15f * 0.08f;
-                    float framePenalty = (float)frame / LanceCombatState.MaxChargeFrames * 0.07f;
-                    float targetSpeedPenalty = Mathf.Clamp01(chunk.vel.magnitude / 12f) * 0.07f;
-                    confidence = Mathf.Clamp01(baseConfidence - pitchPenalty - framePenalty - targetSpeedPenalty);
+                    float baseConfidence = exact ? 0.98f : 0.78f;
+                    float pitchPenalty = Mathf.Abs(pitchDegrees) / 15f * 0.07f;
+                    float framePenalty = (float)frame / LanceCombatState.MaxChargeFrames * 0.06f;
+                    float targetSpeedPenalty = Mathf.Clamp01(chunk.vel.magnitude / 12f) * 0.06f;
+                    float shoulderPenalty = (1f - bladeT) * 0.05f;
+                    confidence = Mathf.Clamp01(baseConfidence - pitchPenalty - framePenalty - targetSpeedPenalty - shoulderPenalty);
                     return true;
                 }
-                previousTip = tip;
+                previousGrip = grip;
             }
             return false;
         }
@@ -168,7 +167,7 @@ internal static class ChargeLanePlanner
         Vector2 body = origin;
         Vector2 velocity = new(horizontalSign * speed, ChargeLaunchY);
         float length = scav.Lance?.Length ?? LanceCombatMath.DefaultLength;
-        float forwardLength = length * (1f - LanceCombatMath.GripFraction);
+        float forwardLength = LanceCombatMath.ForwardLength(length);
         float rearLength = length * LanceCombatMath.GripFraction;
         int frames = Mathf.Min(LanceCombatState.MaxChargeFrames, Mathf.Max(impactFrame + 3, 1));
         Vector2 previousBody = body;
@@ -179,9 +178,8 @@ internal static class ChargeLanePlanner
             if (BodyBlocked(room, body)) return "wall / ceiling";
 
             Vector2 grip = GripPosition(body, lanceDirection);
-            Vector2 tip = grip + lanceDirection * forwardLength;
             Vector2 tail = grip - lanceDirection * rearLength;
-            if (room.GetTile(tip).Solid || room.GetTile(tail).Solid)
+            if (room.GetTile(tail).Solid || BladeBlocked(room, grip, lanceDirection, forwardLength))
                 return "lance blocked";
 
             if (FriendInPath(scav, previousBody, body + new Vector2(horizontalSign * 24f, 0f), target))
@@ -189,6 +187,21 @@ internal static class ChargeLanePlanner
             previousBody = body;
         }
         return null;
+    }
+
+    private static bool BladeBlocked(Room room, Vector2 grip, Vector2 direction, float forwardLength)
+    {
+        Vector2 perp = new(-direction.y, direction.x);
+        for (int i = 0; i < 6; i++)
+        {
+            float t = i / 5f;
+            Vector2 center = LanceCombatMath.BladePoint(grip, direction, forwardLength, t);
+            float width = LanceCombatMath.BladeHalfWidth(t);
+            if (room.GetTile(center).Solid || room.GetTile(center + perp * width).Solid ||
+                room.GetTile(center - perp * width).Solid)
+                return true;
+        }
+        return false;
     }
 
     private static bool BodyBlocked(Room room, Vector2 at) =>
@@ -206,9 +219,6 @@ internal static class ChargeLanePlanner
 
     private static Vector2 GripPosition(Vector2 bodyPosition, Vector2 lanceDirection) =>
         bodyPosition + new Vector2(lanceDirection.x * 7f, -5f);
-
-    private static Vector2 TipPosition(Vector2 bodyPosition, Vector2 lanceDirection, float forwardLength) =>
-        GripPosition(bodyPosition, lanceDirection) + lanceDirection * forwardLength;
 
     private static Vector2 HorizontalDirection(float dx) => new(Mathf.Sign(dx) == 0f ? 1f : Mathf.Sign(dx), 0f);
 
