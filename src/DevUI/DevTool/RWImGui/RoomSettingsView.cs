@@ -65,6 +65,8 @@ internal static class RoomSettingsView
 
     private static Section section = Section.Environment;
     private static string effectSearch = string.Empty;
+    private static string observedEffectSearch;
+    private static string normalizedEffectSearch = string.Empty;
     private static bool effectsExpanded = true;
     private const float BrowserBodyFontScale = 1.22f;
 
@@ -92,16 +94,51 @@ internal static class RoomSettingsView
     private static bool projectedTerrainFadeChinese;
     private static FadeBinding[] terrainFadeBindings = Array.Empty<FadeBinding>();
 
+    internal static void ResetRetainedState()
+    {
+        FloatEdits.Clear();
+        IntEdits.Clear();
+        SettingWidgetIds.Clear();
+        InheritanceWidgetIds.Clear();
+
+        projectedAvailableEffects = null;
+        projectedEffectCategories = null;
+        projectedEffectSearch = string.Empty;
+        effectBrowserRows.Clear();
+        observedEffectSearch = null;
+        normalizedEffectSearch = string.Empty;
+
+        projectedEffects = null;
+        projectedEffectsChinese = false;
+        effectBindings = Array.Empty<EffectBinding>();
+
+        projectedTemplateNames = null;
+        projectedTemplateRegion = string.Empty;
+        projectedTemplateChinese = false;
+        templateBindings = Array.Empty<TemplateBinding>();
+        templatePreviewRegion = string.Empty;
+        templatePreviewName = string.Empty;
+        templatePreview = string.Empty;
+
+        projectedFadeCount = -1;
+        projectedFadeChinese = false;
+        fadeBindings = Array.Empty<FadeBinding>();
+        projectedTerrainFadeCount = -1;
+        projectedTerrainFadeChinese = false;
+        terrainFadeBindings = Array.Empty<FadeBinding>();
+        EffectPreviewIntentHub.ClearHover();
+    }
+
     internal static void DrawBrowser(EditorRoomSettingsSnapshot snapshot)
     {
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("房间设置", "ROOM SETTINGS"), BrowserBodyFontScale);
 
-        DrawSectionButton(Section.Environment, DevToolUiSettings.T("环境", "Environment"));
-        DrawSectionButton(Section.Palette, DevToolUiSettings.T("色板", "Palette"));
-        DrawSectionButton(Section.Gameplay, DevToolUiSettings.T("玩法", "Gameplay"));
-        DrawSectionButton(Section.Terrain, DevToolUiSettings.T("地形", "Terrain"));
-        DrawSectionButton(Section.Templates, DevToolUiSettings.T("模板", "Templates"));
-        DrawSectionButton(Section.Effects, DevToolUiSettings.T("效果", "Effects"));
+        DrawSectionButton(Section.Environment, DevToolUiSettings.T("环境", "Environment"), "RoomSectionEnvironment");
+        DrawSectionButton(Section.Palette, DevToolUiSettings.T("色板", "Palette"), "RoomSectionPalette");
+        DrawSectionButton(Section.Gameplay, DevToolUiSettings.T("玩法", "Gameplay"), "RoomSectionGameplay");
+        DrawSectionButton(Section.Terrain, DevToolUiSettings.T("地形", "Terrain"), "RoomSectionTerrain");
+        DrawSectionButton(Section.Templates, DevToolUiSettings.T("模板", "Templates"), "RoomSectionTemplates");
+        DrawSectionButton(Section.Effects, DevToolUiSettings.T("效果", "Effects"), "RoomSectionEffects");
 
         if (section != Section.Effects || !snapshot.Available)
         {
@@ -495,7 +532,7 @@ internal static class RoomSettingsView
     {
         string[] available = snapshot.AvailableEffects ?? Array.Empty<string>();
         string[] categories = snapshot.AvailableEffectCategories ?? Array.Empty<string>();
-        string normalizedSearch = effectSearch?.Trim() ?? string.Empty;
+        string normalizedSearch = EffectSearchQuery();
         if (ReferenceEquals(projectedAvailableEffects, available) &&
             ReferenceEquals(projectedEffectCategories, categories) &&
             string.Equals(projectedEffectSearch, normalizedSearch, StringComparison.Ordinal))
@@ -521,6 +558,15 @@ internal static class RoomSettingsView
         projectedAvailableEffects = available;
         projectedEffectCategories = categories;
         projectedEffectSearch = normalizedSearch;
+    }
+
+    private static string EffectSearchQuery()
+    {
+        if (string.Equals(observedEffectSearch, effectSearch, StringComparison.Ordinal))
+            return normalizedEffectSearch;
+        observedEffectSearch = effectSearch;
+        normalizedEffectSearch = effectSearch?.Trim() ?? string.Empty;
+        return normalizedEffectSearch;
     }
 
     private static void EnsureEffectBindings(EditorRoomEffectSnapshot[] effects)
@@ -679,14 +725,14 @@ internal static class RoomSettingsView
             Section.Terrain => DevToolUiSettings.T("地形", "Terrain"),
             Section.Templates => DevToolUiSettings.T("模板", "Templates"),
             Section.Effects => DevToolUiSettings.T("效果", "Effects"),
-            _ => value.ToString()
+            _ => string.Empty
         };
     }
 
-    private static void DrawSectionButton(Section value, string label)
+    private static void DrawSectionButton(Section value, string label, string id)
     {
         bool active = section == value;
-        if (DevToolWidgets.NavItem(label, "RoomSection" + value, active))
+        if (DevToolWidgets.NavItem(label, id, active))
             section = value;
     }
 
