@@ -4,6 +4,8 @@ set -euo pipefail
 root="src/DevUI/DevTool"
 objects="$root/Objects"
 phase_doc="$root/PHASE6.md"
+runtime="$root/Core/DevToolRuntime.cs"
+coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
 if [[ ! -d "$root" ]]; then
   echo "DevTool root is missing: $root" >&2
@@ -43,6 +45,54 @@ fi
 
 if grep -Fq 'PomManagedDataInspectorAdapter.EnsureRegistered' "$objects/ObjectCatalog.cs"; then
   echo "ObjectCatalog must not bootstrap a third-party-specific inspector." >&2
+  exit 1
+fi
+
+# Runtime owns hook/frame orchestration only. Cross-feature queue/reset fan-out has exactly one
+# backend owner so adding a workspace cannot silently miss one of several lifecycle lists.
+if [[ ! -f "$coordinator" ]]; then
+  echo "DevTool subsystem coordinator is missing: $coordinator" >&2
+  exit 1
+fi
+
+runtime_fanout_hits="$(
+  grep -nE '(EditorUi|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor)CommandQueue\.(Process|Clear)' \
+    "$runtime" || true
+)"
+if [[ -n "$runtime_fanout_hits" ]]; then
+  echo "DevToolRuntime directly owns feature CommandQueue processing/cleanup again:" >&2
+  echo "$runtime_fanout_hits" >&2
+  exit 1
+fi
+
+required_coordinator_symbols=(
+  'ProcessPendingCommands'
+  'ResetRuntimeState'
+  'ClearDetailPresentations'
+  'EditorUiCommandQueue.Process'
+  'RoomEditorCommandQueue.Process'
+  'RelationshipEditorCommandQueue.Process'
+  'EditorPresentationHub.Clear'
+  'DevToolSessionHub.Reset'
+)
+for symbol in "${required_coordinator_symbols[@]}"; do
+  if ! grep -Fq "$symbol" "$coordinator"; then
+    echo "Subsystem coordinator contract is incomplete: missing '$symbol'" >&2
+    exit 1
+  fi
+done
+
+if grep -Eq 'DevToolApi|DevToolExtensionScope|DevToolRegistration' "$coordinator"; then
+  echo "UI/runtime reset must not own third-party Extension API scope lifetime." >&2
+  exit 1
+fi
+
+if ! grep -Fq 'DevToolSubsystemCoordinator.ProcessPendingCommands(session)' "$runtime"; then
+  echo "DevToolRuntime is not routing command fan-out through the subsystem coordinator." >&2
+  exit 1
+fi
+if ! grep -Fq 'DevToolSubsystemCoordinator.ResetRuntimeState()' "$runtime"; then
+  echo "DevToolRuntime is not routing lifecycle reset through the subsystem coordinator." >&2
   exit 1
 fi
 
