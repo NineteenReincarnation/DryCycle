@@ -10,9 +10,10 @@ Set-StrictMode -Version Latest
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptRoot))
+$DefaultBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".phase6-validation"))
 
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
-    $BuildRoot = Join-Path $RepoRoot ".phase6-validation"
+    $BuildRoot = $DefaultBuildRoot
 }
 $BuildRoot = [System.IO.Path]::GetFullPath($BuildRoot)
 $RainWorldDir = [System.IO.Path]::GetFullPath($RainWorldDir)
@@ -44,6 +45,17 @@ function Same-Path([string]$Left, [string]$Right) {
     $leftNormalized = [System.IO.Path]::GetFullPath($Left).TrimEnd('\', '/')
     $rightNormalized = [System.IO.Path]::GetFullPath($Right).TrimEnd('\', '/')
     return [string]::Equals($leftNormalized, $rightNormalized, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Is-PathWithin([string]$Child, [string]$Parent) {
+    $childNormalized = [System.IO.Path]::GetFullPath($Child).TrimEnd('\', '/')
+    $parentNormalized = [System.IO.Path]::GetFullPath($Parent).TrimEnd('\', '/')
+    if ([string]::Equals($childNormalized, $parentNormalized, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    $prefix = $parentNormalized + [System.IO.Path]::DirectorySeparatorChar
+    return $childNormalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Invoke-DotNetBuild(
@@ -88,10 +100,12 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 Require-Directory $RainWorldDir "Rain World directory"
 
 $buildDriveRoot = [System.IO.Path]::GetPathRoot($BuildRoot)
-if ((Same-Path $BuildRoot $RepoRoot) -or
-    (Same-Path $BuildRoot $RainWorldDir) -or
-    (Same-Path $BuildRoot $buildDriveRoot)) {
-    Fail "Unsafe BuildRoot. Use a dedicated temporary directory, not the repository, Rain World, or drive root."
+$insideRepository = Is-PathWithin $BuildRoot $RepoRoot
+$insideSafeRepositoryOutput = Is-PathWithin $BuildRoot $DefaultBuildRoot
+if ((Same-Path $BuildRoot $buildDriveRoot) -or
+    (Is-PathWithin $BuildRoot $RainWorldDir) -or
+    ($insideRepository -and -not $insideSafeRepositoryOutput)) {
+    Fail "Unsafe BuildRoot. Use .phase6-validation (or a child of it), or a dedicated directory outside the repository and Rain World installation."
 }
 
 $requiredRainWorldFiles = [ordered]@{
@@ -159,7 +173,7 @@ New-Item -ItemType Directory -Path $BuildRoot | Out-Null
 $backendProperties = @(
     "RainWorldDir=$RainWorldDir",
     "DeployToGame=false",
-    "OutputPath=$BuildRoot\"
+    "OutputPath=$BuildRoot"
 )
 Invoke-DotNetBuild $mainProject $backendProperties "DryCycle.dll"
 
