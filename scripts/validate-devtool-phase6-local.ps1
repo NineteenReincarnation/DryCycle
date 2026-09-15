@@ -2,7 +2,8 @@ param(
     [string]$RainWorldDir = "D:\Application\Steam\steamapps\common\Rain World",
     [string]$RWImGuiPluginDir = "",
     [string]$Configuration = "Release",
-    [string]$BuildRoot = ""
+    [string]$BuildRoot = "",
+    [switch]$BackendOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,14 +32,14 @@ function Require-File([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         Fail "$Label not found: $Path"
     }
-    Pass "$Label"
+    Pass $Label
 }
 
 function Require-Directory([string]$Path, [string]$Label) {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         Fail "$Label not found: $Path"
     }
-    Pass "$Label"
+    Pass $Label
 }
 
 function Same-Path([string]$Left, [string]$Right) {
@@ -91,6 +92,7 @@ Write-Host "Repository : $RepoRoot"
 Write-Host "Rain World : $RainWorldDir"
 Write-Host "Build root : $BuildRoot"
 Write-Host "Config     : $Configuration"
+Write-Host "Mode       : $(if ($BackendOnly) { 'Backend only' } else { 'Backend + RWImGui frontend' })"
 Write-Host ""
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
@@ -129,6 +131,41 @@ foreach ($entry in $requiredRainWorldFiles.GetEnumerator()) {
     Require-File (Join-Path $RainWorldDir $entry.Value) $entry.Key
 }
 
+$mainProject = Join-Path $RepoRoot "src/DryCycle.csproj"
+$frontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
+Require-File $mainProject "DryCycle project"
+if (-not $BackendOnly) {
+    Require-File $frontendProject "DevTool RWImGui project"
+}
+
+if (Test-Path -LiteralPath $BuildRoot) {
+    Remove-Item -LiteralPath $BuildRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $BuildRoot | Out-Null
+
+# Build the backend into an isolated directory. DeployToGame=false guarantees that the validation
+# run does not overwrite the user's active Rain World mod installation.
+$backendProperties = @(
+    "RainWorldDir=$RainWorldDir",
+    "DeployToGame=false",
+    "OutputPath=$BuildRoot"
+)
+Invoke-DotNetBuild $mainProject $backendProperties "DryCycle.dll"
+
+$dryCycleDll = Join-Path $BuildRoot "DryCycle.dll"
+Require-File $dryCycleDll "compiled DryCycle.dll"
+
+if ($BackendOnly) {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "Phase 6 backend compile validation passed." -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "Backend  : $dryCycleDll"
+    Write-Host ""
+    Write-Host "BackendOnly validates DryCycle.dll compilation only. RWImGui frontend, Rain World runtime, and performance regression are still pending."
+    exit 0
+}
+
 if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
     $candidates = @(
         (Join-Path $RainWorldDir "../../workshop/content/312520/3417372413/plugins"),
@@ -148,7 +185,7 @@ if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
-    Fail "RWImGui plugin directory was not found. Pass -RWImGuiPluginDir explicitly."
+    Fail "RWImGui plugin directory was not found. Pass -RWImGuiPluginDir explicitly, or use -BackendOnly to validate DryCycle.dll first."
 }
 $RWImGuiPluginDir = [System.IO.Path]::GetFullPath($RWImGuiPluginDir)
 
@@ -157,28 +194,6 @@ Write-Host "=== RWImGui references ===" -ForegroundColor Cyan
 Require-Directory $RWImGuiPluginDir "RWImGui plugin directory"
 Require-File (Join-Path $RWImGuiPluginDir "rain-world-imgui-api.dll") "rain-world-imgui-api"
 Require-File (Join-Path $RWImGuiPluginDir "ImGui.NET.dll") "RWImGui ImGui.NET"
-
-$mainProject = Join-Path $RepoRoot "src/DryCycle.csproj"
-$frontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
-Require-File $mainProject "DryCycle project"
-Require-File $frontendProject "DevTool RWImGui project"
-
-if (Test-Path -LiteralPath $BuildRoot) {
-    Remove-Item -LiteralPath $BuildRoot -Recurse -Force
-}
-New-Item -ItemType Directory -Path $BuildRoot | Out-Null
-
-# Build the backend into an isolated directory. DeployToGame=false guarantees that the validation
-# run does not overwrite the user's active Rain World mod installation.
-$backendProperties = @(
-    "RainWorldDir=$RainWorldDir",
-    "DeployToGame=false",
-    "OutputPath=$BuildRoot"
-)
-Invoke-DotNetBuild $mainProject $backendProperties "DryCycle.dll"
-
-$dryCycleDll = Join-Path $BuildRoot "DryCycle.dll"
-Require-File $dryCycleDll "compiled DryCycle.dll"
 
 # The frontend project resolves DryCycle.dll through GameModOutputDir. Point that property at the
 # isolated validation output so it compiles against the exact backend produced above.
