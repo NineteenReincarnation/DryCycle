@@ -17,6 +17,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// - changing rooms appends markers and never overwrites earlier samples;
 /// - shutdown closes the file but deliberately leaves it on disk so it can still be inspected;
 /// - the next game launch creates the next clean run log.
+///
+/// Performance policy: poll cached presentation snapshots at 20 Hz, skip unchanged entry objects,
+/// buffer disk output, flush at 4 Hz, and perform the file-size check at 1 Hz.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -28,6 +31,9 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
     private const long MaximumLogBytes = 16L * 1024L * 1024L;
     private const string LogFileName = "DryCycle-LanceScavenger-AI.log";
+    private const uint PollIntervalMilliseconds = 50;
+    private const uint FlushIntervalMilliseconds = 250;
+    private const uint SizeCheckIntervalMilliseconds = 1000;
 
     private sealed class PreviousState
     {
@@ -39,6 +45,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
     private readonly Dictionary<long, string> lastPayload = new();
     private readonly Dictionary<long, PreviousState> previousStates = new();
+    private readonly Dictionary<long, LanceScavengerDebugEntrySnapshot> lastEntrySnapshots = new();
 
     private StreamWriter writer;
     private bool captureActive;
@@ -47,7 +54,11 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
     private int processStartTick;
     private int sessionStartTick;
     private int sessionNumber;
+    private int lastPollTick;
+    private int lastFlushTick;
+    private int lastSizeCheckTick;
     private long sequence;
+    private LanceScavengerDebugSnapshot lastSnapshot = LanceScavengerDebugSnapshot.Empty;
 
     internal static string DiagnosticLogPath => Path.Combine(Paths.BepInExRootPath, LogFileName);
 
@@ -58,15 +69,28 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         activeRoom = string.Empty;
         processStartTick = Environment.TickCount;
         sessionStartTick = processStartTick;
+        lastPollTick = processStartTick - (int)PollIntervalMilliseconds;
+        lastFlushTick = processStartTick;
+        lastSizeCheckTick = processStartTick;
         sessionNumber = 0;
         sequence = 0;
+        lastSnapshot = LanceScavengerDebugSnapshot.Empty;
         lastPayload.Clear();
         previousStates.Clear();
+        lastEntrySnapshots.Clear();
         OpenRunLog();
     }
 
     private void Update()
     {
+        int now = Environment.TickCount;
+        if (ElapsedMilliseconds(lastPollTick, now) < PollIntervalMilliseconds)
+        {
+            MaybeFlush(now);
+            return;
+        }
+        lastPollTick = now;
+
         LanceScavengerDebugSnapshot snapshot;
         try
         {
@@ -82,6 +106,8 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         {
             if (captureActive)
                 EndCaptureSession("monitor closed");
+            lastSnapshot = snapshot;
+            MaybeFlush(now);
             return;
         }
 
@@ -93,11 +119,18 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         if (writer == null || capped)
             return;
 
-        LanceScavengerDebugEntrySnapshot[] entries = snapshot.Entries ?? Array.Empty<LanceScavengerDebugEntrySnapshot>();
-        for (int i = 0; i < entries.Length; i++)
-            WriteEntry(entries[i]);
+        // The hub returns the same immutable aggregate instance until a real full capture changed.
+        // Do not walk/string-format the creature list again for duplicate presentation frames.
+        if (!ReferenceEquals(snapshot, lastSnapshot))
+        {
+            LanceScavengerDebugEntrySnapshot[] entries = snapshot.Entries ?? Array.Empty<LanceScavengerDebugEntrySnapshot>();
+            for (int i = 0; i < entries.Length; i++)
+                WriteEntry(entries[i]);
+            lastSnapshot = snapshot;
+        }
 
-        EnforceSizeLimit();
+        MaybeFlush(now);
+        EnforceSizeLimit(now);
     }
 
     private void OnDisable()
@@ -122,8 +155,10 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         CloseWriter();
         captureActive = false;
         activeRoom = string.Empty;
+        lastSnapshot = LanceScavengerDebugSnapshot.Empty;
         lastPayload.Clear();
         previousStates.Clear();
+        lastEntrySnapshots.Clear();
     }
 
     private void OpenRunLog()
@@ -138,7 +173,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
                 new UTF8Encoding(false),
                 64 * 1024)
             {
-                AutoFlush = true
+                AutoFlush = false
             };
 
             writer.WriteLine("# DryCycle LanceScavenger realtime AI diagnostic log");
@@ -148,6 +183,8 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
             writer.WriteLine("# max_bytes=" + MaximumLogBytes.ToString(CultureInfo.InvariantCulture));
             writer.WriteLine("# One file is retained for the complete game run. UI monitor reopen never truncates it.");
             writer.WriteLine(BuildHeader());
+            writer.Flush();
+            lastFlushTick = Environment.TickCount;
             Logger.LogInfo("LanceScavenger game-run AI log opened: " + DiagnosticLogPath);
         }
         catch (Exception error)
@@ -162,6 +199,8 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
     {
         lastPayload.Clear();
         previousStates.Clear();
+        lastEntrySnapshots.Clear();
+        lastSnapshot = LanceScavengerDebugSnapshot.Empty;
         captureActive = true;
         activeRoom = roomName ?? string.Empty;
         sessionStartTick = Environment.TickCount;
@@ -173,6 +212,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
                          "\t" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) +
                          "\troom=" + Safe(activeRoom));
         writer.Flush();
+        lastFlushTick = Environment.TickCount;
         Logger.LogInfo("LanceScavenger realtime AI capture session " + sessionNumber.ToString(CultureInfo.InvariantCulture) +
                        " started; existing game-run log preserved.");
     }
@@ -189,6 +229,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
                                  "\t" + SessionElapsedMilliseconds().ToString(CultureInfo.InvariantCulture) +
                                  "\t" + Safe(reason));
                 writer.Flush();
+                lastFlushTick = Environment.TickCount;
             }
             catch
             {
@@ -198,8 +239,10 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
         captureActive = false;
         activeRoom = string.Empty;
+        lastSnapshot = LanceScavengerDebugSnapshot.Empty;
         lastPayload.Clear();
         previousStates.Clear();
+        lastEntrySnapshots.Clear();
     }
 
     private void ChangeRoom(string roomName)
@@ -207,12 +250,15 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         activeRoom = roomName ?? string.Empty;
         lastPayload.Clear();
         previousStates.Clear();
+        lastEntrySnapshots.Clear();
+        lastSnapshot = LanceScavengerDebugSnapshot.Empty;
         if (writer == null || capped) return;
 
         writer.WriteLine("# ROOM\t" + sessionNumber.ToString(CultureInfo.InvariantCulture) +
                          "\t" + SessionElapsedMilliseconds().ToString(CultureInfo.InvariantCulture) +
                          "\t" + Safe(activeRoom));
         writer.Flush();
+        lastFlushTick = Environment.TickCount;
     }
 
     private void CloseWriter()
@@ -228,10 +274,12 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         if (entry == null || writer == null || capped) return;
 
         long key = EntityKey(entry.Spawner, entry.Number);
-        string payload = BuildPayload(entry);
+        if (lastEntrySnapshots.TryGetValue(key, out LanceScavengerDebugEntrySnapshot previousSnapshot) &&
+            ReferenceEquals(previousSnapshot, entry))
+            return;
+        lastEntrySnapshots[key] = entry;
 
-        // RWImGui can render faster than the 40 Hz simulation. Keep one record per changed
-        // simulation sample rather than duplicating an identical snapshot every presentation frame.
+        string payload = BuildPayload(entry);
         if (lastPayload.TryGetValue(key, out string previousPayload) &&
             string.Equals(previousPayload, payload, StringComparison.Ordinal))
             return;
@@ -394,12 +442,32 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         lastY = y[count - 1];
     }
 
-    private void EnforceSizeLimit()
+    private void MaybeFlush(int now)
     {
         if (writer == null || capped) return;
+        if (ElapsedMilliseconds(lastFlushTick, now) < FlushIntervalMilliseconds) return;
         try
         {
             writer.Flush();
+            lastFlushTick = now;
+        }
+        catch (Exception error)
+        {
+            capped = true;
+            Logger.LogWarning("LanceScavenger realtime AI log flush failed: " + error.Message);
+        }
+    }
+
+    private void EnforceSizeLimit(int now)
+    {
+        if (writer == null || capped) return;
+        if (ElapsedMilliseconds(lastSizeCheckTick, now) < SizeCheckIntervalMilliseconds) return;
+        lastSizeCheckTick = now;
+
+        try
+        {
+            writer.Flush();
+            lastFlushTick = now;
             if (writer.BaseStream.Position < MaximumLogBytes) return;
 
             writer.WriteLine("# STOP\t" + ProcessElapsedMilliseconds().ToString(CultureInfo.InvariantCulture) +
@@ -417,6 +485,7 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
     private long ProcessElapsedMilliseconds() => unchecked((uint)(Environment.TickCount - processStartTick));
     private long SessionElapsedMilliseconds() => unchecked((uint)(Environment.TickCount - sessionStartTick));
+    private static uint ElapsedMilliseconds(int then, int now) => unchecked((uint)(now - then));
 
     private static long EntityKey(int spawner, int number) => ((long)spawner << 32) ^ (uint)number;
 
