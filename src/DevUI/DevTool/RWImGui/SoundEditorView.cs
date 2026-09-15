@@ -16,14 +16,74 @@ internal static class SoundEditorView
         Scene
     }
 
-    private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, Num.Vector2> VectorEdits = new(StringComparer.Ordinal);
+    private readonly struct SoundEditKey : IEquatable<SoundEditKey>
+    {
+        internal SoundEditKey(int index, string key)
+        {
+            Index = index;
+            Key = key ?? string.Empty;
+        }
+
+        private int Index { get; }
+        private string Key { get; }
+
+        public bool Equals(SoundEditKey other) =>
+            Index == other.Index && string.Equals(Key, other.Key, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) => obj is SoundEditKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return Index * 397 ^ StringComparer.Ordinal.GetHashCode(Key);
+            }
+        }
+    }
+
+    private sealed class SoundSceneRow
+    {
+        internal EditorSoundSnapshot Sound;
+        internal string SelectedLabel = string.Empty;
+        internal string NormalLabel = string.Empty;
+    }
+
+    private static readonly Dictionary<string, float> RoomFloatEdits = new(StringComparer.Ordinal);
+    private static readonly Dictionary<SoundEditKey, float> SoundFloatEdits = new();
+    private static readonly Dictionary<SoundEditKey, Num.Vector2> SoundVectorEdits = new();
+    private static readonly List<SoundSceneRow> SceneRows = new();
+
     private static BrowserTab browserTab;
     private static string sceneSearch = string.Empty;
     private static string selectionGroupName = string.Empty;
     private static string selectionGroupId = string.Empty;
     private static bool selectionGroupIdManual;
     private const float BrowserBodyFontScale = 1.22f;
+
+    private static EditorSoundSnapshot[] projectedSceneSounds;
+    private static string projectedSceneSearch = string.Empty;
+    private static bool projectedSceneChinese;
+
+    private static int sceneCountValue = -1;
+    private static bool sceneCountChinese;
+    private static string sceneCountText = string.Empty;
+
+    private static int inspectorSelectionCount = -1;
+    private static bool inspectorSelectionChinese;
+    private static string inspectorSelectionText = string.Empty;
+
+    private static int sceneSelectionCount = -1;
+    private static bool sceneSelectionChinese;
+    private static string sceneSelectionText = string.Empty;
+
+    private static EditorSoundSnapshot stateSound;
+    private static bool stateChinese;
+    private static string stateText = string.Empty;
+
+    private static string activeGroupButtonId = string.Empty;
+    private static string activeGroupButtonName = string.Empty;
+    private static bool activeGroupButtonChinese;
+    private static string activeGroupButtonText = string.Empty;
 
     internal static void DrawBrowser(EditorSoundPresentationSnapshot snapshot)
     {
@@ -98,7 +158,7 @@ internal static class SoundEditorView
             ImGui.Separator();
             ImGui.TextColored(
                 new Num.Vector4(0.62f, 0.84f, 1f, 1f),
-                DevToolUiSettings.T($"已选择 {selectedIndices.Length} 个声音", $"{selectedIndices.Length} SOUNDS SELECTED"));
+                GetInspectorSelectionText(selectedIndices.Length));
             SoundLibraryGroupsView.DrawAddSelectionToGroup(selectedIndices);
         }
 
@@ -112,10 +172,7 @@ internal static class SoundEditorView
 
         ImGui.Separator();
         ImGui.TextWrapped(selected.Sample);
-        string state = selected.Type;
-        if (selected.Inherited) state += DevToolUiSettings.T(" · 继承", " · Inherited");
-        else if (selected.OverWrite) state += DevToolUiSettings.T(" · 覆盖模板", " · Overrides template");
-        ImGui.TextDisabled(state);
+        ImGui.TextDisabled(GetSoundState(selected));
         SoundLibraryGroupsView.DrawSelectedResourceStatus(snapshot, selected);
 
         if (collapseAll) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
@@ -183,7 +240,7 @@ internal static class SoundEditorView
         EditorSoundSnapshot[] sounds = snapshot.Sounds ?? Array.Empty<EditorSoundSnapshot>();
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
-        ImGui.TextDisabled(DevToolUiSettings.T($"{sounds.Length} 个环境声音", $"{sounds.Length} ambient sounds"));
+        ImGui.TextDisabled(GetSceneCountText(sounds.Length));
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "SoundSceneSearch", ref sceneSearch, 128);
 
         bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
@@ -217,33 +274,24 @@ internal static class SoundEditorView
             true);
         ImGui.Separator();
 
-        int visible = 0;
-        for (int i = 0; i < sounds.Length; i++)
+        EnsureSceneProjection(sounds);
+        for (int i = 0; i < SceneRows.Count; i++)
         {
-            EditorSoundSnapshot sound = sounds[i];
-            if (!MatchesScene(sound, sceneSearch)) continue;
-            visible++;
-
+            SoundSceneRow row = SceneRows[i];
+            EditorSoundSnapshot sound = row.Sound;
             bool selected = SoundWorkspaceState.IsSceneSelected(sound.Index);
-            string prefix = sound.Type switch
-            {
-                "Omnidirectional" => "O",
-                "Directional" => "D",
-                "Spot" => "S",
-                _ => "?"
-            };
-            string label = (selected ? "☑ " : "☐ ") + "[" + prefix + "] " + sound.Sample;
-            if (sound.Inherited) label += DevToolUiSettings.T("  [继承]", "  [Inherited]");
-            else if (sound.OverWrite) label += DevToolUiSettings.T("  [覆盖]", "  [Override]");
 
-            if (ImGui.Selectable(label + "##SoundScene" + sound.Index, selected))
+            ImGui.PushID(sound.Index);
+            bool clicked = ImGui.Selectable(selected ? row.SelectedLabel : row.NormalLabel, selected);
+            ImGui.PopID();
+            if (clicked)
             {
                 SoundWorkspaceState.HandleSceneClick(sound.Index, ctrl, shift);
                 SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(SoundEditorCommandKind.Select, sound.Index));
             }
         }
 
-        if (visible == 0)
+        if (SceneRows.Count == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景声音。", "No matching scene sounds."), true);
 
         int[] selectedIndices = SoundWorkspaceState.SelectedIndices();
@@ -252,12 +300,12 @@ internal static class SoundEditorView
         ImGui.Separator();
         ImGui.TextColored(
             new Num.Vector4(0.62f, 0.84f, 1f, 1f),
-            DevToolUiSettings.T($"已选择 {selectedIndices.Length} 个声音", $"{selectedIndices.Length} selected"));
+            GetSceneSelectionText(selectedIndices.Length));
 
         if (SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
         {
             if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("加入工作组 · ", "Add to Working Group · ") + group.Name,
+                    GetActiveGroupButtonText(group),
                     "SoundSceneAddSelectionToGroup",
                     DevToolButtonTone.Primary,
                     true))
@@ -289,6 +337,111 @@ internal static class SoundEditorView
         }
 
         DrawCreateGroupFromSelectionPopup(selectedIndices);
+    }
+
+    private static void EnsureSceneProjection(EditorSoundSnapshot[] sounds)
+    {
+        string normalizedSearch = sceneSearch?.Trim() ?? string.Empty;
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(projectedSceneSounds, sounds) &&
+            string.Equals(projectedSceneSearch, normalizedSearch, StringComparison.Ordinal) &&
+            projectedSceneChinese == chinese)
+            return;
+
+        SceneRows.Clear();
+        for (int i = 0; i < sounds.Length; i++)
+        {
+            EditorSoundSnapshot sound = sounds[i];
+            if (!MatchesScene(sound, normalizedSearch)) continue;
+
+            string prefix = sound.Type switch
+            {
+                "Omnidirectional" => "O",
+                "Directional" => "D",
+                "Spot" => "S",
+                _ => "?"
+            };
+            string suffix = sound.Inherited
+                ? DevToolUiSettings.T("  [继承]", "  [Inherited]")
+                : sound.OverWrite
+                    ? DevToolUiSettings.T("  [覆盖]", "  [Override]")
+                    : string.Empty;
+            string body = "[" + prefix + "] " + sound.Sample + suffix;
+            SceneRows.Add(new SoundSceneRow
+            {
+                Sound = sound,
+                SelectedLabel = "☑ " + body,
+                NormalLabel = "☐ " + body
+            });
+        }
+
+        projectedSceneSounds = sounds;
+        projectedSceneSearch = normalizedSearch;
+        projectedSceneChinese = chinese;
+    }
+
+    private static string GetSceneCountText(int count)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (sceneCountValue == count && sceneCountChinese == chinese && sceneCountText.Length > 0)
+            return sceneCountText;
+        sceneCountValue = count;
+        sceneCountChinese = chinese;
+        sceneCountText = chinese ? $"{count} 个环境声音" : $"{count} ambient sounds";
+        return sceneCountText;
+    }
+
+    private static string GetInspectorSelectionText(int count)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (inspectorSelectionCount == count && inspectorSelectionChinese == chinese && inspectorSelectionText.Length > 0)
+            return inspectorSelectionText;
+        inspectorSelectionCount = count;
+        inspectorSelectionChinese = chinese;
+        inspectorSelectionText = chinese ? $"已选择 {count} 个声音" : $"{count} SOUNDS SELECTED";
+        return inspectorSelectionText;
+    }
+
+    private static string GetSceneSelectionText(int count)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (sceneSelectionCount == count && sceneSelectionChinese == chinese && sceneSelectionText.Length > 0)
+            return sceneSelectionText;
+        sceneSelectionCount = count;
+        sceneSelectionChinese = chinese;
+        sceneSelectionText = chinese ? $"已选择 {count} 个声音" : $"{count} selected";
+        return sceneSelectionText;
+    }
+
+    private static string GetSoundState(EditorSoundSnapshot sound)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        if (ReferenceEquals(stateSound, sound) && stateChinese == chinese)
+            return stateText;
+
+        stateText = sound.Type;
+        if (sound.Inherited) stateText += chinese ? " · 继承" : " · Inherited";
+        else if (sound.OverWrite) stateText += chinese ? " · 覆盖模板" : " · Overrides template";
+        stateSound = sound;
+        stateChinese = chinese;
+        return stateText;
+    }
+
+    private static string GetActiveGroupButtonText(SoundGroupSnapshot group)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        string id = group?.Id ?? string.Empty;
+        string name = group?.Name ?? string.Empty;
+        if (string.Equals(activeGroupButtonId, id, StringComparison.Ordinal) &&
+            string.Equals(activeGroupButtonName, name, StringComparison.Ordinal) &&
+            activeGroupButtonChinese == chinese && activeGroupButtonText.Length > 0)
+            return activeGroupButtonText;
+
+        activeGroupButtonId = id;
+        activeGroupButtonName = name;
+        activeGroupButtonChinese = chinese;
+        activeGroupButtonText = (chinese ? "加入工作组 · " : "Add to Working Group · ") + name;
+        return activeGroupButtonText;
     }
 
     private static void DrawCreateGroupFromSelectionPopup(int[] selectedIndices)
@@ -345,19 +498,21 @@ internal static class SoundEditorView
 
     private static bool MatchesScene(EditorSoundSnapshot sound, string query)
     {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        string q = query.Trim();
-        return (sound?.Sample?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
-               (sound?.Type?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
-               (sound?.ResourceSourceName?.IndexOf(q, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
+        if (string.IsNullOrEmpty(query)) return true;
+        return (sound?.Sample?.IndexOf(query, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+               (sound?.Type?.IndexOf(query, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
+               (sound?.ResourceSourceName?.IndexOf(query, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
     private static void DrawRoomFloat(string key, string label, float current, float min, float max)
     {
-        string stateKey = "room:" + key;
-        float value = Get(FloatEdits, stateKey, current);
-        bool changed = ImGui.SliderFloat(label + "##SoundRoom" + key, ref value, min, max, "%.3f");
-        FloatEdits[stateKey] = value;
+        float value = Get(RoomFloatEdits, key, current);
+        ImGui.PushID("SoundRoom");
+        ImGui.PushID(key);
+        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        ImGui.PopID();
+        ImGui.PopID();
+        RoomFloatEdits[key] = value;
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
@@ -367,16 +522,20 @@ internal static class SoundEditorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            FloatEdits[stateKey] = current;
+            RoomFloatEdits[key] = current;
         }
     }
 
     private static void DrawSoundFloat(EditorSoundSnapshot sound, string key, string label, float current, float min, float max)
     {
-        string stateKey = "sound:" + sound.Index + ":" + key;
-        float value = Get(FloatEdits, stateKey, current);
-        bool changed = ImGui.SliderFloat(label + "##" + stateKey, ref value, min, max, "%.3f");
-        FloatEdits[stateKey] = value;
+        SoundEditKey stateKey = new(sound.Index, key);
+        float value = Get(SoundFloatEdits, stateKey, current);
+        ImGui.PushID(sound.Index);
+        ImGui.PushID(key);
+        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        ImGui.PopID();
+        ImGui.PopID();
+        SoundFloatEdits[stateKey] = value;
         if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
@@ -387,16 +546,20 @@ internal static class SoundEditorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            FloatEdits[stateKey] = current;
+            SoundFloatEdits[stateKey] = current;
         }
     }
 
     private static void DrawSoundVector(EditorSoundSnapshot sound, string key, string label, float x, float y)
     {
-        string stateKey = "sound:" + sound.Index + ":" + key;
-        Num.Vector2 value = Get(VectorEdits, stateKey, new Num.Vector2(x, y));
-        bool changed = ImGui.InputFloat2(label + "##" + stateKey, ref value, "%.2f");
-        VectorEdits[stateKey] = value;
+        SoundEditKey stateKey = new(sound.Index, key);
+        Num.Vector2 value = Get(SoundVectorEdits, stateKey, new Num.Vector2(x, y));
+        ImGui.PushID(sound.Index);
+        ImGui.PushID(key);
+        bool changed = ImGui.InputFloat2(label, ref value, "%.2f");
+        ImGui.PopID();
+        ImGui.PopID();
+        SoundVectorEdits[stateKey] = value;
         if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
@@ -407,7 +570,7 @@ internal static class SoundEditorView
         }
         else if (!changed && !ImGui.IsItemActive())
         {
-            VectorEdits[stateKey] = new Num.Vector2(x, y);
+            SoundVectorEdits[stateKey] = new Num.Vector2(x, y);
         }
     }
 
@@ -423,7 +586,7 @@ internal static class SoundEditorView
         return index >= 0 && index < sounds.Length ? sounds[index] : null;
     }
 
-    private static TValue Get<TValue>(Dictionary<string, TValue> dictionary, string key, TValue fallback)
+    private static TValue Get<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, TValue fallback)
     {
         if (dictionary.TryGetValue(key, out TValue value)) return value;
         dictionary[key] = fallback;
