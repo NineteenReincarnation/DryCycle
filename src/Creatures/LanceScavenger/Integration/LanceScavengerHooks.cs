@@ -40,6 +40,12 @@ internal static class LanceScavengerHooks
     {
         if (self is not LanceScavenger lance || lance.Brain == null) { orig(self); return; }
         lance.Brain.Update();
+
+        // A close-defense lift is a real multi-frame weapon motion. Advance its desired angle even
+        // if the state machine leaves CloseDefense after the first hit/knockback, so the lance does
+        // not freeze halfway through the arc while its remaining collision frames are still active.
+        lance.Lance?.UpdateDefensiveLiftPose();
+
         if (lance.Combat.State == LanceState.Charge && !self.safariControlled) { lance.Motor.Act(); return; }
 
         bool holdPosition = lance.Motor.OwnsMovement && !self.safariControlled;
