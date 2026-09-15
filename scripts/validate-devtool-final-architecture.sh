@@ -7,6 +7,7 @@ frontend="$root/RWImGui"
 phase_doc="$root/PHASE6.md"
 runtime="$root/Core/DevToolRuntime.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
+legacy_controller="$root/Compatibility/LegacyUiPresentationController.cs"
 
 if [[ ! -d "$root" ]]; then
   echo "DevTool root is missing: $root" >&2
@@ -100,6 +101,19 @@ if [[ -n "$runtime_fanout_hits" ]]; then
   exit 1
 fi
 
+# The dormant DevUI lifetime edge used to duplicate the same seven queues and presentation hubs.
+# Compatibility owns only compatibility cleanup; backend runtime cleanup must delegate to Core.
+dormant_fanout_hits="$(
+  grep -nE '(EditorUi|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor)CommandQueue\.Clear|\
+(Editor|RoomEditor|SoundEditor|TriggerEditor|MapEditor|DialogEditor|RelationshipEditor)PresentationHub\.Clear' \
+    "$legacy_controller" || true
+)"
+if [[ -n "$dormant_fanout_hits" ]]; then
+  echo "LegacyUiPresentationController duplicated feature runtime cleanup again:" >&2
+  echo "$dormant_fanout_hits" >&2
+  exit 1
+fi
+
 required_coordinator_symbols=(
   'ProcessPendingCommands'
   'ResetRuntimeState'
@@ -128,6 +142,10 @@ if ! grep -Fq 'DevToolSubsystemCoordinator.ProcessPendingCommands(session)' "$ru
 fi
 if ! grep -Fq 'DevToolSubsystemCoordinator.ResetRuntimeState()' "$runtime"; then
   echo "DevToolRuntime is not routing lifecycle reset through the subsystem coordinator." >&2
+  exit 1
+fi
+if ! grep -Fq 'DevToolSubsystemCoordinator.ResetRuntimeState()' "$legacy_controller"; then
+  echo "Dormant DevUI cleanup is not routing backend lifecycle reset through the subsystem coordinator." >&2
   exit 1
 fi
 
