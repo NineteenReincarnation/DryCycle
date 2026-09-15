@@ -198,7 +198,15 @@ internal static class CombatTests
         Check(Mathf.Abs(LanceCombatMath.CounterSweepChance(fierce) - 0.55f) < 0.001f,
             "Highest counter-sweep personality chance is 55 percent");
 
-        Check(LanceCombatMath.Impact(0f, 1f, 1f, 1f, true, 200f, true).Damage == 0f, "Stationary tip is harmless");
+        Check(Mathf.Abs(LanceAimSolver.MinimumAimQuality - 0.58f) < 0.001f,
+            "Charge commitment uses the intended soft aim-quality threshold");
+        Vector2 smoothed = TargetMotionTracker.BlendVelocity(new Vector2(4f, 0f), new Vector2(-4f, 0f));
+        Check(smoothed.x > -4f && smoothed.x < 4f,
+            "One reversed raw frame is smoothed instead of replacing the target velocity outright");
+        Check(TargetMotionTracker.StabilityFromJitter(1f) > TargetMotionTracker.StabilityFromJitter(6f),
+            "Stable body motion scores higher than animation/constraint jitter");
+
+        Check(LanceCombatMath.Impact(0f, 1f, 1f, 1f, true, 200f, true).Damage == 0f, "Stationary blade is harmless");
         Check(LanceCombatMath.Impact(20f, 0f, 1f, 1f, true, 200f, true).Damage == 0f, "Side strike cannot pierce");
         Check(LanceCombatMath.Impact(20f, -1f, 1f, 1f, true, 200f, true).Damage == 0f, "Rear strike cannot pierce");
         Check(LanceCombatMath.Impact(19f, 1f, 1f, 1f, true, 0f, false).Damage < standard.Damage, "Zero run-up cannot deal full damage");
@@ -206,7 +214,7 @@ internal static class CombatTests
         float heavy = LanceCombatMath.Impact(19f, 1f, 0.85f, 8f, true, 120f, false).RetainedSpeed;
         Check(light > 0.8f && heavy < 0.2f, "Large targets produce materially greater recoil");
         Check(LanceCombatMath.SweepTip(Vector2.zero, new Vector2(40,0), new Vector2(20,0), new Vector2(20,0), 2f, out float fraction) && fraction < 0.5f,
-            "Fast tip does not tunnel through a small target");
+            "Fast blade sample does not tunnel through a small target");
         Check(LanceCombatMath.SweepTip(Vector2.zero, new Vector2(40,0), new Vector2(20,20), new Vector2(20,-20), 2f, out _), "Relative-motion sweep catches crossing target");
         Check(!LanceCombatMath.SweepTip(Vector2.zero, new Vector2(40,0), new Vector2(20,10), new Vector2(20,10), 2f, out _), "Near miss stays a miss");
         Check(!LanceCombatMath.SweepTip(Vector2.zero, Vector2.zero, new Vector2(10,0), new Vector2(10,0), 2f, out _), "Degenerate sweep stays finite");
