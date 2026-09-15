@@ -23,6 +23,7 @@ internal static class ActionToastOverlay
 
     private static string message = string.Empty;
     private static string shortcutKeys = string.Empty;
+    private static string renderedMessage = string.Empty;
     private static bool warning;
     private static double shownAt = -1000d;
 
@@ -38,11 +39,9 @@ internal static class ActionToastOverlay
         double age = ImGui.GetTime() - shownAt;
         if (age < 0d || age >= VisibleSeconds) return;
 
-        string visibleMessage = string.IsNullOrEmpty(message)
-            ? DevToolUiSettings.T("已执行", "Done")
-            : message;
-        if (!string.IsNullOrWhiteSpace(shortcutKeys))
-            visibleMessage += "  ·  " + shortcutKeys;
+        string visibleMessage = renderedMessage;
+        if (string.IsNullOrEmpty(visibleMessage))
+            visibleMessage = DevToolUiSettings.T("已执行", "Done");
 
         float alpha = 1f;
         double fadeStart = VisibleSeconds - FadeSeconds;
@@ -100,6 +99,9 @@ internal static class ActionToastOverlay
     {
         message = DevToolUiSettings.T(chinese, english);
         shortcutKeys = keys ?? string.Empty;
+        renderedMessage = string.IsNullOrWhiteSpace(shortcutKeys)
+            ? message
+            : message + "  ·  " + shortcutKeys;
         warning = isWarning;
         shownAt = ImGui.GetTime();
     }
