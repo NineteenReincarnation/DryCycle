@@ -212,7 +212,7 @@ public static class SoundGroupLibrary
     internal static bool CreateLocalGroup(string id, string name)
     {
         EnsureLoaded();
-        if (!loaded) return false;
+        if (!loaded || loading) return false;
 
         id = (id ?? string.Empty).Trim();
         name = (name ?? string.Empty).Trim();
@@ -244,14 +244,14 @@ public static class SoundGroupLibrary
     internal static bool DeleteLocalGroup(string id)
     {
         EnsureLoaded();
-        if (!loaded || string.IsNullOrWhiteSpace(id) || !localGroups.Remove(id)) return false;
+        if (!loaded || loading || string.IsNullOrWhiteSpace(id) || !localGroups.Remove(id)) return false;
         return SaveLocalAndReload();
     }
 
     internal static bool AddSoundToLocalGroup(string id, SoundGroupSoundDefinition sound)
     {
         EnsureLoaded();
-        if (!loaded || sound == null || string.IsNullOrWhiteSpace(sound.Sample)) return false;
+        if (!loaded || loading || sound == null || string.IsNullOrWhiteSpace(sound.Sample)) return false;
         if (!localGroups.TryGetValue(id ?? string.Empty, out SoundGroupDefinition group)) return false;
 
         if (!string.Equals(sound.Type, "Spot", StringComparison.Ordinal))
@@ -275,7 +275,7 @@ public static class SoundGroupLibrary
     internal static bool TryGetGroup(string id, out SoundGroupDefinition group)
     {
         EnsureLoaded();
-        if (!loaded)
+        if (!loaded || loading)
         {
             group = null;
             return false;
@@ -309,28 +309,28 @@ public static class SoundGroupLibrary
 
     private static void StepDiscoverMod()
     {
-        while (discoverModIndex >= 0)
+        if (discoverModIndex < 0)
         {
-            ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];
-            string file = ResolveStandardFile(mod);
-            if (string.IsNullOrEmpty(file) || !File.Exists(file))
-                return;
-
-            string canonical = CanonicalPath(file);
-            if (!buildingSeenFiles.Add(canonical))
-                return;
-
-            bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
-            pendingFiles.Add(new PendingGroupFile
-            {
-                File = file,
-                SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
-                IsLocal = false
-            });
+            loadPhase = LoadPhase.DiscoverLocal;
             return;
         }
 
-        loadPhase = LoadPhase.DiscoverLocal;
+        ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];
+        string file = ResolveStandardFile(mod);
+        if (string.IsNullOrEmpty(file) || !File.Exists(file))
+            return;
+
+        string canonical = CanonicalPath(file);
+        if (!buildingSeenFiles.Add(canonical))
+            return;
+
+        bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
+        pendingFiles.Add(new PendingGroupFile
+        {
+            File = file,
+            SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
+            IsLocal = false
+        });
     }
 
     private static void DiscoverLocalFile()
@@ -636,9 +636,8 @@ public static class SoundGroupLibrary
             DirectionY = FloatAttr(element, "directionY", -1f)
         };
 
-        // Do not resolve the sample while parsing XML. That old coupling allowed Group loading to
-        // trigger a full SoundSampleCatalog cold build recursively. Sample metadata is attached in
-        // the snapshot stage after the catalog has reached Ready.
+        // Group parsing must never trigger sample-catalog I/O. Resolution belongs to the later
+        // snapshot stage, after the catalog has reached Ready.
         return true;
     }
 
