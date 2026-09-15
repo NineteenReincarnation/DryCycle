@@ -146,13 +146,13 @@ internal static class FloatingWindowSnap
         displaySize = frameContext.DisplaySize;
 
         Guides.Clear();
+        PruneStaleInteractiveState();
         if (frame >= nextStaleAuditFrame)
         {
             RemoveStaleWindows();
             nextStaleAuditFrame = frame + StaleAuditIntervalFrames;
         }
 
-        ImGuiIOPtr io = frameContext.Io;
         bool leftDown = frameContext.LeftMouseDown;
         leftMouseDownThisFrame = leftDown;
 
@@ -217,8 +217,14 @@ internal static class FloatingWindowSnap
             GroupDragOrigins.Clear();
             foreach (string id in Selected)
             {
-                if (Windows.TryGetValue(id, out WindowState state) && state.Initialized)
+                if (IsWindowLive(id) && Windows.TryGetValue(id, out WindowState state))
                     GroupDragOrigins[id] = state.Position;
+            }
+
+            if (GroupDragOrigins.Count < 2)
+            {
+                groupDragging = false;
+                GroupDragOrigins.Clear();
             }
         }
 
@@ -418,6 +424,44 @@ internal static class FloatingWindowSnap
                Windows.TryGetValue(id, out WindowState state) &&
                state.Initialized && state.LastSeenFrame >= frame - 1;
     }
+
+
+private static bool IsWindowRecentForInteractiveState(string id)
+{
+    return !string.IsNullOrEmpty(id) &&
+           Windows.TryGetValue(id, out WindowState state) &&
+           state.Initialized && state.LastSeenFrame >= frame - 2;
+}
+
+private static void PruneStaleInteractiveState()
+{
+    if (Selected.Count > 0)
+    {
+        StaleKeys.Clear();
+        foreach (string id in Selected)
+        {
+            if (!IsWindowRecentForInteractiveState(id)) StaleKeys.Add(id);
+        }
+        for (int i = 0; i < StaleKeys.Count; i++) Selected.Remove(StaleKeys[i]);
+    }
+
+    if (GroupDragOrigins.Count > 0)
+    {
+        StaleKeys.Clear();
+        foreach (KeyValuePair<string, Num.Vector2> pair in GroupDragOrigins)
+        {
+            if (!IsWindowRecentForInteractiveState(pair.Key)) StaleKeys.Add(pair.Key);
+        }
+        for (int i = 0; i < StaleKeys.Count; i++) GroupDragOrigins.Remove(StaleKeys[i]);
+        if (groupDragging && GroupDragOrigins.Count < 2)
+        {
+            groupDragging = false;
+            groupDragDelta = Num.Vector2.Zero;
+            GroupDragOrigins.Clear();
+        }
+    }
+    StaleKeys.Clear();
+}
 
     private static void DetectResizeEdges(WindowState state, Num.Vector2 position, Num.Vector2 size)
     {
