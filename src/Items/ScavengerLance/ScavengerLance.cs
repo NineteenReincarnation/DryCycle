@@ -47,6 +47,7 @@ internal sealed partial class ScavengerLance : Weapon
     internal Vector2 BladeRoot => firstChunk.pos + rotation * LanceCombatMath.BladeRootDistance(Length);
     internal Vector2 Tail => firstChunk.pos - rotation * (Length * LanceCombatMath.GripFraction);
     internal bool CanThrust => _thrustCooldown == 0 && Holder != null;
+    internal bool HasHitCreature(Creature creature) => creature != null && _hitCreatures.Contains(creature);
     public override bool HeavyWeapon => true;
 
     public override void NewRoom(Room newRoom)
@@ -219,17 +220,22 @@ internal sealed partial class ScavengerLance : Weapon
             Vector2.Lerp(_previousGrip, firstChunk.pos, firstHit);
         float alignment = Mathf.Min(Vector2.Dot(rotation, relative.normalized), Vector2.Dot(rotation, targetDirection.normalized));
         bool thrust = _thrustFrames > 0 || _flightFrames > 0;
+        bool counterSweep = charging && _gripValid && _grip.CounterSweep;
         float speed = charging ? Mathf.Max(0f, holderSpeed) : Mathf.Max(0f, Vector2.Dot(relative, rotation));
-        LanceImpact impact = LanceCombatMath.Impact(speed, alignment, holder?.TotalMass ?? TotalMass,
-            victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust, _thrustMaxDamage);
+        LanceImpact impact = counterSweep
+            ? LanceCombatMath.CounterSweepImpact(holder?.TotalMass ?? TotalMass, victim.TotalMass,
+                Mathf.Max(holderSpeed, relative.magnitude))
+            : LanceCombatMath.Impact(speed, alignment, holder?.TotalMass ?? TotalMass,
+                victim.TotalMass, charging, _gripValid ? _grip.RunUp : 0f, thrust, _thrustMaxDamage);
         if (impact.Damage <= 0f) return;
 
-        // The whole front wedge is dangerous. Hits nearer the shoulder are slightly less
-        // efficient than the point, but they are still real stab damage rather than shaft pushes.
-        float bladeScale = LanceCombatMath.BladeDamageMultiplier(firstBladeT);
+        // Counter-sweep is explicitly a full-charge correction attack: any part of the damaging
+        // bone blade that truly intersects receives the full tier. Ordinary attacks keep the
+        // shoulder-to-tip efficiency gradient.
+        float bladeScale = counterSweep ? 1f : LanceCombatMath.BladeDamageMultiplier(firstBladeT);
         float damage = impact.Damage * bladeScale;
         float stun = impact.Stun * bladeScale;
-        float impulse = impact.Impulse * Mathf.Lerp(0.88f, 1f, bladeScale);
+        float impulse = impact.Impulse * (counterSweep ? 1f : Mathf.Lerp(0.88f, 1f, bladeScale));
 
         _hitCreatures.Add(victim);
         victim.SetKillTag((holder ?? thrownBy)?.abstractCreature);
@@ -239,7 +245,7 @@ internal sealed partial class ScavengerLance : Weapon
         {
             foreach (BodyChunk chunk in holder.bodyChunks)
                 chunk.vel -= rotation * Mathf.Max(0f, Vector2.Dot(chunk.vel, rotation)) * (1f - impact.RetainedSpeed);
-            lanceWielder.LanceImpact(false, speed, impact.RetainedSpeed);
+            lanceWielder.LanceImpact(false, Mathf.Max(speed, counterSweep ? 12f : speed), impact.RetainedSpeed);
         }
         else if (holder == null) { firstChunk.vel *= 0.35f; _flightFrames = 0; }
         _bendVelocity += Mathf.Min(3.5f, impulse * 0.4f);
