@@ -130,24 +130,24 @@ internal static class CombatTests
         Check(noPriority.State == LanceState.Threaten && noPriority.AttackSerial == 0,
             "A second lance scavenger without charge priority yields instead of competing for the same lane");
 
-        var recentWindow = new LanceCombatState();
-        recentWindow.Tick(Situation());
-        recentWindow.Tick(Situation());
-        Check(recentWindow.State == LanceState.Brace, "Recent-window test reaches brace");
-        for (int i = 0; i < LanceCombatState.BraceFrames - 4; i++) recentWindow.Tick(Situation());
-        for (int i = 0; i < 4 && recentWindow.State == LanceState.Brace; i++)
-            recentWindow.Tick(Situation(lane: false, commitReady: true));
-        Check(recentWindow.State == LanceState.Charge && recentWindow.AttackSerial == 1,
-            "A soft final-frame prediction miss may still launch from a recent credible solution");
+        var fullBraceWindow = new LanceCombatState();
+        fullBraceWindow.Tick(Situation());
+        fullBraceWindow.Tick(Situation());
+        Check(fullBraceWindow.State == LanceState.Brace, "Full-brace-window test reaches brace");
+        fullBraceWindow.Tick(Situation()); // credible solution on the first brace frame
+        for (int i = 1; i < LanceCombatState.BraceFrames && fullBraceWindow.State == LanceState.Brace; i++)
+            fullBraceWindow.Tick(Situation(lane: false, commitReady: true));
+        Check(fullBraceWindow.State == LanceState.Charge && fullBraceWindow.AttackSerial == 1,
+            "Any credible solution seen during the 38-frame brace may be committed at release");
 
-        var staleWindow = new LanceCombatState();
-        staleWindow.Tick(Situation());
-        staleWindow.Tick(Situation());
-        Check(staleWindow.State == LanceState.Brace, "Stale-window test reaches brace");
+        var noSolutionWindow = new LanceCombatState();
+        noSolutionWindow.Tick(Situation());
+        noSolutionWindow.Tick(Situation());
+        Check(noSolutionWindow.State == LanceState.Brace, "No-solution-window test reaches brace");
         for (int i = 0; i < LanceCombatState.BraceFrames; i++)
-            staleWindow.Tick(Situation(lane: false, commitReady: false));
-        Check(staleWindow.State == LanceState.AcquireChargeLane && staleWindow.AttackSerial == 0,
-            "A brace with no credible recent solution does not launch blindly");
+            noSolutionWindow.Tick(Situation(lane: false, commitReady: false));
+        Check(noSolutionWindow.State == LanceState.AcquireChargeLane && noSolutionWindow.AttackSerial == 0,
+            "A brace with no credible solution anywhere in its 38 frames does not launch blindly");
 
         var hardBlock = new LanceCombatState();
         hardBlock.Tick(Situation());
@@ -155,7 +155,7 @@ internal static class CombatTests
         Check(hardBlock.State == LanceState.Brace, "Hard-block test reaches brace");
         hardBlock.Tick(Situation(lane: false, commitReady: true, hardBlocked: true));
         Check(hardBlock.State == LanceState.AcquireChargeLane && hardBlock.AttackSerial == 0,
-            "Terrain/range hard blockers cancel even when a recent solution exists");
+            "Terrain/range hard blockers cancel even when a stored brace solution exists");
 
         var afraid = new LanceCombatState();
         for (int i = 0; i < 180; i++) afraid.Tick(Situation(afraid: true, lane: false, commitReady: false));
