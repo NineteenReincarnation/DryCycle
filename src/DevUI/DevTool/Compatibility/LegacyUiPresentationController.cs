@@ -304,6 +304,7 @@ internal static class LegacyUiPresentationController
         SceneWorkspaceWindow.ResetRetainedState();
         SoundEditorView.ResetRetainedState();
         TriggerEditorView.ResetRetainedState();
+        WorldWorkspaceView.ResetRetainedState();
 
         // Reset normally releases the observed/hidden page already. Keep the explicit release for
         // the case where presentation never hid the active page during this DevUI lifetime.
