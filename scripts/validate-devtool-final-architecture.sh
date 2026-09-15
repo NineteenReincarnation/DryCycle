@@ -53,13 +53,33 @@ if [[ -n "$third_party_object_hits" ]]; then
   exit 1
 fi
 
+# Deleted adapters must not survive as dangling compile-time references in another DevTool folder.
+removed_adapter_refs="$(
+  grep -RInE --include='*.cs' \
+    'PomManagedDataInspectorAdapter|RegionKitAdvancedShaderInspectorAdapter' \
+    "$root" || true
+)"
+if [[ -n "$removed_adapter_refs" ]]; then
+  echo "Removed framework-specific inspector types are still referenced by DevTool C# code:" >&2
+  echo "$removed_adapter_refs" >&2
+  exit 1
+fi
+
 if [[ -e "$objects/PomManagedDataInspectorAdapter.cs" || -e "$objects/RegionKitAdvancedShaderInspectorAdapter.cs" ]]; then
   echo "Removed framework-specific inspector files were reintroduced." >&2
   exit 1
 fi
 
-if grep -Fq 'PomManagedDataInspectorAdapter.EnsureRegistered' "$objects/ObjectCatalog.cs"; then
-  echo "ObjectCatalog must not bootstrap a third-party-specific inspector." >&2
+# Outside Compatibility diagnostics, runtime feature modules may not learn third-party private type
+# names. Compatibility is allowed to classify source/coverage for diagnostics, but business editing
+# semantics must remain protocol-based.
+private_third_party_hits="$(
+  find "$root" -type f -name '*.cs' ! -path "$root/Compatibility/*" -print0 |
+    xargs -0 grep -nE 'Pom\.Pom|RegionKit\.Modules\.|Fisobs\.|M4r\.' || true
+)"
+if [[ -n "$private_third_party_hits" ]]; then
+  echo "DevTool runtime feature code contains a third-party private runtime type dependency:" >&2
+  echo "$private_third_party_hits" >&2
   exit 1
 fi
 
