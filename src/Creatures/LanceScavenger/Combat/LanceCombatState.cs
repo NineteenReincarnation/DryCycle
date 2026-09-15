@@ -28,16 +28,19 @@ internal sealed class LanceCombatState
     internal const int BraceFrames = 60;
     internal const int MaxChargeFrames = 32;
     internal const int FollowUpThrowFrames = 8;
-    internal const int FollowUpThrowTimeout = 18;
+    internal const int FollowUpThrowTimeout = 60;
     internal const int RecoveryFrames = 44;
     internal const int WallRecoveryFrames = 82;
     internal LanceState State { get; private set; }
     internal int Age { get; private set; }
     internal int Cooldown { get; private set; }
     internal int AttackSerial { get; private set; }
-    internal bool FollowUpReady => State == LanceState.FollowUpThrow && Age >= FollowUpThrowFrames;
+    internal bool FollowUpReady => State == LanceState.FollowUpThrow && _followUpLandingAge >= 0 &&
+        Age - _followUpLandingAge >= FollowUpThrowFrames;
     private int _recoveryDuration;
     private bool _followUpReserved;
+    private bool _chargeLanded;
+    private int _followUpLandingAge = -1;
 
     internal void Tick(LanceSituation s)
     {
@@ -86,8 +89,6 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // Afraid retains vanilla flee locomotion and only counter-charges from a lane
-        // that already exists at its current retreat position.
         if (s.Afraid)
         {
             if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || Cooldown > 0)
@@ -99,6 +100,7 @@ internal sealed class LanceCombatState
             if (Age >= BraceFrames)
             {
                 _followUpReserved = s.Sidearm && s.Lane;
+                _chargeLanded = false;
                 AttackSerial++;
                 Enter(LanceState.Charge);
             }
@@ -117,12 +119,19 @@ internal sealed class LanceCombatState
         if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
         if (Age >= BraceFrames)
         {
-            // Lane.Clear is the charge planner's predicted-hit solution. If a normal
-            // spear is still carried now, reserve it for the fast landing follow-up.
             _followUpReserved = s.Sidearm && s.Lane;
+            _chargeLanded = false;
             AttackSerial++;
             Enter(LanceState.Charge);
         }
+    }
+
+    internal void MarkLanding()
+    {
+        if (State == LanceState.Charge)
+            _chargeLanded = true;
+        else if (State == LanceState.FollowUpThrow && _followUpLandingAge < 0)
+            _followUpLandingAge = Age;
     }
 
     internal void FinishCharge(bool wall)
@@ -130,7 +139,10 @@ internal sealed class LanceCombatState
         if (State != LanceState.Charge) return;
         if (!wall && _followUpReserved)
         {
+            bool alreadyLanded = _chargeLanded;
             Enter(LanceState.FollowUpThrow);
+            _followUpLandingAge = alreadyLanded ? 0 : -1;
+            _chargeLanded = false;
             return;
         }
         Recover(wall);
@@ -144,6 +156,8 @@ internal sealed class LanceCombatState
     internal void Recover(bool wall)
     {
         _followUpReserved = false;
+        _chargeLanded = false;
+        _followUpLandingAge = -1;
         _recoveryDuration = wall ? WallRecoveryFrames : RecoveryFrames;
         Cooldown = wall ? 115 : 76;
         State = LanceState.Recover;
@@ -153,6 +167,8 @@ internal sealed class LanceCombatState
     internal void ResetForRoom()
     {
         _followUpReserved = false;
+        _chargeLanded = false;
+        _followUpLandingAge = -1;
         if (State == LanceState.Recover) return;
         if (State == LanceState.Charge || State == LanceState.Brace || State == LanceState.FollowUpThrow) Recover(false);
         else Enter(LanceState.Observe);
