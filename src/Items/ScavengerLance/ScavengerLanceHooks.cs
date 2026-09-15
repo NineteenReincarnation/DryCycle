@@ -1,4 +1,6 @@
+using DryCycle.Creatures.LanceScavenger;
 using DryCycle.Registration;
+using RWCustom;
 using UnityEngine;
 
 namespace DryCycle.Items.ScavengerLance;
@@ -15,6 +17,7 @@ internal static class ScavengerLanceHooks
         _definition = new ScavengerLanceDefinition();
         ItemRegistry.Register(_definition);
         On.Player.Grabability += Grabability;
+        On.Player.PickupCandidate += PickupCandidate;
         On.Player.HeavyCarry += HeavyCarry;
         On.Player.GetHeldItemDirection += GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
@@ -26,6 +29,7 @@ internal static class ScavengerLanceHooks
         if (!_enabled) return;
         ScavengerLanceDevConsoleSupport.ResetRegistration();
         On.Player.Grabability -= Grabability;
+        On.Player.PickupCandidate -= PickupCandidate;
         On.Player.HeavyCarry -= HeavyCarry;
         On.Player.GetHeldItemDirection -= GetHeldItemDirection;
         On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
@@ -38,6 +42,44 @@ internal static class ScavengerLanceHooks
     }
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
         obj is ScavengerLance ? Player.ObjectGrabability.BigOneHand : orig(self, obj);
+
+    private static PhysicalObject PickupCandidate(On.Player.orig_PickupCandidate orig, Player self, float favorSpears)
+    {
+        PhysicalObject candidate = orig(self, favorSpears);
+        if (candidate is not Spear || self.room == null || candidate.grabbedBy.Count == 0)
+            return candidate;
+
+        LanceScavenger holder = null;
+        for (int i = 0; i < candidate.grabbedBy.Count; i++)
+        {
+            if (candidate.grabbedBy[i]?.grabber is LanceScavenger lanceScavenger)
+            {
+                holder = lanceScavenger;
+                break;
+            }
+        }
+
+        // Vanilla heavily favors Spear when looking for a pickup candidate. Because a LanceScavenger
+        // carries both an ordinary sidearm spear and the custom lance, the player would always steal
+        // the sidearm first. That sidearm is BigOneHand, which then makes CanIPickThisUp reject the
+        // BigOneHand lance on the next pickup attempt. Prefer the signature lance when both are being
+        // carried by the same LanceScavenger, while keeping vanilla distance/visibility checks.
+        ScavengerLance lance = holder?.Lance;
+        if (lance == null || lance.room != self.room || lance.forbiddenToPlayer > 0 || !self.CanIPickThisUp(lance))
+            return candidate;
+        if (lance.abstractPhysicalObject.rippleLayer != self.abstractPhysicalObject.rippleLayer &&
+            !lance.abstractPhysicalObject.rippleBothSides && !self.abstractPhysicalObject.rippleBothSides)
+            return candidate;
+
+        BodyChunk chunk = lance.firstChunk;
+        if (!Custom.DistLess(self.bodyChunks[0].pos, chunk.pos, chunk.rad + 40f))
+            return candidate;
+        if (!Custom.DistLess(self.bodyChunks[0].pos, chunk.pos, chunk.rad + 20f) &&
+            !self.room.VisualContact(self.bodyChunks[0].pos, chunk.pos))
+            return candidate;
+
+        return lance;
+    }
 
     // A carried lance must never pull the player's body towards its extending tip.
     private static bool HeavyCarry(On.Player.orig_HeavyCarry orig, Player self, PhysicalObject obj) =>
