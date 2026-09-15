@@ -11,6 +11,15 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class FontSettingsWindow
 {
+    private static bool fontStatusProjectionValid;
+    private static bool projectedFontStatusChinese;
+    private static string projectedFontName = string.Empty;
+    private static int projectedActualWeight = int.MinValue;
+    private static int projectedWeightVariants = int.MinValue;
+    private static string projectedFontStatus = string.Empty;
+    private static string projectedResolvedWeightStatus = string.Empty;
+    private static string projectedFamilyWeightsStatus = string.Empty;
+
     internal static void Draw(Num.Vector2 display)
     {
         // Typography inspection touches the font catalog and local font diagnostics. It is useful
@@ -86,10 +95,9 @@ internal static class FontSettingsWindow
         string fontName = DevToolFrontend.ResolvedFontName;
         int actualWeight = DevToolFrontend.ResolvedFontWeight;
         int weightVariants = DevToolFrontend.ResolvedFontWeightVariantCount;
-        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(fontName);
-        ImGui.TextDisabled(DevToolUiSettings.T("当前字体：", "Font: ") +
-                           (string.IsNullOrEmpty(friendlyFace) ? DevToolUiSettings.T("默认", "Default") : friendlyFace));
-        ImGui.TextDisabled(DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight);
+        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
+        ImGui.TextDisabled(projectedFontStatus);
+        ImGui.TextDisabled(projectedResolvedWeightStatus);
         ImGui.TextDisabled(DevToolUiSettings.T(
             "默认字号：中文 42 px / 英文 36 px",
             "Default size: Chinese 42 px / English 36 px"));
@@ -102,7 +110,7 @@ internal static class FontSettingsWindow
         }
         else
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants));
+            ImGui.TextDisabled(projectedFamilyWeightsStatus);
         }
 
         ImGui.Separator();
@@ -126,6 +134,32 @@ internal static class FontSettingsWindow
             DevToolUiSettings.ResetFontAppearance();
 
         ImGui.End();
+    }
+
+    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
+    {
+        bool chinese = DevToolUiSettings.IsChinese;
+        string stableFontName = fontName ?? string.Empty;
+        if (fontStatusProjectionValid &&
+            projectedFontStatusChinese == chinese &&
+            projectedActualWeight == actualWeight &&
+            projectedWeightVariants == weightVariants &&
+            string.Equals(projectedFontName, stableFontName, StringComparison.Ordinal))
+            return;
+
+        projectedFontStatusChinese = chinese;
+        projectedFontName = stableFontName;
+        projectedActualWeight = actualWeight;
+        projectedWeightVariants = weightVariants;
+
+        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(stableFontName);
+        projectedFontStatus = DevToolUiSettings.T("当前字体：", "Font: ") +
+                              (string.IsNullOrEmpty(friendlyFace)
+                                  ? DevToolUiSettings.T("默认", "Default")
+                                  : friendlyFace);
+        projectedResolvedWeightStatus = DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight;
+        projectedFamilyWeightsStatus = DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants);
+        fontStatusProjectionValid = true;
     }
 
     private static void DrawChineseFontSelector()

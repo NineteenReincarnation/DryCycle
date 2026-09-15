@@ -96,12 +96,10 @@ internal static class DevToolOverlay
     private static bool placementLabelChinese;
     private static string placementLabelText = string.Empty;
 
-    internal static void Draw(EditorPresentationSnapshot snapshot)
+    internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
-        ImGuiIOPtr io = ImGui.GetIO();
-        Num.Vector2 display = io.DisplaySize;
-        if (display.X < 1f) display.X = 1366f;
-        if (display.Y < 1f) display.Y = 768f;
+        ImGuiIOPtr io = frameContext.Io;
+        Num.Vector2 display = frameContext.DisplaySize;
 
         // The LanceScavenger debugger is a true New-UI workspace. Do not render the normal page
         // workspace under it; only the shared editor chrome remains visible.

@@ -277,7 +277,11 @@ internal static class ControlCenterWindow
                     : DevToolUiSettings.T("开启", "Enable"),
                 "ControlCenterPerformance",
                 profiling ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            DevToolPerformanceMonitor.SetEnabled(!profiling);
+        {
+            bool enable = !profiling;
+            DevToolPerformanceMonitor.SetEnabled(enable);
+            DevToolFrontendPerformanceMonitor.SetEnabled(enable);
+        }
     }
 
     private static void DrawSessionCard(EditorPresentationSnapshot snapshot)

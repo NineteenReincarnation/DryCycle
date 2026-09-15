@@ -25,19 +25,30 @@ internal static class ActionToastOverlay
     private static string shortcutKeys = string.Empty;
     private static string renderedMessage = string.Empty;
     private static bool warning;
+    private static bool toastActive;
     private static double shownAt = -1000d;
 
-    internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
+        Num.Vector2 display = frameContext.DisplaySize;
+
         // ActionToastOverlay is already part of the guaranteed per-frame frontend render chain.
         // Pump the standalone universal DevUI mirror here so every active DevInterface page is
         // testable through the same generic renderer without adding another frontend callback.
         UniversalDevUiMirrorWindow.Draw(display);
 
-        ObserveShortcuts(snapshot);
+        ObserveShortcuts(snapshot, frameContext);
+
+        // Most stable frames have no toast. Keep the common path free of ImGui time queries and
+        // fade/layout work until an action actually activates the overlay.
+        if (!toastActive) return;
 
         double age = ImGui.GetTime() - shownAt;
-        if (age < 0d || age >= VisibleSeconds) return;
+        if (age < 0d || age >= VisibleSeconds)
+        {
+            toastActive = false;
+            return;
+        }
 
         string visibleMessage = renderedMessage;
         if (string.IsNullOrEmpty(visibleMessage))
@@ -104,28 +115,41 @@ internal static class ActionToastOverlay
             : message + "  ·  " + shortcutKeys;
         warning = isWarning;
         shownAt = ImGui.GetTime();
+        toastActive = true;
     }
 
-    private static void ObserveShortcuts(EditorPresentationSnapshot snapshot)
+    private static void ObserveShortcuts(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
-        ImGuiIOPtr io = ImGui.GetIO();
-        if (io.WantTextInput || EditorInputRouter.WantsTextInput) return;
+        // Shortcut acknowledgements only react to key-down edges. On the overwhelmingly common
+        // stable frame no key transitioned down, so avoid crossing into ImGui IO and avoid all
+        // modifier GetKey calls. This also keeps held Ctrl/Command alone at zero polling cost here.
+        if (!frameContext.AnyKeyDown) return;
+
+        if (frameContext.WantTextInput || EditorInputRouter.WantsTextInput) return;
 
         bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightControl) ||
                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftCommand) ||
                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightCommand);
-        bool shift = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftShift) ||
-                     global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
+        if (!ctrl)
+        {
+            if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Tab))
+                Notify(snapshot?.FocusMode == true ? "退出专注" : "进入专注", snapshot?.FocusMode == true ? "Exit Focus" : "Enter Focus", "Tab");
+            return;
+        }
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.S))
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.S))
         {
             Notify("保存", "Save", "Ctrl+S");
             return;
         }
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Z))
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Z))
         {
+            // Shift is only relevant to Ctrl+Z. Avoid two additional native Unity input queries on
+            // every stable frame where no redo chord is being evaluated.
+            bool shift = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftShift) ||
+                         global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
             if (shift)
             {
                 bool canRedo = snapshot?.CanRedo == true;
@@ -139,7 +163,7 @@ internal static class ActionToastOverlay
             return;
         }
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Y))
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Y))
         {
             bool canRedo = snapshot?.CanRedo == true;
             Notify(canRedo ? "重做" : "没有可重做内容", canRedo ? "Redo" : "Nothing to redo", "Ctrl+Y", !canRedo);
@@ -150,26 +174,22 @@ internal static class ActionToastOverlay
         // core input router. Do not show a confirmation for a command that did not actually fire.
         if (EditorUiModeState.UseVanilla) return;
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
         {
             int selected = snapshot.Inspector?.SelectionCount ?? 0;
             Notify(selected > 0 ? "复制所选物件" : "没有选中物件", selected > 0 ? "Duplicate selection" : "Nothing selected", "Ctrl+D", selected <= 0);
             return;
         }
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.B))
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.B))
         {
             Notify("切换浏览器", "Toggle Browser", "Ctrl+B");
             return;
         }
 
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.I))
+        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.I))
         {
             Notify("切换检查器", "Toggle Inspector", "Ctrl+I");
-            return;
         }
-
-        if (!ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Tab))
-            Notify(snapshot?.FocusMode == true ? "退出专注" : "进入专注", snapshot?.FocusMode == true ? "Exit Focus" : "Enter Focus", "Tab");
     }
 }
