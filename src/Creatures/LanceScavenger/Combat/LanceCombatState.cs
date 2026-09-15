@@ -5,7 +5,7 @@ internal enum LanceState { Observe, Threaten, CreateDistance, AcquireChargeLane,
 internal readonly struct LanceSituation
 {
     internal LanceSituation(bool active, bool armed, bool target, ScavengerAI.ViolenceType violence, bool afraid,
-        float distance, bool lane, bool stable)
+        float distance, bool lane)
     {
         Active = active;
         Armed = armed;
@@ -14,10 +14,9 @@ internal readonly struct LanceSituation
         Afraid = afraid;
         Distance = distance;
         Lane = lane;
-        Stable = stable;
     }
 
-    internal readonly bool Active, Armed, Target, Afraid, Lane, Stable;
+    internal readonly bool Active, Armed, Target, Afraid, Lane;
     internal readonly float Distance;
     internal readonly ScavengerAI.ViolenceType Violence;
 }
@@ -34,7 +33,6 @@ internal sealed class LanceCombatState
     internal int Cooldown { get; private set; }
     internal int AttackSerial { get; private set; }
     private int _recoveryDuration;
-    private int _unstableFrames;
 
     internal void Tick(LanceSituation s)
     {
@@ -66,7 +64,6 @@ internal sealed class LanceCombatState
         if (s.Violence != ScavengerAI.ViolenceType.Lethal)
         {
             // Vanilla Warning / NonLethal / ForFun remain non-lethal social states.
-            // The lance may be presented as a threat, but never upgrades them into a charge.
             if (State == LanceState.Charge) Recover(false);
             else Enter(LanceState.Threaten);
             return;
@@ -77,12 +74,11 @@ internal sealed class LanceCombatState
             return;
         }
 
-        // A vanilla Afraid relationship keeps ownership of locomotion. The lance can
-        // opportunistically counter-charge only when a safe lane already exists;
-        // otherwise the ordinary scavenger flee behavior remains untouched.
+        // A vanilla Afraid relationship keeps ownership of locomotion. It can still
+        // counter-charge the moment its current retreat path naturally forms a valid lane.
         if (s.Afraid)
         {
-            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || !s.Stable || Cooldown > 0)
+            if (s.Distance < ChargeLanePlanner.MinimumChargeDistance || !s.Lane || Cooldown > 0)
             {
                 Enter(LanceState.Threaten);
                 return;
@@ -100,19 +96,6 @@ internal sealed class LanceCombatState
             return;
         }
         if (!s.Lane) { Enter(LanceState.AcquireChargeLane); return; }
-        if (!s.Stable)
-        {
-            // Procedural legs can briefly lift the torso during a planted brace.
-            // Keep the wind-up through a short wobble, but never launch off balance.
-            if (State == LanceState.Brace && ++_unstableFrames <= 6)
-            {
-                if (Age >= BraceFrames) Age = BraceFrames - 1;
-                return;
-            }
-            Enter(LanceState.AcquireChargeLane);
-            return;
-        }
-        _unstableFrames = 0;
         if (Cooldown > 0) { Enter(LanceState.Threaten); return; }
         if (State != LanceState.Brace) { Enter(LanceState.Brace); return; }
         if (Age >= BraceFrames) { AttackSerial++; Enter(LanceState.Charge); }
@@ -134,5 +117,5 @@ internal sealed class LanceCombatState
     }
 
     private void Enter(LanceState next)
-    { if (State == next) return; State = next; Age = 0; _unstableFrames = 0; }
+    { if (State == next) return; State = next; Age = 0; }
 }
