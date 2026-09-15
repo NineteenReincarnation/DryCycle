@@ -35,11 +35,14 @@ internal static class DevToolSubsystemCoordinator
         // workspaces. Presentation getters must never execute mutations as a side effect of Draw.
         UniversalDevUiCommandQueue.Process(session);
 
-        // The universal mirror is diagnostics-only. Capture it on the backend frame after commands,
-        // never from an ImGui getter. Production editor frames therefore pay no reflection/tree-scan
-        // cost when compatibility diagnostics are disabled.
+        // Compatibility diagnostics are explicitly opt-in. Capture the universal mirror and every
+        // dependent audit snapshot on the backend frame after commands; RWImGui only reads detached
+        // snapshots and normal editor frames pay none of the reflection/type-inventory cost.
         if (DevUiDiagnosticsPolicy.Enabled && session?.Owner != null)
+        {
             UniversalDevUiPresentationHub.Publish(session.Owner);
+            DevUiDiagnosticsPublisher.Publish(session.Owner);
+        }
     }
 
     internal static void ClearDetailPresentations()
