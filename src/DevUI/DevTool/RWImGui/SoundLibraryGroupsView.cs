@@ -15,6 +15,13 @@ internal static class SoundLibraryGroupsView
         internal string SelectableLabel;
     }
 
+    private sealed class SampleRun
+    {
+        internal DevToolSourceMark Source;
+        internal int Start;
+        internal int Count;
+    }
+
     private sealed class SoundEntryRow
     {
         internal SoundGroupEntrySnapshot Entry;
@@ -52,6 +59,7 @@ internal static class SoundLibraryGroupsView
     private static string projectedSampleSearch = string.Empty;
     private static bool projectedSampleChinese;
     private static readonly List<SampleRow> projectedSamples = new();
+    private static readonly List<SampleRun> projectedSampleRuns = new();
 
     private static SoundGroupSnapshot[] projectedGroupSource;
     private static bool projectedGroupChinese;
@@ -75,6 +83,45 @@ internal static class SoundLibraryGroupsView
     private static int selectionActionCount = -1;
     private static bool selectionActionChinese;
     private static string selectionActionLabel = string.Empty;
+
+    internal static void ResetRetainedState()
+    {
+        createType = 0;
+        search = string.Empty;
+        groupPathEdit = string.Empty;
+        observedGroupPath = string.Empty;
+        quickGroupName = string.Empty;
+        quickGroupId = string.Empty;
+        quickGroupIdManual = false;
+
+        projectedSampleSource = null;
+        projectedSampleSearch = string.Empty;
+        projectedSampleChinese = false;
+        projectedSamples.Clear();
+        projectedSampleRuns.Clear();
+
+        projectedGroupSource = null;
+        projectedGroupChinese = false;
+        projectedGroups = Array.Empty<GroupPresentation>();
+        groupPresentationById.Clear();
+
+        destinationGroup = null;
+        destinationChinese = false;
+        destinationScene = string.Empty;
+        destinationWorking = string.Empty;
+        destinationSceneAndWorking = string.Empty;
+        destinationWorkingOption = string.Empty;
+        destinationSceneAndWorkingOption = string.Empty;
+
+        libraryPathSource = string.Empty;
+        libraryPathChinese = false;
+        libraryPathDisplay = string.Empty;
+
+        selectionActionGroup = null;
+        selectionActionCount = -1;
+        selectionActionChinese = false;
+        selectionActionLabel = string.Empty;
+    }
 
     internal static void DrawWorkingGroupBar()
     {
@@ -149,45 +196,47 @@ internal static class SoundLibraryGroupsView
 
         EditorSoundSampleSnapshot[] samples = snapshot.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
         EnsureSampleProjection(samples);
-        DevToolSourceMark lastSource = default;
-        bool hasLastSource = false;
-        for (int i = 0; i < projectedSamples.Count; i++)
+        for (int runIndex = 0; runIndex < projectedSampleRuns.Count; runIndex++)
         {
-            SampleRow row = projectedSamples[i];
-            EditorSoundSampleSnapshot sample = row.Sample;
-            DevToolSourceMark source = row.Source;
-            if (!hasLastSource || !DevToolSourcePresentation.SameSource(lastSource, source))
+            SampleRun run = projectedSampleRuns[runIndex];
+            DevToolWidgets.SourceHeader(run.Source, 1.52f, BrowserBodyFontScale);
+
+            using DevToolListClipper clipper = new(run.Count);
+            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
             {
-                hasLastSource = true;
-                lastSource = source;
-                DevToolWidgets.SourceHeader(source, 1.52f, BrowserBodyFontScale);
-            }
+                for (int localIndex = firstVisible; localIndex < lastVisibleExclusive; localIndex++)
+                {
+                    SampleRow row = projectedSamples[run.Start + localIndex];
+                    EditorSoundSampleSnapshot sample = row.Sample;
+                    DevToolSourceMark source = row.Source;
 
-            if (ImGui.Selectable(row.SelectableLabel, false))
-            {
-                SoundLibraryDestination destination = SoundWorkspaceState.LibraryDestination;
-                bool hasGroup = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot activeGroup);
-                if (destination != SoundLibraryDestination.Scene && !hasGroup)
-                    destination = SoundLibraryDestination.Scene;
+                    if (ImGui.Selectable(row.SelectableLabel, false))
+                    {
+                        SoundLibraryDestination destination = SoundWorkspaceState.LibraryDestination;
+                        bool hasGroup = SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot activeGroup);
+                        if (destination != SoundLibraryDestination.Scene && !hasGroup)
+                            destination = SoundLibraryDestination.Scene;
 
-                if (destination != SoundLibraryDestination.WorkingGroup)
-                    SoundWorkspaceState.ClearSelection();
+                        if (destination != SoundLibraryDestination.WorkingGroup)
+                            SoundWorkspaceState.ClearSelection();
 
-                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                    SoundEditorCommandKind.CreateFromLibrary,
-                    index: (int)destination,
-                    key: hasGroup ? activeGroup.Id : string.Empty,
-                    text: sample.Sample,
-                    secondaryIndex: createType));
+                        SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                            SoundEditorCommandKind.CreateFromLibrary,
+                            index: (int)destination,
+                            key: hasGroup ? activeGroup.Id : string.Empty,
+                            text: sample.Sample,
+                            secondaryIndex: createType));
 
-                NotifyLibraryDestination(sample.Sample, destination, activeGroup);
-            }
-            if (ImGui.IsItemHovered())
-            {
-                DevToolTooltip.Show(
-                    DevToolUiSettings.T("来源：", "Source: ") + source.Label + "\n" +
-                    DevToolUiSettings.T("添加为：", "Add as: ") + TypeName(createType) + "\n" +
-                    DevToolUiSettings.T("目标：", "Destination: ") + DestinationName(SoundWorkspaceState.LibraryDestination));
+                        NotifyLibraryDestination(sample.Sample, destination, activeGroup);
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        DevToolTooltip.Show(
+                            DevToolUiSettings.T("来源：", "Source: ") + source.Label + "\n" +
+                            DevToolUiSettings.T("添加为：", "Add as: ") + TypeName(createType) + "\n" +
+                            DevToolUiSettings.T("目标：", "Destination: ") + DestinationName(SoundWorkspaceState.LibraryDestination));
+                    }
+                }
             }
         }
 
@@ -527,6 +576,7 @@ internal static class SoundLibraryGroupsView
             return;
 
         projectedSamples.Clear();
+        projectedSampleRuns.Clear();
         for (int i = 0; i < samples.Length; i++)
         {
             EditorSoundSampleSnapshot sample = samples[i];
@@ -535,6 +585,23 @@ internal static class SoundLibraryGroupsView
                 sample.SourceKind,
                 sample.SourceId,
                 sample.SourceName);
+
+            int rowIndex = projectedSamples.Count;
+            if (projectedSampleRuns.Count == 0 ||
+                !DevToolSourcePresentation.SameSource(projectedSampleRuns[projectedSampleRuns.Count - 1].Source, source))
+            {
+                projectedSampleRuns.Add(new SampleRun
+                {
+                    Source = source,
+                    Start = rowIndex,
+                    Count = 1
+                });
+            }
+            else
+            {
+                projectedSampleRuns[projectedSampleRuns.Count - 1].Count++;
+            }
+
             projectedSamples.Add(new SampleRow
             {
                 Sample = sample,
