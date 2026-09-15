@@ -226,12 +226,11 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
     bool ILanceWielder.TryGetLanceGrip(ScavengerLance lance, out LanceGrip grip)
     {
         LanceState state = Combat.State;
+        // Threaten is deliberately NOT a fixed combat pose. Like a vanilla spear, the lance should
+        // keep following hand 0 freely until Brace/Charge/CloseDefense explicitly takes control.
         bool forward = state == LanceState.Backstep || state == LanceState.Brace || state == LanceState.Charge ||
-            state == LanceState.CloseDefense || state == LanceState.Threaten;
+            state == LanceState.CloseDefense;
 
-        // Ordinary carrying should actually inherit the vanilla scavenger hand pose. The combat
-        // states below still own their deliberate forward/two-handed presentation, but Observe,
-        // movement, Recover, lane-seeking, etc. let hand 0 move naturally and make the lance follow it.
         ScavengerGraphics carryGraphics = graphicsModule as ScavengerGraphics;
         bool vanillaHandCarry = !forward && !SidearmInPrimary &&
             grasps != null && grasps.Length > 0 && grasps[0]?.grabbed == lance && carryGraphics != null;
@@ -273,9 +272,7 @@ internal sealed class LanceScavenger : Scavenger, ILanceWielder
         }
         else
         {
-            // Combat presentation uses a fixed hand pivot. Counter-sweep may turn the blade through
-            // 80/120 degrees while the scavenger keeps flying forward; rotating the lance must not
-            // translate the whole weapon through the body.
+            // Only the authored attack poses keep the fixed pivot needed by charge/counter-sweep.
             float gripFacing;
             if (state == LanceState.Charge)
                 gripFacing = Mathf.Sign(Motor.Direction.x);
