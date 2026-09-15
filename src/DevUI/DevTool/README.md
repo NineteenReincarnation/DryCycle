@@ -152,6 +152,20 @@ Level 1 是可选增强而不是兼容前提。第三方完全不引用 DryCycle
 
 Effect Hover Preview 额外遵守一条规则：兼容对象是 Rain World 的运行时行为，而不是具体 Mod。代码中不建立 `RegionKitAdapter`、`POMAdapter` 或按程序集名称分支的 Effect 兼容表。
 
+## Phase 6 最终架构收口
+
+第六阶段不再扩功能，而是冻结长期维护边界。完整契约和当前验收状态见 [`PHASE6.md`](PHASE6.md)。
+
+- `DevToolRuntime` 只负责 Hook 与帧顺序；跨 Workspace 的 Queue processing、Presentation 清理、State / Revision / Session Reset 统一归 `DevToolSubsystemCoordinator`。
+- RWImGui Draw 只读取 detached Snapshot 并入队 Command；兼容诊断也不能从 Draw 推进 live DevInterface 扫描或状态计算。
+- `DevUiDiagnosticsPublisher` 是 FullAudit、Universal Mirror、Page Coverage、Loaded-Type Inventory、Semantic Conformance、Compatibility Gate 的唯一后端发布入口。
+- POM / RegionKit 专用反射 Inspector 已退出核心；未主动接入 API 的第三方继续依赖 Generic DevInterface / Rain World Data Model / Vanilla fallback。
+- 第三方原生增强只通过 Phase 5 `DevToolApi 1.x` 暴露。MigrationCoverage 等诊断注册不再作为外部“声明兼容”的第二套 API。
+- Extension Scope 生命周期属于注册它的外部 Mod，不随 New UI / Vanilla 切换、房间切换或 DevTool runtime reset 被清掉。
+- `DevTool Final Architecture Guard` 固化这些依赖方向，并禁止已删除的专用 Inspector、重复 diagnostics bootstrap 与孤立兼容桥重新进入核心。
+
+目前静态架构收口已进入最终审查；真实联编、游戏内回归和性能回归仍必须使用实际 Rain World / HookGen / RuntimeDetour / RWImGui 运行库完成，不能用静态守卫结果替代。
+
 ## 继续审查 / 完善的重点
 
 - 真正使用游戏安装中的 `PUBLIC-Assembly-CSharp.dll`、`HOOKS-Assembly-CSharp.dll`、RuntimeDetour 和 RWImGui 进行完整联编、进游戏运行测试与错误清理；当前仓库没有覆盖这套环境的编译 CI。
