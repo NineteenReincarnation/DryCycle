@@ -108,21 +108,25 @@ internal static class CombatTests
     internal static void ImpactAndSweeps()
     {
         LanceImpact full = LanceCombatMath.Impact(19f, 1f, 0.85f, 0.85f, true, 120f, false);
-        LanceImpact jab = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true);
+        LanceImpact standard = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true);
+        LanceImpact player = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true,
+            LanceCombatMath.PlayerThrustMaxDamage);
         LanceImpact scavengerClose = LanceCombatMath.Impact(8f, 1f, 0.85f, 0.85f, false, 0f, true,
             LanceCombatMath.LanceScavengerCloseThrustMaxDamage);
         Check(Mathf.Abs(full.Damage - LanceCombatMath.ChargeMaxDamage) < 0.001f,
             "Maximum charge damage is 2.75x the previous cap");
-        Check(Mathf.Abs(scavengerClose.Damage - full.Damage * 0.5f) < 0.001f,
-            "Lance scavenger close thrust caps at half maximum charge damage");
-        Check(jab.Damage <= LanceCombatMath.StandardThrustMaxDamage + 0.001f,
-            "Normal player/throw thrust damage keeps its old cap");
-        Check(full.Damage > scavengerClose.Damage && scavengerClose.Damage > jab.Damage,
-            "Charge, scavenger close thrust and ordinary thrust remain distinct damage tiers");
+        Check(Mathf.Abs(scavengerClose.Damage - full.Damage * 0.20f) < 0.001f,
+            "Lance scavenger close thrust caps at 20 percent of maximum charge damage");
+        Check(Mathf.Abs(player.Damage - LanceCombatMath.PlayerThrustMaxDamage) < 0.001f,
+            "Player thrust caps at 1.35 damage");
+        Check(standard.Damage <= LanceCombatMath.StandardThrustMaxDamage + 0.001f,
+            "Default non-player thrust/throw damage keeps its standard cap");
+        Check(full.Damage > player.Damage && player.Damage > scavengerClose.Damage && scavengerClose.Damage > standard.Damage,
+            "Charge, player thrust, scavenger close thrust and standard thrust remain distinct damage tiers");
         Check(LanceCombatMath.Impact(0f, 1f, 1f, 1f, true, 200f, true).Damage == 0f, "Stationary tip is harmless");
         Check(LanceCombatMath.Impact(20f, 0f, 1f, 1f, true, 200f, true).Damage == 0f, "Side strike cannot pierce");
         Check(LanceCombatMath.Impact(20f, -1f, 1f, 1f, true, 200f, true).Damage == 0f, "Rear strike cannot pierce");
-        Check(LanceCombatMath.Impact(19f, 1f, 1f, 1f, true, 0f, false).Damage < jab.Damage, "Zero run-up cannot deal full damage");
+        Check(LanceCombatMath.Impact(19f, 1f, 1f, 1f, true, 0f, false).Damage < standard.Damage, "Zero run-up cannot deal full damage");
         float light = LanceCombatMath.Impact(19f, 1f, 0.85f, 0.2f, true, 120f, false).RetainedSpeed;
         float heavy = LanceCombatMath.Impact(19f, 1f, 0.85f, 8f, true, 120f, false).RetainedSpeed;
         Check(light > 0.8f && heavy < 0.2f, "Large targets produce materially greater recoil");
