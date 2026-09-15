@@ -2,6 +2,7 @@
 bin/
 obj/
 artifacts/
+.phase6-validation/
 
 # IDE
 .vs/
