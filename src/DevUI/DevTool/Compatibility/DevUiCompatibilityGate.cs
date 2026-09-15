@@ -39,8 +39,7 @@ public static class DevUiCompatibilityGate
     private static readonly Dictionary<string, int> SemanticFailuresByPage = new(StringComparer.Ordinal);
     private static volatile DevUiCompatibilityGateSnapshot current = DevUiCompatibilityGateSnapshot.Empty;
 
-    public static DevUiCompatibilityGateSnapshot Evaluate(
-        UniversalDevUiPresentationSnapshot mirror,
+    internal static DevUiCompatibilityGateSnapshot Evaluate(
         DevUiPageCoverageSnapshot pageCoverage,
         DevUiSemanticConformanceSnapshot semantic,
         DevUiProtocolInventorySnapshot inventory)
