@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
 using UnityEngine;
@@ -11,9 +12,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Editing assists for the rebuilt Player Map: output-pixel snapping and cached overlap diagnostics.
-/// Overlap math intentionally mirrors PlayerMapRenderScheduler.DetectOverlaps so the editor warning
-/// matches the deterministic Render preflight instead of using a separate visual approximation.
+/// Editing assists for the rebuilt Player Map: output-pixel movement snapping and cached overlap
+/// highlighting. Snapping is applied to movement delta, never to absolute Canon coordinates, so
+/// opening an old authored map cannot silently shift its coordinate phase onto a new grid.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapMultiSelectionPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -34,15 +35,12 @@ internal static class PlayerMapLayoutAssist
         internal string Region = string.Empty;
         internal long Revision = long.MinValue;
         internal readonly HashSet<int> OverlapRooms = new();
-        internal string[] Pairs = Array.Empty<string>();
     }
 
     private delegate void OrigDrawToolbar(PlayerMapPresentationSnapshot snapshot);
     private delegate void HookDrawToolbar(OrigDrawToolbar orig, PlayerMapPresentationSnapshot snapshot);
     private delegate void OrigDrawRooms(ImDrawListPtr draw, PlayerMapPresentationSnapshot snapshot, Num.Vector2 canvasMin, PlayerMapRoomSnapshot hovered);
     private delegate void HookDrawRooms(OrigDrawRooms orig, ImDrawListPtr draw, PlayerMapPresentationSnapshot snapshot, Num.Vector2 canvasMin, PlayerMapRoomSnapshot hovered);
-    private delegate void OrigDrawRenderReport(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawRenderReport(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot);
     private delegate void OrigGroupEnqueue(PlayerMapGroupMoveCommand command);
     private delegate void HookGroupEnqueue(OrigGroupEnqueue orig, PlayerMapGroupMoveCommand command);
     private delegate void OrigHandleRoomInteraction(PlayerMapPresentationSnapshot snapshot, bool canvasHovered, PlayerMapRoomSnapshot hoveredRoom, Num.Vector2 canvasMin, ImGuiIOPtr io);
@@ -50,22 +48,18 @@ internal static class PlayerMapLayoutAssist
 
     private static readonly HookDrawToolbar DrawToolbarHookDelegate = DrawToolbarHook;
     private static readonly HookDrawRooms DrawRoomsHookDelegate = DrawRoomsHook;
-    private static readonly HookDrawRenderReport DrawRenderReportHookDelegate = DrawRenderReportHook;
     private static readonly HookGroupEnqueue GroupEnqueueHookDelegate = GroupEnqueueHook;
     private static readonly HookHandleRoomInteraction HandleRoomInteractionHookDelegate = HandleRoomInteractionHook;
 
     private static IDisposable toolbarHook;
     private static IDisposable roomsHook;
-    private static IDisposable reportHook;
     private static IDisposable enqueueHook;
     private static IDisposable interactionHook;
     private static FieldInfo panField;
     private static FieldInfo zoomField;
     private static FieldInfo layerVisibleField;
     private static FieldInfo groupDraggingField;
-    private static FieldInfo dragAnchorRoomField;
     private static FieldInfo dragDeltaField;
-    private static FieldInfo dragStartPositionsField;
     private static ManualLogSource log;
     private static bool enabled;
     private static int snapMode = 1; // 0=off, 1=one output pixel, 2=ten output pixels
@@ -83,8 +77,6 @@ internal static class PlayerMapLayoutAssist
                 new[] { typeof(PlayerMapPresentationSnapshot) }, null);
             MethodInfo rooms = view.GetMethod("DrawRooms", flags, null,
                 new[] { typeof(ImDrawListPtr), typeof(PlayerMapPresentationSnapshot), typeof(Num.Vector2), typeof(PlayerMapRoomSnapshot) }, null);
-            MethodInfo report = view.GetMethod("DrawRenderReport", flags, null,
-                new[] { typeof(PlayerMapPresentationSnapshot) }, null);
             MethodInfo interaction = view.GetMethod("HandleRoomInteraction", flags, null,
                 new[] { typeof(PlayerMapPresentationSnapshot), typeof(bool), typeof(PlayerMapRoomSnapshot), typeof(Num.Vector2), typeof(ImGuiIOPtr) }, null);
             MethodInfo enqueue = typeof(PlayerMapGroupCommandQueue).GetMethod("Enqueue", flags, null,
@@ -93,16 +85,13 @@ internal static class PlayerMapLayoutAssist
             panField = view.GetField("pan", flags);
             zoomField = view.GetField("zoom", flags);
             layerVisibleField = view.GetField("LayerVisible", flags);
-
             Type selection = typeof(PlayerMapMultiSelection);
             groupDraggingField = selection.GetField("groupDragging", flags);
-            dragAnchorRoomField = selection.GetField("dragAnchorRoom", flags);
             dragDeltaField = selection.GetField("dragDelta", flags);
-            dragStartPositionsField = selection.GetField("DragStartPositions", flags);
 
-            if (toolbar == null || rooms == null || report == null || interaction == null || enqueue == null ||
-                panField == null || zoomField == null || layerVisibleField == null || groupDraggingField == null ||
-                dragAnchorRoomField == null || dragDeltaField == null || dragStartPositionsField == null)
+            if (toolbar == null || rooms == null || interaction == null || enqueue == null ||
+                panField == null || zoomField == null || layerVisibleField == null ||
+                groupDraggingField == null || dragDeltaField == null)
                 throw new MissingMemberException("Player Map layout-assist targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
@@ -112,14 +101,13 @@ internal static class PlayerMapLayoutAssist
 
             toolbarHook = constructor.Invoke(new object[] { toolbar, DrawToolbarHookDelegate }) as IDisposable;
             roomsHook = constructor.Invoke(new object[] { rooms, DrawRoomsHookDelegate }) as IDisposable;
-            reportHook = constructor.Invoke(new object[] { report, DrawRenderReportHookDelegate }) as IDisposable;
             enqueueHook = constructor.Invoke(new object[] { enqueue, GroupEnqueueHookDelegate }) as IDisposable;
             interactionHook = constructor.Invoke(new object[] { interaction, HandleRoomInteractionHookDelegate }) as IDisposable;
-            if (toolbarHook == null || roomsHook == null || reportHook == null || enqueueHook == null || interactionHook == null)
+            if (toolbarHook == null || roomsHook == null || enqueueHook == null || interactionHook == null)
                 throw new InvalidOperationException("One or more Player Map layout-assist hooks were not created.");
 
             enabled = true;
-            log?.LogInfo("Player Map snap and overlap diagnostics enabled.");
+            log?.LogInfo("Player Map movement snap and overlap highlighting enabled.");
         }
         catch (Exception error)
         {
@@ -132,20 +120,16 @@ internal static class PlayerMapLayoutAssist
     {
         Dispose(ref interactionHook);
         Dispose(ref enqueueHook);
-        Dispose(ref reportHook);
         Dispose(ref roomsHook);
         Dispose(ref toolbarHook);
         panField = null;
         zoomField = null;
         layerVisibleField = null;
         groupDraggingField = null;
-        dragAnchorRoomField = null;
         dragDeltaField = null;
-        dragStartPositionsField = null;
         Cached.Region = string.Empty;
         Cached.Revision = long.MinValue;
         Cached.OverlapRooms.Clear();
-        Cached.Pairs = Array.Empty<string>();
         enabled = false;
         log = null;
     }
@@ -183,14 +167,25 @@ internal static class PlayerMapLayoutAssist
             return;
         }
 
-        float grid = SnapGrid;
-        Vector2[] positions = (Vector2[])command.EffectivePositions.Clone();
-        Vector2 anchor = positions[0];
-        Vector2 snapped = Snap(anchor, grid);
-        Vector2 correction = snapped - anchor;
-        if (correction.sqrMagnitude > 0.000001f)
+        PlayerMapPresentationSnapshot snapshot = PlayerMapWorkspaceRuntime.GetPresentation(DevToolRuntime.ActiveSession);
+        PlayerMapRoomSnapshot anchor = FindRoom(snapshot, command.RoomIndices[0]);
+        if (anchor == null)
         {
-            for (int i = 0; i < positions.Length; i++) positions[i] += correction;
+            orig(command);
+            return;
+        }
+
+        // GroupMove guarantees a shared translation. Quantize that translation rather than the
+        // destination coordinate itself, preserving legacy Canon phase and all relative offsets.
+        Vector2 requestedDelta = command.EffectivePositions[0] - anchor.EffectivePosition;
+        Vector2 snappedDelta = SnapDelta(requestedDelta, SnapGrid);
+        Vector2[] positions = new Vector2[command.RoomIndices.Length];
+        for (int i = 0; i < command.RoomIndices.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = FindRoom(snapshot, command.RoomIndices[i]);
+            positions[i] = room == null
+                ? command.EffectivePositions[i]
+                : room.EffectivePosition + snappedDelta;
         }
 
         orig(new PlayerMapGroupMoveCommand(command.RoomIndices, positions, command.Label));
@@ -207,19 +202,13 @@ internal static class PlayerMapLayoutAssist
         orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
         if (!enabled || snapMode == 0) return;
 
-        // Multi-selection computes raw mouse delta inside its interaction hook. Quantize that delta
-        // after the hook so the following draw frame previews the exact position that will be queued
-        // on release. Final command enqueue is snapped again, so mouse-up cannot race this preview.
+        // Multi-selection computes raw shared delta. Quantize that delta in-place so room previews
+        // and exact shortcut-mouth connection previews both show the same final movement before release.
         try
         {
             if (!(bool)groupDraggingField.GetValue(null)) return;
-            int anchorRoom = (int)dragAnchorRoomField.GetValue(null);
-            if (anchorRoom < 0) return;
-            if (dragStartPositionsField.GetValue(null) is not Dictionary<int, Vector2> starts ||
-                !starts.TryGetValue(anchorRoom, out Vector2 start)) return;
             Vector2 delta = (Vector2)dragDeltaField.GetValue(null);
-            Vector2 target = start + delta;
-            dragDeltaField.SetValue(null, Snap(target, SnapGrid) - start);
+            dragDeltaField.SetValue(null, SnapDelta(delta, SnapGrid));
         }
         catch (Exception error)
         {
@@ -265,28 +254,6 @@ internal static class PlayerMapLayoutAssist
         }
     }
 
-    private static void DrawRenderReportHook(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot)
-    {
-        orig(snapshot);
-        if (!enabled || snapshot?.Available != true) return;
-
-        Diagnostics diagnostics = GetDiagnostics(snapshot);
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("布局检查", "LAYOUT CHECK"));
-        if (diagnostics.Pairs.Length == 0)
-        {
-            ImGui.TextDisabled(DevToolUiSettings.T("未发现同层房间重叠。", "No same-layer room overlaps."));
-            return;
-        }
-
-        ImGui.TextWrapped(DevToolUiSettings.T(
-            "发现 " + diagnostics.Pairs.Length + " 组同层重叠；正式 Render 会按 RoomIndex 确定顺序覆盖。",
-            diagnostics.Pairs.Length + " same-layer overlap(s); Render resolves them deterministically by RoomIndex."));
-        int shown = Math.Min(8, diagnostics.Pairs.Length);
-        for (int i = 0; i < shown; i++) ImGui.TextDisabled(diagnostics.Pairs[i]);
-        if (diagnostics.Pairs.Length > shown)
-            ImGui.TextDisabled("… +" + (diagnostics.Pairs.Length - shown));
-    }
-
     private static Diagnostics GetDiagnostics(PlayerMapPresentationSnapshot snapshot)
     {
         string region = snapshot.RegionName ?? string.Empty;
@@ -296,31 +263,26 @@ internal static class PlayerMapLayoutAssist
         Cached.Region = region;
         Cached.Revision = snapshot.Revision;
         Cached.OverlapRooms.Clear();
-        List<string> pairs = new();
-
         PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
         List<(PlayerMapRoomSnapshot Room, int X, int Y, int W, int H)> rects = new();
         float minX = float.MaxValue;
         float minY = float.MaxValue;
+
         for (int i = 0; i < rooms.Length; i++)
         {
             PlayerMapRoomSnapshot room = rooms[i];
-            if (room == null || room.Disabled || room.Bake == null || room.Bake.Status != RoomMapBakeStatus.Ready) continue;
+            if (room == null || room.Disabled || room.Bake?.Status != RoomMapBakeStatus.Ready) continue;
             float halfW = room.Bake.Width * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
             float halfH = room.Bake.Height * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
             minX = Math.Min(minX, room.EffectivePosition.x - halfW);
             minY = Math.Min(minY, room.EffectivePosition.y - halfH);
         }
-        if (minX == float.MaxValue)
-        {
-            Cached.Pairs = Array.Empty<string>();
-            return Cached;
-        }
+        if (minX == float.MaxValue) return Cached;
 
         for (int i = 0; i < rooms.Length; i++)
         {
             PlayerMapRoomSnapshot room = rooms[i];
-            if (room == null || room.Disabled || room.Bake == null || room.Bake.Status != RoomMapBakeStatus.Ready) continue;
+            if (room == null || room.Disabled || room.Bake?.Status != RoomMapBakeStatus.Ready) continue;
             float left = room.EffectivePosition.x - room.Bake.Width * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
             float bottom = room.EffectivePosition.y - room.Bake.Height * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
             int x = (int)((left - minX) / PlayerMapCoordinateSystem.CanonPixelsPerTile) + PlayerMapCoordinateSystem.OutputPadding;
@@ -342,12 +304,17 @@ internal static class PlayerMapLayoutAssist
                 if (a.X >= bx2 || b.X >= ax2 || a.Y >= by2 || b.Y >= ay2) continue;
                 Cached.OverlapRooms.Add(a.Room.RoomIndex);
                 Cached.OverlapRooms.Add(b.Room.RoomIndex);
-                pairs.Add("L" + a.Room.Layer + " · " + a.Room.Name + " / " + b.Room.Name);
             }
         }
-
-        Cached.Pairs = pairs.ToArray();
         return Cached;
+    }
+
+    private static PlayerMapRoomSnapshot FindRoom(PlayerMapPresentationSnapshot snapshot, int roomIndex)
+    {
+        PlayerMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+            if (rooms[i]?.RoomIndex == roomIndex) return rooms[i];
+        return null;
     }
 
     private static bool TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers)
@@ -370,12 +337,12 @@ internal static class PlayerMapLayoutAssist
 
     private static float SnapGrid => PlayerMapCoordinateSystem.CanonPixelsPerTile * (snapMode == 2 ? 10f : 1f);
 
-    private static Vector2 Snap(Vector2 value, float grid)
+    private static Vector2 SnapDelta(Vector2 delta, float grid)
     {
-        if (grid <= 0f) return value;
+        if (grid <= 0f) return delta;
         return new Vector2(
-            Mathf.Round(value.x / grid) * grid,
-            Mathf.Round(value.y / grid) * grid);
+            Mathf.Round(delta.x / grid) * grid,
+            Mathf.Round(delta.y / grid) * grid);
     }
 
     private static void Dispose(ref IDisposable hook)
