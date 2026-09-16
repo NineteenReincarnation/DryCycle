@@ -131,14 +131,16 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.orig_GetAudioClip orig,
         SoundLoader self,
         int i,
-        out AssetBundleLoadAssetOperation loadOp,
-        out string name)
+        ref AssetBundleLoadAssetOperation loadOp,
+        ref string name)
     {
+        // HookGen exposes CLR by-ref output parameters as ref in HOOKS-Assembly-CSharp even though
+        // the original C# method declares them as out. Match the generated delegate exactly here.
         // Let vanilla (and every earlier hook in the chain) choose the variation and handle the
         // AssetBundle/WAV/OGG paths first. We only replace the result when the chosen variation has
         // a higher-priority custom-format LoadedSoundEffects override. This preserves vanilla random
         // selection and avoids consuming Random twice.
-        AudioClip result = orig(self, i, out loadOp, out name);
+        AudioClip result = orig(self, i, ref loadOp, ref name);
         if (result != null && customOverrideClipIds.Contains(result.GetInstanceID())) return result;
         if (self?.allAudio == null || i < 0 || i >= self.allAudio.Length) return result;
 
