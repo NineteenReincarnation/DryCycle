@@ -11,29 +11,17 @@ internal static class SoundSampleCatalog
     private const string DownpourModId = "moreslugcats";
     private const string WatcherModId = "watcher";
 
-    private enum BuildPhase
-    {
-        Idle = 0,
-        Samples = 1,
-        Finalize = 2
-    }
+    private enum BuildPhase { Idle = 0, Samples = 1, Finalize = 2 }
 
-    private static Dictionary<string, EditorSoundSampleSnapshot> samples =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, string> loadedAmbientFiles =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, string> looseAmbientFiles =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, ModManager.Mod> modAmbientOwners =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, ModManager.Mod> officialDlcAmbientOwners =
-        new(StringComparer.OrdinalIgnoreCase);
-
+    private static Dictionary<string, EditorSoundSampleSnapshot> samples = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, string> loadedAmbientFiles = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, string> looseAmbientFiles = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, ModManager.Mod> modAmbientOwners = new(StringComparer.OrdinalIgnoreCase);
+    private static Dictionary<string, ModManager.Mod> officialDlcAmbientOwners = new(StringComparer.OrdinalIgnoreCase);
     private static SoundPage publishedPage;
     private static string[] publishedNames;
     private static EditorSoundSampleSnapshot[] sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
     private static bool sortedDirty;
-
     private static SoundPage requestedPage;
     private static string[] requestedNames;
     private static Dictionary<string, EditorSoundSampleSnapshot> buildingSamples;
@@ -44,58 +32,55 @@ internal static class SoundSampleCatalog
     private static BuildPhase buildPhase;
     private static int buildSampleIndex;
 
-    internal static int ProcessedSampleCount => buildPhase == BuildPhase.Idle
-        ? publishedNames?.Length ?? 0
-        : Math.Min(buildSampleIndex, requestedNames?.Length ?? 0);
-
+    internal static int ProcessedSampleCount => buildPhase == BuildPhase.Idle ? publishedNames?.Length ?? 0 : Math.Min(buildSampleIndex, requestedNames?.Length ?? 0);
     internal static int TotalSampleCount => requestedNames?.Length ?? publishedNames?.Length ?? 0;
-
-    internal static float Progress
+    internal static float Progress => buildPhase switch
     {
-        get
-        {
-            if (buildPhase == BuildPhase.Idle)
-                return publishedNames != null ? 1f : 0f;
-
-            return buildPhase switch
-            {
-                BuildPhase.Samples => 0.03f + 0.94f * SampleProgress(),
-                BuildPhase.Finalize => 0.99f,
-                _ => 0f
-            };
-        }
-    }
+        BuildPhase.Idle => publishedNames != null ? 1f : 0f,
+        BuildPhase.Samples => 0.03f + 0.94f * SampleProgress(),
+        BuildPhase.Finalize => 0.99f,
+        _ => 0f
+    };
 
     internal static EditorSoundSampleSnapshot[] Refresh(SoundPage page)
     {
-        if (page == null)
-        {
-            ResetRuntimeState();
-            return Array.Empty<EditorSoundSampleSnapshot>();
-        }
-
+        if (page == null) { ResetRuntimeState(); return Array.Empty<EditorSoundSampleSnapshot>(); }
         BeginRefresh(page);
-        if (buildPhase == BuildPhase.Idle && sortedDirty)
-            RebuildSortedCache();
+        if (buildPhase == BuildPhase.Idle && sortedDirty) RebuildSortedCache();
         return sortedCache;
     }
 
     internal static void BeginRefresh(SoundPage page)
     {
-        if (page == null || !SoundFileNameCatalog.IsReady)
-            return;
+        if (page == null || !SoundFileNameCatalog.IsReady) return;
+        BeginBuild(page.fileNames ?? Array.Empty<string>(), page);
+    }
 
-        string[] names = page.fileNames ?? Array.Empty<string>();
+    internal static void BeginPrewarm()
+    {
+        if (!SoundFileNameCatalog.IsReady) return;
+        BeginBuild(SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>(), null);
+    }
+
+    internal static bool IsReadyFor(SoundPage page) =>
+        page != null && IsReadyForNames(page.fileNames ?? Array.Empty<string>());
+
+    internal static bool IsReadyForNames(string[] names) =>
+        buildPhase == BuildPhase.Idle && ReferenceEquals(publishedNames, names ?? Array.Empty<string>());
+
+    private static void BeginBuild(string[] names, SoundPage page)
+    {
+        names ??= Array.Empty<string>();
         if (buildPhase == BuildPhase.Idle && ReferenceEquals(publishedNames, names))
         {
-            publishedPage = page;
+            if (page != null) publishedPage = page;
             return;
         }
-
-        if (buildPhase != BuildPhase.Idle &&
-            ReferenceEquals(requestedPage, page) &&
-            ReferenceEquals(requestedNames, names))
+        if (buildPhase != BuildPhase.Idle && ReferenceEquals(requestedNames, names))
+        {
+            if (page != null) requestedPage = page;
             return;
+        }
 
         requestedPage = page;
         requestedNames = names;
@@ -108,63 +93,28 @@ internal static class SoundSampleCatalog
         buildPhase = BuildPhase.Samples;
     }
 
-    internal static bool IsReadyFor(SoundPage page)
-    {
-        if (page == null || buildPhase != BuildPhase.Idle)
-            return false;
-        return ReferenceEquals(publishedNames, page.fileNames ?? Array.Empty<string>());
-    }
-
     internal static bool StepRefresh(double budgetMilliseconds)
     {
-        if (buildPhase == BuildPhase.Idle)
-            return true;
-        if (budgetMilliseconds <= 0d)
-            return false;
-
+        if (buildPhase == BuildPhase.Idle) return true;
+        if (budgetMilliseconds <= 0d) return false;
         long started = Stopwatch.GetTimestamp();
         do
         {
-            switch (buildPhase)
-            {
-                case BuildPhase.Samples:
-                    StepSampleResolution();
-                    break;
-                case BuildPhase.Finalize:
-                    PublishBuild();
-                    break;
-            }
-
-            if (buildPhase == BuildPhase.Idle)
-                return true;
+            if (buildPhase == BuildPhase.Samples) StepSampleResolution();
+            else if (buildPhase == BuildPhase.Finalize) PublishBuild();
+            if (buildPhase == BuildPhase.Idle) return true;
         }
         while (ElapsedMilliseconds(started) < budgetMilliseconds);
-
         return false;
     }
 
     internal static EditorSoundSampleSnapshot Resolve(string sample)
     {
-        if (string.IsNullOrWhiteSpace(sample))
-            return Missing(sample);
-
-        if (samples.TryGetValue(sample, out EditorSoundSampleSnapshot known))
-            return known;
-        if (buildingSamples != null && buildingSamples.TryGetValue(sample, out known))
-            return known;
-
-        // Draw/presentation may ask for a resource before the activation builder has published its
-        // immutable snapshot. Never let that read path escape the frame budget by probing disk.
-        if (!SoundFileNameCatalog.IsReady || publishedNames == null || buildPhase != BuildPhase.Idle)
-            return Missing(sample);
-
-        EditorSoundSampleSnapshot resolved = ResolveCore(
-            sample,
-            knownAvailable: false,
-            loadedAmbientFiles,
-            looseAmbientFiles,
-            modAmbientOwners,
-            officialDlcAmbientOwners);
+        if (string.IsNullOrWhiteSpace(sample)) return Missing(sample);
+        if (samples.TryGetValue(sample, out EditorSoundSampleSnapshot known)) return known;
+        if (buildingSamples != null && buildingSamples.TryGetValue(sample, out known)) return known;
+        if (!SoundFileNameCatalog.IsReady || publishedNames == null || buildPhase != BuildPhase.Idle) return Missing(sample);
+        EditorSoundSampleSnapshot resolved = ResolveCore(sample, false, loadedAmbientFiles, looseAmbientFiles, modAmbientOwners, officialDlcAmbientOwners);
         samples[sample] = resolved;
         sortedDirty = true;
         return resolved;
@@ -181,7 +131,6 @@ internal static class SoundSampleCatalog
         publishedNames = null;
         sortedCache = Array.Empty<EditorSoundSampleSnapshot>();
         sortedDirty = false;
-
         requestedPage = null;
         requestedNames = null;
         buildingSamples = null;
@@ -199,19 +148,10 @@ internal static class SoundSampleCatalog
         while (buildSampleIndex < names.Length)
         {
             string sample = names[buildSampleIndex++];
-            if (string.IsNullOrWhiteSpace(sample) || buildingSamples.ContainsKey(sample))
-                return;
-
-            buildingSamples[sample] = ResolveCore(
-                sample,
-                knownAvailable: true,
-                buildingLoadedAmbientFiles,
-                buildingLooseAmbientFiles,
-                buildingModAmbientOwners,
-                buildingOfficialDlcAmbientOwners);
+            if (string.IsNullOrWhiteSpace(sample) || buildingSamples.ContainsKey(sample)) return;
+            buildingSamples[sample] = ResolveCore(sample, true, buildingLoadedAmbientFiles, buildingLooseAmbientFiles, buildingModAmbientOwners, buildingOfficialDlcAmbientOwners);
             return;
         }
-
         buildPhase = BuildPhase.Finalize;
     }
 
@@ -226,7 +166,6 @@ internal static class SoundSampleCatalog
         publishedNames = requestedNames ?? Array.Empty<string>();
         sortedDirty = true;
         RebuildSortedCache();
-
         buildingSamples = null;
         buildingLoadedAmbientFiles = null;
         buildingLooseAmbientFiles = null;
@@ -239,139 +178,74 @@ internal static class SoundSampleCatalog
     {
         sortedCache = new EditorSoundSampleSnapshot[samples.Count];
         int index = 0;
-        foreach (EditorSoundSampleSnapshot value in samples.Values)
-            sortedCache[index++] = value;
+        foreach (EditorSoundSampleSnapshot value in samples.Values) sortedCache[index++] = value;
         Array.Sort(sortedCache, CompareSamples);
         sortedDirty = false;
     }
 
-    private static EditorSoundSampleSnapshot ResolveCore(
-        string sample,
-        bool knownAvailable,
-        Dictionary<string, string> loadedFiles,
-        Dictionary<string, string> looseFiles,
-        Dictionary<string, ModManager.Mod> owners,
-        Dictionary<string, ModManager.Mod> officialOwners)
+    private static EditorSoundSampleSnapshot ResolveCore(string sample, bool knownAvailable, Dictionary<string, string> loadedFiles, Dictionary<string, string> looseFiles, Dictionary<string, ModManager.Mod> owners, Dictionary<string, ModManager.Mod> officialOwners)
     {
         string resolved = TryResolveAmbientFile(sample, loadedFiles, looseFiles);
         if (!string.IsNullOrEmpty(resolved))
         {
-            if (TryIdentifyMod(resolved, owners, out ModManager.Mod mod))
-                return FromMod(sample, mod);
-            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
-                return FromMod(sample, officialDlc);
+            if (TryIdentifyMod(resolved, owners, out ModManager.Mod mod)) return FromMod(sample, mod);
+            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc)) return FromMod(sample, officialDlc);
             return Vanilla(sample);
         }
-
         if (knownAvailable)
         {
-            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
-                return FromMod(sample, officialDlc);
+            if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc)) return FromMod(sample, officialDlc);
             return Vanilla(sample);
         }
-
         return Missing(sample);
     }
 
-    private static EditorSoundSampleSnapshot Missing(string sample) => new()
-    {
-        Sample = sample ?? string.Empty,
-        SourceKind = EditorSoundSourceKind.Missing,
-        SourceName = "Missing",
-        Available = false
-    };
-
-    private static EditorSoundSampleSnapshot Vanilla(string sample) => new()
-    {
-        Sample = sample,
-        SourceKind = EditorSoundSourceKind.Vanilla,
-        SourceName = "Vanilla",
-        SourceId = string.Empty,
-        Available = true
-    };
+    private static EditorSoundSampleSnapshot Missing(string sample) => new() { Sample = sample ?? string.Empty, SourceKind = EditorSoundSourceKind.Missing, SourceName = "Missing", Available = false };
+    private static EditorSoundSampleSnapshot Vanilla(string sample) => new() { Sample = sample, SourceKind = EditorSoundSourceKind.Vanilla, SourceName = "Vanilla", SourceId = string.Empty, Available = true };
 
     private static EditorSoundSampleSnapshot FromMod(string sample, ModManager.Mod mod)
     {
         string id = mod?.id ?? string.Empty;
         EditorSoundSourceKind kind = ClassifyMod(id);
-        string name = kind switch
-        {
-            EditorSoundSourceKind.Downpour => "Downpour",
-            EditorSoundSourceKind.Watcher => "Watcher",
-            _ => SafeModName(mod)
-        };
-
-        return new EditorSoundSampleSnapshot
-        {
-            Sample = sample,
-            SourceKind = kind,
-            SourceName = name,
-            SourceId = id,
-            Available = true
-        };
+        string name = kind switch { EditorSoundSourceKind.Downpour => "Downpour", EditorSoundSourceKind.Watcher => "Watcher", _ => SafeModName(mod) };
+        return new EditorSoundSampleSnapshot { Sample = sample, SourceKind = kind, SourceName = name, SourceId = id, Available = true };
     }
 
     private static EditorSoundSourceKind ClassifyMod(string id)
     {
-        if (string.Equals(id, DownpourModId, StringComparison.OrdinalIgnoreCase))
-            return EditorSoundSourceKind.Downpour;
-        if (string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase))
-            return EditorSoundSourceKind.Watcher;
+        if (string.Equals(id, DownpourModId, StringComparison.OrdinalIgnoreCase)) return EditorSoundSourceKind.Downpour;
+        if (string.Equals(id, WatcherModId, StringComparison.OrdinalIgnoreCase)) return EditorSoundSourceKind.Watcher;
         return EditorSoundSourceKind.Mod;
     }
 
-    private static string TryResolveAmbientFile(
-        string sample,
-        Dictionary<string, string> loadedFiles,
-        Dictionary<string, string> looseFiles)
+    private static string TryResolveAmbientFile(string sample, Dictionary<string, string> loadedFiles, Dictionary<string, string> looseFiles)
     {
         string key = SampleKey(sample);
-        if (string.IsNullOrEmpty(key))
-            return string.Empty;
-
-        if (loadedFiles != null && loadedFiles.TryGetValue(key, out string loadedPath))
-            return loadedPath;
-        if (looseFiles != null && looseFiles.TryGetValue(key, out string loosePath))
-            return loosePath;
+        if (string.IsNullOrEmpty(key)) return string.Empty;
+        if (loadedFiles != null && loadedFiles.TryGetValue(key, out string loadedPath)) return loadedPath;
+        if (looseFiles != null && looseFiles.TryGetValue(key, out string loosePath)) return loosePath;
         return string.Empty;
     }
 
-    private static bool TryIdentifyMod(
-        string filePath,
-        Dictionary<string, ModManager.Mod> owners,
-        out ModManager.Mod owner)
+    private static bool TryIdentifyMod(string filePath, Dictionary<string, ModManager.Mod> owners, out ModManager.Mod owner)
     {
         owner = null;
         if (string.IsNullOrEmpty(filePath)) return false;
-
         for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
         {
             ModManager.Mod mod = ModManager.ActiveMods[i];
             if (mod == null) continue;
-            if (IsUnder(filePath, mod.TargetedPath) ||
-                IsUnder(filePath, mod.NewestPath) ||
-                IsUnder(filePath, mod.path))
-            {
-                owner = mod;
-                return true;
-            }
+            if (IsUnder(filePath, mod.TargetedPath) || IsUnder(filePath, mod.NewestPath) || IsUnder(filePath, mod.path)) { owner = mod; return true; }
         }
-
         if (!IsMergedModsPath(filePath)) return false;
         string key = SampleKey(filePath);
         return !string.IsNullOrEmpty(key) && owners != null && owners.TryGetValue(key, out owner);
     }
 
-    private static bool TryIdentifyOfficialDlcBySample(
-        string sample,
-        Dictionary<string, ModManager.Mod> officialOwners,
-        out ModManager.Mod owner)
+    private static bool TryIdentifyOfficialDlcBySample(string sample, Dictionary<string, ModManager.Mod> officialOwners, out ModManager.Mod owner)
     {
         string key = SampleKey(sample);
-        if (!string.IsNullOrEmpty(key) &&
-            officialOwners != null &&
-            officialOwners.TryGetValue(key, out owner))
-            return true;
+        if (!string.IsNullOrEmpty(key) && officialOwners != null && officialOwners.TryGetValue(key, out owner)) return true;
         owner = null;
         return false;
     }
@@ -379,8 +253,7 @@ internal static class SoundSampleCatalog
     private static string SampleKey(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-        try { return Path.GetFileName(value.Trim()) ?? string.Empty; }
-        catch { return value.Trim(); }
+        try { return Path.GetFileName(value.Trim()) ?? string.Empty; } catch { return value.Trim(); }
     }
 
     private static bool IsMergedModsPath(string path)
@@ -396,11 +269,8 @@ internal static class SoundSampleCatalog
         if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(root)) return false;
         try
         {
-            string file = Path.GetFullPath(filePath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string dir = Path.GetFullPath(root)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
-                         Path.DirectorySeparatorChar;
+            string file = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string dir = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             return file.StartsWith(dir, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
@@ -409,13 +279,7 @@ internal static class SoundSampleCatalog
     private static string SafeModName(ModManager.Mod mod)
     {
         if (mod == null) return "Mod";
-        try
-        {
-            string localized = mod.LocalizedName;
-            if (!string.IsNullOrWhiteSpace(localized)) return localized;
-        }
-        catch { }
-
+        try { string localized = mod.LocalizedName; if (!string.IsNullOrWhiteSpace(localized)) return localized; } catch { }
         if (!string.IsNullOrWhiteSpace(mod.name)) return mod.name;
         if (!string.IsNullOrWhiteSpace(mod.id)) return mod.id;
         return "Mod";
@@ -435,6 +299,5 @@ internal static class SoundSampleCatalog
         return total <= 0 ? 1f : Math.Max(0f, Math.Min(1f, buildSampleIndex / (float)total));
     }
 
-    private static double ElapsedMilliseconds(long startedTimestamp) =>
-        (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
+    private static double ElapsedMilliseconds(long startedTimestamp) => (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
 }
