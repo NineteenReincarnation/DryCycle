@@ -24,6 +24,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapTerrainBakeBridge.Enable(logger);
         PlayerMapDerivedLayoutBridge.Enable(logger);
         PlayerMapConfigBuildPipeline.Enable(logger);
+        PlayerMapDisabledConfigFilter.Enable(logger);
         PlayerMapRenderOutputValidator.Enable(logger);
         PlayerMapGroupCommandRuntime.Enable(logger);
         PlayerMapLayerMutationFilter.Enable(logger);
@@ -50,6 +51,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapLayerMutationFilter.Disable();
         PlayerMapGroupCommandRuntime.Disable();
         PlayerMapRenderOutputValidator.Disable();
+        PlayerMapDisabledConfigFilter.Disable();
         PlayerMapConfigBuildPipeline.Disable();
         PlayerMapDerivedLayoutBridge.Disable();
         PlayerMapTerrainBakeBridge.Disable();
