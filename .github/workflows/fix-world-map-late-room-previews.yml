@@ -1,6 +1,6 @@
 name: Fix World Map late room previews
 
-'on':
+on:
   push:
     paths:
       - '.github/workflows/fix-world-map-late-room-previews.yml'
@@ -20,216 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
-              return text.replace(old, new, 1)
-
-          scene_path = Path('src/DevUI/DevTool/RWImGui/WorldMapGpuScene.cs')
-          scene = scene_path.read_text(encoding='utf-8')
-
-          old_hash = '''                if (TryFindRoomPanel(page, room.RoomIndex, out RoomPanel panel))
-                {
-                    FAtlasElement element = panel.roomRep?.mapTex;
-                    if (element != null)
-                    {
-                        hash = hash * 397 ^ (element.name?.GetHashCode() ?? 0);
-                        Texture2D texture = element.atlas?.texture as Texture2D;
-                        hash = hash * 397 ^ (texture != null ? texture.GetInstanceID() : 0);
-                    }
-                }
-'''
-          new_hash = '''                if (TryFindRoomPanel(page, room.RoomIndex, out RoomPanel panel))
-                {
-                    MapObject.RoomRepresentation rep = panel.roomRep;
-                    FAtlasElement element = rep?.mapTex;
-                    if (TryResolveRoomTextureAtlas(
-                            element,
-                            out Texture2D atlas,
-                            out Rect sourceUv,
-                            out float sourceWidth,
-                            out float sourceHeight))
-                    {
-                        // Hash the same source that TryGetRoomQuad will actually render. MapTex can
-                        // arrive or finish atlas setup after the immutable map snapshot was published.
-                        hash = hash * 397 ^ 1;
-                        hash = hash * 397 ^ (element.name?.GetHashCode() ?? 0);
-                        hash = hash * 397 ^ atlas.GetInstanceID();
-                        hash = hash * 397 ^ atlas.width;
-                        hash = hash * 397 ^ atlas.height;
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceWidth * 1000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceHeight * 1000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.x * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.y * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.width * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.height * 1000000f);
-                    }
-                    else if (rep?.texture != null)
-                    {
-                        // Some rooms expose their generated minimap through RoomRepresentation.texture
-                        // before (or instead of) a usable Futile atlas element. Track that source too;
-                        // otherwise a late texture never invalidates the retained room batch.
-                        Texture2D direct = rep.texture;
-                        hash = hash * 397 ^ 2;
-                        hash = hash * 397 ^ direct.GetInstanceID();
-                        hash = hash * 397 ^ direct.width;
-                        hash = hash * 397 ^ direct.height;
-                    }
-                    else
-                    {
-                        hash = hash * 397;
-                    }
-                }
-'''
-          scene = replace_once(scene, old_hash, new_hash, 'WorldMapGpuScene source hash')
-
-          old_quad = '''        FAtlasElement element = panel.roomRep.mapTex;
-        if (element?.atlas?.texture is Texture2D atlas)
-        {
-            texture = atlas;
-            uv = element.uvRect;
-            widthTiles = Math.Max(1f, element.sourcePixelSize.x);
-            heightTiles = Math.Max(1f, element.sourcePixelSize.y);
-        }
-        else if (panel.roomRep.texture != null)
-        {
-            texture = panel.roomRep.texture;
-            widthTiles = Math.Max(1f, texture.width);
-            heightTiles = Math.Max(1f, texture.height);
-        }
-'''
-          new_quad = '''        FAtlasElement element = panel.roomRep.mapTex;
-        if (TryResolveRoomTextureAtlas(
-                element,
-                out Texture2D atlas,
-                out Rect atlasUv,
-                out float atlasWidth,
-                out float atlasHeight))
-        {
-            texture = atlas;
-            uv = atlasUv;
-            widthTiles = atlasWidth;
-            heightTiles = atlasHeight;
-        }
-        else if (panel.roomRep.texture != null)
-        {
-            texture = panel.roomRep.texture;
-            widthTiles = Math.Max(1f, texture.width);
-            heightTiles = Math.Max(1f, texture.height);
-        }
-'''
-          scene = replace_once(scene, old_quad, new_quad, 'WorldMapGpuScene room quad source')
-
-          helper_anchor = '''    private static ChunkKey BaseKey(RoomQuad quad) =>
-'''
-          helper = '''    private static bool TryResolveRoomTextureAtlas(
-        FAtlasElement element,
-        out Texture2D texture,
-        out Rect uv,
-        out float width,
-        out float height)
-    {
-        texture = null;
-        uv = new Rect(0f, 0f, 1f, 1f);
-        width = 0f;
-        height = 0f;
-
-        if (element?.atlas?.texture is not Texture2D atlas || atlas == null)
-            return false;
-
-        Rect candidateUv = element.uvRect;
-        float uvWidth = Math.Abs(candidateUv.width);
-        float uvHeight = Math.Abs(candidateUv.height);
-        if (uvWidth <= 0.000001f || uvHeight <= 0.000001f)
-            return false;
-
-        float sampledWidth = uvWidth * Math.Max(1, atlas.width);
-        float sampledHeight = uvHeight * Math.Max(1, atlas.height);
-        if (sampledWidth < 0.5f || sampledHeight < 0.5f)
-            return false;
-
-        texture = atlas;
-        uv = candidateUv;
-        width = Math.Max(1f, element.sourcePixelSize.x > 0.5f ? element.sourcePixelSize.x : sampledWidth);
-        height = Math.Max(1f, element.sourcePixelSize.y > 0.5f ? element.sourcePixelSize.y : sampledHeight);
-        return true;
-    }
-
-'''
-          scene = replace_once(scene, helper_anchor, helper + helper_anchor, 'WorldMapGpuScene atlas resolver')
-          scene_path.write_text(scene, encoding='utf-8')
-
-          optimizer_path = Path('src/DevUI/DevTool/RWImGui/WorldMapGpuRetainedOptimizerPlugin.cs')
-          optimizer = optimizer_path.read_text(encoding='utf-8')
-          optimizer = replace_once(
-              optimizer,
-              'using DryCycle.DevUI.DevTool.Map;\n',
-              'using DryCycle.DevUI.DevTool.Map;\nusing UnityEngine;\n',
-              'optimizer UnityEngine using')
-          optimizer = replace_once(
-              optimizer,
-              'internal static class WorldMapGpuRetainedOptimizer\n{\n',
-              'internal static class WorldMapGpuRetainedOptimizer\n{\n    private const int SourceAuditIntervalFrames = 15;\n\n',
-              'optimizer audit constant')
-          optimizer = replace_once(
-              optimizer,
-              '    private static int cachedSourceHash;\n    private static bool enabled;\n',
-              '    private static int cachedSourceHash;\n    private static int nextSourceAuditFrame;\n    private static bool enabled;\n',
-              'optimizer audit field')
-          optimizer = replace_once(
-              optimizer,
-              '        cachedSourceHash = 0;\n        enabled = false;\n',
-              '        cachedSourceHash = 0;\n        nextSourceAuditFrame = 0;\n        enabled = false;\n',
-              'optimizer audit reset')
-
-          start_marker = '    private static int ComputeRoomSourceHashHook(\n'
-          end_marker = '    private static bool TryFindRoomPanelHook(\n'
-          start = optimizer.find(start_marker)
-          end = optimizer.find(end_marker, start)
-          if start < 0 or end < 0 or end <= start:
-              raise SystemExit('optimizer source hash hook markers not found')
-          new_hook = '''    private static int ComputeRoomSourceHashHook(
-        OrigComputeRoomSourceHash orig,
-        MapPage page,
-        WorldMapGpuScene.FrameState frame)
-    {
-        if (!enabled || frame?.Snapshot?.Available != true)
-            return orig(page, frame);
-
-        EditorMapPresentationSnapshot snapshot = frame.Snapshot;
-        int generation = WorldMapGpuCache.Generation;
-        bool snapshotChanged = !ReferenceEquals(cachedSourceSnapshot, snapshot);
-        bool generationChanged = cachedSourceGeneration != generation;
-        bool auditDue = Time.frameCount >= nextSourceAuditFrame;
-
-        if (!snapshotChanged && !generationChanged && !auditDue)
-            return cachedSourceHash;
-
-        // Stable frames stay O(1), but periodically ask the authoritative scene hash to audit live
-        // RoomPanel texture state. MapTex and RoomRepresentation.texture are populated asynchronously
-        // and can change without publishing a new map snapshot or bumping WorldMapGpuCache.Generation.
-        // Without this audit, a room that missed its first texture-ready frame can stay invisible for
-        // the rest of the Map session.
-        int liveHash = orig(page, frame);
-        unchecked
-        {
-            int hash = liveHash * 397 ^ generation;
-            cachedSourceSnapshot = snapshot;
-            cachedSourceGeneration = generation;
-            cachedSourceHash = hash;
-            nextSourceAuditFrame = Time.frameCount + SourceAuditIntervalFrames;
-            return hash;
-        }
-    }
-
-'''
-          optimizer = optimizer[:start] + new_hook + optimizer[end:]
-          optimizer_path.write_text(optimizer, encoding='utf-8')
-          PY
+          python -c "import base64; exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpkZWYgcmVwbGFjZV9vbmNlKHRleHQ6IHN0ciwgb2xkOiBzdHIsIG5ldzogc3RyLCBsYWJlbDogc3RyKSAtPiBzdHI6CiAgICBjb3VudCA9IHRleHQuY291bnQob2xkKQogICAgaWYgY291bnQgIT0gMToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYne2xhYmVsfTogZXhwZWN0ZWQgZXhhY3RseSBvbmUgbWF0Y2gsIGZvdW5kIHtjb3VudH0nKQogICAgcmV0dXJuIHRleHQucmVwbGFjZShvbGQsIG5ldyw gMSkKCnNjZW5lX3BhdGggPSBQYXRoKCdzcmMvRGV2VUkvRGV2VG9vbC9SV0ltR3VpL1dvcmxkTWFwR3B1U2NlbmUuY3MnKQpzY2VuZSA9IHNjZW5lX3BhdGgucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCgpvbGRfaGFzaCA9ICIiIiAgICAgICAgICAgICAgICBpZiAoVHJ5RmluZFJvb21QYW5lbChwYWdlLCByb29tLlJvb21JbmRleCwgb3V0IFJvb21QYW5lbCBwYW5lbCkpCiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgRkF0bGFzRWxlbWVudCBlbGVtZW50ID0gcGFuZWwucm9vbVJlcD8ubWFwVGV4OwogICAgICAgICAgICAgICAgICAgIGlmIChlbGVtZW50ICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIChlbGVtZW50Lm5hbWU/LkdldEhhc2hDb2RlKCkgPz8gMCk7CiAgICAgICAgICAgICAgICAgICAgICAgIFRleHR1cmUyRCB0ZXh0dXJlID0gZWxlbWVudC5hdGxhcz8udGV4dHVyZSBhcyBUZXh0dXJlMkQ7CiAgICAgICAgICAgICAgICAgICAgICAgIGhhc2ggPSBoYXNoICogMzk3IF4gKHRleHR1cmUgIT0gbnVsbCA/IHRleHR1cmUuR2V0SW5zdGFuY2VJRCgpIDogMCk7CiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgfQoiIiIKbmV3X2hhc2ggPSAiIiIgICAgICAgICAgICAgICAgaWYgKFRyeUZpbmRSb29tUGFuZWwocGFnZSwgcm9vbS5Sb29tSW5kZXgsIG91dCBSb29tUGFuZWwgcGFuZWwpKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIE1hcE9iamVjdC5Sb29tUmVwcmVzZW50YXRpb24gcmVwID0gcGFuZWwucm9vbVJlcDsKICAgICAgICAgICAgICAgICAgICBGQXRsYXNFbGVtZW50IGVsZW1lbnQgPSByZXA/Lm1hcFRleDsKICAgICAgICAgICAgICAgICAgICBpZiAoVHJ5UmVzb2x2ZVJvb21UZXh0dXJlQXRsYXMoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBlbGVtZW50LAogICAgICAgICAgICAgICAgICAgICAgICAgICAgb3V0IFRleHR1cmUyRCBhdGxhcywKICAgICAgICAgICAgICAgICAgICAgICAgICAgIG91dCBSZWN0IHNvdXJjZVV2LAogICAgICAgICAgICAgICAgICAgICAgICAgICAgb3V0IGZsb2F0IHNvdXJjZVdpZHRoLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgb3V0IGZsb2F0IHNvdXJjZUhlaWdodCkpCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICAvLyBIYXNoIHRoZSBzYW1lIHNvdXJjZSB0aGF0IFRyeUdldFJvb21RdWFkIHdpbGwgYWN0dWFsbHkgcmVuZGVyLiBNYXBUZXggY2FuCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIGFycml2ZSBvciBmaW5pc2ggYXRsYXMgc2V0dXAgYWZ0ZXIgdGhlIGltbXV0YWJsZSBtYXAgc25hcHNob3Qgd2FzIHB1Ymxpc2hlZC4KICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiAxOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIChlbGVtZW50Lm5hbWU/LkdldEhhc2hDb2RlKCkgPz8gMCk7CiAgICAgICAgICAgICAgICAgICAgICAgIGhhc2ggPSBoYXNoICogMzk3IF4gYXRsYXMuR2V0SW5zdGFuY2VJRCgpOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIGF0bGFzLndpZHRoOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIGF0bGFzLmhlaWdodDsKICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiBNYXRoZi5Sb3VuZFRvSW50KHNvdXJjZVdpZHRoICogMTAwMGYpOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIE1hdGhmLlJvdW5kVG9JbnQoc291cmNlSGVpZ2h0ICogMTAwMGYpOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIE1hdGhmLlJvdW5kVG9JbnQoc291cmNlVXYueCAqIDEwMDAwMDBmKTsKICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiBNYXRoZi5Sb3VuZFRvSW50KHNvdXJjZVV2LnkgKiAxMDAwMDAwZik7CiAgICAgICAgICAgICAgICAgICAgICAgIGhhc2ggPSBoYXNoICogMzk3IF4gTWF0aGYuUm91bmRUb0ludChzb3VyY2VVdi53aWR0aCAqIDEwMDAwMDBmKTsKICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiBNYXRoZi5Sb3VuZFRvSW50KHNvdXJjZVV2LmhlaWdodCAqIDEwMDAwMDBmKTsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICAgICAgZWxzZSBpZiAocmVwPy50ZXh0dXJlICE9IG51bGwpCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICAvLyBTb21lIHJvb21zIGV4cG9zZSB0aGVpciBnZW5lcmF0ZWQgbWluaW1hcCB0aHJvdWdoIFJvb21SZXByZXNlbnRhdGlvbi50ZXh0dXJlCiAgICAgICAgICAgICAgICAgICAgICAgIC8vIGJlZm9yZSAob3IgaW5zdGVhZCBvZikgYSB1c2FibGUgRnV0aWxlIGF0bGFzIGVsZW1lbnQuIFRyYWNrIHRoYXQgc291cmNlIHRvbzsKICAgICAgICAgICAgICAgICAgICAgICAgLy8gb3RoZXJ3aXNlIGEgbGF0ZSB0ZXh0dXJlIG5ldmVyIGludmFsaWRhdGVzIHRoZSByZXRhaW5lZCByb29tIGJhdGNoLgogICAgICAgICAgICAgICAgICAgICAgICBUZXh0dXJlMkQgZGlyZWN0ID0gcmVwLnRleHR1cmU7CiAgICAgICAgICAgICAgICAgICAgICAgIGhhc2ggPSBoYXNoICogMzk3IF4gMjsKICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiBkaXJlY3QuR2V0SW5zdGFuY2VJRCgpOwogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NyBeIGRpcmVjdC53aWR0aDsKICAgICAgICAgICAgICAgICAgICAgICAgaGFzaCA9IGhhc2ggKiAzOTcgXiBkaXJlY3QuaGVpZ2h0OwogICAgICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgICAgICBlbHNlCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICBoYXNoID0gaGFzaCAqIDM5NzsKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICB9CiIiIgpzY2VuZSA9IHJlcGxhY2Vfb25jZShzY2VuZSwgb2xkX2hhc2gsIG5ld19oYXNoLCAnV29ybGRNYXBHcHVTY2VuZSBzb3VyY2UgaGFzaCcpCgpvbGRfcXVhZCA9ICIiIiAgICAgICAgRkF0bGFzRWxlbWVudCBlbGVtZW50ID0gcGFuZWwucm9vbVJlcC5tYXBUZXg7CiAgICAgICAgaWYgKGVsZW1lbnQ/LmF0bGFzPy50ZXh0dXJlIGlzIFRleHR1cmUyRCBhdGxhcykKICAgICAgICB7CiAgICAgICAgICAgIHRleHR1cmUgPSBhdGxhczsKICAgICAgICAgICAgdXYgPSBlbGVtZW50LnV2UmVjdDsKICAgICAgICAgICAgd2lkdGhUaWxlcyA9IE1hdGguTWF4KDFmLCBlbGVtZW50LnNvdXJjZVBpeGVsU2l6ZS54KTsKICAgICAgICAgICAgaGVpZ2h0VGlsZXMgPSBNYXRoLk1heCgxZiwgZWxlbWVudC5zb3VyY2VQaXhlbFNpemUueSk7CiAgICAgICAgfQogICAgICAgIGVsc2UgaWYgKHBhbmVsLnJvb21SZXAudGV4dHVyZSAhPSBudWxsKQogICAgICAgIHsKICAgICAgICAgICAgdGV4dHVyZSA9IHBhbmVsLnJvb21SZXAudGV4dHVyZTsKICAgICAgICAgICAgd2lkdGhUaWxlcyA9IE1hdGguTWF4KDFmLCB0ZXh0dXJlLndpZHRoKTsKICAgICAgICAgICAgaGVpZ2h0VGlsZXMgPSBNYXRoLk1heCgxZiwgdGV4dHVyZS5oZWlnaHQpOwogICAgICAgIH0KIiIiCm5ld19xdWFkID0gIiIiICAgICAgICBGQXRsYXNFbGVtZW50IGVsZW1lbnQgPSBwYW5lbC5yb29tUmVwLm1hcFRleDsKICAgICAgICBpZiAoVHJ5UmVzb2x2ZVJvb21UZXh0dXJlQXRsYXMoCiAgICAgICAgICAgICAgICBlbGVtZW50LAogICAgICAgICAgICAgICAgb3V0IFRleHR1cmUyRCBhdGxhcywKICAgICAgICAgICAgICAgIG91dCBSZWN0IGF0bGFzVXY sCiAgICAgICAgICAgICAgICBvdXQgZmxvYXQgYXRsYXNXaWR0aCwKICAgICAgICAgICAgICAgIG91dCBmbG9hdCBhdGxhc0hlaWdodCkpCiAgICAgICAgewogICAgICAgICAgICB0ZXh0dXJlID0gYXRsYXM7CiAgICAgICAgICAgIHV2ID0gYXRsYXNVdjsKICAgICAgICAgICAgd2lkdGhUaWxlcyA9IGF0bGFzV2lkdGg7CiAgICAgICAgICAgIGhlaWdodFRpbGVzID0gYXRsYXNIZWlnaHQ7CiAgICAgICAgfQogICAgICAgIGVsc2UgaWYgKHBhbmVsLnJvb21SZXAudGV4dHVyZSAhPSBudWxsKQogICAgICAgIHsKICAgICAgICAgICAgdGV4dHVyZSA9IHBhbmVsLnJvb21SZXAudGV4dHVyZTsKICAgICAgICAgICAgd2lkdGhUaWxlcyA9IE1hdGguTWF4KDFmLCB0ZXh0dXJlLndpZHRoKTsKICAgICAgICAgICAgaGVpZ2h0VGlsZXMgPSBNYXRoLk1heCgxZiwgdGV4dHVyZS5oZWlnaHQpOwogICAgICAgIH0KIiIiCnNjZW5lID0gcmVwbGFjZV9vbmNlKHNjZW5lLCBvbGRfcXVhZCwgbmV3X3F1YWQsICdXb3JsZE1hcEdwdVNjZW5lIHJvb20gcXVhZCBzb3VyY2UnKQoKaGVscGVyX2FuY2hvciA9ICIiIiAgICBwcml2YXRlIHN0YXRpYyBDaHVua0tleSBCYXNlS2V5KFJvb21RdWFkIHF1YWQpID0+CiIiIgpoZWxwZXIgPSAiIiIgICAgcHJpdmF0ZSBzdGF0aWMgYm9vbCBUcnlSZXNvbHZlUm9vbVRleHR1cmVBdGxhcygKICAgICAgICBGQXRsYXNFbGVtZW50IGVsZW1lbnQsCiAgICAgICAgb3V0IFRleHR1cmUyRCB0ZXh0dXJlLAogICAgICAgIG91dCBSZWN0IHV2LAogICAgICAgIG91dCBmbG9hdCB3aWR0aCwKICAgICAgICBvdXQgZmxvYXQgaGVpZ2h0KQogICAgewogICAgICAgIHRleHR1cmUgPSBudWxsOwogICAgICAgIHV2ID0gbmV3IFJlY3QoMGYsIDBmLCAxZiwgMWYpOwogICAgICAgIHdpZHRoID0gMGY7CiAgICAgICAgaGVpZ2h0ID0gMGY7CgogICAgICAgIGlmIChlbGVtZW50Py5hdGxhcz8udGV4dHVyZSBpcyBub3QgVGV4dHVyZTJEIGF0bGFzIHx8IGF0bGFzID09IG51bGwpCiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKCiAgICAgICAgUmVjdCBjYW5kaWRhdGVVdiA9IGVsZW1lbnQudXZSZWN0OwogICAgICAgIGZsb2F0IHV2V2lkdGggPSBNYXRoLkFicyhjYW5kaWRhdGVVdi53aWR0aCk7CiAgICAgICAgZmxvYXQgdXZIZWlnaHQgPSBNYXRoLkFicyhjYW5kaWRhdGVVdi5oZWlnaHQpOwogICAgICAgIGlmICh1dldpZHRoIDw9IDAuMDAwMDAxZiB8fCB1dkhlaWdodCA8PSAwLjAwMDAwMWYpCiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKCiAgICAgICAgZmxvYXQgc2FtcGxlZFdpZHRoID0gdXZXaWR0aCAqIE1hdGguTWF4KDEsIGF0bGFzLndpZHRoKTsKICAgICAgICBmbG9hdCBzYW1wbGVkSGVpZ2h0ID0gdXZIZWlnaHQgKiBNYXRoLk1heCgxLCBhdGxhcy5oZWlnaHQpOwogICAgICAgIGlmIChzYW1wbGVkV2lkdGggPCAwLjVmIHx8IHNhbXBsZWRIZWlnaHQgPCAwLjVmKQogICAgICAgICAgICByZXR1cm4gZmFsc2U7CgogICAgICAgIHRleHR1cmUgPSBhdGxhczsKICAgICAgICB1diA9IGNhbmRpZGF0ZVV2OwogICAgICAgIHdpZHRoID0gTWF0aC5NYXgoMWYsIGVsZW1lbnQuc291cmNlUGl4ZWxTaXplLnggPiAwLjVmID8gZWxlbWVudC5zb3VyY2VQaXhlbFNpemUueCA6IHNhbXBsZWRXaWR0aCk7CiAgICAgICAgaGVpZ2h0ID0gTWF0aC5NYXgoMWYsIGVsZW1lbnQuc291cmNlUGl4ZWxTaXplLnkgPiAwLjVmID8gZWxlbWVudC5zb3VyY2VQaXhlbFNpemUueSA6IHNhbXBsZWRIZWlnaHQpOwogICAgICAgIHJldHVybiB0cnVlOwogICAgfQoKIiIiCnNjZW5lID0gcmVwbGFjZV9vbmNlKHNjZW5lLCBoZWxwZXJfYW5jaG9yLCBoZWxwZXIgKyBoZWxwZXJfYW5jaG9yLCAnV29ybGRNYXBHcHVTY2VuZSBhdGxhcyByZXNvbHZlcicpCnNjZW5lX3BhdGgud3JpdGVfdGV4dChzY2VuZSwgZW5jb2Rpbmc9J3V0Zi04JykKCm9wdGltaXplcl9wYXRoID0gUGF0aCgnc3JjL0RldlVJL0RldlRvb2wvUldJbUd1aS9Xb3JsZE1hcEdwdVJldGFpbmVkT3B0aW1pemVyUGx1Z2luLmNzJykKb3B0aW1pemVyID0gb3B0aW1pemVyX3BhdGgucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCm9wdGltaXplciA9IHJlcGxhY2Vfb25jZSgKICAgIG9wdGltaXplciwKICAgICJ1c2luZyBEcnlDeWNsZS5EZXZVSS5EZXZUb29sLk1hcDtcbiIsCiAgICAidXNpbmcgRHJ5Q3ljbGUuRGV2VUkuRGV2VG9vbC5NYXA7XG51c2luZyBVbml0eUVuZ2luZTtcbiIsCiAgICAnb3B0aW1pemVyIFVuaXR5RW5naW5lIHVzaW5nJykKb3B0aW1pemVyID0gcmVwbGFjZV9vbmNlKAogICAgb3B0aW1pemVyLAogICAgImludGVybmFsIHN0YXRpYyBjbGFzcyBXb3JsZE1hcEdwdVJldGFpbmVkT3B0aW1pemVyXG57XG4iLAogICAgImludGVybmFsIHN0YXRpYyBjbGFzcyBXb3JsZE1hcEdwdVJldGFpbmVkT3B0aW1pemVyXG57XG4gICAgcHJpdmF0ZSBjb25zdCBpbnQgU291cmNlQXVkaXRJbnRlcnZhbEZyYW1lcyA9IDE1O1xuXG4iLAogICAgJ29wdGltaXplciBhdWRpdCBjb25zdGFudCcpCm9wdGltaXplciA9IHJlcGxhY2Vfb25jZSgKICAgIG9wdGltaXplciwKICAgICIgICAgcHJpdmF0ZSBzdGF0aWMgaW50IGNhY2hlZFNvdXJjZUhhc2g7XG4gICAgcHJpdmF0ZSBzdGF0aWMgYm9vbCBlbmFibGVkO1xuIiwKICAgICIgICAgcHJpdmF0ZSBzdGF0aWMgaW50IGNhY2hlZFNvdXJjZUhhc2g7XG4gICAgcHJpdmF0ZSBzdGF0aWMgaW50IG5leHRTb3VyY2VBdWRpdEZyYW1lO1xuICAgIHByaXZhdGUgc3RhdGljIGJvb2wgZW5hYmxlZDtcbiIsCiAgICAnb3B0aW1pemVyIGF1ZGl0IGZpZWxkJykKb3B0aW1pemVyID0gcmVwbGFjZV9vbmNlKAogICAgb3B0aW1pemVyLAogICAgIiAgICAgICAgY2FjaGVkU291cmNlSGFzaCA9IDA7XG4gICAgICAgIGVuYWJsZWQgPSBmYWxzZTtcbiIsCiAgICAiICAgICAgICBjYWNoZWRTb3VyY2VIYXNoID0gMDtcbiAgICAgICAgbmV4dFNvdXJjZUF1ZGl0RnJhbWUgPSAwO1xuICAgICAgICBlbmFibGVkID0gZmFsc2U7XG4iLAogICAgJ29wdGltaXplciBhdWRpdCByZXNldCcpCgpzdGFydF9tYXJrZXIgPSAiICAgIHByaXZhdGUgc3RhdGljIGludCBDb21wdXRlUm9vbVNvdXJjZUhhc2hIb29rKFxuIgplbmRfbWFya2VyID0gIiAgICBwcml2YXRlIHN0YXRpYyBib29sIFRyeUZpbmRSb29tUGFuZWxIb29rKFxuIgpzdGFydCA9IG9wdGltaXplci5maW5kKHN0YXJ0X21hcmtlcikKZW5kID0gb3B0aW1pemVyLmZpbmQoZW5kX21hcmtlciwgc3RhcnQpCmlmIHN0YXJ0IDwgMCBvciBlbmQgPCAwIG9yIGVuZCA8PSBzdGFydDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoJ29wdGltaXplciBzb3VyY2UgaGFzaCBob29rIG1hcmtlcnMgbm90IGZvdW5kJykKbmV3X2hvb2sgPSAiIiIgICAgcHJpdmF0ZSBzdGF0aWMgaW50IENvbXB1dGVSb29tU291cmNlSGFzaEhvb2soCiAgICAgICAgT3JpZ0NvbXB1dGVSb29tU291cmNlSGFzaCBvcmlnLAogICAgICAgIE1hcFBhZ2UgcGFnZSwKICAgICAgICBXb3JsZE1hcEdwdVNjZW5lLkZyYW1lU3RhdGUgZnJhbWUpCiAgICB7CiAgICAgICAgaWYgKCFlbmFibGVkIHx8IGZyYW1lPy5TbmFwc2hvdD8uQXZhaWxhYmxlICE9IHRydWUpCiAgICAgICAgICAgIHJldHVybiBvcmlnKHBhZ2UsIGZyYW1lKTsKCiAgICAgICAgRWRpdG9yTWFwUHJlc2VudGF0aW9uU25hcHNob3Qgc25hcHNob3QgPSBmcmFtZS5TbmFwc2hvdDsKICAgICAgICBpbnQgZ2VuZXJhdGlvbiA9IFdvcmxkTWFwR3B1Q2FjaGUuR2VuZXJhdGlvbjsKICAgICAgICBib29sIHNuYXBzaG90Q2hhbmdlZCA9ICFSZWZlcmVuY2VFcXVhbHMoY2FjaGVkU291cmNlU25hcHNob3QsIHNuYXBzaG90KTsKICAgICAgICBib29sIGdlbmVyYXRpb25DaGFuZ2VkID0gY2FjaGVkU291cmNlR2VuZXJhdGlvbiAhPSBnZW5lcmF0aW9uOwogICAgICAgIGJvb2wgYXVkaXREdWUgPSBUaW1lLmZyYW1lQ291bnQgPj0gbmV4dFNvdXJjZUF1ZGl0RnJhbWU7CgogICAgICAgIGlmICghc25hcHNob3RDaGFuZ2VkICYmICFnZW5lcmF0aW9uQ2hhbmdlZCAmJiAhYXVkaXREdWUpCiAgICAgICAgICAgIHJldHVybiBjYWNoZWRTb3VyY2VIYXNoOwoKICAgICAgICAvLyBTdGFibGUgZnJhbWVzIHN0YXkgTygxKSwgYnV0IHBlcmlvZGljYWxseSBhc2sgdGhlIGF1dGhvcml0YXRpdmUgc2NlbmUgaGFzaCB0byBhdWRpdCBsaXZlCiAgICAgICAgLy8gUm9vbVBhbmVsIHRleHR1cmUgc3RhdGUuIE1hcFRleCBhbmQgUm9vbVJlcHJlc2VudGF0aW9uLnRleHR1cmUgYXJlIHBvcHVsYXRlZCBhc3luY2hyb25vdXNseQogICAgICAgIC8vIGFuZCBjYW4gY2hhbmdlIHdpdGhvdXQgcHVibGlzaGluZyBhIG5ldyBtYXAgc25hcHNob3Qgb3IgYnVtcGluZyBXb3JsZE1hcEdwdUNhY2hlLkdlbmVyYXRpb24uCiAgICAgICAgLy8gV2l0aG91dCB0aGlzIGF1ZGl0LCBhIHJvb20gdGhhdCBtaXNzZWQgaXRzIGZpcnN0IHRleHR1cmUtcmVhZHkgZnJhbWUgY2FuIHN0YXkgaW52aXNpYmxlIGZvcgogICAgICAgIC8vIHRoZSByZXN0IG9mIHRoZSBNYXAgc2Vzc2lvbi4KICAgICAgICBpbnQgbGl2ZUhhc2ggPSBvcmlnKHBhZ2UsIGZyYW1lKTsKICAgICAgICB1bmNoZWNrZWQKICAgICAgICB7CiAgICAgICAgICAgIGludCBoYXNoID0gbGl2ZUhhc2ggKiAzOTcgXiBnZW5lcmF0aW9uOwogICAgICAgICAgICBjYWNoZWRTb3VyY2VTbmFwc2hvdCA9IHNuYXBzaG90OwogICAgICAgICAgICBjYWNoZWRTb3VyY2VHZW5lcmF0aW9uID0gZ2VuZXJhdGlvbjsKICAgICAgICAgICAgY2FjaGVkU291cmNlSGFzaCA9IGhhc2g7CiAgICAgICAgICAgIG5leHRTb3VyY2VBdWRpdEZyYW1lID0gVGltZS5mcmFtZUNvdW50ICsgU291cmNlQXVkaXRJbnRlcnZhbEZyYW1lczsKICAgICAgICAgICAgcmV0dXJuIGhhc2g7CiAgICAgICAgfQogICAgfQoKIiIiCm9wdGltaXplciA9IG9wdGltaXplcls6c3RhcnRdICsgbmV3X2hvb2sgKyBvcHRpbWl6ZXJbZW5kOl0Kb3B0aW1pemVyX3BhdGgud3JpdGVfdGV4dChvcHRpbWl6ZXIsIGVuY29kaW5nPSd1dGYtOCcpCg=='))"
 
       - name: Verify room preview recovery fix
         shell: bash
@@ -237,13 +28,11 @@ jobs:
           set -euo pipefail
           scene='src/DevUI/DevTool/RWImGui/WorldMapGpuScene.cs'
           optimizer='src/DevUI/DevTool/RWImGui/WorldMapGpuRetainedOptimizerPlugin.cs'
-
           grep -Fq 'private static bool TryResolveRoomTextureAtlas(' "$scene"
           grep -Fq 'hash = hash * 397 ^ direct.GetInstanceID();' "$scene"
           grep -Fq 'hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.width * 1000000f);' "$scene"
           grep -Fq 'out float atlasWidth' "$scene"
           ! grep -Fq 'if (element?.atlas?.texture is Texture2D atlas)' "$scene"
-
           grep -Fq 'private const int SourceAuditIntervalFrames = 15;' "$optimizer"
           grep -Fq 'bool auditDue = Time.frameCount >= nextSourceAuditFrame;' "$optimizer"
           grep -Fq 'int liveHash = orig(page, frame);' "$optimizer"
