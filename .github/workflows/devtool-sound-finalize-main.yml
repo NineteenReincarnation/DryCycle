@@ -1,0 +1,56 @@
+name: DevTool Sound Finalize Main
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-sound-finalize-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified Sound group discovery cleanup
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/DevUI/DevTool/Sound/SoundGroupLibrary.cs')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''                case LoadPhase.ResolveLocalDirectory:\n                    buildingLocalDirectory = ResolveConfiguredLocalDirectory();\n                    discoverModIndex = ModManager.ActiveMods.Count - 1;\n                    loadPhase = LoadPhase.DiscoverMods;\n                    break;\n'''
+          new = '''                case LoadPhase.ResolveLocalDirectory:\n                {\n                    long unitStarted = Stopwatch.GetTimestamp();\n                    buildingLocalDirectory = ResolveConfiguredLocalDirectory();\n                    RecordBlockingUnit("resolve sound-group local directory", ElapsedMilliseconds(unitStarted));\n                    discoverModIndex = ModManager.ActiveMods.Count - 1;\n                    loadPhase = LoadPhase.DiscoverMods;\n                    break;\n                }\n'''
+          if old not in text:
+              raise SystemExit('ResolveLocalDirectory anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];\n        string file = ResolveStandardFile(mod);\n        if (string.IsNullOrEmpty(file) || !File.Exists(file))\n            return;\n\n        string canonical = CanonicalPath(file);\n        if (!buildingSeenFiles.Add(canonical))\n            return;\n\n        bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);\n        pendingFiles.Add(new PendingGroupFile\n        {\n            File = file,\n            SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),\n            IsLocal = false\n        });\n'''
+          new = '''        ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];\n        long started = Stopwatch.GetTimestamp();\n        try\n        {\n            // ResolveStandardFile already returns only an existing candidate; do not probe the same\n            // path a second time after it succeeds. This keeps group discovery to one filesystem\n            // decision per candidate root.\n            string file = ResolveStandardFile(mod);\n            if (string.IsNullOrEmpty(file))\n                return;\n\n            string canonical = CanonicalPath(file);\n            if (!buildingSeenFiles.Add(canonical))\n                return;\n\n            bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);\n            pendingFiles.Add(new PendingGroupFile\n            {\n                File = file,\n                SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),\n                IsLocal = false\n            });\n        }\n        finally\n        {\n            RecordBlockingUnit(\n                "discover sound-group file " + (mod?.id ?? string.Empty),\n                ElapsedMilliseconds(started));\n        }\n'''
+          if old not in text:
+              raise SystemExit('StepDiscoverMod anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    private static void DiscoverLocalFile()\n    {\n        string localFile = Path.Combine(buildingLocalDirectory ?? DefaultLocalDirectory, FileName);\n        if (!File.Exists(localFile))\n            return;\n\n        string canonical = CanonicalPath(localFile);\n        if (!buildingSeenFiles.Add(canonical))\n            return;\n\n        pendingFiles.Add(new PendingGroupFile\n        {\n            File = localFile,\n            SourceName = "Local",\n            IsLocal = true\n        });\n    }\n'''
+          new = '''    private static void DiscoverLocalFile()\n    {\n        long started = Stopwatch.GetTimestamp();\n        try\n        {\n            string localFile = Path.Combine(buildingLocalDirectory ?? DefaultLocalDirectory, FileName);\n            if (!File.Exists(localFile))\n                return;\n\n            string canonical = CanonicalPath(localFile);\n            if (!buildingSeenFiles.Add(canonical))\n                return;\n\n            pendingFiles.Add(new PendingGroupFile\n            {\n                File = localFile,\n                SourceName = "Local",\n                IsLocal = true\n            });\n        }\n        finally\n        {\n            RecordBlockingUnit("discover local sound-group file", ElapsedMilliseconds(started));\n        }\n    }\n'''
+          if old not in text:
+              raise SystemExit('DiscoverLocalFile anchor not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit cleanup and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/devtool-sound-finalize-main.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/DevUI/DevTool/Sound/SoundGroupLibrary.cs .github/workflows/devtool-sound-finalize-main.yml
+          git commit -m "DevTool Sound: finalize cold-start discovery I/O"
+          git push origin HEAD:main
