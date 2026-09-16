@@ -58,8 +58,36 @@ internal static class RoomSettingsView
         internal string WidgetId;
     }
 
+    private readonly struct PendingFloatEdit
+    {
+        internal PendingFloatEdit(float value, int submittedFrame)
+        {
+            Value = value;
+            SubmittedFrame = submittedFrame;
+        }
+
+        internal float Value { get; }
+        internal int SubmittedFrame { get; }
+    }
+
+    private readonly struct PendingIntEdit
+    {
+        internal PendingIntEdit(int value, int submittedFrame)
+        {
+            Value = value;
+            SubmittedFrame = submittedFrame;
+        }
+
+        internal int Value { get; }
+        internal int SubmittedFrame { get; }
+    }
+
     private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> DirtyFloatEdits = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, PendingFloatEdit> PendingFloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> DirtyIntEdits = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, PendingIntEdit> PendingIntEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> SettingWidgetIds = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> InheritanceWidgetIds = new(StringComparer.Ordinal);
 
@@ -97,7 +125,11 @@ internal static class RoomSettingsView
     internal static void ResetRetainedState()
     {
         FloatEdits.Clear();
+        DirtyFloatEdits.Clear();
+        PendingFloatEdits.Clear();
         IntEdits.Clear();
+        DirtyIntEdits.Clear();
+        PendingIntEdits.Clear();
         SettingWidgetIds.Clear();
         InheritanceWidgetIds.Clear();
 
@@ -265,12 +297,10 @@ internal static class RoomSettingsView
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("渐变色板", "FADE PALETTE"));
         int fadePalette = Get(IntEdits, RoomSettingKeys.FadePalette, snapshot.HasFadePalette ? snapshot.FadePalette : -1);
         BeginSettingRow(DevToolUiSettings.T("渐变色板编号", "Fade Palette"), 0f, out _);
+        int fadeAuthoritative = snapshot.HasFadePalette ? snapshot.FadePalette : -1;
         bool fadeChanged = ImGui.InputInt("##RoomFadePalette", ref fadePalette, 1, 10);
-        IntEdits[RoomSettingKeys.FadePalette] = fadePalette;
-        if (ImGui.IsItemDeactivatedAfterEdit())
+        if (FinishIntEdit(RoomSettingKeys.FadePalette, fadeAuthoritative, ref fadePalette, fadeChanged))
             SendSetting(RoomSettingKeys.FadePalette, new EditorPropertyValue(EditorPropertyKind.Integer, integer: fadePalette));
-        else if (!fadeChanged && !ImGui.IsItemActive())
-            IntEdits[RoomSettingKeys.FadePalette] = snapshot.HasFadePalette ? snapshot.FadePalette : -1;
 
         if (snapshot.HasFadePalette)
             DrawScreenFades(snapshot.FadePaletteFades, false);
@@ -463,20 +493,27 @@ internal static class RoomSettingsView
                 EffectSliderBinding sliderBinding = binding.Sliders[slider];
                 float value = Get(FloatEdits, sliderBinding.StateKey, values[slider]);
                 BeginSettingRow(sliderBinding.DisplayName, 0f, out _);
-                bool changed = ImGui.SliderFloat(sliderBinding.WidgetId, ref value, 0f, 1f, "%.3f");
-                FloatEdits[sliderBinding.StateKey] = value;
+                bool changed = ImGui.SliderFloat(
+                    sliderBinding.WidgetId,
+                    ref value,
+                    0f,
+                    1f,
+                    "%.3f",
+                    ImGuiSliderFlags.AlwaysClamp);
 
-                if (!effect.Inherited && ImGui.IsItemDeactivatedAfterEdit())
+                if (effect.Inherited)
+                {
+                    DirtyFloatEdits.Remove(sliderBinding.StateKey);
+                    PendingFloatEdits.Remove(sliderBinding.StateKey);
+                    FloatEdits[sliderBinding.StateKey] = values[slider];
+                }
+                else if (FinishFloatEdit(sliderBinding.StateKey, values[slider], ref value, changed))
                 {
                     RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                         RoomEditorCommandKind.SetEffectAmount,
                         index: effect.Index,
                         secondaryIndex: slider,
                         value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
-                }
-                else if (!changed && !ImGui.IsItemActive())
-                {
-                    FloatEdits[sliderBinding.StateKey] = values[slider];
                 }
             }
 
@@ -512,18 +549,14 @@ internal static class RoomSettingsView
                 ref value,
                 0f,
                 1f,
-                "%.3f");
-            FloatEdits[binding.StateKey] = value;
-            if (ImGui.IsItemDeactivatedAfterEdit())
+                "%.3f",
+                ImGuiSliderFlags.AlwaysClamp);
+            if (FinishFloatEdit(binding.StateKey, fades[i], ref value, changed))
             {
                 RoomEditorCommandQueue.Enqueue(new RoomEditorCommand(
                     terrain ? RoomEditorCommandKind.SetTerrainPaletteFade : RoomEditorCommandKind.SetPaletteFade,
                     index: i,
                     value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
-            }
-            else if (!changed && !ImGui.IsItemActive())
-            {
-                FloatEdits[binding.StateKey] = fades[i];
             }
         }
     }
@@ -822,32 +855,114 @@ internal static class RoomSettingsView
     private static void DrawFloat(string key, float current, float min, float max)
     {
         float value = Get(FloatEdits, key, current);
-        bool changed = ImGui.SliderFloat(CachedId(SettingWidgetIds, key, "##RoomSetting"), ref value, min, max, "%.3f");
-        FloatEdits[key] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
+        bool changed = ImGui.SliderFloat(
+            CachedId(SettingWidgetIds, key, "##RoomSetting"),
+            ref value,
+            min,
+            max,
+            "%.3f",
+            ImGuiSliderFlags.AlwaysClamp);
+        if (FinishFloatEdit(key, current, ref value, changed))
             SendSetting(key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            FloatEdits[key] = current;
-        }
     }
 
     private static void DrawInt(string key, int current)
     {
         int value = Get(IntEdits, key, current);
         bool changed = ImGui.InputInt(CachedId(SettingWidgetIds, key, "##RoomSetting"), ref value, 1, 10);
-        IntEdits[key] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
+        if (FinishIntEdit(key, current, ref value, changed))
             SendSetting(key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            IntEdits[key] = current;
-        }
     }
+
+    private static bool FinishFloatEdit(
+        string key,
+        float authoritativeValue,
+        ref float value,
+        bool changed)
+    {
+        FloatEdits[key] = value;
+        if (changed)
+            DirtyFloatEdits.Add(key);
+
+        if (ImGui.IsItemActive())
+            return false;
+
+        // Mouse release, Enter and clicking elsewhere all end the same edit transaction. Do not
+        // rely on IsItemDeactivatedAfterEdit: SliderFloat's Ctrl+Click temporary text input can
+        // leave that signal inconsistent across ImGui versions even though the edited value is valid.
+        if (DirtyFloatEdits.Remove(key))
+        {
+            PendingFloatEdits[key] = new PendingFloatEdit(value, ImGui.GetFrameCount());
+            return true;
+        }
+
+        if (PendingFloatEdits.TryGetValue(key, out PendingFloatEdit pending))
+        {
+            int age = ImGui.GetFrameCount() - pending.SubmittedFrame;
+            if (NearlyEqual(authoritativeValue, pending.Value) || age >= 3)
+            {
+                PendingFloatEdits.Remove(key);
+                FloatEdits[key] = authoritativeValue;
+                value = authoritativeValue;
+            }
+            else
+            {
+                // The command queue is processed on the next backend frame. Keep the optimistic
+                // committed value visible until the authoritative snapshot acknowledges it.
+                FloatEdits[key] = pending.Value;
+                value = pending.Value;
+            }
+            return false;
+        }
+
+        FloatEdits[key] = authoritativeValue;
+        value = authoritativeValue;
+        return false;
+    }
+
+    private static bool FinishIntEdit(
+        string key,
+        int authoritativeValue,
+        ref int value,
+        bool changed)
+    {
+        IntEdits[key] = value;
+        if (changed)
+            DirtyIntEdits.Add(key);
+
+        if (ImGui.IsItemActive())
+            return false;
+
+        if (DirtyIntEdits.Remove(key))
+        {
+            PendingIntEdits[key] = new PendingIntEdit(value, ImGui.GetFrameCount());
+            return true;
+        }
+
+        if (PendingIntEdits.TryGetValue(key, out PendingIntEdit pending))
+        {
+            int age = ImGui.GetFrameCount() - pending.SubmittedFrame;
+            if (authoritativeValue == pending.Value || age >= 3)
+            {
+                PendingIntEdits.Remove(key);
+                IntEdits[key] = authoritativeValue;
+                value = authoritativeValue;
+            }
+            else
+            {
+                IntEdits[key] = pending.Value;
+                value = pending.Value;
+            }
+            return false;
+        }
+
+        IntEdits[key] = authoritativeValue;
+        value = authoritativeValue;
+        return false;
+    }
+
+    private static bool NearlyEqual(float left, float right) =>
+        Math.Abs(left - right) <= 0.0001f;
 
     private static void SendSetting(string key, EditorPropertyValue value)
     {
