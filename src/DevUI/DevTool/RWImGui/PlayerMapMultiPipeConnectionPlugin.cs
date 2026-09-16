@@ -12,15 +12,14 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Replaces the temporary room-centre Player Map links with endpoint-aware connection rendering.
-/// Exact world connections are keyed by source/target node index, so two or more pipes between the
-/// same room pair remain visually distinct and terminate at their real shortcut mouths.
-///
-/// A centre-to-centre fallback is retained only for a single legacy connection between a room pair.
-/// Repeated unresolved connections are deliberately not collapsed into the same fake line.
+/// Replaces temporary room-centre Player Map links with endpoint-aware connection rendering. Exact
+/// world connections are keyed by source/target node index, so repeated pipes between the same room
+/// pair remain distinct and terminate at their real shortcut mouths. Group-drag preview positions are
+/// consumed directly, keeping precise pipes attached while several rooms move together.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(PlayerMapMultiSelectionPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class PlayerMapMultiPipeConnectionPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.PlayerMap.MultiPipeConnections";
@@ -171,20 +170,16 @@ internal static class PlayerMapMultiPipeConnections
 
             if (!repeatedPair)
             {
-                // Compatibility only: one legacy vanilla room-to-room link cannot be confused with
-                // another pipe, so retaining the old centre line is safe and keeps old regions useful.
+                // Compatibility only: one unresolved legacy link cannot be confused with another
+                // pipe, so a centre line remains safe. Repeated unresolved links never get this path.
                 Num.Vector2 ca = RoomCenter(a, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition);
                 Num.Vector2 cb = RoomCenter(b, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition);
                 draw.AddLine(ca, cb, fallbackColor, 1f);
                 continue;
             }
 
-            // Repeated pair + unresolved endpoint: never merge it into another connection. Mark any
-            // side we can resolve, but omit the invented route until topology/Bake becomes exact.
-            if (exactA)
-                DrawUnresolvedEndpoint(draw, pa, unresolvedColor);
-            if (exactB)
-                DrawUnresolvedEndpoint(draw, pb, unresolvedColor);
+            if (exactA) DrawUnresolvedEndpoint(draw, pa, unresolvedColor);
+            if (exactB) DrawUnresolvedEndpoint(draw, pb, unresolvedColor);
         }
     }
 
@@ -226,7 +221,7 @@ internal static class PlayerMapMultiPipeConnections
             anchor.Kind != RoomMapPixelKind.RoomExit)
             return false;
 
-        Vector2 center = draggingRoom == room.RoomIndex ? dragPreviewPosition : room.EffectivePosition;
+        Vector2 center = ResolveCenter(room, draggingRoom, dragPreviewPosition);
         Vector2 local = new(
             (anchor.EntranceX - room.Bake.Width * 0.5f) * PlayerMapCoordinateSystem.CanonPixelsPerTile,
             (anchor.EntranceY - room.Bake.Height * 0.5f) * PlayerMapCoordinateSystem.CanonPixelsPerTile);
@@ -243,14 +238,24 @@ internal static class PlayerMapMultiPipeConnections
         int draggingRoom,
         Vector2 dragPreviewPosition)
     {
-        Vector2 center = draggingRoom == room.RoomIndex ? dragPreviewPosition : room.EffectivePosition;
+        Vector2 center = ResolveCenter(room, draggingRoom, dragPreviewPosition);
         return canvasMin + pan + new Num.Vector2(center.x, center.y) * zoom;
+    }
+
+    private static Vector2 ResolveCenter(
+        PlayerMapRoomSnapshot room,
+        int draggingRoom,
+        Vector2 dragPreviewPosition)
+    {
+        if (room != null && PlayerMapMultiSelection.TryGetPreviewPosition(room.RoomIndex, out Vector2 groupPreview))
+            return groupPreview;
+        return draggingRoom == room?.RoomIndex ? dragPreviewPosition : room?.EffectivePosition ?? Vector2.zero;
     }
 
     private static bool Visible(PlayerMapRoomSnapshot room, bool[] layers)
     {
         if (room == null || room.Disabled) return false;
-        int layer = Math.Max(0, Math.Min(2, room.Layer));
+        int layer = Math.Max(0, Math.Min(PlayerMapCoordinateSystem.LayerCount - 1, room.Layer));
         return layers != null && layer < layers.Length && layers[layer];
     }
 
