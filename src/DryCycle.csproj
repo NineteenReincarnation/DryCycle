@@ -111,6 +111,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <!-- M4A/AAC is not decoded by Rain World's Unity AudioType.ACC path. Keep the Windows
+         Media Foundation backend isolated behind the shared audio-format support layer. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
   </ItemGroup>
 
   <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
