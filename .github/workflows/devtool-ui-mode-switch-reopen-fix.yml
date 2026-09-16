@@ -1,0 +1,61 @@
+name: DevTool UI Mode Reopen Fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/devtool-ui-mode-switch-reopen-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch BridgePlugin lifetime gates
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/DevUI/DevTool/RWImGui/BridgePlugin.cs')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '        bool rawSessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;',
+                  '''        // Session lifetime is authoritative here. Vanilla presentation intentionally does not\n        // publish rebuilt presentation snapshots, so requiring Current.Available makes the tiny\n        // Vanilla -> New UI return panel disappear after H closes and recreates DevUI.\n        bool rawSessionVisible = DevToolSessionHub.IsCurrentSessionLive;'''
+              ),
+              (
+                  '''        if (!visible || !snapshot.Available || EditorUiModeState.OverlayHidden)\n        {\n            EditorInputRouter.SetFrontendCapture(false, false, false);\n            return;\n        }''',
+                  '''        // Vanilla mode deliberately renders only the tiny return panel and therefore does not\n        // require a rebuilt presentation snapshot. New UI surfaces still require a valid snapshot.\n        bool needsPresentationSnapshot = !EditorUiModeState.UseVanilla;\n        if (!visible || (needsPresentationSnapshot && !snapshot.Available) || EditorUiModeState.OverlayHidden)\n        {\n            EditorInputRouter.SetFrontendCapture(false, false, false);\n            return;\n        }'''
+              ),
+              (
+                  '''                if (!EditorUiModeState.UseVanilla)\n                {''',
+                  '''                // Switching from Vanilla to New UI can happen inside UiModeSwitch.Draw(). If the\n                // recreated session has not published its first snapshot yet, wait one frame rather\n                // than feeding an unavailable snapshot into rebuilt editor windows.\n                if (!EditorUiModeState.UseVanilla && snapshot.Available)\n                {'''
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one patch anchor, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Run DevTool architecture guard
+        run: bash scripts/validate-devtool-final-architecture.sh
+
+      - name: Commit fix and remove bootstrap workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/devtool-ui-mode-switch-reopen-fix.yml
+          git add src/DevUI/DevTool/RWImGui/BridgePlugin.cs
+          git commit -m 'DevTool: restore UI mode switch after H reopen'
+          git push
