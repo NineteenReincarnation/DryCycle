@@ -224,9 +224,12 @@ internal static class PlayerMapMultiPipeConnections
             return false;
 
         Vector2 center = ResolveCenter(room, draggingRoom, dragPreviewPosition);
+        // Room bake coordinates use Rain World's bottom-origin tile Y while ImGui screen Y grows
+        // downward. Mirror only the room-local Y here; the room's global Player Map position stays
+        // in the authoring coordinate system.
         Vector2 local = new(
             (anchor.EntranceX - room.Bake.Width * 0.5f) * PlayerMapCoordinateSystem.CanonPixelsPerTile,
-            (anchor.EntranceY - room.Bake.Height * 0.5f) * PlayerMapCoordinateSystem.CanonPixelsPerTile);
+            (room.Bake.Height * 0.5f - anchor.EntranceY) * PlayerMapCoordinateSystem.CanonPixelsPerTile);
         Vector2 point = center + local;
         screen = canvasMin + pan + new Num.Vector2(point.x, point.y) * zoom;
         return true;
