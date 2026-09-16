@@ -108,14 +108,16 @@ internal static class PlayerMapTerrainBakeBridge
             return false;
         }
 
-        if (!enabled || !MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
-                roomIndex,
-                out EditorMapRectSnapshot[] terrainRuns,
-                out int terrainRevision) ||
-            terrainRuns.Length == 0)
+        EditorMapRectSnapshot[] terrainRuns = Array.Empty<EditorMapRectSnapshot>();
+        int terrainRevision = 0;
+        bool terrainReady = enabled && MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
+            roomIndex,
+            out terrainRuns,
+            out terrainRevision);
+        if (!terrainReady || terrainRuns == null || terrainRuns.Length == 0)
         {
             bake = baseBake;
-            if (terrainRuns == null || terrainRuns.Length == 0) Cache.Remove(roomIndex);
+            Cache.Remove(roomIndex);
             return true;
         }
 
