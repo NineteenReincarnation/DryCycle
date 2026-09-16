@@ -29,7 +29,8 @@ internal static class DevToolSubsystemCoordinator
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
-        PlayerMapCommandQueue.Process(session);
+        if (PlayerMapActivityGate.ShouldProcess)
+            PlayerMapCommandQueue.Process(session);
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
 
@@ -93,6 +94,7 @@ internal static class DevToolSubsystemCoordinator
 
     private static void ResetWorkspaceState()
     {
+        PlayerMapActivityGate.Reset();
         SoundActivationPipeline.Reset();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
