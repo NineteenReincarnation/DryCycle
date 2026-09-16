@@ -28,6 +28,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapLayoutAssist.Enable(logger);
         PlayerMapLiveOverlapPreview.Enable(logger);
         PlayerMapPreflightPanel.Enable(logger);
+        PlayerMapConditionalVisibilityInfo.Enable(logger);
         PlayerMapMultiPipeConnections.Enable(logger);
 
         enabled = true;
@@ -43,6 +44,7 @@ internal static class PlayerMapFrontendLifecycle
         }
 
         PlayerMapMultiPipeConnections.Disable();
+        PlayerMapConditionalVisibilityInfo.Disable();
         PlayerMapPreflightPanel.Disable();
         PlayerMapLiveOverlapPreview.Disable();
         PlayerMapLayoutAssist.Disable();
