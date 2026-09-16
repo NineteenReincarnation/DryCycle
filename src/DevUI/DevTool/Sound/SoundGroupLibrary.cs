@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Xml;
 using System.Xml.Linq;
 using BepInEx;
 using UnityEngine;
@@ -33,6 +34,20 @@ public static class SoundGroupLibrary
         internal bool IsLocal;
     }
 
+    private sealed class ActiveGroupFileReader : IDisposable
+    {
+        internal PendingGroupFile Pending;
+        internal XmlReader Reader;
+        internal readonly HashSet<string> IdsInFile = new(StringComparer.OrdinalIgnoreCase);
+        internal bool RootValidated;
+
+        public void Dispose()
+        {
+            try { Reader?.Dispose(); } catch { }
+            Reader = null;
+        }
+    }
+
     private static Dictionary<string, SoundGroupDefinition> effectiveGroups =
         new(StringComparer.OrdinalIgnoreCase);
     private static Dictionary<string, SoundGroupDefinition> localGroups =
@@ -56,6 +71,9 @@ public static class SoundGroupLibrary
     private static int discoverModIndex;
     private static int parseFileIndex;
     private static int snapshotGroupIndex;
+    private static ActiveGroupFileReader activeGroupFile;
+    private static double maxBlockingUnitMilliseconds;
+    private static string maxBlockingUnit = string.Empty;
 
     public static SoundGroupLibrarySnapshot Current => current;
 
@@ -65,6 +83,8 @@ public static class SoundGroupLibrary
     internal static bool IsReady => loaded && !loading;
     internal static int ProcessedFileCount => Math.Min(parseFileIndex, pendingFiles.Count);
     internal static int TotalFileCount => pendingFiles.Count;
+    internal static double MaxBlockingUnitMilliseconds => maxBlockingUnitMilliseconds;
+    internal static string MaxBlockingUnit => maxBlockingUnit;
 
     internal static float Progress
     {
@@ -112,6 +132,9 @@ public static class SoundGroupLibrary
         discoverModIndex = -1;
         parseFileIndex = 0;
         snapshotGroupIndex = 0;
+        DisposeActiveGroupFile();
+        maxBlockingUnitMilliseconds = 0d;
+        maxBlockingUnit = string.Empty;
     }
 
     internal static bool StepReload(double budgetMilliseconds)
@@ -305,6 +328,9 @@ public static class SoundGroupLibrary
         discoverModIndex = -1;
         parseFileIndex = 0;
         snapshotGroupIndex = 0;
+        DisposeActiveGroupFile();
+        maxBlockingUnitMilliseconds = 0d;
+        maxBlockingUnit = string.Empty;
     }
 
     private static void StepDiscoverMod()
@@ -353,10 +379,15 @@ public static class SoundGroupLibrary
 
     private static void StepParseFile()
     {
+        if (activeGroupFile != null)
+        {
+            StepActiveGroupFile();
+            return;
+        }
+
         if (parseFileIndex < pendingFiles.Count)
         {
-            PendingGroupFile pending = pendingFiles[parseFileIndex++];
-            LoadFileIntoBuilder(pending.File, pending.SourceName, pending.IsLocal);
+            BeginGroupFile(pendingFiles[parseFileIndex]);
             return;
         }
 
@@ -370,7 +401,9 @@ public static class SoundGroupLibrary
         if (buildingSnapshotSources != null && snapshotGroupIndex < buildingSnapshotSources.Count)
         {
             SoundGroupDefinition group = buildingSnapshotSources[snapshotGroupIndex++];
+            long started = Stopwatch.GetTimestamp();
             buildingSnapshots.Add(BuildGroupSnapshot(group, buildingProblems, reportMissing: true));
+            RecordBlockingUnit("build sound-group snapshot " + (group?.Id ?? string.Empty), ElapsedMilliseconds(started));
             return;
         }
 
@@ -379,6 +412,7 @@ public static class SoundGroupLibrary
 
     private static void PublishBuild()
     {
+        long publishStarted = Stopwatch.GetTimestamp();
         buildingSnapshots.Sort(CompareGroupSnapshots);
 
         effectiveGroups = buildingEffectiveGroups ??
@@ -412,6 +446,7 @@ public static class SoundGroupLibrary
         discoverModIndex = -1;
         parseFileIndex = 0;
         snapshotGroupIndex = 0;
+        RecordBlockingUnit("publish sound-group snapshot", ElapsedMilliseconds(publishStarted));
     }
 
     private static bool SaveLocalAndReload()
@@ -480,101 +515,23 @@ public static class SoundGroupLibrary
         return element;
     }
 
-    private static void LoadFileIntoBuilder(string file, string sourceName, bool isLocal)
+    private static void BeginGroupFile(PendingGroupFile pending)
     {
+        long started = Stopwatch.GetTimestamp();
         try
         {
-            XDocument document = XDocument.Load(file, LoadOptions.None);
-            XElement root = document.Root;
-            if (root == null || !string.Equals(root.Name.LocalName, "SoundGroups", StringComparison.OrdinalIgnoreCase))
+            XmlReaderSettings settings = new()
             {
-                AddProblem(
-                    DevToolProblemSeverity.Error,
-                    "sound-group-xml-root",
-                    "sound-groups.xml must use <SoundGroups> as its root element.",
-                    string.Empty,
-                    file);
-                return;
-            }
-
-            HashSet<string> idsInFile = new(StringComparer.OrdinalIgnoreCase);
-            foreach (XElement element in root.Elements())
+                CloseInput = true,
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreWhitespace = true
+            };
+            activeGroupFile = new ActiveGroupFileReader
             {
-                if (!string.Equals(element.Name.LocalName, "SoundGroup", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                string id = Attr(element, "id");
-                string name = element.Elements()
-                    .FirstOrDefault(value => string.Equals(value.Name.LocalName, "Name", StringComparison.OrdinalIgnoreCase))
-                    ?.Value?.Trim() ?? string.Empty;
-
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    AddProblem(
-                        DevToolProblemSeverity.Warning,
-                        "sound-group-missing-id",
-                        "A sound group was ignored because it has no ID.",
-                        string.Empty,
-                        file);
-                    continue;
-                }
-
-                if (!idsInFile.Add(id))
-                {
-                    AddProblem(
-                        DevToolProblemSeverity.Warning,
-                        "duplicate-sound-group-id",
-                        "Duplicate sound-group ID inside the same XML file. The first definition is used: " + id,
-                        id,
-                        file);
-                    continue;
-                }
-
-                SoundGroupDefinition group = new()
-                {
-                    Id = id,
-                    Name = string.IsNullOrWhiteSpace(name) ? id : name,
-                    SourceName = sourceName,
-                    SourcePath = file,
-                    IsLocal = isLocal
-                };
-
-                foreach (XElement soundElement in element.Elements())
-                {
-                    if (!string.Equals(soundElement.Name.LocalName, "Sound", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (TryParseSound(soundElement, group, out SoundGroupSoundDefinition sound))
-                        group.Sounds.Add(sound);
-                }
-
-                if (group.Sounds.Count == 0)
-                {
-                    AddProblem(
-                        DevToolProblemSeverity.Warning,
-                        "sound-group-empty",
-                        "Sound group contains no valid sounds.",
-                        id,
-                        file);
-                }
-
-                if (isLocal)
-                    buildingLocalGroups[id] = group;
-
-                if (!buildingEffectiveGroups.TryGetValue(id, out SoundGroupDefinition winner))
-                {
-                    buildingEffectiveGroups[id] = group;
-                }
-                else
-                {
-                    AddProblem(
-                        DevToolProblemSeverity.Warning,
-                        "duplicate-sound-group-id",
-                        "Duplicate sound-group ID. Using \"" + winner.SourceName +
-                        "\" and ignoring \"" + sourceName + "\".",
-                        id,
-                        file);
-                }
-            }
+                Pending = pending,
+                Reader = XmlReader.Create(pending.File, settings)
+            };
         }
         catch (Exception error)
         {
@@ -583,8 +540,188 @@ public static class SoundGroupLibrary
                 "sound-group-xml",
                 "Unable to read sound-groups.xml: " + error.Message,
                 string.Empty,
+                pending?.File ?? string.Empty);
+            parseFileIndex++;
+            DisposeActiveGroupFile();
+        }
+        finally
+        {
+            RecordBlockingUnit("open sound-group XML", ElapsedMilliseconds(started));
+        }
+    }
+
+    private static void StepActiveGroupFile()
+    {
+        ActiveGroupFileReader state = activeGroupFile;
+        if (state?.Reader == null)
+        {
+            FinishActiveGroupFile();
+            return;
+        }
+
+        try
+        {
+            XmlReader reader = state.Reader;
+            if (!state.RootValidated)
+            {
+                long rootStarted = Stopwatch.GetTimestamp();
+                XmlNodeType nodeType = reader.MoveToContent();
+                RecordBlockingUnit("read sound-group XML root", ElapsedMilliseconds(rootStarted));
+                if (nodeType != XmlNodeType.Element ||
+                    !string.Equals(reader.LocalName, "SoundGroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddProblem(
+                        DevToolProblemSeverity.Error,
+                        "sound-group-xml-root",
+                        "sound-groups.xml must use <SoundGroups> as its root element.",
+                        string.Empty,
+                        state.Pending.File);
+                    FinishActiveGroupFile();
+                    return;
+                }
+
+                state.RootValidated = true;
+                if (reader.IsEmptyElement)
+                {
+                    FinishActiveGroupFile();
+                    return;
+                }
+
+                reader.Read();
+                return;
+            }
+
+            while (!reader.EOF)
+            {
+                if (reader.NodeType == XmlNodeType.EndElement &&
+                    string.Equals(reader.LocalName, "SoundGroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    FinishActiveGroupFile();
+                    return;
+                }
+
+                if (reader.NodeType == XmlNodeType.Element &&
+                    string.Equals(reader.LocalName, "SoundGroup", StringComparison.OrdinalIgnoreCase))
+                {
+                    long groupStarted = Stopwatch.GetTimestamp();
+                    XElement element = XNode.ReadFrom(reader) as XElement;
+                    if (element != null)
+                        ProcessGroupElement(state.Pending, state.IdsInFile, element);
+                    RecordBlockingUnit(
+                        "parse SoundGroup " + (element == null ? string.Empty : Attr(element, "id")),
+                        ElapsedMilliseconds(groupStarted));
+                    return;
+                }
+
+                if (!reader.Read())
+                    break;
+            }
+
+            FinishActiveGroupFile();
+        }
+        catch (Exception error)
+        {
+            AddProblem(
+                DevToolProblemSeverity.Error,
+                "sound-group-xml",
+                "Unable to read sound-groups.xml: " + error.Message,
+                string.Empty,
+                state.Pending?.File ?? string.Empty);
+            FinishActiveGroupFile();
+        }
+    }
+
+    private static void ProcessGroupElement(
+        PendingGroupFile pending,
+        HashSet<string> idsInFile,
+        XElement element)
+    {
+        string file = pending?.File ?? string.Empty;
+        string sourceName = pending?.SourceName ?? string.Empty;
+        bool isLocal = pending?.IsLocal ?? false;
+        string id = Attr(element, "id");
+        string name = element.Elements()
+            .FirstOrDefault(value => string.Equals(value.Name.LocalName, "Name", StringComparison.OrdinalIgnoreCase))
+            ?.Value?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            AddProblem(
+                DevToolProblemSeverity.Warning,
+                "sound-group-missing-id",
+                "A sound group was ignored because it has no ID.",
+                string.Empty,
+                file);
+            return;
+        }
+
+        if (!idsInFile.Add(id))
+        {
+            AddProblem(
+                DevToolProblemSeverity.Warning,
+                "duplicate-sound-group-id",
+                "Duplicate sound-group ID inside the same XML file. The first definition is used: " + id,
+                id,
+                file);
+            return;
+        }
+
+        SoundGroupDefinition group = new()
+        {
+            Id = id,
+            Name = string.IsNullOrWhiteSpace(name) ? id : name,
+            SourceName = sourceName,
+            SourcePath = file,
+            IsLocal = isLocal
+        };
+
+        foreach (XElement soundElement in element.Elements())
+        {
+            if (!string.Equals(soundElement.Name.LocalName, "Sound", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TryParseSound(soundElement, group, out SoundGroupSoundDefinition sound))
+                group.Sounds.Add(sound);
+        }
+
+        if (group.Sounds.Count == 0)
+        {
+            AddProblem(
+                DevToolProblemSeverity.Warning,
+                "sound-group-empty",
+                "Sound group contains no valid sounds.",
+                id,
                 file);
         }
+
+        if (isLocal)
+            buildingLocalGroups[id] = group;
+
+        if (!buildingEffectiveGroups.TryGetValue(id, out SoundGroupDefinition winner))
+        {
+            buildingEffectiveGroups[id] = group;
+        }
+        else
+        {
+            AddProblem(
+                DevToolProblemSeverity.Warning,
+                "duplicate-sound-group-id",
+                "Duplicate sound-group ID. Using \"" + winner.SourceName +
+                "\" and ignoring \"" + sourceName + "\".",
+                id,
+                file);
+        }
+    }
+
+    private static void FinishActiveGroupFile()
+    {
+        DisposeActiveGroupFile();
+        parseFileIndex++;
+    }
+
+    private static void DisposeActiveGroupFile()
+    {
+        try { activeGroupFile?.Dispose(); } catch { }
+        activeGroupFile = null;
     }
 
     private static bool TryParseSound(
@@ -845,6 +982,13 @@ public static class SoundGroupLibrary
         return total <= 0
             ? 1f
             : Math.Max(0f, Math.Min(1f, snapshotGroupIndex / (float)total));
+    }
+
+    private static void RecordBlockingUnit(string label, double milliseconds)
+    {
+        if (milliseconds <= maxBlockingUnitMilliseconds) return;
+        maxBlockingUnitMilliseconds = milliseconds;
+        maxBlockingUnit = label ?? string.Empty;
     }
 
     private static double ElapsedMilliseconds(long startedTimestamp) =>
