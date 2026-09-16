@@ -155,10 +155,12 @@ internal static class PlayerMapMultiPipeConnections
             string pair = PairKey(link.FromRoomIndex, link.ToRoomIndex);
             bool repeatedPair = pairCounts.TryGetValue(pair, out int pairCount) && pairCount > 1;
             bool trustedExact = !link.Ambiguous && link.FromNodeIndex >= 0 && link.ToNodeIndex >= 0;
+            Num.Vector2 pa = default;
+            Num.Vector2 pb = default;
             bool exactA = trustedExact && TryEndpointScreen(
-                a, link.FromNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out Num.Vector2 pa);
+                a, link.FromNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out pa);
             bool exactB = trustedExact && TryEndpointScreen(
-                b, link.ToNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out Num.Vector2 pb);
+                b, link.ToNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out pb);
 
             if (exactA && exactB)
             {
