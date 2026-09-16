@@ -37,8 +37,6 @@ internal static class PlayerMapGroupLayerControls
 
     private static IDisposable toolbarHook;
     private static IDisposable interactionHook;
-    private static HashSet<int> selection;
-    private static string region = string.Empty;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -46,6 +44,9 @@ internal static class PlayerMapGroupLayerControls
         if (enabled) return;
         try
         {
+            if (!PlayerMapSelectionAccess.Available)
+                throw new InvalidOperationException("Player Map selection adapter is unavailable.");
+
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
             Type view = typeof(PlayerMapWorkspaceView);
             MethodInfo toolbar = view.GetMethod(
@@ -57,9 +58,7 @@ internal static class PlayerMapGroupLayerControls
                     typeof(PlayerMapPresentationSnapshot), typeof(bool), typeof(PlayerMapRoomSnapshot),
                     typeof(Num.Vector2), typeof(ImGuiIOPtr)
                 }, null);
-            FieldInfo selectionField = typeof(PlayerMapMultiSelection).GetField("Selection", flags);
-            selection = selectionField?.GetValue(null) as HashSet<int>;
-            if (toolbar == null || interaction == null || selection == null)
+            if (toolbar == null || interaction == null)
                 throw new MissingMemberException("Player Map grouped layer control targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
@@ -86,8 +85,6 @@ internal static class PlayerMapGroupLayerControls
     {
         Dispose(ref interactionHook);
         Dispose(ref toolbarHook);
-        selection = null;
-        region = string.Empty;
         enabled = false;
     }
 
@@ -96,8 +93,7 @@ internal static class PlayerMapGroupLayerControls
         orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
-        NormalizeRegion(snapshot);
-        List<PlayerMapRoomSnapshot> selected = CollectSelected(snapshot);
+        List<PlayerMapRoomSnapshot> selected = PlayerMapSelectionAccess.Collect(snapshot);
         if (selected.Count == 0) return;
 
         ImGui.SameLine(0f, 12f);
@@ -135,41 +131,13 @@ internal static class PlayerMapGroupLayerControls
             ImGui.IsMouseDown(ImGuiMouseButton.Left))
             return;
 
-        NormalizeRegion(snapshot);
         int target = -1;
         if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) target = 0;
         else if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) target = 1;
         else if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) target = 2;
         if (target < 0) return;
 
-        QueueLayerChange(CollectSelected(snapshot), target);
-    }
-
-    private static void NormalizeRegion(PlayerMapPresentationSnapshot snapshot)
-    {
-        string next = snapshot.RegionName ?? string.Empty;
-        if (string.Equals(region, next, StringComparison.OrdinalIgnoreCase)) return;
-        region = next;
-        selection?.Clear();
-        if (snapshot.SelectedRoomIndex >= 0)
-            selection?.Add(snapshot.SelectedRoomIndex);
-    }
-
-    private static List<PlayerMapRoomSnapshot> CollectSelected(PlayerMapPresentationSnapshot snapshot)
-    {
-        List<PlayerMapRoomSnapshot> result = new();
-        PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
-        {
-            PlayerMapRoomSnapshot room = rooms[i];
-            if (room == null || room.Disabled) continue;
-            bool selectedByGroup = selection?.Contains(room.RoomIndex) == true;
-            bool selectedByInspector = selection?.Count == 0 && room.RoomIndex == snapshot.SelectedRoomIndex;
-            if (selectedByGroup || selectedByInspector)
-                result.Add(room);
-        }
-        result.Sort((a, b) => a.RoomIndex.CompareTo(b.RoomIndex));
-        return result;
+        QueueLayerChange(PlayerMapSelectionAccess.Collect(snapshot), target);
     }
 
     private static void QueueLayerChange(List<PlayerMapRoomSnapshot> selected, int targetLayer)
