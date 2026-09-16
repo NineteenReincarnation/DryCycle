@@ -19,6 +19,7 @@ internal static class PlayerMapBackendLifecycle
 
         // Base state must exist before any hook redirects its command/presentation boundaries.
         PlayerMapWorkspaceRuntime.Enable();
+        PlayerMapLegacyRenderGuard.Enable(logger);
         PlayerMapIncrementalRenderHooks.Enable(logger);
         PlayerMapTerrainBakeBridge.Enable(logger);
         PlayerMapDerivedLayoutBridge.Enable(logger);
@@ -47,6 +48,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapDerivedLayoutBridge.Disable();
         PlayerMapTerrainBakeBridge.Disable();
         PlayerMapIncrementalRenderHooks.Disable();
+        PlayerMapLegacyRenderGuard.Disable();
 
         ResetTransientState();
         PlayerMapWorkspaceRuntime.Disable();
