@@ -82,6 +82,31 @@ public static class PlayerMapCoordinateSystem
     internal static int CanonDeltaToOutputPixel(float value) => (int)(value / CanonPixelsPerTile);
 }
 
+/// <summary>
+/// Player Map renders physical room geometry only. Off-screen dens are topology/creature-storage
+/// rooms with no physical room source and therefore must never enter the room bake/render pipeline.
+/// AbstractRoom.offScreenDen is authoritative; the name check is a compatibility fallback for
+/// partially constructed/third-party world data.
+/// </summary>
+internal static class PlayerMapRoomEligibility
+{
+    internal static bool IsRenderable(AbstractRoom room)
+    {
+        if (room == null || room.offScreenDen) return false;
+        return !IsOffscreenDenName(room.name);
+    }
+
+    internal static bool IsRenderableName(string roomName) => !IsOffscreenDenName(roomName);
+
+    private static bool IsOffscreenDenName(string roomName)
+    {
+        if (string.IsNullOrWhiteSpace(roomName)) return false;
+        string value = roomName.Trim();
+        return value.Equals("OffscreenDen", StringComparison.OrdinalIgnoreCase) ||
+               value.StartsWith("OffscreenDen_", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
 internal sealed class PlayerMapRoomState
 {
     internal int RoomIndex;
@@ -369,6 +394,8 @@ internal static class PlayerMapWorkspaceRuntime
         {
             if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
             AbstractRoom room = panel.roomRep.room;
+            if (!PlayerMapRoomEligibility.IsRenderable(room)) continue;
+
             alive.Add(room.index);
             Vector2 derivedBase = PlayerMapCoordinateSystem.WorldLayoutToCanon(panel.devPos);
 
@@ -434,14 +461,18 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         List<PlayerMapRoomSnapshot> rooms = new(state.Rooms.Count);
+        bool selectedRenderable = false;
         if (page.subNodes != null)
         {
             for (int i = 0; i < page.subNodes.Count; i++)
             {
                 if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
                 AbstractRoom room = panel.roomRep.room;
+                if (!PlayerMapRoomEligibility.IsRenderable(room)) continue;
                 if (!state.Rooms.TryGetValue(room.index, out PlayerMapRoomState roomState)) continue;
                 Vector2 derivedBase = PlayerMapCoordinateSystem.WorldLayoutToCanon(panel.devPos);
+                bool selected = room.index == selectedRoom;
+                if (selected) selectedRenderable = true;
                 rooms.Add(new PlayerMapRoomSnapshot
                 {
                     RoomIndex = room.index,
@@ -454,7 +485,7 @@ internal static class PlayerMapWorkspaceRuntime
                     EffectivePosition = Effective(roomState, panel.devPos),
                     Layer = Mathf.Clamp(panel.layer, 0, 2),
                     Disabled = disabled.Contains(room.name ?? string.Empty),
-                    Selected = room.index == selectedRoom,
+                    Selected = selected,
                     Bake = RoomMapBakeCache.GetSnapshot(room.index)
                 });
             }
@@ -474,7 +505,7 @@ internal static class PlayerMapWorkspaceRuntime
             RegionName = state.Region,
             Dirty = state.Dirty,
             Revision = state.Revision,
-            SelectedRoomIndex = selectedRoom,
+            SelectedRoomIndex = selectedRenderable ? selectedRoom : -1,
             Rooms = rooms.ToArray(),
             DefaultMaterials = defs,
             RenderReport = state.RenderReport,
@@ -904,6 +935,7 @@ internal static class PlayerMapConfigSerializer
         {
             if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
             AbstractRoom room = panel.roomRep.room;
+            if (!PlayerMapRoomEligibility.IsRenderable(room)) continue;
             if (disabled.Contains(room.name ?? string.Empty)) continue;
             if (!state.Rooms.TryGetValue(room.index, out PlayerMapRoomState roomState)) continue;
             Vector2 canonical = PlayerMapWorkspaceRuntime.Effective(roomState, panel);
