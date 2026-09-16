@@ -26,6 +26,7 @@ internal static class SoundPageConstructorOptimization
         try
         {
             IL.DevInterface.SoundPage.ctor += PatchConstructor;
+            On.DevInterface.SoundPage.RefreshFilesPage += SoundPage_RefreshFilesPage;
             patchInstalled = true;
         }
         catch (Exception error)
@@ -41,6 +42,7 @@ internal static class SoundPageConstructorOptimization
         if (!patchInstalled) return;
         try
         {
+            On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage;
             IL.DevInterface.SoundPage.ctor -= PatchConstructor;
         }
         catch (Exception error)
@@ -151,6 +153,27 @@ internal static class SoundPageConstructorOptimization
             return vanillaNames?.ToArray() ?? Array.Empty<string>();
 
         return SoundFileNameCatalog.ConstructorNamesOrEmpty();
+    }
+
+    private static void SoundPage_RefreshFilesPage(
+        On.DevInterface.SoundPage.orig_RefreshFilesPage orig,
+        DevInterface.SoundPage self)
+    {
+        // The rebuilt frontend reads fileNames directly. Building up to 28 AddSoundButton nodes is
+        // pure hidden-UI work until legacy presentation is explicitly requested.
+        if (UseOptimizedConstructor())
+            return;
+
+        orig(self);
+    }
+
+    internal static void MaterializeLegacyFileButtons(DevInterface.SoundPage page)
+    {
+        if (page == null) return;
+        // Call through the normal hooked method after LegacyUiVisible has been set. At that point
+        // UseOptimizedConstructor() is false, so vanilla RefreshFilesPage performs the authoritative
+        // legacy materialization.
+        page.RefreshFilesPage();
     }
 
     private static bool UseOptimizedConstructor()
