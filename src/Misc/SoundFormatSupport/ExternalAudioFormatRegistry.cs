@@ -58,8 +58,8 @@ internal readonly struct ResolvedAudioFile
 
 /// <summary>
 /// Single source of truth for loose audio formats understood by DryCycle's SoundLoader bridge.
-/// New extensions should be registered here and should reuse an existing decoder backend whenever
-/// possible; SoundLoader integration must not grow a second set of format-specific hooks.
+/// New formats are added here and reuse one of the decoder backends in ExternalAudioLoader;
+/// SoundLoader integration itself must not grow format-specific hooks.
 /// </summary>
 internal static class ExternalAudioFormatRegistry
 {
@@ -72,34 +72,43 @@ internal static class ExternalAudioFormatRegistry
 
     static ExternalAudioFormatRegistry()
     {
-        // Preserve Rain World's historical preference first: WAV, then OGG. Every additional
-        // format gets a deterministic lower priority so duplicate files never race for one slot.
-        RegisterBuiltIn(new ExternalAudioFormat(".wav", AudioType.WAV, ExternalAudioDecoderKind.Unity, true, 200));
-        RegisterBuiltIn(new ExternalAudioFormat(".wave", AudioType.WAV, ExternalAudioDecoderKind.Unity, true, 199));
-        RegisterBuiltIn(new ExternalAudioFormat(".ogg", AudioType.OGGVORBIS, ExternalAudioDecoderKind.Unity, true, 190));
-        RegisterBuiltIn(new ExternalAudioFormat(".oga", AudioType.OGGVORBIS, ExternalAudioDecoderKind.Unity, true, 189));
-        RegisterBuiltIn(new ExternalAudioFormat(".mp3", AudioType.MPEG, ExternalAudioDecoderKind.Unity, true, 180));
-        RegisterBuiltIn(new ExternalAudioFormat(".mp2", AudioType.MPEG, ExternalAudioDecoderKind.Unity, true, 179));
-        RegisterBuiltIn(new ExternalAudioFormat(".aiff", AudioType.AIFF, ExternalAudioDecoderKind.Unity, false, 170));
-        RegisterBuiltIn(new ExternalAudioFormat(".aif", AudioType.AIFF, ExternalAudioDecoderKind.Unity, false, 169));
+        // Keep Rain World's historical loose-audio choices first, then deterministic aliases.
+        RegisterUnity(".wav", AudioType.WAV, true, 300);
+        RegisterUnity(".wave", AudioType.WAV, true, 299);
+        RegisterUnity(".ogg", AudioType.OGGVORBIS, true, 290);
+        RegisterUnity(".oga", AudioType.OGGVORBIS, true, 289);
+        RegisterUnity(".mp3", AudioType.MPEG, true, 280);
+        RegisterUnity(".mp2", AudioType.MPEG, true, 279);
+        RegisterUnity(".mpa", AudioType.MPEG, true, 278);
+        RegisterUnity(".aiff", AudioType.AIFF, false, 270);
+        RegisterUnity(".aif", AudioType.AIFF, false, 269);
 
-        // Rain World's Unity generation has no usable AudioType entry for these formats. Windows
-        // therefore uses the same Media Foundation backend for all of them. This includes AAC in
-        // ADTS/M4A containers, WMA, FLAC and Opus. Non-Windows builds make one UNKNOWN-type Unity
-        // fallback attempt in ExternalAudioLoader instead of pretending a dedicated decoder exists.
-        RegisterBuiltIn(new ExternalAudioFormat(".flac", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 160));
-        RegisterBuiltIn(new ExternalAudioFormat(".m4a", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 150));
-        RegisterBuiltIn(new ExternalAudioFormat(".aac", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 149));
-        RegisterBuiltIn(new ExternalAudioFormat(".adts", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 148));
-        RegisterBuiltIn(new ExternalAudioFormat(".wma", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 140));
-        RegisterBuiltIn(new ExternalAudioFormat(".opus", AudioType.UNKNOWN, ExternalAudioDecoderKind.MediaFoundation, false, 130));
+        // Classic tracker modules are native AudioType formats in the Unity generation used by
+        // Rain World. They pass through exactly the same importer/variation path as WAV or MP3.
+        RegisterUnity(".mod", AudioType.MOD, false, 250);
+        RegisterUnity(".xm", AudioType.XM, false, 249);
+        RegisterUnity(".it", AudioType.IT, false, 248);
+        RegisterUnity(".s3m", AudioType.S3M, false, 247);
 
-        // Unity/FM0D also exposes the classic tracker-module formats. They use the same Unity
-        // loader as ordinary loose sound files and do not need any tracker-specific SoundLoader hook.
-        RegisterBuiltIn(new ExternalAudioFormat(".mod", AudioType.MOD, ExternalAudioDecoderKind.Unity, false, 100));
-        RegisterBuiltIn(new ExternalAudioFormat(".xm", AudioType.XM, ExternalAudioDecoderKind.Unity, false, 99));
-        RegisterBuiltIn(new ExternalAudioFormat(".it", AudioType.IT, ExternalAudioDecoderKind.Unity, false, 98));
-        RegisterBuiltIn(new ExternalAudioFormat(".s3m", AudioType.S3M, ExternalAudioDecoderKind.Unity, false, 97));
+        // Media Foundation family. These all reuse one decoder backend; adding them does NOT add
+        // any SoundLoader hooks. Availability of individual codecs ultimately follows the Windows
+        // Media Foundation installation, while decode failure is isolated to the affected clip.
+        RegisterMediaFoundation(".flac", 230);
+        RegisterMediaFoundation(".m4a", 220);
+        RegisterMediaFoundation(".aac", 219);
+        RegisterMediaFoundation(".adts", 218);
+        RegisterMediaFoundation(".wma", 210);
+        RegisterMediaFoundation(".asf", 209);
+        RegisterMediaFoundation(".opus", 200);
+
+        // Audio-bearing MPEG-4 / 3GP containers. In SoundEffects directories these are treated as
+        // audio assets; MediaFoundationReader extracts the audio stream and ignores video streams.
+        RegisterMediaFoundation(".mp4", 190);
+        RegisterMediaFoundation(".mov", 189);
+        RegisterMediaFoundation(".3gp", 180);
+        RegisterMediaFoundation(".3g2", 179);
+        RegisterMediaFoundation(".3gp2", 178);
+        RegisterMediaFoundation(".3gpp", 177);
     }
 
     internal static string[] SupportedExtensions
@@ -116,8 +125,8 @@ internal static class ExternalAudioFormatRegistry
     }
 
     /// <summary>
-    /// Extension point for future formats that can reuse one of the existing decoder backends.
-    /// Registration is deterministic and does not install any additional Rain World hooks.
+    /// Extension point for future formats that can reuse Unity or Media Foundation decoding.
+    /// Registration is deterministic and never installs a new Rain World hook.
     /// </summary>
     internal static bool RegisterFormat(ExternalAudioFormat format)
     {
@@ -154,8 +163,8 @@ internal static class ExternalAudioFormatRegistry
         string stem = logicalName.Trim();
         if (oneBasedVariation == 1)
         {
-            // A numbered family wins over the unnumbered spelling. This prevents Foo.wav and
-            // Foo_1.flac (for example) from racing for allAudio[x].audio[0].
+            // A numbered family wins over the unnumbered spelling. This prevents two formats from
+            // racing for allAudio[x].audio[0] when a mod accidentally ships both Foo and Foo_1.
             if (TryResolveAssetStem("SoundEffects", stem + "_1", out file)) return true;
             return TryResolveAssetStem("SoundEffects", stem, out file);
         }
@@ -197,16 +206,15 @@ internal static class ExternalAudioFormatRegistry
         try { extension = Path.GetExtension(clipName); }
         catch { return false; }
 
-        // First preserve vanilla's exact-name override semantics. If no exact override exists,
-        // resolve the same logical stem across all supported formats so a loose .flac/.m4a/etc.
-        // can replace an AssetBundle or loose ambient clip authored under another extension.
         if (!string.IsNullOrEmpty(extension) && TryGetFormat(clipName, out ExternalAudioFormat exactFormat))
         {
             if (TryResolveOverrideExact(relativeDirectory, clipName, exactFormat, out file)) return true;
+
             string stem;
             try { stem = Path.GetFileNameWithoutExtension(clipName); }
             catch { stem = string.Empty; }
-            if (!string.IsNullOrWhiteSpace(stem)) return TryResolveOverrideStem(relativeDirectory, stem, out file);
+            if (!string.IsNullOrWhiteSpace(stem))
+                return TryResolveOverrideStem(relativeDirectory, stem, out file);
             return false;
         }
 
@@ -284,6 +292,17 @@ internal static class ExternalAudioFormatRegistry
     {
         lock (Gate) return Formats.ToArray();
     }
+
+    private static void RegisterUnity(string extension, AudioType type, bool stream, int priority) =>
+        RegisterBuiltIn(new ExternalAudioFormat(extension, type, ExternalAudioDecoderKind.Unity, stream, priority));
+
+    private static void RegisterMediaFoundation(string extension, int priority) =>
+        RegisterBuiltIn(new ExternalAudioFormat(
+            extension,
+            AudioType.UNKNOWN,
+            ExternalAudioDecoderKind.MediaFoundation,
+            false,
+            priority));
 
     private static void RegisterBuiltIn(ExternalAudioFormat format)
     {
