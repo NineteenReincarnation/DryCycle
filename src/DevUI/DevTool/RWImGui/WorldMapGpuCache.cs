@@ -21,7 +21,10 @@ internal static class WorldMapGpuCache
 {
     private const uint Magic = 0x4D574344; // "DCWM"
     private const int FormatVersion = 4;
-    private const int BakerVersion = 5;
+    // v6 invalidates bakes produced while the retained cache could feed its own geometry hook.
+    // Those bakes could be internally self-consistent yet visually stale, so source signatures
+    // alone cannot safely migrate them.
+    private const int BakerVersion = 6;
     private const int ValidationRoomsPerFrame = 6;
     private const int CaptureRoomsPerFrame = 8;
     private const int SaveDelayFrames = 45;
@@ -161,7 +164,9 @@ internal static class WorldMapGpuCache
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (room == null || !cache.Rooms.TryGetValue(room.RoomIndex, out RoomBake bake) ||
-                !bake.GeometryReady || !bake.ShortcutsReady)
+                !bake.GeometryReady || !bake.ShortcutsReady ||
+                bake.Visual?.Available != true || !bake.Visual.DetailedRasterAvailable ||
+                bake.Visual.WidthTiles <= 0f || bake.Visual.HeightTiles <= 0f)
                 return false;
         }
         return true;
