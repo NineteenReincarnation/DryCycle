@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -14,61 +15,151 @@ public static class SoundGroupLibrary
     private const string FileName = "sound-groups.xml";
     private const string LocationFileName = "sound-groups.location.txt";
 
-    private static readonly Dictionary<string, SoundGroupDefinition> effectiveGroups =
+    private enum LoadPhase
+    {
+        Idle = 0,
+        ResolveLocalDirectory = 1,
+        DiscoverMods = 2,
+        DiscoverLocal = 3,
+        ParseFiles = 4,
+        BuildSnapshots = 5,
+        Finalize = 6
+    }
+
+    private sealed class PendingGroupFile
+    {
+        internal string File = string.Empty;
+        internal string SourceName = string.Empty;
+        internal bool IsLocal;
+    }
+
+    private static Dictionary<string, SoundGroupDefinition> effectiveGroups =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, SoundGroupDefinition> localGroups =
+    private static Dictionary<string, SoundGroupDefinition> localGroups =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly List<DevToolProblemSnapshot> problems = new();
+    private static List<DevToolProblemSnapshot> problems = new();
 
     private static volatile SoundGroupLibrarySnapshot current = SoundGroupLibrarySnapshot.Empty;
     private static bool loaded;
+    private static bool loading;
     private static string localDirectory;
+
+    private static Dictionary<string, SoundGroupDefinition> buildingEffectiveGroups;
+    private static Dictionary<string, SoundGroupDefinition> buildingLocalGroups;
+    private static List<DevToolProblemSnapshot> buildingProblems;
+    private static readonly List<PendingGroupFile> pendingFiles = new();
+    private static HashSet<string> buildingSeenFiles;
+    private static List<SoundGroupDefinition> buildingSnapshotSources;
+    private static readonly List<SoundGroupSnapshot> buildingSnapshots = new();
+    private static string buildingLocalDirectory;
+    private static LoadPhase loadPhase;
+    private static int discoverModIndex;
+    private static int parseFileIndex;
+    private static int snapshotGroupIndex;
 
     public static SoundGroupLibrarySnapshot Current => current;
 
     public static string DefaultLocalDirectory =>
         Path.Combine(Paths.ConfigPath, "DryCycle", "DevTool");
 
-    internal static void EnsureLoaded()
+    internal static bool IsReady => loaded && !loading;
+    internal static int ProcessedFileCount => Math.Min(parseFileIndex, pendingFiles.Count);
+    internal static int TotalFileCount => pendingFiles.Count;
+
+    internal static float Progress
     {
-        if (!loaded) Reload();
+        get
+        {
+            if (!loading)
+                return loaded ? 1f : 0f;
+
+            return loadPhase switch
+            {
+                LoadPhase.ResolveLocalDirectory => 0.03f,
+                LoadPhase.DiscoverMods => 0.05f + 0.20f * DiscoverProgress(),
+                LoadPhase.DiscoverLocal => 0.26f,
+                LoadPhase.ParseFiles => 0.28f + 0.38f * FileProgress(),
+                LoadPhase.BuildSnapshots => 0.67f + 0.31f * SnapshotProgress(),
+                LoadPhase.Finalize => 0.99f,
+                _ => 0f
+            };
+        }
     }
 
-    internal static void Reload()
+    internal static void EnsureLoaded()
     {
-        loaded = true;
-        effectiveGroups.Clear();
-        localGroups.Clear();
-        problems.Clear();
+        if (!loaded && !loading)
+            BeginReload(force: false);
+    }
 
-        localDirectory = ResolveConfiguredLocalDirectory();
-        string localFile = Path.Combine(localDirectory, FileName);
-        HashSet<string> seenFiles = new(StringComparer.OrdinalIgnoreCase);
+    internal static void Reload() => BeginReload(force: true);
 
-        // Portable Mod definitions are authoritative. Walk in Rain World's real active-mod
-        // priority order, then fall back to the developer-local library.
-        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
+    internal static void BeginReload(bool force)
+    {
+        if (loading && !force)
+            return;
+
+        loading = true;
+        loadPhase = LoadPhase.ResolveLocalDirectory;
+        buildingEffectiveGroups = new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        buildingLocalGroups = new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        buildingProblems = new List<DevToolProblemSnapshot>();
+        buildingSeenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        buildingSnapshotSources = null;
+        buildingSnapshots.Clear();
+        pendingFiles.Clear();
+        buildingLocalDirectory = null;
+        discoverModIndex = -1;
+        parseFileIndex = 0;
+        snapshotGroupIndex = 0;
+    }
+
+    internal static bool StepReload(double budgetMilliseconds)
+    {
+        if (!loading)
+            return loaded;
+        if (budgetMilliseconds <= 0d)
+            return false;
+
+        long started = Stopwatch.GetTimestamp();
+        do
         {
-            ModManager.Mod mod = ModManager.ActiveMods[i];
-            string file = ResolveStandardFile(mod);
-            if (string.IsNullOrEmpty(file) || !File.Exists(file)) continue;
-            string canonical = CanonicalPath(file);
-            if (!seenFiles.Add(canonical)) continue;
-            bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
-            LoadFile(
-                file,
-                dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
-                isLocal: false);
-        }
+            switch (loadPhase)
+            {
+                case LoadPhase.ResolveLocalDirectory:
+                    buildingLocalDirectory = ResolveConfiguredLocalDirectory();
+                    discoverModIndex = ModManager.ActiveMods.Count - 1;
+                    loadPhase = LoadPhase.DiscoverMods;
+                    break;
 
-        if (File.Exists(localFile))
-        {
-            string canonical = CanonicalPath(localFile);
-            if (seenFiles.Add(canonical))
-                LoadFile(localFile, "Local", isLocal: true);
-        }
+                case LoadPhase.DiscoverMods:
+                    StepDiscoverMod();
+                    break;
 
-        RebuildSnapshot();
+                case LoadPhase.DiscoverLocal:
+                    DiscoverLocalFile();
+                    loadPhase = LoadPhase.ParseFiles;
+                    break;
+
+                case LoadPhase.ParseFiles:
+                    StepParseFile();
+                    break;
+
+                case LoadPhase.BuildSnapshots:
+                    StepBuildSnapshot();
+                    break;
+
+                case LoadPhase.Finalize:
+                    PublishBuild();
+                    break;
+            }
+
+            if (!loading)
+                return true;
+        }
+        while (ElapsedMilliseconds(started) < budgetMilliseconds);
+
+        return false;
     }
 
     internal static bool SetLocalDirectory(string folder)
@@ -86,7 +177,7 @@ public static class SoundGroupLibrary
             Directory.CreateDirectory(DefaultLocalDirectory);
             File.WriteAllText(Path.Combine(DefaultLocalDirectory, LocationFileName), candidate);
             localDirectory = candidate;
-            Reload();
+            BeginReload(force: true);
             return true;
         }
         catch (Exception error)
@@ -115,12 +206,14 @@ public static class SoundGroupLibrary
         }
 
         localDirectory = DefaultLocalDirectory;
-        Reload();
+        BeginReload(force: true);
     }
 
     internal static bool CreateLocalGroup(string id, string name)
     {
         EnsureLoaded();
+        if (!loaded || loading) return false;
+
         id = (id ?? string.Empty).Trim();
         name = (name ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)) return false;
@@ -151,18 +244,16 @@ public static class SoundGroupLibrary
     internal static bool DeleteLocalGroup(string id)
     {
         EnsureLoaded();
-        if (string.IsNullOrWhiteSpace(id) || !localGroups.Remove(id)) return false;
+        if (!loaded || loading || string.IsNullOrWhiteSpace(id) || !localGroups.Remove(id)) return false;
         return SaveLocalAndReload();
     }
 
     internal static bool AddSoundToLocalGroup(string id, SoundGroupSoundDefinition sound)
     {
         EnsureLoaded();
-        if (sound == null || string.IsNullOrWhiteSpace(sound.Sample)) return false;
+        if (!loaded || loading || sound == null || string.IsNullOrWhiteSpace(sound.Sample)) return false;
         if (!localGroups.TryGetValue(id ?? string.Empty, out SoundGroupDefinition group)) return false;
 
-        // Omni/Directional entries behave like Rain World's own toggled ambient entries: one
-        // sample/type pair per group. Spot sounds may intentionally appear multiple times.
         if (!string.Equals(sound.Type, "Spot", StringComparison.Ordinal))
         {
             for (int i = group.Sounds.Count - 1; i >= 0; i--)
@@ -184,7 +275,143 @@ public static class SoundGroupLibrary
     internal static bool TryGetGroup(string id, out SoundGroupDefinition group)
     {
         EnsureLoaded();
+        if (!loaded || loading)
+        {
+            group = null;
+            return false;
+        }
         return effectiveGroups.TryGetValue(id ?? string.Empty, out group);
+    }
+
+    internal static void ResetRuntimeState()
+    {
+        effectiveGroups = new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        localGroups = new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        problems = new List<DevToolProblemSnapshot>();
+        current = SoundGroupLibrarySnapshot.Empty;
+        loaded = false;
+        loading = false;
+        localDirectory = null;
+
+        buildingEffectiveGroups = null;
+        buildingLocalGroups = null;
+        buildingProblems = null;
+        buildingSeenFiles = null;
+        buildingSnapshotSources = null;
+        buildingSnapshots.Clear();
+        pendingFiles.Clear();
+        buildingLocalDirectory = null;
+        loadPhase = LoadPhase.Idle;
+        discoverModIndex = -1;
+        parseFileIndex = 0;
+        snapshotGroupIndex = 0;
+    }
+
+    private static void StepDiscoverMod()
+    {
+        if (discoverModIndex < 0)
+        {
+            loadPhase = LoadPhase.DiscoverLocal;
+            return;
+        }
+
+        ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];
+        string file = ResolveStandardFile(mod);
+        if (string.IsNullOrEmpty(file) || !File.Exists(file))
+            return;
+
+        string canonical = CanonicalPath(file);
+        if (!buildingSeenFiles.Add(canonical))
+            return;
+
+        bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
+        pendingFiles.Add(new PendingGroupFile
+        {
+            File = file,
+            SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
+            IsLocal = false
+        });
+    }
+
+    private static void DiscoverLocalFile()
+    {
+        string localFile = Path.Combine(buildingLocalDirectory ?? DefaultLocalDirectory, FileName);
+        if (!File.Exists(localFile))
+            return;
+
+        string canonical = CanonicalPath(localFile);
+        if (!buildingSeenFiles.Add(canonical))
+            return;
+
+        pendingFiles.Add(new PendingGroupFile
+        {
+            File = localFile,
+            SourceName = "Local",
+            IsLocal = true
+        });
+    }
+
+    private static void StepParseFile()
+    {
+        if (parseFileIndex < pendingFiles.Count)
+        {
+            PendingGroupFile pending = pendingFiles[parseFileIndex++];
+            LoadFileIntoBuilder(pending.File, pending.SourceName, pending.IsLocal);
+            return;
+        }
+
+        buildingSnapshotSources = new List<SoundGroupDefinition>(buildingEffectiveGroups.Values);
+        snapshotGroupIndex = 0;
+        loadPhase = LoadPhase.BuildSnapshots;
+    }
+
+    private static void StepBuildSnapshot()
+    {
+        if (buildingSnapshotSources != null && snapshotGroupIndex < buildingSnapshotSources.Count)
+        {
+            SoundGroupDefinition group = buildingSnapshotSources[snapshotGroupIndex++];
+            buildingSnapshots.Add(BuildGroupSnapshot(group, buildingProblems, reportMissing: true));
+            return;
+        }
+
+        loadPhase = LoadPhase.Finalize;
+    }
+
+    private static void PublishBuild()
+    {
+        buildingSnapshots.Sort(CompareGroupSnapshots);
+
+        effectiveGroups = buildingEffectiveGroups ??
+            new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        localGroups = buildingLocalGroups ??
+            new Dictionary<string, SoundGroupDefinition>(StringComparer.OrdinalIgnoreCase);
+        problems = buildingProblems ?? new List<DevToolProblemSnapshot>();
+        localDirectory = string.IsNullOrWhiteSpace(buildingLocalDirectory)
+            ? DefaultLocalDirectory
+            : buildingLocalDirectory;
+
+        current = new SoundGroupLibrarySnapshot
+        {
+            LocalDirectory = localDirectory,
+            LocalFilePath = Path.Combine(localDirectory, FileName),
+            Groups = buildingSnapshots.ToArray(),
+            Problems = problems.ToArray()
+        };
+
+        loaded = true;
+        loading = false;
+        loadPhase = LoadPhase.Idle;
+        buildingEffectiveGroups = null;
+        buildingLocalGroups = null;
+        buildingProblems = null;
+        buildingSeenFiles = null;
+        buildingSnapshotSources = null;
+        buildingSnapshots.Clear();
+        pendingFiles.Clear();
+        buildingLocalDirectory = null;
+        discoverModIndex = -1;
+        parseFileIndex = 0;
+        snapshotGroupIndex = 0;
     }
 
     private static bool SaveLocalAndReload()
@@ -210,7 +437,7 @@ public static class SoundGroupLibrary
 
             XDocument document = new(new XDeclaration("1.0", "utf-8", null), root);
             document.Save(file);
-            Reload();
+            BeginReload(force: true);
             return true;
         }
         catch (Exception error)
@@ -253,7 +480,7 @@ public static class SoundGroupLibrary
         return element;
     }
 
-    private static void LoadFile(string file, string sourceName, bool isLocal)
+    private static void LoadFileIntoBuilder(string file, string sourceName, bool isLocal)
     {
         try
         {
@@ -331,11 +558,11 @@ public static class SoundGroupLibrary
                 }
 
                 if (isLocal)
-                    localGroups[id] = group;
+                    buildingLocalGroups[id] = group;
 
-                if (!effectiveGroups.TryGetValue(id, out SoundGroupDefinition winner))
+                if (!buildingEffectiveGroups.TryGetValue(id, out SoundGroupDefinition winner))
                 {
-                    effectiveGroups[id] = group;
+                    buildingEffectiveGroups[id] = group;
                 }
                 else
                 {
@@ -409,72 +636,77 @@ public static class SoundGroupLibrary
             DirectionY = FloatAttr(element, "directionY", -1f)
         };
 
-        EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sample);
-        if (!resource.Available)
+        // Group parsing must never trigger sample-catalog I/O. Resolution belongs to the later
+        // snapshot stage, after the catalog has reached Ready.
+        return true;
+    }
+
+    private static SoundGroupSnapshot BuildGroupSnapshot(
+        SoundGroupDefinition group,
+        List<DevToolProblemSnapshot> targetProblems,
+        bool reportMissing)
+    {
+        List<SoundGroupEntrySnapshot> entries = new();
+        bool missing = false;
+        for (int i = 0; i < group.Sounds.Count; i++)
         {
-            AddProblem(
-                DevToolProblemSeverity.Error,
-                "sound-group-missing-sample",
-                "Sound group references an ambient sample that is not available: " + sample,
-                group.Id,
-                group.SourcePath);
+            SoundGroupSoundDefinition sound = group.Sounds[i];
+            EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sound.Sample);
+            if (!resource.Available)
+            {
+                missing = true;
+                if (reportMissing)
+                {
+                    targetProblems?.Add(new DevToolProblemSnapshot
+                    {
+                        Severity = DevToolProblemSeverity.Error,
+                        Code = "sound-group-missing-sample",
+                        Message = "Sound group references an ambient sample that is not available: " + sound.Sample,
+                        GroupId = group.Id,
+                        SourcePath = group.SourcePath
+                    });
+                }
+            }
+
+            entries.Add(new SoundGroupEntrySnapshot
+            {
+                Type = sound.Type,
+                Sample = sound.Sample,
+                Volume = sound.Volume,
+                Pitch = sound.Pitch,
+                Doppler = sound.Doppler,
+                Taper = sound.Taper,
+                X = sound.X,
+                Y = sound.Y,
+                Radius = sound.Radius,
+                DirectionX = sound.DirectionX,
+                DirectionY = sound.DirectionY,
+                Available = resource.Available,
+                SourceKind = resource.SourceKind,
+                SourceName = resource.SourceName,
+                SourceId = resource.SourceId
+            });
         }
 
-        return true;
+        return new SoundGroupSnapshot
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SourceName = group.SourceName,
+            SourcePath = group.SourcePath,
+            IsLocal = group.IsLocal,
+            HasMissingResources = missing,
+            Sounds = entries.ToArray()
+        };
     }
 
     private static void RebuildSnapshot()
     {
         List<SoundGroupSnapshot> groups = new();
         foreach (SoundGroupDefinition group in effectiveGroups.Values)
-        {
-            List<SoundGroupEntrySnapshot> entries = new();
-            bool missing = false;
-            for (int i = 0; i < group.Sounds.Count; i++)
-            {
-                SoundGroupSoundDefinition sound = group.Sounds[i];
-                EditorSoundSampleSnapshot resource = SoundSampleCatalog.Resolve(sound.Sample);
-                missing |= !resource.Available;
-                entries.Add(new SoundGroupEntrySnapshot
-                {
-                    Type = sound.Type,
-                    Sample = sound.Sample,
-                    Volume = sound.Volume,
-                    Pitch = sound.Pitch,
-                    Doppler = sound.Doppler,
-                    Taper = sound.Taper,
-                    X = sound.X,
-                    Y = sound.Y,
-                    Radius = sound.Radius,
-                    DirectionX = sound.DirectionX,
-                    DirectionY = sound.DirectionY,
-                    Available = resource.Available,
-                    SourceKind = resource.SourceKind,
-                    SourceName = resource.SourceName
-                });
-            }
+            groups.Add(BuildGroupSnapshot(group, problems, reportMissing: false));
 
-            groups.Add(new SoundGroupSnapshot
-            {
-                Id = group.Id,
-                Name = group.Name,
-                SourceName = group.SourceName,
-                SourcePath = group.SourcePath,
-                IsLocal = group.IsLocal,
-                HasMissingResources = missing,
-                Sounds = entries.ToArray()
-            });
-        }
-
-        groups.Sort((a, b) =>
-        {
-            int local = b.IsLocal.CompareTo(a.IsLocal);
-            if (local != 0) return local;
-            int source = string.Compare(a.SourceName, b.SourceName, StringComparison.OrdinalIgnoreCase);
-            if (source != 0) return source;
-            return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
-        });
-
+        groups.Sort(CompareGroupSnapshots);
         current = new SoundGroupLibrarySnapshot
         {
             LocalDirectory = GetLocalDirectory(),
@@ -482,6 +714,15 @@ public static class SoundGroupLibrary
             Groups = groups.ToArray(),
             Problems = problems.ToArray()
         };
+    }
+
+    private static int CompareGroupSnapshots(SoundGroupSnapshot a, SoundGroupSnapshot b)
+    {
+        int local = b.IsLocal.CompareTo(a.IsLocal);
+        if (local != 0) return local;
+        int source = string.Compare(a.SourceName, b.SourceName, StringComparison.OrdinalIgnoreCase);
+        if (source != 0) return source;
+        return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveConfiguredLocalDirectory()
@@ -520,8 +761,6 @@ public static class SoundGroupLibrary
     {
         if (mod == null) return string.Empty;
 
-        // The portable standard is mods/ModName/music/sound-groups.xml. Version folders are
-        // accepted as compatibility fallbacks, but the Mod root remains the canonical location.
         string[] roots = { mod.path, mod.TargetedPath, mod.NewestPath };
         for (int i = 0; i < roots.Length; i++)
         {
@@ -562,7 +801,10 @@ public static class SoundGroupLibrary
         string groupId,
         string sourcePath)
     {
-        problems.Add(new DevToolProblemSnapshot
+        List<DevToolProblemSnapshot> target = loading && buildingProblems != null
+            ? buildingProblems
+            : problems;
+        target.Add(new DevToolProblemSnapshot
         {
             Severity = severity,
             Code = code ?? string.Empty,
@@ -584,4 +826,27 @@ public static class SoundGroupLibrary
     }
 
     private static string F(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static float DiscoverProgress()
+    {
+        int total = ModManager.ActiveMods.Count;
+        if (total <= 0) return 1f;
+        int remaining = Math.Max(0, discoverModIndex + 1);
+        return Math.Max(0f, Math.Min(1f, (total - remaining) / (float)total));
+    }
+
+    private static float FileProgress() => pendingFiles.Count == 0
+        ? 1f
+        : Math.Max(0f, Math.Min(1f, parseFileIndex / (float)pendingFiles.Count));
+
+    private static float SnapshotProgress()
+    {
+        int total = buildingSnapshotSources?.Count ?? 0;
+        return total <= 0
+            ? 1f
+            : Math.Max(0f, Math.Min(1f, snapshotGroupIndex / (float)total));
+    }
+
+    private static double ElapsedMilliseconds(long startedTimestamp) =>
+        (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
 }

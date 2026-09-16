@@ -31,6 +31,11 @@ internal static class DevToolSubsystemCoordinator
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
 
+        // Sound cold-start work has one backend owner. It runs after commands so a SetToolMode or
+        // explicit group refresh issued this frame is visible immediately, but before presentation
+        // publication so completed snapshots can be consumed in the same frame.
+        SoundActivationPipeline.Step(session);
+
         // The universal compatibility queue follows the same backend command phase as native
         // workspaces. Presentation getters must never execute mutations as a side effect of Draw.
         UniversalDevUiCommandQueue.Process(session);
@@ -85,6 +90,7 @@ internal static class DevToolSubsystemCoordinator
 
     private static void ResetWorkspaceState()
     {
+        SoundActivationPipeline.Reset();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
         MapEditorStateHub.Reset();
