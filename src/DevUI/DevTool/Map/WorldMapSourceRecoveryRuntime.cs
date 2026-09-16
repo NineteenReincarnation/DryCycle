@@ -188,7 +188,7 @@ internal static partial class MapRoomGeometryPresentationHub
         Publish(entry);
     }
 
-    private static void ApplyPreparedRoomDimensions(Room room)
+    private static void ApplyPreparedRoomDimensions(global::Room room)
     {
         if (room?.abstractRoom == null || room.TileWidth <= 0 || room.TileHeight <= 0) return;
         int roomIndex = room.abstractRoom.index;
@@ -253,7 +253,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 continue;
             }
 
-            Room realized = roomRep.room.realizedRoom;
+            global::Room realized = roomRep.room.realizedRoom;
             if (realized != null && realized.readyForAI)
             {
                 try
@@ -274,7 +274,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
             try
             {
-                Room preparedRoom = new(null, mapObject.world, roomRep.room);
+                global::Room preparedRoom = new(null, mapObject.world, roomRep.room);
 
                 // MapTex only needs loaded tiles and shortcut metadata. Running AImapper and heatmap
                 // decompression here duplicates a large amount of room-load work for no visual gain.
