@@ -1,0 +1,466 @@
+name: DevTool Shared Numeric Edit Transaction
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-shared-numeric-edit-transaction.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add shared transaction helper and migrate scalar controls
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('src/DevUI/DevTool/RWImGui')
+
+          helper = r'''using System;
+          using System.Collections.Generic;
+          using ImGuiNET;
+
+          namespace DryCycle.DevUI.DevTool.RWImGui;
+
+          internal enum DevToolNumericEditScope
+          {
+              Relationship = 0,
+              Trigger = 1,
+              SoundRoom = 2,
+              SoundItem = 3,
+              Universal = 4,
+              ObjectProperty = 5,
+              ObjectLegacy = 6
+          }
+
+          /// <summary>
+          /// Shared commit transaction for scalar ImGui numeric controls.
+          /// Dragging or Ctrl+Click text entry owns a local dirty value while active. Mouse release,
+          /// Enter, or clicking elsewhere commits once; the submitted value remains visible briefly
+          /// until the backend Presentation snapshot acknowledges it.
+          /// </summary>
+          internal static class DevToolNumericEditTransaction
+          {
+              private readonly struct EditKey : IEquatable<EditKey>
+              {
+                  internal EditKey(DevToolNumericEditScope scope, int index, string key)
+                  {
+                      Scope = scope;
+                      Index = index;
+                      Key = key ?? string.Empty;
+                  }
+
+                  internal DevToolNumericEditScope Scope { get; }
+                  internal int Index { get; }
+                  internal string Key { get; }
+
+                  public bool Equals(EditKey other) =>
+                      Scope == other.Scope && Index == other.Index && string.Equals(Key, other.Key, StringComparison.Ordinal);
+                  public override bool Equals(object obj) => obj is EditKey other && Equals(other);
+                  public override int GetHashCode()
+                  {
+                      unchecked
+                      {
+                          int hash = (int)Scope;
+                          hash = (hash * 397) ^ Index;
+                          hash = (hash * 397) ^ StringComparer.Ordinal.GetHashCode(Key);
+                          return hash;
+                      }
+                  }
+              }
+
+              private readonly struct PendingFloat
+              {
+                  internal PendingFloat(float value, int submittedFrame)
+                  {
+                      Value = value;
+                      SubmittedFrame = submittedFrame;
+                  }
+                  internal float Value { get; }
+                  internal int SubmittedFrame { get; }
+              }
+
+              private readonly struct PendingInt
+              {
+                  internal PendingInt(int value, int submittedFrame)
+                  {
+                      Value = value;
+                      SubmittedFrame = submittedFrame;
+                  }
+                  internal int Value { get; }
+                  internal int SubmittedFrame { get; }
+              }
+
+              private static readonly HashSet<EditKey> DirtyFloats = new();
+              private static readonly Dictionary<EditKey, PendingFloat> PendingFloats = new();
+              private static readonly HashSet<EditKey> DirtyInts = new();
+              private static readonly Dictionary<EditKey, PendingInt> PendingInts = new();
+
+              internal static bool FinishFloat(
+                  DevToolNumericEditScope scope,
+                  string stateKey,
+                  float authoritativeValue,
+                  ref float value,
+                  bool changed,
+                  int index = -1)
+              {
+                  EditKey key = new(scope, index, stateKey);
+                  if (changed) DirtyFloats.Add(key);
+                  if (ImGui.IsItemActive()) return false;
+
+                  if (DirtyFloats.Remove(key))
+                  {
+                      PendingFloats[key] = new PendingFloat(value, ImGui.GetFrameCount());
+                      return true;
+                  }
+
+                  if (!PendingFloats.TryGetValue(key, out PendingFloat pending))
+                  {
+                      value = authoritativeValue;
+                      return false;
+                  }
+
+                  int age = ImGui.GetFrameCount() - pending.SubmittedFrame;
+                  if (NearlyEqual(authoritativeValue, pending.Value) || age >= 3)
+                  {
+                      PendingFloats.Remove(key);
+                      value = authoritativeValue;
+                  }
+                  else
+                  {
+                      value = pending.Value;
+                  }
+                  return false;
+              }
+
+              internal static bool FinishInt(
+                  DevToolNumericEditScope scope,
+                  string stateKey,
+                  int authoritativeValue,
+                  ref int value,
+                  bool changed,
+                  int index = -1)
+              {
+                  EditKey key = new(scope, index, stateKey);
+                  if (changed) DirtyInts.Add(key);
+                  if (ImGui.IsItemActive()) return false;
+
+                  if (DirtyInts.Remove(key))
+                  {
+                      PendingInts[key] = new PendingInt(value, ImGui.GetFrameCount());
+                      return true;
+                  }
+
+                  if (!PendingInts.TryGetValue(key, out PendingInt pending))
+                  {
+                      value = authoritativeValue;
+                      return false;
+                  }
+
+                  int age = ImGui.GetFrameCount() - pending.SubmittedFrame;
+                  if (authoritativeValue == pending.Value || age >= 3)
+                  {
+                      PendingInts.Remove(key);
+                      value = authoritativeValue;
+                  }
+                  else
+                  {
+                      value = pending.Value;
+                  }
+                  return false;
+              }
+
+              internal static void Discard(DevToolNumericEditScope scope, string stateKey, int index = -1)
+              {
+                  EditKey key = new(scope, index, stateKey);
+                  DirtyFloats.Remove(key);
+                  PendingFloats.Remove(key);
+                  DirtyInts.Remove(key);
+                  PendingInts.Remove(key);
+              }
+
+              internal static void Reset()
+              {
+                  DirtyFloats.Clear();
+                  PendingFloats.Clear();
+                  DirtyInts.Clear();
+                  PendingInts.Clear();
+              }
+
+              private static bool NearlyEqual(float left, float right) => Math.Abs(left - right) <= 0.0001f;
+          }
+          '''
+          helper = '\n'.join(line[10:] if line.startswith('          ') else line for line in helper.splitlines()) + '\n'
+          (root / 'DevToolNumericEditTransaction.cs').write_text(helper, encoding='utf-8')
+
+          def rep(file, old, new):
+              path = root / file
+              text = path.read_text(encoding='utf-8')
+              assert old in text, f'{file}: patch anchor missing'
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          rep('RelationshipEditorView.cs', '''        bool changed = ImGui.SliderFloat(DevToolUiSettings.T("强度##RelationshipIntensity", "Intensity##RelationshipIntensity"), ref intensity, 0f, 1f, "%.3f");
+        IntensityEdits[editKey] = intensity;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
+                RelationshipEditorCommandKind.SetRelationshipIntensity,
+                primary: snapshot.PrimaryCreature,
+                other: row.CreatureType,
+                value: intensity,
+                direction: snapshot.SelectedDirection));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            IntensityEdits[editKey] = relationship.Intensity;
+        }''', '''        bool changed = ImGui.SliderFloat(
+            DevToolUiSettings.T("强度##RelationshipIntensity", "Intensity##RelationshipIntensity"),
+            ref intensity,
+            0f,
+            1f,
+            "%.3f",
+            ImGuiSliderFlags.AlwaysClamp);
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.Relationship, editKey, relationship.Intensity, ref intensity, changed))
+        {
+            RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
+                RelationshipEditorCommandKind.SetRelationshipIntensity,
+                primary: snapshot.PrimaryCreature,
+                other: row.CreatureType,
+                value: intensity,
+                direction: snapshot.SelectedDirection));
+        }
+        IntensityEdits[editKey] = intensity;''')
+
+          path = root / 'TriggerEditorView.cs'
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+          ('''        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
+        value = Math.Max(min, Math.Min(max, value));
+        IntEdits[binding.StateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+        else if (!changed && !ImGui.IsItemActive())
+            IntEdits[binding.StateKey] = current;''', '''        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
+        value = Math.Max(min, Math.Min(max, value));
+        if (DevToolNumericEditTransaction.FinishInt(
+                DevToolNumericEditScope.Trigger, binding.StateKey, current, ref value, changed, trigger.Index))
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+        IntEdits[binding.StateKey] = value;'''),
+          ('''        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f");
+        FloatEdits[binding.StateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+        else if (!changed && !ImGui.IsItemActive())
+            FloatEdits[binding.StateKey] = current;''', '''        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f", ImGuiSliderFlags.AlwaysClamp);
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.Trigger, binding.StateKey, current, ref value, changed, trigger.Index))
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+        FloatEdits[binding.StateKey] = value;'''),
+          ('''        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f");
+        FloatEdits[binding.StateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+        else if (!changed && !ImGui.IsItemActive())
+            FloatEdits[binding.StateKey] = current;''', '''        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f", ImGuiSliderFlags.AlwaysClamp);
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.Trigger, binding.StateKey, current, ref value, changed, triggerIndex))
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+        FloatEdits[binding.StateKey] = value;'''),
+          ('''        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
+        value = Math.Max(min, Math.Min(max, value));
+        IntEdits[binding.StateKey] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+        else if (!changed && !ImGui.IsItemActive())
+            IntEdits[binding.StateKey] = current;''', '''        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
+        value = Math.Max(min, Math.Min(max, value));
+        if (DevToolNumericEditTransaction.FinishInt(
+                DevToolNumericEditScope.Trigger, binding.StateKey, current, ref value, changed, triggerIndex))
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+        IntEdits[binding.StateKey] = value;''')]
+          for old, new in replacements:
+              assert old in text, 'TriggerEditorView scalar anchor missing'
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          rep('SoundEditorView.cs', '''        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        ImGui.PopID();
+        ImGui.PopID();
+        RoomFloatEdits[key] = value;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetRoomValue,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            RoomFloatEdits[key] = current;
+        }''', '''        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f", ImGuiSliderFlags.AlwaysClamp);
+        ImGui.PopID();
+        ImGui.PopID();
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.SoundRoom, key, current, ref value, changed))
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetRoomValue,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        RoomFloatEdits[key] = value;''')
+
+          rep('SoundEditorView.cs', '''        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        ImGui.PopID();
+        ImGui.PopID();
+        SoundFloatEdits[stateKey] = value;
+        if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetSoundValue,
+                index: sound.Index,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            SoundFloatEdits[stateKey] = current;
+        }''', '''        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f", ImGuiSliderFlags.AlwaysClamp);
+        ImGui.PopID();
+        ImGui.PopID();
+        if (sound.Inherited)
+        {
+            DevToolNumericEditTransaction.Discard(DevToolNumericEditScope.SoundItem, key, sound.Index);
+            value = current;
+        }
+        else if (DevToolNumericEditTransaction.FinishFloat(
+                     DevToolNumericEditScope.SoundItem, key, current, ref value, changed, sound.Index))
+        {
+            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
+                SoundEditorCommandKind.SetSoundValue,
+                index: sound.Index,
+                key: key,
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
+        }
+        SoundFloatEdits[stateKey] = value;''')
+
+          rep('UniversalDevUiMirrorView.cs', '''        bool changed = ImGui.SliderFloat(label + "##UniversalSlider_" + stateKey, ref value, 0f, 1f, "%.3f");
+        bool active = ImGui.IsItemActive();
+        bool commit = ImGui.IsItemDeactivatedAfterEdit();
+        FloatEdits[stateKey] = value;
+
+        if (commit)
+            Send(new UniversalDevUiCommand(UniversalDevUiCommandKind.SetSlider, control.Path, x: value));
+        else if (!changed && !active)
+            FloatEdits[stateKey] = control.Factor;''', '''        bool changed = ImGui.SliderFloat(
+            label + "##UniversalSlider_" + stateKey,
+            ref value,
+            0f,
+            1f,
+            "%.3f",
+            ImGuiSliderFlags.AlwaysClamp);
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.Universal, stateKey, control.Factor, ref value, changed))
+            Send(new UniversalDevUiCommand(UniversalDevUiCommandKind.SetSlider, control.Path, x: value));
+        FloatEdits[stateKey] = value;''')
+
+          path = root / 'ObjectInspectorView.cs'
+          text = path.read_text(encoding='utf-8')
+          olds_news = [
+          ('''                bool changed = property.HasRange
+                    ? ImGui.SliderFloat(label, ref value, property.Min, property.Max, "%.3f")
+                    : ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
+                FloatEdits[stateKey] = value;
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+                else if (!changed && !ImGui.IsItemActive())
+                    FloatEdits[stateKey] = property.X;''', '''                bool changed = property.HasRange
+                    ? ImGui.SliderFloat(label, ref value, property.Min, property.Max, "%.3f", ImGuiSliderFlags.AlwaysClamp)
+                    : ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
+                if (DevToolNumericEditTransaction.FinishFloat(
+                        DevToolNumericEditScope.ObjectProperty, stateKey, property.X, ref value, changed, inspector.ObjectIndex))
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
+                FloatEdits[stateKey] = value;'''),
+          ('''                bool changed = property.HasRange
+                    ? ImGui.SliderInt(label, ref value, (int)property.Min, (int)property.Max)
+                    : ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
+                IntEdits[stateKey] = value;
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+                else if (!changed && !ImGui.IsItemActive())
+                    IntEdits[stateKey] = property.IntegerValue;''', '''                bool changed = property.HasRange
+                    ? ImGui.SliderInt(label, ref value, (int)property.Min, (int)property.Max, "%d", ImGuiSliderFlags.AlwaysClamp)
+                    : ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
+                if (DevToolNumericEditTransaction.FinishInt(
+                        DevToolNumericEditScope.ObjectProperty, stateKey, property.IntegerValue, ref value, changed, inspector.ObjectIndex))
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
+                IntEdits[stateKey] = value;'''),
+          ('''        bool changed = ImGui.SliderFloat(binding.SliderLabel, ref factor, 0f, 1f, "%.3f");
+        LegacySliderEdits[binding.StateKey] = factor;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacySlider,
+                inspector.ObjectIndex,
+                text: control.Path,
+                x: factor));
+        }
+        else if (!changed && !ImGui.IsItemActive())
+        {
+            LegacySliderEdits[binding.StateKey] = control.Factor;
+        }''', '''        bool changed = ImGui.SliderFloat(
+            binding.SliderLabel, ref factor, 0f, 1f, "%.3f", ImGuiSliderFlags.AlwaysClamp);
+        if (DevToolNumericEditTransaction.FinishFloat(
+                DevToolNumericEditScope.ObjectLegacy, binding.StateKey, control.Factor, ref factor, changed, inspector.ObjectIndex))
+        {
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.SetLegacySlider,
+                inspector.ObjectIndex,
+                text: control.Path,
+                x: factor));
+        }
+        LegacySliderEdits[binding.StateKey] = factor;''')]
+          for old, new in olds_news:
+              assert old in text, 'ObjectInspectorView scalar anchor missing'
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          rep('DevToolRetainedViewLifecyclePlugin.cs', '''    private static void ReleaseRetainedState()
+    {
+        DevToolOverlay.ResetRetainedState();''', '''    private static void ReleaseRetainedState()
+    {
+        DevToolNumericEditTransaction.Reset();
+        DevToolOverlay.ResetRetainedState();''')
+      - name: Verify migrated scalar controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/DevUI/DevTool/RWImGui/DevToolNumericEditTransaction.cs
+          grep -Fq 'DevToolNumericEditScope.Relationship' src/DevUI/DevTool/RWImGui/RelationshipEditorView.cs
+          grep -Fq 'DevToolNumericEditScope.Trigger' src/DevUI/DevTool/RWImGui/TriggerEditorView.cs
+          grep -Fq 'DevToolNumericEditScope.SoundRoom' src/DevUI/DevTool/RWImGui/SoundEditorView.cs
+          grep -Fq 'DevToolNumericEditScope.Universal' src/DevUI/DevTool/RWImGui/UniversalDevUiMirrorView.cs
+          grep -Fq 'DevToolNumericEditScope.ObjectProperty' src/DevUI/DevTool/RWImGui/ObjectInspectorView.cs
+          grep -Fq 'DevToolNumericEditTransaction.Reset();' src/DevUI/DevTool/RWImGui/DevToolRetainedViewLifecyclePlugin.cs
+      - name: Commit migration and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/devtool-shared-numeric-edit-transaction.yml
+          git add src/DevUI/DevTool/RWImGui/DevToolNumericEditTransaction.cs \
+                  src/DevUI/DevTool/RWImGui/RelationshipEditorView.cs \
+                  src/DevUI/DevTool/RWImGui/TriggerEditorView.cs \
+                  src/DevUI/DevTool/RWImGui/SoundEditorView.cs \
+                  src/DevUI/DevTool/RWImGui/UniversalDevUiMirrorView.cs \
+                  src/DevUI/DevTool/RWImGui/ObjectInspectorView.cs \
+                  src/DevUI/DevTool/RWImGui/DevToolRetainedViewLifecyclePlugin.cs
+          git commit -m 'DevTool: unify scalar numeric edit commits'
+          git push origin HEAD:main
