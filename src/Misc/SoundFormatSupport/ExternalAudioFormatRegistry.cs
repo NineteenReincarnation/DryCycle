@@ -155,13 +155,11 @@ internal static class ExternalAudioFormatRegistry
         return count;
     }
 
-    internal static bool TryResolveLoadedSoundEffect(string logicalName, int oneBasedVariation, out ResolvedAudioFile file)
+    internal static bool TryResolveLoadedSoundEffect(string selectedStem, out ResolvedAudioFile file)
     {
         file = default;
-        if (string.IsNullOrWhiteSpace(logicalName) || oneBasedVariation < 1) return false;
-        string stem = logicalName.Trim();
-        if (oneBasedVariation > 1) stem += "_" + oneBasedVariation;
-        return TryResolveOverrideStem("LoadedSoundEffects", stem, out file);
+        if (string.IsNullOrWhiteSpace(selectedStem)) return false;
+        return TryResolveOverrideStem("LoadedSoundEffects", selectedStem.Trim(), out file);
     }
 
     internal static bool TryResolveLoadedAmbient(string clipName, out ResolvedAudioFile file)
