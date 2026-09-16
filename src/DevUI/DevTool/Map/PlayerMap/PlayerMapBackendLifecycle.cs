@@ -20,7 +20,6 @@ internal static class PlayerMapBackendLifecycle
         // Base state must exist before any hook redirects its command/presentation boundaries.
         PlayerMapWorkspaceRuntime.Enable();
         PlayerMapPlacementBootstrap.Enable(logger);
-        PlayerMapLegacyRenderGuard.Enable(logger);
         PlayerMapIncrementalRenderHooks.Enable(logger);
         PlayerMapTerrainBakeBridge.Enable(logger);
         PlayerMapDerivedLayoutBridge.Enable(logger);
@@ -28,8 +27,8 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapRenderOutputValidator.Enable(logger);
         PlayerMapGroupCommandRuntime.Enable(logger);
         PlayerMapRenderRevisionGuard.Enable(logger);
-        // Install last so it becomes the outer command/synchronize gate: pending bakes are allowed
-        // to finish before the incremental renderer freezes its authoritative input snapshot.
+        // Install last so it becomes the outer Scheduler.Begin/synchronize gate: pending bakes are
+        // allowed to finish before the incremental renderer freezes its authoritative input snapshot.
         PlayerMapRenderPreparationController.Enable(logger);
 
         enabled = true;
@@ -53,7 +52,6 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapDerivedLayoutBridge.Disable();
         PlayerMapTerrainBakeBridge.Disable();
         PlayerMapIncrementalRenderHooks.Disable();
-        PlayerMapLegacyRenderGuard.Disable();
         PlayerMapPlacementBootstrap.Disable();
 
         ResetTransientState();
