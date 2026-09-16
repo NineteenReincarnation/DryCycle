@@ -1,0 +1,150 @@
+using System;
+using System.Globalization;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Map.PlayerMap;
+using ImGuiNET;
+using Num = System.Numerics;
+
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+/// <summary>
+/// Adds live incremental Render Map progress to the right-side Player Map inspector. The bar is fed
+/// by actual scheduler work counters, not by a timer, so large composition/preview phases advance in
+/// proportion to the pixels/rows that have really been processed.
+/// </summary>
+[BepInPlugin(PluginId, PluginName, PluginVersion)]
+[BepInDependency(PlayerMapWorkspaceIntegrationPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+public sealed class PlayerMapRenderProgressPlugin : BaseUnityPlugin
+{
+    public const string PluginId = "DryCycle.DevTool.RWImGui.PlayerMap.RenderProgress";
+    public const string PluginName = "DryCycle Player Map Render Progress";
+    public const string PluginVersion = BridgePlugin.PluginVersion;
+
+    private void OnEnable() => PlayerMapRenderProgressView.Enable(Logger);
+    private void OnDisable() => PlayerMapRenderProgressView.Disable();
+}
+
+internal static class PlayerMapRenderProgressView
+{
+    private delegate void OrigDrawRenderReport(PlayerMapPresentationSnapshot snapshot);
+    private delegate void HookDrawRenderReport(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot);
+
+    private static readonly HookDrawRenderReport DrawRenderReportHookDelegate = DrawRenderReportHook;
+    private static IDisposable drawReportHook;
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        log = logger;
+        try
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+            MethodInfo report = typeof(PlayerMapWorkspaceView).GetMethod(
+                "DrawRenderReport",
+                flags,
+                null,
+                new[] { typeof(PlayerMapPresentationSnapshot) },
+                null);
+            if (report == null)
+                throw new MissingMethodException("PlayerMapWorkspaceView.DrawRenderReport was not found.");
+
+            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
+            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
+            if (constructor == null)
+                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
+
+            drawReportHook = constructor.Invoke(new object[] { report, DrawRenderReportHookDelegate }) as IDisposable;
+            if (drawReportHook == null)
+                throw new InvalidOperationException("Player Map Render progress hook was not created.");
+
+            enabled = true;
+            log?.LogInfo("Player Map live Render progress enabled.");
+        }
+        catch (Exception error)
+        {
+            Disable();
+            logger?.LogWarning("Player Map Render progress could not attach: " + Unwrap(error).Message);
+        }
+    }
+
+    internal static void Disable()
+    {
+        try { drawReportHook?.Dispose(); }
+        catch { }
+        drawReportHook = null;
+        enabled = false;
+        log = null;
+    }
+
+    private static void DrawRenderReportHook(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot)
+    {
+        PlayerMapRenderProgressSnapshot progress = PlayerMapRenderScheduler.Progress;
+        if (!enabled || progress == null || !progress.Running)
+        {
+            orig(snapshot);
+            return;
+        }
+
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 进度", "RENDER PROGRESS"));
+        ImGui.TextUnformatted(progress.StageLabel ?? string.Empty);
+        DrawProgressBar(progress.Progress);
+
+        string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        string stagePercent = (progress.StageProgress * 100f).ToString("0", CultureInfo.InvariantCulture) + "%";
+        ImGui.TextDisabled(percent + "  ·  " + stagePercent + " " + DevToolUiSettings.T("阶段", "stage"));
+
+        if (progress.TotalUnits > 1)
+        {
+            string units = progress.CompletedUnits.ToString("N0", CultureInfo.InvariantCulture) + " / " +
+                           progress.TotalUnits.ToString("N0", CultureInfo.InvariantCulture);
+            ImGui.TextDisabled(units);
+        }
+        if (!string.IsNullOrWhiteSpace(progress.Detail))
+            ImGui.TextWrapped(progress.Detail);
+
+        if (progress.CanCancel)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("取消 Render", "Cancel Render"),
+                    "PlayerMapCancelRender",
+                    DevToolButtonTone.Danger))
+                PlayerMapRenderScheduler.RequestCancel();
+        }
+        else
+        {
+            ImGui.TextDisabled(DevToolUiSettings.T("正在提交文件，已不可取消。", "Committing files; cancellation is disabled."));
+        }
+    }
+
+    private static void DrawProgressBar(float fraction)
+    {
+        fraction = Math.Max(0f, Math.Min(1f, fraction));
+        float width = Math.Max(80f, ImGui.GetContentRegionAvail().X);
+        float height = Math.Max(8f, ImGui.GetFrameHeight() * 0.62f);
+        Num.Vector2 min = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton("##PlayerMapRenderProgressBar", new Num.Vector2(width, height));
+        Num.Vector2 max = min + new Num.Vector2(width, height);
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        uint bg = ImGui.GetColorU32(ImGuiCol.FrameBg);
+        uint fill = ImGui.GetColorU32(ImGuiCol.HeaderActive);
+        uint border = ImGui.GetColorU32(ImGuiCol.Border);
+        draw.AddRectFilled(min, max, bg, 2f);
+        if (fraction > 0f)
+        {
+            Num.Vector2 fillMax = new(min.X + width * fraction, max.Y);
+            draw.AddRectFilled(min, fillMax, fill, 2f);
+        }
+        draw.AddRect(min, max, border, 2f);
+    }
+
+    private static Exception Unwrap(Exception error)
+    {
+        while (error is TargetInvocationException invocation && invocation.InnerException != null)
+            error = invocation.InnerException;
+        return error;
+    }
+}
