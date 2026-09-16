@@ -21,30 +21,54 @@ public readonly struct PlayerMapGroupMoveCommand
     public string Label { get; }
 }
 
+public readonly struct PlayerMapGroupLayerCommand
+{
+    public PlayerMapGroupLayerCommand(int[] roomIndices, int layer, string label)
+    {
+        RoomIndices = roomIndices == null ? Array.Empty<int>() : (int[])roomIndices.Clone();
+        Layer = Math.Max(0, Math.Min(PlayerMapCoordinateSystem.LayerCount - 1, layer));
+        Label = string.IsNullOrWhiteSpace(label) ? "Change player-map room layers" : label;
+    }
+
+    public int[] RoomIndices { get; }
+    public int Layer { get; }
+    public string Label { get; }
+}
+
 public static class PlayerMapGroupCommandQueue
 {
-    private static readonly ConcurrentQueue<PlayerMapGroupMoveCommand> Queue = new();
+    private static readonly ConcurrentQueue<PlayerMapGroupMoveCommand> MoveQueue = new();
+    private static readonly ConcurrentQueue<PlayerMapGroupLayerCommand> LayerQueue = new();
 
     public static void Enqueue(PlayerMapGroupMoveCommand command)
     {
         if (command.RoomIndices == null || command.EffectivePositions == null ||
             command.RoomIndices.Length == 0 || command.RoomIndices.Length != command.EffectivePositions.Length)
             return;
-        Queue.Enqueue(command);
+        MoveQueue.Enqueue(command);
     }
 
-    internal static bool TryDequeue(out PlayerMapGroupMoveCommand command) => Queue.TryDequeue(out command);
+    public static void Enqueue(PlayerMapGroupLayerCommand command)
+    {
+        if (command.RoomIndices == null || command.RoomIndices.Length == 0)
+            return;
+        LayerQueue.Enqueue(command);
+    }
+
+    internal static bool TryDequeue(out PlayerMapGroupMoveCommand command) => MoveQueue.TryDequeue(out command);
+    internal static bool TryDequeue(out PlayerMapGroupLayerCommand command) => LayerQueue.TryDequeue(out command);
 
     internal static void Clear()
     {
-        while (Queue.TryDequeue(out _)) { }
+        while (MoveQueue.TryDequeue(out _)) { }
+        while (LayerQueue.TryDequeue(out _)) { }
     }
 }
 
 /// <summary>
-/// Executes Player Map group movement on the same main-thread command boundary as existing map edits.
-/// Child commands keep their proven per-room undo logic; EditorHistoryService.BeginBatch folds them
-/// into one atomic user-visible history entry.
+/// Executes Player Map group mutations on the same main-thread command boundary as existing map
+/// edits. Child commands retain their proven per-room undo semantics; EditorHistoryService.BeginBatch
+/// folds an entire group move/layer change into one atomic user-visible history entry.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -94,7 +118,7 @@ internal static class PlayerMapGroupCommandRuntime
                 throw new InvalidOperationException("Player Map group command hook was not created.");
 
             enabled = true;
-            log?.LogInfo("Player Map grouped placement command runtime enabled.");
+            log?.LogInfo("Player Map grouped placement/layer command runtime enabled.");
         }
         catch (Exception error)
         {
@@ -122,7 +146,7 @@ internal static class PlayerMapGroupCommandRuntime
             return;
         }
 
-        bool changed = false;
+        bool processed = false;
         while (PlayerMapGroupCommandQueue.TryDequeue(out PlayerMapGroupMoveCommand group))
         {
             int count = Math.Min(group.RoomIndices?.Length ?? 0, group.EffectivePositions?.Length ?? 0);
@@ -138,10 +162,28 @@ internal static class PlayerMapGroupCommandRuntime
                         value: group.EffectivePositions[i]));
                 }
             }
-            changed = true;
+            processed = true;
         }
 
-        if (changed)
+        while (PlayerMapGroupCommandQueue.TryDequeue(out PlayerMapGroupLayerCommand group))
+        {
+            int count = group.RoomIndices?.Length ?? 0;
+            if (count <= 0) continue;
+
+            using (session.History?.BeginBatch(group.Label))
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    PlayerMapWorkspaceRuntime.Execute(session, new PlayerMapCommand(
+                        PlayerMapCommandKind.SetLayer,
+                        roomIndex: group.RoomIndices[i],
+                        integer: group.Layer));
+                }
+            }
+            processed = true;
+        }
+
+        if (processed)
             PlayerMapWorkspaceRuntime.Synchronize(session);
     }
 
