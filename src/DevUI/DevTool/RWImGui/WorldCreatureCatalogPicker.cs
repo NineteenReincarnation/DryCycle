@@ -176,6 +176,7 @@ internal static class WorldCreatureCatalogPicker
     private static readonly Dictionary<int, AtlasPixels> atlasPixels = new();
     private static readonly HashSet<int> unreadableAtlases = new();
     private static readonly Dictionary<string, string> searchByPicker = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, Num.Vector2> pickerSizeByPopup = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, FilterCacheEntry> filterCache = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly Dictionary<string, string> sourceByCreature = new(StringComparer.OrdinalIgnoreCase);
@@ -250,6 +251,7 @@ internal static class WorldCreatureCatalogPicker
         sourceFingerprintByKey.Clear();
         sandboxIntDataByCreature.Clear();
         searchByPicker.Clear();
+        pickerSizeByPopup.Clear();
         filterCache.Clear();
         atlasPixels.Clear();
         unreadableAtlases.Clear();
@@ -378,16 +380,23 @@ internal static class WorldCreatureCatalogPicker
         Num.Vector2 desired = new(
             Math.Min(900f, Math.Max(560f, io.DisplaySize.X * 0.58f)),
             Math.Min(720f, Math.Max(430f, io.DisplaySize.Y * 0.72f)));
-        ImGui.SetNextWindowSize(desired, ImGuiCond.Appearing);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(
-                Math.Min(520f, Math.Max(280f, io.DisplaySize.X - 24f)),
-                Math.Min(360f, Math.Max(220f, io.DisplaySize.Y - 24f))),
-            new Num.Vector2(
-                Math.Max(520f, io.DisplaySize.X - 20f),
-                Math.Max(360f, io.DisplaySize.Y - 20f)));
+        Num.Vector2 minSize = new(
+            Math.Min(520f, Math.Max(280f, io.DisplaySize.X - 24f)),
+            Math.Min(360f, Math.Max(220f, io.DisplaySize.Y - 24f)));
+        Num.Vector2 maxSize = new(
+            Math.Max(520f, io.DisplaySize.X - 20f),
+            Math.Max(360f, io.DisplaySize.Y - 20f));
+        Num.Vector2 requestedSize = pickerSizeByPopup.TryGetValue(popupId, out Num.Vector2 rememberedSize)
+            ? ClampPickerSize(rememberedSize, minSize, maxSize)
+            : ClampPickerSize(desired, minSize, maxSize);
+
+        // Keep the outer popup size authoritative. A fill-remaining child inside an auto-fit popup
+        // otherwise creates a parent/child feedback loop that progressively shrinks the window.
+        ImGui.SetNextWindowSize(requestedSize, ImGuiCond.Always);
+        ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
 
         if (!ImGui.BeginPopup(popupId)) return false;
+        pickerSizeByPopup[popupId] = ClampPickerSize(ImGui.GetWindowSize(), minSize, maxSize);
 
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("生物图鉴", "CREATURE CATALOG"));
         DevToolWidgets.MutedText(
@@ -406,7 +415,8 @@ internal static class WorldCreatureCatalogPicker
             searchByPicker[popupId] = search;
 
         ImGui.Spacing();
-        if (ImGui.BeginChild("##CreatureCatalogScroll_" + widgetId, new Num.Vector2(0f, 0f), ImGuiChildFlags.None))
+        float scrollHeight = Math.Max(1f, ImGui.GetContentRegionAvail().Y);
+        if (ImGui.BeginChild("##CreatureCatalogScroll_" + widgetId, new Num.Vector2(0f, scrollHeight), ImGuiChildFlags.None))
         {
             if (allowNone)
             {
@@ -474,6 +484,13 @@ internal static class WorldCreatureCatalogPicker
         ImGui.EndChild();
         ImGui.EndPopup();
         return changed;
+    }
+
+    private static Num.Vector2 ClampPickerSize(Num.Vector2 value, Num.Vector2 min, Num.Vector2 max)
+    {
+        return new Num.Vector2(
+            Math.Max(min.X, Math.Min(max.X, value.X)),
+            Math.Max(min.Y, Math.Min(max.Y, value.Y)));
     }
 
     private static CreatureEntry[] GetFilteredEntries(SourceGroup group, string search, int revision)
