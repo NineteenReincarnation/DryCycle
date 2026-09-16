@@ -1,0 +1,143 @@
+using System;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map;
+using DryCycle.DevUI.DevTool.Map.PlayerMap;
+using ImGuiNET;
+
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+/// <summary>
+/// Integrates the rebuilt Canon/Player Map editor into the existing World Workspace without routing
+/// any authoring or rendering back through vanilla MapPage/MiniMap UI logic. World Layout remains
+/// the default workspace; Player Map is an explicit sibling view backed by the new PlayerMap runtime.
+/// </summary>
+[BepInPlugin(PluginId, PluginName, PluginVersion)]
+[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(PlayerMapIncrementalRenderPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+public sealed class PlayerMapWorkspaceIntegrationPlugin : BaseUnityPlugin
+{
+    public const string PluginId = "DryCycle.DevTool.RWImGui.PlayerMap.WorkspaceIntegration";
+    public const string PluginName = "DryCycle Player Map Workspace Integration";
+    public const string PluginVersion = BridgePlugin.PluginVersion;
+
+    private void OnEnable() => PlayerMapWorkspaceIntegration.Enable(Logger);
+    private void OnDisable() => PlayerMapWorkspaceIntegration.Disable();
+}
+
+internal static class PlayerMapWorkspaceIntegration
+{
+    private delegate void OrigDrawToolbar(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot);
+    private delegate void HookDrawToolbar(OrigDrawToolbar orig, EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot);
+    private delegate void OrigDrawBody(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot);
+    private delegate void HookDrawBody(OrigDrawBody orig, EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot);
+
+    private static readonly HookDrawToolbar DrawToolbarHookDelegate = DrawToolbarHook;
+    private static readonly HookDrawBody DrawBodyHookDelegate = DrawBodyHook;
+
+    private static IDisposable toolbarHook;
+    private static IDisposable bodyHook;
+    private static ManualLogSource log;
+    private static bool enabled;
+    private static bool playerMapActive;
+
+    internal static bool Active => enabled && playerMapActive;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        log = logger;
+        try
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+            Type workspace = typeof(WorldWorkspaceView);
+            MethodInfo toolbar = workspace.GetMethod("DrawToolbar", flags, null,
+                new[] { typeof(EditorPresentationSnapshot), typeof(EditorMapPresentationSnapshot) }, null);
+            MethodInfo body = workspace.GetMethod("DrawBody", flags, null,
+                new[] { typeof(EditorPresentationSnapshot), typeof(EditorMapPresentationSnapshot) }, null);
+            if (toolbar == null || body == null)
+                throw new MissingMemberException("World Workspace Player Map integration targets were not found.");
+
+            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
+            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
+            if (constructor == null)
+                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
+
+            toolbarHook = constructor.Invoke(new object[] { toolbar, DrawToolbarHookDelegate }) as IDisposable;
+            bodyHook = constructor.Invoke(new object[] { body, DrawBodyHookDelegate }) as IDisposable;
+            if (toolbarHook == null || bodyHook == null)
+                throw new InvalidOperationException("Player Map World Workspace integration hooks were not created.");
+
+            enabled = true;
+            log?.LogInfo("Player Map integrated into World Workspace.");
+        }
+        catch (Exception error)
+        {
+            Disable();
+            logger?.LogWarning("Player Map workspace integration could not attach: " + Unwrap(error).Message);
+        }
+    }
+
+    internal static void Disable()
+    {
+        Dispose(ref bodyHook);
+        Dispose(ref toolbarHook);
+        playerMapActive = false;
+        PlayerMapActivityGate.Reset();
+        enabled = false;
+        log = null;
+    }
+
+    private static void DrawToolbarHook(
+        OrigDrawToolbar orig,
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        orig(editor, snapshot);
+        if (!enabled || snapshot?.Available != true) return;
+
+        ImGui.SameLine(0f, 8f);
+        string label = playerMapActive
+            ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
+            : DevToolUiSettings.T("玩家地图", "Player Map");
+        if (DevToolWidgets.ActionButton(
+                label,
+                "WorldWorkspacePlayerMap",
+                playerMapActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            playerMapActive = !playerMapActive;
+            if (!playerMapActive) PlayerMapActivityGate.Reset();
+        }
+    }
+
+    private static void DrawBodyHook(
+        OrigDrawBody orig,
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!enabled || !playerMapActive)
+        {
+            orig(editor, snapshot);
+            return;
+        }
+
+        PlayerMapActivityGate.MarkVisible();
+        PlayerMapWorkspaceView.DrawBody(editor, snapshot);
+    }
+
+    private static void Dispose(ref IDisposable hook)
+    {
+        try { hook?.Dispose(); }
+        catch { }
+        hook = null;
+    }
+
+    private static Exception Unwrap(Exception error)
+    {
+        while (error is TargetInvocationException invocation && invocation.InnerException != null)
+            error = invocation.InnerException;
+        return error;
+    }
+}
