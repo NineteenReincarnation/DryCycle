@@ -15,6 +15,7 @@ public sealed class PlayerMapPreflightSnapshot
     public int EnabledRooms { get; init; }
     public int ReadyRooms { get; init; }
     public int PendingRooms { get; init; }
+    public int MissingRooms { get; init; }
     public int FailedRooms { get; init; }
     public int ExactConnections { get; init; }
     public int AmbiguousConnections { get; init; }
@@ -94,6 +95,7 @@ internal static class PlayerMapPreflightDiagnostics
         int enabledRooms = 0;
         int readyRooms = 0;
         int pendingRooms = 0;
+        int missingRooms = 0;
         int failedRooms = 0;
         float minX = float.MaxValue;
         float minY = float.MaxValue;
@@ -131,13 +133,18 @@ internal static class PlayerMapPreflightDiagnostics
                     maxX = Mathf.Max(maxX, room.EffectivePosition.x + halfW);
                     maxY = Mathf.Max(maxY, room.EffectivePosition.y + halfH);
                     break;
+                case RoomMapBakeStatus.Pending:
+                    pendingRooms++;
+                    break;
+                case RoomMapBakeStatus.Missing:
+                    missingRooms++;
+                    errors.Add(room.Name + ": room source file is missing" +
+                               (string.IsNullOrWhiteSpace(bake.Error) ? "." : " (" + bake.Error + ")"));
+                    break;
                 case RoomMapBakeStatus.Failed:
                     failedRooms++;
                     errors.Add(room.Name + ": room bake failed" +
                                (string.IsNullOrWhiteSpace(bake.Error) ? "." : " (" + bake.Error + ")"));
-                    break;
-                default:
-                    pendingRooms++;
                     break;
             }
         }
@@ -244,9 +251,9 @@ internal static class PlayerMapPreflightDiagnostics
         }
 
         if (pendingRooms > 0)
-            warnings.Add(pendingRooms + " room bake(s) are still pending; Render will wait/block until they are ready.");
+            warnings.Add(pendingRooms + " room/terrain bake(s) are still pending; a Render request will wait for them.");
 
-        bool canRender = errors.Count == 0 && failedRooms == 0 && pendingRooms == 0 &&
+        bool canRender = errors.Count == 0 && missingRooms == 0 && failedRooms == 0 && pendingRooms == 0 &&
                          enabledRooms > 0 && readyRooms == enabledRooms && outputSafe;
         return new PlayerMapPreflightSnapshot
         {
@@ -255,6 +262,7 @@ internal static class PlayerMapPreflightDiagnostics
             EnabledRooms = enabledRooms,
             ReadyRooms = readyRooms,
             PendingRooms = pendingRooms,
+            MissingRooms = missingRooms,
             FailedRooms = failedRooms,
             ExactConnections = exactConnections,
             AmbiguousConnections = ambiguousConnections,
