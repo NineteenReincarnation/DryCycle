@@ -31,7 +31,11 @@ internal static class SoundSampleCatalog
     private static Dictionary<string, ModManager.Mod> buildingOfficialDlcAmbientOwners;
     private static BuildPhase buildPhase;
     private static int buildSampleIndex;
+    private static double maxBlockingUnitMilliseconds;
+    private static string maxBlockingUnit = string.Empty;
 
+    internal static double MaxBlockingUnitMilliseconds => maxBlockingUnitMilliseconds;
+    internal static string MaxBlockingUnit => maxBlockingUnit;
     internal static int ProcessedSampleCount => buildPhase == BuildPhase.Idle ? publishedNames?.Length ?? 0 : Math.Min(buildSampleIndex, requestedNames?.Length ?? 0);
     internal static int TotalSampleCount => requestedNames?.Length ?? publishedNames?.Length ?? 0;
     internal static float Progress => buildPhase switch
@@ -140,6 +144,8 @@ internal static class SoundSampleCatalog
         buildingOfficialDlcAmbientOwners = null;
         buildPhase = BuildPhase.Idle;
         buildSampleIndex = 0;
+        maxBlockingUnitMilliseconds = 0d;
+        maxBlockingUnit = string.Empty;
     }
 
     private static void StepSampleResolution()
@@ -149,7 +155,9 @@ internal static class SoundSampleCatalog
         {
             string sample = names[buildSampleIndex++];
             if (string.IsNullOrWhiteSpace(sample) || buildingSamples.ContainsKey(sample)) return;
+            long started = Stopwatch.GetTimestamp();
             buildingSamples[sample] = ResolveCore(sample, true, buildingLoadedAmbientFiles, buildingLooseAmbientFiles, buildingModAmbientOwners, buildingOfficialDlcAmbientOwners);
+            RecordBlockingUnit("resolve sample " + sample, ElapsedMilliseconds(started));
             return;
         }
         buildPhase = BuildPhase.Finalize;
@@ -176,11 +184,13 @@ internal static class SoundSampleCatalog
 
     private static void RebuildSortedCache()
     {
+        long started = Stopwatch.GetTimestamp();
         sortedCache = new EditorSoundSampleSnapshot[samples.Count];
         int index = 0;
         foreach (EditorSoundSampleSnapshot value in samples.Values) sortedCache[index++] = value;
         Array.Sort(sortedCache, CompareSamples);
         sortedDirty = false;
+        RecordBlockingUnit("sort sample snapshot", ElapsedMilliseconds(started));
     }
 
     private static EditorSoundSampleSnapshot ResolveCore(string sample, bool knownAvailable, Dictionary<string, string> loadedFiles, Dictionary<string, string> looseFiles, Dictionary<string, ModManager.Mod> owners, Dictionary<string, ModManager.Mod> officialOwners)
@@ -297,6 +307,13 @@ internal static class SoundSampleCatalog
     {
         int total = requestedNames?.Length ?? 0;
         return total <= 0 ? 1f : Math.Max(0f, Math.Min(1f, buildSampleIndex / (float)total));
+    }
+
+    private static void RecordBlockingUnit(string label, double milliseconds)
+    {
+        if (milliseconds <= maxBlockingUnitMilliseconds) return;
+        maxBlockingUnitMilliseconds = milliseconds;
+        maxBlockingUnit = label ?? string.Empty;
     }
 
     private static double ElapsedMilliseconds(long startedTimestamp) => (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
