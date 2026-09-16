@@ -10,9 +10,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Adds live incremental Render Map progress to the right-side Player Map inspector. The bar is fed
-/// by actual scheduler work counters, not by a timer, so large composition/preview phases advance in
-/// proportion to the pixels/rows that have really been processed.
+/// Adds live Render Map progress to the right-side Player Map inspector. Progress starts while room /
+/// authored-terrain bakes are still preparing, then hands off to the incremental deterministic
+/// compositor. All percentages are fed by real work counters rather than timers.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapWorkspaceIntegrationPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -82,13 +82,51 @@ internal static class PlayerMapRenderProgressView
 
     private static void DrawRenderReportHook(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot)
     {
-        PlayerMapRenderProgressSnapshot progress = PlayerMapRenderScheduler.Progress;
-        if (!enabled || progress == null || !progress.Running)
+        if (!enabled)
         {
             orig(snapshot);
             return;
         }
 
+        PlayerMapRenderProgressSnapshot render = PlayerMapRenderScheduler.Progress;
+        if (render?.Running == true)
+        {
+            DrawRenderProgress(render);
+            return;
+        }
+
+        PlayerMapRenderPreparationSnapshot preparation = PlayerMapRenderPreparationController.Progress;
+        if (preparation?.Running == true)
+        {
+            DrawPreparationProgress(preparation);
+            return;
+        }
+
+        orig(snapshot);
+    }
+
+    private static void DrawPreparationProgress(PlayerMapRenderPreparationSnapshot progress)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 进度", "RENDER PROGRESS"));
+        ImGui.TextUnformatted(DevToolUiSettings.T("准备房间 Bake", "Preparing room bakes"));
+        DrawProgressBar(progress.Progress);
+
+        string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        string units = progress.ReadyRooms.ToString(CultureInfo.InvariantCulture) + " / " +
+                       progress.TotalRooms.ToString(CultureInfo.InvariantCulture) + " rooms";
+        ImGui.TextDisabled(percent + "  ·  " + units);
+        if (!string.IsNullOrWhiteSpace(progress.Detail))
+            ImGui.TextWrapped(progress.Detail);
+
+        if (progress.CanCancel && DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("取消 Render", "Cancel Render"),
+                "PlayerMapCancelRenderPreparation",
+                DevToolButtonTone.Danger))
+            PlayerMapRenderPreparationController.RequestCancel();
+    }
+
+    private static void DrawRenderProgress(PlayerMapRenderProgressSnapshot progress)
+    {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 进度", "RENDER PROGRESS"));
         ImGui.TextUnformatted(progress.StageLabel ?? string.Empty);
         DrawProgressBar(progress.Progress);
