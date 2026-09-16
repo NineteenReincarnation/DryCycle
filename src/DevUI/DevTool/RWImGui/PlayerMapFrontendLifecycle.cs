@@ -22,6 +22,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapCanvasAuthoring.Enable(logger);
         PlayerMapMultiSelection.Enable(logger);
         PlayerMapLayoutAssist.Enable(logger);
+        PlayerMapLiveOverlapPreview.Enable(logger);
         PlayerMapPreflightPanel.Enable(logger);
         PlayerMapMultiPipeConnections.Enable(logger);
 
@@ -39,6 +40,7 @@ internal static class PlayerMapFrontendLifecycle
 
         PlayerMapMultiPipeConnections.Disable();
         PlayerMapPreflightPanel.Disable();
+        PlayerMapLiveOverlapPreview.Disable();
         PlayerMapLayoutAssist.Disable();
         PlayerMapMultiSelection.Disable();
         PlayerMapCanvasAuthoring.Disable();
