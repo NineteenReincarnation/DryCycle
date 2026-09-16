@@ -127,7 +127,8 @@ internal static class SoundActivationPipeline
         if (rebuiltFrontendOwnsPresentation &&
             (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage))
         {
-            StepPrewarm();
+            if (!ShouldPausePrewarm(session))
+                StepPrewarm();
             return;
         }
 
@@ -138,10 +139,11 @@ internal static class SoundActivationPipeline
         {
             BeginActivation(page);
             if (phase == SoundActivationPhase.Ready)
-            {
                 CompleteActivation(session);
-                return;
-            }
+
+            // Never charge the first Sound click for foreground bootstrap work. The page/shell is
+            // published this frame; any unfinished 0.85 ms activation slice starts next frame.
+            return;
         }
 
         if (phase == SoundActivationPhase.Ready && !SoundGroupLibrary.IsReady)
@@ -267,6 +269,20 @@ internal static class SoundActivationPipeline
                 : !SoundGroupLibrary.IsReady
                     ? SoundActivationPhase.LoadingGroups
                     : SoundActivationPhase.Ready;
+    }
+
+    private static bool ShouldPausePrewarm(EditorSession session)
+    {
+        if (session == null) return true;
+        if (session.LegacyTransactions.HasPendingTransaction ||
+            session.Owner?.draggedNode != null ||
+            session.PlacementActive)
+            return true;
+
+        // Background Sound preparation is opportunistic. Yield completely while the developer is
+        // actively pressing a key or mouse button so an indivisible filesystem/XML unit can never
+        // land on top of a drag, edit or shortcut frame.
+        return global::UnityEngine.Input.anyKey;
     }
 
     private static void StepPrewarm()

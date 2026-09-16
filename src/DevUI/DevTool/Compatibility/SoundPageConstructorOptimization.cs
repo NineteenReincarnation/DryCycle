@@ -17,7 +17,8 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 internal static class SoundPageConstructorOptimization
 {
     private static bool enabled;
-    private static bool patchInstalled;
+    private static bool constructorPatchInstalled;
+    private static bool refreshHookInstalled;
 
     internal static void Enable()
     {
@@ -26,12 +27,28 @@ internal static class SoundPageConstructorOptimization
         try
         {
             IL.DevInterface.SoundPage.ctor += PatchConstructor;
+            constructorPatchInstalled = true;
             On.DevInterface.SoundPage.RefreshFilesPage += SoundPage_RefreshFilesPage;
-            patchInstalled = true;
+            refreshHookInstalled = true;
         }
         catch (Exception error)
         {
-            patchInstalled = false;
+            // Hook installation is transactional. Never leave only half of the optimization alive;
+            // an isolated constructor IL patch without the matching lazy-materialization hook would
+            // violate the legacy fallback contract.
+            if (refreshHookInstalled)
+            {
+                try { On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage; }
+                catch { }
+                refreshHookInstalled = false;
+            }
+            if (constructorPatchInstalled)
+            {
+                try { IL.DevInterface.SoundPage.ctor -= PatchConstructor; }
+                catch { }
+                constructorPatchInstalled = false;
+            }
+            enabled = false;
             Plugin.Logger?.LogWarning("DevTool SoundPage constructor optimization unavailable: " + error);
         }
     }
@@ -39,17 +56,26 @@ internal static class SoundPageConstructorOptimization
     internal static void Disable()
     {
         enabled = false;
-        if (!patchInstalled) return;
-        try
+
+        if (refreshHookInstalled)
         {
-            On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage;
-            IL.DevInterface.SoundPage.ctor -= PatchConstructor;
+            try { On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage; }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool SoundPage refresh optimization could not be removed cleanly: " + error.Message);
+            }
+            refreshHookInstalled = false;
         }
-        catch (Exception error)
+
+        if (constructorPatchInstalled)
         {
-            Plugin.Logger?.LogWarning("DevTool SoundPage constructor optimization could not be removed cleanly: " + error.Message);
+            try { IL.DevInterface.SoundPage.ctor -= PatchConstructor; }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool SoundPage constructor optimization could not be removed cleanly: " + error.Message);
+            }
+            constructorPatchInstalled = false;
         }
-        patchInstalled = false;
     }
 
     private static void PatchConstructor(ILContext il)
