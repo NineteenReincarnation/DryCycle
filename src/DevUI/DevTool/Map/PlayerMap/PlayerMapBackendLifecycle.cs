@@ -58,6 +58,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapRenderScheduler.Reset();
         PlayerMapGroupCommandQueue.Clear();
         PlayerMapTerrainSemanticRevision.Reset();
+        PlayerMapPreflightDiagnostics.Reset();
         PlayerMapActivityGate.Reset();
         RoomMapBakeCache.Clear();
     }
