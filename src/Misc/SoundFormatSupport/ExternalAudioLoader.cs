@@ -125,6 +125,11 @@ internal static class ExternalAudioLoader
         Action<AudioClip> onLoaded,
         Action<string> onFailed)
     {
+        // Rain World itself still ships and uses the legacy WWW audio module. Keeping this coroutine
+        // on the game's native compatibility path avoids adding UnityWebRequestAudioModule as a new
+        // hard dependency solely to replace an API that is already present in the target runtime.
+        // The suppression is intentionally scoped to this method so new obsolete API use still warns.
+#pragma warning disable CS0618
         WWW www = null;
         AudioClip clip = null;
         string startError = null;
@@ -159,6 +164,7 @@ internal static class ExternalAudioLoader
         clip.name = clipName;
         onLoaded?.Invoke(clip);
         www?.Dispose();
+#pragma warning restore CS0618
     }
 
     private static DecodedPcm DecodeWithMediaFoundation(string path)
