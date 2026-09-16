@@ -28,14 +28,20 @@ internal static class ExternalAudioLoader
     {
         if (file.Format.Decoder == ExternalAudioDecoderKind.MediaFoundation && IsWindows())
         {
-            Task<DecodedPcm> task;
+            Task<DecodedPcm> task = null;
+            string taskStartError = null;
             try
             {
                 task = Task.Run(() => DecodeWithMediaFoundation(file.Path));
             }
             catch (Exception error)
             {
-                onFailed?.Invoke(error.Message);
+                taskStartError = error.Message;
+            }
+
+            if (task == null)
+            {
+                onFailed?.Invoke(taskStartError ?? "Unable to start Media Foundation decode task.");
                 yield break;
             }
 
@@ -120,6 +126,7 @@ internal static class ExternalAudioLoader
     {
         WWW www = null;
         AudioClip clip = null;
+        string startError = null;
         try
         {
             www = new WWW("file://" + file.Path);
@@ -127,7 +134,12 @@ internal static class ExternalAudioLoader
         }
         catch (Exception error)
         {
-            onFailed?.Invoke(error.Message);
+            startError = error.Message;
+        }
+
+        if (startError != null)
+        {
+            onFailed?.Invoke(startError);
             www?.Dispose();
             yield break;
         }
