@@ -194,13 +194,20 @@ internal static class WorldMapView
         ExitPortHit hoveredPort = canvasHovered
             ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
             : null;
-        EdgeHit hoveredEdge = canvasHovered && hoveredPort == null
+
+        bool routedConnections = showConnections && WorldConnectionOverlay.Ready;
+        EdgeHit hoveredEdge = canvasHovered && hoveredPort == null && !routedConnections
             ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
             : null;
-        hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
+        if (!routedConnections)
+            hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
-        if (showConnections) DrawConnections(draw, snapshot, canvasMin, canvasSize);
         DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
+        if (routedConnections)
+            WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
+        else if (showConnections)
+            DrawConnections(draw, snapshot, canvasMin, canvasSize);
+
         HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
@@ -368,8 +375,8 @@ internal static class WorldMapView
 
     private static uint ConnectionColor(WorldConnectionDirection direction) =>
         ImGui.GetColorU32(direction == WorldConnectionDirection.Bidirectional
-            ? new Num.Vector4(0.80f, 0.83f, 0.86f, 1.00f)
-            : new Num.Vector4(0.96f, 0.69f, 0.25f, 1.00f));
+            ? new Num.Vector4(0.98f, 0.72f, 0.10f, 1.00f)
+            : new Num.Vector4(0.92f, 0.94f, 0.97f, 1.00f));
 
     private static void DrawRoomLabel(
         ImDrawListPtr draw,
@@ -411,13 +418,11 @@ internal static class WorldMapView
 
             bool selected = string.Equals(selectedConnectionId, connection.ConnectionId, StringComparison.Ordinal);
             bool hovered = string.Equals(hoveredConnectionId, connection.ConnectionId, StringComparison.Ordinal);
-            uint core = selected
-                ? ImGui.GetColorU32(ImGuiCol.ButtonActive)
-                : hovered
-                    ? ImGui.GetColorU32(ImGuiCol.ButtonHovered)
-                    : connection.Ambiguous
-                        ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
-                        : ConnectionColor(connection.Direction);
+            uint core = selected || hovered
+                ? ConnectionColor(connection.Direction)
+                : connection.Ambiguous
+                    ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
+                    : ConnectionColor(connection.Direction);
             uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
 
             float coreThickness = selected ? 4.8f : hovered ? 4.2f : connection.Direction == WorldConnectionDirection.Bidirectional ? 3.4f : 3.2f;
@@ -559,6 +564,12 @@ internal static class WorldMapView
                     selectedConnectionId = hoveredPort.Connection.ConnectionId;
                 }
             }
+            else if (showConnections && WorldConnectionOverlay.Ready && !string.IsNullOrEmpty(hoveredConnectionId))
+            {
+                // Routed connection input is owned by WorldConnectionOverlay. Do not let the same
+                // click fall through and start dragging a room behind the routed line.
+                draggingRoom = -1;
+            }
             else if (hoveredEdge?.Connection != null && showConnections)
             {
                 selectedConnectionId = hoveredEdge.Connection.ConnectionId;
@@ -616,7 +627,7 @@ internal static class WorldMapView
         Num.Vector2 source = EndpointPosition(sourceRoom, linkingNode, canvasMin);
         bool validTarget = hoveredPort != null && hoveredPort.Free && hoveredPort.Room.RoomIndex != linkingRoom;
         Num.Vector2 target = validTarget ? hoveredPort.Position : mouse;
-        uint color = ImGui.GetColorU32(ImGuiCol.ButtonHovered);
+        uint color = ConnectionColor(linkDirection);
         uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
         DrawConnectionStroke(draw, source, target, shadow, color, 9f, 3.8f, linkDirection, false);
         DrawShortcutSocket(draw, source, shadow, ShortcutGold(true), true, true);
@@ -981,25 +992,6 @@ internal static class WorldMapView
         }
 
         draw.AddLine(a, b, shadow, shadowThickness);
-
-        if (direction == WorldConnectionDirection.Bidirectional && length >= 20f)
-        {
-            Num.Vector2 forward = delta / length;
-            Num.Vector2 normal = new(-forward.Y, forward.X);
-            float railOffset = Math.Max(2f, coreThickness * 0.72f);
-            float railThickness = Math.Max(1.6f, coreThickness * 0.72f);
-            draw.AddLine(a + normal * railOffset, b + normal * railOffset, core, railThickness);
-            draw.AddLine(a - normal * railOffset, b - normal * railOffset, core, railThickness);
-
-            if (length >= 34f)
-            {
-                float arrowSize = Math.Max(6.2f, Math.Min(9.2f, 6.2f + coreThickness * 0.55f));
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.62f) + normal * railOffset, delta, shadow, core, arrowSize);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.38f) - normal * railOffset, -delta, shadow, core, arrowSize);
-            }
-            return;
-        }
-
         draw.AddLine(a, b, core, coreThickness);
         if (length >= 25f) DrawDirectionArrows(draw, a, b, direction, shadow, core, coreThickness);
     }
@@ -1039,14 +1031,10 @@ internal static class WorldMapView
         switch (direction)
         {
             case WorldConnectionDirection.AToB:
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.42f), forward, shadow, core, size);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.62f), forward, shadow, core, size);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.82f), forward, shadow, core, size);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.58f), forward, shadow, core, size);
                 break;
             case WorldConnectionDirection.BToA:
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.58f), -forward, shadow, core, size);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.38f), -forward, shadow, core, size);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.18f), -forward, shadow, core, size);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.42f), -forward, shadow, core, size);
                 break;
             default:
                 DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.40f), forward, shadow, core, size * 0.92f);
