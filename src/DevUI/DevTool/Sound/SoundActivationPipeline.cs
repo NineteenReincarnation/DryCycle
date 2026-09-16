@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
@@ -74,10 +75,10 @@ internal readonly struct SoundActivationStatusSnapshot
 /// <summary>
 /// Owns the cold-start lifecycle of the Sound workspace.
 ///
-/// Rain World/AssetManager work deliberately stays on the game thread. Game-thread-only does not
-/// mean same-frame-only: discovery and parsing are resumed in small units under a frame budget.
-/// The ambient filename catalog can prewarm at a lower budget before Sound is ever clicked, and the
-/// vanilla SoundPage constructor consumes only the already-published snapshot (or an empty shell).
+/// Resource discovery is incremental, but publication is transactional: Ready is not exposed until
+/// the authoritative filename array, resolved sample snapshot, sound groups and final Sound
+/// presentation all describe the same generation. This prevents a completed progress bar from
+/// dropping back into an empty/stale Library view.
 /// </summary>
 internal static class SoundActivationPipeline
 {
@@ -121,20 +122,16 @@ internal static class SoundActivationPipeline
             !EditorUiModeState.UseVanilla &&
             !session.LegacyUiVisible;
 
-        // Vanilla/legacy sessions that entered Sound natively already paid the original constructor
-        // and own the original file list. Do not start a parallel rebuilt-UI activation behind them.
-        // If this exact page began activation while the rebuilt UI owned it and the user then exposes
-        // Legacy UI, allow that in-flight activation to finish so an initially empty shell can be
-        // populated safely.
+        // A legacy SoundPage that did not originate from the rebuilt frontend already owns its
+        // vanilla constructor state. Do not start a second resource transaction behind it.
         if (!rebuiltFrontendOwnsPresentation &&
             session.ToolMode == EditorToolMode.Sound &&
             session.Owner.activePage is SoundPage legacySoundPage &&
             !ReferenceEquals(requestedPage, legacySoundPage))
             return;
 
-        // Prewarm the complete cold-start dependency chain before Sound is clicked. Work stays on
-        // the Rain World thread and shares one tiny frame budget across filename discovery, sample
-        // metadata/provenance and group parsing. A normal first click should therefore be a warm hit.
+        // Opportunistically prepare the immutable catalogues before Sound is opened. This never
+        // publishes a half-built array to a SoundPage.
         if (rebuiltFrontendOwnsPresentation &&
             (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage))
         {
@@ -149,11 +146,10 @@ internal static class SoundActivationPipeline
         if (!ReferenceEquals(requestedPage, page))
         {
             BeginActivation(page);
-            if (phase == SoundActivationPhase.Ready)
-                CompleteActivation(session);
+            if (DependenciesReady(page))
+                TryCommitReady(session, page);
 
-            // Never charge the first Sound click for foreground bootstrap work. The page/shell is
-            // published this frame; any unfinished 0.85 ms activation slice starts next frame.
+            // Publish the page shell immediately. Any unfinished resource work starts next frame.
             return;
         }
 
@@ -163,13 +159,14 @@ internal static class SoundActivationPipeline
             activationStartedTimestamp = Stopwatch.GetTimestamp();
             clickToReadyMilliseconds = 0d;
             maxFrameWorkMilliseconds = 0d;
+            detail = "Loading sound groups";
         }
 
         if (phase == SoundActivationPhase.Ready || phase == SoundActivationPhase.Failed)
             return;
 
         long frameStarted = Stopwatch.GetTimestamp();
-        bool completedThisFrame = false;
+        bool dependenciesReady = false;
         try
         {
             double remaining = ActiveFrameBudgetMilliseconds;
@@ -189,7 +186,7 @@ internal static class SoundActivationPipeline
                 if (!SoundSampleCatalog.IsReadyFor(page) && remaining > 0d)
                 {
                     phase = SoundActivationPhase.IndexingSamples;
-                    detail = "Indexing ambient sound resources";
+                    detail = "Preparing ambient sound list";
                     SoundSampleCatalog.BeginRefresh(page);
                     SoundSampleCatalog.StepRefresh(remaining);
                     remaining = Math.Max(0d, ActiveFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
@@ -204,10 +201,7 @@ internal static class SoundActivationPipeline
                 }
             }
 
-            completedThisFrame =
-                SoundFileNameCatalog.IsReady &&
-                SoundSampleCatalog.IsReadyFor(page) &&
-                SoundGroupLibrary.IsReady;
+            dependenciesReady = DependenciesReady(page);
         }
         catch (Exception error)
         {
@@ -222,8 +216,8 @@ internal static class SoundActivationPipeline
                 maxFrameWorkMilliseconds = lastFrameWorkMilliseconds;
         }
 
-        if (completedThisFrame && phase != SoundActivationPhase.Failed)
-            CompleteActivation(session);
+        if (dependenciesReady && phase != SoundActivationPhase.Failed)
+            TryCommitReady(session, page);
     }
 
     internal static double LastPageSwitchMilliseconds => lastPageSwitchMilliseconds;
@@ -290,7 +284,100 @@ internal static class SoundActivationPipeline
                 ? SoundActivationPhase.IndexingSamples
                 : !SoundGroupLibrary.IsReady
                     ? SoundActivationPhase.LoadingGroups
-                    : SoundActivationPhase.Ready;
+                    : SoundActivationPhase.IndexingSamples;
+    }
+
+    private static bool DependenciesReady(SoundPage page) =>
+        page != null &&
+        SoundFileNameCatalog.IsReady &&
+        ReferenceEquals(page.fileNames, SoundFileNameCatalog.CurrentNames) &&
+        SoundSampleCatalog.IsReadyFor(page) &&
+        SoundGroupLibrary.IsReady;
+
+    /// <summary>
+    /// Commits the completed resource generation to the presentation before exposing Ready. A
+    /// failed validation remains in the preparing state and is retried next frame instead of
+    /// presenting a false 100% completion.
+    /// </summary>
+    private static bool TryCommitReady(EditorSession session, SoundPage page)
+    {
+        if (!DependenciesReady(page))
+            return false;
+
+        try
+        {
+            // Clear the old generation first, then mark the new generation and publish it now. The
+            // normal presentation pass later in this frame will observe an already-current snapshot.
+            SoundEditorPresentationHub.Clear();
+            EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
+            SoundPresentationChangeHintHub.MarkFull(session);
+            SoundEditorPresentationHub.Publish(session);
+
+            if (!ValidatePublishedLibrary(page, SoundEditorPresentationHub.Current))
+            {
+                phase = SoundActivationPhase.IndexingSamples;
+                detail = "Preparing final sound list";
+                return false;
+            }
+
+            phase = SoundActivationPhase.Ready;
+            detail = "Ready";
+            clickToReadyMilliseconds = activationStartedTimestamp == 0L
+                ? 0d
+                : ElapsedMilliseconds(activationStartedTimestamp);
+
+            if (DevToolPerformanceMonitor.Enabled)
+            {
+                Plugin.Logger?.LogInfo(
+                    "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
+                    " ms; page switch/constructor " + lastPageSwitchMilliseconds.ToString("0.00") +
+                    " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
+                    " ms; worst indivisible unit " +
+                    MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
+                    MaxIndivisibleUnitName() + ").");
+            }
+            return true;
+        }
+        catch (Exception error)
+        {
+            phase = SoundActivationPhase.Failed;
+            detail = error.Message;
+            Plugin.Logger?.LogWarning("DevTool Sound final publication failed: " + error);
+            return false;
+        }
+    }
+
+    private static bool ValidatePublishedLibrary(
+        SoundPage page,
+        EditorSoundPresentationSnapshot presentation)
+    {
+        if (page == null || presentation?.Available != true)
+            return false;
+
+        string[] names = page.fileNames ?? Array.Empty<string>();
+        EditorSoundSampleSnapshot[] samples = presentation.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
+        if (names.Length == 0)
+            return samples.Length == 0;
+        if (samples.Length == 0)
+            return false;
+
+        // SampleCatalog intentionally de-duplicates names case-insensitively. Validate membership,
+        // not raw array length, so harmless duplicate physical filenames cannot prevent readiness.
+        HashSet<string> published = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < samples.Length; i++)
+        {
+            string sample = samples[i]?.Sample;
+            if (!string.IsNullOrWhiteSpace(sample))
+                published.Add(sample);
+        }
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            string name = names[i];
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!published.Contains(name)) return false;
+        }
+        return true;
     }
 
     private static bool ShouldPausePrewarm(EditorSession session)
@@ -301,9 +388,6 @@ internal static class SoundActivationPipeline
             session.PlacementActive)
             return true;
 
-        // Background Sound preparation is opportunistic. Yield completely while the developer is
-        // actively pressing a key or mouse button so an indivisible filesystem/XML unit can never
-        // land on top of a drag, edit or shortcut frame.
         return global::UnityEngine.Input.anyKey;
     }
 
@@ -350,34 +434,8 @@ internal static class SoundActivationPipeline
         if (page.currFilesPage < 0 || page.currFilesPage >= page.totalFilePages)
             page.currFilesPage = 0;
 
-        // This only materializes the at-most-28 legacy buttons after the expensive filename walk has
-        // completed. It preserves the vanilla page contract for legacy fallback without rebuilding
-        // the complete file catalogue in the constructor.
+        // Keep the vanilla fallback page coherent without making it authoritative for discovery.
         page.RefreshFilesPage();
-    }
-
-    private static void CompleteActivation(EditorSession session)
-    {
-        phase = SoundActivationPhase.Ready;
-        detail = "Ready";
-        clickToReadyMilliseconds = activationStartedTimestamp == 0L
-            ? 0d
-            : ElapsedMilliseconds(activationStartedTimestamp);
-
-        SoundEditorPresentationHub.Clear();
-        EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
-        SoundPresentationChangeHintHub.MarkFull(session);
-
-        if (DevToolPerformanceMonitor.Enabled)
-        {
-            Plugin.Logger?.LogInfo(
-                "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
-                " ms; page switch/constructor " + lastPageSwitchMilliseconds.ToString("0.00") +
-                " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
-                " ms; worst indivisible unit " +
-                MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
-                MaxIndivisibleUnitName() + ").");
-        }
     }
 
     private static string StatusDetail()
@@ -413,7 +471,10 @@ internal static class SoundActivationPipeline
         {
             SoundActivationPhase.Dormant => 0f,
             SoundActivationPhase.DiscoveringFileNames => 0.24f * SoundFileNameCatalog.Progress,
-            SoundActivationPhase.IndexingSamples => 0.24f + 0.44f * SoundSampleCatalog.Progress,
+            SoundActivationPhase.IndexingSamples =>
+                SoundSampleCatalog.IsReadyFor(requestedPage)
+                    ? 0.98f
+                    : 0.24f + 0.44f * SoundSampleCatalog.Progress,
             SoundActivationPhase.LoadingGroups => 0.68f + 0.30f * SoundGroupLibrary.Progress,
             SoundActivationPhase.Ready => 1f,
             SoundActivationPhase.Failed => 1f,
