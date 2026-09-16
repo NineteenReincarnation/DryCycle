@@ -1,0 +1,290 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Logging;
+
+namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
+
+/// <summary>
+/// Merges authored continuous/custom terrain into the new static Player Map room bake. The base bake
+/// remains sourced directly from room text; this overlay consumes only the rebuilt semantic terrain
+/// runs from MapRoomGeometryPresentationHub and never asks vanilla MiniMap/RoomRepresentation to
+/// generate a texture.
+/// </summary>
+[BepInPlugin(PluginId, PluginName, PluginVersion)]
+[BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+public sealed class PlayerMapTerrainBakeBridgePlugin : BaseUnityPlugin
+{
+    public const string PluginId = "DryCycle.DevTool.PlayerMap.TerrainBakeBridge";
+    public const string PluginName = "DryCycle Player Map Terrain Bake Bridge";
+    public const string PluginVersion = global::DryCycle.Plugin.Version;
+
+    private void OnEnable() => PlayerMapTerrainBakeBridge.Enable(Logger);
+    private void OnDisable() => PlayerMapTerrainBakeBridge.Disable();
+}
+
+internal static class PlayerMapTerrainBakeBridge
+{
+    private delegate bool OrigTryGetReady(int roomIndex, out RoomMapBake bake);
+    private delegate bool HookTryGetReady(OrigTryGetReady orig, int roomIndex, out RoomMapBake bake);
+    private delegate RoomMapBakeSnapshot OrigGetSnapshot(int roomIndex);
+    private delegate RoomMapBakeSnapshot HookGetSnapshot(OrigGetSnapshot orig, int roomIndex);
+
+    private sealed class OverlayEntry
+    {
+        internal RoomMapBake BaseBake;
+        internal int TerrainRevision;
+        internal RoomMapBake Enhanced;
+    }
+
+    private static readonly HookTryGetReady TryGetReadyHookDelegate = TryGetReadyHook;
+    private static readonly HookGetSnapshot GetSnapshotHookDelegate = GetSnapshotHook;
+    private static readonly Dictionary<int, OverlayEntry> Cache = new();
+
+    private static IDisposable tryGetReadyHook;
+    private static IDisposable getSnapshotHook;
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        log = logger;
+        try
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+            Type cacheType = typeof(RoomMapBakeCache);
+            MethodInfo tryGetReady = cacheType.GetMethod(
+                "TryGetReady",
+                flags,
+                null,
+                new[] { typeof(int), typeof(RoomMapBake).MakeByRefType() },
+                null);
+            MethodInfo getSnapshot = cacheType.GetMethod(
+                "GetSnapshot",
+                flags,
+                null,
+                new[] { typeof(int) },
+                null);
+            if (tryGetReady == null || getSnapshot == null)
+                throw new MissingMemberException("RoomMapBakeCache terrain bridge targets were not found.");
+
+            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
+            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
+            if (constructor == null)
+                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
+
+            tryGetReadyHook = constructor.Invoke(new object[] { tryGetReady, TryGetReadyHookDelegate }) as IDisposable;
+            getSnapshotHook = constructor.Invoke(new object[] { getSnapshot, GetSnapshotHookDelegate }) as IDisposable;
+            if (tryGetReadyHook == null || getSnapshotHook == null)
+                throw new InvalidOperationException("Player Map terrain-bake hooks were not created.");
+
+            enabled = true;
+            log?.LogInfo("Player Map authored-terrain bake bridge enabled.");
+        }
+        catch (Exception error)
+        {
+            Disable();
+            logger?.LogWarning("Player Map terrain-bake bridge could not attach: " + Unwrap(error).Message);
+        }
+    }
+
+    internal static void Disable()
+    {
+        Dispose(ref getSnapshotHook);
+        Dispose(ref tryGetReadyHook);
+        Cache.Clear();
+        enabled = false;
+        log = null;
+    }
+
+    private static bool TryGetReadyHook(OrigTryGetReady orig, int roomIndex, out RoomMapBake bake)
+    {
+        if (!orig(roomIndex, out RoomMapBake baseBake) || baseBake == null)
+        {
+            bake = null;
+            Cache.Remove(roomIndex);
+            return false;
+        }
+
+        if (!enabled || !MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
+                roomIndex,
+                out EditorMapRectSnapshot[] terrainRuns,
+                out int terrainRevision) ||
+            terrainRuns.Length == 0)
+        {
+            bake = baseBake;
+            if (terrainRuns == null || terrainRuns.Length == 0) Cache.Remove(roomIndex);
+            return true;
+        }
+
+        if (Cache.TryGetValue(roomIndex, out OverlayEntry cached) &&
+            ReferenceEquals(cached.BaseBake, baseBake) &&
+            cached.TerrainRevision == terrainRevision &&
+            cached.Enhanced != null)
+        {
+            bake = cached.Enhanced;
+            return true;
+        }
+
+        RoomMapBake enhanced = CloneBake(baseBake);
+        ApplyTerrain(enhanced, terrainRuns);
+        enhanced.Runs = BuildRuns(enhanced);
+        Cache[roomIndex] = new OverlayEntry
+        {
+            BaseBake = baseBake,
+            TerrainRevision = terrainRevision,
+            Enhanced = enhanced
+        };
+        bake = enhanced;
+        return true;
+    }
+
+    private static RoomMapBakeSnapshot GetSnapshotHook(OrigGetSnapshot orig, int roomIndex)
+    {
+        RoomMapBakeSnapshot source = orig(roomIndex);
+        if (!enabled || source == null || source.Status != RoomMapBakeStatus.Ready)
+            return source;
+
+        if (!RoomMapBakeCache.TryGetReady(roomIndex, out RoomMapBake enhanced) || enhanced == null)
+            return source;
+
+        return new RoomMapBakeSnapshot
+        {
+            Status = source.Status,
+            Width = enhanced.Width,
+            Height = enhanced.Height,
+            Error = source.Error,
+            Runs = enhanced.Runs ?? Array.Empty<RoomMapPreviewRun>(),
+            NodeAnchors = enhanced.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>()
+        };
+    }
+
+    private static RoomMapBake CloneBake(RoomMapBake source)
+    {
+        RoomMapBake clone = new()
+        {
+            RoomIndex = source.RoomIndex,
+            RoomName = source.RoomName,
+            Width = source.Width,
+            Height = source.Height,
+            Pixels = source.Pixels == null ? Array.Empty<RoomMapPixel>() : (RoomMapPixel[])source.Pixels.Clone(),
+            Runs = source.Runs ?? Array.Empty<RoomMapPreviewRun>(),
+            NodeAnchors = source.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>(),
+            SourcePath = source.SourcePath,
+            SourceLength = source.SourceLength,
+            SourceWriteTimeUtc = source.SourceWriteTimeUtc
+        };
+        RoomMapNodeAnchorSnapshot[] anchors = clone.NodeAnchors;
+        for (int i = 0; i < anchors.Length; i++)
+            clone.NodeAnchorByIndex[anchors[i].NodeIndex] = anchors[i];
+        return clone;
+    }
+
+    private static void ApplyTerrain(RoomMapBake bake, EditorMapRectSnapshot[] terrainRuns)
+    {
+        if (bake?.Pixels == null || bake.Width <= 0 || bake.Height <= 0 || terrainRuns == null) return;
+
+        for (int i = 0; i < terrainRuns.Length; i++)
+        {
+            EditorMapRectSnapshot run = terrainRuns[i];
+            if (!TryMapKind(run.Kind, out RoomMapPixelKind targetKind)) continue;
+
+            float left = Math.Min(run.X, run.X + run.Width);
+            float right = Math.Max(run.X, run.X + run.Width);
+            float bottom = Math.Min(run.Y, run.Y + run.Height);
+            float top = Math.Max(run.Y, run.Y + run.Height);
+            int minX = Math.Max(0, (int)Math.Floor(left));
+            int maxX = Math.Min(bake.Width - 1, (int)Math.Ceiling(right) - 1);
+            int minY = Math.Max(0, (int)Math.Floor(bottom));
+            int maxY = Math.Min(bake.Height - 1, (int)Math.Ceiling(top) - 1);
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    // Use the tile centre as the semantic sample point. WorldMap terrain runs are
+                    // conservative envelopes of the authored curves; centre sampling avoids turning
+                    // every touched neighbouring tile into full material while retaining continuous
+                    // slopes and custom bands.
+                    float cx = x + 0.5f;
+                    float cy = y + 0.5f;
+                    if (cx < left || cx > right || cy < bottom || cy > top) continue;
+
+                    int index = y * bake.Width + x;
+                    RoomMapPixel current = bake.Pixels[index];
+                    if (IsShortcut(current.Kind)) continue;
+
+                    if (targetKind == RoomMapPixelKind.Solid || current.Kind == RoomMapPixelKind.Air ||
+                        current.Kind == RoomMapPixelKind.BackWall)
+                        bake.Pixels[index] = new RoomMapPixel(targetKind, current.Water);
+                }
+            }
+        }
+    }
+
+    private static bool TryMapKind(EditorMapGeometryKind kind, out RoomMapPixelKind target)
+    {
+        switch (kind)
+        {
+            case EditorMapGeometryKind.Solid:
+            case EditorMapGeometryKind.CurvedSlope:
+                target = RoomMapPixelKind.Solid;
+                return true;
+            case EditorMapGeometryKind.Structure:
+            case EditorMapGeometryKind.LocalTerrain:
+            case EditorMapGeometryKind.QuicksandBody:
+            case EditorMapGeometryKind.QuicksandMaterial:
+                target = RoomMapPixelKind.Structure;
+                return true;
+            default:
+                target = default;
+                return false;
+        }
+    }
+
+    private static bool IsShortcut(RoomMapPixelKind kind) =>
+        kind == RoomMapPixelKind.RoomExit ||
+        kind == RoomMapPixelKind.CreatureHole ||
+        kind == RoomMapPixelKind.NormalShortcut ||
+        kind == RoomMapPixelKind.NpcTransport ||
+        kind == RoomMapPixelKind.RegionTransport;
+
+    private static RoomMapPreviewRun[] BuildRuns(RoomMapBake bake)
+    {
+        List<RoomMapPreviewRun> runs = new();
+        for (int y = 0; y < bake.Height; y++)
+        {
+            int x = 0;
+            while (x < bake.Width)
+            {
+                RoomMapPixel pixel = bake.Pixels[y * bake.Width + x];
+                int end = x + 1;
+                while (end < bake.Width)
+                {
+                    RoomMapPixel next = bake.Pixels[y * bake.Width + end];
+                    if (next.Kind != pixel.Kind || next.Water != pixel.Water) break;
+                    end++;
+                }
+                runs.Add(new RoomMapPreviewRun(x, y, end - x, pixel.Kind, pixel.Water));
+                x = end;
+            }
+        }
+        return runs.ToArray();
+    }
+
+    private static void Dispose(ref IDisposable hook)
+    {
+        try { hook?.Dispose(); }
+        catch { }
+        hook = null;
+    }
+
+    private static Exception Unwrap(Exception error)
+    {
+        while (error is TargetInvocationException invocation && invocation.InnerException != null)
+            error = invocation.InnerException;
+        return error;
+    }
+}
