@@ -258,13 +258,12 @@ internal static class WorldMapGpuRuntime
 
         if (session?.ToolMode == EditorToolMode.Map && snapshot?.Available == true)
         {
+            // The geometry/shortcut hubs are the authoring source of truth. Advance them before the
+            // retained cache consumes the frame so the GPU cache can never become its own upstream
+            // source and permanently recycle a stale/broken thumbnail bake.
+            MapRoomGeometryPresentationHub.Prime(session);
+            WorldMapShortcutPresentation.Prime(session, snapshot.SelectedRoomIndex);
             WorldMapGpuCache.Update(session, snapshot);
-            if (!WorldMapGpuCache.HasCompleteCachedData(snapshot))
-            {
-                MapRoomGeometryPresentationHub.Prime(session);
-                WorldMapShortcutPresentation.Prime(session, snapshot.SelectedRoomIndex);
-                WorldMapGpuCache.Update(session, snapshot);
-            }
         }
         else
         {
@@ -480,26 +479,22 @@ internal static class WorldMapGpuRuntime
     private static void GeometryPrimeHook(OrigGeometryPrime orig, EditorSession session)
     {
         if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
-        if (MapEditorPresentationHub.Current.Available &&
-            WorldMapGpuCache.HasCompleteCachedData(MapEditorPresentationHub.Current))
-            return;
+        // Never let the retained cache suppress the authoring source. Prime() is already frame- and
+        // revision-gated, so keeping it authoritative does not reintroduce whole-map stable-frame work.
         orig(session);
     }
 
     private static EditorMapRoomVisualSnapshot GeometryGetHook(OrigGeometryGet orig, int roomIndex)
     {
-        if (WorldMapGpuCache.TryGetRoom(roomIndex, out WorldMapGpuCache.RoomBake bake) &&
-            bake.Visual?.Available == true)
-            return bake.Visual;
+        // The GPU cache is downstream only. Returning its bake here created a feedback loop where
+        // WorldMapGpuCache captured MapRoomGeometryPresentationHub.Get(), which could return the old
+        // GPU bake again and make a broken thumbnail self-perpetuating forever.
         return orig(roomIndex);
     }
 
     private static void ShortcutPrimeHook(OrigShortcutPrime orig, EditorSession session, int selectedRoomIndex)
     {
         if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
-        if (MapEditorPresentationHub.Current.Available &&
-            WorldMapGpuCache.HasCompleteCachedData(MapEditorPresentationHub.Current))
-            return;
         orig(session, selectedRoomIndex);
     }
 
@@ -509,7 +504,6 @@ internal static class WorldMapGpuRuntime
         int nodeIndex,
         out WorldMapShortcutPresentation.ShortcutMarker marker)
     {
-        if (WorldMapGpuCache.TryGetExit(roomIndex, nodeIndex, out marker)) return true;
         return orig(roomIndex, nodeIndex, out marker);
     }
 
@@ -517,8 +511,6 @@ internal static class WorldMapGpuRuntime
         OrigGetCreatureHoles orig,
         int roomIndex)
     {
-        if (WorldMapGpuCache.TryGetRoom(roomIndex, out WorldMapGpuCache.RoomBake bake) && bake.ShortcutsReady)
-            return bake.CreatureHoles ?? Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
         return orig(roomIndex);
     }
 
