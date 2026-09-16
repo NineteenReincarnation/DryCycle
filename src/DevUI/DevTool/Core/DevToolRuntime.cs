@@ -553,7 +553,18 @@ public sealed class EditorSession
         LegacyUiPresentationController.Restore(Owner.activePage);
         LegacyTransactions.Reset();
         LegacyUiVisible = false;
+
+        long soundSwitchStarted = mode == EditorToolMode.Sound
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0L;
         Owner.SwitchPage(pageIndex);
+        if (soundSwitchStarted != 0L)
+        {
+            double milliseconds =
+                (System.Diagnostics.Stopwatch.GetTimestamp() - soundSwitchStarted) * 1000d /
+                System.Diagnostics.Stopwatch.Frequency;
+            SoundActivationPipeline.RecordPageSwitch(milliseconds);
+        }
 
         // SwitchPage constructs a new concrete Page immediately and can cross document boundaries
         // (Room <-> RegionMap <-> Relationships). Reconcile now so any later command in this same
