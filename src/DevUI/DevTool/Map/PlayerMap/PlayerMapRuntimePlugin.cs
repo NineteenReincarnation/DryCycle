@@ -1,4 +1,5 @@
 using BepInEx;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
@@ -16,5 +17,32 @@ public sealed class PlayerMapRuntimePlugin : BaseUnityPlugin
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
     private void OnEnable() => PlayerMapWorkspaceRuntime.Enable();
-    private void OnDisable() => PlayerMapWorkspaceRuntime.Disable();
+    private void OnDisable()
+    {
+        PlayerMapActivityGate.Reset();
+        PlayerMapWorkspaceRuntime.Disable();
+    }
+}
+
+/// <summary>
+/// Prevents the rebuilt Player Map from reintroducing hidden-page frame cost. The frontend marks
+/// itself visible during Draw; the backend command phase is allowed for the current and next two
+/// frames so commands enqueued at the end of a visible frame are still consumed on the following
+/// update. Stable World Layout frames therefore do not scan/bake the Player Map in the background.
+/// </summary>
+internal static class PlayerMapActivityGate
+{
+    private static int lastVisibleFrame = int.MinValue;
+
+    internal static bool ShouldProcess
+    {
+        get
+        {
+            int frame = Time.frameCount;
+            return lastVisibleFrame != int.MinValue && frame >= lastVisibleFrame && frame - lastVisibleFrame <= 2;
+        }
+    }
+
+    internal static void MarkVisible() => lastVisibleFrame = Time.frameCount;
+    internal static void Reset() => lastVisibleFrame = int.MinValue;
 }
