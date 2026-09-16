@@ -2,37 +2,44 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using RWCustom;
 
 namespace DryCycle.DevUI.DevTool.Sound;
 
 /// <summary>
-/// Incremental replacement for the synchronous ambient-file enumeration performed by the vanilla
-/// SoundPage constructor. The published arrays/dictionaries are immutable by convention: builders
-/// are private and are swapped only after a complete pass.
+/// Authoritative ambient-file catalogue for the rebuilt Sound workspace.
+///
+/// Rain World owns asset resolution. In particular, AssetManager.ListDirectory contains the real
+/// mergedmods / active-mod / targeted-version / newest-version / console / vanilla precedence and
+/// duplicate masking rules. Do not reproduce those rules here. We capture the same two source sets
+/// used by vanilla SoundPage, then consume their returned paths incrementally and publish one
+/// immutable snapshot when the pass is complete.
+///
+/// A small secondary scan of active mod folders is retained only for provenance labels. It never
+/// decides whether a sound exists and therefore cannot change the authoritative filename set.
 /// </summary>
 internal static class SoundFileNameCatalog
 {
     private enum BuildPhase
     {
         Dormant = 0,
-        ResolveLoadedDirectory = 1,
-        ScanLoadedDirectory = 2,
-        PrepareAssetRoots = 3,
-        ScanAssetRoots = 4,
-        Finalize = 5,
-        Ready = 6
+        CaptureVanillaSources = 1,
+        ProcessLoadedNames = 2,
+        ProcessResolvedNames = 3,
+        PrepareProvenanceRoots = 4,
+        ScanProvenanceRoots = 5,
+        Finalize = 6,
+        Ready = 7
     }
 
-    private sealed class AssetRoot
+    private sealed class ProvenanceRoot
     {
         internal string Root = string.Empty;
         internal string RelativeDirectory = string.Empty;
         internal ModManager.Mod Owner;
-        internal bool IncludeInNames;
     }
 
     private static readonly string[] EmptyNames = Array.Empty<string>();
+
     private static string[] currentNames = EmptyNames;
     private static Dictionary<string, string> currentLoadedAmbientFiles =
         new(StringComparer.OrdinalIgnoreCase);
@@ -46,21 +53,27 @@ internal static class SoundFileNameCatalog
     private static BuildPhase phase;
     private static readonly List<string> buildingNames = new();
     private static readonly HashSet<string> buildingNameSet = new(StringComparer.Ordinal);
-    private static readonly HashSet<string> secondarySeenNames = new(StringComparer.Ordinal);
-    private static readonly HashSet<string> rootKeys = new(StringComparer.OrdinalIgnoreCase);
     private static Dictionary<string, string> buildingLoadedAmbientFiles;
     private static Dictionary<string, string> buildingLooseAmbientFiles;
     private static Dictionary<string, ModManager.Mod> buildingModAmbientOwners;
     private static Dictionary<string, ModManager.Mod> buildingOfficialDlcAmbientOwners;
-    private static readonly List<AssetRoot> roots = new();
-    private static int rootIndex;
-    private static IEnumerator<string> enumerator;
-    private static AssetRoot activeRoot;
-    private static string loadedDirectory = string.Empty;
+
+    private static string[] loadedSourceFiles = EmptyNames;
+    private static string[] resolvedSourceFiles = EmptyNames;
+    private static int loadedSourceIndex;
+    private static int resolvedSourceIndex;
+
+    private static readonly List<ProvenanceRoot> provenanceRoots = new();
+    private static readonly HashSet<string> provenanceRootKeys = new(StringComparer.OrdinalIgnoreCase);
+    private static int provenanceRootIndex;
+    private static IEnumerator<string> provenanceEnumerator;
+    private static ProvenanceRoot activeProvenanceRoot;
+
     private static int processedEntries;
     private static int processedRoots;
     private static double maxUnitMilliseconds;
     private static string maxUnit = string.Empty;
+    private static int publishedRevision;
 
     internal static bool IsReady => phase == BuildPhase.Ready;
     internal static string[] CurrentNames => currentNames;
@@ -70,17 +83,21 @@ internal static class SoundFileNameCatalog
     internal static Dictionary<string, ModManager.Mod> CurrentOfficialDlcAmbientOwners => currentOfficialDlcAmbientOwners;
     internal static int ProcessedEntries => processedEntries;
     internal static int ProcessedRoots => processedRoots;
-    internal static int TotalRoots => roots.Count;
+    internal static int TotalRoots => provenanceRoots.Count;
     internal static double MaxUnitMilliseconds => maxUnitMilliseconds;
     internal static string MaxUnit => maxUnit;
+    internal static int PublishedRevision => publishedRevision;
 
     internal static float Progress => phase switch
     {
         BuildPhase.Dormant => 0f,
-        BuildPhase.ResolveLoadedDirectory => 0.02f,
-        BuildPhase.ScanLoadedDirectory => 0.18f,
-        BuildPhase.PrepareAssetRoots => 0.22f,
-        BuildPhase.ScanAssetRoots => 0.24f + 0.73f * RootProgress(),
+        BuildPhase.CaptureVanillaSources => 0.03f,
+        BuildPhase.ProcessLoadedNames =>
+            0.08f + 0.20f * Fraction(loadedSourceIndex, loadedSourceFiles.Length),
+        BuildPhase.ProcessResolvedNames =>
+            0.28f + 0.44f * Fraction(resolvedSourceIndex, resolvedSourceFiles.Length),
+        BuildPhase.PrepareProvenanceRoots => 0.74f,
+        BuildPhase.ScanProvenanceRoots => 0.76f + 0.22f * RootProgress(),
         BuildPhase.Finalize => 0.99f,
         BuildPhase.Ready => 1f,
         _ => 0f
@@ -93,22 +110,27 @@ internal static class SoundFileNameCatalog
 
         buildingNames.Clear();
         buildingNameSet.Clear();
-        secondarySeenNames.Clear();
-        rootKeys.Clear();
         buildingLoadedAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         buildingLooseAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         buildingModAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
         buildingOfficialDlcAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
-        roots.Clear();
-        rootIndex = 0;
-        DisposeEnumerator();
-        activeRoot = null;
-        loadedDirectory = string.Empty;
+
+        loadedSourceFiles = EmptyNames;
+        resolvedSourceFiles = EmptyNames;
+        loadedSourceIndex = 0;
+        resolvedSourceIndex = 0;
+
+        provenanceRoots.Clear();
+        provenanceRootKeys.Clear();
+        provenanceRootIndex = 0;
+        DisposeProvenanceEnumerator();
+        activeProvenanceRoot = null;
+
         processedEntries = 0;
         processedRoots = 0;
         maxUnitMilliseconds = 0d;
         maxUnit = string.Empty;
-        phase = BuildPhase.ResolveLoadedDirectory;
+        phase = BuildPhase.CaptureVanillaSources;
     }
 
     internal static bool Step(double budgetMilliseconds)
@@ -124,28 +146,30 @@ internal static class SoundFileNameCatalog
         {
             switch (phase)
             {
-                case BuildPhase.ResolveLoadedDirectory:
-                    MeasureUnit("resolve loaded ambient directory", ResolveLoadedDirectory);
-                    phase = BuildPhase.ScanLoadedDirectory;
+                case BuildPhase.CaptureVanillaSources:
+                    MeasureUnit("capture Rain World ambient sources", CaptureVanillaSources);
+                    phase = BuildPhase.ProcessLoadedNames;
                     break;
 
-                case BuildPhase.ScanLoadedDirectory:
-                    if (!StepLoadedDirectory())
+                case BuildPhase.ProcessLoadedNames:
+                    if (!StepLoadedName())
+                        phase = BuildPhase.ProcessResolvedNames;
+                    break;
+
+                case BuildPhase.ProcessResolvedNames:
+                    if (!StepResolvedName())
+                        phase = BuildPhase.PrepareProvenanceRoots;
+                    break;
+
+                case BuildPhase.PrepareProvenanceRoots:
+                    MeasureUnit("capture sound provenance roots", PrepareProvenanceRoots);
+                    phase = BuildPhase.ScanProvenanceRoots;
+                    break;
+
+                case BuildPhase.ScanProvenanceRoots:
+                    if (!StepProvenanceRoots())
                     {
-                        DisposeEnumerator();
-                        phase = BuildPhase.PrepareAssetRoots;
-                    }
-                    break;
-
-                case BuildPhase.PrepareAssetRoots:
-                    MeasureUnit("capture AssetManager roots", PrepareAssetRoots);
-                    phase = BuildPhase.ScanAssetRoots;
-                    break;
-
-                case BuildPhase.ScanAssetRoots:
-                    if (!StepAssetRoots())
-                    {
-                        DisposeEnumerator();
+                        DisposeProvenanceEnumerator();
                         phase = BuildPhase.Finalize;
                     }
                     break;
@@ -162,9 +186,9 @@ internal static class SoundFileNameCatalog
     }
 
     /// <summary>
-    /// SoundPage's patched constructor consumes only a complete snapshot. Returning an empty array
-    /// while a prewarm is in flight is intentional: the rebuilt UI can show its shell immediately,
-    /// and SoundActivationPipeline publishes the complete names back to the page when ready.
+    /// The patched SoundPage constructor consumes only a complete immutable snapshot. During the
+    /// first background pass it receives an empty shell; SoundActivationPipeline installs the final
+    /// array once this catalogue reaches Ready.
     /// </summary>
     internal static string[] ConstructorNamesOrEmpty()
     {
@@ -174,176 +198,201 @@ internal static class SoundFileNameCatalog
 
     internal static void ResetRuntimeState()
     {
-        DisposeEnumerator();
+        DisposeProvenanceEnumerator();
         currentNames = EmptyNames;
         currentLoadedAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         currentLooseAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         currentModAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
         currentOfficialDlcAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+
         phase = BuildPhase.Dormant;
         buildingNames.Clear();
         buildingNameSet.Clear();
-        secondarySeenNames.Clear();
-        rootKeys.Clear();
         buildingLoadedAmbientFiles = null;
         buildingLooseAmbientFiles = null;
         buildingModAmbientOwners = null;
         buildingOfficialDlcAmbientOwners = null;
-        roots.Clear();
-        rootIndex = 0;
-        activeRoot = null;
-        loadedDirectory = string.Empty;
+
+        loadedSourceFiles = EmptyNames;
+        resolvedSourceFiles = EmptyNames;
+        loadedSourceIndex = 0;
+        resolvedSourceIndex = 0;
+
+        provenanceRoots.Clear();
+        provenanceRootKeys.Clear();
+        provenanceRootIndex = 0;
+        activeProvenanceRoot = null;
+
         processedEntries = 0;
         processedRoots = 0;
         maxUnitMilliseconds = 0d;
         maxUnit = string.Empty;
+        publishedRevision = 0;
     }
 
-    private static void ResolveLoadedDirectory()
+    private static void CaptureVanillaSources()
     {
-        const string local = "./Assets/LoadedSoundEffects/Ambient/";
-        loadedDirectory = Directory.Exists(local)
-            ? local
+        // This is intentionally the same source contract as vanilla DevInterface.SoundPage:
+        //  1) physical LoadedSoundEffects/Ambient files;
+        //  2) AssetManager-resolved soundeffects/ambient files.
+        // AssetManager.ListDirectory is the authority for mod precedence and duplicate masking.
+        const string localLoadedDirectory = "./Assets/LoadedSoundEffects/Ambient/";
+        string loadedDirectory = Directory.Exists(localLoadedDirectory)
+            ? localLoadedDirectory
             : AssetManager.ResolveDirectory("LoadedSoundEffects" + Path.DirectorySeparatorChar + "Ambient");
-        BeginEnumeration(loadedDirectory);
+
+        loadedSourceFiles = SafeGetFiles(loadedDirectory);
+        resolvedSourceFiles = AssetManager.ListDirectory("soundeffects/ambient") ?? EmptyNames;
+        loadedSourceIndex = 0;
+        resolvedSourceIndex = 0;
     }
 
-    private static bool StepLoadedDirectory()
+    private static bool StepLoadedName()
     {
-        if (enumerator == null)
+        if (loadedSourceIndex >= loadedSourceFiles.Length)
             return false;
 
-        bool hasNext = MeasureMoveNext("enumerate loaded ambient file");
-        if (!hasNext)
-            return false;
-
-        string path = enumerator.Current;
+        string path = loadedSourceFiles[loadedSourceIndex++];
         string name = SafeFileName(path);
-        if (!string.IsNullOrEmpty(name))
-        {
-            buildingNames.Add(name);
-            buildingNameSet.Add(name);
-            if (!buildingLoadedAmbientFiles.ContainsKey(name))
-                buildingLoadedAmbientFiles[name] = path;
-            processedEntries++;
-        }
+        if (string.IsNullOrEmpty(name))
+            return true;
+
+        // Vanilla adds every file from LoadedSoundEffects first. Keep its exact filename casing so
+        // the subsequent AssetManager list is compared with the same observable semantics.
+        buildingNames.Add(name);
+        buildingNameSet.Add(name);
+        if (!buildingLoadedAmbientFiles.ContainsKey(name))
+            buildingLoadedAmbientFiles[name] = path;
+        processedEntries++;
         return true;
     }
 
-    private static void PrepareAssetRoots()
+    private static bool StepResolvedName()
     {
-        roots.Clear();
-        rootKeys.Clear();
-        string gameRoot = Custom.RootFolderDirectory();
+        if (resolvedSourceIndex >= resolvedSourceFiles.Length)
+            return false;
 
-        // Keep the same observable name precedence as AssetManager.ListDirectory. mergedmods and
-        // regular soundeffects roots contribute names. Per-mod loadedsoundeffects roots are scanned
-        // only for provenance so SoundSampleCatalog never needs a second directory pass.
-        AddRoot(Path.Combine(gameRoot, "mergedmods"), "soundeffects/ambient", null, includeInNames: true);
+        string path = resolvedSourceFiles[resolvedSourceIndex++];
+        string name = SafeFileName(path);
+        if (string.IsNullOrEmpty(name))
+            return true;
 
+        // AssetManager already applied active-mod precedence and duplicate masking. The only
+        // remaining vanilla rule is that a LoadedSoundEffects filename with the exact same casing
+        // wins over the resolved loose file.
+        if (!buildingNameSet.Contains(name))
+        {
+            buildingNames.Add(name);
+            buildingNameSet.Add(name);
+        }
+
+        if (!buildingLooseAmbientFiles.ContainsKey(name))
+            buildingLooseAmbientFiles[name] = path;
+
+        TryRecordOwnerFromResolvedPath(name, path);
+        processedEntries++;
+        return true;
+    }
+
+    private static void PrepareProvenanceRoots()
+    {
+        provenanceRoots.Clear();
+        provenanceRootKeys.Clear();
+
+        // These roots are metadata-only. They cannot add/remove catalogue entries. Iterate in the
+        // same priority direction as AssetManager so merged output can still be attributed to the
+        // highest-priority active mod that supplied a filename.
         for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
         {
             ModManager.Mod mod = ModManager.ActiveMods[i];
             if (mod == null) continue;
-            AddModRoots(mod.TargetedPath, mod);
-            AddModRoots(mod.NewestPath, mod);
-            AddModRoots(mod.path, mod);
+            AddModProvenanceRoots(mod.TargetedPath, mod);
+            AddModProvenanceRoots(mod.NewestPath, mod);
+            AddModProvenanceRoots(mod.path, mod);
         }
 
-        string console = AssetManager.GetConsoleFilesSubfolder();
-        if (!string.IsNullOrEmpty(console))
-            AddRoot(Path.Combine(gameRoot, "consolefiles", console), "soundeffects/ambient", null, includeInNames: true);
-        AddRoot(gameRoot, "soundeffects/ambient", null, includeInNames: true);
-
-        rootIndex = 0;
+        provenanceRootIndex = 0;
         processedRoots = 0;
-        DisposeEnumerator();
-        activeRoot = null;
+        DisposeProvenanceEnumerator();
+        activeProvenanceRoot = null;
     }
 
-    private static void AddModRoots(string root, ModManager.Mod mod)
+    private static void AddModProvenanceRoots(string root, ModManager.Mod mod)
     {
         if (string.IsNullOrWhiteSpace(root) || mod == null) return;
-        AddRoot(root, "loadedsoundeffects/ambient", mod, includeInNames: false);
-        AddRoot(root, "soundeffects/ambient", mod, includeInNames: true);
+        AddProvenanceRoot(root, "loadedsoundeffects/ambient", mod);
+        AddProvenanceRoot(root, "soundeffects/ambient", mod);
     }
 
-    private static bool StepAssetRoots()
+    private static bool StepProvenanceRoots()
     {
         while (true)
         {
-            if (enumerator != null)
+            if (provenanceEnumerator != null)
             {
-                bool hasNext = MeasureMoveNext("enumerate ambient provenance file");
+                bool hasNext = MeasureMoveNext();
                 if (hasNext)
                 {
-                    AddAssetFile(enumerator.Current, activeRoot);
+                    RecordProvenanceFile(provenanceEnumerator.Current, activeProvenanceRoot?.Owner);
                     return true;
                 }
 
-                DisposeEnumerator();
-                activeRoot = null;
+                DisposeProvenanceEnumerator();
+                activeProvenanceRoot = null;
                 processedRoots++;
-                return rootIndex < roots.Count;
+                return provenanceRootIndex < provenanceRoots.Count;
             }
 
-            if (rootIndex >= roots.Count)
+            if (provenanceRootIndex >= provenanceRoots.Count)
                 return false;
 
-            activeRoot = roots[rootIndex++];
-            string directory = Path.Combine(activeRoot.Root, activeRoot.RelativeDirectory);
-            if (!MeasureExists(directory))
+            activeProvenanceRoot = provenanceRoots[provenanceRootIndex++];
+            string directory = Path.Combine(activeProvenanceRoot.Root, activeProvenanceRoot.RelativeDirectory);
+            if (!Directory.Exists(directory))
             {
-                activeRoot = null;
+                activeProvenanceRoot = null;
                 processedRoots++;
                 return true;
             }
 
-            BeginEnumeration(directory);
+            BeginProvenanceEnumeration(directory);
             return true;
         }
     }
 
-    private static void AddAssetFile(string path, AssetRoot root)
+    private static void RecordProvenanceFile(string path, ModManager.Mod owner)
     {
-        string originalName = SafeFileName(path);
-        if (string.IsNullOrEmpty(originalName))
-            return;
+        if (owner == null) return;
+        string name = SafeFileName(path);
+        if (string.IsNullOrEmpty(name)) return;
 
-        if (root?.Owner != null)
+        if (!buildingModAmbientOwners.ContainsKey(name))
+            buildingModAmbientOwners[name] = owner;
+        if (IsOfficialDlc(owner.id) && !buildingOfficialDlcAmbientOwners.ContainsKey(name))
+            buildingOfficialDlcAmbientOwners[name] = owner;
+    }
+
+    private static void TryRecordOwnerFromResolvedPath(string name, string path)
+    {
+        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(path)) return;
+        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
         {
-            if (!buildingModAmbientOwners.ContainsKey(originalName))
-                buildingModAmbientOwners[originalName] = root.Owner;
-            if (IsOfficialDlc(root.Owner.id) && !buildingOfficialDlcAmbientOwners.ContainsKey(originalName))
-                buildingOfficialDlcAmbientOwners[originalName] = root.Owner;
-        }
+            ModManager.Mod mod = ModManager.ActiveMods[i];
+            if (mod == null) continue;
+            if (!IsUnder(path, mod.TargetedPath) && !IsUnder(path, mod.NewestPath) && !IsUnder(path, mod.path))
+                continue;
 
-        if (root == null || !root.IncludeInNames)
-        {
-            processedEntries++;
+            if (!buildingModAmbientOwners.ContainsKey(name))
+                buildingModAmbientOwners[name] = mod;
+            if (IsOfficialDlc(mod.id) && !buildingOfficialDlcAmbientOwners.ContainsKey(name))
+                buildingOfficialDlcAmbientOwners[name] = mod;
             return;
         }
-
-        if (!secondarySeenNames.Add(originalName))
-        {
-            processedEntries++;
-            return;
-        }
-
-        // AssetManager.ListDirectory lower-cases the returned path before SoundPage extracts the
-        // filename. Preserve that observable behaviour so vanilla/DLC/mod duplicate precedence does
-        // not change when the constructor switches to this snapshot.
-        string finalName = originalName.ToLowerInvariant();
-        if (buildingNameSet.Add(finalName))
-            buildingNames.Add(finalName);
-
-        if (!buildingLooseAmbientFiles.ContainsKey(finalName))
-            buildingLooseAmbientFiles[finalName] = path;
-        processedEntries++;
     }
 
     private static void PublishBuild()
     {
+        // Vanilla removes .meta entries after merging the two source sets.
         for (int i = buildingNames.Count - 1; i >= 0; i--)
         {
             string name = buildingNames[i] ?? string.Empty;
@@ -360,75 +409,71 @@ internal static class SoundFileNameCatalog
             new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
         currentOfficialDlcAmbientOwners = buildingOfficialDlcAmbientOwners ??
             new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
+        publishedRevision = publishedRevision == int.MaxValue ? 1 : publishedRevision + 1;
     }
 
-    private static void AddRoot(
-        string root,
-        string relativeDirectory,
-        ModManager.Mod owner,
-        bool includeInNames)
+    private static void AddProvenanceRoot(string root, string relativeDirectory, ModManager.Mod owner)
     {
-        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(relativeDirectory)) return;
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(relativeDirectory) || owner == null)
+            return;
 
         string key;
         try { key = Path.GetFullPath(Path.Combine(root, relativeDirectory)); }
         catch { key = Path.Combine(root, relativeDirectory); }
-        if (!rootKeys.Add(key)) return;
+        if (!provenanceRootKeys.Add(key)) return;
 
-        roots.Add(new AssetRoot
+        provenanceRoots.Add(new ProvenanceRoot
         {
             Root = root,
             RelativeDirectory = relativeDirectory,
-            Owner = owner,
-            IncludeInNames = includeInNames
+            Owner = owner
         });
     }
 
-    private static bool IsOfficialDlc(string id) =>
-        string.Equals(id, "moreslugcats", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(id, "watcher", StringComparison.OrdinalIgnoreCase);
-
-    private static void BeginEnumeration(string directory)
+    private static void BeginProvenanceEnumeration(string directory)
     {
-        DisposeEnumerator();
+        DisposeProvenanceEnumerator();
         try
         {
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-                return;
-            enumerator = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly).GetEnumerator();
+            provenanceEnumerator = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly).GetEnumerator();
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool Sound ambient enumeration failed for " + directory + ": " + error.Message);
-            enumerator = null;
+            Plugin.Logger?.LogWarning("DevTool Sound provenance enumeration failed for " + directory + ": " + error.Message);
+            provenanceEnumerator = null;
         }
     }
 
-    private static bool MeasureMoveNext(string label)
+    private static bool MeasureMoveNext()
     {
-        if (enumerator == null) return false;
+        if (provenanceEnumerator == null) return false;
         long started = Stopwatch.GetTimestamp();
         try
         {
-            return enumerator.MoveNext();
+            return provenanceEnumerator.MoveNext();
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool Sound ambient enumeration step failed: " + error.Message);
-            DisposeEnumerator();
+            Plugin.Logger?.LogWarning("DevTool Sound provenance enumeration step failed: " + error.Message);
+            DisposeProvenanceEnumerator();
             return false;
         }
         finally
         {
-            RecordUnit(label, ElapsedMilliseconds(started));
+            RecordUnit("enumerate sound provenance file", ElapsedMilliseconds(started));
         }
     }
 
-    private static bool MeasureExists(string directory)
+    private static string[] SafeGetFiles(string directory)
     {
-        long started = Stopwatch.GetTimestamp();
-        try { return Directory.Exists(directory); }
-        finally { RecordUnit("probe ambient root", ElapsedMilliseconds(started)); }
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            return EmptyNames;
+        try { return Directory.GetFiles(directory); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool Sound loaded ambient enumeration failed for " + directory + ": " + error.Message);
+            return EmptyNames;
+        }
     }
 
     private static void MeasureUnit(string label, Action action)
@@ -445,11 +490,11 @@ internal static class SoundFileNameCatalog
         maxUnit = label ?? string.Empty;
     }
 
-    private static void DisposeEnumerator()
+    private static void DisposeProvenanceEnumerator()
     {
-        try { enumerator?.Dispose(); }
+        try { provenanceEnumerator?.Dispose(); }
         catch { }
-        enumerator = null;
+        provenanceEnumerator = null;
     }
 
     private static string SafeFileName(string path)
@@ -458,12 +503,31 @@ internal static class SoundFileNameCatalog
         catch { return string.Empty; }
     }
 
+    private static bool IsOfficialDlc(string id) =>
+        string.Equals(id, "moreslugcats", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(id, "watcher", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsUnder(string filePath, string root)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(root)) return false;
+        try
+        {
+            string file = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string dir = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            return file.StartsWith(dir, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     private static float RootProgress()
     {
-        int total = roots.Count;
+        int total = provenanceRoots.Count;
         if (total <= 0) return 1f;
         return Math.Max(0f, Math.Min(1f, processedRoots / (float)total));
     }
+
+    private static float Fraction(int completed, int total) =>
+        total <= 0 ? 1f : Math.Max(0f, Math.Min(1f, completed / (float)total));
 
     private static double ElapsedMilliseconds(long startedTimestamp) =>
         (Stopwatch.GetTimestamp() - startedTimestamp) * 1000d / Stopwatch.Frequency;
