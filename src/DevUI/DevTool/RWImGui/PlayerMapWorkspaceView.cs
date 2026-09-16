@@ -70,7 +70,7 @@ internal static class PlayerMapWorkspaceView
         ImGui.Separator();
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
-        float left = Math.Max(190f, Math.Min(250f, available.X * 0.23f));
+        float left = Math.Max(280f, Math.Min(340f, available.X * 0.25f));
         float right = Math.Max(270f, Math.Min(355f, available.X * 0.30f));
         float center = Math.Max(260f, available.X - left - right - 16f);
 
@@ -137,10 +137,11 @@ internal static class PlayerMapWorkspaceView
 
     private static void DrawExplorer(PlayerMapPresentationSnapshot snapshot)
     {
-        DevToolWidgets.PaneTitle(DevToolUiSettings.T("玩家地图房间", "PLAYER MAP ROOMS"));
+        DevToolWidgets.PaneTitle(DevToolUiSettings.T("房间", "ROOMS"));
+        ImGui.TextDisabled(DevToolUiSettings.T("搜索房间", "Search rooms"));
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##PlayerMapSearch", "Search##PlayerMapSearch"), ref search, 160);
-        ImGui.Separator();
+        ImGui.InputText("##PlayerMapSearch", ref search, 160);
+        ImGui.Spacing();
 
         string normalized = (search ?? string.Empty).Trim();
         for (int i = 0; i < snapshot.Rooms.Length; i++)
@@ -149,42 +150,95 @@ internal static class PlayerMapWorkspaceView
             if (!LayerVisible[Math.Max(0, Math.Min(2, room.Layer))]) continue;
             if (normalized.Length > 0 && room.Name.IndexOf(normalized, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-            string status = room.Disabled ? "×" : room.Bake.Status switch
-            {
-                RoomMapBakeStatus.Ready => "✓",
-                RoomMapBakeStatus.Pending => "…",
-                RoomMapBakeStatus.Failed => "!",
-                _ => "?"
-            };
-            string mode = room.Mode == PlayerMapPlacementMode.Derived
-                ? ((room.Offset.sqrMagnitude <= 0.0001f) ? "↳" : "↳+")
-                : "◆";
-            string label = status + " " + mode + "  " + room.Name + "  L" + room.Layer;
+            const float rowHeight = 46f;
+            string status = RoomStatusText(room);
+            string placement = RoomPlacementText(room);
+            string layerText = "L" + room.Layer;
+            uint statusColor = RoomStatusColor(room);
+
             ImGui.PushID(room.RoomIndex);
-            bool clicked = ImGui.Selectable(label, room.Selected);
+            bool clicked = ImGui.Selectable(
+                "##PlayerMapRoomEntry",
+                room.Selected,
+                ImGuiSelectableFlags.None,
+                new Num.Vector2(0f, rowHeight));
+
+            Num.Vector2 min = ImGui.GetItemRectMin();
+            Num.Vector2 max = ImGui.GetItemRectMax();
+            ImDrawListPtr draw = ImGui.GetWindowDrawList();
+            draw.AddRectFilled(
+                new Num.Vector2(min.X + 2f, min.Y + 6f),
+                new Num.Vector2(min.X + 5f, max.Y - 6f),
+                statusColor);
+
+            Num.Vector2 namePos = min + new Num.Vector2(11f, 5f);
+            draw.AddText(namePos, ImGui.GetColorU32(ImGuiCol.Text), room.Name ?? string.Empty);
+
+            Num.Vector2 layerSize = ImGui.CalcTextSize(layerText);
+            draw.AddText(
+                new Num.Vector2(max.X - layerSize.X - 8f, min.Y + 5f),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled),
+                layerText);
+
+            Num.Vector2 metaPos = min + new Num.Vector2(11f, 25f);
+            draw.AddText(metaPos, statusColor, status);
+            if (!room.Disabled)
+            {
+                Num.Vector2 statusSize = ImGui.CalcTextSize(status);
+                draw.AddText(
+                    metaPos + new Num.Vector2(statusSize.X, 0f),
+                    ImGui.GetColorU32(ImGuiCol.TextDisabled),
+                    " · " + placement);
+            }
+
+            if (ImGui.IsItemHovered() && room.Bake.Status == RoomMapBakeStatus.Failed &&
+                !string.IsNullOrWhiteSpace(room.Bake.Error))
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextWrapped(room.Bake.Error);
+                ImGui.EndTooltip();
+            }
+
             ImGui.PopID();
             if (clicked)
                 MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex: room.RoomIndex));
-
-            if (room.Bake.Status == RoomMapBakeStatus.Failed && !string.IsNullOrWhiteSpace(room.Bake.Error))
-                DevToolWidgets.MutedText(room.Bake.Error, true);
         }
+    }
 
-        ImGui.Separator();
-        int ready = 0;
-        int failed = 0;
-        int pending = 0;
-        for (int i = 0; i < snapshot.Rooms.Length; i++)
+    private static string RoomStatusText(PlayerMapRoomSnapshot room)
+    {
+        if (room.Disabled)
+            return DevToolUiSettings.T("已禁用", "Disabled");
+        return room.Bake.Status switch
         {
-            if (snapshot.Rooms[i].Disabled) continue;
-            switch (snapshot.Rooms[i].Bake.Status)
-            {
-                case RoomMapBakeStatus.Ready: ready++; break;
-                case RoomMapBakeStatus.Failed: failed++; break;
-                default: pending++; break;
-            }
-        }
-        DevToolWidgets.MutedText("Ready " + ready + " · Pending " + pending + " · Failed " + failed, true);
+            RoomMapBakeStatus.Ready => DevToolUiSettings.T("可用", "Ready"),
+            RoomMapBakeStatus.Pending => DevToolUiSettings.T("准备中", "Preparing"),
+            RoomMapBakeStatus.Failed => DevToolUiSettings.T("无法读取", "Unavailable"),
+            _ => DevToolUiSettings.T("等待数据", "Waiting")
+        };
+    }
+
+    private static string RoomPlacementText(PlayerMapRoomSnapshot room)
+    {
+        if (room.Mode == PlayerMapPlacementMode.Absolute)
+            return DevToolUiSettings.T("独立位置", "Independent");
+        return room.Offset.sqrMagnitude <= 0.0001f
+            ? DevToolUiSettings.T("跟随世界布局", "World Layout")
+            : DevToolUiSettings.T("跟随世界布局 + 偏移", "World Layout + Offset");
+    }
+
+    private static uint RoomStatusColor(PlayerMapRoomSnapshot room)
+    {
+        if (room.Disabled)
+            return ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        Num.Vector4 color = room.Bake.Status switch
+        {
+            RoomMapBakeStatus.Ready => new Num.Vector4(0.45f, 0.82f, 0.50f, 1f),
+            RoomMapBakeStatus.Pending => new Num.Vector4(0.92f, 0.72f, 0.34f, 1f),
+            RoomMapBakeStatus.Failed => new Num.Vector4(0.92f, 0.38f, 0.34f, 1f),
+            _ => new Num.Vector4(0.62f, 0.66f, 0.72f, 1f)
+        };
+        return ImGui.ColorConvertFloat4ToU32(color);
     }
 
     private static void DrawCanvas(PlayerMapPresentationSnapshot snapshot, EditorMapPresentationSnapshot worldSnapshot)
