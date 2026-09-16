@@ -108,7 +108,7 @@ internal static class SoundActivationPipeline
         SoundGroupLibrary.TotalFileCount,
         MaxIndivisibleUnitMilliseconds(),
         MaxIndivisibleUnitName(),
-        detail);
+        StatusDetail());
 
     internal static void Step(EditorSession session)
     {
@@ -286,6 +286,13 @@ internal static class SoundActivationPipeline
                 MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
                 MaxIndivisibleUnitName() + ").");
         }
+    }
+
+    private static string StatusDetail()
+    {
+        double worst = MaxIndivisibleUnitMilliseconds();
+        if (worst <= 0d) return detail;
+        return detail + " · worst unit " + worst.ToString("0.00") + " ms · " + MaxIndivisibleUnitName();
     }
 
     private static double MaxIndivisibleUnitMilliseconds() =>
