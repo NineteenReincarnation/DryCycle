@@ -39,6 +39,7 @@ internal static class PlayerMapWorkspaceIntegration
 
     private static IDisposable toolbarHook;
     private static IDisposable bodyHook;
+    private static FieldInfo workspaceModeField;
     private static ManualLogSource log;
     private static bool enabled;
     private static bool playerMapActive;
@@ -57,7 +58,8 @@ internal static class PlayerMapWorkspaceIntegration
                 new[] { typeof(EditorPresentationSnapshot), typeof(EditorMapPresentationSnapshot) }, null);
             MethodInfo body = workspace.GetMethod("DrawBody", flags, null,
                 new[] { typeof(EditorPresentationSnapshot), typeof(EditorMapPresentationSnapshot) }, null);
-            if (toolbar == null || body == null)
+            workspaceModeField = workspace.GetField("workspaceMode", flags);
+            if (toolbar == null || body == null || workspaceModeField == null)
                 throw new MissingMemberException("World Workspace Player Map integration targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
@@ -84,6 +86,7 @@ internal static class PlayerMapWorkspaceIntegration
     {
         Dispose(ref bodyHook);
         Dispose(ref toolbarHook);
+        workspaceModeField = null;
         playerMapActive = false;
         PlayerMapActivityGate.Reset();
         enabled = false;
@@ -98,6 +101,14 @@ internal static class PlayerMapWorkspaceIntegration
         orig(editor, snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
+        // WorldData/Validation are mutually exclusive with Player Map. If one of the native rebuilt
+        // workspace modes is active, honor it rather than leaving the toolbar and body disagreeing.
+        if (playerMapActive && ReadWorkspaceMode() != 0)
+        {
+            playerMapActive = false;
+            PlayerMapActivityGate.Reset();
+        }
+
         ImGui.SameLine(0f, 8f);
         string label = playerMapActive
             ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
@@ -108,7 +119,10 @@ internal static class PlayerMapWorkspaceIntegration
                 playerMapActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
         {
             playerMapActive = !playerMapActive;
-            if (!playerMapActive) PlayerMapActivityGate.Reset();
+            if (playerMapActive)
+                WriteWorkspaceMode(0); // Keep the sibling mode anchored to the World Map workspace.
+            else
+                PlayerMapActivityGate.Reset();
         }
     }
 
@@ -125,6 +139,32 @@ internal static class PlayerMapWorkspaceIntegration
 
         PlayerMapActivityGate.MarkVisible();
         PlayerMapWorkspaceView.DrawBody(editor, snapshot);
+    }
+
+    private static int ReadWorkspaceMode()
+    {
+        try
+        {
+            object value = workspaceModeField?.GetValue(null);
+            return value == null ? 0 : Convert.ToInt32(value);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static void WriteWorkspaceMode(int value)
+    {
+        try
+        {
+            if (workspaceModeField == null) return;
+            workspaceModeField.SetValue(null, Enum.ToObject(workspaceModeField.FieldType, value));
+        }
+        catch (Exception error)
+        {
+            log?.LogDebug("Player Map could not synchronize World Workspace mode: " + error.Message);
+        }
     }
 
     private static void Dispose(ref IDisposable hook)
