@@ -28,6 +28,38 @@ public enum RoomMapPixelKind : byte
     UnknownShortcut = 9
 }
 
+/// <summary>
+/// Exact authored node anchor recovered directly from the room text shortcut graph.
+/// NodeIndex follows Rain World's ShortcutMapper ordering (RoomExit, CreatureHole,
+/// RegionTransport; each scanned top-to-bottom and left-to-right). EntranceX/Y is the visible
+/// shortcut mouth and is therefore the coordinate used by World/Player Map pipe rendering.
+/// </summary>
+public readonly struct RoomMapNodeAnchorSnapshot
+{
+    public RoomMapNodeAnchorSnapshot(
+        int nodeIndex,
+        float entranceX,
+        float entranceY,
+        int terminalX,
+        int terminalY,
+        RoomMapPixelKind kind)
+    {
+        NodeIndex = nodeIndex;
+        EntranceX = entranceX;
+        EntranceY = entranceY;
+        TerminalX = terminalX;
+        TerminalY = terminalY;
+        Kind = kind;
+    }
+
+    public int NodeIndex { get; }
+    public float EntranceX { get; }
+    public float EntranceY { get; }
+    public int TerminalX { get; }
+    public int TerminalY { get; }
+    public RoomMapPixelKind Kind { get; }
+}
+
 public readonly struct RoomMapPreviewRun
 {
     public RoomMapPreviewRun(int x, int y, int length, RoomMapPixelKind kind, bool water)
@@ -55,6 +87,20 @@ public sealed class RoomMapBakeSnapshot
     public int Height { get; init; }
     public string Error { get; init; } = string.Empty;
     public RoomMapPreviewRun[] Runs { get; init; } = Array.Empty<RoomMapPreviewRun>();
+    public RoomMapNodeAnchorSnapshot[] NodeAnchors { get; init; } = Array.Empty<RoomMapNodeAnchorSnapshot>();
+
+    public bool TryGetNodeAnchor(int nodeIndex, out RoomMapNodeAnchorSnapshot anchor)
+    {
+        RoomMapNodeAnchorSnapshot[] anchors = NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>();
+        for (int i = 0; i < anchors.Length; i++)
+        {
+            if (anchors[i].NodeIndex != nodeIndex) continue;
+            anchor = anchors[i];
+            return true;
+        }
+        anchor = default;
+        return false;
+    }
 }
 
 internal readonly struct RoomMapPixel
@@ -77,9 +123,14 @@ internal sealed class RoomMapBake
     internal int Height;
     internal RoomMapPixel[] Pixels = Array.Empty<RoomMapPixel>();
     internal RoomMapPreviewRun[] Runs = Array.Empty<RoomMapPreviewRun>();
+    internal RoomMapNodeAnchorSnapshot[] NodeAnchors = Array.Empty<RoomMapNodeAnchorSnapshot>();
+    internal readonly Dictionary<int, RoomMapNodeAnchorSnapshot> NodeAnchorByIndex = new();
     internal string SourcePath = string.Empty;
     internal long SourceLength;
     internal DateTime SourceWriteTimeUtc;
+
+    internal bool TryGetNodeAnchor(int nodeIndex, out RoomMapNodeAnchorSnapshot anchor) =>
+        NodeAnchorByIndex.TryGetValue(nodeIndex, out anchor);
 }
 
 internal sealed class RoomMapSource
@@ -129,8 +180,8 @@ internal static class RoomMapSourceLoader
                 return false;
             }
 
-            // VersionFix is a pure text-shape compatibility helper; it does not instantiate or
-            // advance any Rain World room runtime state.
+            // VersionFix is a pure text-shape compatibility helper. It does not instantiate or
+            // advance Rain World's room runtime state.
             RoomPreprocessor.VersionFix(ref lines);
             string[] header = lines[1].Split('|');
             if (header.Length < 2)
@@ -207,15 +258,34 @@ internal static class RoomMapSourceLoader
 
 internal static class RoomMapSemanticCompiler
 {
-    private const byte Air = 0;
     private const byte Solid = 1;
     private const byte Slope = 2;
     private const byte Floor = 3;
     private const byte ShortcutEntrance = 4;
+    private const int ShortcutGuard = 1000;
+
+    private readonly struct ShortcutResolution
+    {
+        internal ShortcutResolution(RoomMapPixelKind kind, int nodeIndex, int terminalX, int terminalY)
+        {
+            Kind = kind;
+            NodeIndex = nodeIndex;
+            TerminalX = terminalX;
+            TerminalY = terminalY;
+        }
+
+        internal RoomMapPixelKind Kind { get; }
+        internal int NodeIndex { get; }
+        internal int TerminalX { get; }
+        internal int TerminalY { get; }
+    }
 
     internal static RoomMapBake Compile(int roomIndex, string roomName, RoomMapSource source, string sourcePath)
     {
+        Dictionary<long, int> nodeByTerminal = BuildNodeIndex(source);
+        Dictionary<int, RoomMapNodeAnchorSnapshot> anchors = new();
         RoomMapPixel[] pixels = new RoomMapPixel[source.Width * source.Height];
+
         for (int y = 0; y < source.Height; y++)
         {
             for (int x = 0; x < source.Width; x++)
@@ -224,7 +294,22 @@ internal static class RoomMapSemanticCompiler
                 RoomMapPixelKind kind;
                 if (tile.Terrain == ShortcutEntrance)
                 {
-                    kind = ResolveShortcut(source, x, y);
+                    ShortcutResolution shortcut = ResolveShortcut(source, x, y, nodeByTerminal);
+                    kind = shortcut.Kind;
+                    if (shortcut.NodeIndex >= 0 &&
+                        (kind == RoomMapPixelKind.RoomExit ||
+                         kind == RoomMapPixelKind.CreatureHole ||
+                         kind == RoomMapPixelKind.RegionTransport) &&
+                        !anchors.ContainsKey(shortcut.NodeIndex))
+                    {
+                        anchors.Add(shortcut.NodeIndex, new RoomMapNodeAnchorSnapshot(
+                            shortcut.NodeIndex,
+                            x + 0.5f,
+                            y + 0.5f,
+                            shortcut.TerminalX,
+                            shortcut.TerminalY,
+                            kind));
+                    }
                 }
                 else if (tile.Terrain == Solid)
                 {
@@ -246,6 +331,9 @@ internal static class RoomMapSemanticCompiler
             }
         }
 
+        List<RoomMapNodeAnchorSnapshot> orderedAnchors = new(anchors.Values);
+        orderedAnchors.Sort((a, b) => a.NodeIndex.CompareTo(b.NodeIndex));
+
         FileInfo info = new(sourcePath);
         RoomMapBake bake = new()
         {
@@ -254,21 +342,52 @@ internal static class RoomMapSemanticCompiler
             Width = source.Width,
             Height = source.Height,
             Pixels = pixels,
+            NodeAnchors = orderedAnchors.ToArray(),
             SourcePath = sourcePath,
             SourceLength = info.Exists ? info.Length : 0L,
             SourceWriteTimeUtc = info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue
         };
+        for (int i = 0; i < bake.NodeAnchors.Length; i++)
+            bake.NodeAnchorByIndex[bake.NodeAnchors[i].NodeIndex] = bake.NodeAnchors[i];
         bake.Runs = BuildRuns(bake);
         return bake;
     }
 
-    private static RoomMapPixelKind ResolveShortcut(RoomMapSource source, int startX, int startY)
+    /// <summary>
+    /// Reproduces ShortcutMapper.nodesIndex ordering without constructing a Room. This exact ordering
+    /// is what lets two or more RoomExit pipes between the same room pair remain distinct by node id.
+    /// </summary>
+    private static Dictionary<long, int> BuildNodeIndex(RoomMapSource source)
+    {
+        Dictionary<long, int> result = new();
+        int nodeIndex = 0;
+        int[] terminalTypes = { 2, 3, 5 };
+        for (int t = 0; t < terminalTypes.Length; t++)
+        {
+            int type = terminalTypes[t];
+            for (int y = source.Height - 1; y >= 0; y--)
+            {
+                for (int x = 0; x < source.Width; x++)
+                {
+                    if (source.Tile(x, y).Shortcut != type) continue;
+                    result[TileKey(x, y)] = nodeIndex++;
+                }
+            }
+        }
+        return result;
+    }
+
+    private static ShortcutResolution ResolveShortcut(
+        RoomMapSource source,
+        int startX,
+        int startY,
+        Dictionary<long, int> nodeByTerminal)
     {
         int x = startX;
         int y = startY;
         int lastX = startX;
         int lastY = startY;
-        int maxSteps = Math.Max(16, source.Width * source.Height * 4);
+        int maxSteps = Math.Min(ShortcutGuard, Math.Max(16, source.Width * source.Height * 4));
 
         for (int step = 0; step < maxSteps; step++)
         {
@@ -276,13 +395,20 @@ internal static class RoomMapSemanticCompiler
             {
                 ref SourceTile current = ref source.Tile(x, y);
                 if (current.Terrain == ShortcutEntrance)
-                    return RoomMapPixelKind.NormalShortcut;
-                switch (current.Shortcut)
+                    return new ShortcutResolution(RoomMapPixelKind.NormalShortcut, -1, x, y);
+
+                RoomMapPixelKind terminalKind = current.Shortcut switch
                 {
-                    case 2: return RoomMapPixelKind.RoomExit;
-                    case 3: return RoomMapPixelKind.CreatureHole;
-                    case 4: return RoomMapPixelKind.NpcTransport;
-                    case 5: return RoomMapPixelKind.RegionTransport;
+                    2 => RoomMapPixelKind.RoomExit,
+                    3 => RoomMapPixelKind.CreatureHole,
+                    4 => RoomMapPixelKind.NpcTransport,
+                    5 => RoomMapPixelKind.RegionTransport,
+                    _ => RoomMapPixelKind.Air
+                };
+                if (terminalKind != RoomMapPixelKind.Air)
+                {
+                    int nodeIndex = nodeByTerminal.TryGetValue(TileKey(x, y), out int index) ? index : -1;
+                    return new ShortcutResolution(terminalKind, nodeIndex, x, y);
                 }
             }
 
@@ -294,7 +420,7 @@ internal static class RoomMapSemanticCompiler
             lastY = previousY;
             if (x == startX && y == startY && step > 1) break;
         }
-        return RoomMapPixelKind.UnknownShortcut;
+        return new ShortcutResolution(RoomMapPixelKind.UnknownShortcut, -1, x, y);
     }
 
     private static bool TryNextShortcutPosition(RoomMapSource source, ref int x, ref int y, int lastX, int lastY)
@@ -310,9 +436,12 @@ internal static class RoomMapSemanticCompiler
             return true;
         }
 
-        // Fixed ordering keeps malformed branch handling deterministic.
-        ReadOnlySpan<int> xs = stackalloc int[4] { 0, 1, 0, -1 };
-        ReadOnlySpan<int> ys = stackalloc int[4] { 1, 0, -1, 0 };
+        // Match RWCustom.Custom.fourDirections used by ShortcutHandler exactly:
+        // left, down, right, up. Branch/malformed tunnels therefore resolve identically to vanilla.
+        int[] xs = { -1, 0, 1, 0 };
+        int[] ys = { 0, -1, 0, 1 };
+        int originalX = x;
+        int originalY = y;
         for (int i = 0; i < 4; i++)
         {
             if (xs[i] == -dx && ys[i] == -dy) continue;
@@ -321,20 +450,23 @@ internal static class RoomMapSemanticCompiler
             if (!HasShortcut(source, nx, ny)) continue;
             x = nx;
             y = ny;
-            return true;
+            break;
         }
 
-        if (dx == 0 && dy == 0) return false;
-        nx = x - dx;
-        ny = y - dy;
-        if (!source.Inside(nx, ny)) return false;
-        x = nx;
-        y = ny;
-        return true;
+        if (x == lastX && y == lastY)
+        {
+            x -= dx;
+            y -= dy;
+        }
+        if (x == originalX && y == originalY && dx == 0 && dy == 0)
+            return false;
+        return source.Inside(x, y);
     }
 
     private static bool HasShortcut(RoomMapSource source, int x, int y) =>
         source.Inside(x, y) && source.Tile(x, y).Shortcut != 0;
+
+    private static long TileKey(int x, int y) => ((long)(uint)x << 32) | (uint)y;
 
     private static RoomMapPreviewRun[] BuildRuns(RoomMapBake bake)
     {
@@ -415,8 +547,6 @@ internal static class RoomMapBakeCache
         else if ((entry.Status == RoomMapBakeStatus.Missing || entry.Status == RoomMapBakeStatus.Failed) &&
                  !entry.Queued && frame >= entry.NextSourceAuditFrame)
         {
-            // Missing/failed sources are compatibility-audited at low frequency instead of scanning
-            // the filesystem for every room on every stable editor frame.
             entry.NextSourceAuditFrame = frame + 120 + Math.Abs(roomIndex % 31);
             string path = WorldLoader.FindRoomFile(entry.RoomName, false, ".txt", false);
             if (!string.Equals(path ?? string.Empty, entry.LastSourcePath ?? string.Empty, StringComparison.OrdinalIgnoreCase) ||
@@ -453,7 +583,8 @@ internal static class RoomMapBakeCache
             Width = bake?.Width ?? 0,
             Height = bake?.Height ?? 0,
             Error = entry.Error ?? string.Empty,
-            Runs = bake?.Runs ?? Array.Empty<RoomMapPreviewRun>()
+            Runs = bake?.Runs ?? Array.Empty<RoomMapPreviewRun>(),
+            NodeAnchors = bake?.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>()
         };
     }
 
