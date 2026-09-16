@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using BepInEx.Logging;
 using DevInterface;
@@ -8,13 +9,14 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 /// <summary>
-/// Final map-config contract filter for conditional hidden rooms.
+/// Final map-config room-record contract filter.
 ///
-/// Vanilla MapPage.SaveMapConfig omits every room in World.DisabledMapRooms. The rebuilt config
-/// pipeline already excludes those rooms from freshly generated room/connection blocks, but its
-/// extension-preserving source merge can otherwise retain a stale room record that existed in an
-/// older map file. Filter that exact record shape immediately before the single atomic write.
-/// Unknown/third-party records remain byte-for-byte represented as lines in the outgoing document.
+/// Vanilla MapPage.SaveMapConfig rewrites room records from the current RoomPanel set and omits every
+/// World.DisabledMapRooms entry. The rebuilt config pipeline intentionally preserves unknown extension
+/// lines, so an old room record could otherwise survive after that room becomes conditionally hidden,
+/// is renamed, or is removed from the region. Immediately before the single atomic write, recognize
+/// only the exact vanilla 8-field room-record shape and retain it only for a current visible RoomPanel.
+/// Unknown/third-party records are left untouched.
 /// </summary>
 internal static class PlayerMapDisabledConfigFilter
 {
@@ -47,15 +49,15 @@ internal static class PlayerMapDisabledConfigFilter
 
             atomicWriteHook = constructor.Invoke(new object[] { target, AtomicWriteHookDelegate }) as IDisposable;
             if (atomicWriteHook == null)
-                throw new InvalidOperationException("Player Map disabled-room config filter hook was not created.");
+                throw new InvalidOperationException("Player Map room-record contract filter hook was not created.");
 
             enabled = true;
-            logger?.LogInfo("Player Map disabled-room config contract filter enabled.");
+            logger?.LogInfo("Player Map active room-record config contract filter enabled.");
         }
         catch (Exception error)
         {
             Disable();
-            logger?.LogWarning("Player Map disabled-room config filter could not attach: " + Unwrap(error).Message);
+            logger?.LogWarning("Player Map room-record config filter could not attach: " + Unwrap(error).Message);
         }
     }
 
@@ -69,30 +71,40 @@ internal static class PlayerMapDisabledConfigFilter
 
     private static void AtomicWriteHook(OrigAtomicWriteAllLines orig, string target, IReadOnlyList<string> lines)
     {
-        if (!enabled || lines == null || !TryGetActiveMap(target, out MapPage page) ||
-            page.world?.DisabledMapRooms == null || page.world.DisabledMapRooms.Count == 0)
+        if (!enabled || lines == null || !TryGetActiveMap(target, out MapPage page))
         {
             orig(target, lines);
             return;
         }
 
         HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < page.world.DisabledMapRooms.Count; i++)
+        if (page.world?.DisabledMapRooms != null)
         {
-            string room = page.world.DisabledMapRooms[i];
-            if (!string.IsNullOrWhiteSpace(room)) disabled.Add(room.Trim());
+            for (int i = 0; i < page.world.DisabledMapRooms.Count; i++)
+            {
+                string name = page.world.DisabledMapRooms[i];
+                if (!string.IsNullOrWhiteSpace(name)) disabled.Add(name.Trim());
+            }
         }
-        if (disabled.Count == 0)
+
+        HashSet<string> visibleRooms = new(StringComparer.OrdinalIgnoreCase);
+        if (page.subNodes != null)
         {
-            orig(target, lines);
-            return;
+            for (int i = 0; i < page.subNodes.Count; i++)
+            {
+                if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
+                string name = panel.roomRep.room.name;
+                if (!string.IsNullOrWhiteSpace(name) && !disabled.Contains(name))
+                    visibleRooms.Add(name);
+            }
         }
 
         List<string> filtered = null;
         for (int i = 0; i < lines.Count; i++)
         {
             string line = lines[i] ?? string.Empty;
-            if (!IsDisabledRoomRecord(line, disabled))
+            bool strip = TryParseVanillaRoomRecord(line, out string roomName) && !visibleRooms.Contains(roomName);
+            if (!strip)
             {
                 filtered?.Add(line);
                 continue;
@@ -100,7 +112,7 @@ internal static class PlayerMapDisabledConfigFilter
 
             if (filtered == null)
             {
-                filtered = new List<string>(lines.Count - 1);
+                filtered = new List<string>(Math.Max(0, lines.Count - 1));
                 for (int j = 0; j < i; j++) filtered.Add(lines[j] ?? string.Empty);
             }
         }
@@ -119,21 +131,33 @@ internal static class PlayerMapDisabledConfigFilter
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsDisabledRoomRecord(string line, HashSet<string> disabled)
+    private static bool TryParseVanillaRoomRecord(string line, out string roomName)
     {
+        roomName = null;
         if (string.IsNullOrWhiteSpace(line)) return false;
         int colon = line.IndexOf(':');
         if (colon <= 0) return false;
 
         string key = line.Substring(0, colon).Trim();
-        if (!disabled.Contains(key)) return false;
+        if (key.Length == 0) return false;
+        string payload = line.Substring(colon + 1).Trim();
+        string[] fields = payload.Split(new[] { "><" }, StringSplitOptions.None);
+        if (fields.Length < 8) return false;
 
-        // A map room record always uses the canonical/dev-position "><" payload. Requiring that
-        // shape prevents a third-party record that happens to reuse a room name as a key from being
-        // removed by this compatibility filter.
-        string payload = line.Substring(colon + 1);
-        return payload.IndexOf("><", StringComparison.Ordinal) >= 0;
+        // Exact fields emitted by MapPage.SaveMapConfig:
+        // canonX, canonY, devX, devY, layer, subregion, roomWidth, roomHeight.
+        if (!TryFloat(fields[0]) || !TryFloat(fields[1]) || !TryFloat(fields[2]) || !TryFloat(fields[3]) ||
+            !int.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+            !int.TryParse(fields[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+            !int.TryParse(fields[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            return false;
+
+        roomName = key;
+        return true;
     }
+
+    private static bool TryFloat(string value) =>
+        float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
 
     private static string NormalizePath(string value) =>
         (value ?? string.Empty).Replace('\\', '/').Trim();
