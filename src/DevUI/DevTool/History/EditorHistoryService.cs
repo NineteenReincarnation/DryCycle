@@ -31,6 +31,72 @@ public sealed class DelegateHistoryEntry : IEditorHistoryEntry
 }
 
 /// <summary>
+/// One logical history item composed from several already-reversible edits. Undo runs children in
+/// reverse mutation order; Redo runs them forward. If a child fails, operations already applied in
+/// this call are rolled back best-effort so a grouped edit does not intentionally leave half-state.
+/// </summary>
+public sealed class CompositeHistoryEntry : IEditorHistoryEntry
+{
+    private readonly IEditorHistoryEntry[] entries;
+
+    public CompositeHistoryEntry(string label, IReadOnlyList<IEditorHistoryEntry> entries)
+    {
+        Label = string.IsNullOrEmpty(label) ? "Edit group" : label;
+        if (entries == null || entries.Count == 0)
+            throw new ArgumentException("Composite history requires at least one entry.", nameof(entries));
+        this.entries = new IEditorHistoryEntry[entries.Count];
+        for (int i = 0; i < entries.Count; i++)
+            this.entries[i] = entries[i] ?? throw new ArgumentException("Composite history cannot contain null entries.", nameof(entries));
+    }
+
+    public string Label { get; }
+
+    public bool Undo(EditorSession session)
+    {
+        int undoneFrom = entries.Length;
+        for (int i = entries.Length - 1; i >= 0; i--)
+        {
+            if (entries[i].Undo(session))
+            {
+                undoneFrom = i;
+                continue;
+            }
+
+            // Restore children already undone: original mutation order is ascending.
+            for (int restore = undoneFrom; restore < entries.Length; restore++)
+            {
+                try { entries[restore].Redo(session); }
+                catch { }
+            }
+            return false;
+        }
+        return true;
+    }
+
+    public bool Redo(EditorSession session)
+    {
+        int redoneThrough = -1;
+        for (int i = 0; i < entries.Length; i++)
+        {
+            if (entries[i].Redo(session))
+            {
+                redoneThrough = i;
+                continue;
+            }
+
+            // Return to the pre-redo state by undoing successful children in reverse order.
+            for (int restore = redoneThrough; restore >= 0; restore--)
+            {
+                try { entries[restore].Undo(session); }
+                catch { }
+            }
+            return false;
+        }
+        return true;
+    }
+}
+
+/// <summary>
 /// One history stack per editor document. Switching Object/Room/Sound tools therefore
 /// keeps Undo/Redo intact, while changing room/map/relationship documents activates a
 /// separate stack.
@@ -43,12 +109,36 @@ public sealed class EditorHistoryService
         internal readonly List<IEditorHistoryEntry> Redo = new();
     }
 
+    private sealed class BatchScope : IDisposable
+    {
+        private EditorHistoryService owner;
+
+        internal BatchScope(EditorHistoryService owner) => this.owner = owner;
+
+        public void Dispose()
+        {
+            EditorHistoryService value = owner;
+            owner = null;
+            value?.EndBatch();
+        }
+    }
+
+    private sealed class EmptyScope : IDisposable
+    {
+        internal static readonly EmptyScope Instance = new();
+        public void Dispose() { }
+    }
+
     private readonly Dictionary<EditorDocumentKey, DocumentHistory> documents = new();
     private readonly int capacity;
     private EditorDocumentKey activeDocument;
     private bool hasActiveDocument;
     private long revision = 1L;
     private int lastPublishedInvalidationFrame = int.MinValue;
+
+    private int batchDepth;
+    private string batchLabel = string.Empty;
+    private List<IEditorHistoryEntry> batchEntries;
 
     public EditorHistoryService(int capacity)
     {
@@ -78,19 +168,38 @@ public sealed class EditorHistoryService
             BumpRevision(modelMayHaveChanged: false);
     }
 
+    /// <summary>
+    /// Groups every Push made until the returned scope is disposed into one atomic Undo/Redo entry.
+    /// Nested scopes are supported; only the outermost label is used and only the outermost dispose
+    /// commits. Model mutation itself is still performed immediately by the existing commands.
+    /// </summary>
+    public IDisposable BeginBatch(string label)
+    {
+        if (!hasActiveDocument) return EmptyScope.Instance;
+        if (batchDepth == 0)
+        {
+            batchLabel = string.IsNullOrEmpty(label) ? "Edit group" : label;
+            batchEntries = new List<IEditorHistoryEntry>();
+        }
+        batchDepth++;
+        return new BatchScope(this);
+    }
+
     public void Push(IEditorHistoryEntry entry)
     {
         if (entry == null || !hasActiveDocument) return;
-        DocumentHistory history = Current;
-        history.Undo.Add(entry);
-        if (history.Undo.Count > capacity)
-            history.Undo.RemoveAt(0);
-        history.Redo.Clear();
-        BumpRevision(modelMayHaveChanged: true);
+        if (batchDepth > 0)
+        {
+            batchEntries ??= new List<IEditorHistoryEntry>();
+            batchEntries.Add(entry);
+            return;
+        }
+        CommitEntry(entry);
     }
 
     public bool Undo(EditorSession session)
     {
+        if (batchDepth > 0) return false;
         DocumentHistory history = Current;
         if (history == null || history.Undo.Count == 0) return false;
 
@@ -106,6 +215,7 @@ public sealed class EditorHistoryService
 
     public bool Redo(EditorSession session)
     {
+        if (batchDepth > 0) return false;
         DocumentHistory history = Current;
         if (history == null || history.Redo.Count == 0) return false;
 
@@ -123,11 +233,40 @@ public sealed class EditorHistoryService
 
     public void ClearActive()
     {
+        if (batchDepth > 0) return;
         if (Current == null) return;
         if (Current.Undo.Count == 0 && Current.Redo.Count == 0) return;
         Current.Undo.Clear();
         Current.Redo.Clear();
         BumpRevision(modelMayHaveChanged: false);
+    }
+
+    private void EndBatch()
+    {
+        if (batchDepth <= 0) return;
+        batchDepth--;
+        if (batchDepth > 0) return;
+
+        List<IEditorHistoryEntry> entries = batchEntries;
+        string label = batchLabel;
+        batchEntries = null;
+        batchLabel = string.Empty;
+        if (entries == null || entries.Count == 0) return;
+
+        CommitEntry(entries.Count == 1 && string.IsNullOrEmpty(label)
+            ? entries[0]
+            : new CompositeHistoryEntry(label, entries));
+    }
+
+    private void CommitEntry(IEditorHistoryEntry entry)
+    {
+        if (entry == null || !hasActiveDocument) return;
+        DocumentHistory history = Current;
+        history.Undo.Add(entry);
+        if (history.Undo.Count > capacity)
+            history.Undo.RemoveAt(0);
+        history.Redo.Clear();
+        BumpRevision(modelMayHaveChanged: true);
     }
 
     private void BumpRevision(bool modelMayHaveChanged)
