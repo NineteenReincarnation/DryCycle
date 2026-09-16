@@ -2,16 +2,18 @@ using System;
 using System.Diagnostics;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 
 namespace DryCycle.DevUI.DevTool.Sound;
 
 internal enum SoundActivationPhase
 {
     Dormant = 0,
-    IndexingSamples = 1,
-    LoadingGroups = 2,
-    Ready = 3,
-    Failed = 4
+    DiscoveringFileNames = 1,
+    IndexingSamples = 2,
+    LoadingGroups = 3,
+    Ready = 4,
+    Failed = 5
 }
 
 internal readonly struct SoundActivationStatusSnapshot
@@ -22,10 +24,15 @@ internal readonly struct SoundActivationStatusSnapshot
         double lastFrameWorkMilliseconds,
         double maxFrameWorkMilliseconds,
         double clickToReadyMilliseconds,
+        int discoveredFiles,
+        int processedFileRoots,
+        int totalFileRoots,
         int processedSamples,
         int totalSamples,
         int processedGroupFiles,
         int totalGroupFiles,
+        double maxBlockingUnitMilliseconds,
+        string maxBlockingUnit,
         string detail)
     {
         Phase = phase;
@@ -33,10 +40,15 @@ internal readonly struct SoundActivationStatusSnapshot
         LastFrameWorkMilliseconds = lastFrameWorkMilliseconds;
         MaxFrameWorkMilliseconds = maxFrameWorkMilliseconds;
         ClickToReadyMilliseconds = clickToReadyMilliseconds;
+        DiscoveredFiles = discoveredFiles;
+        ProcessedFileRoots = processedFileRoots;
+        TotalFileRoots = totalFileRoots;
         ProcessedSamples = processedSamples;
         TotalSamples = totalSamples;
         ProcessedGroupFiles = processedGroupFiles;
         TotalGroupFiles = totalGroupFiles;
+        MaxBlockingUnitMilliseconds = maxBlockingUnitMilliseconds;
+        MaxBlockingUnit = maxBlockingUnit ?? string.Empty;
         Detail = detail ?? string.Empty;
     }
 
@@ -45,18 +57,32 @@ internal readonly struct SoundActivationStatusSnapshot
     internal double LastFrameWorkMilliseconds { get; }
     internal double MaxFrameWorkMilliseconds { get; }
     internal double ClickToReadyMilliseconds { get; }
+    internal int DiscoveredFiles { get; }
+    internal int ProcessedFileRoots { get; }
+    internal int TotalFileRoots { get; }
     internal int ProcessedSamples { get; }
     internal int TotalSamples { get; }
     internal int ProcessedGroupFiles { get; }
     internal int TotalGroupFiles { get; }
+    internal double MaxBlockingUnitMilliseconds { get; }
+    internal string MaxBlockingUnit { get; }
     internal string Detail { get; }
     internal bool IsActive => Phase != SoundActivationPhase.Dormant;
     internal bool IsReady => Phase == SoundActivationPhase.Ready;
 }
 
+/// <summary>
+/// Owns the cold-start lifecycle of the Sound workspace.
+///
+/// Rain World/AssetManager work deliberately stays on the game thread. Game-thread-only does not
+/// mean same-frame-only: discovery and parsing are resumed in small units under a frame budget.
+/// The ambient filename catalog can prewarm at a lower budget before Sound is ever clicked, and the
+/// vanilla SoundPage constructor consumes only the already-published snapshot (or an empty shell).
+/// </summary>
 internal static class SoundActivationPipeline
 {
     private const double ActiveFrameBudgetMilliseconds = 0.85d;
+    private const double PrewarmFrameBudgetMilliseconds = 0.22d;
 
     private static SoundPage requestedPage;
     private static string[] requestedNames;
@@ -73,10 +99,15 @@ internal static class SoundActivationPipeline
         lastFrameWorkMilliseconds,
         maxFrameWorkMilliseconds,
         clickToReadyMilliseconds,
+        SoundFileNameCatalog.ProcessedEntries,
+        SoundFileNameCatalog.ProcessedRoots,
+        SoundFileNameCatalog.TotalRoots,
         SoundSampleCatalog.ProcessedSampleCount,
         SoundSampleCatalog.TotalSampleCount,
         SoundGroupLibrary.ProcessedFileCount,
         SoundGroupLibrary.TotalFileCount,
+        SoundFileNameCatalog.MaxUnitMilliseconds,
+        SoundFileNameCatalog.MaxUnit,
         detail);
 
     internal static void Step(EditorSession session)
@@ -84,12 +115,26 @@ internal static class SoundActivationPipeline
         if (session?.Owner == null)
             return;
 
+        bool rebuiltFrontendOwnsPresentation =
+            EditorInputRouter.FrontendAttached &&
+            !EditorUiModeState.UseVanilla &&
+            !session.LegacyUiVisible;
+
+        if (rebuiltFrontendOwnsPresentation)
+        {
+            SoundFileNameCatalog.EnsureStarted();
+            if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage)
+            {
+                SoundFileNameCatalog.Step(PrewarmFrameBudgetMilliseconds);
+                return;
+            }
+        }
+
         if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage page)
             return;
 
-        string[] names = page.fileNames ?? Array.Empty<string>();
-        if (!ReferenceEquals(requestedPage, page) || !ReferenceEquals(requestedNames, names))
-            BeginActivation(page, names);
+        if (!ReferenceEquals(requestedPage, page))
+            BeginActivation(page);
 
         if (phase == SoundActivationPhase.Ready && !SoundGroupLibrary.IsReady)
         {
@@ -108,24 +153,40 @@ internal static class SoundActivationPipeline
         {
             double remaining = ActiveFrameBudgetMilliseconds;
 
-            if (!SoundSampleCatalog.IsReadyFor(page))
+            if (!SoundFileNameCatalog.IsReady)
             {
-                phase = SoundActivationPhase.IndexingSamples;
-                detail = "Indexing ambient sound resources";
-                SoundSampleCatalog.BeginRefresh(page);
-                SoundSampleCatalog.StepRefresh(remaining);
+                phase = SoundActivationPhase.DiscoveringFileNames;
+                detail = "Discovering ambient sound files";
+                SoundFileNameCatalog.Step(remaining);
                 remaining = Math.Max(0d, ActiveFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
             }
 
-            if (SoundSampleCatalog.IsReadyFor(page) && !SoundGroupLibrary.IsReady && remaining > 0d)
+            if (SoundFileNameCatalog.IsReady)
             {
-                phase = SoundActivationPhase.LoadingGroups;
-                detail = "Loading sound groups";
-                SoundGroupLibrary.EnsureLoaded();
-                SoundGroupLibrary.StepReload(remaining);
+                PublishFileNamesToPage(page);
+
+                if (!SoundSampleCatalog.IsReadyFor(page) && remaining > 0d)
+                {
+                    phase = SoundActivationPhase.IndexingSamples;
+                    detail = "Indexing ambient sound resources";
+                    SoundSampleCatalog.BeginRefresh(page);
+                    SoundSampleCatalog.StepRefresh(remaining);
+                    remaining = Math.Max(0d, ActiveFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
+                }
+
+                if (SoundSampleCatalog.IsReadyFor(page) && !SoundGroupLibrary.IsReady && remaining > 0d)
+                {
+                    phase = SoundActivationPhase.LoadingGroups;
+                    detail = "Loading sound groups";
+                    SoundGroupLibrary.EnsureLoaded();
+                    SoundGroupLibrary.StepReload(remaining);
+                }
             }
 
-            completedThisFrame = SoundSampleCatalog.IsReadyFor(page) && SoundGroupLibrary.IsReady;
+            completedThisFrame =
+                SoundFileNameCatalog.IsReady &&
+                SoundSampleCatalog.IsReadyFor(page) &&
+                SoundGroupLibrary.IsReady;
         }
         catch (Exception error)
         {
@@ -154,23 +215,48 @@ internal static class SoundActivationPipeline
         maxFrameWorkMilliseconds = 0d;
         clickToReadyMilliseconds = 0d;
         detail = string.Empty;
+        SoundFileNameCatalog.ResetRuntimeState();
         SoundSampleCatalog.ResetRuntimeState();
         SoundGroupLibrary.ResetRuntimeState();
     }
 
-    private static void BeginActivation(SoundPage page, string[] names)
+    private static void BeginActivation(SoundPage page)
     {
         requestedPage = page;
-        requestedNames = names;
-        phase = SoundActivationPhase.IndexingSamples;
+        requestedNames = null;
+        phase = SoundFileNameCatalog.IsReady
+            ? SoundActivationPhase.IndexingSamples
+            : SoundActivationPhase.DiscoveringFileNames;
         activationStartedTimestamp = Stopwatch.GetTimestamp();
         lastFrameWorkMilliseconds = 0d;
         maxFrameWorkMilliseconds = 0d;
         clickToReadyMilliseconds = 0d;
         detail = "Preparing Sound workspace";
 
-        SoundSampleCatalog.BeginRefresh(page);
+        SoundFileNameCatalog.EnsureStarted();
         SoundGroupLibrary.BeginReload(force: true);
+        if (SoundFileNameCatalog.IsReady)
+        {
+            PublishFileNamesToPage(page);
+            SoundSampleCatalog.BeginRefresh(page);
+        }
+    }
+
+    private static void PublishFileNamesToPage(SoundPage page)
+    {
+        string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+        if (ReferenceEquals(requestedNames, names) && ReferenceEquals(page.fileNames, names))
+            return;
+
+        page.fileNames = names;
+        requestedNames = names;
+
+        int maxPerPage = Math.Max(1, page.maxFilesPerPage);
+        page.totalFilePages = 1 + (int)(names.Length / (float)maxPerPage + 0.5f);
+        if (page.currFilesPage < 0 || page.currFilesPage >= page.totalFilePages)
+            page.currFilesPage = 0;
+
+        page.RefreshFilesPage();
     }
 
     private static void CompleteActivation(EditorSession session)
@@ -189,7 +275,10 @@ internal static class SoundActivationPipeline
         {
             Plugin.Logger?.LogInfo(
                 "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
-                " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") + " ms.");
+                " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
+                " ms; worst indivisible file-discovery unit " +
+                SoundFileNameCatalog.MaxUnitMilliseconds.ToString("0.00") + " ms (" +
+                SoundFileNameCatalog.MaxUnit + ").");
         }
     }
 
@@ -198,8 +287,9 @@ internal static class SoundActivationPipeline
         return phase switch
         {
             SoundActivationPhase.Dormant => 0f,
-            SoundActivationPhase.IndexingSamples => 0.62f * SoundSampleCatalog.Progress,
-            SoundActivationPhase.LoadingGroups => 0.62f + 0.36f * SoundGroupLibrary.Progress,
+            SoundActivationPhase.DiscoveringFileNames => 0.24f * SoundFileNameCatalog.Progress,
+            SoundActivationPhase.IndexingSamples => 0.24f + 0.44f * SoundSampleCatalog.Progress,
+            SoundActivationPhase.LoadingGroups => 0.68f + 0.30f * SoundGroupLibrary.Progress,
             SoundActivationPhase.Ready => 1f,
             SoundActivationPhase.Failed => 1f,
             _ => 0f
