@@ -91,7 +91,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
         EditorSession session = DevToolSessionHub.Current;
         RainWorldGame game = session?.Owner?.game;
-        bool rawSessionVisible = EditorPresentationHub.Current.Available && DevToolSessionHub.IsCurrentSessionLive;
+        // Session lifetime is authoritative here. Vanilla presentation intentionally does not
+        // publish rebuilt presentation snapshots, so requiring Current.Available makes the tiny
+        // Vanilla -> New UI return panel disappear after H closes and recreates DevUI.
+        bool rawSessionVisible = DevToolSessionHub.IsCurrentSessionLive;
         bool definitelyClosed = IsSessionDefinitelyClosed(session, game);
 
         // Do not use a frame-count grace period here. In exclusive/fullscreen transitions Unity can
@@ -403,7 +406,10 @@ internal static class DevToolFrontend
             return;
         }
 
-        if (!visible || !snapshot.Available || EditorUiModeState.OverlayHidden)
+        // Vanilla mode deliberately renders only the tiny return panel and therefore does not
+        // require a rebuilt presentation snapshot. New UI surfaces still require a valid snapshot.
+        bool needsPresentationSnapshot = !EditorUiModeState.UseVanilla;
+        if (!visible || (needsPresentationSnapshot && !snapshot.Available) || EditorUiModeState.OverlayHidden)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -446,7 +452,10 @@ internal static class DevToolFrontend
                 using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.UiModeSwitch))
                     UiModeSwitch.Draw();
 
-                if (!EditorUiModeState.UseVanilla)
+                // Switching from Vanilla to New UI can happen inside UiModeSwitch.Draw(). If the
+                // recreated session has not published its first snapshot yet, wait one frame rather
+                // than feeding an unavailable snapshot into rebuilt editor windows.
+                if (!EditorUiModeState.UseVanilla && snapshot.Available)
                 {
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
                         FontSettingsWindow.Draw(frameContext.DisplaySize);
