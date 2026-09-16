@@ -15,9 +15,10 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Integration boundary between RWImGui and the retained Unity World Map renderer.
 ///
-/// ImGui remains responsible for layout, toolbar, inspector, labels and direct manipulation. Static
-/// room raster/topology and the high-frequency selection/hover highlights live in retained GPU
-/// layers. If GPU setup fails, the original ImGui map remains usable.
+/// ImGui remains responsible for layout, toolbar, inspector, labels, direct manipulation and routed
+/// topology links. Retained GPU layers own room raster plus high-frequency room highlights only.
+/// Keeping connection rendering in one native WorldMapView path avoids competing DrawCanvas hooks
+/// and guarantees the fallback and retained views use identical link geometry and semantics.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -40,9 +41,6 @@ public sealed class WorldMapGpuRendererPlugin : BaseUnityPlugin
 
 internal static class WorldMapGpuRuntime
 {
-    // Packed MapTex atlases become visually unstable when heavily minified: greys average into the
-    // dark atlas/background and rooms read as black blocks. Below this zoom we cover the sampled
-    // texture with a compact semantic LOD built from the already cached RasterRuns instead.
     private const float SemanticRoomLodZoom = 0.52f;
 
     private delegate void OrigDrawCanvas(EditorMapPresentationSnapshot snapshot);
@@ -128,10 +126,6 @@ internal static class WorldMapGpuRuntime
 
         try
         {
-            // The old routed overlay routes in screen space and therefore has an unavoidable
-            // zoom-time CPU cost. Keep it only as fallback/reference while retained mode is active.
-            WorldConnectionOverlay.Disable();
-
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
             Type mapType = typeof(WorldMapView);
             MethodInfo drawCanvas = mapType.GetMethod(
@@ -204,7 +198,7 @@ internal static class WorldMapGpuRuntime
             creatureHolesHook = constructor.Invoke(new object[] { getCreatureHoles, GetCreatureHolesHookDelegate }) as IDisposable;
 
             enabled = true;
-            log?.LogInfo("Retained GPU World Map integration enabled.");
+            log?.LogInfo("Retained GPU World Map room integration enabled; routed links stay on the native map layer.");
         }
         catch (Exception error)
         {
@@ -258,9 +252,6 @@ internal static class WorldMapGpuRuntime
 
         if (session?.ToolMode == EditorToolMode.Map && snapshot?.Available == true)
         {
-            // The geometry/shortcut hubs are the authoring source of truth. Advance them before the
-            // retained cache consumes the frame so the GPU cache can never become its own upstream
-            // source and permanently recycle a stale/broken thumbnail bake.
             MapRoomGeometryPresentationHub.Prime(session);
             WorldMapShortcutPresentation.Prime(session, snapshot.SelectedRoomIndex);
             WorldMapGpuCache.Update(session, snapshot);
@@ -293,24 +284,18 @@ internal static class WorldMapGpuRuntime
         ImGuiIOPtr io = ImGui.GetIO();
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
-        bool showConnections = showConnectionsField?.GetValue(null) is bool links && links;
         int layerMask = CurrentLayerMask();
 
         bool mouseInside = PointInside(io.MousePos, canvasMin, canvasMin + canvasSize);
-        WorldMapGpuScene.RouteHit preHit = null;
         frameHoveredRoomIndex = -1;
         if (gpuReady && mouseInside)
         {
             Num.Vector2 mapPoint = ScreenToMap(io.MousePos, canvasMin, pan, zoom);
             WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out frameHoveredRoomIndex);
-            if (showConnections)
-                WorldMapGpuScene.TryHitConnection(mapPoint, 12f / Math.Max(0.20f, zoom), out preHit);
         }
 
-        // The base canvas keeps input, labels and shortcut authoring, but static routes and room
-        // focus outlines are now supplied by retained GPU meshes.
-        bool suppressImmediateConnections = gpuReady && showConnections;
-        if (suppressImmediateConnections) showConnectionsField.SetValue(null, false);
+        // The retained renderer now owns room pixels only. Do not suppress WorldMapView's Links
+        // state: the native routed layer must execute in both fallback and GPU modes.
         if (gpuReady) ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
         try
         {
@@ -319,34 +304,11 @@ internal static class WorldMapGpuRuntime
         finally
         {
             if (gpuReady) ImGui.PopStyleColor();
-            if (suppressImmediateConnections) showConnectionsField.SetValue(null, true);
         }
 
-        if (gpuReady && showConnections)
-        {
-            WorldMapGpuScene.RouteHit hit = preHit;
-            if (mouseInside)
-            {
-                Num.Vector2 mapPoint = ScreenToMap(io.MousePos, canvasMin, pan, zoom);
-                WorldMapGpuScene.TryHitConnection(mapPoint, 12f / Math.Max(0.20f, zoom), out hit);
-            }
-
-            string hovered = hit?.Connection?.ConnectionId ?? string.Empty;
-            hoveredConnectionIdField.SetValue(null, hovered);
-            if (hit != null)
-            {
-                // A focused route owns the interaction layer above a room at the same pixel.
-                frameHoveredRoomIndex = -1;
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                {
-                    draggingRoomField.SetValue(null, -1);
-                    WorldMapView.SelectConnection(hovered);
-                }
-                if (mouseInside) DrawRouteTooltip(hit.Connection);
-            }
-        }
-
-        PublishFrame(snapshot, canvasMin, canvasSize, io.DisplaySize, pan, zoom, showConnections, layerMask);
+        // Connections deliberately stay out of the retained scene. This removes the duplicate GPU
+        // route pipeline and makes one orthogonal route set authoritative for visuals and hit tests.
+        PublishFrame(snapshot, canvasMin, canvasSize, io.DisplaySize, pan, zoom, showConnections: false, layerMask);
     }
 
     private static void DrawRoomGeometryHook(
@@ -373,9 +335,6 @@ internal static class WorldMapGpuRuntime
             return;
         }
 
-        // Selection/hover have moved to a separate dynamic retained mesh. Keeping them out of the
-        // ImGui room pass prevents the whole interaction effect from being regenerated as immediate
-        // draw commands every frame.
         if (selected || hovered) return;
 
         float width = Math.Max(1f, visual?.WidthTiles ?? 12f) * WorldMapGpuScene.TileDisplaySize * zoom;
@@ -387,11 +346,6 @@ internal static class WorldMapGpuRuntime
         draw.AddRect(roomMin, max, color, Math.Max(1f, 3f * zoom), ImDrawFlags.None, 1f);
     }
 
-    /// <summary>
-    /// Far-zoom semantic thumbnail. A single opaque Air fill masks the minified MapTex completely;
-    /// non-Air raster runs then restore the room silhouette without depending on atlas mip sampling.
-    /// Water is intentionally omitted at this LOD, matching the original low-LOD map path.
-    /// </summary>
     private static void DrawSemanticRoomLod(
         ImDrawListPtr draw,
         EditorMapRoomSnapshot room,
@@ -404,8 +358,6 @@ internal static class WorldMapGpuRuntime
         float heightTiles = Math.Max(1f, visual.HeightTiles);
         Num.Vector2 roomMax = roomMin + new Num.Vector2(widthTiles * tileScale, heightTiles * tileScale);
 
-        // Cover the raw atlas first. This is the important part of the fix: the room can no longer
-        // collapse into the dark minified atlas color when zoomed far out.
         draw.AddRectFilled(roomMin, roomMax, SemanticGeometryColor(EditorMapGeometryKind.Air));
 
         EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
@@ -479,16 +431,11 @@ internal static class WorldMapGpuRuntime
     private static void GeometryPrimeHook(OrigGeometryPrime orig, EditorSession session)
     {
         if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
-        // Never let the retained cache suppress the authoring source. Prime() is already frame- and
-        // revision-gated, so keeping it authoritative does not reintroduce whole-map stable-frame work.
         orig(session);
     }
 
     private static EditorMapRoomVisualSnapshot GeometryGetHook(OrigGeometryGet orig, int roomIndex)
     {
-        // The GPU cache is downstream only. Returning its bake here created a feedback loop where
-        // WorldMapGpuCache captured MapRoomGeometryPresentationHub.Get(), which could return the old
-        // GPU bake again and make a broken thumbnail self-perpetuating forever.
         return orig(roomIndex);
     }
 
@@ -608,25 +555,6 @@ internal static class WorldMapGpuRuntime
 
     private static bool PointInside(Num.Vector2 point, Num.Vector2 min, Num.Vector2 max) =>
         point.X >= min.X && point.X <= max.X && point.Y >= min.Y && point.Y <= max.Y;
-
-    private static void DrawRouteTooltip(EditorMapConnectionSnapshot connection)
-    {
-        if (connection == null) return;
-        ImGui.BeginTooltip();
-        ImGui.TextUnformatted(
-            connection.FromRoomIndex + ":" + connection.FromNodeIndex + " " +
-            DirectionText(connection.Direction) + " " +
-            connection.ToRoomIndex + ":" + connection.ToNodeIndex);
-        ImGui.EndTooltip();
-    }
-
-    private static string DirectionText(DryCycle.DevUI.DevTool.World.WorldConnectionDirection direction) =>
-        direction switch
-        {
-            DryCycle.DevUI.DevTool.World.WorldConnectionDirection.AToB => "->",
-            DryCycle.DevUI.DevTool.World.WorldConnectionDirection.BToA => "<-",
-            _ => "<->"
-        };
 
     private static void DisposeHook(ref IDisposable hook)
     {
