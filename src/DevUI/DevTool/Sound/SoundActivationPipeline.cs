@@ -336,12 +336,19 @@ internal static class SoundActivationPipeline
     }
 
     private static double MaxIndivisibleUnitMilliseconds() =>
-        Math.Max(SoundFileNameCatalog.MaxUnitMilliseconds, SoundGroupLibrary.MaxBlockingUnitMilliseconds);
+        Math.Max(
+            SoundFileNameCatalog.MaxUnitMilliseconds,
+            Math.Max(SoundSampleCatalog.MaxBlockingUnitMilliseconds, SoundGroupLibrary.MaxBlockingUnitMilliseconds));
 
-    private static string MaxIndivisibleUnitName() =>
-        SoundGroupLibrary.MaxBlockingUnitMilliseconds > SoundFileNameCatalog.MaxUnitMilliseconds
-            ? SoundGroupLibrary.MaxBlockingUnit
-            : SoundFileNameCatalog.MaxUnit;
+    private static string MaxIndivisibleUnitName()
+    {
+        double file = SoundFileNameCatalog.MaxUnitMilliseconds;
+        double sample = SoundSampleCatalog.MaxBlockingUnitMilliseconds;
+        double group = SoundGroupLibrary.MaxBlockingUnitMilliseconds;
+        if (group >= sample && group >= file) return SoundGroupLibrary.MaxBlockingUnit;
+        if (sample >= file) return SoundSampleCatalog.MaxBlockingUnit;
+        return SoundFileNameCatalog.MaxUnit;
+    }
 
     private static float ComputeProgress()
     {
