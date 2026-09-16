@@ -26,7 +26,6 @@ internal static class RelationshipEditorView
     private static string observedMatrixSearch;
     private static string normalizedMatrixSearch = string.Empty;
     private static bool changedOnly;
-    private static readonly Dictionary<string, float> IntensityEdits = new(StringComparer.Ordinal);
 
     private static string[] projectedCreatureTypes;
     private static string[] projectedCreatureLabels = Array.Empty<string>();
@@ -42,7 +41,6 @@ internal static class RelationshipEditorView
 
     internal static void ResetRetainedState()
     {
-        IntensityEdits.Clear();
         projectedCreatureTypes = null;
         projectedCreatureLabels = Array.Empty<string>();
         projectedRowsSource = null;
@@ -90,8 +88,7 @@ internal static class RelationshipEditorView
                 RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                     RelationshipEditorCommandKind.SelectPrimary,
                     primary: type));
-                IntensityEdits.Clear();
-            }
+                    }
             if (selected) ImGui.SetItemDefaultFocus();
         }
         if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."), true);
@@ -229,21 +226,21 @@ internal static class RelationshipEditorView
         }
 
         string editKey = GetInspectorEditKey(snapshot.PrimaryCreature, row.CreatureType, snapshot.SelectedDirection);
-        float intensity = GetIntensity(editKey, relationship.Intensity);
-        bool changed = ImGui.SliderFloat(DevToolUiSettings.T("强度##RelationshipIntensity", "Intensity##RelationshipIntensity"), ref intensity, 0f, 1f, "%.3f");
-        IntensityEdits[editKey] = intensity;
-        if (ImGui.IsItemDeactivatedAfterEdit())
+        DevToolNumericEditResult<float> intensityEdit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.Relationship,
+            editKey,
+            DevToolUiSettings.T("强度##RelationshipIntensity", "Intensity##RelationshipIntensity"),
+            relationship.Intensity,
+            0f,
+            1f);
+        if (intensityEdit.Committed)
         {
             RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                 RelationshipEditorCommandKind.SetRelationshipIntensity,
                 primary: snapshot.PrimaryCreature,
                 other: row.CreatureType,
-                value: intensity,
+                value: intensityEdit.Value,
                 direction: snapshot.SelectedDirection));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            IntensityEdits[editKey] = relationship.Intensity;
         }
 
         ImGui.Separator();
@@ -256,7 +253,7 @@ internal static class RelationshipEditorView
                 primary: snapshot.PrimaryCreature,
                 other: row.CreatureType,
                 direction: snapshot.SelectedDirection));
-            IntensityEdits.Remove(editKey);
+            DevToolNumericWidgets.Discard(DevToolNumericScope.Relationship, editKey);
         }
         if (!canReset) ImGui.EndDisabled();
 
@@ -301,13 +298,6 @@ internal static class RelationshipEditorView
         for (int i = 0; i < rows.Length; i++)
             if (string.Equals(rows[i].CreatureType, type, StringComparison.Ordinal)) return rows[i];
         return null;
-    }
-
-    private static float GetIntensity(string key, float fallback)
-    {
-        if (IntensityEdits.TryGetValue(key, out float value)) return value;
-        IntensityEdits[key] = fallback;
-        return fallback;
     }
 
     private static void EnsureCreatureLabels(string[] creatures)
