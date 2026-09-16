@@ -12,6 +12,7 @@ internal static class MiscRuntime
         }
 
         DryCycleOptions.Register();
+        DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable();
 
         // Core DryCycle DevUI features stay enabled regardless of optional editor frontends.
         DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable();
@@ -53,6 +54,7 @@ internal static class MiscRuntime
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
         DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Disable();
         DryCycle.DevUI.DevTool.Core.EditorRevisionHub.Reset();
+        DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Disable();
 
         if (!_enabled)
         {
