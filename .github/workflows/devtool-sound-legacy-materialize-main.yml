@@ -1,0 +1,50 @@
+name: DevTool Sound Legacy Materialize Main
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-sound-legacy-materialize-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch legacy Sound materialization entry points
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/DevUI/DevTool/Core/DevToolRuntime.cs')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''        LegacyUiVisible = deferredRestoreLegacyUi;\n        if (LegacyUiVisible)\n            LegacyUiPresentationController.Restore(Owner?.activePage);\n        return true;\n'''
+          new = '''        LegacyUiVisible = deferredRestoreLegacyUi;\n        if (LegacyUiVisible)\n        {\n            if (Owner?.activePage is SoundPage soundPage)\n                SoundPageConstructorOptimization.MaterializeLegacyFileButtons(soundPage);\n            LegacyUiPresentationController.Restore(Owner?.activePage);\n        }\n        return true;\n'''
+          if old not in text:
+              raise SystemExit('deferred legacy restore anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        LegacyUiVisible = !LegacyUiVisible;\n        if (LegacyUiVisible)\n            LegacyUiPresentationController.Restore(Owner?.activePage);\n'''
+          new = '''        LegacyUiVisible = !LegacyUiVisible;\n        if (LegacyUiVisible)\n        {\n            if (Owner?.activePage is SoundPage soundPage)\n                SoundPageConstructorOptimization.MaterializeLegacyFileButtons(soundPage);\n            LegacyUiPresentationController.Restore(Owner?.activePage);\n        }\n'''
+          if old not in text:
+              raise SystemExit('toggle legacy anchor not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/devtool-sound-legacy-materialize-main.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/DevUI/DevTool/Core/DevToolRuntime.cs .github/workflows/devtool-sound-legacy-materialize-main.yml
+          git commit -m "DevTool Sound: materialize legacy file buttons on demand"
+          git push origin HEAD:main
