@@ -27,6 +27,9 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapRenderOutputValidator.Enable(logger);
         PlayerMapGroupCommandRuntime.Enable(logger);
         PlayerMapRenderRevisionGuard.Enable(logger);
+        // Install last so it becomes the outer command/synchronize gate: pending bakes are allowed
+        // to finish before the incremental renderer freezes its authoritative input snapshot.
+        PlayerMapRenderPreparationController.Enable(logger);
 
         enabled = true;
         logger?.LogInfo("Player Map backend lifecycle enabled explicitly.");
@@ -41,6 +44,7 @@ internal static class PlayerMapBackendLifecycle
         }
 
         // Remove outer hooks first, then their inner dependencies.
+        PlayerMapRenderPreparationController.Disable();
         PlayerMapRenderRevisionGuard.Disable();
         PlayerMapGroupCommandRuntime.Disable();
         PlayerMapRenderOutputValidator.Disable();
@@ -57,6 +61,7 @@ internal static class PlayerMapBackendLifecycle
 
     internal static void ResetTransientState()
     {
+        PlayerMapRenderPreparationController.Reset();
         PlayerMapRenderScheduler.Reset();
         PlayerMapGroupCommandQueue.Clear();
         PlayerMapTerrainSemanticRevision.Reset();
