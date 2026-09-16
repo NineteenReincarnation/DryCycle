@@ -13,13 +13,17 @@ namespace DryCycle.DevUI.DevTool.Map;
 /// DevTool keeps MapPage's legacy Update/Draw lifecycle quiescent.
 ///
 /// Missing room bounds are recovered directly from the room source header, while missing MapTex
-/// rasters are prepared through the vanilla RoomPreparer state machine one non-blocking step per
-/// frame. This deliberately does not call MapObject.Update(): vanilla's implementation can execute
-/// up to 1000 preparation polls with Thread.Sleep(1), which is not acceptable on the editor frame.
+/// rasters are prepared incrementally. Newly-created recovery jobs only run the shortcut mapper,
+/// because MapTex generation needs tile/shortcut data but does not need a full AI map bake.
+/// This deliberately does not call MapObject.Update(): vanilla's implementation can execute up to
+/// 1000 preparation polls with Thread.Sleep(1), which is not acceptable on the editor frame.
 /// </summary>
 internal static partial class MapRoomGeometryPresentationHub
 {
     private const int SourceDimensionReadsPerFrame = 12;
+    private const int ShortcutMapperMinStepsPerFrame = 64;
+    private const int ShortcutMapperMaxStepsPerFrame = 512;
+    private const float ShortcutMapperBudgetSeconds = 0.0015f;
 
     private static readonly HashSet<int> sourceDimensionsResolved = new();
     private static global::World sourceRecoveryWorld;
@@ -34,11 +38,11 @@ internal static partial class MapRoomGeometryPresentationHub
         lastSourceRecoveryFrame = Time.frameCount;
 
         MapPage page = session?.Owner?.activePage as MapPage;
-        if (page?.world == null || page.mapObject == null)
+        if (page?.world == null || page.map == null)
         {
-            // RoomPreparer owns a worker thread that can busy-wait for its main-thread handshake.
-            // If the user leaves Map while one room is being prepared, keep polling that one job
-            // until it terminates, but never start another room while Map is dormant.
+            // Never orphan an already-started vanilla preparer. Recovery jobs created below do not
+            // own worker threads, but a MapObject may already contain one started by legacy code.
+            // Keep polling only that active job while Map is dormant and never begin another room.
             if (sourceRecoveryMapObject?.roomPrep != null)
                 AdvanceMapTexturePreparation(sourceRecoveryMapObject, allowStartNew: false);
             else
@@ -50,7 +54,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
         // Do not orphan a preparer if DevUI replaces the MapPage/MapObject while changing context.
         if (sourceRecoveryMapObject != null &&
-            !ReferenceEquals(sourceRecoveryMapObject, page.mapObject) &&
+            !ReferenceEquals(sourceRecoveryMapObject, page.map) &&
             sourceRecoveryMapObject.roomPrep != null)
         {
             AdvanceMapTexturePreparation(sourceRecoveryMapObject, allowStartNew: false);
@@ -59,11 +63,11 @@ internal static partial class MapRoomGeometryPresentationHub
 
         bool newMapSession = !sourceRecoveryMapActive ||
                              !ReferenceEquals(sourceRecoveryWorld, page.world) ||
-                             !ReferenceEquals(sourceRecoveryMapObject, page.mapObject);
+                             !ReferenceEquals(sourceRecoveryMapObject, page.map);
         if (newMapSession)
         {
             sourceRecoveryWorld = page.world;
-            sourceRecoveryMapObject = page.mapObject;
+            sourceRecoveryMapObject = page.map;
             sourceRecoveryMapActive = true;
             sourceDimensionsResolved.Clear();
             sourceDimensionCursor = 0;
@@ -74,7 +78,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (cache.Count > 0)
             RecoverSourceDimensions(page.world);
 
-        AdvanceMapTexturePreparation(page.mapObject, allowStartNew: true);
+        AdvanceMapTexturePreparation(page.map, allowStartNew: true);
     }
 
     internal static void ResetSourceRecovery()
@@ -203,7 +207,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (mapObject.roomLoaderIndex < 0) mapObject.roomLoaderIndex = 0;
 
         // The loop only skips already-resolved rooms and can finalize at most one active preparer.
-        // It never spins a pending preparer: one Update poll is issued and control returns to Unity.
+        // It never spins a pending preparer without a budget and never sleeps the Unity thread.
         int guard = roomCount + 1;
         while (guard-- > 0)
         {
@@ -214,16 +218,16 @@ internal static partial class MapRoomGeometryPresentationHub
 
                 try
                 {
-                    if (!preparer.done)
-                        preparer.Update();
+                    AdvancePreparerOneFrame(preparer);
                     ApplyPreparedRoomDimensions(preparer.room);
                 }
                 catch (Exception error)
                 {
+                    preparer.failed = true;
+                    preparer.done = true;
                     global::DryCycle.Plugin.Logger?.LogWarning(
                         "WorldMap RoomPreparer update failed for " +
                         (preparer.room?.abstractRoom?.name ?? "?") + ": " + error.Message);
-                    return;
                 }
 
                 if (!preparer.done) return;
@@ -271,12 +275,20 @@ internal static partial class MapRoomGeometryPresentationHub
             try
             {
                 Room preparedRoom = new(null, mapObject.world, roomRep.room);
-                RoomPreparer preparer = new(preparedRoom, loadAiHeatMaps: true, falseBake: false, shortcutsOnly: false);
+
+                // MapTex only needs loaded tiles and shortcut metadata. Running AImapper and heatmap
+                // decompression here duplicates a large amount of room-load work for no visual gain.
+                // Keep the vanilla RoomPreparer/ShortcutMapper data path, but own its cheap subset on
+                // the main thread under a strict per-frame budget instead of starting its worker.
+                RoomPreparer preparer = new(
+                    preparedRoom,
+                    loadAiHeatMaps: false,
+                    falseBake: false,
+                    shortcutsOnly: true);
                 mapObject.roomPrep = preparer;
                 ApplyPreparedRoomDimensions(preparedRoom);
 
-                if (!preparer.done)
-                    preparer.Update();
+                AdvancePreparerOneFrame(preparer);
                 if (!preparer.done) return;
 
                 FinishPreparedMapTexture(mapObject, preparer, roomCount);
@@ -289,6 +301,64 @@ internal static partial class MapRoomGeometryPresentationHub
                 mapObject.roomLoaderIndex++;
             }
         }
+    }
+
+    private static void AdvancePreparerOneFrame(RoomPreparer preparer)
+    {
+        if (preparer == null || preparer.done) return;
+
+        // Recovery jobs created by this class intentionally never call RoomPreparer.Update(). That
+        // method starts a worker thread which then busy-waits for main-thread handshakes. Driving the
+        // ShortcutMapper directly gives us deterministic frame cost and cannot strand a worker when
+        // the user closes or switches the Map page.
+        if (preparer.shortcutsOnly && preparer.thread == null)
+        {
+            AdvanceShortcutOnlyPreparer(preparer);
+            return;
+        }
+
+        // Respect a preparer that legacy MapObject already started before the rebuilt lifecycle took
+        // ownership. It may be a full AI preparation job, so only issue one vanilla poll this frame.
+        preparer.Update();
+    }
+
+    private static void AdvanceShortcutOnlyPreparer(RoomPreparer preparer)
+    {
+        ShortcutMapper mapper = preparer.scMapper;
+        if (mapper == null)
+        {
+            preparer.done = true;
+            return;
+        }
+
+        float startedAt = Time.realtimeSinceStartup;
+        int steps = 0;
+        while (!mapper.done && steps < ShortcutMapperMaxStepsPerFrame)
+        {
+            mapper.Update();
+            steps++;
+
+            if (steps >= ShortcutMapperMinStepsPerFrame &&
+                Time.realtimeSinceStartup - startedAt >= ShortcutMapperBudgetSeconds)
+                break;
+        }
+
+        if (!mapper.done) return;
+
+        preparer.scMapper = null;
+        preparer.room.ShortCutsReady();
+
+        // RoomRepresentation.CreateMapTexture gates on readyForAI even though its actual data needs
+        // are tiles, water and shortcut metadata. This Room is detached (game == null) and discarded
+        // immediately after MapTex creation, so promote only its local loading marker instead of
+        // performing an unused AImapper/heatmap bake.
+        if (preparer.room.loadingProgress < 2)
+            preparer.room.loadingProgress = 2;
+
+        preparer.status = Math.Max(preparer.status, 1);
+        preparer.threadFinished = true;
+        preparer.finished = true;
+        preparer.done = true;
     }
 
     private static void FinishPreparedMapTexture(
@@ -308,11 +378,17 @@ internal static partial class MapRoomGeometryPresentationHub
         try
         {
             if (!preparer.failed)
+            {
+                if (preparer.room != null && preparer.room.shortCutsReady && !preparer.room.readyForAI)
+                    preparer.room.loadingProgress = 2;
                 roomRep?.CreateMapTexture(preparer.room);
+            }
             else
+            {
                 global::DryCycle.Plugin.Logger?.LogWarning(
                     "WorldMap RoomPreparer reported failure for " +
                     (roomRep?.room?.name ?? preparer.room?.abstractRoom?.name ?? "?"));
+            }
 
             MarkVanillaMapRoomRefresh(mapObject, localIndex);
             RefreshRecoveredRoomEntry(roomRep);
