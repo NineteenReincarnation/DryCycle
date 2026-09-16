@@ -21,6 +21,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapRenderProgressView.Enable(logger);
         PlayerMapCanvasAuthoring.Enable(logger);
         PlayerMapMultiSelection.Enable(logger);
+        PlayerMapSelectionAccess.Enable(logger);
         PlayerMapGroupLayerControls.Enable(logger);
         PlayerMapGroupPlacementControls.Enable(logger);
         PlayerMapGroupLayoutControls.Enable(logger);
@@ -48,6 +49,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapGroupLayoutControls.Disable();
         PlayerMapGroupPlacementControls.Disable();
         PlayerMapGroupLayerControls.Disable();
+        PlayerMapSelectionAccess.Disable();
         PlayerMapMultiSelection.Disable();
         PlayerMapCanvasAuthoring.Disable();
         PlayerMapRenderProgressView.Disable();
