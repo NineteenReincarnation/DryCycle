@@ -15,6 +15,7 @@ namespace DryCycle.Misc.SoundFormatSupport;
 internal static class SoundFormatSupportRuntime
 {
     private static bool enabled;
+    private static readonly System.Collections.Generic.HashSet<int> customOverrideClipIds = new();
 
     internal static void Enable()
     {
@@ -45,6 +46,7 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.AmbientImporter.validFileType -= AmbientImporter_validFileType;
         On.SoundLoader.SoundImporter.loadFile -= SoundImporter_loadFile;
         On.SoundLoader.SoundImporter.validFileType -= SoundImporter_validFileType;
+        customOverrideClipIds.Clear();
         enabled = false;
     }
 
@@ -137,6 +139,7 @@ internal static class SoundFormatSupportRuntime
         // a higher-priority custom-format LoadedSoundEffects override. This preserves vanilla random
         // selection and avoids consuming Random twice.
         AudioClip result = orig(self, i, out loadOp, out name);
+        if (result != null && customOverrideClipIds.Contains(result.GetInstanceID())) return result;
         if (self?.allAudio == null || i < 0 || i >= self.allAudio.Length) return result;
 
         SoundLoader.ClipLoadData data = self.allAudio[i];
@@ -158,6 +161,7 @@ internal static class SoundFormatSupportRuntime
         }
 
         self.allAudio[i].audio[variationIndex] = clip;
+        customOverrideClipIds.Add(clip.GetInstanceID());
         if (self.unityAudioLoaders != null
             && i < self.unityAudioLoaders.Length
             && self.unityAudioLoaders[i] != null
@@ -190,8 +194,10 @@ internal static class SoundFormatSupportRuntime
         AudioClip clip = ExternalAudioLoader.LoadBlocking(file, clipName, stream: true, out string error);
         if (clip == null)
         {
+            // Vanilla treats every non-WAV loose ambient override as OGG. Falling through after an
+            // MP3/M4A decode failure would therefore retry the same file with the wrong decoder.
             LogDecodeFailure("LoadedSoundEffects/Ambient", file.Path, error, self.errors);
-            return orig(self, clipName);
+            return null;
         }
 
         self.ambientClipsThroughUnity.Add(clip);
