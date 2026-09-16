@@ -11,9 +11,12 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Replaces the old straight-line World Map connection presentation with routed, layered links.
-/// WorldMapView remains authoritative for room/shortcut interaction and topology commands; this
-/// overlay owns connection geometry, connection hit-testing and link presentation only.
+/// Routed World Map connection presentation.
+///
+/// This used to detour WorldMapView.DrawCanvas. It is now a normal render service called directly
+/// by WorldMapView, so connection ownership and draw order are explicit instead of depending on
+/// RuntimeDetour ordering. The service still owns routed geometry, route hit-testing and link
+/// presentation; WorldMapView remains authoritative for rooms, shortcuts and topology commands.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -37,9 +40,6 @@ internal static class WorldConnectionOverlay
     private const float RouteHoverRadius = 12f;
     private const float CornerRadius = 10f;
     private const float TerminalGap = 8.5f;
-
-    private delegate void OrigDrawCanvas(EditorMapPresentationSnapshot snapshot);
-    private delegate void HookDrawCanvas(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot);
 
     private sealed class Entry
     {
@@ -68,10 +68,7 @@ internal static class WorldConnectionOverlay
         internal Num.Vector2 Tangent { get; }
     }
 
-    private static readonly HookDrawCanvas CanvasHookDelegate = DrawCanvasHook;
-
     private static ManualLogSource log;
-    private static object canvasHook;
     private static bool enabled;
 
     private static FieldInfo showConnectionsField;
@@ -84,6 +81,8 @@ internal static class WorldConnectionOverlay
     private static FieldInfo draggingRoomField;
     private static FieldInfo linkingRoomField;
 
+    internal static bool Ready => enabled;
+
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
@@ -93,12 +92,6 @@ internal static class WorldConnectionOverlay
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
             Type mapType = typeof(WorldMapView);
-            MethodInfo drawCanvas = mapType.GetMethod(
-                "DrawCanvas",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot) },
-                null);
 
             showConnectionsField = mapType.GetField("showConnections", flags);
             panField = mapType.GetField("pan", flags);
@@ -110,34 +103,23 @@ internal static class WorldConnectionOverlay
             draggingRoomField = mapType.GetField("draggingRoom", flags);
             linkingRoomField = mapType.GetField("linkingRoom", flags);
 
-            if (drawCanvas == null || showConnectionsField == null || panField == null || zoomField == null ||
+            if (showConnectionsField == null || panField == null || zoomField == null ||
                 localPositionsField == null || layerVisibleField == null || selectedConnectionIdField == null ||
                 hoveredConnectionIdField == null || draggingRoomField == null || linkingRoomField == null)
                 throw new MissingMemberException("WorldMapView members required by connection routing were not found.");
 
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            canvasHook = constructor.Invoke(new object[] { drawCanvas, CanvasHookDelegate });
             enabled = true;
-            log?.LogInfo("World Map routed connection overlay enabled.");
+            log?.LogInfo("World Map routed connection service enabled without a DrawCanvas detour.");
         }
         catch (Exception error)
         {
-            DisposeHook(ref canvasHook);
-            enabled = false;
-            log?.LogWarning("World Map routed connection overlay could not attach: " + Unwrap(error).Message);
+            Disable();
+            logger?.LogWarning("World Map routed connection service could not initialize: " + Unwrap(error).Message);
         }
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref canvasHook);
         WorldConnectionRouter.Clear();
         showConnectionsField = null;
         panField = null;
@@ -152,45 +134,15 @@ internal static class WorldConnectionOverlay
         log = null;
     }
 
-    private static void DrawCanvasHook(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot)
-    {
-        bool connectionsEnabled = showConnectionsField?.GetValue(null) is bool value && value;
-        if (!connectionsEnabled)
-        {
-            orig(snapshot);
-            return;
-        }
-
-        // Capture the canvas before orig creates its InvisibleButton. Do not derive it from the
-        // "last item" afterwards: another DrawCanvas detour (for example the player locator) may
-        // legitimately submit a tooltip after the canvas and change ImGui's last-item rectangle.
-        Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
-        Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
-        Num.Vector2 canvasMax = canvasMin + canvasSize;
-        bool mapWindowHovered = ImGui.IsWindowHovered(ImGuiHoveredFlags.None);
-
-        // Suppress both the legacy straight rendering and its straight-line hit target while the
-        // original canvas draws rooms/shortcuts. The real Links setting is restored immediately.
-        showConnectionsField.SetValue(null, false);
-        try
-        {
-            orig(snapshot);
-        }
-        finally
-        {
-            showConnectionsField.SetValue(null, true);
-        }
-
-        if (snapshot?.Available != true || canvasSize.X < 80f || canvasSize.Y < 80f) return;
-        DrawRoutedLayer(snapshot, canvasMin, canvasMax, mapWindowHovered);
-    }
-
-    private static void DrawRoutedLayer(
+    internal static void DrawRoutedLayer(
         EditorMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         Num.Vector2 canvasMax,
         bool mapWindowHovered)
     {
+        if (!enabled || snapshot?.Available != true) return;
+        if (!(showConnectionsField?.GetValue(null) is bool showConnections) || !showConnections) return;
+
         float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
         Dictionary<int, Num.Vector2> localPositions =
@@ -213,7 +165,7 @@ internal static class WorldConnectionOverlay
             layerVisible);
         if (entries.Count == 0)
         {
-            hoveredConnectionIdField.SetValue(null, string.Empty);
+            hoveredConnectionIdField?.SetValue(null, string.Empty);
             return;
         }
 
@@ -232,7 +184,7 @@ internal static class WorldConnectionOverlay
         Entry routeHover = canInteract && endpointHover == null ? FindRouteHover(entries, io.MousePos) : null;
         Entry hovered = endpointHover ?? routeHover;
         string hoveredId = hovered?.Connection?.ConnectionId ?? string.Empty;
-        hoveredConnectionIdField.SetValue(null, hoveredId);
+        hoveredConnectionIdField?.SetValue(null, hoveredId);
 
         string focusId = !string.IsNullOrEmpty(hoveredId) ? hoveredId : selectedId;
         bool hasFocus = !string.IsNullOrEmpty(focusId);
@@ -242,8 +194,6 @@ internal static class WorldConnectionOverlay
         draw.PushClipRect(canvasMin, canvasMax, true);
         try
         {
-            // Normal topology is intentionally drawn after the room preview, so raster/terrain can
-            // never hide a connection. Focused links get a second last-pass draw below.
             for (int i = 0; i < entries.Count; i++)
             {
                 Entry entry = entries[i];
@@ -253,8 +203,6 @@ internal static class WorldConnectionOverlay
                 DrawEntry(draw, entry, dimmed: hasFocus || linkCreationActive, focused: false, selected: false);
             }
 
-            // Gold remains the Exit type colour. A separate connection-colour ring tells the author
-            // the socket is bound even when two rooms are so close that the bridge itself is tiny.
             for (int i = 0; i < entries.Count; i++)
                 DrawConnectedEndpointMarks(draw, entries[i], hasFocus || linkCreationActive ? 0.24f : 0.58f);
 
@@ -278,7 +226,6 @@ internal static class WorldConnectionOverlay
 
         if (canInteract)
             HandleRouteClick(snapshot, hovered, io);
-        HandleDelete(snapshot, selectedId, io);
     }
 
     private static List<WorldConnectionRouter.Obstacle> BuildObstacles(
@@ -497,7 +444,7 @@ internal static class WorldConnectionOverlay
         uint core = ImGui.GetColorU32(coreColor);
         uint shadow = ImGui.GetColorU32(shadowColor);
 
-        float coreThickness = focused ? 4.4f : bidirectional ? 3.25f : 3.05f;
+        float coreThickness = focused ? 4.4f : bidirectional ? 3.4f : 3.05f;
         float shadowThickness = coreThickness + (focused ? 6.4f : 5.0f);
 
         if (ambiguous)
@@ -505,22 +452,13 @@ internal static class WorldConnectionOverlay
             DrawDashedPolyline(draw, path, shadow, shadowThickness, 10f, 6f);
             DrawDashedPolyline(draw, path, core, coreThickness, 10f, 6f);
         }
-        else if (bidirectional)
-        {
-            DrawPolyline(draw, path, shadow, shadowThickness);
-            Num.Vector2[] positive = OffsetPolyline(path, focused ? 2.8f : 2.35f);
-            Num.Vector2[] negative = OffsetPolyline(path, focused ? -2.8f : -2.35f);
-            float rail = focused ? 2.35f : 1.85f;
-            DrawPolyline(draw, positive, core, rail);
-            DrawPolyline(draw, negative, core, rail);
-        }
         else
         {
             DrawPolyline(draw, path, shadow, shadowThickness);
             DrawPolyline(draw, path, core, coreThickness);
         }
 
-        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 8.8f : 7.4f, bidirectional);
+        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 8.8f : 7.4f);
 
         if (entry.Route?.Kind == WorldConnectionRouter.RouteKind.Bridge)
             DrawBridgeBadge(draw, path, entry.Connection.Direction, shadow, core, focused);
@@ -538,11 +476,17 @@ internal static class WorldConnectionOverlay
         bool selected,
         float alpha)
     {
-        if (selected) return new Num.Vector4(0.36f, 0.72f, 1.00f, alpha);
-        if (focused) return new Num.Vector4(0.28f, 0.88f, 1.00f, alpha);
+        // Direction semantics are stable colors. Selection/hover changes brightness and thickness,
+        // never the meaning of the color itself.
         if (direction == WorldConnectionDirection.Bidirectional)
-            return new Num.Vector4(0.63f, 0.74f, 0.86f, alpha);
-        return new Num.Vector4(0.97f, 0.67f, 0.23f, alpha);
+        {
+            if (selected) return new Num.Vector4(1.00f, 0.88f, 0.30f, alpha);
+            if (focused) return new Num.Vector4(1.00f, 0.84f, 0.22f, alpha);
+            return new Num.Vector4(0.98f, 0.72f, 0.10f, alpha);
+        }
+
+        if (selected || focused) return new Num.Vector4(1.00f, 1.00f, 1.00f, alpha);
+        return new Num.Vector4(0.92f, 0.94f, 0.97f, alpha);
     }
 
     private static void DrawConnectedEndpointMarks(ImDrawListPtr draw, Entry entry, float alpha)
@@ -556,7 +500,8 @@ internal static class WorldConnectionOverlay
 
     private static void DrawEndpointFocus(ImDrawListPtr draw, Entry entry, float alpha)
     {
-        uint color = ImGui.GetColorU32(new Num.Vector4(0.28f, 0.88f, 1.00f, alpha));
+        Num.Vector4 focus = ResolveConnectionColor(entry.Connection.Direction, focused: true, selected: true, alpha);
+        uint color = ImGui.GetColorU32(focus);
         Num.Vector2 half = new(12.5f, 12.5f);
         draw.AddRect(entry.Start - half, entry.Start + half, color, 5f, ImDrawFlags.None, 2.2f);
         draw.AddRect(entry.End - half, entry.End + half, color, 5f, ImDrawFlags.None, 2.2f);
@@ -642,26 +587,23 @@ internal static class WorldConnectionOverlay
         WorldConnectionDirection direction,
         uint shadow,
         uint core,
-        float size,
-        bool bidirectional)
+        float size)
     {
         if (path.Length < 2 || WorldConnectionRouter.PathLength(path) < 28f) return;
-        if (direction == WorldConnectionDirection.AToB)
+
+        switch (direction)
         {
-            DrawArrowAt(draw, path, 0.36f, false, shadow, core, size);
-            DrawArrowAt(draw, path, 0.58f, false, shadow, core, size);
-            DrawArrowAt(draw, path, 0.78f, false, shadow, core, size);
-        }
-        else if (direction == WorldConnectionDirection.BToA)
-        {
-            DrawArrowAt(draw, path, 0.64f, true, shadow, core, size);
-            DrawArrowAt(draw, path, 0.42f, true, shadow, core, size);
-            DrawArrowAt(draw, path, 0.22f, true, shadow, core, size);
-        }
-        else
-        {
-            DrawArrowAt(draw, path, 0.39f, false, shadow, core, size * (bidirectional ? 0.92f : 1f));
-            DrawArrowAt(draw, path, 0.61f, true, shadow, core, size * (bidirectional ? 0.92f : 1f));
+            case WorldConnectionDirection.AToB:
+                DrawArrowAt(draw, path, 0.58f, false, shadow, core, size);
+                break;
+            case WorldConnectionDirection.BToA:
+                DrawArrowAt(draw, path, 0.42f, true, shadow, core, size);
+                break;
+            default:
+                // Yellow bidirectional links carry exactly one arrow for each travel direction.
+                DrawArrowAt(draw, path, 0.40f, false, shadow, core, size * 0.94f);
+                DrawArrowAt(draw, path, 0.60f, true, shadow, core, size * 0.94f);
+                break;
         }
     }
 
@@ -921,33 +863,12 @@ internal static class WorldConnectionOverlay
     private static void HandleRouteClick(EditorMapPresentationSnapshot snapshot, Entry hovered, ImGuiIOPtr io)
     {
         if (hovered?.Connection == null || io.WantTextInput || !ImGui.IsMouseClicked(ImGuiMouseButton.Left)) return;
-        selectedConnectionIdField.SetValue(null, hovered.Connection.ConnectionId);
-        hoveredConnectionIdField.SetValue(null, hovered.Connection.ConnectionId);
-        draggingRoomField.SetValue(null, -1);
+        selectedConnectionIdField?.SetValue(null, hovered.Connection.ConnectionId);
+        hoveredConnectionIdField?.SetValue(null, hovered.Connection.ConnectionId);
+        draggingRoomField?.SetValue(null, -1);
         MapEditorCommandQueue.Enqueue(new MapEditorCommand(
             MapEditorCommandKind.SelectRoom,
             hovered.Connection.FromRoomIndex));
-    }
-
-    private static void HandleDelete(EditorMapPresentationSnapshot snapshot, string selectedId, ImGuiIOPtr io)
-    {
-        if (string.IsNullOrEmpty(selectedId) || io.WantTextInput || !ImGui.IsKeyPressed(ImGuiKey.Delete)) return;
-        EditorMapConnectionSnapshot connection = FindConnection(snapshot, selectedId);
-        if (connection == null || connection.Ambiguous || connection.ToNodeIndex < 0) return;
-        EditorMapRoomSnapshot a = FindRoom(snapshot, connection.FromRoomIndex);
-        EditorMapRoomSnapshot b = FindRoom(snapshot, connection.ToRoomIndex);
-        if (a == null || b == null) return;
-
-        WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
-            WorldTopologyCommandKind.DeleteConnection,
-            region: snapshot.RegionName,
-            edgeId: ExplicitEdgeId(connection.ConnectionId),
-            roomA: a.Name,
-            nodeA: connection.FromNodeIndex,
-            roomB: b.Name,
-            nodeB: connection.ToNodeIndex));
-        selectedConnectionIdField.SetValue(null, string.Empty);
-        hoveredConnectionIdField.SetValue(null, string.Empty);
     }
 
     private static Num.Vector2 EndpointPosition(
@@ -1116,33 +1037,10 @@ internal static class WorldConnectionOverlay
 
     private static float Clamp(float value, float min, float max) => value < min ? min : value > max ? max : value;
 
-    private static string ExplicitEdgeId(string connectionId)
-    {
-        const string prefix = "explicit:";
-        return connectionId != null && connectionId.StartsWith(prefix, StringComparison.Ordinal)
-            ? connectionId.Substring(prefix.Length)
-            : string.Empty;
-    }
-
     private static Exception Unwrap(Exception error)
     {
         while (error is TargetInvocationException invocation && invocation.InnerException != null)
             error = invocation.InnerException;
         return error;
-    }
-
-    private static void DisposeHook(ref object hook)
-    {
-        try
-        {
-            (hook as IDisposable)?.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            hook = null;
-        }
     }
 }
