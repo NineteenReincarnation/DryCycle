@@ -16,15 +16,16 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency(PlayerMapIncrementalRenderPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class PlayerMapWorkspaceIntegrationPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.PlayerMap.WorkspaceIntegration";
     public const string PluginName = "DryCycle Player Map Workspace Integration";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapWorkspaceIntegration.Enable(Logger);
-    private void OnDisable() => PlayerMapWorkspaceIntegration.Disable();
+    // This is the Player Map frontend root. One discovered entry point explicitly owns every helper
+    // module so the feature cannot partially load when a BepInEx build skips auxiliary plugin types.
+    private void OnEnable() => PlayerMapFrontendLifecycle.Enable(Logger);
+    private void OnDisable() => PlayerMapFrontendLifecycle.Disable();
 }
 
 internal static class PlayerMapWorkspaceIntegration
