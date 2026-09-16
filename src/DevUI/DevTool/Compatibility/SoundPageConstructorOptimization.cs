@@ -19,6 +19,7 @@ internal static class SoundPageConstructorOptimization
     private static bool enabled;
     private static bool constructorPatchInstalled;
     private static bool refreshHookInstalled;
+    private static int legacyConstructionBypassDepth;
 
     internal static void Enable()
     {
@@ -76,6 +77,8 @@ internal static class SoundPageConstructorOptimization
             }
             constructorPatchInstalled = false;
         }
+
+        legacyConstructionBypassDepth = 0;
     }
 
     private static void PatchConstructor(ILContext il)
@@ -193,6 +196,22 @@ internal static class SoundPageConstructorOptimization
         orig(self);
     }
 
+    internal readonly struct LegacyConstructionScope : IDisposable
+    {
+        internal LegacyConstructionScope(bool enter)
+        {
+            if (enter) legacyConstructionBypassDepth++;
+        }
+
+        public void Dispose()
+        {
+            if (legacyConstructionBypassDepth > 0)
+                legacyConstructionBypassDepth--;
+        }
+    }
+
+    internal static LegacyConstructionScope EnterLegacyConstruction() => new(true);
+
     internal static void MaterializeLegacyFileButtons(DevInterface.SoundPage page)
     {
         if (page == null) return;
@@ -206,6 +225,7 @@ internal static class SoundPageConstructorOptimization
     {
         EditorSession session = DevToolRuntime.ActiveSession;
         return enabled &&
+               legacyConstructionBypassDepth == 0 &&
                EditorInputRouter.FrontendAttached &&
                !EditorUiModeState.UseVanilla &&
                session != null &&

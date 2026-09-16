@@ -516,7 +516,16 @@ public sealed class EditorSession
             return false;
 
         deferredViewRestorePending = false;
-        SetToolMode(deferredRestoreMode);
+        if (deferredRestoreLegacyUi && deferredRestoreMode == EditorToolMode.Sound)
+        {
+            using SoundPageConstructorOptimization.LegacyConstructionScope legacyConstruction =
+                SoundPageConstructorOptimization.EnterLegacyConstruction();
+            SetToolMode(deferredRestoreMode);
+        }
+        else
+        {
+            SetToolMode(deferredRestoreMode);
+        }
         LegacyUiVisible = deferredRestoreLegacyUi;
         if (LegacyUiVisible)
         {

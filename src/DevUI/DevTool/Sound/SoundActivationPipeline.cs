@@ -121,6 +121,17 @@ internal static class SoundActivationPipeline
             !EditorUiModeState.UseVanilla &&
             !session.LegacyUiVisible;
 
+        // Vanilla/legacy sessions that entered Sound natively already paid the original constructor
+        // and own the original file list. Do not start a parallel rebuilt-UI activation behind them.
+        // If this exact page began activation while the rebuilt UI owned it and the user then exposes
+        // Legacy UI, allow that in-flight activation to finish so an initially empty shell can be
+        // populated safely.
+        if (!rebuiltFrontendOwnsPresentation &&
+            session.ToolMode == EditorToolMode.Sound &&
+            session.Owner.activePage is SoundPage legacySoundPage &&
+            !ReferenceEquals(requestedPage, legacySoundPage))
+            return;
+
         // Prewarm the complete cold-start dependency chain before Sound is clicked. Work stays on
         // the Rain World thread and shares one tiny frame budget across filename discovery, sample
         // metadata/provenance and group parsing. A normal first click should therefore be a warm hit.
