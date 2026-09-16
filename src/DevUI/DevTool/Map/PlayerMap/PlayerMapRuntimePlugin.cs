@@ -19,6 +19,7 @@ public sealed class PlayerMapRuntimePlugin : BaseUnityPlugin
     private void OnEnable() => PlayerMapWorkspaceRuntime.Enable();
     private void OnDisable()
     {
+        PlayerMapRenderScheduler.Reset();
         PlayerMapActivityGate.Reset();
         PlayerMapWorkspaceRuntime.Disable();
     }
@@ -28,7 +29,8 @@ public sealed class PlayerMapRuntimePlugin : BaseUnityPlugin
 /// Prevents the rebuilt Player Map from reintroducing hidden-page frame cost. The frontend marks
 /// itself visible during Draw; the backend command phase is allowed for the current and next two
 /// frames so commands enqueued at the end of a visible frame are still consumed on the following
-/// update. Stable World Layout frames therefore do not scan/bake the Player Map in the background.
+/// update. An explicitly running Render job is the only exception: once started it keeps receiving
+/// its bounded frame budget even if the developer temporarily switches back to World Layout.
 /// </summary>
 internal static class PlayerMapActivityGate
 {
@@ -38,6 +40,7 @@ internal static class PlayerMapActivityGate
     {
         get
         {
+            if (PlayerMapRenderScheduler.IsRunning) return true;
             int frame = Time.frameCount;
             return lastVisibleFrame != int.MinValue && frame >= lastVisibleFrame && frame - lastVisibleFrame <= 2;
         }
