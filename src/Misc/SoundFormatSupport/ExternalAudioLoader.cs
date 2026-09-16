@@ -48,7 +48,7 @@ internal static class ExternalAudioLoader
             while (!task.IsCompleted) yield return null;
             if (task.IsFaulted || task.IsCanceled)
             {
-                string message = task.Exception?.GetBaseException().Message ?? "M4A decode task was cancelled.";
+                string message = task.Exception?.GetBaseException().Message ?? "Media Foundation decode task was cancelled.";
                 onFailed?.Invoke(message);
                 yield break;
             }
@@ -93,8 +93,9 @@ internal static class ExternalAudioLoader
         }
         catch (Exception exception)
         {
-            // Non-Windows M4A has no dependable decoder in Rain World's Unity generation. Try the
-            // runtime's extension sniffing once so platforms with a native decoder still work.
+            // Formats assigned to Media Foundation have no dependable decoder in Rain World's old
+            // Unity AudioType table. Non-Windows platforms still get one UNKNOWN-type sniffing pass
+            // so a platform-native decoder can succeed without another SoundLoader integration path.
             if (file.Format.Decoder == ExternalAudioDecoderKind.MediaFoundation)
             {
                 try
@@ -167,9 +168,9 @@ internal static class ExternalAudioLoader
         int channels = provider.WaveFormat.Channels;
         int sampleRate = provider.WaveFormat.SampleRate;
         if (channels < 1 || channels > 8)
-            throw new NotSupportedException("M4A channel count " + channels + " is outside Unity's 1-8 channel AudioClip range.");
+            throw new NotSupportedException("Decoded channel count " + channels + " is outside Unity's 1-8 channel AudioClip range.");
         if (sampleRate <= 0)
-            throw new InvalidOperationException("M4A decoder returned an invalid sample rate.");
+            throw new InvalidOperationException("Media Foundation returned an invalid sample rate.");
 
         int estimated = 0;
         try
@@ -193,7 +194,7 @@ internal static class ExternalAudioLoader
 
         int completeSampleCount = samplesOut.Count - samplesOut.Count % channels;
         if (completeSampleCount <= 0)
-            throw new InvalidOperationException("Decoded M4A data does not contain a complete sample frame.");
+            throw new InvalidOperationException("Decoded audio does not contain a complete sample frame.");
         if (completeSampleCount != samplesOut.Count)
             samplesOut.RemoveRange(completeSampleCount, samplesOut.Count - completeSampleCount);
 
