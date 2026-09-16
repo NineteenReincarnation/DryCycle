@@ -8,6 +8,7 @@ using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
