@@ -11,6 +11,10 @@ namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 /// remains sourced directly from room text; this overlay consumes only the rebuilt semantic terrain
 /// runs from MapRoomGeometryPresentationHub and never asks vanilla MiniMap/RoomRepresentation to
 /// generate a texture.
+///
+/// A base room bake is not considered officially ready while authored-terrain discovery is still
+/// pending. This readiness barrier prevents timing-dependent Render Map output where an early render
+/// could omit curves/custom terrain that had not finished entering the semantic cache yet.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -108,13 +112,25 @@ internal static class PlayerMapTerrainBakeBridge
             return false;
         }
 
-        EditorMapRectSnapshot[] terrainRuns = Array.Empty<EditorMapRectSnapshot>();
-        int terrainRevision = 0;
-        bool terrainReady = enabled && MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
-            roomIndex,
-            out terrainRuns,
-            out terrainRevision);
-        if (!terrainReady || terrainRuns == null || terrainRuns.Length == 0)
+        if (!enabled)
+        {
+            bake = baseBake;
+            return true;
+        }
+
+        if (!MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
+                roomIndex,
+                out EditorMapRectSnapshot[] terrainRuns,
+                out int terrainRevision))
+        {
+            // Do not silently treat "not scanned yet" as "no authored terrain". Official render
+            // preflight must wait for a definite semantic result so output cannot depend on timing.
+            bake = null;
+            Cache.Remove(roomIndex);
+            return false;
+        }
+
+        if (terrainRuns == null || terrainRuns.Length == 0)
         {
             bake = baseBake;
             Cache.Remove(roomIndex);
@@ -149,12 +165,41 @@ internal static class PlayerMapTerrainBakeBridge
         if (!enabled || source == null || source.Status != RoomMapBakeStatus.Ready)
             return source;
 
-        if (!RoomMapBakeCache.TryGetReady(roomIndex, out RoomMapBake enhanced) || enhanced == null)
+        if (!MapRoomGeometryPresentationHub.TryGetPlayerMapTerrainFillRuns(
+                roomIndex,
+                out EditorMapRectSnapshot[] terrainRuns,
+                out _))
+        {
+            return new RoomMapBakeSnapshot
+            {
+                Status = RoomMapBakeStatus.Pending,
+                Width = source.Width,
+                Height = source.Height,
+                Error = "Authored terrain semantic scan is still pending.",
+                Runs = source.Runs ?? Array.Empty<RoomMapPreviewRun>(),
+                NodeAnchors = source.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>()
+            };
+        }
+
+        if (terrainRuns == null || terrainRuns.Length == 0)
             return source;
+
+        if (!RoomMapBakeCache.TryGetReady(roomIndex, out RoomMapBake enhanced) || enhanced == null)
+        {
+            return new RoomMapBakeSnapshot
+            {
+                Status = RoomMapBakeStatus.Pending,
+                Width = source.Width,
+                Height = source.Height,
+                Error = "Authored terrain bake is still being merged.",
+                Runs = source.Runs ?? Array.Empty<RoomMapPreviewRun>(),
+                NodeAnchors = source.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>()
+            };
+        }
 
         return new RoomMapBakeSnapshot
         {
-            Status = source.Status,
+            Status = RoomMapBakeStatus.Ready,
             Width = enhanced.Width,
             Height = enhanced.Height,
             Error = source.Error,
