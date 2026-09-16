@@ -26,6 +26,10 @@ internal static class MiscRuntime
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
+        // Player Map is a first-class DevTool subsystem. Do not depend on BepInEx discovering every
+        // helper-plugin type from this assembly: explicitly own the entire rebuilt backend lifetime.
+        DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Enable(global::DryCycle.Plugin.Logger);
+
         // The Room editor has a few catalogs whose source is static for the lifetime of the loaded
         // mod set (danger types and terrain-palette assets). Resolve them during the normal mods-init
         // phase instead of charging their cold filesystem/registry cost to the first O/H UI frame.
@@ -50,6 +54,9 @@ internal static class MiscRuntime
 
     public static void Disable()
     {
+        // Tear down Player Map before the generic DevTool session disappears so incremental Render
+        // jobs can cancel/clean temporary files while their owning editor state is still addressable.
+        DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Disable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
         DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Disable();
