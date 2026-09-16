@@ -23,22 +23,48 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static readonly HashSet<int> sourceDimensionsResolved = new();
     private static global::World sourceRecoveryWorld;
+    private static MapObject sourceRecoveryMapObject;
+    private static bool sourceRecoveryMapActive;
     private static int sourceDimensionCursor;
     private static int lastSourceRecoveryFrame = -1;
 
     internal static void RecoverMissingSources(EditorSession session)
     {
-        if (session?.Owner?.activePage is not MapPage page ||
-            page.world == null ||
-            page.mapObject == null)
-            return;
-
         if (lastSourceRecoveryFrame == Time.frameCount) return;
         lastSourceRecoveryFrame = Time.frameCount;
 
-        if (!ReferenceEquals(sourceRecoveryWorld, page.world))
+        MapPage page = session?.Owner?.activePage as MapPage;
+        if (page?.world == null || page.mapObject == null)
+        {
+            // RoomPreparer owns a worker thread that can busy-wait for its main-thread handshake.
+            // If the user leaves Map while one room is being prepared, keep polling that one job
+            // until it terminates, but never start another room while Map is dormant.
+            if (sourceRecoveryMapObject?.roomPrep != null)
+                AdvanceMapTexturePreparation(sourceRecoveryMapObject, allowStartNew: false);
+            else
+                sourceRecoveryMapObject = null;
+
+            sourceRecoveryMapActive = false;
+            return;
+        }
+
+        // Do not orphan a preparer if DevUI replaces the MapPage/MapObject while changing context.
+        if (sourceRecoveryMapObject != null &&
+            !ReferenceEquals(sourceRecoveryMapObject, page.mapObject) &&
+            sourceRecoveryMapObject.roomPrep != null)
+        {
+            AdvanceMapTexturePreparation(sourceRecoveryMapObject, allowStartNew: false);
+            return;
+        }
+
+        bool newMapSession = !sourceRecoveryMapActive ||
+                             !ReferenceEquals(sourceRecoveryWorld, page.world) ||
+                             !ReferenceEquals(sourceRecoveryMapObject, page.mapObject);
+        if (newMapSession)
         {
             sourceRecoveryWorld = page.world;
+            sourceRecoveryMapObject = page.mapObject;
+            sourceRecoveryMapActive = true;
             sourceDimensionsResolved.Clear();
             sourceDimensionCursor = 0;
         }
@@ -48,7 +74,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (cache.Count > 0)
             RecoverSourceDimensions(page.world);
 
-        AdvanceMapTexturePreparation(page.mapObject);
+        AdvanceMapTexturePreparation(page.mapObject, allowStartNew: true);
     }
 
     internal static void ResetSourceRecovery()
@@ -57,6 +83,9 @@ internal static partial class MapRoomGeometryPresentationHub
         sourceDimensionsResolved.Clear();
         sourceDimensionCursor = 0;
         lastSourceRecoveryFrame = -1;
+        sourceRecoveryMapActive = false;
+        if (sourceRecoveryMapObject?.roomPrep == null)
+            sourceRecoveryMapObject = null;
     }
 
     private static void RecoverSourceDimensions(global::World world)
@@ -91,9 +120,9 @@ internal static partial class MapRoomGeometryPresentationHub
             if (TryReadSourceDimensions(world, entry.Room, out int width, out int height))
                 ApplyRecoveredDimensions(entry, width, height);
 
-            // A missing/malformed source will not become valid repeatedly during the same region
-            // session. Avoid reopening the same file every few frames; a World/context rebuild resets
-            // this set and gives late replacements another chance.
+            // A missing/malformed source will not become valid repeatedly during the same Map
+            // session. Avoid reopening the same file every few frames; re-entering Map or changing
+            // World/context resets this set and gives late replacements another chance.
             sourceDimensionsResolved.Add(roomIndex);
         }
     }
@@ -164,7 +193,7 @@ internal static partial class MapRoomGeometryPresentationHub
             ApplyRecoveredDimensions(entry, room.TileWidth, room.TileHeight);
     }
 
-    private static void AdvanceMapTexturePreparation(MapObject mapObject)
+    private static void AdvanceMapTexturePreparation(MapObject mapObject, bool allowStartNew)
     {
         if (mapObject?.world == null || mapObject.roomReps == null || mapObject.roomReps.Length == 0)
             return;
@@ -199,10 +228,11 @@ internal static partial class MapRoomGeometryPresentationHub
 
                 if (!preparer.done) return;
                 FinishPreparedMapTexture(mapObject, preparer, roomCount);
+                if (!allowStartNew) return;
                 continue;
             }
 
-            if (mapObject.roomLoaderIndex >= roomCount) return;
+            if (!allowStartNew || mapObject.roomLoaderIndex >= roomCount) return;
 
             int localIndex = mapObject.roomLoaderIndex;
             MapObject.RoomRepresentation roomRep = mapObject.roomReps[localIndex];
