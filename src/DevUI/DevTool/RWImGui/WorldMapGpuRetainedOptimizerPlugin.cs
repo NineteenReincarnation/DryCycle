@@ -5,6 +5,7 @@ using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Map;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -30,6 +31,8 @@ public sealed class WorldMapGpuRetainedOptimizerPlugin : BaseUnityPlugin
 
 internal static class WorldMapGpuRetainedOptimizer
 {
+    private const int SourceAuditIntervalFrames = 15;
+
     private delegate int OrigComputeRoomSourceHash(MapPage page, WorldMapGpuScene.FrameState frame);
     private delegate int HookComputeRoomSourceHash(
         OrigComputeRoomSourceHash orig,
@@ -56,6 +59,7 @@ internal static class WorldMapGpuRetainedOptimizer
     private static EditorMapPresentationSnapshot cachedSourceSnapshot;
     private static int cachedSourceGeneration = int.MinValue;
     private static int cachedSourceHash;
+    private static int nextSourceAuditFrame;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -112,6 +116,7 @@ internal static class WorldMapGpuRetainedOptimizer
         cachedSourceSnapshot = null;
         cachedSourceGeneration = int.MinValue;
         cachedSourceHash = 0;
+        nextSourceAuditFrame = 0;
         enabled = false;
         log = null;
     }
@@ -126,30 +131,26 @@ internal static class WorldMapGpuRetainedOptimizer
 
         EditorMapPresentationSnapshot snapshot = frame.Snapshot;
         int generation = WorldMapGpuCache.Generation;
-        if (ReferenceEquals(cachedSourceSnapshot, snapshot) && cachedSourceGeneration == generation)
+        bool snapshotChanged = !ReferenceEquals(cachedSourceSnapshot, snapshot);
+        bool generationChanged = cachedSourceGeneration != generation;
+        bool auditDue = Time.frameCount >= nextSourceAuditFrame;
+
+        if (!snapshotChanged && !generationChanged && !auditDue)
             return cachedSourceHash;
 
-        // WorldMapGpuCache already owns source validation. Its generation changes when cached room
-        // data is invalidated/replaced. MapEditorPresentationHub publishes immutable snapshots and
-        // retains the same instance while the map model is stable, so hashing the room identity/layer
-        // vector only once per published snapshot removes the per-frame O(roomCount) scan.
+        // Stable frames stay O(1), but periodically ask the authoritative scene hash to audit live
+        // RoomPanel texture state. MapTex and RoomRepresentation.texture are populated asynchronously
+        // and can change without publishing a new map snapshot or bumping WorldMapGpuCache.Generation.
+        // Without this audit, a room that missed its first texture-ready frame can stay invisible for
+        // the rest of the Map session.
+        int liveHash = orig(page, frame);
         unchecked
         {
-            int hash = 17;
-            hash = hash * 397 ^ generation;
-            EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-            hash = hash * 397 ^ rooms.Length;
-            for (int i = 0; i < rooms.Length; i++)
-            {
-                EditorMapRoomSnapshot room = rooms[i];
-                if (room == null) continue;
-                hash = hash * 397 ^ room.RoomIndex;
-                hash = hash * 397 ^ room.Layer;
-            }
-
+            int hash = liveHash * 397 ^ generation;
             cachedSourceSnapshot = snapshot;
             cachedSourceGeneration = generation;
             cachedSourceHash = hash;
+            nextSourceAuditFrame = Time.frameCount + SourceAuditIntervalFrames;
             return hash;
         }
     }

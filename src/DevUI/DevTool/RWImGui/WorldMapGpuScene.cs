@@ -522,12 +522,43 @@ internal static class WorldMapGpuScene
                 hash = hash * 397 ^ room.Layer;
                 if (TryFindRoomPanel(page, room.RoomIndex, out RoomPanel panel))
                 {
-                    FAtlasElement element = panel.roomRep?.mapTex;
-                    if (element != null)
+                    MapObject.RoomRepresentation rep = panel.roomRep;
+                    FAtlasElement element = rep?.mapTex;
+                    if (TryResolveRoomTextureAtlas(
+                            element,
+                            out Texture2D atlas,
+                            out Rect sourceUv,
+                            out float sourceWidth,
+                            out float sourceHeight))
                     {
+                        // Hash the same source that TryGetRoomQuad will actually render. MapTex can
+                        // arrive or finish atlas setup after the immutable map snapshot was published.
+                        hash = hash * 397 ^ 1;
                         hash = hash * 397 ^ (element.name?.GetHashCode() ?? 0);
-                        Texture2D texture = element.atlas?.texture as Texture2D;
-                        hash = hash * 397 ^ (texture != null ? texture.GetInstanceID() : 0);
+                        hash = hash * 397 ^ atlas.GetInstanceID();
+                        hash = hash * 397 ^ atlas.width;
+                        hash = hash * 397 ^ atlas.height;
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceWidth * 1000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceHeight * 1000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.x * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.y * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.width * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.height * 1000000f);
+                    }
+                    else if (rep?.texture != null)
+                    {
+                        // Some rooms expose their generated minimap through RoomRepresentation.texture
+                        // before (or instead of) a usable Futile atlas element. Track that source too;
+                        // otherwise a late texture never invalidates the retained room batch.
+                        Texture2D direct = rep.texture;
+                        hash = hash * 397 ^ 2;
+                        hash = hash * 397 ^ direct.GetInstanceID();
+                        hash = hash * 397 ^ direct.width;
+                        hash = hash * 397 ^ direct.height;
+                    }
+                    else
+                    {
+                        hash = hash * 397;
                     }
                 }
 
@@ -677,12 +708,17 @@ internal static class WorldMapGpuScene
         float widthTiles = 12f;
         float heightTiles = 6f;
         FAtlasElement element = panel.roomRep.mapTex;
-        if (element?.atlas?.texture is Texture2D atlas)
+        if (TryResolveRoomTextureAtlas(
+                element,
+                out Texture2D atlas,
+                out Rect atlasUv,
+                out float atlasWidth,
+                out float atlasHeight))
         {
             texture = atlas;
-            uv = element.uvRect;
-            widthTiles = Math.Max(1f, element.sourcePixelSize.x);
-            heightTiles = Math.Max(1f, element.sourcePixelSize.y);
+            uv = atlasUv;
+            widthTiles = atlasWidth;
+            heightTiles = atlasHeight;
         }
         else if (panel.roomRep.texture != null)
         {
@@ -712,6 +748,39 @@ internal static class WorldMapGpuScene
             Height = heightTiles * TileDisplaySize,
             Bake = bake
         };
+        return true;
+    }
+
+    private static bool TryResolveRoomTextureAtlas(
+        FAtlasElement element,
+        out Texture2D texture,
+        out Rect uv,
+        out float width,
+        out float height)
+    {
+        texture = null;
+        uv = new Rect(0f, 0f, 1f, 1f);
+        width = 0f;
+        height = 0f;
+
+        if (element?.atlas?.texture is not Texture2D atlas || atlas == null)
+            return false;
+
+        Rect candidateUv = element.uvRect;
+        float uvWidth = Math.Abs(candidateUv.width);
+        float uvHeight = Math.Abs(candidateUv.height);
+        if (uvWidth <= 0.000001f || uvHeight <= 0.000001f)
+            return false;
+
+        float sampledWidth = uvWidth * Math.Max(1, atlas.width);
+        float sampledHeight = uvHeight * Math.Max(1, atlas.height);
+        if (sampledWidth < 0.5f || sampledHeight < 0.5f)
+            return false;
+
+        texture = atlas;
+        uv = candidateUv;
+        width = Math.Max(1f, element.sourcePixelSize.x > 0.5f ? element.sourcePixelSize.x : sampledWidth);
+        height = Math.Max(1f, element.sourcePixelSize.y > 0.5f ? element.sourcePixelSize.y : sampledHeight);
         return true;
     }
 
