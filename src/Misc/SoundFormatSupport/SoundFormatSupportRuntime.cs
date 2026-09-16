@@ -143,10 +143,7 @@ internal static class SoundFormatSupportRuntime
         if (!data.audioClipThroughUnity || data.audio == null || data.audio.Length == 0) return result;
         if (!TryParseSelectedVariation(data, name, out int variationIndex)) return result;
 
-        if (!ExternalAudioFormatRegistry.TryResolveLoadedSoundEffect(
-                data.name,
-                variationIndex + 1,
-                out ResolvedAudioFile file))
+        if (!ExternalAudioFormatRegistry.TryResolveLoadedSoundEffect(name, out ResolvedAudioFile file))
             return result;
 
         // Vanilla already handles WAV/OGG LoadedSoundEffects correctly. The common resolver still
