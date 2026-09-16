@@ -3,7 +3,6 @@ using System.Reflection;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.World;
 using UnityEngine;
 
@@ -23,9 +22,10 @@ public sealed class PlayerMapRenderPreparationSnapshot
 }
 
 /// <summary>
-/// Render request gate between UI command dispatch and the incremental compositor. A render request
-/// no longer fails merely because some room/terrain bakes are still progressing through their normal
-/// bounded cache pipeline. The request waits across editor frames until all enabled rooms are ready.
+/// Render request gate at the scheduler boundary. A render request no longer fails merely because
+/// some room/authored-terrain bakes are still progressing through their bounded cache pipeline.
+/// Every caller of PlayerMapRenderScheduler.Begin (UI, shortcut, future API) therefore receives the
+/// same preparation semantics without depending on command-hook ordering.
 ///
 /// Authoring state is fingerprinted at request time. Bake readiness is allowed to advance; room
 /// placement/layer/Def_Mat/topology edits cancel the request instead of silently changing the output
@@ -44,15 +44,24 @@ internal static class PlayerMapRenderPreparationController
         internal int WorldTextRevision;
     }
 
-    private delegate void OrigExecute(EditorSession session, PlayerMapCommand command);
-    private delegate void HookExecute(OrigExecute orig, EditorSession session, PlayerMapCommand command);
+    private delegate bool OrigBegin(
+        EditorSession session,
+        MapPage page,
+        PlayerMapPresentationSnapshot snapshot,
+        bool export);
+    private delegate bool HookBegin(
+        OrigBegin orig,
+        EditorSession session,
+        MapPage page,
+        PlayerMapPresentationSnapshot snapshot,
+        bool export);
     private delegate void OrigSynchronize(EditorSession session);
     private delegate void HookSynchronize(OrigSynchronize orig, EditorSession session);
 
-    private static readonly HookExecute ExecuteHookDelegate = ExecuteHook;
+    private static readonly HookBegin BeginHookDelegate = BeginHook;
     private static readonly HookSynchronize SynchronizeHookDelegate = SynchronizeHook;
 
-    private static IDisposable executeHook;
+    private static IDisposable beginHook;
     private static IDisposable synchronizeHook;
     private static ManualLogSource log;
     private static bool enabled;
@@ -69,12 +78,19 @@ internal static class PlayerMapRenderPreparationController
         try
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type runtime = typeof(PlayerMapWorkspaceRuntime);
-            MethodInfo execute = runtime.GetMethod("Execute", flags, null,
-                new[] { typeof(EditorSession), typeof(PlayerMapCommand) }, null);
-            MethodInfo synchronize = runtime.GetMethod("Synchronize", flags, null,
-                new[] { typeof(EditorSession) }, null);
-            if (execute == null || synchronize == null)
+            MethodInfo begin = typeof(PlayerMapRenderScheduler).GetMethod(
+                "Begin",
+                flags,
+                null,
+                new[] { typeof(EditorSession), typeof(MapPage), typeof(PlayerMapPresentationSnapshot), typeof(bool) },
+                null);
+            MethodInfo synchronize = typeof(PlayerMapWorkspaceRuntime).GetMethod(
+                "Synchronize",
+                flags,
+                null,
+                new[] { typeof(EditorSession) },
+                null);
+            if (begin == null || synchronize == null)
                 throw new MissingMemberException("Player Map render-preparation targets were not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
@@ -82,9 +98,9 @@ internal static class PlayerMapRenderPreparationController
             if (constructor == null)
                 throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
 
-            executeHook = constructor.Invoke(new object[] { execute, ExecuteHookDelegate }) as IDisposable;
+            beginHook = constructor.Invoke(new object[] { begin, BeginHookDelegate }) as IDisposable;
             synchronizeHook = constructor.Invoke(new object[] { synchronize, SynchronizeHookDelegate }) as IDisposable;
-            if (executeHook == null || synchronizeHook == null)
+            if (beginHook == null || synchronizeHook == null)
                 throw new InvalidOperationException("Player Map render-preparation hooks were not created.");
 
             enabled = true;
@@ -99,7 +115,7 @@ internal static class PlayerMapRenderPreparationController
     internal static void Disable()
     {
         Dispose(ref synchronizeHook);
-        Dispose(ref executeHook);
+        Dispose(ref beginHook);
         Reset();
         enabled = false;
         log = null;
@@ -117,46 +133,38 @@ internal static class PlayerMapRenderPreparationController
             Cancel("Render preparation cancelled. Existing output files were preserved.");
     }
 
-    private static void ExecuteHook(OrigExecute orig, EditorSession session, PlayerMapCommand command)
+    private static bool BeginHook(
+        OrigBegin orig,
+        EditorSession session,
+        MapPage page,
+        PlayerMapPresentationSnapshot snapshot,
+        bool export)
     {
-        if (!enabled ||
-            (command.Kind != PlayerMapCommandKind.BuildPreview && command.Kind != PlayerMapCommandKind.RenderAndExport))
-        {
-            orig(session, command);
-            return;
-        }
-
+        if (!enabled)
+            return orig(session, page, snapshot, export);
         if (active != null || PlayerMapRenderScheduler.IsRunning)
-            return;
-        if (session?.Owner?.activePage is not MapPage page || page.world == null)
-            return;
+            return false;
+        if (session == null || page?.world == null || snapshot?.Available != true)
+            return orig(session, page, snapshot, export);
 
-        PlayerMapPresentationSnapshot snapshot = PlayerMapWorkspaceRuntime.GetPresentation(session);
-        if (!NeedsPreparation(snapshot, out int ready, out int pending, out bool hardFailure))
-        {
-            // Ready now, or already contains a hard error that the authoritative scheduler preflight
-            // should report. In both cases pass through to the normal incremental render command.
-            orig(session, command);
-            return;
-        }
-        if (hardFailure)
-        {
-            orig(session, command);
-            return;
-        }
+        bool waiting = NeedsPreparation(snapshot, out int ready, out int pending, out bool hardFailure);
+        if (hardFailure || !waiting)
+            return orig(session, page, snapshot, export);
 
         active = new Request
         {
             Session = session,
             Page = page,
             Region = snapshot.RegionName ?? string.Empty,
-            Export = command.Kind == PlayerMapCommandKind.RenderAndExport,
+            Export = export,
             AuthoringFingerprint = AuthoringFingerprint(snapshot),
             TopologyRevision = WorldTopologyRegistry.Revision,
             WorldTextRevision = WorldTextRegistry.Revision
         };
         Publish(ready, ready + pending,
             pending + " room/terrain bake(s) are still preparing.");
+        // The request was accepted by the Render chain even though composition has not started yet.
+        return true;
     }
 
     private static void SynchronizeHook(OrigSynchronize orig, EditorSession session)
@@ -189,8 +197,6 @@ internal static class PlayerMapRenderPreparationController
         if (hardFailure)
         {
             Cancel("Render preparation stopped because a room bake is missing or failed.");
-            // Let a fresh Render click enter the authoritative scheduler preflight and expose the
-            // exact room error list; do not start a render from an invalid preparation state.
             return;
         }
         if (waiting)
@@ -203,6 +209,8 @@ internal static class PlayerMapRenderPreparationController
         bool export = request.Export;
         active = null;
         progress = PlayerMapRenderPreparationSnapshot.Idle;
+        // Re-enter the single scheduler boundary. Our Begin hook sees that all bakes are ready and
+        // immediately delegates to the authoritative incremental renderer.
         if (!PlayerMapRenderScheduler.Begin(session, page, snapshot, export))
             log?.LogWarning("Player Map render preparation completed, but the render scheduler did not accept the job.");
     }
