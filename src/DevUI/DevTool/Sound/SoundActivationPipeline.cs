@@ -91,6 +91,7 @@ internal static class SoundActivationPipeline
     private static double lastFrameWorkMilliseconds;
     private static double maxFrameWorkMilliseconds;
     private static double clickToReadyMilliseconds;
+    private static double lastPageSwitchMilliseconds;
     private static string detail = string.Empty;
 
     internal static SoundActivationStatusSnapshot Current => new(
@@ -212,6 +213,17 @@ internal static class SoundActivationPipeline
             CompleteActivation(session);
     }
 
+    internal static double LastPageSwitchMilliseconds => lastPageSwitchMilliseconds;
+
+    internal static void RecordPageSwitch(double milliseconds)
+    {
+        lastPageSwitchMilliseconds = Math.Max(0d, milliseconds);
+        if (DevToolPerformanceMonitor.Enabled)
+            Plugin.Logger?.LogInfo(
+                "DevTool Sound page switch/constructor " +
+                lastPageSwitchMilliseconds.ToString("0.00") + " ms.");
+    }
+
     internal static void Reset()
     {
         requestedPage = null;
@@ -221,6 +233,7 @@ internal static class SoundActivationPipeline
         lastFrameWorkMilliseconds = 0d;
         maxFrameWorkMilliseconds = 0d;
         clickToReadyMilliseconds = 0d;
+        lastPageSwitchMilliseconds = 0d;
         detail = string.Empty;
         SoundFileNameCatalog.ResetRuntimeState();
         SoundSampleCatalog.ResetRuntimeState();
@@ -321,6 +334,7 @@ internal static class SoundActivationPipeline
         {
             Plugin.Logger?.LogInfo(
                 "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
+                " ms; page switch/constructor " + lastPageSwitchMilliseconds.ToString("0.00") +
                 " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
                 " ms; worst indivisible unit " +
                 MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
@@ -330,9 +344,14 @@ internal static class SoundActivationPipeline
 
     private static string StatusDetail()
     {
+        string value = detail;
+        if (lastPageSwitchMilliseconds > 0d)
+            value += " · page switch " + lastPageSwitchMilliseconds.ToString("0.00") + " ms";
+
         double worst = MaxIndivisibleUnitMilliseconds();
-        if (worst <= 0d) return detail;
-        return detail + " · worst unit " + worst.ToString("0.00") + " ms · " + MaxIndivisibleUnitName();
+        if (worst > 0d)
+            value += " · worst unit " + worst.ToString("0.00") + " ms · " + MaxIndivisibleUnitName();
+        return value;
     }
 
     private static double MaxIndivisibleUnitMilliseconds() =>
