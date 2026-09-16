@@ -150,10 +150,14 @@ public static class SoundGroupLibrary
             switch (loadPhase)
             {
                 case LoadPhase.ResolveLocalDirectory:
+                {
+                    long unitStarted = Stopwatch.GetTimestamp();
                     buildingLocalDirectory = ResolveConfiguredLocalDirectory();
+                    RecordBlockingUnit("resolve sound-group local directory", ElapsedMilliseconds(unitStarted));
                     discoverModIndex = ModManager.ActiveMods.Count - 1;
                     loadPhase = LoadPhase.DiscoverMods;
                     break;
+                }
 
                 case LoadPhase.DiscoverMods:
                     StepDiscoverMod();
@@ -342,39 +346,60 @@ public static class SoundGroupLibrary
         }
 
         ModManager.Mod mod = ModManager.ActiveMods[discoverModIndex--];
-        string file = ResolveStandardFile(mod);
-        if (string.IsNullOrEmpty(file) || !File.Exists(file))
-            return;
-
-        string canonical = CanonicalPath(file);
-        if (!buildingSeenFiles.Add(canonical))
-            return;
-
-        bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
-        pendingFiles.Add(new PendingGroupFile
+        long started = Stopwatch.GetTimestamp();
+        try
         {
-            File = file,
-            SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
-            IsLocal = false
-        });
+            // ResolveStandardFile already returns only an existing candidate; do not probe the same
+            // path a second time after it succeeds. This keeps group discovery to one filesystem
+            // decision per candidate root.
+            string file = ResolveStandardFile(mod);
+            if (string.IsNullOrEmpty(file))
+                return;
+
+            string canonical = CanonicalPath(file);
+            if (!buildingSeenFiles.Add(canonical))
+                return;
+
+            bool dlc = mod != null && ModManager.PrePackagedModIDs.Contains(mod.id);
+            pendingFiles.Add(new PendingGroupFile
+            {
+                File = file,
+                SourceName = dlc ? "DLC · " + SafeModName(mod) : SafeModName(mod),
+                IsLocal = false
+            });
+        }
+        finally
+        {
+            RecordBlockingUnit(
+                "discover sound-group file " + (mod?.id ?? string.Empty),
+                ElapsedMilliseconds(started));
+        }
     }
 
     private static void DiscoverLocalFile()
     {
-        string localFile = Path.Combine(buildingLocalDirectory ?? DefaultLocalDirectory, FileName);
-        if (!File.Exists(localFile))
-            return;
-
-        string canonical = CanonicalPath(localFile);
-        if (!buildingSeenFiles.Add(canonical))
-            return;
-
-        pendingFiles.Add(new PendingGroupFile
+        long started = Stopwatch.GetTimestamp();
+        try
         {
-            File = localFile,
-            SourceName = "Local",
-            IsLocal = true
-        });
+            string localFile = Path.Combine(buildingLocalDirectory ?? DefaultLocalDirectory, FileName);
+            if (!File.Exists(localFile))
+                return;
+
+            string canonical = CanonicalPath(localFile);
+            if (!buildingSeenFiles.Add(canonical))
+                return;
+
+            pendingFiles.Add(new PendingGroupFile
+            {
+                File = localFile,
+                SourceName = "Local",
+                IsLocal = true
+            });
+        }
+        finally
+        {
+            RecordBlockingUnit("discover local sound-group file", ElapsedMilliseconds(started));
+        }
     }
 
     private static void StepParseFile()
