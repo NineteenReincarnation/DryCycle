@@ -32,8 +32,6 @@ internal static class PlayerMapGroupLayoutControls
 
     private static readonly HookDrawInspector DrawInspectorHookDelegate = DrawInspectorHook;
     private static IDisposable inspectorHook;
-    private static HashSet<int> selection;
-    private static string region = string.Empty;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -41,13 +39,14 @@ internal static class PlayerMapGroupLayoutControls
         if (enabled) return;
         try
         {
+            if (!PlayerMapSelectionAccess.Available)
+                throw new InvalidOperationException("Player Map selection adapter is unavailable.");
+
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
             MethodInfo inspector = typeof(PlayerMapWorkspaceView).GetMethod(
                 "DrawInspector", flags, null, new[] { typeof(PlayerMapPresentationSnapshot) }, null);
-            FieldInfo selectionField = typeof(PlayerMapMultiSelection).GetField("Selection", flags);
-            selection = selectionField?.GetValue(null) as HashSet<int>;
-            if (inspector == null || selection == null)
-                throw new MissingMemberException("Player Map grouped layout control targets were not found.");
+            if (inspector == null)
+                throw new MissingMemberException("Player Map grouped layout control target was not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
@@ -73,8 +72,6 @@ internal static class PlayerMapGroupLayoutControls
         try { inspectorHook?.Dispose(); }
         catch { }
         inspectorHook = null;
-        selection = null;
-        region = string.Empty;
         enabled = false;
     }
 
@@ -83,8 +80,7 @@ internal static class PlayerMapGroupLayoutControls
         orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
-        NormalizeRegion(snapshot);
-        List<PlayerMapRoomSnapshot> selected = CollectSelected(snapshot);
+        List<PlayerMapRoomSnapshot> selected = PlayerMapSelectionAccess.Collect(snapshot);
         if (selected.Count < 2) return;
 
         ImGui.Separator();
@@ -285,33 +281,6 @@ internal static class PlayerMapGroupLayoutControls
         LayoutOperation.SpaceY => "Distribute player-map rooms vertically",
         _ => "Layout player-map rooms"
     };
-
-    private static void NormalizeRegion(PlayerMapPresentationSnapshot snapshot)
-    {
-        string next = snapshot.RegionName ?? string.Empty;
-        if (string.Equals(region, next, StringComparison.OrdinalIgnoreCase)) return;
-        region = next;
-        selection?.Clear();
-        if (snapshot.SelectedRoomIndex >= 0)
-            selection?.Add(snapshot.SelectedRoomIndex);
-    }
-
-    private static List<PlayerMapRoomSnapshot> CollectSelected(PlayerMapPresentationSnapshot snapshot)
-    {
-        List<PlayerMapRoomSnapshot> result = new();
-        PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
-        {
-            PlayerMapRoomSnapshot room = rooms[i];
-            if (room == null || room.Disabled) continue;
-            bool selectedByGroup = selection?.Contains(room.RoomIndex) == true;
-            bool selectedByInspector = selection?.Count == 0 && room.RoomIndex == snapshot.SelectedRoomIndex;
-            if (selectedByGroup || selectedByInspector)
-                result.Add(room);
-        }
-        result.Sort((a, b) => a.RoomIndex.CompareTo(b.RoomIndex));
-        return result;
-    }
 
     private static Exception Unwrap(Exception error)
     {
