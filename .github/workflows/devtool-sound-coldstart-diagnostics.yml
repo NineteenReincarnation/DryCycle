@@ -1,0 +1,61 @@
+name: DevTool Sound Cold Start Diagnostics
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-sound-coldstart-diagnostics.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add verified Sound cold-start diagnostics
+        shell: python
+        run: |
+          from pathlib import Path
+
+          pipeline = Path('src/DevUI/DevTool/Sound/SoundActivationPipeline.cs')
+          text = pipeline.read_text(encoding='utf-8')
+          needle = '''    internal static double LastPageSwitchMilliseconds => lastPageSwitchMilliseconds;\n\n'''
+          insert = '''    internal static bool IsPrewarmed\n    {\n        get\n        {\n            string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();\n            return SoundFileNameCatalog.IsReady &&\n                   SoundSampleCatalog.IsReadyForNames(names) &&\n                   SoundGroupLibrary.IsReady;\n        }\n    }\n\n'''
+          if needle not in text:
+              raise SystemExit('IsPrewarmed insertion anchor not found')
+          pipeline.write_text(text.replace(needle, needle + insert, 1), encoding='utf-8')
+
+          view = Path('src/DevUI/DevTool/RWImGui/DevToolPerformanceWindow.cs')
+          text = view.read_text(encoding='utf-8')
+          if 'using DryCycle.DevUI.DevTool.Sound;' not in text:
+              text = text.replace(
+                  'using DryCycle.DevUI.DevTool.Core;\n',
+                  'using DryCycle.DevUI.DevTool.Core;\nusing DryCycle.DevUI.DevTool.Sound;\n',
+                  1)
+
+          old = '''        DrawMetric(DevToolPerformanceMetric.RelationshipPresentation, "Relationships");\n\n        ImGui.Spacing();\n        ImGui.Separator();\n        DrawSection(DevToolUiSettings.T("快照缓存效率", "SNAPSHOT CACHE"));\n'''
+          new = '''        DrawMetric(DevToolPerformanceMetric.RelationshipPresentation, "Relationships");\n\n        ImGui.Spacing();\n        ImGui.Separator();\n        DrawSoundColdStart();\n\n        ImGui.Spacing();\n        ImGui.Separator();\n        DrawSection(DevToolUiSettings.T("快照缓存效率", "SNAPSHOT CACHE"));\n'''
+          if old not in text:
+              raise SystemExit('performance section anchor not found')
+          text = text.replace(old, new, 1)
+
+          needle = '''    private static void EnsureReadback()\n    {\n'''
+          helper = '''    private static void DrawSoundColdStart()\n    {\n        DrawSection(DevToolUiSettings.T("Sound 冷启动", "SOUND COLD START"));\n        SoundActivationStatusSnapshot status = SoundActivationPipeline.Current;\n\n        ImGui.TextUnformatted(DevToolUiSettings.T("预热状态", "Prewarm"));\n        DrawAt(LastColumn, SoundActivationPipeline.IsPrewarmed\n            ? DevToolUiSettings.T("已完成", "Ready")\n            : DevToolUiSettings.T("进行中", "Working"));\n\n        ImGui.TextUnformatted(DevToolUiSettings.T("页面切换 / 构造", "Page switch / ctor"));\n        DrawAt(LastColumn, FormatMilliseconds(SoundActivationPipeline.LastPageSwitchMilliseconds));\n\n        ImGui.TextUnformatted(DevToolUiSettings.T("点击 → Ready", "Click → Ready"));\n        DrawAt(LastColumn, FormatMilliseconds(status.ClickToReadyMilliseconds));\n\n        ImGui.TextUnformatted(DevToolUiSettings.T("激活单帧峰值", "Activation frame max"));\n        DrawAt(LastColumn, FormatMilliseconds(status.MaxFrameWorkMilliseconds));\n\n        ImGui.TextUnformatted(DevToolUiSettings.T("最坏不可切分单元", "Worst indivisible unit"));\n        DrawAt(LastColumn, FormatMilliseconds(status.MaxBlockingUnitMilliseconds));\n        if (!string.IsNullOrEmpty(status.MaxBlockingUnit))\n        {\n            ImGui.SameLine();\n            ImGui.TextDisabled(status.MaxBlockingUnit);\n        }\n\n        DevToolWidgets.MutedText(\n            DevToolUiSettings.T(\n                "Page switch 高说明剩余成本在原版 SoundPage 构造；Worst unit 高说明某个文件系统/XML/排序单元仍超过帧预算。",\n                "A high page-switch value points to remaining vanilla SoundPage construction cost; a high worst-unit value points to an indivisible filesystem/XML/sort operation."));\n    }\n\n'''
+          if needle not in text:
+              raise SystemExit('performance helper anchor not found')
+          view.write_text(text.replace(needle, helper + needle, 1), encoding='utf-8')
+
+      - name: Commit and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/devtool-sound-coldstart-diagnostics.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/DevUI/DevTool/Sound/SoundActivationPipeline.cs src/DevUI/DevTool/RWImGui/DevToolPerformanceWindow.cs .github/workflows/devtool-sound-coldstart-diagnostics.yml
+          git commit -m "DevTool Sound: surface cold-start diagnostics"
+          git push origin HEAD:main
