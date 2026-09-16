@@ -106,8 +106,8 @@ internal static class SoundActivationPipeline
         SoundSampleCatalog.TotalSampleCount,
         SoundGroupLibrary.ProcessedFileCount,
         SoundGroupLibrary.TotalFileCount,
-        SoundFileNameCatalog.MaxUnitMilliseconds,
-        SoundFileNameCatalog.MaxUnit,
+        MaxIndivisibleUnitMilliseconds(),
+        MaxIndivisibleUnitName(),
         detail);
 
     internal static void Step(EditorSession session)
@@ -120,6 +120,9 @@ internal static class SoundActivationPipeline
             !EditorUiModeState.UseVanilla &&
             !session.LegacyUiVisible;
 
+        // Start the exact file-name discovery before Sound is clicked. This is deliberately tiny
+        // background-on-the-main-thread work, not a worker thread: one filesystem iterator step at a
+        // time, with the same runtime/thread-safety assumptions as vanilla AssetManager.
         if (rebuiltFrontendOwnsPresentation)
         {
             SoundFileNameCatalog.EnsureStarted();
@@ -256,6 +259,9 @@ internal static class SoundActivationPipeline
         if (page.currFilesPage < 0 || page.currFilesPage >= page.totalFilePages)
             page.currFilesPage = 0;
 
+        // This only materializes the at-most-28 legacy buttons after the expensive filename walk has
+        // completed. It preserves the vanilla page contract for legacy fallback without rebuilding
+        // the complete file catalogue in the constructor.
         page.RefreshFilesPage();
     }
 
@@ -276,11 +282,19 @@ internal static class SoundActivationPipeline
             Plugin.Logger?.LogInfo(
                 "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
                 " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
-                " ms; worst indivisible file-discovery unit " +
-                SoundFileNameCatalog.MaxUnitMilliseconds.ToString("0.00") + " ms (" +
-                SoundFileNameCatalog.MaxUnit + ").");
+                " ms; worst indivisible unit " +
+                MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
+                MaxIndivisibleUnitName() + ").");
         }
     }
+
+    private static double MaxIndivisibleUnitMilliseconds() =>
+        Math.Max(SoundFileNameCatalog.MaxUnitMilliseconds, SoundGroupLibrary.MaxBlockingUnitMilliseconds);
+
+    private static string MaxIndivisibleUnitName() =>
+        SoundGroupLibrary.MaxBlockingUnitMilliseconds > SoundFileNameCatalog.MaxUnitMilliseconds
+            ? SoundGroupLibrary.MaxBlockingUnit
+            : SoundFileNameCatalog.MaxUnit;
 
     private static float ComputeProgress()
     {
