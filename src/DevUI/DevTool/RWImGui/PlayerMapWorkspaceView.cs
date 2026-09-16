@@ -266,7 +266,10 @@ internal static class PlayerMapWorkspaceView
                 for (int r = 0; r < room.Bake.Runs.Length; r++)
                 {
                     RoomMapPreviewRun run = room.Bake.Runs[r];
-                    Num.Vector2 a = min + new Num.Vector2(run.X * tile, run.Y * tile);
+                    // RoomMapBake uses Rain World's bottom-origin tile Y. ImGui uses top-origin
+                    // screen Y, so mirror only the room-local row while leaving global placement intact.
+                    float screenRow = room.Bake.Height - 1f - run.Y;
+                    Num.Vector2 a = min + new Num.Vector2(run.X * tile, screenRow * tile);
                     Num.Vector2 b = a + new Num.Vector2(run.Length * tile, tile);
                     draw.AddRectFilled(a, b, PreviewColor(run.Kind, run.Water, room.Layer));
                 }
