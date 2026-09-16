@@ -3,23 +3,20 @@ using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 /// <summary>
-/// Keeps the Player Map's default Derived placement truly live with World Layout authoring.
-/// The authoritative saved model remains offset-based; this bridge only projects the latest
-/// Dev Position/layer/disabled flags into immutable PlayerMap presentation snapshots.
+/// Projects the latest World Layout into immutable Player Map snapshots.
 ///
-/// It also invalidates an in-flight incremental render when World Layout changes, preventing an
-/// export from completing with a layout snapshot that became stale after the Render button press.
+/// Derived rooms remain defined as Convert(WorldLayoutPosition) + PlayerMapOffset; Absolute rooms
+/// remain independent. This class has no Render lifecycle responsibility: stale-render cancellation
+/// is owned exclusively by PlayerMapRenderRevisionGuard.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency(PlayerMapIncrementalRenderPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class PlayerMapDerivedLayoutBridgePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.PlayerMap.DerivedLayoutBridge";
@@ -34,26 +31,15 @@ internal static class PlayerMapDerivedLayoutBridge
 {
     private delegate PlayerMapPresentationSnapshot OrigGetPresentation(EditorSession session);
     private delegate PlayerMapPresentationSnapshot HookGetPresentation(OrigGetPresentation orig, EditorSession session);
-    private delegate bool OrigBegin(EditorSession session, MapPage page, PlayerMapPresentationSnapshot snapshot, bool export);
-    private delegate bool HookBegin(OrigBegin orig, EditorSession session, MapPage page, PlayerMapPresentationSnapshot snapshot, bool export);
-    private delegate void OrigStep(EditorSession session);
-    private delegate void HookStep(OrigStep orig, EditorSession session);
 
     private static readonly HookGetPresentation GetPresentationHookDelegate = GetPresentationHook;
-    private static readonly HookBegin BeginHookDelegate = BeginHook;
-    private static readonly HookStep StepHookDelegate = StepHook;
-
     private static IDisposable getPresentationHook;
-    private static IDisposable beginHook;
-    private static IDisposable stepHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     private static PlayerMapRoomSnapshot[] cachedSourceRooms;
     private static EditorMapRoomSnapshot[] cachedWorldRooms;
     private static PlayerMapRoomSnapshot[] cachedProjectedRooms;
-    private static EditorSession renderSession;
-    private static long renderMapRevision;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -63,14 +49,13 @@ internal static class PlayerMapDerivedLayoutBridge
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
             MethodInfo getPresentation = typeof(PlayerMapWorkspaceRuntime).GetMethod(
-                "GetPresentation", flags, null, new[] { typeof(EditorSession) }, null);
-            MethodInfo begin = typeof(PlayerMapRenderScheduler).GetMethod(
-                "Begin", flags, null,
-                new[] { typeof(EditorSession), typeof(MapPage), typeof(PlayerMapPresentationSnapshot), typeof(bool) }, null);
-            MethodInfo step = typeof(PlayerMapRenderScheduler).GetMethod(
-                "Step", flags, null, new[] { typeof(EditorSession) }, null);
-            if (getPresentation == null || begin == null || step == null)
-                throw new MissingMemberException("Player Map derived-layout hook targets were not found.");
+                "GetPresentation",
+                flags,
+                null,
+                new[] { typeof(EditorSession) },
+                null);
+            if (getPresentation == null)
+                throw new MissingMemberException("Player Map derived-layout presentation target was not found.");
 
             Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
             ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
@@ -78,10 +63,8 @@ internal static class PlayerMapDerivedLayoutBridge
                 throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
 
             getPresentationHook = constructor.Invoke(new object[] { getPresentation, GetPresentationHookDelegate }) as IDisposable;
-            beginHook = constructor.Invoke(new object[] { begin, BeginHookDelegate }) as IDisposable;
-            stepHook = constructor.Invoke(new object[] { step, StepHookDelegate }) as IDisposable;
-            if (getPresentationHook == null || beginHook == null || stepHook == null)
-                throw new InvalidOperationException("One or more Player Map derived-layout hooks were not created.");
+            if (getPresentationHook == null)
+                throw new InvalidOperationException("Player Map derived-layout projection hook was not created.");
 
             enabled = true;
             log?.LogInfo("Player Map live derived-layout projection enabled.");
@@ -95,14 +78,10 @@ internal static class PlayerMapDerivedLayoutBridge
 
     internal static void Disable()
     {
-        Dispose(ref stepHook);
-        Dispose(ref beginHook);
         Dispose(ref getPresentationHook);
         cachedSourceRooms = null;
         cachedWorldRooms = null;
         cachedProjectedRooms = null;
-        renderSession = null;
-        renderMapRevision = 0L;
         enabled = false;
         log = null;
     }
@@ -144,7 +123,8 @@ internal static class PlayerMapDerivedLayoutBridge
     {
         sourceRooms ??= Array.Empty<PlayerMapRoomSnapshot>();
         worldRooms ??= Array.Empty<EditorMapRoomSnapshot>();
-        if (ReferenceEquals(cachedSourceRooms, sourceRooms) && ReferenceEquals(cachedWorldRooms, worldRooms) &&
+        if (ReferenceEquals(cachedSourceRooms, sourceRooms) &&
+            ReferenceEquals(cachedWorldRooms, worldRooms) &&
             cachedProjectedRooms != null)
             return cachedProjectedRooms;
 
@@ -163,13 +143,13 @@ internal static class PlayerMapDerivedLayoutBridge
                 continue;
 
             Vector2 worldPosition = new(world.X, world.Y);
-            Vector2 derived = PlayerMapCoordinateSystem.WorldLayoutToCanon(worldPosition);
+            Vector2 derivedBase = PlayerMapCoordinateSystem.WorldLayoutToCanon(worldPosition);
             Vector2 effective = room.Mode == PlayerMapPlacementMode.Derived
-                ? derived + room.Offset
+                ? derivedBase + room.Offset
                 : room.AbsolutePosition;
             bool changed =
                 (room.WorldPosition - worldPosition).sqrMagnitude > 0.000001f ||
-                (room.DerivedBasePosition - derived).sqrMagnitude > 0.000001f ||
+                (room.DerivedBasePosition - derivedBase).sqrMagnitude > 0.000001f ||
                 (room.EffectivePosition - effective).sqrMagnitude > 0.000001f ||
                 room.Layer != world.Layer ||
                 room.Disabled != world.Disabled ||
@@ -183,7 +163,7 @@ internal static class PlayerMapDerivedLayoutBridge
                 Name = room.Name,
                 Mode = room.Mode,
                 WorldPosition = worldPosition,
-                DerivedBasePosition = derived,
+                DerivedBasePosition = derivedBase,
                 Offset = room.Offset,
                 AbsolutePosition = room.AbsolutePosition,
                 EffectivePosition = effective,
@@ -198,38 +178,6 @@ internal static class PlayerMapDerivedLayoutBridge
         cachedWorldRooms = worldRooms;
         cachedProjectedRooms = result ?? sourceRooms;
         return cachedProjectedRooms;
-    }
-
-    private static bool BeginHook(
-        OrigBegin orig,
-        EditorSession session,
-        MapPage page,
-        PlayerMapPresentationSnapshot snapshot,
-        bool export)
-    {
-        bool started = orig(session, page, snapshot, export);
-        if (started)
-        {
-            renderSession = session;
-            renderMapRevision = session == null ? 0L : EditorRevisionHub.Get(session, EditorRevisionKind.Map);
-        }
-        return started;
-    }
-
-    private static void StepHook(OrigStep orig, EditorSession session)
-    {
-        if (enabled && PlayerMapRenderScheduler.IsRunning && ReferenceEquals(renderSession, session))
-        {
-            long current = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
-            if (current != renderMapRevision)
-                PlayerMapRenderScheduler.RequestCancel();
-        }
-        orig(session);
-        if (!PlayerMapRenderScheduler.IsRunning)
-        {
-            renderSession = null;
-            renderMapRevision = 0L;
-        }
     }
 
     private static void Dispose(ref IDisposable hook)
