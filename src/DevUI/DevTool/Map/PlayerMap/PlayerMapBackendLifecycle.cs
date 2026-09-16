@@ -19,6 +19,7 @@ internal static class PlayerMapBackendLifecycle
 
         // Base state must exist before any hook redirects its command/presentation boundaries.
         PlayerMapWorkspaceRuntime.Enable();
+        PlayerMapMigrationStreamRuntime.Enable(logger);
         PlayerMapPlacementBootstrap.Enable(logger);
         PlayerMapIncrementalRenderHooks.Enable(logger);
         PlayerMapTerrainBakeBridge.Enable(logger);
@@ -27,6 +28,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapDisabledConfigFilter.Enable(logger);
         PlayerMapRenderOutputValidator.Enable(logger);
         PlayerMapGroupCommandRuntime.Enable(logger);
+        PlayerMapMigrationCommandBridge.Enable(logger);
         PlayerMapLayerMutationFilter.Enable(logger);
         PlayerMapRenderRevisionGuard.Enable(logger);
         // Install last so it becomes the outer Scheduler.Begin/synchronize gate: pending bakes are
@@ -49,6 +51,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapRenderPreparationController.Disable();
         PlayerMapRenderRevisionGuard.Disable();
         PlayerMapLayerMutationFilter.Disable();
+        PlayerMapMigrationCommandBridge.Disable();
         PlayerMapGroupCommandRuntime.Disable();
         PlayerMapRenderOutputValidator.Disable();
         PlayerMapDisabledConfigFilter.Disable();
@@ -57,6 +60,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapTerrainBakeBridge.Disable();
         PlayerMapIncrementalRenderHooks.Disable();
         PlayerMapPlacementBootstrap.Disable();
+        PlayerMapMigrationStreamRuntime.Disable();
 
         ResetTransientState();
         PlayerMapWorkspaceRuntime.Disable();
@@ -67,6 +71,8 @@ internal static class PlayerMapBackendLifecycle
     {
         PlayerMapRenderPreparationController.Reset();
         PlayerMapRenderScheduler.Reset();
+        PlayerMapMigrationCommandQueue.Clear();
+        PlayerMapMigrationStreamRuntime.Reset();
         PlayerMapGroupCommandQueue.Clear();
         PlayerMapTerrainSemanticRevision.Reset();
         PlayerMapPreflightDiagnostics.Reset();
