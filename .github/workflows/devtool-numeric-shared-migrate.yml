@@ -1,0 +1,42 @@
+name: DevTool Numeric Shared Migration
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-numeric-shared-migrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply shared scalar migration
+        run: python scripts/devtool-numeric-shared-migrate.py
+      - name: Verify shared widget routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'DevToolNumericScope.Trigger' src/DevUI/DevTool/RWImGui/TriggerEditorView.cs
+          grep -Fq 'DevToolNumericScope.SoundRoom' src/DevUI/DevTool/RWImGui/SoundEditorView.cs
+          grep -Fq 'DevToolNumericScope.ObjectTransform' src/DevUI/DevTool/RWImGui/ObjectInspectorView.cs
+          grep -Fq 'DevToolNumericScope.Universal' src/DevUI/DevTool/RWImGui/UniversalDevUiMirrorView.cs
+          grep -Fq 'DevToolNumericWidgets.Reset();' src/DevUI/DevTool/RWImGui/DevToolRetainedViewLifecyclePlugin.cs
+      - name: Commit migration and remove bootstrap files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/devtool-numeric-shared-migrate.py .github/workflows/devtool-numeric-shared-migrate.yml
+          git add src/DevUI/DevTool/RWImGui/TriggerEditorView.cs \
+                  src/DevUI/DevTool/RWImGui/SoundEditorView.cs \
+                  src/DevUI/DevTool/RWImGui/ObjectInspectorView.cs \
+                  src/DevUI/DevTool/RWImGui/UniversalDevUiMirrorView.cs \
+                  src/DevUI/DevTool/RWImGui/DevToolRetainedViewLifecyclePlugin.cs
+          git commit -m 'DevTool: route scalar editors through shared numeric widgets'
+          git push origin HEAD:main
