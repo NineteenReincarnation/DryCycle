@@ -229,6 +229,17 @@ internal static class PlayerMapRenderPipeline
             return false;
         }
 
+        // Multi-pipe correctness is validated before any output allocation. A modern exact world
+        // connection is identified by both room and node index; multiple pipes between the same room
+        // pair therefore remain distinct. We never collapse by room pair and never silently fall back
+        // to the room centre during official Render Map output.
+        ValidateExactConnectionEndpoints(page, plan, failures);
+        if (failures.Count > 0)
+        {
+            errors = failures.ToArray();
+            return false;
+        }
+
         plan.Rooms.Sort((a, b) =>
         {
             int layer = a.Layer.CompareTo(b.Layer);
@@ -273,6 +284,83 @@ internal static class PlayerMapRenderPipeline
         errors = Array.Empty<string>();
         return true;
     }
+
+    private static void ValidateExactConnectionEndpoints(
+        MapPage page,
+        PlayerMapRenderPlan plan,
+        List<string> failures)
+    {
+        EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
+        if (map?.Available != true ||
+            !string.Equals(map.RegionName ?? string.Empty, page.world?.name ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+        {
+            plan.Warnings.Add("Connection preflight is unavailable for the current region; room raster output remains deterministic.");
+            return;
+        }
+
+        Dictionary<int, PlayerMapRenderRoom> rooms = new();
+        for (int i = 0; i < plan.Rooms.Count; i++) rooms[plan.Rooms[i].RoomIndex] = plan.Rooms[i];
+        HashSet<string> claimedEndpoints = new(StringComparer.Ordinal);
+        EditorMapConnectionSnapshot[] connections = map.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+
+        for (int i = 0; i < connections.Length; i++)
+        {
+            EditorMapConnectionSnapshot connection = connections[i];
+            if (connection == null ||
+                !rooms.TryGetValue(connection.FromRoomIndex, out PlayerMapRenderRoom from) ||
+                !rooms.TryGetValue(connection.ToRoomIndex, out PlayerMapRenderRoom to))
+                continue;
+
+            if (connection.Ambiguous || connection.FromNodeIndex < 0 || connection.ToNodeIndex < 0)
+            {
+                plan.Warnings.Add(
+                    "Unresolved connection " + ConnectionLabel(connection, from, to) +
+                    ": exact node mapping is required to distinguish repeated room-to-room pipes.");
+                continue;
+            }
+
+            ValidateEndpoint(connection, from, connection.FromNodeIndex, "A", failures);
+            ValidateEndpoint(connection, to, connection.ToNodeIndex, "B", failures);
+
+            string fromKey = connection.FromRoomIndex.ToString(CultureInfo.InvariantCulture) + ":" +
+                             connection.FromNodeIndex.ToString(CultureInfo.InvariantCulture);
+            string toKey = connection.ToRoomIndex.ToString(CultureInfo.InvariantCulture) + ":" +
+                           connection.ToNodeIndex.ToString(CultureInfo.InvariantCulture);
+            if (!claimedEndpoints.Add(fromKey))
+                plan.Warnings.Add("Multiple map connections claim endpoint " + from.Name + ":" + connection.FromNodeIndex + ".");
+            if (!claimedEndpoints.Add(toKey))
+                plan.Warnings.Add("Multiple map connections claim endpoint " + to.Name + ":" + connection.ToNodeIndex + ".");
+        }
+    }
+
+    private static void ValidateEndpoint(
+        EditorMapConnectionSnapshot connection,
+        PlayerMapRenderRoom room,
+        int nodeIndex,
+        string side,
+        List<string> failures)
+    {
+        if (!room.Bake.TryGetNodeAnchor(nodeIndex, out RoomMapNodeAnchorSnapshot anchor))
+        {
+            failures.Add(
+                "Connection " + (connection.ConnectionId ?? "<unnamed>") + " endpoint " + side + " " +
+                room.Name + ":" + nodeIndex + " has no baked shortcut mouth. Render was blocked to avoid a wrong multi-pipe map.");
+            return;
+        }
+
+        if (anchor.Kind != RoomMapPixelKind.RoomExit)
+        {
+            failures.Add(
+                "Connection " + (connection.ConnectionId ?? "<unnamed>") + " endpoint " + side + " " +
+                room.Name + ":" + nodeIndex + " resolves to " + anchor.Kind + " instead of RoomExit.");
+        }
+    }
+
+    private static string ConnectionLabel(
+        EditorMapConnectionSnapshot connection,
+        PlayerMapRenderRoom from,
+        PlayerMapRenderRoom to) =>
+        from.Name + ":" + connection.FromNodeIndex + " -> " + to.Name + ":" + connection.ToNodeIndex;
 
     private static void DetectOverlaps(PlayerMapRenderPlan plan)
     {
