@@ -35,10 +35,32 @@ public readonly struct PlayerMapGroupLayerCommand
     public string Label { get; }
 }
 
+public enum PlayerMapGroupPlacementOperation
+{
+    SetDerived = 0,
+    SetAbsolute = 1,
+    ResetOffset = 2
+}
+
+public readonly struct PlayerMapGroupPlacementCommand
+{
+    public PlayerMapGroupPlacementCommand(int[] roomIndices, PlayerMapGroupPlacementOperation operation, string label)
+    {
+        RoomIndices = roomIndices == null ? Array.Empty<int>() : (int[])roomIndices.Clone();
+        Operation = operation;
+        Label = string.IsNullOrWhiteSpace(label) ? "Change player-map room placement" : label;
+    }
+
+    public int[] RoomIndices { get; }
+    public PlayerMapGroupPlacementOperation Operation { get; }
+    public string Label { get; }
+}
+
 public static class PlayerMapGroupCommandQueue
 {
     private static readonly ConcurrentQueue<PlayerMapGroupMoveCommand> MoveQueue = new();
     private static readonly ConcurrentQueue<PlayerMapGroupLayerCommand> LayerQueue = new();
+    private static readonly ConcurrentQueue<PlayerMapGroupPlacementCommand> PlacementQueue = new();
 
     public static void Enqueue(PlayerMapGroupMoveCommand command)
     {
@@ -55,20 +77,29 @@ public static class PlayerMapGroupCommandQueue
         LayerQueue.Enqueue(command);
     }
 
+    public static void Enqueue(PlayerMapGroupPlacementCommand command)
+    {
+        if (command.RoomIndices == null || command.RoomIndices.Length == 0)
+            return;
+        PlacementQueue.Enqueue(command);
+    }
+
     internal static bool TryDequeue(out PlayerMapGroupMoveCommand command) => MoveQueue.TryDequeue(out command);
     internal static bool TryDequeue(out PlayerMapGroupLayerCommand command) => LayerQueue.TryDequeue(out command);
+    internal static bool TryDequeue(out PlayerMapGroupPlacementCommand command) => PlacementQueue.TryDequeue(out command);
 
     internal static void Clear()
     {
         while (MoveQueue.TryDequeue(out _)) { }
         while (LayerQueue.TryDequeue(out _)) { }
+        while (PlacementQueue.TryDequeue(out _)) { }
     }
 }
 
 /// <summary>
 /// Executes Player Map group mutations on the same main-thread command boundary as existing map
 /// edits. Child commands retain their proven per-room undo semantics; EditorHistoryService.BeginBatch
-/// folds an entire group move/layer change into one atomic user-visible history entry.
+/// folds an entire group move/layer/placement change into one atomic user-visible history entry.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -178,6 +209,41 @@ internal static class PlayerMapGroupCommandRuntime
                         PlayerMapCommandKind.SetLayer,
                         roomIndex: group.RoomIndices[i],
                         integer: group.Layer));
+                }
+            }
+            processed = true;
+        }
+
+        while (PlayerMapGroupCommandQueue.TryDequeue(out PlayerMapGroupPlacementCommand group))
+        {
+            int count = group.RoomIndices?.Length ?? 0;
+            if (count <= 0) continue;
+
+            using (session.History?.BeginBatch(group.Label))
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    int roomIndex = group.RoomIndices[i];
+                    switch (group.Operation)
+                    {
+                        case PlayerMapGroupPlacementOperation.SetDerived:
+                            PlayerMapWorkspaceRuntime.Execute(session, new PlayerMapCommand(
+                                PlayerMapCommandKind.SetPlacementMode,
+                                roomIndex: roomIndex,
+                                integer: (int)PlayerMapPlacementMode.Derived));
+                            break;
+                        case PlayerMapGroupPlacementOperation.SetAbsolute:
+                            PlayerMapWorkspaceRuntime.Execute(session, new PlayerMapCommand(
+                                PlayerMapCommandKind.SetPlacementMode,
+                                roomIndex: roomIndex,
+                                integer: (int)PlayerMapPlacementMode.Absolute));
+                            break;
+                        case PlayerMapGroupPlacementOperation.ResetOffset:
+                            PlayerMapWorkspaceRuntime.Execute(session, new PlayerMapCommand(
+                                PlayerMapCommandKind.ResetOffset,
+                                roomIndex: roomIndex));
+                            break;
+                    }
                 }
             }
             processed = true;
