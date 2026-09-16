@@ -64,9 +64,19 @@ public static class PlayerMapGroupCommandQueue
 
     public static void Enqueue(PlayerMapGroupMoveCommand command)
     {
-        if (command.RoomIndices == null || command.EffectivePositions == null ||
-            command.RoomIndices.Length == 0 || command.RoomIndices.Length != command.EffectivePositions.Length)
-            return;
+        if (!Valid(command)) return;
+        MoveQueue.Enqueue(command);
+    }
+
+    /// <summary>
+    /// Queues independent absolute targets without passing through interactive shared-delta snapping.
+    /// Use this for deterministic layout tools such as Align/Distribute. Dragging and keyboard nudges
+    /// must keep using Enqueue(PlayerMapGroupMoveCommand) so PlayerMapLayoutAssist can quantize their
+    /// shared translation while preserving legacy Canon coordinate phase.
+    /// </summary>
+    public static void EnqueueExact(PlayerMapGroupMoveCommand command)
+    {
+        if (!Valid(command)) return;
         MoveQueue.Enqueue(command);
     }
 
@@ -94,6 +104,10 @@ public static class PlayerMapGroupCommandQueue
         while (LayerQueue.TryDequeue(out _)) { }
         while (PlacementQueue.TryDequeue(out _)) { }
     }
+
+    private static bool Valid(PlayerMapGroupMoveCommand command) =>
+        command.RoomIndices != null && command.EffectivePositions != null &&
+        command.RoomIndices.Length > 0 && command.RoomIndices.Length == command.EffectivePositions.Length;
 }
 
 /// <summary>
