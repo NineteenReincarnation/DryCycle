@@ -9,11 +9,12 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 /// <summary>
-/// Projects the latest World Layout into immutable Player Map snapshots.
+/// Projects the latest World Layout and authored-terrain semantics into immutable Player Map
+/// snapshots. Derived rooms remain Convert(WorldLayoutPosition) + PlayerMapOffset; Absolute rooms
+/// remain independent.
 ///
-/// Derived rooms remain defined as Convert(WorldLayoutPosition) + PlayerMapOffset; Absolute rooms
-/// remain independent. This class has no Render lifecycle responsibility: stale-render cancellation
-/// is owned exclusively by PlayerMapRenderRevisionGuard.
+/// Stable frames audit only a small terrain batch. A semantic terrain change causes one full snapshot
+/// projection so curved/custom terrain cannot remain stale in the Player Map preview.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -40,6 +41,7 @@ internal static class PlayerMapDerivedLayoutBridge
     private static PlayerMapRoomSnapshot[] cachedSourceRooms;
     private static EditorMapRoomSnapshot[] cachedWorldRooms;
     private static PlayerMapRoomSnapshot[] cachedProjectedRooms;
+    private static int cachedTerrainRevision;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -67,7 +69,7 @@ internal static class PlayerMapDerivedLayoutBridge
                 throw new InvalidOperationException("Player Map derived-layout projection hook was not created.");
 
             enabled = true;
-            log?.LogInfo("Player Map live derived-layout projection enabled.");
+            log?.LogInfo("Player Map live derived-layout/terrain projection enabled.");
         }
         catch (Exception error)
         {
@@ -82,6 +84,8 @@ internal static class PlayerMapDerivedLayoutBridge
         cachedSourceRooms = null;
         cachedWorldRooms = null;
         cachedProjectedRooms = null;
+        cachedTerrainRevision = 0;
+        PlayerMapTerrainSemanticRevision.Reset();
         enabled = false;
         log = null;
     }
@@ -96,12 +100,18 @@ internal static class PlayerMapDerivedLayoutBridge
             !string.Equals(source.RegionName ?? string.Empty, world.RegionName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             return source;
 
-        PlayerMapRoomSnapshot[] projected = ProjectRooms(source.Rooms, world.Rooms);
+        PlayerMapTerrainSemanticRevision.Audit(source.Rooms, 12);
+        int terrainRevision = PlayerMapTerrainSemanticRevision.Revision;
+        PlayerMapRoomSnapshot[] projected = ProjectRooms(source.Rooms, world.Rooms, terrainRevision);
         if (ReferenceEquals(projected, source.Rooms)) return source;
 
         long mapRevision = session == null ? 0L : EditorRevisionHub.Get(session, EditorRevisionKind.Map);
         long projectedRevision;
-        unchecked { projectedRevision = source.Revision * 397L + mapRevision; }
+        unchecked
+        {
+            projectedRevision = source.Revision * 397L + mapRevision;
+            projectedRevision = projectedRevision * 397L + terrainRevision;
+        }
 
         return new PlayerMapPresentationSnapshot
         {
@@ -119,12 +129,14 @@ internal static class PlayerMapDerivedLayoutBridge
 
     private static PlayerMapRoomSnapshot[] ProjectRooms(
         PlayerMapRoomSnapshot[] sourceRooms,
-        EditorMapRoomSnapshot[] worldRooms)
+        EditorMapRoomSnapshot[] worldRooms,
+        int terrainRevision)
     {
         sourceRooms ??= Array.Empty<PlayerMapRoomSnapshot>();
         worldRooms ??= Array.Empty<EditorMapRoomSnapshot>();
         if (ReferenceEquals(cachedSourceRooms, sourceRooms) &&
             ReferenceEquals(cachedWorldRooms, worldRooms) &&
+            cachedTerrainRevision == terrainRevision &&
             cachedProjectedRooms != null)
             return cachedProjectedRooms;
 
@@ -147,13 +159,16 @@ internal static class PlayerMapDerivedLayoutBridge
             Vector2 effective = room.Mode == PlayerMapPlacementMode.Derived
                 ? derivedBase + room.Offset
                 : room.AbsolutePosition;
+            RoomMapBakeSnapshot currentBake = RoomMapBakeCache.GetSnapshot(room.RoomIndex) ?? room.Bake;
+
             bool changed =
                 (room.WorldPosition - worldPosition).sqrMagnitude > 0.000001f ||
                 (room.DerivedBasePosition - derivedBase).sqrMagnitude > 0.000001f ||
                 (room.EffectivePosition - effective).sqrMagnitude > 0.000001f ||
                 room.Layer != world.Layer ||
                 room.Disabled != world.Disabled ||
-                room.Selected != world.Selected;
+                room.Selected != world.Selected ||
+                !BakeEquivalent(room.Bake, currentBake);
             if (!changed) continue;
 
             result ??= (PlayerMapRoomSnapshot[])sourceRooms.Clone();
@@ -170,14 +185,27 @@ internal static class PlayerMapDerivedLayoutBridge
                 Layer = world.Layer,
                 Disabled = world.Disabled,
                 Selected = world.Selected,
-                Bake = room.Bake
+                Bake = currentBake
             };
         }
 
         cachedSourceRooms = sourceRooms;
         cachedWorldRooms = worldRooms;
+        cachedTerrainRevision = terrainRevision;
         cachedProjectedRooms = result ?? sourceRooms;
         return cachedProjectedRooms;
+    }
+
+    private static bool BakeEquivalent(RoomMapBakeSnapshot a, RoomMapBakeSnapshot b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a == null || b == null) return false;
+        return a.Status == b.Status &&
+               a.Width == b.Width &&
+               a.Height == b.Height &&
+               string.Equals(a.Error ?? string.Empty, b.Error ?? string.Empty, StringComparison.Ordinal) &&
+               ReferenceEquals(a.Runs, b.Runs) &&
+               ReferenceEquals(a.NodeAnchors, b.NodeAnchors);
     }
 
     private static void Dispose(ref IDisposable hook)
