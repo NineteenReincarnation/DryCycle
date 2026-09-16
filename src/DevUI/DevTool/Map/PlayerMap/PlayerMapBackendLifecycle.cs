@@ -26,6 +26,7 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapConfigBuildPipeline.Enable(logger);
         PlayerMapRenderOutputValidator.Enable(logger);
         PlayerMapGroupCommandRuntime.Enable(logger);
+        PlayerMapLayerMutationFilter.Enable(logger);
         PlayerMapRenderRevisionGuard.Enable(logger);
         // Install last so it becomes the outer Scheduler.Begin/synchronize gate: pending bakes are
         // allowed to finish before the incremental renderer freezes its authoritative input snapshot.
@@ -46,6 +47,7 @@ internal static class PlayerMapBackendLifecycle
         // Remove outer hooks first, then their inner dependencies.
         PlayerMapRenderPreparationController.Disable();
         PlayerMapRenderRevisionGuard.Disable();
+        PlayerMapLayerMutationFilter.Disable();
         PlayerMapGroupCommandRuntime.Disable();
         PlayerMapRenderOutputValidator.Disable();
         PlayerMapConfigBuildPipeline.Disable();
