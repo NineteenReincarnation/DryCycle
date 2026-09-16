@@ -22,6 +22,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapCanvasAuthoring.Enable(logger);
         PlayerMapMultiSelection.Enable(logger);
         PlayerMapLayoutAssist.Enable(logger);
+        PlayerMapPreflightPanel.Enable(logger);
         PlayerMapMultiPipeConnections.Enable(logger);
 
         enabled = true;
@@ -37,6 +38,7 @@ internal static class PlayerMapFrontendLifecycle
         }
 
         PlayerMapMultiPipeConnections.Disable();
+        PlayerMapPreflightPanel.Disable();
         PlayerMapLayoutAssist.Disable();
         PlayerMapMultiSelection.Disable();
         PlayerMapCanvasAuthoring.Disable();
