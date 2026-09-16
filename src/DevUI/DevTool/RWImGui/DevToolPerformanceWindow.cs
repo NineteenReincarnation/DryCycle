@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -185,6 +186,10 @@ internal static class DevToolPerformanceWindow
 
         ImGui.Spacing();
         ImGui.Separator();
+        DrawSoundColdStart();
+
+        ImGui.Spacing();
+        ImGui.Separator();
         DrawSection(DevToolUiSettings.T("快照缓存效率", "SNAPSHOT CACHE"));
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
@@ -207,6 +212,39 @@ internal static class DevToolPerformanceWindow
                 "When monitoring is disabled, timing returns to its allocation-free fast path and cache counters reduce to one Enabled check."));
 
         ImGui.End();
+    }
+
+    private static void DrawSoundColdStart()
+    {
+        DrawSection(DevToolUiSettings.T("Sound 冷启动", "SOUND COLD START"));
+        SoundActivationStatusSnapshot status = SoundActivationPipeline.Current;
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("预热状态", "Prewarm"));
+        DrawAt(LastColumn, SoundActivationPipeline.IsPrewarmed
+            ? DevToolUiSettings.T("已完成", "Ready")
+            : DevToolUiSettings.T("进行中", "Working"));
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("页面切换 / 构造", "Page switch / ctor"));
+        DrawAt(LastColumn, FormatMilliseconds(SoundActivationPipeline.LastPageSwitchMilliseconds));
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("点击 → Ready", "Click → Ready"));
+        DrawAt(LastColumn, FormatMilliseconds(status.ClickToReadyMilliseconds));
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("激活单帧峰值", "Activation frame max"));
+        DrawAt(LastColumn, FormatMilliseconds(status.MaxFrameWorkMilliseconds));
+
+        ImGui.TextUnformatted(DevToolUiSettings.T("最坏不可切分单元", "Worst indivisible unit"));
+        DrawAt(LastColumn, FormatMilliseconds(status.MaxBlockingUnitMilliseconds));
+        if (!string.IsNullOrEmpty(status.MaxBlockingUnit))
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled(status.MaxBlockingUnit);
+        }
+
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T(
+                "Page switch 高说明剩余成本在原版 SoundPage 构造；Worst unit 高说明某个文件系统/XML/排序单元仍超过帧预算。",
+                "A high page-switch value points to remaining vanilla SoundPage construction cost; a high worst-unit value points to an indivisible filesystem/XML/sort operation."));
     }
 
     private static void EnsureReadback()

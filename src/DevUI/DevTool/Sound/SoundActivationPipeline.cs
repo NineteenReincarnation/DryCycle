@@ -217,6 +217,17 @@ internal static class SoundActivationPipeline
 
     internal static double LastPageSwitchMilliseconds => lastPageSwitchMilliseconds;
 
+    internal static bool IsPrewarmed
+    {
+        get
+        {
+            string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+            return SoundFileNameCatalog.IsReady &&
+                   SoundSampleCatalog.IsReadyForNames(names) &&
+                   SoundGroupLibrary.IsReady;
+        }
+    }
+
     internal static void RecordPageSwitch(double milliseconds)
     {
         lastPageSwitchMilliseconds = Math.Max(0d, milliseconds);
