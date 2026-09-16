@@ -30,7 +30,13 @@ internal static class DevToolSubsystemCoordinator
         TriggerEditorCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
         if (PlayerMapActivityGate.ShouldProcess)
+        {
+            // WorldTopology commands are consumed by MapEditorCommandQueue above. Publish their
+            // resulting exact node-to-node graph before a Player Map Build/Render command uses it,
+            // so "edit connection + render" in one UI frame cannot see the previous topology.
+            MapEditorPresentationHub.Publish(session);
             PlayerMapCommandQueue.Process(session);
+        }
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
 
