@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Reflection;
 using AssetBundles;
 using RWCustom;
 using UnityEngine;
@@ -14,7 +15,22 @@ namespace DryCycle.Misc.SoundFormatSupport;
 /// </summary>
 internal static class SoundFormatSupportRuntime
 {
+    private delegate AudioClip OrigGetAudioClip(
+        SoundLoader self,
+        int i,
+        out AssetBundleLoadAssetOperation loadOp,
+        out string name);
+
+    private delegate AudioClip HookGetAudioClip(
+        OrigGetAudioClip orig,
+        SoundLoader self,
+        int i,
+        out AssetBundleLoadAssetOperation loadOp,
+        out string name);
+
+    private static readonly HookGetAudioClip GetAudioClipHookDelegate = SoundLoader_GetAudioClip;
     private static bool enabled;
+    private static IDisposable getAudioClipHook;
     private static readonly System.Collections.Generic.HashSet<int> customOverrideClipIds = new();
 
     internal static void Enable()
@@ -27,27 +43,76 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.AmbientImporter.loadFile += AmbientImporter_loadFile;
         On.SoundLoader.CheckIfFileExistsAsExternal += SoundLoader_CheckIfFileExistsAsExternal;
         On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
-        On.SoundLoader.GetAudioClip += SoundLoader_GetAudioClip;
         On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
 
-        enabled = true;
-        Plugin.Logger?.LogInfo("Sound format support enabled: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
+        try
+        {
+            getAudioClipHook = CreateGetAudioClipHook();
+            enabled = true;
+            Plugin.Logger?.LogInfo("Sound format support enabled: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
+        }
+        catch
+        {
+            RemoveOnHooks();
+            DisposeGetAudioClipHook();
+            throw;
+        }
     }
 
     internal static void Disable()
     {
-        if (!enabled) return;
+        if (!enabled && getAudioClipHook == null) return;
 
+        RemoveOnHooks();
+        DisposeGetAudioClipHook();
+        customOverrideClipIds.Clear();
+        enabled = false;
+    }
+
+    private static IDisposable CreateGetAudioClipHook()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo target = typeof(SoundLoader).GetMethod(
+            "GetAudioClip",
+            flags,
+            null,
+            new[]
+            {
+                typeof(int),
+                typeof(AssetBundleLoadAssetOperation).MakeByRefType(),
+                typeof(string).MakeByRefType()
+            },
+            null);
+        if (target == null)
+            throw new MissingMethodException("SoundLoader.GetAudioClip(int, out AssetBundleLoadAssetOperation, out string) was not found.");
+
+        Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
+        ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
+        if (constructor == null)
+            throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
+
+        IDisposable hook = constructor.Invoke(new object[] { target, GetAudioClipHookDelegate }) as IDisposable;
+        if (hook == null)
+            throw new InvalidOperationException("SoundLoader.GetAudioClip RuntimeDetour hook was not created.");
+        return hook;
+    }
+
+    private static void RemoveOnHooks()
+    {
         On.SoundLoader.RequestAmbientAudioClip -= SoundLoader_RequestAmbientAudioClip;
-        On.SoundLoader.GetAudioClip -= SoundLoader_GetAudioClip;
         On.SoundLoader.VariationsForSound -= SoundLoader_VariationsForSound;
         On.SoundLoader.CheckIfFileExistsAsExternal -= SoundLoader_CheckIfFileExistsAsExternal;
         On.SoundLoader.AmbientImporter.loadFile -= AmbientImporter_loadFile;
         On.SoundLoader.AmbientImporter.validFileType -= AmbientImporter_validFileType;
         On.SoundLoader.SoundImporter.loadFile -= SoundImporter_loadFile;
         On.SoundLoader.SoundImporter.validFileType -= SoundImporter_validFileType;
-        customOverrideClipIds.Clear();
-        enabled = false;
+    }
+
+    private static void DisposeGetAudioClipHook()
+    {
+        try { getAudioClipHook?.Dispose(); }
+        catch { }
+        getAudioClipHook = null;
     }
 
     private static bool SoundImporter_validFileType(
@@ -128,19 +193,20 @@ internal static class SoundFormatSupportRuntime
     }
 
     private static AudioClip SoundLoader_GetAudioClip(
-        On.SoundLoader.orig_GetAudioClip orig,
+        OrigGetAudioClip orig,
         SoundLoader self,
         int i,
-        AssetBundleLoadAssetOperation loadOp,
+        out AssetBundleLoadAssetOperation loadOp,
         out string name)
     {
-        // Match the actual HOOKS-Assembly-CSharp delegate metadata used by Rain World:
-        // loadOp is passed by value by HookGen here, while name remains an out parameter.
-        // Let vanilla (and every earlier hook in the chain) choose the variation and handle the
+        // GetAudioClip is detoured directly instead of going through HOOKS-Assembly-CSharp. Some
+        // Rain World HookGen builds expose incompatible delegate metadata for this two-out method,
+        // while RuntimeDetour can bind to the original Assembly-CSharp signature exactly.
+        // Let vanilla (and every earlier detour in the chain) choose the variation and handle the
         // AssetBundle/WAV/OGG paths first. We only replace the result when the chosen variation has
         // a higher-priority custom-format LoadedSoundEffects override. This preserves vanilla random
         // selection and avoids consuming Random twice.
-        AudioClip result = orig(self, i, loadOp, out name);
+        AudioClip result = orig(self, i, out loadOp, out name);
         if (result != null && customOverrideClipIds.Contains(result.GetInstanceID())) return result;
         if (self?.allAudio == null || i < 0 || i >= self.allAudio.Length) return result;
 
