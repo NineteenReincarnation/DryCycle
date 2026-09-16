@@ -3,6 +3,7 @@ using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -38,14 +39,26 @@ internal static class DevToolUserFacingCopyCleanup
     private delegate void OrigDrawPerformanceDiagnostics(Num.Vector2 display);
     private delegate void HookDrawPerformanceDiagnostics(OrigDrawPerformanceDiagnostics orig, Num.Vector2 display);
 
+    private delegate void OrigDrawSoundActivationShell(SoundActivationStatusSnapshot status);
+    private delegate void HookDrawSoundActivationShell(
+        OrigDrawSoundActivationShell orig,
+        SoundActivationStatusSnapshot status);
+
+    private delegate void OrigDrawSoundProjectionShell(int totalSamples);
+    private delegate void HookDrawSoundProjectionShell(OrigDrawSoundProjectionShell orig, int totalSamples);
+
     private static readonly HookMutedText MutedTextHookDelegate = MutedTextHook;
     private static readonly HookDrawInterfaceCard InterfaceCardHookDelegate = DrawInterfaceCardHook;
     private static readonly HookDrawPerformanceDiagnostics PerformanceDiagnosticsHookDelegate = DrawPerformanceDiagnosticsHook;
+    private static readonly HookDrawSoundActivationShell SoundActivationShellHookDelegate = DrawSoundActivationShellHook;
+    private static readonly HookDrawSoundProjectionShell SoundProjectionShellHookDelegate = DrawSoundProjectionShellHook;
 
     private static ManualLogSource log;
     private static IDisposable mutedTextHook;
     private static IDisposable interfaceCardHook;
     private static IDisposable performanceDiagnosticsHook;
+    private static IDisposable soundActivationShellHook;
+    private static IDisposable soundProjectionShellHook;
     private static FieldInfo lanceDebugPageField;
     private static FieldInfo worldMapToolbarHookField;
     private static bool enabled;
@@ -84,19 +97,37 @@ internal static class DevToolUserFacingCopyCleanup
                 null,
                 new[] { typeof(Num.Vector2) },
                 null);
+            MethodInfo drawSoundActivationShell = typeof(SoundLibraryGroupsView).GetMethod(
+                "DrawActivationShell",
+                allStatic,
+                null,
+                new[] { typeof(SoundActivationStatusSnapshot) },
+                null);
+            MethodInfo drawSoundProjectionShell = typeof(SoundLibraryGroupsView).GetMethod(
+                "DrawProjectionShell",
+                allStatic,
+                null,
+                new[] { typeof(int) },
+                null);
 
             lanceDebugPageField = typeof(DevToolOverlay).GetField("lanceDebugPage", allStatic);
             worldMapToolbarHookField = typeof(WorldMapGpuRuntime).GetField("toolbarHook", allStatic);
 
-            if (mutedText == null || drawInterfaceCard == null || drawPerformanceDiagnostics == null)
+            if (mutedText == null || drawInterfaceCard == null || drawPerformanceDiagnostics == null ||
+                drawSoundActivationShell == null || drawSoundProjectionShell == null)
                 throw new MissingMemberException("Normal-UI copy cleanup targets were not found.");
 
             mutedTextHook = constructor.Invoke(new object[] { mutedText, MutedTextHookDelegate }) as IDisposable;
             interfaceCardHook = constructor.Invoke(new object[] { drawInterfaceCard, InterfaceCardHookDelegate }) as IDisposable;
             performanceDiagnosticsHook = constructor.Invoke(
                 new object[] { drawPerformanceDiagnostics, PerformanceDiagnosticsHookDelegate }) as IDisposable;
+            soundActivationShellHook = constructor.Invoke(
+                new object[] { drawSoundActivationShell, SoundActivationShellHookDelegate }) as IDisposable;
+            soundProjectionShellHook = constructor.Invoke(
+                new object[] { drawSoundProjectionShell, SoundProjectionShellHookDelegate }) as IDisposable;
 
-            if (mutedTextHook == null || interfaceCardHook == null || performanceDiagnosticsHook == null)
+            if (mutedTextHook == null || interfaceCardHook == null || performanceDiagnosticsHook == null ||
+                soundActivationShellHook == null || soundProjectionShellHook == null)
                 throw new InvalidOperationException("Normal-UI copy cleanup hooks were not created.");
 
             enabled = true;
@@ -112,6 +143,8 @@ internal static class DevToolUserFacingCopyCleanup
 
     internal static void Disable()
     {
+        DisposeHook(ref soundProjectionShellHook);
+        DisposeHook(ref soundActivationShellHook);
         DisposeHook(ref performanceDiagnosticsHook);
         DisposeHook(ref interfaceCardHook);
         DisposeHook(ref mutedTextHook);
@@ -163,6 +196,68 @@ internal static class DevToolUserFacingCopyCleanup
     }
 
     /// <summary>
+    /// Normal Sound loading UI describes only what the editor is doing. Timing budgets and profiling
+    /// counters remain available to the dedicated performance/debug path, not the authoring panel.
+    /// </summary>
+    private static void DrawSoundActivationShellHook(
+        OrigDrawSoundActivationShell orig,
+        SoundActivationStatusSnapshot status)
+    {
+        if (!enabled || IsDebugWorkspace())
+        {
+            orig(status);
+            return;
+        }
+
+        DevToolWidgets.SectionHeader(
+            DevToolUiSettings.T("正在载入声音资源", "LOADING SOUND RESOURCES"),
+            1.22f);
+
+        string phaseText = status.Phase switch
+        {
+            SoundActivationPhase.DiscoveringFileNames =>
+                DevToolUiSettings.T("正在查找可用的环境声音文件…", "Finding available ambient sound files…"),
+            SoundActivationPhase.IndexingSamples =>
+                DevToolUiSettings.T("正在整理声音列表…", "Preparing the sound list…"),
+            SoundActivationPhase.LoadingGroups =>
+                DevToolUiSettings.T("正在载入音效组…", "Loading sound groups…"),
+            SoundActivationPhase.Failed =>
+                DevToolUiSettings.T("声音资源载入失败。请查看日志中的具体错误。", "Sound resources could not be loaded. Check the log for details."),
+            _ => DevToolUiSettings.T("正在准备声音编辑器…", "Preparing the Sound editor…")
+        };
+
+        ImGui.TextWrapped(phaseText);
+        float progress = Math.Max(0f, Math.Min(1f, status.Progress));
+        string overlay = Math.Round(progress * 100f) + "%";
+        ImGui.ProgressBar(progress, new Num.Vector2(-1f, 0f), overlay);
+
+        if (status.TotalSamples > 0)
+            ImGui.TextDisabled(DevToolUiSettings.T(
+                $"声音：{status.ProcessedSamples}/{status.TotalSamples}",
+                $"Sounds: {status.ProcessedSamples}/{status.TotalSamples}"));
+        if (status.TotalGroupFiles > 0)
+            ImGui.TextDisabled(DevToolUiSettings.T(
+                $"音效组：{status.ProcessedGroupFiles}/{status.TotalGroupFiles}",
+                $"Sound groups: {status.ProcessedGroupFiles}/{status.TotalGroupFiles}"));
+    }
+
+    private static void DrawSoundProjectionShellHook(OrigDrawSoundProjectionShell orig, int totalSamples)
+    {
+        if (!enabled || IsDebugWorkspace())
+        {
+            orig(totalSamples);
+            return;
+        }
+
+        DevToolWidgets.SectionHeader(
+            DevToolUiSettings.T("正在显示声音列表", "PREPARING SOUND LIST"),
+            1.22f);
+        ImGui.TextWrapped(DevToolUiSettings.T(
+            "正在整理当前声音列表…",
+            "Preparing the current sound list…"));
+    }
+
+    /// <summary>
     /// The Control Center is editor chrome. Keep normal UI/language choices here and move profiling
     /// out of this card entirely; diagnostics are not ordinary editing preferences.
     /// </summary>
@@ -211,10 +306,6 @@ internal static class DevToolUserFacingCopyCleanup
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
     }
 
-    /// <summary>
-    /// Do not spawn the profiling window from the always-visible Control Center. Dedicated debug
-    /// workspaces may still consume the monitor directly when diagnostics are explicitly requested.
-    /// </summary>
     private static void DrawPerformanceDiagnosticsHook(OrigDrawPerformanceDiagnostics orig, Num.Vector2 display)
     {
         // Intentionally empty outside the dedicated debug workflow.
@@ -232,7 +323,6 @@ internal static class DevToolUserFacingCopyCleanup
         if (string.IsNullOrWhiteSpace(text)) return false;
         string lower = text.ToLowerInvariant();
 
-        // Known normal-editor implementation/status strings.
         if (text.IndexOf("缓存内容立即显示", StringComparison.Ordinal) >= 0 ||
             text.IndexOf("后台增量刷新", StringComparison.Ordinal) >= 0 ||
             lower.Contains("cached content is immediate") ||
@@ -250,8 +340,6 @@ internal static class DevToolUserFacingCopyCleanup
             lower.Contains("generic devinterface protocols mirror"))
             return true;
 
-        // Prevent new implementation notes of the same class from leaking into ordinary muted-help
-        // copy. Actual Debug workspace copy is exempted by IsDebugWorkspace().
         return text.IndexOf("缓存", StringComparison.Ordinal) >= 0 ||
                text.IndexOf("增量", StringComparison.Ordinal) >= 0 ||
                text.IndexOf("后台刷新", StringComparison.Ordinal) >= 0 ||
