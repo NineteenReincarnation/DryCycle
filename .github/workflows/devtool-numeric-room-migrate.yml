@@ -1,0 +1,37 @@
+name: DevTool Numeric Room Migration
+
+on:
+  push:
+    paths:
+      - '.github/workflows/devtool-numeric-room-migrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply RoomSettings migration
+        run: python scripts/devtool-numeric-room-migrate.py
+      - name: Verify thin shared numeric usage
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'DevToolNumericWidgets.SliderFloat' src/DevUI/DevTool/RWImGui/RoomSettingsView.cs
+          grep -Fq 'DevToolNumericWidgets.InputInt' src/DevUI/DevTool/RWImGui/RoomSettingsView.cs
+          ! grep -Fq 'FinishFloatEdit' src/DevUI/DevTool/RWImGui/RoomSettingsView.cs
+          ! grep -Fq 'PendingFloatEdit' src/DevUI/DevTool/RWImGui/RoomSettingsView.cs
+      - name: Commit migration and remove bootstrap files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/devtool-numeric-room-migrate.py .github/workflows/devtool-numeric-room-migrate.yml
+          git add src/DevUI/DevTool/RWImGui/RoomSettingsView.cs
+          git commit -m 'DevTool: route RoomSettings numeric edits through shared widgets'
+          git push origin HEAD:main
