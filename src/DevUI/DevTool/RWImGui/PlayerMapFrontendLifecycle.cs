@@ -23,6 +23,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapMultiSelection.Enable(logger);
         PlayerMapGroupLayerControls.Enable(logger);
         PlayerMapGroupPlacementControls.Enable(logger);
+        PlayerMapGroupLayoutControls.Enable(logger);
         PlayerMapLayoutAssist.Enable(logger);
         PlayerMapLiveOverlapPreview.Enable(logger);
         PlayerMapPreflightPanel.Enable(logger);
@@ -44,6 +45,7 @@ internal static class PlayerMapFrontendLifecycle
         PlayerMapPreflightPanel.Disable();
         PlayerMapLiveOverlapPreview.Disable();
         PlayerMapLayoutAssist.Disable();
+        PlayerMapGroupLayoutControls.Disable();
         PlayerMapGroupPlacementControls.Disable();
         PlayerMapGroupLayerControls.Disable();
         PlayerMapMultiSelection.Disable();
