@@ -99,10 +99,14 @@ internal sealed class PlayerMapRenderOutcome
 /// Compatibility boundary only. The former all-at-once renderer has been deleted; all real Player
 /// Map rendering is owned by PlayerMapRenderScheduler. Reaching this method means scheduler command
 /// interception was unavailable, so fail closed without writing or previewing stale output.
+///
+/// This fallback intentionally remains callable without an Obsolete attribute: it is a runtime
+/// safety boundary used by the workspace when the scheduler hook is unavailable, not a supported
+/// rendering implementation. Keeping it warning-free avoids flagging the deliberate fail-closed
+/// compatibility call as if the removed synchronous renderer were still in use.
 /// </summary>
 internal static class PlayerMapRenderPipeline
 {
-    [Obsolete("Use PlayerMapRenderScheduler. The synchronous Player Map renderer was removed.")]
     internal static PlayerMapRenderOutcome Build(MapPage page, PlayerMapSessionState state, bool export) => new()
     {
         Report = PlayerMapRenderReport.Failure(
