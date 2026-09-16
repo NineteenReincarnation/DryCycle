@@ -96,7 +96,10 @@ internal static class PlayerMapPreflightPanel
         ImGui.TextUnformatted(state);
 
         DrawMetric("Rooms",
-            preflight.ReadyRooms + " ready / " + preflight.PendingRooms + " pending / " + preflight.FailedRooms + " failed");
+            preflight.ReadyRooms + " ready / " +
+            preflight.PendingRooms + " pending / " +
+            preflight.MissingRooms + " missing / " +
+            preflight.FailedRooms + " failed");
         DrawMetric("Pipes",
             preflight.ExactConnections + " exact / " + preflight.AmbiguousConnections + " unresolved");
         if (preflight.InvalidEndpoints > 0)
