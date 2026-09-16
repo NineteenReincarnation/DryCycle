@@ -93,7 +93,9 @@ internal static class MapViewPersistentCacheStore
     }
 
     private const int CacheMagic = 0x44434D56; // DCMV
-    private const int CacheVersion = 1;
+    // v2 drops geometry snapshots created before the retained-cache feedback-loop fix. File stamps
+    // cannot prove those raster runs are semantically valid, so a one-time rebuild is safer.
+    private const int CacheVersion = 2;
     private const long MaxCacheBytes = 256L * 1024L * 1024L;
     private const int MaxRooms = 4096;
     private const int MaxRectsPerRoom = 500000;
