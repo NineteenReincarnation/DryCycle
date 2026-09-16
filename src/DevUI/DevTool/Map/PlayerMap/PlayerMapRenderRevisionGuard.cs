@@ -8,13 +8,13 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 /// <summary>
-/// Extends incremental Render invalidation to edits outside the Player Map command surface. A
-/// derived Canon position depends on World Layout, so moving a room there must invalidate the same
-/// frozen render job. Room-bake revision changes are also treated as stale source data rather than
-/// allowing a render to finish against an older room file.
+/// Owns all stale-source invalidation for incremental Player Map Render jobs. A frozen render is
+/// cancelled if World Layout, exact topology, the static room bake, or authored RoomSettings terrain
+/// changes before commit. This guard never advances vanilla Map/Room update logic.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapIncrementalRenderPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(PlayerMapTerrainBakeBridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class PlayerMapRenderRevisionGuardPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.PlayerMap.RenderRevisionGuard";
@@ -38,8 +38,10 @@ internal static class PlayerMapRenderRevisionGuard
     private static IDisposable stepHook;
     private static ManualLogSource log;
     private static EditorSession renderSession;
+    private static string renderRegion = string.Empty;
     private static long mapRevision;
     private static int bakeRevision;
+    private static int terrainRevision;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -93,12 +95,22 @@ internal static class PlayerMapRenderRevisionGuard
         PlayerMapPresentationSnapshot snapshot,
         bool export)
     {
+        if (enabled && snapshot?.Available == true)
+        {
+            // Establish a complete terrain baseline before the frozen Render snapshot is accepted.
+            // Later budgeted audits can then distinguish a genuine change from merely observing an
+            // untouched room for the first time.
+            PlayerMapTerrainSemanticRevision.AuditAll(snapshot.RegionName, snapshot.Rooms);
+        }
+
         bool started = orig(session, page, snapshot, export);
         if (enabled && started)
         {
             renderSession = session;
+            renderRegion = snapshot?.RegionName ?? page?.world?.name ?? string.Empty;
             mapRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
             bakeRevision = RoomMapBakeCache.Revision;
+            terrainRevision = PlayerMapTerrainSemanticRevision.Revision;
         }
         return started;
     }
@@ -107,10 +119,21 @@ internal static class PlayerMapRenderRevisionGuard
     {
         if (enabled && PlayerMapRenderScheduler.IsRunning && ReferenceEquals(renderSession, session))
         {
+            PlayerMapPresentationSnapshot current = PlayerMapWorkspaceRuntime.GetPresentation(session);
+            if (current?.Available == true &&
+                string.Equals(current.RegionName ?? string.Empty, renderRegion, StringComparison.OrdinalIgnoreCase))
+            {
+                // Render keeps checking terrain even if the user switches away from Player Map while
+                // the job continues. The audit is bounded so background progress remains predictable.
+                PlayerMapTerrainSemanticRevision.Audit(renderRegion, current.Rooms, 24);
+            }
+
             long currentMapRevision = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
             if (currentMapRevision != mapRevision)
                 PlayerMapRenderScheduler.RequestCancel();
             else if (RoomMapBakeCache.Revision != bakeRevision)
+                PlayerMapRenderScheduler.RequestCancel();
+            else if (PlayerMapTerrainSemanticRevision.Revision != terrainRevision)
                 PlayerMapRenderScheduler.RequestCancel();
         }
 
@@ -122,8 +145,10 @@ internal static class PlayerMapRenderRevisionGuard
     private static void ClearObservedRender()
     {
         renderSession = null;
+        renderRegion = string.Empty;
         mapRevision = 0L;
         bakeRevision = 0;
+        terrainRevision = 0;
     }
 
     private static void Dispose(ref IDisposable hook)
