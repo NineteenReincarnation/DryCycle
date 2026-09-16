@@ -14,10 +14,9 @@ internal static class SoundSampleCatalog
     private enum BuildPhase
     {
         Idle = 0,
-        LooseAmbient = 1,
-        ModAmbient = 2,
-        Samples = 3,
-        Finalize = 4
+        ModAmbient = 1,
+        Samples = 2,
+        Finalize = 3
     }
 
     private static Dictionary<string, EditorSoundSampleSnapshot> samples =
@@ -62,9 +61,8 @@ internal static class SoundSampleCatalog
 
             return buildPhase switch
             {
-                BuildPhase.LooseAmbient => 0.03f,
-                BuildPhase.ModAmbient => 0.08f + 0.22f * ModProgress(),
-                BuildPhase.Samples => 0.30f + 0.67f * SampleProgress(),
+                BuildPhase.ModAmbient => 0.03f + 0.25f * ModProgress(),
+                BuildPhase.Samples => 0.28f + 0.69f * SampleProgress(),
                 BuildPhase.Finalize => 0.99f,
                 _ => 0f
             };
@@ -87,7 +85,7 @@ internal static class SoundSampleCatalog
 
     internal static void BeginRefresh(SoundPage page)
     {
-        if (page == null)
+        if (page == null || !SoundFileNameCatalog.IsReady)
             return;
 
         string[] names = page.fileNames ?? Array.Empty<string>();
@@ -105,7 +103,7 @@ internal static class SoundSampleCatalog
         requestedPage = page;
         requestedNames = names;
         buildingSamples = new Dictionary<string, EditorSoundSampleSnapshot>(StringComparer.OrdinalIgnoreCase);
-        buildingLooseAmbientFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        buildingLooseAmbientFiles = SoundFileNameCatalog.CurrentLooseAmbientFiles;
         buildingModAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
         buildingOfficialDlcAmbientOwners = new Dictionary<string, ModManager.Mod>(StringComparer.OrdinalIgnoreCase);
         buildSampleIndex = 0;
@@ -113,7 +111,7 @@ internal static class SoundSampleCatalog
         buildMod = null;
         buildModDirectories = Array.Empty<string>();
         buildModDirectoryIndex = 0;
-        buildPhase = BuildPhase.LooseAmbient;
+        buildPhase = BuildPhase.ModAmbient;
     }
 
     internal static bool IsReadyFor(SoundPage page)
@@ -135,19 +133,12 @@ internal static class SoundSampleCatalog
         {
             switch (buildPhase)
             {
-                case BuildPhase.LooseAmbient:
-                    BuildLooseAmbientIndex();
-                    buildPhase = BuildPhase.ModAmbient;
-                    break;
-
                 case BuildPhase.ModAmbient:
                     StepModAmbientIndex();
                     break;
-
                 case BuildPhase.Samples:
                     StepSampleResolution();
                     break;
-
                 case BuildPhase.Finalize:
                     PublishBuild();
                     break;
@@ -171,11 +162,7 @@ internal static class SoundSampleCatalog
         if (buildingSamples != null && buildingSamples.TryGetValue(sample, out known))
             return known;
 
-        // Presentation capture can ask for room-local samples while the global catalog is still
-        // warming. Do not let that read path perform filesystem/provenance work and recreate the
-        // exact first-click spike the activation pipeline is designed to remove. The completed
-        // catalog forces a full Sound presentation recapture, so this placeholder is temporary.
-        if (buildPhase != BuildPhase.Idle)
+        if (!SoundFileNameCatalog.IsReady || publishedNames == null || buildPhase != BuildPhase.Idle)
             return Missing(sample);
 
         EditorSoundSampleSnapshot resolved = ResolveCore(
@@ -212,25 +199,6 @@ internal static class SoundSampleCatalog
         buildMod = null;
         buildModDirectories = Array.Empty<string>();
         buildModDirectoryIndex = 0;
-    }
-
-    private static void BuildLooseAmbientIndex()
-    {
-        try
-        {
-            string[] loose = AssetManager.ListDirectory("soundeffects/ambient") ?? Array.Empty<string>();
-            for (int i = 0; i < loose.Length; i++)
-            {
-                string path = loose[i];
-                string key = SampleKey(path);
-                if (string.IsNullOrEmpty(key) || buildingLooseAmbientFiles.ContainsKey(key)) continue;
-                buildingLooseAmbientFiles[key] = path;
-            }
-        }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool sound ambient index failed: " + error.Message);
-        }
     }
 
     private static void StepModAmbientIndex()
@@ -287,14 +255,8 @@ internal static class SoundSampleCatalog
     private static void AddRoot(HashSet<string> roots, string root)
     {
         if (string.IsNullOrWhiteSpace(root)) return;
-        try
-        {
-            roots.Add(Path.GetFullPath(root));
-        }
-        catch
-        {
-            roots.Add(root);
-        }
+        try { roots.Add(Path.GetFullPath(root)); }
+        catch { roots.Add(root); }
     }
 
     private static void IndexAmbientDirectory(
@@ -388,10 +350,8 @@ internal static class SoundSampleCatalog
         {
             if (TryIdentifyMod(resolved, owners, out ModManager.Mod mod))
                 return FromMod(sample, mod);
-
             if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
-
             return Vanilla(sample);
         }
 
@@ -399,7 +359,6 @@ internal static class SoundSampleCatalog
         {
             if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc))
                 return FromMod(sample, officialDlc);
-
             return Vanilla(sample);
         }
 
@@ -520,14 +479,8 @@ internal static class SoundSampleCatalog
     private static string SampleKey(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-        try
-        {
-            return Path.GetFileName(value.Trim()) ?? string.Empty;
-        }
-        catch
-        {
-            return value.Trim();
-        }
+        try { return Path.GetFileName(value.Trim()) ?? string.Empty; }
+        catch { return value.Trim(); }
     }
 
     private static bool IsOfficialDlc(string id) =>
@@ -554,10 +507,7 @@ internal static class SoundSampleCatalog
                          Path.DirectorySeparatorChar;
             return file.StartsWith(dir, StringComparison.OrdinalIgnoreCase);
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
     private static string SafeModName(ModManager.Mod mod)
@@ -568,9 +518,7 @@ internal static class SoundSampleCatalog
             string localized = mod.LocalizedName;
             if (!string.IsNullOrWhiteSpace(localized)) return localized;
         }
-        catch
-        {
-        }
+        catch { }
 
         if (!string.IsNullOrWhiteSpace(mod.name)) return mod.name;
         if (!string.IsNullOrWhiteSpace(mod.id)) return mod.id;
