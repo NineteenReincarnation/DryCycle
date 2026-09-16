@@ -120,24 +120,28 @@ internal static class SoundActivationPipeline
             !EditorUiModeState.UseVanilla &&
             !session.LegacyUiVisible;
 
-        // Start the exact file-name discovery before Sound is clicked. This is deliberately tiny
-        // background-on-the-main-thread work, not a worker thread: one filesystem iterator step at a
-        // time, with the same runtime/thread-safety assumptions as vanilla AssetManager.
-        if (rebuiltFrontendOwnsPresentation)
+        // Prewarm the complete cold-start dependency chain before Sound is clicked. Work stays on
+        // the Rain World thread and shares one tiny frame budget across filename discovery, sample
+        // metadata/provenance and group parsing. A normal first click should therefore be a warm hit.
+        if (rebuiltFrontendOwnsPresentation &&
+            (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage))
         {
-            SoundFileNameCatalog.EnsureStarted();
-            if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage)
-            {
-                SoundFileNameCatalog.Step(PrewarmFrameBudgetMilliseconds);
-                return;
-            }
+            StepPrewarm();
+            return;
         }
 
         if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage page)
             return;
 
         if (!ReferenceEquals(requestedPage, page))
+        {
             BeginActivation(page);
+            if (phase == SoundActivationPhase.Ready)
+            {
+                CompleteActivation(session);
+                return;
+            }
+        }
 
         if (phase == SoundActivationPhase.Ready && !SoundGroupLibrary.IsReady)
         {
@@ -227,9 +231,6 @@ internal static class SoundActivationPipeline
     {
         requestedPage = page;
         requestedNames = null;
-        phase = SoundFileNameCatalog.IsReady
-            ? SoundActivationPhase.IndexingSamples
-            : SoundActivationPhase.DiscoveringFileNames;
         activationStartedTimestamp = Stopwatch.GetTimestamp();
         lastFrameWorkMilliseconds = 0d;
         maxFrameWorkMilliseconds = 0d;
@@ -237,11 +238,50 @@ internal static class SoundActivationPipeline
         detail = "Preparing Sound workspace";
 
         SoundFileNameCatalog.EnsureStarted();
-        SoundGroupLibrary.BeginReload(force: true);
         if (SoundFileNameCatalog.IsReady)
         {
             PublishFileNamesToPage(page);
             SoundSampleCatalog.BeginRefresh(page);
+        }
+
+        if (!SoundGroupLibrary.IsReady)
+            SoundGroupLibrary.EnsureLoaded();
+
+        phase = !SoundFileNameCatalog.IsReady
+            ? SoundActivationPhase.DiscoveringFileNames
+            : !SoundSampleCatalog.IsReadyFor(page)
+                ? SoundActivationPhase.IndexingSamples
+                : !SoundGroupLibrary.IsReady
+                    ? SoundActivationPhase.LoadingGroups
+                    : SoundActivationPhase.Ready;
+    }
+
+    private static void StepPrewarm()
+    {
+        long frameStarted = Stopwatch.GetTimestamp();
+        double remaining = PrewarmFrameBudgetMilliseconds;
+
+        SoundFileNameCatalog.EnsureStarted();
+        if (!SoundFileNameCatalog.IsReady)
+        {
+            SoundFileNameCatalog.Step(remaining);
+            remaining = Math.Max(0d, PrewarmFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
+            if (!SoundFileNameCatalog.IsReady || remaining <= 0d) return;
+        }
+
+        string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+        if (!SoundSampleCatalog.IsReadyForNames(names))
+        {
+            SoundSampleCatalog.BeginPrewarm();
+            SoundSampleCatalog.StepRefresh(remaining);
+            remaining = Math.Max(0d, PrewarmFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
+            if (!SoundSampleCatalog.IsReadyForNames(names) || remaining <= 0d) return;
+        }
+
+        if (!SoundGroupLibrary.IsReady)
+        {
+            SoundGroupLibrary.EnsureLoaded();
+            SoundGroupLibrary.StepReload(remaining);
         }
     }
 
