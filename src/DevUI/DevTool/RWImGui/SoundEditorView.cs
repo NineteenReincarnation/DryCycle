@@ -48,8 +48,6 @@ internal static class SoundEditorView
         internal string NormalLabel = string.Empty;
     }
 
-    private static readonly Dictionary<string, float> RoomFloatEdits = new(StringComparer.Ordinal);
-    private static readonly Dictionary<SoundEditKey, float> SoundFloatEdits = new();
     private static readonly Dictionary<SoundEditKey, Num.Vector2> SoundVectorEdits = new();
     private static readonly List<SoundSceneRow> SceneRows = new();
 
@@ -226,8 +224,6 @@ internal static class SoundEditorView
 
     internal static void ResetRetainedState()
     {
-        RoomFloatEdits.Clear();
-        SoundFloatEdits.Clear();
         SoundVectorEdits.Clear();
         SceneRows.Clear();
         projectedSceneSounds = null;
@@ -551,47 +547,39 @@ internal static class SoundEditorView
 
     private static void DrawRoomFloat(string key, string label, float current, float min, float max)
     {
-        float value = Get(RoomFloatEdits, key, current);
         ImGui.PushID("SoundRoom");
         ImGui.PushID(key);
-        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.SoundRoom, key, label, current, min, max);
         ImGui.PopID();
         ImGui.PopID();
-        RoomFloatEdits[key] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
+        if (edit.Committed)
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
                 SoundEditorCommandKind.SetRoomValue,
                 key: key,
-                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            RoomFloatEdits[key] = current;
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: edit.Value)));
         }
     }
 
     private static void DrawSoundFloat(EditorSoundSnapshot sound, string key, string label, float current, float min, float max)
     {
-        SoundEditKey stateKey = new(sound.Index, key);
-        float value = Get(SoundFloatEdits, stateKey, current);
+        if (sound.Inherited)
+            DevToolNumericWidgets.Discard(DevToolNumericScope.SoundItem, key, sound.Index);
+
         ImGui.PushID(sound.Index);
         ImGui.PushID(key);
-        bool changed = ImGui.SliderFloat(label, ref value, min, max, "%.3f");
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.SoundItem, key, label, current, min, max, instance: sound.Index);
         ImGui.PopID();
         ImGui.PopID();
-        SoundFloatEdits[stateKey] = value;
-        if (!sound.Inherited && ImGui.IsItemDeactivatedAfterEdit())
+        if (!sound.Inherited && edit.Committed)
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
                 SoundEditorCommandKind.SetSoundValue,
                 index: sound.Index,
                 key: key,
-                value: new EditorPropertyValue(EditorPropertyKind.Float, x: value)));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            SoundFloatEdits[stateKey] = current;
+                value: new EditorPropertyValue(EditorPropertyKind.Float, x: edit.Value)));
         }
     }
 

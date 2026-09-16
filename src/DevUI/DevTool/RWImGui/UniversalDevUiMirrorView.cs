@@ -13,7 +13,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class UniversalDevUiMirrorView
 {
-    private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> StringEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> Vector2Edits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector4> ColorEdits = new(StringComparer.Ordinal);
@@ -23,7 +22,6 @@ internal static class UniversalDevUiMirrorView
 
     internal static void ResetRetainedState()
     {
-        FloatEdits.Clear();
         StringEdits.Clear();
         Vector2Edits.Clear();
         ColorEdits.Clear();
@@ -175,16 +173,16 @@ internal static class UniversalDevUiMirrorView
 
     private static void DrawSlider(LegacyControlSnapshot control, string stateKey, string label)
     {
-        float value = Get(FloatEdits, stateKey, control.Factor);
-        bool changed = ImGui.SliderFloat(label + "##UniversalSlider_" + stateKey, ref value, 0f, 1f, "%.3f");
-        bool active = ImGui.IsItemActive();
-        bool commit = ImGui.IsItemDeactivatedAfterEdit();
-        FloatEdits[stateKey] = value;
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.Universal,
+            stateKey,
+            label + "##UniversalSlider_" + stateKey,
+            control.Factor,
+            0f,
+            1f);
 
-        if (commit)
-            Send(new UniversalDevUiCommand(UniversalDevUiCommandKind.SetSlider, control.Path, x: value));
-        else if (!changed && !active)
-            FloatEdits[stateKey] = control.Factor;
+        if (edit.Committed)
+            Send(new UniversalDevUiCommand(UniversalDevUiCommandKind.SetSlider, control.Path, x: edit.Value));
 
         if (!string.IsNullOrWhiteSpace(control.ValueText))
         {
@@ -199,7 +197,10 @@ internal static class UniversalDevUiMirrorView
                     DevToolUiSettings.T("继承", "Reset"),
                     "UniversalSliderReset_" + stateKey,
                     DevToolButtonTone.Subtle))
+            {
+                DevToolNumericWidgets.Discard(DevToolNumericScope.Universal, stateKey);
                 Send(new UniversalDevUiCommand(UniversalDevUiCommandKind.ResetSlider, control.Path));
+            }
         }
     }
 

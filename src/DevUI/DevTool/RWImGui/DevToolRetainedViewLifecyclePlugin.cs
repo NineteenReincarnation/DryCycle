@@ -71,6 +71,7 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
 
     private static void ReleaseRetainedState()
     {
+        DevToolNumericWidgets.Reset();
         DevToolOverlay.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
         SceneWorkspaceWindow.ResetRetainedState();

@@ -44,12 +44,9 @@ internal static class ObjectInspectorView
         internal string ColorLabel;
     }
 
-    private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> StringEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> Vector2Edits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector4> ColorEdits = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, float> LegacySliderEdits = new(StringComparer.Ordinal);
     private static readonly HashSet<string> MixedKeyScratch = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType = new(StringComparer.Ordinal);
 
@@ -179,18 +176,29 @@ internal static class ObjectInspectorView
             ? DevToolUiSettings.T("变换 · 组锚点", "TRANSFORM · GROUP ANCHOR")
             : DevToolUiSettings.T("变换", "TRANSFORM"));
 
-        if (!ImGui.IsAnyItemActive())
-            SynchronizePosition(inspector);
+        ImGui.SetNextItemWidth(-1f);
+        DevToolNumericEditResult<float> xEdit = DevToolNumericWidgets.InputFloat(
+            DevToolNumericScope.ObjectTransform,
+            "x",
+            "X##DevToolPosX",
+            inspector.X,
+            1f,
+            "%.1f",
+            inspector.ObjectIndex);
+        positionX = xEdit.Value;
 
         ImGui.SetNextItemWidth(-1f);
-        ImGui.InputFloat("X##DevToolPosX", ref positionX, 1f, 20f, "%.1f");
-        bool xCommit = ImGui.IsItemDeactivatedAfterEdit();
+        DevToolNumericEditResult<float> yEdit = DevToolNumericWidgets.InputFloat(
+            DevToolNumericScope.ObjectTransform,
+            "y",
+            "Y##DevToolPosY",
+            inspector.Y,
+            1f,
+            "%.1f",
+            inspector.ObjectIndex);
+        positionY = yEdit.Value;
 
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputFloat("Y##DevToolPosY", ref positionY, 1f, 20f, "%.1f");
-        bool yCommit = ImGui.IsItemDeactivatedAfterEdit();
-
-        if (xCommit || yCommit)
+        if (xEdit.Committed || yEdit.Committed)
             SendPosition(inspector);
     }
 
@@ -249,29 +257,29 @@ internal static class ObjectInspectorView
 
             case EditorPropertyKind.Float:
             {
-                float value = Get(FloatEdits, stateKey, property.X);
-                bool changed = property.HasRange
-                    ? ImGui.SliderFloat(label, ref value, property.Min, property.Max, "%.3f")
-                    : ImGui.InputFloat(label, ref value, property.Step <= 0f ? 0.1f : property.Step, 0f, "%.3f");
-                FloatEdits[stateKey] = value;
-                if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
-                else if (!changed && !ImGui.IsItemActive())
-                    FloatEdits[stateKey] = property.X;
+                DevToolNumericEditResult<float> edit = property.HasRange
+                    ? DevToolNumericWidgets.SliderFloat(
+                        DevToolNumericScope.ObjectProperty, stateKey, label, property.X, property.Min, property.Max,
+                        instance: inspector.ObjectIndex)
+                    : DevToolNumericWidgets.InputFloat(
+                        DevToolNumericScope.ObjectProperty, stateKey, label, property.X,
+                        property.Step <= 0f ? 0.1f : property.Step, "%.3f", inspector.ObjectIndex);
+                if (edit.Committed)
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Float, x: edit.Value));
                 break;
             }
 
             case EditorPropertyKind.Integer:
             {
-                int value = Get(IntEdits, stateKey, property.IntegerValue);
-                bool changed = property.HasRange
-                    ? ImGui.SliderInt(label, ref value, (int)property.Min, (int)property.Max)
-                    : ImGui.InputInt(label, ref value, Math.Max(1, (int)property.Step));
-                IntEdits[stateKey] = value;
-                if (ImGui.IsItemDeactivatedAfterEdit())
-                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
-                else if (!changed && !ImGui.IsItemActive())
-                    IntEdits[stateKey] = property.IntegerValue;
+                DevToolNumericEditResult<int> edit = property.HasRange
+                    ? DevToolNumericWidgets.SliderInt(
+                        DevToolNumericScope.ObjectProperty, stateKey, label, property.IntegerValue,
+                        (int)property.Min, (int)property.Max, instance: inspector.ObjectIndex)
+                    : DevToolNumericWidgets.InputInt(
+                        DevToolNumericScope.ObjectProperty, stateKey, label, property.IntegerValue,
+                        Math.Max(1, (int)property.Step), instance: inspector.ObjectIndex);
+                if (edit.Committed)
+                    SendProperty(inspector, property.Key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: edit.Value));
                 break;
             }
 
@@ -471,20 +479,21 @@ internal static class ObjectInspectorView
     private static void DrawLegacySlider(EditorInspectorSnapshot inspector, LegacyBinding binding)
     {
         LegacyControlSnapshot control = binding.Control;
-        float factor = Get(LegacySliderEdits, binding.StateKey, control.Factor);
-        bool changed = ImGui.SliderFloat(binding.SliderLabel, ref factor, 0f, 1f, "%.3f");
-        LegacySliderEdits[binding.StateKey] = factor;
-        if (ImGui.IsItemDeactivatedAfterEdit())
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.ObjectLegacy,
+            binding.StateKey,
+            binding.SliderLabel,
+            control.Factor,
+            0f,
+            1f,
+            instance: inspector.ObjectIndex);
+        if (edit.Committed)
         {
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.SetLegacySlider,
                 inspector.ObjectIndex,
                 text: control.Path,
-                x: factor));
-        }
-        else if (!changed && !ImGui.IsItemActive())
-        {
-            LegacySliderEdits[binding.StateKey] = control.Factor;
+                x: edit.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(control.ValueText))
@@ -500,10 +509,13 @@ internal static class ObjectInspectorView
                     DevToolUiSettings.T("重置", "Reset"),
                     binding.ResetId,
                     DevToolButtonTone.Subtle))
+            {
+                DevToolNumericWidgets.Discard(DevToolNumericScope.ObjectLegacy, binding.StateKey, inspector.ObjectIndex);
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.ResetLegacySlider,
                     inspector.ObjectIndex,
                     text: control.Path));
+            }
         }
     }
 
@@ -882,12 +894,9 @@ internal static class ObjectInspectorView
         selectionCount = nextSelectionCount;
         positionX = x;
         positionY = y;
-        FloatEdits.Clear();
-        IntEdits.Clear();
         StringEdits.Clear();
         Vector2Edits.Clear();
         ColorEdits.Clear();
-        LegacySliderEdits.Clear();
     }
 
     private static TValue Get<TValue>(Dictionary<string, TValue> dictionary, string key, TValue fallback)

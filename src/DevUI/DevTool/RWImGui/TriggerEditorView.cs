@@ -54,8 +54,6 @@ internal static class TriggerEditorView
         internal string OptionalLabel;
     }
 
-    private static readonly Dictionary<string, int> IntEdits = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, float> FloatEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> VectorEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> StringEdits = new(StringComparer.Ordinal);
     private static readonly Dictionary<EditBindingKey, EditBinding> EditBindings = new();
@@ -88,8 +86,6 @@ internal static class TriggerEditorView
 
     internal static void ResetRetainedState()
     {
-        IntEdits.Clear();
-        FloatEdits.Clear();
         VectorEdits.Clear();
         StringEdits.Clear();
         EditBindings.Clear();
@@ -536,26 +532,31 @@ internal static class TriggerEditorView
     private static void DrawInt(EditorTriggerSnapshot trigger, string key, string label, int current, int min, int max)
     {
         EditBinding binding = GetBinding(trigger.Index, key, label, eventField: false);
-        int value = Get(IntEdits, binding.StateKey, current);
-        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
-        value = Math.Max(min, Math.Min(max, value));
-        IntEdits[binding.StateKey] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
-        else if (!changed && !ImGui.IsItemActive())
-            IntEdits[binding.StateKey] = current;
+        DevToolNumericEditResult<int> edit = DevToolNumericWidgets.InputInt(
+            DevToolNumericScope.Trigger,
+            binding.StateKey,
+            binding.WidgetLabel,
+            current,
+            instance: trigger.Index,
+            min: min,
+            max: max);
+        if (edit.Committed)
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: edit.Value));
     }
 
     private static void DrawFloat(EditorTriggerSnapshot trigger, string key, string label, float current, float min, float max)
     {
         EditBinding binding = GetBinding(trigger.Index, key, label, eventField: false);
-        float value = Get(FloatEdits, binding.StateKey, current);
-        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f");
-        FloatEdits[binding.StateKey] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
-        else if (!changed && !ImGui.IsItemActive())
-            FloatEdits[binding.StateKey] = current;
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.Trigger,
+            binding.StateKey,
+            binding.WidgetLabel,
+            current,
+            min,
+            max,
+            instance: trigger.Index);
+        if (edit.Committed)
+            SendValue(trigger.Index, key, new EditorPropertyValue(EditorPropertyKind.Float, x: edit.Value));
     }
 
     private static void DrawVector(EditorTriggerSnapshot trigger, string key, string label, float x, float y)
@@ -586,26 +587,31 @@ internal static class TriggerEditorView
     private static void DrawEventFloat(int triggerIndex, string key, string label, float current, float min, float max)
     {
         EditBinding binding = GetBinding(triggerIndex, key, label, eventField: true);
-        float value = Get(FloatEdits, binding.StateKey, current);
-        bool changed = ImGui.SliderFloat(binding.WidgetLabel, ref value, min, max, "%.3f");
-        FloatEdits[binding.StateKey] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Float, x: value));
-        else if (!changed && !ImGui.IsItemActive())
-            FloatEdits[binding.StateKey] = current;
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
+            DevToolNumericScope.Trigger,
+            binding.StateKey,
+            binding.WidgetLabel,
+            current,
+            min,
+            max,
+            instance: triggerIndex);
+        if (edit.Committed)
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Float, x: edit.Value));
     }
 
     private static void DrawEventInt(int triggerIndex, string key, string label, int current, int min, int max)
     {
         EditBinding binding = GetBinding(triggerIndex, key, label, eventField: true);
-        int value = Get(IntEdits, binding.StateKey, current);
-        bool changed = ImGui.InputInt(binding.WidgetLabel, ref value);
-        value = Math.Max(min, Math.Min(max, value));
-        IntEdits[binding.StateKey] = value;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: value));
-        else if (!changed && !ImGui.IsItemActive())
-            IntEdits[binding.StateKey] = current;
+        DevToolNumericEditResult<int> edit = DevToolNumericWidgets.InputInt(
+            DevToolNumericScope.Trigger,
+            binding.StateKey,
+            binding.WidgetLabel,
+            current,
+            instance: triggerIndex,
+            min: min,
+            max: max);
+        if (edit.Committed)
+            SendEventValue(triggerIndex, key, new EditorPropertyValue(EditorPropertyKind.Integer, integer: edit.Value));
     }
 
     private static void DrawOptionalEventInt(
