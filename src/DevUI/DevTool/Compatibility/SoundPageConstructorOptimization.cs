@@ -122,6 +122,8 @@ internal static class SoundPageConstructorOptimization
             catch { return Array.Empty<FileInfo>(); }
         }
 
+        // The complete filename set is supplied by the second patched call below. Keeping this first
+        // source empty avoids duplicating entries while still skipping DirectoryInfo.GetFiles.
         SoundFileNameCatalog.EnsureStarted();
         return Array.Empty<FileInfo>();
     }
@@ -151,6 +153,13 @@ internal static class SoundPageConstructorOptimization
         return SoundFileNameCatalog.ConstructorNamesOrEmpty();
     }
 
-    private static bool UseOptimizedConstructor() =>
-        enabled && EditorInputRouter.FrontendAttached && !EditorUiModeState.UseVanilla;
+    private static bool UseOptimizedConstructor()
+    {
+        EditorSession session = DevToolRuntime.ActiveSession;
+        return enabled &&
+               EditorInputRouter.FrontendAttached &&
+               !EditorUiModeState.UseVanilla &&
+               session != null &&
+               session.LegacyUiVisible == false;
+    }
 }
