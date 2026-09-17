@@ -48,11 +48,12 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
         ObjectInspectorView.Draw(snapshot.Inspector);
 
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
-        SceneWorkspaceWindow.DrawObjectSceneContent(snapshot);
+        ObjectSceneWorkspaceView.Draw(snapshot);
 
     protected override void OnReset()
     {
         ObjectExplorerView.ResetRetainedState();
+        ObjectSceneWorkspaceView.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
     }
 }
