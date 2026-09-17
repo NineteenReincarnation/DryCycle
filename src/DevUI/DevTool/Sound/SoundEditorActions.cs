@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
-using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
@@ -63,7 +62,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
 
-        SynchronizeNativeMutation(session, collectionChanged: true);
+        NativeSoundRuntimeReconciler.Reconcile(session);
         SoundEditorStateHub.Get(session)?.SetSelectedIndex(selectedIndex);
         return created != null;
     }
@@ -112,8 +111,8 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
-        SynchronizeNativeMutation(session, collectionChanged: true);
         session.History.Push(entry);
+        NativeSoundRuntimeReconciler.Reconcile(session);
 
         SoundEditorState state = SoundEditorStateHub.Get(session);
         if (state != null)
@@ -337,8 +336,8 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
-        SynchronizeNativeMutation(session, collectionChanged: true);
         session.History.Push(entry);
+        NativeSoundRuntimeReconciler.Reconcile(session);
         SoundEditorStateHub.Get(session)?.SetSelectedIndex(lastIndex);
         return true;
     }
@@ -455,8 +454,7 @@ internal static class SoundEditorActions
         EditorSession session,
         AmbientSound target,
         string label,
-        Func<bool> mutation,
-        bool syncLegacyPresentation = true)
+        Func<bool> mutation)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null || target == null || mutation == null) return false;
@@ -468,8 +466,6 @@ internal static class SoundEditorActions
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
-        if (syncLegacyPresentation)
-            SynchronizeNativeMutation(session, collectionChanged: false);
         session.History.Push(entry);
         return true;
     }
@@ -488,16 +484,8 @@ internal static class SoundEditorActions
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
-        SynchronizeNativeMutation(session, collectionChanged: false);
         session.History.Push(entry);
         return true;
-    }
-
-    private static void SynchronizeNativeMutation(EditorSession session, bool collectionChanged)
-    {
-        NativeLegacyPresentationInvalidation.InvalidateCurrentSoundOrTriggerPage(session);
-        if (collectionChanged)
-            NativeSoundRuntimeReconciler.Reconcile(session);
     }
 
     private static bool TryGetSound(EditorSession session, int index, out AmbientSound sound)
