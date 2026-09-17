@@ -73,6 +73,23 @@ internal static class ScenePlacementWindow
         ImGui.End();
     }
 
+    internal static void ResetRetainedState()
+    {
+        projectionValid = false;
+        projectedChinese = false;
+        projectedScale = 0f;
+        projectedDisplay = default;
+        projectedFontScale = 0f;
+        projectedPosition = default;
+        projectedSize = default;
+        projectedMinSize = default;
+        projectedMaxSize = default;
+        projectedTitle = string.Empty;
+        projectedCaption = string.Empty;
+        projectedLeft = string.Empty;
+        projectedCenter = string.Empty;
+    }
+
     private static void EnsureProjection(Num.Vector2 display)
     {
         float scale = Math.Max(0.80f, Math.Min(2.2f, DevToolUiSettings.UiScale));
