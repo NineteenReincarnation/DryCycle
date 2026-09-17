@@ -84,10 +84,25 @@ internal static class NativeAuthoringFactoryRegistry
         out PlacedObject created)
     {
         created = null;
-        return type != null && TryInvoke(
-            PlacedObjects,
-            Normalize(type.value),
-            factory => factory(session, type, worldPosition, out created));
+        if (type == null || !PlacedObjects.TryGetValue(Normalize(type.value), out List<Entry<PlacedObjectFactory>> entries))
+            return false;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            try
+            {
+                if (entries[i].Factory(session, type, worldPosition, out PlacedObject candidate) && candidate != null)
+                {
+                    created = candidate;
+                    return true;
+                }
+            }
+            catch (Exception error)
+            {
+                LogProviderFailure("placed object", type.value, error);
+            }
+        }
+        return false;
     }
 
     internal static bool TryCreateSound(
@@ -97,10 +112,25 @@ internal static class NativeAuthoringFactoryRegistry
         out AmbientSound created)
     {
         created = null;
-        return TryInvoke(
-            Sounds,
-            soundType,
-            factory => factory(session, sample, soundType, out created));
+        if (!Sounds.TryGetValue(soundType, out List<Entry<SoundFactory>> entries))
+            return false;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            try
+            {
+                if (entries[i].Factory(session, sample, soundType, out AmbientSound candidate) && candidate != null)
+                {
+                    created = candidate;
+                    return true;
+                }
+            }
+            catch (Exception error)
+            {
+                LogProviderFailure("sound", soundType.ToString(), error);
+            }
+        }
+        return false;
     }
 
     internal static bool TryCreateTrigger(
@@ -109,10 +139,25 @@ internal static class NativeAuthoringFactoryRegistry
         out EventTrigger created)
     {
         created = null;
-        return type != null && TryInvoke(
-            Triggers,
-            Normalize(type.value),
-            factory => factory(session, type, out created));
+        if (type == null || !Triggers.TryGetValue(Normalize(type.value), out List<Entry<TriggerFactory>> entries))
+            return false;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            try
+            {
+                if (entries[i].Factory(session, type, out EventTrigger candidate) && candidate != null)
+                {
+                    created = candidate;
+                    return true;
+                }
+            }
+            catch (Exception error)
+            {
+                LogProviderFailure("trigger", type.value, error);
+            }
+        }
+        return false;
     }
 
     internal static bool TryCreateTriggeredEvent(
@@ -122,10 +167,25 @@ internal static class NativeAuthoringFactoryRegistry
         out TriggeredEvent created)
     {
         created = null;
-        return type != null && TryInvoke(
-            TriggeredEvents,
-            Normalize(type.value),
-            factory => factory(session, owner, type, out created));
+        if (type == null || !TriggeredEvents.TryGetValue(Normalize(type.value), out List<Entry<TriggeredEventFactory>> entries))
+            return false;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            try
+            {
+                if (entries[i].Factory(session, owner, type, out TriggeredEvent candidate) && candidate != null)
+                {
+                    created = candidate;
+                    return true;
+                }
+            }
+            catch (Exception error)
+            {
+                LogProviderFailure("triggered event", type.value, error);
+            }
+        }
+        return false;
     }
 
     internal static bool TryCreateRoomEffect(
@@ -134,17 +194,25 @@ internal static class NativeAuthoringFactoryRegistry
         out RoomSettings.RoomEffect created)
     {
         created = null;
-        return type != null && TryInvoke(
-            RoomEffects,
-            Normalize(type.value),
-            factory => factory(session, type, out created));
-    }
+        if (type == null || !RoomEffects.TryGetValue(Normalize(type.value), out List<Entry<RoomEffectFactory>> entries))
+            return false;
 
-    internal static void ResetRuntimeState()
-    {
-        // Registrations describe process/mod lifetime capabilities rather than an editor session.
-        // Do not clear them during DevUI close/reopen. This method only exists as an explicit marker
-        // so runtime reset code never starts treating provider ownership as session state.
+        for (int i = 0; i < entries.Count; i++)
+        {
+            try
+            {
+                if (entries[i].Factory(session, type, out RoomSettings.RoomEffect candidate) && candidate != null)
+                {
+                    created = candidate;
+                    return true;
+                }
+            }
+            catch (Exception error)
+            {
+                LogProviderFailure("room effect", type.value, error);
+            }
+        }
+        return false;
     }
 
     private static IDisposable Register<TKey, TFactory>(
@@ -177,31 +245,6 @@ internal static class NativeAuthoringFactoryRegistry
         });
     }
 
-    private static bool TryInvoke<TKey, TFactory>(
-        Dictionary<TKey, List<Entry<TFactory>>> table,
-        TKey key,
-        Func<TFactory, bool> invoke)
-        where TFactory : Delegate
-    {
-        if (!table.TryGetValue(key, out List<Entry<TFactory>> entries) || entries.Count == 0)
-            return false;
-
-        // Providers are isolated: one broken optional registration must not block lower-priority
-        // providers or force the whole editor into legacy mode.
-        for (int i = 0; i < entries.Count; i++)
-        {
-            try
-            {
-                if (invoke(entries[i].Factory)) return true;
-            }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning("DevTool native authoring provider failed: " + error.Message);
-            }
-        }
-        return false;
-    }
-
     private static int CompareEntries<TFactory>(Entry<TFactory> a, Entry<TFactory> b)
         where TFactory : Delegate
     {
@@ -210,6 +253,10 @@ internal static class NativeAuthoringFactoryRegistry
     }
 
     private static string Normalize(string value) => value?.Trim() ?? string.Empty;
+
+    private static void LogProviderFailure(string kind, string id, Exception error) =>
+        Plugin.Logger?.LogWarning(
+            "DevTool native " + kind + " provider failed for '" + (id ?? string.Empty) + "': " + error.Message);
 
     private sealed class Registration : IDisposable
     {
