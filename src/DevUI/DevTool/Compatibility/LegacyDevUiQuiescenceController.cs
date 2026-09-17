@@ -70,13 +70,12 @@ internal static partial class LegacyDevUiQuiescenceController
         if (enabled) return;
 
         // DevUINode.Update is the generic fallback for pages that do not provide their own Update
-        // override. Known derived vanilla pages are intercepted separately so their now-redundant
-        // page-specific work (trash bins, threat sliders, layout, hidden map loading, etc.) never
-        // runs while the rebuilt UI owns that workspace.
+        // override. Derived pages that still need a compatibility backend are intercepted separately.
+        // Sound/Trigger are page-less native tools in rebuilt mode, so they intentionally have no
+        // dedicated Page.Update hooks here; their optional legacy pages are owned by the top-level
+        // scheduler and run vanilla unchanged when explicitly materialized.
         On.DevInterface.DevUINode.Update += DevUINode_Update;
         On.DevInterface.ObjectsPage.Update += ObjectsPage_Update;
-        On.DevInterface.SoundPage.Update += SoundPage_Update;
-        On.DevInterface.TriggersPage.Update += TriggersPage_Update;
         On.DevInterface.MapPage.Update += MapPage_Update;
         On.DevInterface.DialogPage.Update += DialogPage_Update;
         On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
@@ -97,8 +96,6 @@ internal static partial class LegacyDevUiQuiescenceController
         On.DevInterface.RelationshipPage.Update -= RelationshipPage_Update;
         On.DevInterface.DialogPage.Update -= DialogPage_Update;
         On.DevInterface.MapPage.Update -= MapPage_Update;
-        On.DevInterface.TriggersPage.Update -= TriggersPage_Update;
-        On.DevInterface.SoundPage.Update -= SoundPage_Update;
         On.DevInterface.ObjectsPage.Update -= ObjectsPage_Update;
         On.DevInterface.DevUINode.Update -= DevUINode_Update;
 
@@ -193,20 +190,6 @@ internal static partial class LegacyDevUiQuiescenceController
         orig(self);
     }
 
-    private static void SoundPage_Update(On.DevInterface.SoundPage.orig_Update orig, SoundPage self)
-    {
-        if (TryPumpDerivedPage(self)) return;
-        PrepareFullLegacyPageUpdate(self);
-        orig(self);
-    }
-
-    private static void TriggersPage_Update(On.DevInterface.TriggersPage.orig_Update orig, TriggersPage self)
-    {
-        if (TryPumpDerivedPage(self)) return;
-        PrepareFullLegacyPageUpdate(self);
-        orig(self);
-    }
-
     private static void MapPage_Update(On.DevInterface.MapPage.orig_Update orig, MapPage self)
     {
         if (TryPumpDerivedPage(self)) return;
@@ -273,10 +256,10 @@ internal static partial class LegacyDevUiQuiescenceController
     }
 
     /// <summary>
-    /// Preserve the tiny transient-state contract from the bypassed vanilla page Update methods.
-    /// Objects still let legacy representations repopulate draggedObject. Sound/Trigger now have no
-    /// built-in legacy spatial nodes, but clearing the same fields prevents stale values from a
-    /// previous Vanilla/compatibility frame from leaking back into native revision logic.
+    /// Preserve the tiny transient-state contract from bypassed vanilla page Update methods. Objects
+    /// still lets legacy representations repopulate draggedObject. Sound/Trigger can enter this helper
+    /// only through the top-level compatibility pump when an already-materialized built-in page is
+    /// temporarily used without explicit legacy presentation.
     /// </summary>
     private static void PrepareQuiescentFrame(Page page)
     {
@@ -393,9 +376,8 @@ internal static partial class LegacyDevUiQuiescenceController
             if (profile.MaterializeInitialRefresh)
             {
                 // Materialize once as a compatibility probe so third-party Refresh hooks can attach
-                // their nodes. Objects keeps required representations. Pure built-in Sound/Trigger
-                // presentation is retired immediately after this frame by the native spatial owner;
-                // a deferred Refresh recreates it only if Vanilla/Legacy is later requested.
+                // their nodes. Objects keeps required representations. A materialized Sound/Trigger
+                // page reaches this path only through the conservative top-level compatibility pump.
                 fullCompatibilityDepth++;
                 try
                 {
