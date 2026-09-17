@@ -26,8 +26,11 @@ internal static class NativeLegacyPresentationInvalidation
 
         try
         {
+            // This path is intentionally compatibility-only: vanilla presentation is already active,
+            // or the page contains opaque third-party DevUI that cannot be represented by the native
+            // editor contract. Refresh it immediately rather than pretending the foreign subtree can
+            // tolerate deferred state.
             page.Refresh();
-            LegacyDevUiQuiescenceController.ReleasePage(page);
         }
         catch (Exception error)
         {
