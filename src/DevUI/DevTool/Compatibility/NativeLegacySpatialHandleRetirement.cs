@@ -11,9 +11,10 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// simply stops existing on the native path.
 ///
 /// The first ordinary page materialization is still allowed as a compatibility probe so third-party
-/// hooks can attach their own nodes. Exact vanilla panels are retired only when they contain no
-/// opaque foreign descendants. Returning to Vanilla/Legacy performs the normal deferred Refresh and
-/// recreates the original DevInterface presentation losslessly.
+/// hooks can attach their own nodes. A page containing any opaque foreign DevUI node is left entirely
+/// intact and stays on the conservative Legacy backend. Pure built-in pages retire their vanilla
+/// panels wholesale. Returning to Vanilla/Legacy performs the normal deferred Refresh and recreates
+/// the original DevInterface presentation losslessly.
 /// </summary>
 internal static class NativeLegacySpatialHandleRetirement
 {
@@ -68,7 +69,7 @@ internal static class NativeLegacySpatialHandleRetirement
 
     internal static bool PruneBuiltinSoundNodes(SoundPage page)
     {
-        if (page?.subNodes == null) return false;
+        if (page?.subNodes == null || ContainsOpaqueForeignDescendant(page)) return false;
         bool changed = false;
 
         for (int i = page.subNodes.Count - 1; i >= 0; i--)
@@ -76,10 +77,9 @@ internal static class NativeLegacySpatialHandleRetirement
             if (page.subNodes[i] is not AmbientSoundPanel panel)
                 continue;
 
-            // A custom panel subtype is an explicit compatibility contract. Likewise, an exact
-            // vanilla panel that contains a foreign child may be serving as the host for a mod's
-            // authoring UI; keep that complete subtree alive rather than guessing its dependencies.
-            if (panel.GetType() != typeof(AmbientSoundPanel) || ContainsOpaqueForeignDescendant(panel))
+            // Pure built-in pages contain exact vanilla panels. A custom subtype is still treated as
+            // an unknown contract even if a mod happened to emit it from the vanilla assembly path.
+            if (panel.GetType() != typeof(AmbientSoundPanel))
                 continue;
 
             RetireTopLevelNode(page, i, panel);
@@ -93,7 +93,7 @@ internal static class NativeLegacySpatialHandleRetirement
 
     internal static bool PruneBuiltinTriggerNodes(TriggersPage page)
     {
-        if (page?.subNodes == null) return false;
+        if (page?.subNodes == null || ContainsOpaqueForeignDescendant(page)) return false;
         bool changed = false;
 
         for (int i = page.subNodes.Count - 1; i >= 0; i--)
@@ -101,7 +101,7 @@ internal static class NativeLegacySpatialHandleRetirement
             if (page.subNodes[i] is not TriggerPanel panel)
                 continue;
 
-            if (panel.GetType() != typeof(TriggerPanel) || ContainsOpaqueForeignDescendant(panel))
+            if (panel.GetType() != typeof(TriggerPanel))
                 continue;
 
             RetireTopLevelNode(page, i, panel);
