@@ -26,6 +26,11 @@ internal static class DevToolSubsystemCoordinator
 {
     internal static void ProcessPendingCommands(EditorSession session)
     {
+        // Import legacy selection before native queues run. A native Select command in this same
+        // frame therefore remains authoritative instead of being overwritten by an older dragged
+        // Panel after command processing.
+        LegacySoundTriggerSelectionBridge.Synchronize(session);
+
         EditorUiCommandQueue.Process(session);
         RoomEditorCommandQueue.Process(session);
         SoundEditorCommandQueue.Process(session);
@@ -42,9 +47,11 @@ internal static class DevToolSubsystemCoordinator
 
         SoundActivationPipeline.Step(session);
 
-        // Native Sound resource discovery never writes into SoundPage. Only explicit Vanilla/Legacy
-        // presentation receives a compatibility projection of the completed headless catalogue.
+        // Native resource discovery never writes into legacy page metadata. Only explicit
+        // Vanilla/Legacy presentation receives compatibility projections of completed headless
+        // catalogues.
         LegacySoundPageHydrator.Step(session);
+        LegacyTriggerPageHydrator.Step(session);
 
         // Native Sound/Trigger gizmos own their built-in spatial handles. Retire the corresponding
         // vanilla nodes instead of adding another Handle.Update interception layer. Unknown derived
@@ -94,6 +101,7 @@ internal static class DevToolSubsystemCoordinator
         EditorContinuousTransactionHub.Reset();
         NativeLegacySpatialHandleRetirement.Reset();
         LegacySoundPageHydrator.Reset();
+        LegacyTriggerPageHydrator.Reset();
         EditorViewportPresentationHub.Clear();
         EditorPresentationHub.Clear();
         ClearDetailPresentations();
@@ -123,6 +131,7 @@ internal static class DevToolSubsystemCoordinator
     {
         PlayerMapActivityGate.Reset();
         SoundActivationPipeline.Reset();
+        TriggerSongCatalog.ResetRuntimeState();
         SoundEditorStateHub.Reset();
         TriggerEditorStateHub.Reset();
         MapEditorStateHub.Reset();
