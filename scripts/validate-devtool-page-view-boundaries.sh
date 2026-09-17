@@ -83,15 +83,28 @@ if ! grep -Fq 'page?.SupportsPlacementInput != true' "$overlay"; then
   exit 1
 fi
 
-# Scene chrome stays a pure window shell and must dispatch page content through the contract.
+# Scene chrome stays a pure window shell and must dispatch page content through the contract. Both
+# shared Scene windows also defend themselves against the standalone debug workspace so BridgePlugin
+# call ordering cannot accidentally resurrect an underlying page surface.
 if ! grep -Fq 'page.DrawSceneWorkspace(snapshot);' "$scene_workspace"; then
   echo "SceneWorkspaceWindow is not dispatching through IDevToolPageView." >&2
   exit 1
 fi
+for scene_file in "$scene_workspace" "$scene_placement"; do
+  if ! grep -Fq 'DevToolOverlay.SuppressesSharedPageSurfaces' "$scene_file"; then
+    echo "Shared Scene surface does not respect the standalone debug workspace: $scene_file" >&2
+    exit 1
+  fi
+done
 
-# Control Center status belongs to the page object and is cached by DevToolFrontendPageBase.
+# Control Center status and tool labels belong to the page object. The base class caches status text
+# by semantic state and language so this ownership move must not regress stable-frame allocations.
 if ! grep -Fq 'page.GetSessionStatus(snapshot)' "$control_center"; then
   echo "ControlCenterWindow is not reading session status through the page contract." >&2
+  exit 1
+fi
+if ! grep -Fq 'return page.NavigationLabel;' "$control_center"; then
+  echo "ControlCenterWindow is not reading the tool label from page metadata." >&2
   exit 1
 fi
 if ! grep -Fq 'BuildSessionStatusState' "$page_contract" ||
