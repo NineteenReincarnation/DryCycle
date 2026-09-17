@@ -42,6 +42,10 @@ internal static class DevToolSubsystemCoordinator
 
         SoundActivationPipeline.Step(session);
 
+        // Native Sound resource discovery never writes into SoundPage. Only explicit Vanilla/Legacy
+        // presentation receives a compatibility projection of the completed headless catalogue.
+        LegacySoundPageHydrator.Step(session);
+
         // Native Sound/Trigger gizmos own their built-in spatial handles. Retire the corresponding
         // vanilla nodes instead of adding another Handle.Update interception layer. Unknown derived
         // third-party handles remain on the compatibility path.
@@ -89,6 +93,7 @@ internal static class DevToolSubsystemCoordinator
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
         NativeLegacySpatialHandleRetirement.Reset();
+        LegacySoundPageHydrator.Reset();
         EditorViewportPresentationHub.Clear();
         EditorPresentationHub.Clear();
         ClearDetailPresentations();
