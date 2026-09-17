@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -66,29 +65,6 @@ internal static class SoundEditorStateHub
     internal static SoundEditorState Get(EditorSession session) =>
         session == null ? null : states.GetValue(session, _ => new SoundEditorState());
 
-    /// <summary>
-    /// Compatibility-only selection import. Native selection does not depend on a DevInterface
-    /// panel, but an explicitly active legacy/third-party node may still become the user's selection
-    /// source and should be mirrored into the rebuilt presentation.
-    /// </summary>
-    internal static void SynchronizeFromLegacyNode(EditorSession session, DevUINode node)
-    {
-        if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null || node == null)
-            return;
-
-        DevUINode current = node;
-        while (current != null)
-        {
-            if (current is AmbientSoundPanel panel && panel.sound != null)
-            {
-                int index = session.RoomSettings.ambientSounds.IndexOf(panel.sound);
-                if (index >= 0) Get(session)?.SetSelectedIndex(index);
-                return;
-            }
-            current = current.parentNode;
-        }
-    }
-
     internal static void Reset() => states = new ConditionalWeakTable<EditorSession, SoundEditorState>();
 }
 
@@ -113,29 +89,15 @@ public static class SoundEditorPresentationHub
             return;
         }
 
-        DevUINode legacyDrag = session.Owner?.draggedNode;
-        if (legacyDrag == null && session.Owner?.activePage is SoundPage legacyPage)
-            legacyDrag = legacyPage.draggedObject;
-        SoundEditorStateHub.SynchronizeFromLegacyNode(session, legacyDrag);
-
         SoundEditorState state = SoundEditorStateHub.Get(session);
         int count = session.RoomSettings.ambientSounds.Count;
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
-        // Opaque compatibility writers do not provide member hints, so force the safe full-capture
-        // path. A live legacy drag is compatibility-only and can invalidate the selected row without
-        // making the native presentation depend on a SoundPage identity.
-        bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
-        if (opaqueLiveWriter)
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
             SoundPresentationChangeHintHub.MarkFull(session);
-        }
-        else if (legacyDrag != null)
-        {
-            EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
-            SoundPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
         }
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Sound);
@@ -585,7 +547,6 @@ public static class SoundEditorCommandQueue
                 long historyAfterCommand = session?.History.Revision ?? 0L;
                 bool historyChanged = historyAfterCommand != historyBeforeCommand;
                 bool membershipChanged = soundCountAfter != soundCountBefore;
-
                 bool directSceneMutation =
                     changed && command.Kind != SoundEditorCommandKind.CreateFromLibrary;
                 bool observableModelChange = historyChanged || membershipChanged || directSceneMutation;
