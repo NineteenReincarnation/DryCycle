@@ -10,13 +10,15 @@ sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
 trigger_hydrator="$root/Compatibility/LegacyTriggerPageHydrator.cs"
 top_level_pump="$root/Compatibility/LegacyNativeSoundTriggerTopLevelPump.cs"
 scheduler="$root/Compatibility/NativeSoundTriggerDevUiScheduler.cs"
+native_tool_scheduler="$root/Core/NativeToolScheduler.cs"
+runtime="$root/Core/DevToolRuntime.cs"
 sound_ctor="$root/Compatibility/SoundPageConstructorOptimization.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 misc_runtime="src/Misc/MiscRuntime.cs"
 
 for file in "$sound_runtime" "$trigger_runtime" "$trigger_catalog" "$selection_bridge" \
             "$sound_hydrator" "$trigger_hydrator" "$top_level_pump" "$scheduler" \
-            "$sound_ctor" "$coordinator" "$misc_runtime"; do
+            "$native_tool_scheduler" "$runtime" "$sound_ctor" "$coordinator" "$misc_runtime"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Sound/Trigger runtime contract file missing: $file" >&2
     exit 1
@@ -73,10 +75,44 @@ if ! grep -Fq 'LegacySoundPageHydrator.Reset();' "$coordinator" ||
   exit 1
 fi
 
+# Native Sound/Trigger workspace selection is virtual: normal rebuilt navigation must hit the native
+# scheduler before the generic DevUI SwitchPage fallback. The only stable legacy anchor is exact
+# RoomSettingsPage; concrete SoundPage/TriggersPage are compatibility materializations only.
+if ! grep -Fq 'internal static bool TryActivate(EditorSession session, EditorToolMode mode)' "$native_tool_scheduler" ||
+   ! grep -Fq 'session.Owner.SwitchPage(RoomAnchorPageIndex);' "$native_tool_scheduler" ||
+   ! grep -Fq 'MaterializeLegacyTool' "$native_tool_scheduler" ||
+   ! grep -Fq 'session.Owner.SwitchPage(SoundPageIndex);' "$native_tool_scheduler" ||
+   ! grep -Fq 'session.Owner.SwitchPage(TriggerPageIndex);' "$native_tool_scheduler"; then
+  echo "Native Sound/Trigger tool scheduler lost its Room-anchor / legacy-materialization split." >&2
+  exit 1
+fi
+if ! grep -Fq 'page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage)' "$native_tool_scheduler"; then
+  echo "Native Sound/Trigger scheduler no longer requires an exact RoomSettingsPage anchor." >&2
+  exit 1
+fi
+
+native_select_line="$(grep -n 'NativeToolScheduler.TryActivate(this, mode)' "$runtime" | head -1 | cut -d: -f1)"
+legacy_switch_line="$(grep -n 'Owner.SwitchPage(pageIndex);' "$runtime" | head -1 | cut -d: -f1)"
+if [[ -z "$native_select_line" || -z "$legacy_switch_line" || "$native_select_line" -ge "$legacy_switch_line" ]]; then
+  echo "EditorSession.SetToolMode no longer gives native Sound/Trigger virtualization priority over legacy SwitchPage." >&2
+  exit 1
+fi
+if ! grep -Fq 'NativeToolScheduler.MaterializeLegacyTool(this, ToolMode, explicitLegacyUi: true)' "$runtime" ||
+   ! grep -Fq 'NativeToolScheduler.ReturnToNativeTool(this)' "$runtime"; then
+  echo "Per-workspace Legacy UI no longer materializes/retires Sound/Trigger through NativeToolScheduler." >&2
+  exit 1
+fi
+if ! grep -Fq 'NativeToolScheduler.SynchronizePresentationOwnership(session);' "$runtime" ||
+   ! grep -Fq 'NativeToolScheduler.SynchronizePresentationOwnership(DevToolRuntime.ActiveSession);' "$scheduler"; then
+  echo "Global New UI/Vanilla ownership is not synchronized on the main-thread Sound/Trigger scheduler boundary." >&2
+  exit 1
+fi
+
 # Native Sound/Trigger no longer require separate derived Page.Update detours at runtime. The
-# top-level pump reproduces DevUI mouse bookkeeping and executes the compiled compatibility plan;
-# scheduler Enable immediately retires both old page hooks after quiescence has installed them.
+# top-level pump reproduces DevUI mouse bookkeeping; a virtual tool performs no activePage.Update at
+# all, while materialized compatibility pages fail open to vanilla when explicitly visible.
 if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate' "$top_level_pump" ||
+   ! grep -Fq 'NativeToolScheduler.IsVirtualToolActive(session)' "$top_level_pump" ||
    ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks' "$top_level_pump" ||
    ! grep -Fq 'On.DevInterface.SoundPage.Update -= SoundPage_Update;' "$top_level_pump" ||
    ! grep -Fq 'On.DevInterface.TriggersPage.Update -= TriggersPage_Update;' "$top_level_pump"; then
@@ -86,6 +122,11 @@ fi
 if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate(self)' "$scheduler" ||
    ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks();' "$scheduler"; then
   echo "Native Sound/Trigger top-level scheduler no longer owns the replacement update path." >&2
+  exit 1
+fi
+if ! grep -Fq 'EditorUiModeState.UseVanilla' "$top_level_pump" ||
+   ! grep -Fq 'session?.LegacyUiVisible == true' "$top_level_pump"; then
+  echo "Visible Vanilla/Legacy Sound/Trigger presentation no longer fails open before native pumping." >&2
   exit 1
 fi
 
