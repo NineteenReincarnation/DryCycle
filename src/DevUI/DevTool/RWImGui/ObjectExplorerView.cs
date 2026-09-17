@@ -155,21 +155,30 @@ internal static class ObjectExplorerView
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
+        bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
+        if (!sceneInBrowser)
+            sceneTab = false;
+
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("资源库", "Library"),
                 "ObjectsLibraryTab",
                 sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             sceneTab = false;
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("场景", "Scene"),
-                "ObjectsSceneTab",
-                sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            sceneTab = true;
+
+        if (sceneInBrowser)
+        {
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("场景", "Scene"),
+                    "ObjectsSceneTab",
+                    sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                sceneTab = true;
+        }
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        if (sceneTab) DrawSceneObjectList(snapshot);
+        if (sceneTab && sceneInBrowser) DrawSceneObjectList(snapshot);
         else DrawObjectLibrary(snapshot);
     }
 
