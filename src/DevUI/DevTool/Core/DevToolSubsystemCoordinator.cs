@@ -1,5 +1,6 @@
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Dialog;
+using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using DryCycle.DevUI.DevTool.Objects;
@@ -31,28 +32,15 @@ internal static class DevToolSubsystemCoordinator
         MapEditorCommandQueue.Process(session);
         if (PlayerMapActivityGate.ShouldProcess)
         {
-            // WorldTopology commands are consumed by MapEditorCommandQueue above. Publish their
-            // resulting exact node-to-node graph before a Player Map Build/Render command uses it,
-            // so "edit connection + render" in one UI frame cannot see the previous topology.
             MapEditorPresentationHub.Publish(session);
             PlayerMapCommandQueue.Process(session);
         }
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
 
-        // Sound cold-start work has one backend owner. It runs after commands so a SetToolMode or
-        // explicit group refresh issued this frame is visible immediately, but before presentation
-        // publication so completed snapshots can be consumed in the same frame.
         SoundActivationPipeline.Step(session);
-
-        // The universal compatibility queue follows the same backend command phase as native
-        // workspaces. Presentation getters must never execute mutations as a side effect of Draw.
         UniversalDevUiCommandQueue.Process(session);
 
-        // Compatibility diagnostics are explicitly opt-in and have exactly one publication owner.
-        // The publisher performs migration audit, mirror capture and downstream detached audit
-        // snapshots in a defined order. Production editor frames pay none of this reflection/type-
-        // inventory cost when diagnostics are disabled.
         if (DevUiDiagnosticsPolicy.Enabled && session?.Owner != null)
             DevUiDiagnosticsPublisher.Publish(session.Owner);
     }
@@ -70,11 +58,13 @@ internal static class DevToolSubsystemCoordinator
 
     /// <summary>
     /// Clears all backend state owned by a DevTool runtime activation.
-    /// This is intentionally idempotent and does not unregister public extension scopes.
+    /// This is intentionally idempotent and does not unregister public extension/native factory
+    /// scopes: provider lifetime belongs to the owning mod/process, not a DevUI session.
     /// </summary>
     internal static void ResetRuntimeState()
     {
         ClearCommandQueues();
+        EditorContinuousTransactionHub.Reset();
         EditorPresentationHub.Clear();
         ClearDetailPresentations();
         ResetWorkspaceState();
