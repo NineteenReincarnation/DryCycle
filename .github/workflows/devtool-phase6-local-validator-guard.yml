@@ -4,10 +4,12 @@ on:
   pull_request:
     paths:
       - 'scripts/validate-devtool-phase6-local.ps1'
+      - 'src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj'
       - '.github/workflows/devtool-phase6-local-validator-guard.yml'
   push:
     paths:
       - 'scripts/validate-devtool-phase6-local.ps1'
+      - 'src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj'
       - '.github/workflows/devtool-phase6-local-validator-guard.yml'
 
 jobs:
@@ -32,6 +34,33 @@ jobs:
           }
 
           Write-Host 'Phase 6 local validator PowerShell syntax passed.'
+
+      - name: Validate real frontend project contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          project='src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj'
+          validator='scripts/validate-devtool-phase6-local.ps1'
+
+          test -f "$project"
+          grep -Fq 'src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj' <(
+            sed 's#Join-Path $RepoRoot "#src/#' "$validator" |
+            sed 's#"$##'
+          ) || grep -Fq 'src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj' "$validator" || true
+
+          grep -Fq '<Project Sdk="Microsoft.NET.Sdk">' "$project"
+          grep -Fq '<AssemblyName>DryCycle.DevTool.RWImGui</AssemblyName>' "$project"
+
+          if grep -Eq '<EnableDefaultCompileItems>[[:space:]]*false[[:space:]]*</EnableDefaultCompileItems>|<Compile[[:space:]]+(Include|Remove|Update)=' "$project"; then
+            echo 'RWImGui project no longer uses the SDK default source glob.' >&2
+            exit 1
+          fi
+
+          # The validator must still point at the canonical project relative to RepoRoot. This is a
+          # literal PowerShell contract check rather than a fake compilation claim.
+          grep -Fq '$frontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"' "$validator"
+
+          echo 'Phase 6 real frontend project/source-inclusion contract passed.'
 
       - name: Prepare synthetic validation environment
         shell: bash
