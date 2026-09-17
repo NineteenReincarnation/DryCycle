@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Preview;
@@ -151,7 +152,7 @@ public static class EditorActions
         }
 
         if (moved == 0) return false;
-        session.Owner.activePage?.Refresh();
+        RefreshObjectBackend(session);
 
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
@@ -209,7 +210,7 @@ public static class EditorActions
             string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal))
             return false;
 
-        session.Owner.activePage?.Refresh();
+        RefreshObjectBackend(session);
         if (SnapshotHistoryEntry.TryCreate(
                 changed == 1 ? "Change " + key : "Change " + key + " on " + changed + " objects",
                 before,
@@ -290,39 +291,22 @@ public static class EditorActions
     {
         if (session?.Owner == null || session.RoomSettings?.placedObjects == null || type == null) return null;
 
-        int beforeCount = session.RoomSettings.placedObjects.Count;
-        ObjectsPage page = session.Owner.activePage as ObjectsPage;
-        bool temporary = page == null;
-        if (temporary)
-            page = new ObjectsPage(session.Owner, "DevTool_CompatibilityObjects", null, "Objects");
-
-        try
-        {
-            page.CreateObjRep(type, null);
-            if (session.RoomSettings.placedObjects.Count <= beforeCount) return null;
-
-            PlacedObject created = session.RoomSettings.placedObjects[session.RoomSettings.placedObjects.Count - 1];
-            created.pos = worldPosition;
-            TryRefresh(created);
-            PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, created);
-            session.History.Push(new DelegateHistoryEntry(
-                "Create " + (type.value ?? "object"),
-                s => RemoveExact(s, created),
-                s => after?.Restore(s) ?? false));
-            session.Selection.SelectOnly(created);
-            session.Owner.activePage?.Refresh();
-            return created;
-        }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool object creation failed: " + error.Message);
+        if (!NativePlacedObjectFactory.TryCreate(session, type, worldPosition, out PlacedObject created) || created == null)
             return null;
-        }
-        finally
-        {
-            if (temporary)
-                page.ClearSprites();
-        }
+
+        TryRefresh(created);
+        PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, created);
+        session.History.Push(new DelegateHistoryEntry(
+            "Create " + (type.value ?? "object"),
+            s => RemoveExact(s, created),
+            s => after?.Restore(s) ?? false));
+        session.Selection.SelectOnly(created);
+
+        // Transitional compatibility only. Native creation no longer depends on ObjectsPage; this
+        // refresh merely reconciles the still-retained vanilla representation/gizmo backend until
+        // the Native Gizmo Engine takes ownership of world-space editing.
+        RefreshObjectBackend(session);
+        return created;
     }
 
     public static bool DeleteObject(EditorSession session, PlacedObject target)
@@ -332,7 +316,7 @@ public static class EditorActions
         if (!session.RoomSettings.placedObjects.Remove(target)) return false;
 
         session.Selection.Toggle(target);
-        session.Owner.activePage?.Refresh();
+        RefreshObjectBackend(session);
         session.History.Push(new DelegateHistoryEntry(
             "Delete " + (target.type?.value ?? "object"),
             s => before?.Restore(s) ?? false,
@@ -355,7 +339,7 @@ public static class EditorActions
         if (removed == 0) return false;
 
         session.Selection.Clear();
-        session.Owner.activePage?.Refresh();
+        RefreshObjectBackend(session);
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
                 removed == 1 ? "Delete object" : "Delete " + removed + " objects",
@@ -370,36 +354,30 @@ public static class EditorActions
     {
         List<PlacedObject> live = session?.RoomSettings?.placedObjects;
         if (session?.Owner == null || live == null || session.Selection.Count == 0) return false;
-
-        ObjectsPage page = session.Owner.activePage as ObjectsPage;
-        if (page == null)
-        {
+        if (session.ToolMode != EditorToolMode.Objects)
             session.SetToolMode(EditorToolMode.Objects);
-            page = session.Owner.activePage as ObjectsPage;
-        }
-        if (page == null) return false;
 
         PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         List<PlacedObject> originals = new(session.Selection.PlacedObjects);
         List<PlacedObject> copies = new(originals.Count);
+        Vector2 offset = new(20f, 20f);
 
         for (int i = 0; i < originals.Count; i++)
         {
             PlacedObject source = originals[i];
             if (source?.type == null) continue;
 
-            int count = live.Count;
-            page.CreateObjRep(source.type, null);
-            if (live.Count <= count) continue;
+            if (!NativePlacedObjectFactory.TryCreate(session, source.type, source.pos + offset, out PlacedObject copy) ||
+                copy == null)
+                continue;
 
-            PlacedObject copy = live[live.Count - 1];
-            CopyObjectState(source, copy, new Vector2(20f, 20f));
+            CopyObjectState(source, copy, offset);
             copies.Add(copy);
         }
 
         if (copies.Count == 0) return false;
 
-        page.Refresh();
+        RefreshObjectBackend(session);
         session.Selection.Clear();
         for (int i = 0; i < copies.Count; i++) session.Selection.Toggle(copies[i]);
 
@@ -470,8 +448,17 @@ public static class EditorActions
             removed = true;
         }
         session.Selection.RemoveMissing(session.RoomSettings.placedObjects);
-        session.Owner.activePage?.Refresh();
+        RefreshObjectBackend(session);
         return removed;
+    }
+
+    private static void RefreshObjectBackend(EditorSession session)
+    {
+        try { session?.Owner?.activePage?.Refresh(); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool object backend refresh failed: " + error.Message);
+        }
     }
 
     private static void TryRefresh(PlacedObject target)
