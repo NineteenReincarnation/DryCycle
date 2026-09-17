@@ -9,9 +9,19 @@ frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
 retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
 spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
+legacy_invalidation="$root/Compatibility/NativeLegacyPresentationInvalidation.cs"
+quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
+sound_actions="$root/Sound/SoundEditorActions.cs"
+trigger_actions="$root/Triggers/TriggerEditorActions.cs"
+sound_runtime="$root/Sound/NativeSoundRuntimeReconciler.cs"
+history="$root/History/EditorHistoryService.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
-required=("$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement" "$spatial_refresh" "$coordinator")
+required=(
+  "$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement"
+  "$spatial_refresh" "$legacy_invalidation" "$quiescence" "$sound_actions"
+  "$trigger_actions" "$sound_runtime" "$history" "$coordinator"
+)
 for file in "${required[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "Native gizmo contract file missing: $file" >&2
@@ -49,8 +59,8 @@ for symbol in 'EditorContinuousTransactionHub.Begin' 'EditorContinuousTransactio
 done
 
 # Built-in Sound/Trigger legacy spatial presentation is retired as nodes, not intercepted through a
-# new hook. The minimal refresh path may reconcile AmbientSoundPlayer runtime state, but it must never
-# rematerialize vanilla Panel/Handle trees behind the native editor.
+# new hook. Returning to Vanilla may recreate it, but normal rebuilt authoring must not keep a hidden
+# Panel/Handle refresh pipeline alive.
 if grep -Eq 'On\.DevInterface|IL\.DevInterface' "$retirement"; then
   echo "Legacy spatial retirement introduced a new DevInterface hook." >&2
   exit 1
@@ -60,16 +70,60 @@ if ! grep -Fq 'NativeLegacySpatialHandleRetirement.Apply(session)' "$coordinator
   exit 1
 fi
 if grep -Eq 'new[[:space:]]+(AmbientSoundPanel|TriggerPanel|SpotSoundHandle|DirectionalSoundHandle|SpotTriggerHandle)[[:space:]]*\(' "$spatial_refresh"; then
-  echo "Native Sound/Trigger backend refresh started rebuilding legacy Panel/Handle nodes." >&2
+  echo "Legacy backend refresh started rebuilding Sound/Trigger Panel/Handle nodes." >&2
   exit 1
 fi
-if ! grep -Fq 'ReconcileAmbientPlayers(page)' "$spatial_refresh"; then
-  echo "Native Sound backend no longer reconciles the real ambient runtime." >&2
+if grep -Eq 'TryRefreshSound|TryRefreshTriggers|ReconcileAmbientPlayers' "$spatial_refresh"; then
+  echo "LegacySpatialBackendRefresh regained a Sound/Trigger backend path." >&2
   exit 1
 fi
-if ! grep -Fq 'PruneBuiltinSoundNodes(page)' "$spatial_refresh" ||
-   ! grep -Fq 'PruneBuiltinTriggerNodes(page)' "$spatial_refresh"; then
-  echo "Native Sound/Trigger refresh no longer prunes stale built-in legacy nodes." >&2
+
+# Native Sound runtime ownership is separate from DevInterface presentation. Collection membership is
+# reconciled directly against AmbientSoundPlayer, while scalar/spatial model fields stay live by
+# reference and therefore do not need a page rebuild.
+if ! grep -Fq 'new AmbientSoundPlayer' "$sound_runtime" ||
+   ! grep -Fq 'ReferenceEquals(player.aSound, sound)' "$sound_runtime"; then
+  echo "Native Sound runtime reconciler no longer owns ambient player membership." >&2
+  exit 1
+fi
+if grep -Eq 'SoundPage|AmbientSoundPanel|SpotSoundHandle|DirectionalSoundHandle' "$sound_runtime"; then
+  echo "Native Sound runtime reconciler regained DevInterface presentation dependencies." >&2
+  exit 1
+fi
+
+# Sound/Trigger native actions may mutate game models and history, but they must not call the hidden
+# legacy page Refresh path. The only immediate Refresh allowed is isolated in the compatibility
+# fallback used when defer is refused for Vanilla/opaque third-party DevUI.
+if grep -Eq 'activePage[^;]*Refresh|SoundPage[^;]*Refresh|TriggersPage[^;]*Refresh' "$sound_actions" "$trigger_actions"; then
+  echo "Native Sound/Trigger action code calls a legacy page Refresh." >&2
+  exit 1
+fi
+if ! grep -Fq 'page.Refresh();' "$legacy_invalidation"; then
+  echo "Sound/Trigger compatibility fallback no longer has an explicit legacy refresh boundary." >&2
+  exit 1
+fi
+
+# Sound/Trigger no longer need Refresh hooks. Objects remains the only migrated workspace with a
+# reduced legacy Refresh interception until its representation/gizmo backend is native too.
+if grep -Eq 'On\.DevInterface\.(SoundPage|TriggersPage)\.Refresh' "$quiescence"; then
+  echo "Sound/Trigger Refresh hooks returned to the quiescence controller." >&2
+  exit 1
+fi
+if ! grep -Fq 'On.DevInterface.ObjectsPage.Refresh += ObjectsPage_Refresh;' "$quiescence"; then
+  echo "Objects transitional Refresh hook unexpectedly disappeared during Sound/Trigger migration." >&2
+  exit 1
+fi
+
+# History is the authoritative stale-presentation boundary. Pure rebuilt pages defer; when defer is
+# refused, Sound/Trigger alone may invoke the compatibility fallback. Undo/Redo must also reconcile
+# the real Sound runtime because snapshot restore can replace collection members by reference.
+if ! grep -Fq 'NativeLegacyPresentationInvalidation.RefreshCurrentSoundOrTriggerFallback(session)' "$history"; then
+  echo "History no longer owns Sound/Trigger legacy fallback invalidation." >&2
+  exit 1
+fi
+if ! grep -Fq 'ReconcileRuntimeAfterHistoryRestore(session)' "$history" ||
+   ! grep -Fq 'NativeSoundRuntimeReconciler.Reconcile(session)' "$coordinator"; then
+  echo "Undo/Redo no longer reconciles native Sound runtime state." >&2
   exit 1
 fi
 
