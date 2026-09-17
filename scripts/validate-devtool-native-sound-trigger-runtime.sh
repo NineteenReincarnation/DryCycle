@@ -8,10 +8,14 @@ trigger_catalog="$root/Triggers/TriggerSongCatalog.cs"
 selection_bridge="$root/Compatibility/LegacySoundTriggerSelectionBridge.cs"
 sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
 trigger_hydrator="$root/Compatibility/LegacyTriggerPageHydrator.cs"
+top_level_pump="$root/Compatibility/LegacyNativeSoundTriggerTopLevelPump.cs"
+scheduler="$root/Compatibility/NativeSoundTriggerDevUiScheduler.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
+misc_runtime="src/Misc/MiscRuntime.cs"
 
 for file in "$sound_runtime" "$trigger_runtime" "$trigger_catalog" "$selection_bridge" \
-            "$sound_hydrator" "$trigger_hydrator" "$coordinator"; do
+            "$sound_hydrator" "$trigger_hydrator" "$top_level_pump" "$scheduler" \
+            "$coordinator" "$misc_runtime"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Sound/Trigger runtime contract file missing: $file" >&2
     exit 1
@@ -65,6 +69,37 @@ if ! grep -Fq 'LegacySoundPageHydrator.Reset();' "$coordinator" ||
    ! grep -Fq 'LegacyTriggerPageHydrator.Reset();' "$coordinator" ||
    ! grep -Fq 'TriggerSongCatalog.ResetRuntimeState();' "$coordinator"; then
   echo "Native Sound/Trigger compatibility/catalog lifetime reset is incomplete." >&2
+  exit 1
+fi
+
+# Native Sound/Trigger no longer require separate derived Page.Update detours at runtime. The
+# top-level pump reproduces DevUI mouse bookkeeping and executes the compiled compatibility plan;
+# scheduler Enable immediately retires both old page hooks after quiescence has installed them.
+if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate' "$top_level_pump" ||
+   ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks' "$top_level_pump" ||
+   ! grep -Fq 'On.DevInterface.SoundPage.Update -= SoundPage_Update;' "$top_level_pump" ||
+   ! grep -Fq 'On.DevInterface.TriggersPage.Update -= TriggersPage_Update;' "$top_level_pump"; then
+  echo "Sound/Trigger derived Page.Update hooks are no longer retired by the top-level pump." >&2
+  exit 1
+fi
+if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate(self)' "$scheduler" ||
+   ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks();' "$scheduler"; then
+  echo "Native Sound/Trigger top-level scheduler no longer owns the replacement update path." >&2
+  exit 1
+fi
+
+# Hook order is semantic: quiescence installs compatibility hooks first, scheduler becomes the inner
+# DevUI layer second, and DevToolRuntime becomes the outer authoritative editor lifecycle last.
+q_line="$(grep -n 'LegacyDevUiQuiescenceController.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
+s_line="$(grep -n 'NativeSoundTriggerDevUiScheduler.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
+r_line="$(grep -n 'DevToolRuntime.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
+if [[ -z "$q_line" || -z "$s_line" || -z "$r_line" || "$q_line" -ge "$s_line" || "$s_line" -ge "$r_line" ]]; then
+  echo "Sound/Trigger scheduler hook ordering changed; expected quiescence -> scheduler -> DevToolRuntime." >&2
+  exit 1
+fi
+
+if ! grep -Fq 'NativeSoundTriggerDevUiScheduler.Disable();' "$misc_runtime"; then
+  echo "Native Sound/Trigger scheduler lifetime is not paired on shutdown." >&2
   exit 1
 fi
 
