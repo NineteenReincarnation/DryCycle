@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -35,38 +36,25 @@ internal static class SoundEditorActions
     {
         if (session?.RoomSettings?.ambientSounds == null || string.IsNullOrEmpty(sample)) return false;
         if (session.ToolMode != EditorToolMode.Sound) session.SetToolMode(EditorToolMode.Sound);
-        if (session.Owner?.activePage is not SoundPage page) return false;
         if (soundType < 0 || soundType > 2) return false;
 
         RoomSettings settings = session.RoomSettings;
-        if (soundType != AmbientSound.Type.Spot.Index)
-        {
-            for (int i = 0; i < settings.ambientSounds.Count; i++)
-            {
-                AmbientSound existing = settings.ambientSounds[i];
-                if (existing != null && !existing.inherited && existing.type?.Index == soundType &&
-                    string.Equals(existing.sample, sample, StringComparison.Ordinal))
-                {
-                    SoundEditorStateHub.Get(session)?.SetSelectedIndex(i);
-                    return false;
-                }
-            }
-        }
+        IEditorStateSnapshot before = AmbientSoundCollectionStateSnapshot.Capture(settings);
+        if (before == null) return false;
 
-        int beforeCount = settings.ambientSounds.Count;
-        page.soundType = soundType;
-        page.CreateSoundRep(sample);
-
-        if (settings.ambientSounds.Count <= beforeCount)
+        if (!NativeSoundFactory.TryCreate(
+                session,
+                sample,
+                soundType,
+                out AmbientSound created,
+                out int selectedIndex))
         {
-            SoundEditorStateHub.Get(session)?.SetSelectedIndex(FindLast(session, sample, soundType));
+            if (selectedIndex >= 0)
+                SoundEditorStateHub.Get(session)?.SetSelectedIndex(selectedIndex);
             return false;
         }
 
-        int createdIndex = settings.ambientSounds.Count - 1;
-        AmbientSound created = settings.ambientSounds[createdIndex];
-        IEditorStateSnapshot before = AbsentMemberSnapshots.AmbientSound(settings, created);
-        IEditorStateSnapshot after = SingleAmbientSoundStateSnapshot.Capture(settings, created);
+        IEditorStateSnapshot after = AmbientSoundCollectionStateSnapshot.Capture(settings);
         if (SnapshotHistoryEntry.TryCreate(
                 "Create sound " + sample,
                 before,
@@ -74,8 +62,11 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
 
-        SoundEditorStateHub.Get(session)?.SetSelectedIndex(createdIndex);
-        return true;
+        // Transitional compatibility only: reconcile the retained vanilla spatial handle/audio
+        // backend without using SoundPage as the model factory. Native Gizmo will remove this edge.
+        RefreshSoundPage(session);
+        SoundEditorStateHub.Get(session)?.SetSelectedIndex(selectedIndex);
+        return created != null;
     }
 
     internal static bool CreateFromLibrary(
