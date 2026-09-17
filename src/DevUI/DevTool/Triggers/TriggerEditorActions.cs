@@ -1,6 +1,6 @@
 using System;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -56,24 +56,15 @@ internal static class TriggerEditorActions
     {
         if (session?.RoomSettings?.triggers == null || string.IsNullOrEmpty(typeName)) return false;
         if (session.ToolMode != EditorToolMode.Triggers) session.SetToolMode(EditorToolMode.Triggers);
-        if (session.Owner?.activePage is not TriggersPage page) return false;
 
-        int count = session.RoomSettings.triggers.Count;
+        EventTrigger.TriggerType type = new(typeName, false);
+        if (!NativeTriggerFactory.TryCreate(session, type, out EventTrigger created) || created == null)
+            return false;
 
-        // Keep the vanilla public construction path so ordinary Rain World hooks from other
-        // mods still participate. Trigger creation itself is not a destructive toggle.
-        page.CreateTriggerRep(new EventTrigger.TriggerType(typeName, false));
-        if (session.RoomSettings.triggers.Count <= count) return false;
-
-        EventTrigger created = session.RoomSettings.triggers[session.RoomSettings.triggers.Count - 1];
-        if (created is SpotTrigger spot)
-        {
-            RoomCamera camera = session.Owner.game?.cameras != null && session.Owner.game.cameras.Length > 0
-                ? session.Owner.game.cameras[0]
-                : null;
-            spot.pos = (camera?.pos ?? Vector2.zero) + new Vector2(683f, 384f);
-            page.Refresh();
-        }
+        // Native construction mutates only the model. Until the Native Gizmo Engine replaces the
+        // remaining vanilla SpotTrigger handle, this compatibility refresh reconciles that spatial
+        // backend and marks the hidden legacy page stale for a one-time full rebuild on vanilla return.
+        RefreshPage(session);
 
         IEditorStateSnapshot before = AbsentMemberSnapshots.Trigger(session.RoomSettings, created);
         IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, created);
@@ -212,22 +203,13 @@ internal static class TriggerEditorActions
     internal static bool SetEventType(EditorSession session, int index, string eventTypeName)
     {
         if (!TryGet(session, index, out EventTrigger trigger) || string.IsNullOrEmpty(eventTypeName)) return false;
-        if (session.Owner?.activePage is not TriggersPage page) return false;
 
-        return Mutate(session, trigger, "Set trigger event " + eventTypeName, () =>
-        {
-            TriggerPanel panel = FindPanel(page, trigger);
-            TriggeredEvent.EventType eventType = new(eventTypeName, false);
-            if (panel != null)
-            {
-                panel.AddEvent(eventType);
-                return trigger.tEvent != null;
-            }
-
-            trigger.tEvent = CreateEventFallback(eventType);
-            ApplyDefaultMultiUse(trigger, eventType);
-            return trigger.tEvent != null;
-        }, refreshPage: false);
+        TriggeredEvent.EventType eventType = new(eventTypeName, false);
+        return Mutate(
+            session,
+            trigger,
+            "Set trigger event " + eventTypeName,
+            () => NativeTriggeredEventFactory.TryAssign(session, trigger, eventType));
     }
 
     internal static bool ClearEvent(EditorSession session, int index)
@@ -358,30 +340,6 @@ internal static class TriggerEditorActions
             default:
                 return false;
         }
-    }
-
-    private static TriggerPanel FindPanel(TriggersPage page, EventTrigger trigger)
-    {
-        if (page?.subNodes == null || trigger == null) return null;
-        for (int i = 0; i < page.subNodes.Count; i++)
-            if (page.subNodes[i] is TriggerPanel panel && ReferenceEquals(panel.trigger, trigger)) return panel;
-        return null;
-    }
-
-    private static TriggeredEvent CreateEventFallback(TriggeredEvent.EventType eventType)
-    {
-        if (eventType == TriggeredEvent.EventType.MusicEvent) return new MusicEvent();
-        if (eventType == TriggeredEvent.EventType.StopMusicEvent) return new StopMusicEvent();
-        if (eventType == TriggeredEvent.EventType.ShowProjectedImageEvent) return new ShowProjectedImageEvent();
-        return new TriggeredEvent(eventType);
-    }
-
-    private static void ApplyDefaultMultiUse(EventTrigger trigger, TriggeredEvent.EventType eventType)
-    {
-        if (trigger == null || eventType == null) return;
-        if (eventType == TriggeredEvent.EventType.MusicEvent) trigger.multiUse = false;
-        else if (eventType == TriggeredEvent.EventType.StopMusicEvent ||
-                 eventType == TriggeredEvent.EventType.ShowProjectedImageEvent) trigger.multiUse = true;
     }
 
     private static bool Mutate(
