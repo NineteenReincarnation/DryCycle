@@ -12,18 +12,23 @@ top_level_pump="$root/Compatibility/LegacyNativeSoundTriggerTopLevelPump.cs"
 scheduler="$root/Compatibility/NativeSoundTriggerDevUiScheduler.cs"
 native_tool_scheduler="$root/Core/NativeToolScheduler.cs"
 runtime="$root/Core/DevToolRuntime.cs"
-sound_ctor="$root/Compatibility/SoundPageConstructorOptimization.cs"
+removed_sound_ctor="$root/Compatibility/SoundPageConstructorOptimization.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 misc_runtime="src/Misc/MiscRuntime.cs"
 
 for file in "$sound_runtime" "$trigger_runtime" "$trigger_catalog" "$selection_bridge" \
             "$sound_hydrator" "$trigger_hydrator" "$top_level_pump" "$scheduler" \
-            "$native_tool_scheduler" "$runtime" "$sound_ctor" "$coordinator" "$misc_runtime"; do
+            "$native_tool_scheduler" "$runtime" "$coordinator" "$misc_runtime"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Sound/Trigger runtime contract file missing: $file" >&2
     exit 1
   fi
 done
+
+if [[ -e "$removed_sound_ctor" ]]; then
+  echo "Obsolete SoundPage constructor optimization returned: $removed_sound_ctor" >&2
+  exit 1
+fi
 
 # Native runtime/presentation is allowed to use Rain World model types, but never DevInterface UI
 # nodes/pages as state owners. Legacy selection import lives exclusively in Compatibility.
@@ -81,8 +86,7 @@ fi
 if ! grep -Fq 'internal static bool TryActivate(EditorSession session, EditorToolMode mode)' "$native_tool_scheduler" ||
    ! grep -Fq 'session.Owner.SwitchPage(RoomAnchorPageIndex);' "$native_tool_scheduler" ||
    ! grep -Fq 'MaterializeLegacyTool' "$native_tool_scheduler" ||
-   ! grep -Fq 'session.Owner.SwitchPage(SoundPageIndex);' "$native_tool_scheduler" ||
-   ! grep -Fq 'session.Owner.SwitchPage(TriggerPageIndex);' "$native_tool_scheduler"; then
+   ! grep -Fq 'session.Owner.SwitchPage(mode == EditorToolMode.Sound ? SoundPageIndex : TriggerPageIndex);' "$native_tool_scheduler"; then
   echo "Native Sound/Trigger tool scheduler lost its Room-anchor / legacy-materialization split." >&2
   exit 1
 fi
@@ -130,16 +134,13 @@ if ! grep -Fq 'EditorUiModeState.UseVanilla' "$top_level_pump" ||
   exit 1
 fi
 
-# The remaining Sound constructor optimization is one IL boundary only. Hidden file-button suppression
-# is folded into the constructor patch; a separate RefreshFilesPage On-hook would reintroduce another
-# runtime interception point for presentation-only work.
-if grep -Eq 'On\.DevInterface\.SoundPage\.RefreshFilesPage' "$sound_ctor"; then
-  echo "Sound constructor optimization regained a RefreshFilesPage On-hook." >&2
-  exit 1
-fi
-if ! grep -Fq 'IL.DevInterface.SoundPage.ctor += PatchConstructor;' "$sound_ctor" ||
-   ! grep -Fq 'RefreshFilesPageDuringConstruction' "$sound_ctor"; then
-  echo "Sound constructor optimization no longer folds hidden file-button suppression into one IL boundary." >&2
+# Once page virtualization is active, there is no reason to intercept SoundPage construction or its
+# file-list refresh. Native never constructs SoundPage; explicit Vanilla/Legacy must run the complete
+# original constructor. Reintroducing either hook would duplicate ownership and add startup risk.
+if grep -R -n -E 'IL\.DevInterface\.SoundPage\.ctor|On\.DevInterface\.SoundPage\.RefreshFilesPage|SoundPageConstructorOptimization' \
+    "$root" "$misc_runtime" --include='*.cs' >/tmp/devtool_sound_ctor_hits.txt 2>/dev/null; then
+  echo "Obsolete SoundPage constructor/file-list interception returned:" >&2
+  cat /tmp/devtool_sound_ctor_hits.txt >&2
   exit 1
 fi
 
