@@ -4,10 +4,9 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Factories;
 
 /// <summary>
-/// Pure model construction for Rain World's three ambient-sound kinds. This replaces the old
-/// SoundPage.CreateSoundRep dependency: no panel, file-list button or SoundPage state is required to
-/// add a sound to RoomSettings. Spatial runtime/legacy-handle reconciliation remains a separate
-/// compatibility concern until the Native Gizmo Engine lands.
+/// Pure model construction for ambient sounds. Registered native providers get first refusal;
+/// Rain World's three built-in kinds remain the default. No SoundPage/Panel is required to create
+/// the model. Spatial runtime/legacy-handle reconciliation is a separate transitional concern.
 /// </summary>
 internal static class NativeSoundFactory
 {
@@ -22,13 +21,11 @@ internal static class NativeSoundFactory
         selectedIndex = -1;
         if (session?.RoomSettings?.ambientSounds == null || string.IsNullOrWhiteSpace(sample))
             return false;
-        if (soundType < AmbientSound.Type.Omnidirectional.Index || soundType > AmbientSound.Type.Spot.Index)
-            return false;
 
         RoomSettings settings = session.RoomSettings;
 
-        // Omni and Directional are unique by (type, sample). Preserve the current rebuilt-editor
-        // behavior: selecting an already-local entry is a no-op rather than vanilla's old toggle-off.
+        // Non-spot sounds are unique by semantic identity. This check precedes providers so every
+        // native implementation observes the same document-level rule instead of duplicating it.
         if (soundType != AmbientSound.Type.Spot.Index)
         {
             for (int i = 0; i < settings.ambientSounds.Count; i++)
@@ -43,20 +40,25 @@ internal static class NativeSoundFactory
             }
         }
 
-        if (soundType == AmbientSound.Type.Omnidirectional.Index)
-            created = new OmniDirectionalSound(sample, inherited: false);
-        else if (soundType == AmbientSound.Type.Directional.Index)
-            created = new DirectionalSound(sample, inherited: false);
-        else
-            created = new SpotSound(sample, inherited: false)
-            {
-                pos = NativeFactoryPlacement.WorldCursor(session)
-            };
+        if (!NativeAuthoringFactoryRegistry.TryCreateSound(session, sample, soundType, out created))
+        {
+            if (soundType < AmbientSound.Type.Omnidirectional.Index || soundType > AmbientSound.Type.Spot.Index)
+                return false;
 
+            if (soundType == AmbientSound.Type.Omnidirectional.Index)
+                created = new OmniDirectionalSound(sample, inherited: false);
+            else if (soundType == AmbientSound.Type.Directional.Index)
+                created = new DirectionalSound(sample, inherited: false);
+            else
+                created = new SpotSound(sample, inherited: false)
+                {
+                    pos = NativeFactoryPlacement.WorldCursor(session)
+                };
+        }
+
+        if (created == null) return false;
         created.panelPosition = NativeFactoryPlacement.LegacyPanelSlot(settings.ambientSounds.Count);
 
-        // A local non-spatial sound shadows inherited entries with the same identity. Preserve the
-        // serialized overWrite bit and legacy panel position without asking SoundPage to rebuild.
         if (soundType != AmbientSound.Type.Spot.Index)
         {
             bool overWrite = false;
@@ -74,8 +76,16 @@ internal static class NativeSoundFactory
             created.overWrite = overWrite;
         }
 
-        settings.ambientSounds.Add(created);
-        selectedIndex = settings.ambientSounds.Count - 1;
-        return true;
+        if (!ContainsReference(settings.ambientSounds, created))
+            settings.ambientSounds.Add(created);
+        selectedIndex = settings.ambientSounds.IndexOf(created);
+        return selectedIndex >= 0;
+    }
+
+    private static bool ContainsReference(System.Collections.Generic.List<AmbientSound> values, AmbientSound target)
+    {
+        for (int i = 0; i < values.Count; i++)
+            if (ReferenceEquals(values[i], target)) return true;
+        return false;
     }
 }
