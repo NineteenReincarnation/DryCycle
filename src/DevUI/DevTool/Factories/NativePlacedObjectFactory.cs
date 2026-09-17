@@ -6,10 +6,9 @@ using UnityEngine;
 namespace DryCycle.DevUI.DevTool.Factories;
 
 /// <summary>
-/// Native model factory for Rain World/DLC/Watcher PlacedObject types. Game-defined ExtEnum IDs are
-/// constructed directly through PlacedObject.GenerateEmptyData; external IDs are delegated to an
-/// isolated ObjectsPage fallback so third-party CreateObjRep hooks still work until that object type
-/// registers a native factory.
+/// Native model factory for Rain World/DLC/Watcher PlacedObject types. Registered native providers
+/// get first refusal, game-defined ExtEnum IDs then construct directly through
+/// PlacedObject.GenerateEmptyData, and external IDs finally enter an isolated ObjectsPage fallback.
 /// </summary>
 internal static class NativePlacedObjectFactory
 {
@@ -22,6 +21,15 @@ internal static class NativePlacedObjectFactory
         created = null;
         if (session?.RoomSettings?.placedObjects == null || type == null)
             return false;
+
+        if (NativeAuthoringFactoryRegistry.TryCreatePlacedObject(session, type, worldPosition, out created))
+        {
+            if (created == null) return false;
+            created.pos = worldPosition;
+            if (!ContainsReference(session.RoomSettings.placedObjects, created))
+                session.RoomSettings.placedObjects.Add(created);
+            return true;
+        }
 
         if (!GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), type.value))
             return TryCreateLegacy(session, type, worldPosition, out created);
@@ -114,5 +122,12 @@ internal static class NativePlacedObjectFactory
                 catch { }
             }
         }
+    }
+
+    private static bool ContainsReference(System.Collections.Generic.List<PlacedObject> values, PlacedObject target)
+    {
+        for (int i = 0; i < values.Count; i++)
+            if (ReferenceEquals(values[i], target)) return true;
+        return false;
     }
 }
