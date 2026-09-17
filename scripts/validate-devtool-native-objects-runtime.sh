@@ -7,6 +7,8 @@ bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
 controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
+quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
+removed_spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
 geometry_frontend="$root/RWImGui/NativeObjectGeometryGizmoView.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
@@ -15,13 +17,18 @@ geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$controller" "$frontend" \
+for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$controller" "$quiescence" "$frontend" \
             "$geometry_frontend" "$pages" "$backend" "$geometry_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
     exit 1
   fi
 done
+
+if [[ -e "$removed_spatial_refresh" ]]; then
+  echo "Obsolete Objects legacy spatial refresh layer returned: $removed_spatial_refresh" >&2
+  exit 1
+fi
 
 # Rebuilt Objects is page-less just like Sound/Trigger. A matching ObjectsPage is allowed only when
 # NativeToolScheduler explicitly materializes the legacy fallback.
@@ -39,6 +46,13 @@ fi
 
 if ! grep -Fq 'native Objects/Sound/Trigger' "$anchor"; then
   echo "NativeToolAnchorPage documentation no longer records Objects ownership." >&2
+  exit 1
+fi
+
+# A page-less native Objects workspace must not keep an ObjectsPage Update/Refresh hook or any world-
+# handle execution plan. Explicit Vanilla/Legacy materializes the original page and runs it normally.
+if grep -Eq 'On\.DevInterface\.ObjectsPage\.(Update|Refresh)|ObjectsPage_(Update|Refresh)|PreserveWorldHandles|UseNativeBackendRefresh|IsWorldBackendNode|LegacySpatialBackendRefresh' "$quiescence"; then
+  echo "Objects regained a hidden legacy Page/Handle backend in quiescence." >&2
   exit 1
 fi
 
