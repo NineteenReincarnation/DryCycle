@@ -1,0 +1,144 @@
+using System;
+using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Input;
+using DryCycle.DevUI.DevTool.Sound;
+
+namespace DryCycle.DevUI.DevTool.Core;
+
+/// <summary>
+/// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
+/// DevInterface Page. Sound and Triggers use an exact RoomSettingsPage only as a lightweight room
+/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode.
+/// </summary>
+internal static class NativeToolScheduler
+{
+    private const int RoomAnchorPageIndex = 0;
+    private const int SoundPageIndex = 2;
+    private const int TriggerPageIndex = 4;
+
+    internal static bool Supports(EditorToolMode mode) =>
+        mode == EditorToolMode.Sound || mode == EditorToolMode.Triggers;
+
+    internal static bool IsVirtualToolActive(EditorSession session)
+    {
+        if (session?.Owner == null || !Supports(session.ToolMode)) return false;
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
+            return false;
+
+        Page page = session.Owner.activePage;
+        return page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage);
+    }
+
+    /// <summary>
+    /// Activates a rebuilt Sound/Trigger workspace without constructing its legacy page. A room page
+    /// is the only valid anchor: keeping Objects would leak old gizmos, while Map/Relationships would
+    /// keep the wrong document identity alive.
+    /// </summary>
+    internal static bool TryActivate(EditorSession session, EditorToolMode mode)
+    {
+        if (session?.Owner == null || !Supports(mode)) return false;
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
+            return false;
+
+        return ActivateCore(session, mode);
+    }
+
+    /// <summary>
+    /// Reconciles global New UI / Vanilla ownership on Rain World's main thread. EditorUiModeState is
+    /// intentionally presentation-only and may be written by RWImGui, so actual Page construction or
+    /// retirement happens here rather than inside the mode setter.
+    /// </summary>
+    internal static void SynchronizePresentationOwnership(EditorSession session)
+    {
+        if (session?.Owner == null || !Supports(session.ToolMode)) return;
+
+        bool rebuiltAvailable = EditorInputRouter.FrontendAttached && !EditorUiModeState.UseVanilla;
+        if (!rebuiltAvailable)
+        {
+            if (!session.LegacyUiVisible && IsRoomAnchor(session.Owner.activePage))
+                MaterializeLegacyTool(session, session.ToolMode, explicitLegacyUi: false);
+            return;
+        }
+
+        if (session.LegacyUiVisible)
+            return;
+
+        if (IsExactLegacyPage(session.Owner.activePage, session.ToolMode))
+            ActivateCore(session, session.ToolMode);
+    }
+
+    internal static bool MaterializeLegacyTool(
+        EditorSession session,
+        EditorToolMode mode,
+        bool explicitLegacyUi)
+    {
+        if (session?.Owner == null || !Supports(mode)) return false;
+
+        if (!IsExactLegacyPage(session.Owner.activePage, mode))
+        {
+            LegacyUiPresentationController.Restore(session.Owner.activePage);
+            session.LegacyTransactions.Reset();
+
+            if (mode == EditorToolMode.Sound)
+            {
+                using SoundPageConstructorOptimization.LegacyConstructionScope legacyConstruction =
+                    SoundPageConstructorOptimization.EnterLegacyConstruction();
+                session.Owner.SwitchPage(SoundPageIndex);
+            }
+            else
+            {
+                session.Owner.SwitchPage(TriggerPageIndex);
+            }
+
+            session.Synchronize(session.Owner);
+        }
+
+        if (!IsExactLegacyPage(session.Owner.activePage, mode))
+            return false;
+
+        session.AdoptMaterializedToolMode(mode, explicitLegacyUi);
+        LegacyUiPresentationController.Restore(session.Owner.activePage);
+        return true;
+    }
+
+    internal static bool ReturnToNativeTool(EditorSession session)
+    {
+        if (session?.Owner == null || !Supports(session.ToolMode)) return false;
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla)
+            return false;
+
+        EditorToolMode mode = session.ToolMode;
+        session.AdoptMaterializedToolMode(mode, legacyUiVisible: false);
+        return ActivateCore(session, mode);
+    }
+
+    private static bool ActivateCore(EditorSession session, EditorToolMode mode)
+    {
+        if (session?.Owner == null || !Supports(mode)) return false;
+
+        if (!IsRoomAnchor(session.Owner.activePage))
+        {
+            LegacyUiPresentationController.Restore(session.Owner.activePage);
+            session.LegacyTransactions.Reset();
+            session.Owner.SwitchPage(RoomAnchorPageIndex);
+            session.Synchronize(session.Owner);
+        }
+
+        if (!IsRoomAnchor(session.Owner.activePage))
+            return false;
+
+        session.AdoptVirtualToolMode(mode);
+        return true;
+    }
+
+    private static bool IsRoomAnchor(Page page) =>
+        page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage);
+
+    private static bool IsExactLegacyPage(Page page, EditorToolMode mode) => mode switch
+    {
+        EditorToolMode.Sound => page is SoundPage && page.GetType() == typeof(SoundPage),
+        EditorToolMode.Triggers => page is TriggersPage && page.GetType() == typeof(TriggersPage),
+        _ => false
+    };
+}
