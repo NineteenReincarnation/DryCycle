@@ -37,9 +37,12 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
             observedLiveSession = true;
 
             // Page lifecycle follows the editor ToolMode even while RWImGui is temporarily hidden or
-            // Vanilla UI is primary. The render path performs the same synchronization defensively,
-            // so either update order remains correct and repeated calls are O(1) no-ops.
-            if (session != null)
+            // Vanilla UI is primary. The standalone debug workspace is different: it deliberately
+            // replaces every normal page surface, so a normal page must stay deactivated for the
+            // entire debug lifetime instead of being reactivated here from the stale ToolMode.
+            if (DevToolOverlay.SuppressesSharedPageSurfaces)
+                DevToolPageViewRegistry.DeactivateActive();
+            else if (session != null)
                 DevToolPageViewRegistry.SynchronizeActive(session.ToolMode);
             return;
         }
