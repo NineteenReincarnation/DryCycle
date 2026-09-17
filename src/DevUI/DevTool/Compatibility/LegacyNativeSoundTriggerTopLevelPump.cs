@@ -1,5 +1,6 @@
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
@@ -25,6 +26,13 @@ internal static partial class LegacyDevUiQuiescenceController
             UpdateVanillaMouseContract(owner);
             return true;
         }
+
+        // Explicit Vanilla/Legacy ownership must never be swallowed by the native optimization.
+        // This is deliberately checked before consulting quiescence profiles so a future profile
+        // change cannot accidentally make a visible legacy Sound/Trigger page dormant.
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla ||
+            session?.LegacyUiVisible == true)
+            return false;
 
         Page page = owner?.activePage;
         if (page is not SoundPage && page is not TriggersPage)
