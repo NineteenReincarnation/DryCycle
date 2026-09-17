@@ -14,6 +14,7 @@ required_paths = (
     backend_project,
     targets_path,
     frontend_project,
+    Path('src/DevUI/DevTool/Core/IDevToolPage.cs'),
     frontend_dir / 'IDevToolPageView.cs',
     frontend_dir / 'BuiltinDevToolPages.cs',
     frontend_dir / 'DevToolPageViewRegistry.cs',
@@ -25,6 +26,7 @@ for path in required_paths:
     if not path.exists():
         raise SystemExit(f'DevTool frontend build-contract input is missing: {path}')
 
+backend = ET.parse(backend_project).getroot()
 frontend = ET.parse(frontend_project).getroot()
 targets = ET.parse(targets_path).getroot()
 
@@ -72,10 +74,33 @@ targets_text = targets_path.read_text(encoding='utf-8')
 require('<Compile Remove="DevUI/DevTool/RWImGui/**/*.cs" />' in targets_text,
         'DryCycle backend no longer excludes the DevTool RWImGui frontend source tree')
 
-reference_names = {item.attrib.get('Include', '') for item in nodes(frontend, 'Reference')}
+reference_nodes = {
+    item.attrib.get('Include', ''): item
+    for item in nodes(frontend, 'Reference')
+}
 for reference in ('DryCycle', 'rain-world-imgui-api', 'ImGui.NET'):
-    require(reference in reference_names,
+    require(reference in reference_nodes,
             f'DevTool RWImGui frontend lost required assembly reference: {reference}')
+
+# The frontend intentionally consumes several internal backend contracts (IDevToolPage and related
+# scheduler/performance helpers). Because it is a separate DLL, its AssemblyName and the backend
+# InternalsVisibleTo entry are one compile-time contract. A rename on either side otherwise turns a
+# structurally-correct source tree into CS0122 accessibility failures.
+friend_names = {
+    item.attrib.get('Include', '').strip()
+    for item in nodes(backend, 'InternalsVisibleTo')
+}
+require('DryCycle.DevTool.RWImGui' in friend_names,
+        'DryCycle backend lost InternalsVisibleTo for the DevTool RWImGui frontend')
+
+backend_ref = reference_nodes['DryCycle']
+hint_paths = [
+    (child.text or '').strip()
+    for child in list(backend_ref)
+    if local_name(child) == 'HintPath'
+]
+require('$(GameModOutputDir)/DryCycle.dll' in hint_paths,
+        'DevTool RWImGui frontend no longer compiles against the backend DLL produced in GameModOutputDir')
 
 # Parent DryCycle deployment is the authoritative build entry. It must restore and forcibly rebuild
 # the exact frontend project, then fail if the expected DLL was not actually deployed.
@@ -92,5 +117,5 @@ require('Rebuild' in frontend_targets,
 require("!Exists('$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll')" in targets_text,
         'DryCycle parent build no longer verifies the deployed DevTool RWImGui DLL exists')
 
-print('DevTool RWImGui frontend build contract passed: source glob, assembly boundary and forced rebuild are intact.')
+print('DevTool RWImGui frontend build contract passed: source glob, friend assembly boundary, backend reference and forced rebuild are intact.')
 PY
