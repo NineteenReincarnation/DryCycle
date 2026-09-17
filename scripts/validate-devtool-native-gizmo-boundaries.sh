@@ -10,17 +10,23 @@ pages="$root/RWImGui/BuiltinDevToolPages.cs"
 retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
 spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 legacy_invalidation="$root/Compatibility/NativeLegacyPresentationInvalidation.cs"
+legacy_sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
 quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
 sound_actions="$root/Sound/SoundEditorActions.cs"
-trigger_actions="$root/Triggers/TriggerEditorActions.cs"
 sound_runtime="$root/Sound/NativeSoundRuntimeReconciler.cs"
+sound_activation="$root/Sound/SoundActivationPipeline.cs"
+sound_catalog="$root/Sound/SoundSampleCatalog.cs"
+sound_resource_snapshot="$root/Sound/NativeSoundResourceSnapshot.cs"
+sound_presentation="$root/Sound/SoundEditorRuntime.cs"
+trigger_actions="$root/Triggers/TriggerEditorActions.cs"
 history="$root/History/EditorHistoryService.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
 required=(
   "$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement"
-  "$spatial_refresh" "$legacy_invalidation" "$quiescence" "$sound_actions"
-  "$trigger_actions" "$sound_runtime" "$history" "$coordinator"
+  "$spatial_refresh" "$legacy_invalidation" "$legacy_sound_hydrator" "$quiescence"
+  "$sound_actions" "$trigger_actions" "$sound_runtime" "$sound_activation" "$sound_catalog"
+  "$sound_resource_snapshot" "$sound_presentation" "$history" "$coordinator"
 )
 for file in "${required[@]}"; do
   if [[ ! -f "$file" ]]; then
@@ -88,6 +94,30 @@ if ! grep -Fq 'new AmbientSoundPlayer' "$sound_runtime" ||
 fi
 if grep -Eq 'using DevInterface|global::DevInterface|new[[:space:]]+(AmbientSoundPanel|SpotSoundHandle|DirectionalSoundHandle)[[:space:]]*\(' "$sound_runtime"; then
   echo "Native Sound runtime reconciler regained DevInterface presentation dependencies." >&2
+  exit 1
+fi
+
+# Resource discovery/indexing is now a truly headless Sound subsystem. Neither activation nor sample
+# catalog nor the immutable resource snapshot may know that SoundPage exists. Presentation consumes
+# the headless filename generation directly; only Compatibility may project it back into page.fileNames.
+for file in "$sound_activation" "$sound_catalog" "$sound_resource_snapshot"; do
+  if grep -Eq 'using DevInterface|global::DevInterface|SoundPage|AmbientSoundPanel|RefreshFilesPage|\.fileNames' "$file"; then
+    echo "Headless Sound resource code regained DevInterface/SoundPage dependencies: $file" >&2
+    exit 1
+  fi
+done
+if grep -Eq 'SoundSampleCatalog\.Refresh\(|\.fileNames' "$sound_presentation"; then
+  echo "Native Sound presentation reads resources through SoundPage instead of headless catalogues." >&2
+  exit 1
+fi
+if ! grep -Fq 'SoundFileNameCatalog.CurrentNames' "$sound_presentation" ||
+   ! grep -Fq 'NativeSoundResourceSnapshot.Capture' "$sound_presentation"; then
+  echo "Native Sound presentation no longer consumes the headless resource generation." >&2
+  exit 1
+fi
+if ! grep -Fq 'page.fileNames = names;' "$legacy_sound_hydrator" ||
+   ! grep -Fq 'LegacySoundPageHydrator.Step(session)' "$coordinator"; then
+  echo "Vanilla Sound compatibility hydration is no longer isolated at the compatibility boundary." >&2
   exit 1
 fi
 
