@@ -37,6 +37,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     public override string NavigationLabel => DevToolUiSettings.T("物件", "Objects");
     public override string NavigationTooltip => DevToolUiSettings.T("物件", "Objects");
     public override bool SupportsSceneSurface => true;
+    public override bool SupportsPlacementInput => true;
 
     public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
         snapshot.Inspector?.HasSelection != true;
