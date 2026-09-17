@@ -57,6 +57,17 @@ internal static class DevToolSubsystemCoordinator
             DevUiDiagnosticsPublisher.Publish(session.Owner);
     }
 
+    /// <summary>
+    /// History snapshots can restore collection membership without going back through the original
+    /// authoring action. Reconcile real runtime state once after a successful Undo/Redo so Sound
+    /// players follow the restored AmbientSound model while scalar edits continue to update live by
+    /// reference without any rebuild.
+    /// </summary>
+    internal static void ReconcileRuntimeAfterHistoryRestore(EditorSession session)
+    {
+        NativeSoundRuntimeReconciler.Reconcile(session);
+    }
+
     internal static void ClearDetailPresentations()
     {
         RoomEditorPresentationHub.Clear();
