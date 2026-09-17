@@ -100,25 +100,14 @@ internal static class DevToolOverlay
     {
         ImGuiIOPtr io = frameContext.Io;
         Num.Vector2 display = frameContext.DisplaySize;
+        IDevToolPageView page = DevToolPageViewRegistry.Get(snapshot.ToolMode);
 
-        // The LanceScavenger debugger is a true New-UI workspace. Do not render the normal page
-        // workspace under it; only the shared editor chrome remains visible.
+        // Page-specific background surfaces are now dispatched through one page contract.
+        // Existing page views remain unchanged; Map alone owns a dedicated workspace.
         if (!lanceDebugPage)
-        {
-            // Map no longer opens an independent floating graph on top of the Browser/Inspector panel.
-            // In normal mode it gets one coherent World Workspace below. Focus mode intentionally
-            // keeps only the graph itself.
-            if (snapshot.FocusMode && snapshot.ToolMode == EditorToolMode.Map)
-                DrawMapCanvas(snapshot, display);
-            else if (snapshot.ToolMode == EditorToolMode.Dialog)
-                DrawDialogPreview(snapshot, display);
-            else if (snapshot.ToolMode == EditorToolMode.Relationships)
-                DrawRelationshipMatrix(snapshot, display);
-        }
+            page?.DrawBackground(snapshot, display);
 
         // The shared Control Center is part of the editor chrome, not a page-specific panel.
-        // Keep it alive while switching into Map/World so the developer's current view does not
-        // disappear merely because the active DevInterface page changed.
         ControlCenterWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
@@ -126,8 +115,6 @@ internal static class DevToolOverlay
 
         if (lanceDebugPage)
         {
-            // Entering diagnostics must not leave Objects placement armed underneath the debug
-            // workspace, otherwise a click outside an ImGui window could place an object.
             if (snapshot.PlacementActive)
                 Send(EditorUiCommandKind.CancelPlacement);
             LanceScavengerDebugView.Draw(snapshot, display);
@@ -137,10 +124,10 @@ internal static class DevToolOverlay
             LanceScavengerDebugView.StopCapture();
             if (!snapshot.FocusMode)
             {
-                if (snapshot.ToolMode == EditorToolMode.Map)
-                    WorldWorkspaceView.Draw(snapshot, display);
+                if (page?.UsesDedicatedWorkspace == true)
+                    page.DrawWorkspace(snapshot, display);
                 else if (snapshot.BrowserOpen || snapshot.InspectorOpen)
-                    DrawBrowserInspectorPanel(snapshot, display);
+                    DrawBrowserInspectorPanel(snapshot, display, page);
             }
             HandlePlacement(snapshot, display, io);
         }
@@ -192,19 +179,19 @@ internal static class DevToolOverlay
         LanceScavengerDebugView.StopCapture();
     }
 
-    private static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    internal static void DrawMapCanvas(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, pos, size);
     }
 
-    private static void DrawDialogPreview(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    internal static void DrawDialogPreview(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         DialogEditorView.DrawPreview(DialogEditorPresentationHub.Current, pos, size);
     }
 
-    private static void DrawRelationshipMatrix(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    internal static void DrawRelationshipMatrix(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         GetCentralWorkspaceRect(display, out Num.Vector2 pos, out Num.Vector2 size);
         RelationshipEditorView.DrawMatrix(RelationshipEditorPresentationHub.Current, pos, size);
@@ -312,14 +299,10 @@ internal static class DevToolOverlay
         if (ImGui.IsItemHovered()) DevToolTooltip.Show(tooltip);
     }
 
-    private static void DrawMapWorkspacePanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
-    {
-        // Kept as a compatibility shim for older callers while the World Workspace becomes the
-        // single region-level editor surface.
-        WorldWorkspaceView.Draw(snapshot, display);
-    }
-
-    private static void DrawBrowserInspectorPanel(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    private static void DrawBrowserInspectorPanel(
+        EditorPresentationSnapshot snapshot,
+        Num.Vector2 display,
+        IDevToolPageView page)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
         float defaultWidth = Math.Min(Math.Max(760f * Math.Min(1.4f, scale), display.X * 0.58f), Math.Max(520f, display.X - 80f));
@@ -343,11 +326,11 @@ internal static class DevToolOverlay
 
         FloatingWindowSnap.TrackCurrentWindow("BrowserInspector");
 
-        bool objectNoSelection = snapshot.ToolMode == EditorToolMode.Objects && snapshot.Inspector?.HasSelection != true;
+        bool suppressInspector = page?.SuppressInspector(snapshot) == true;
         bool browser = snapshot.BrowserOpen;
-        bool inspector = snapshot.InspectorOpen && !objectNoSelection;
+        bool inspector = snapshot.InspectorOpen && !suppressInspector;
 
-        if (objectNoSelection && !browser && snapshot.InspectorOpen)
+        if (suppressInspector && !browser && snapshot.InspectorOpen)
             browser = true;
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
@@ -370,7 +353,7 @@ internal static class DevToolOverlay
             {
                 ImGui.SetWindowFontScale(BrowserPaneFontScale);
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
-                DrawBrowserContents(snapshot);
+                DrawBrowserContents(snapshot, page);
             }
             ImGui.EndChild();
 
@@ -406,7 +389,7 @@ internal static class DevToolOverlay
             if (ImGui.BeginChild("##DevToolInspectorPane", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
             {
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
-                DrawInspectorContents(snapshot);
+                DrawInspectorContents(snapshot, page);
             }
             ImGui.EndChild();
         }
@@ -417,7 +400,7 @@ internal static class DevToolOverlay
             {
                 ImGui.SetWindowFontScale(BrowserPaneFontScale);
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserPaneFontScale);
-                DrawBrowserContents(snapshot);
+                DrawBrowserContents(snapshot, page);
             }
             ImGui.EndChild();
         }
@@ -427,7 +410,7 @@ internal static class DevToolOverlay
             if (ImGui.BeginChild("##DevToolInspectorPaneFull", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
             {
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
-                DrawInspectorContents(snapshot);
+                DrawInspectorContents(snapshot, page);
             }
             ImGui.EndChild();
         }
@@ -435,77 +418,49 @@ internal static class DevToolOverlay
         ImGui.End();
     }
 
-    private static void DrawBrowserContents(EditorPresentationSnapshot snapshot)
+    private static void DrawBrowserContents(EditorPresentationSnapshot snapshot, IDevToolPageView page)
     {
-        if (snapshot.ToolMode == EditorToolMode.Room)
-            RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Sound)
-            SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Triggers)
-            TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Map)
-            MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Dialog)
-            DialogEditorView.DrawBrowser(DialogEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Relationships)
-            RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Objects)
+        if (page == null)
         {
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("资源库", "Library"),
-                    "ObjectsLibraryTab",
-                    sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
-                sceneTab = false;
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("场景", "Scene"),
-                    "ObjectsSceneTab",
-                    sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-                sceneTab = true;
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            if (sceneTab) DrawSceneObjectList(snapshot);
-            else DrawObjectLibrary(snapshot);
-        }
-        else
             ImGui.TextDisabled(DevToolUiSettings.T("当前工具不可用。", "Tools unavailable."));
+            return;
+        }
+
+        page.DrawBrowser(snapshot);
     }
 
-    private static void DrawInspectorContents(EditorPresentationSnapshot snapshot)
+    private static void DrawInspectorContents(EditorPresentationSnapshot snapshot, IDevToolPageView page)
     {
-        if (snapshot.ToolMode == EditorToolMode.Room)
+        if (page == null)
         {
-            RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于尚未迁移的模板、地形或自定义房间设置控件。", "Fallback for template, terrain or custom RoomSettings controls not migrated yet."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Objects)
-            ObjectInspectorView.Draw(snapshot.Inspector);
-        else if (snapshot.ToolMode == EditorToolMode.Sound)
-        {
-            SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于未迁移的自定义声音页面控件。", "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Triggers)
-        {
-            TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于新检查器无法表达的自定义触发器/事件控件。", "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector."));
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Map)
-        {
-            // MapPage extensions are exposed through the World Workspace compatibility surface.
-            // Do not ask users to reopen the old DevUI for the Map workflow.
-            MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
-        }
-        else if (snapshot.ToolMode == EditorToolMode.Dialog)
-            DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
-        else if (snapshot.ToolMode == EditorToolMode.Relationships)
-        {
-            RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
-            DrawLegacyFallback(snapshot, DevToolUiSettings.T("用于矩阵编辑器尚未表达的关系页面扩展。", "Fallback for custom RelationshipPage extensions not represented by the matrix editor."));
-        }
-        else
             ImGui.TextDisabled(DevToolUiSettings.T("当前检查器不可用。", "Inspector unavailable."));
+            return;
+        }
+
+        page.DrawInspector(snapshot);
+        string legacyTooltip = page.LegacyFallbackTooltip;
+        if (!string.IsNullOrEmpty(legacyTooltip))
+            DrawLegacyFallback(snapshot, legacyTooltip);
+    }
+
+    internal static void DrawObjectsBrowser(EditorPresentationSnapshot snapshot)
+    {
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("资源库", "Library"),
+                "ObjectsLibraryTab",
+                sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+            sceneTab = false;
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("场景", "Scene"),
+                "ObjectsSceneTab",
+                sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            sceneTab = true;
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        if (sceneTab) DrawSceneObjectList(snapshot);
+        else DrawObjectLibrary(snapshot);
     }
 
     private static void DrawObjectLibrary(EditorPresentationSnapshot snapshot)
