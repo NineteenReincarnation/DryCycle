@@ -4,10 +4,9 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Factories;
 
 /// <summary>
-/// Native construction path for Rain World's built-in trigger model. Built-in trigger creation no
-/// longer needs TriggersPage/TriggerPanel to exist. Unknown ExtEnum values deliberately fall back to
-/// the legacy page boundary so third-party CreateTriggerRep hooks remain available until they opt in
-/// to the native extension API.
+/// Native construction path for trigger models. Registered native providers get first refusal;
+/// Rain World's built-ins are created directly, and unknown external ExtEnum values fall back to
+/// the legacy page boundary so existing third-party hooks remain available during migration.
 /// </summary>
 internal static class NativeTriggerFactory
 {
@@ -20,18 +19,23 @@ internal static class NativeTriggerFactory
         if (session?.RoomSettings?.triggers == null || type == null)
             return false;
 
-        if (!IsBuiltin(type))
-            return TryCreateLegacy(session, type, out trigger);
+        if (!NativeAuthoringFactoryRegistry.TryCreateTrigger(session, type, out trigger))
+        {
+            if (!IsBuiltin(type))
+                return TryCreateLegacy(session, type, out trigger);
 
-        trigger = type == EventTrigger.TriggerType.Spot
-            ? new SpotTrigger()
-            : new EventTrigger(type);
+            trigger = type == EventTrigger.TriggerType.Spot
+                ? new SpotTrigger()
+                : new EventTrigger(type);
+        }
 
-        if (trigger is SpotTrigger spot)
+        if (trigger == null) return false;
+        if (trigger is SpotTrigger spot && spot.pos == UnityEngine.Vector2.zero)
             spot.pos = NativeFactoryPlacement.WorldCursor(session);
 
         trigger.panelPosition = NativeFactoryPlacement.LegacyPanelSlot(session.RoomSettings.triggers.Count);
-        session.RoomSettings.triggers.Add(trigger);
+        if (!ContainsReference(session.RoomSettings.triggers, trigger))
+            session.RoomSettings.triggers.Add(trigger);
         return true;
     }
 
@@ -58,12 +62,19 @@ internal static class NativeTriggerFactory
         trigger = session.RoomSettings.triggers[session.RoomSettings.triggers.Count - 1];
         return trigger != null;
     }
+
+    private static bool ContainsReference(System.Collections.Generic.List<EventTrigger> values, EventTrigger target)
+    {
+        for (int i = 0; i < values.Count; i++)
+            if (ReferenceEquals(values[i], target)) return true;
+        return false;
+    }
 }
 
 /// <summary>
-/// Native TriggeredEvent factory. The seven Rain World event IDs are pure model constructors; only
-/// unknown third-party IDs are delegated to TriggerPanel.AddEvent so an existing mod hook can still
-/// supply custom event state.
+/// Native TriggeredEvent factory. Registered providers can supply a first-class model for custom
+/// event IDs; Rain World's built-ins are direct constructors, and only unknown unregistered IDs are
+/// delegated to TriggerPanel.AddEvent as an explicit Legacy fallback.
 /// </summary>
 internal static class NativeTriggeredEventFactory
 {
@@ -74,6 +85,13 @@ internal static class NativeTriggeredEventFactory
     {
         if (trigger == null || eventType == null)
             return false;
+
+        TriggeredEvent created;
+        if (NativeAuthoringFactoryRegistry.TryCreateTriggeredEvent(session, trigger, eventType, out created))
+        {
+            trigger.tEvent = created;
+            return created != null;
+        }
 
         if (!IsBuiltin(eventType))
             return TryAssignLegacy(session, trigger, eventType);
