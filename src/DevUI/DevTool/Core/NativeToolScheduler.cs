@@ -2,7 +2,6 @@ using System;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Input;
-using DryCycle.DevUI.DevTool.Sound;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -79,18 +78,7 @@ internal static class NativeToolScheduler
         {
             LegacyUiPresentationController.Restore(session.Owner.activePage);
             session.LegacyTransactions.Reset();
-
-            if (mode == EditorToolMode.Sound)
-            {
-                using SoundPageConstructorOptimization.LegacyConstructionScope legacyConstruction =
-                    SoundPageConstructorOptimization.EnterLegacyConstruction();
-                session.Owner.SwitchPage(SoundPageIndex);
-            }
-            else
-            {
-                session.Owner.SwitchPage(TriggerPageIndex);
-            }
-
+            session.Owner.SwitchPage(mode == EditorToolMode.Sound ? SoundPageIndex : TriggerPageIndex);
             session.Synchronize(session.Owner);
         }
 
