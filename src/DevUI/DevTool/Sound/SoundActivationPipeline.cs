@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 
@@ -73,19 +72,19 @@ internal readonly struct SoundActivationStatusSnapshot
 }
 
 /// <summary>
-/// Owns the cold-start lifecycle of the Sound workspace.
+/// Owns the cold-start lifecycle of the rebuilt Sound workspace without depending on DevInterface
+/// presentation state. Filename discovery, sample indexing and group loading are headless services;
+/// the native frontend consumes their immutable snapshots directly.
 ///
-/// Resource discovery is incremental, but publication is transactional: Ready is not exposed until
-/// the authoritative filename array, resolved sample snapshot, sound groups and final Sound
-/// presentation all describe the same generation. This prevents a completed progress bar from
-/// dropping back into an empty/stale Library view.
+/// Vanilla SoundPage hydration is intentionally not performed here. Compatibility presentation is
+/// synchronized only when the user actually enters Vanilla/Legacy mode.
 /// </summary>
 internal static class SoundActivationPipeline
 {
     private const double ActiveFrameBudgetMilliseconds = 0.85d;
     private const double PrewarmFrameBudgetMilliseconds = 0.22d;
 
-    private static SoundPage requestedPage;
+    private static EditorSession requestedSession;
     private static string[] requestedNames;
     private static SoundActivationPhase phase;
     private static long activationStartedTimestamp;
@@ -122,34 +121,24 @@ internal static class SoundActivationPipeline
             !EditorUiModeState.UseVanilla &&
             !session.LegacyUiVisible;
 
-        // A legacy SoundPage that did not originate from the rebuilt frontend already owns its
-        // vanilla constructor state. Do not start a second resource transaction behind it.
-        if (!rebuiltFrontendOwnsPresentation &&
-            session.ToolMode == EditorToolMode.Sound &&
-            session.Owner.activePage is SoundPage legacySoundPage &&
-            !ReferenceEquals(requestedPage, legacySoundPage))
+        // Explicit Vanilla/Legacy mode owns its own presentation lifecycle. Native catalog work is
+        // deliberately dormant there; compatibility hydration occurs at the boundary instead of
+        // keeping a hidden vanilla page authoritative during normal rebuilt operation.
+        if (!rebuiltFrontendOwnsPresentation)
             return;
 
-        // Opportunistically prepare the immutable catalogues before Sound is opened. This never
-        // publishes a half-built array to a SoundPage.
-        if (rebuiltFrontendOwnsPresentation &&
-            (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage))
+        if (session.ToolMode != EditorToolMode.Sound)
         {
             if (!ShouldPausePrewarm(session))
                 StepPrewarm();
             return;
         }
 
-        if (session.ToolMode != EditorToolMode.Sound || session.Owner.activePage is not SoundPage page)
-            return;
-
-        if (!ReferenceEquals(requestedPage, page))
+        if (!ReferenceEquals(requestedSession, session))
         {
-            BeginActivation(page);
-            if (DependenciesReady(page))
-                TryCommitReady(session, page);
-
-            // Publish the page shell immediately. Any unfinished resource work starts next frame.
+            BeginActivation(session);
+            if (DependenciesReady())
+                TryCommitReady(session);
             return;
         }
 
@@ -181,18 +170,19 @@ internal static class SoundActivationPipeline
 
             if (SoundFileNameCatalog.IsReady)
             {
-                PublishFileNamesToPage(page);
+                string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+                requestedNames = names;
 
-                if (!SoundSampleCatalog.IsReadyFor(page) && remaining > 0d)
+                if (!SoundSampleCatalog.IsReadyForNames(names) && remaining > 0d)
                 {
                     phase = SoundActivationPhase.IndexingSamples;
                     detail = "Preparing ambient sound list";
-                    SoundSampleCatalog.BeginRefresh(page);
+                    SoundSampleCatalog.BeginPrewarm();
                     SoundSampleCatalog.StepRefresh(remaining);
                     remaining = Math.Max(0d, ActiveFrameBudgetMilliseconds - ElapsedMilliseconds(frameStarted));
                 }
 
-                if (SoundSampleCatalog.IsReadyFor(page) && !SoundGroupLibrary.IsReady && remaining > 0d)
+                if (SoundSampleCatalog.IsReadyForNames(names) && !SoundGroupLibrary.IsReady && remaining > 0d)
                 {
                     phase = SoundActivationPhase.LoadingGroups;
                     detail = "Loading sound groups";
@@ -201,7 +191,7 @@ internal static class SoundActivationPipeline
                 }
             }
 
-            dependenciesReady = DependenciesReady(page);
+            dependenciesReady = DependenciesReady();
         }
         catch (Exception error)
         {
@@ -217,7 +207,7 @@ internal static class SoundActivationPipeline
         }
 
         if (dependenciesReady && phase != SoundActivationPhase.Failed)
-            TryCommitReady(session, page);
+            TryCommitReady(session);
     }
 
     internal static double LastPageSwitchMilliseconds => lastPageSwitchMilliseconds;
@@ -238,13 +228,13 @@ internal static class SoundActivationPipeline
         lastPageSwitchMilliseconds = Math.Max(0d, milliseconds);
         if (DevToolPerformanceMonitor.Enabled)
             Plugin.Logger?.LogInfo(
-                "DevTool Sound page switch/constructor " +
+                "DevTool Sound workspace switch " +
                 lastPageSwitchMilliseconds.ToString("0.00") + " ms.");
     }
 
     internal static void Reset()
     {
-        requestedPage = null;
+        requestedSession = null;
         requestedNames = null;
         phase = SoundActivationPhase.Dormant;
         activationStartedTimestamp = 0L;
@@ -258,9 +248,9 @@ internal static class SoundActivationPipeline
         SoundGroupLibrary.ResetRuntimeState();
     }
 
-    private static void BeginActivation(SoundPage page)
+    private static void BeginActivation(EditorSession session)
     {
-        requestedPage = page;
+        requestedSession = session;
         requestedNames = null;
         activationStartedTimestamp = Stopwatch.GetTimestamp();
         lastFrameWorkMilliseconds = 0d;
@@ -271,49 +261,51 @@ internal static class SoundActivationPipeline
         SoundFileNameCatalog.EnsureStarted();
         if (SoundFileNameCatalog.IsReady)
         {
-            PublishFileNamesToPage(page);
-            SoundSampleCatalog.BeginRefresh(page);
+            requestedNames = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+            if (!SoundSampleCatalog.IsReadyForNames(requestedNames))
+                SoundSampleCatalog.BeginPrewarm();
         }
 
         if (!SoundGroupLibrary.IsReady)
             SoundGroupLibrary.EnsureLoaded();
 
+        string[] names = requestedNames ?? SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
         phase = !SoundFileNameCatalog.IsReady
             ? SoundActivationPhase.DiscoveringFileNames
-            : !SoundSampleCatalog.IsReadyFor(page)
+            : !SoundSampleCatalog.IsReadyForNames(names)
                 ? SoundActivationPhase.IndexingSamples
                 : !SoundGroupLibrary.IsReady
                     ? SoundActivationPhase.LoadingGroups
                     : SoundActivationPhase.IndexingSamples;
     }
 
-    private static bool DependenciesReady(SoundPage page) =>
-        page != null &&
-        SoundFileNameCatalog.IsReady &&
-        ReferenceEquals(page.fileNames, SoundFileNameCatalog.CurrentNames) &&
-        SoundSampleCatalog.IsReadyFor(page) &&
-        SoundGroupLibrary.IsReady;
+    private static bool DependenciesReady()
+    {
+        string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+        return SoundFileNameCatalog.IsReady &&
+               SoundSampleCatalog.IsReadyForNames(names) &&
+               SoundGroupLibrary.IsReady;
+    }
 
     /// <summary>
-    /// Commits the completed resource generation to the presentation before exposing Ready. A
-    /// failed validation remains in the preparing state and is retried next frame instead of
-    /// presenting a false 100% completion.
+    /// Commits one complete native resource generation before exposing Ready. No DevInterface page
+    /// participates in validation or publication.
     /// </summary>
-    private static bool TryCommitReady(EditorSession session, SoundPage page)
+    private static bool TryCommitReady(EditorSession session)
     {
-        if (!DependenciesReady(page))
+        if (!DependenciesReady())
             return false;
 
         try
         {
-            // Clear the old generation first, then mark the new generation and publish it now. The
-            // normal presentation pass later in this frame will observe an already-current snapshot.
+            requestedNames = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
+
             SoundEditorPresentationHub.Clear();
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
             SoundPresentationChangeHintHub.MarkFull(session);
             SoundEditorPresentationHub.Publish(session);
 
-            if (!ValidatePublishedLibrary(page, SoundEditorPresentationHub.Current))
+            if (!ValidatePublishedLibrary(SoundEditorPresentationHub.Current))
             {
                 phase = SoundActivationPhase.IndexingSamples;
                 detail = "Preparing final sound list";
@@ -330,7 +322,7 @@ internal static class SoundActivationPipeline
             {
                 Plugin.Logger?.LogInfo(
                     "DevTool Sound activation ready in " + clickToReadyMilliseconds.ToString("0.00") +
-                    " ms; page switch/constructor " + lastPageSwitchMilliseconds.ToString("0.00") +
+                    " ms; workspace switch " + lastPageSwitchMilliseconds.ToString("0.00") +
                     " ms; max bootstrap frame " + maxFrameWorkMilliseconds.ToString("0.00") +
                     " ms; worst indivisible unit " +
                     MaxIndivisibleUnitMilliseconds().ToString("0.00") + " ms (" +
@@ -347,22 +339,18 @@ internal static class SoundActivationPipeline
         }
     }
 
-    private static bool ValidatePublishedLibrary(
-        SoundPage page,
-        EditorSoundPresentationSnapshot presentation)
+    private static bool ValidatePublishedLibrary(EditorSoundPresentationSnapshot presentation)
     {
-        if (page == null || presentation?.Available != true)
+        if (presentation?.Available != true)
             return false;
 
-        string[] names = page.fileNames ?? Array.Empty<string>();
+        string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
         EditorSoundSampleSnapshot[] samples = presentation.SampleEntries ?? Array.Empty<EditorSoundSampleSnapshot>();
         if (names.Length == 0)
             return samples.Length == 0;
         if (samples.Length == 0)
             return false;
 
-        // SampleCatalog intentionally de-duplicates names case-insensitively. Validate membership,
-        // not raw array length, so harmless duplicate physical filenames cannot prevent readiness.
         HashSet<string> published = new(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < samples.Length; i++)
         {
@@ -420,29 +408,11 @@ internal static class SoundActivationPipeline
         }
     }
 
-    private static void PublishFileNamesToPage(SoundPage page)
-    {
-        string[] names = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
-        if (ReferenceEquals(requestedNames, names) && ReferenceEquals(page.fileNames, names))
-            return;
-
-        page.fileNames = names;
-        requestedNames = names;
-
-        int maxPerPage = Math.Max(1, page.maxFilesPerPage);
-        page.totalFilePages = 1 + (int)(names.Length / (float)maxPerPage + 0.5f);
-        if (page.currFilesPage < 0 || page.currFilesPage >= page.totalFilePages)
-            page.currFilesPage = 0;
-
-        // Keep the vanilla fallback page coherent without making it authoritative for discovery.
-        page.RefreshFilesPage();
-    }
-
     private static string StatusDetail()
     {
         string value = detail;
         if (lastPageSwitchMilliseconds > 0d)
-            value += " · page switch " + lastPageSwitchMilliseconds.ToString("0.00") + " ms";
+            value += " · workspace switch " + lastPageSwitchMilliseconds.ToString("0.00") + " ms";
 
         double worst = MaxIndivisibleUnitMilliseconds();
         if (worst > 0d)
@@ -467,12 +437,13 @@ internal static class SoundActivationPipeline
 
     private static float ComputeProgress()
     {
+        string[] names = requestedNames ?? SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
         return phase switch
         {
             SoundActivationPhase.Dormant => 0f,
             SoundActivationPhase.DiscoveringFileNames => 0.24f * SoundFileNameCatalog.Progress,
             SoundActivationPhase.IndexingSamples =>
-                SoundSampleCatalog.IsReadyFor(requestedPage)
+                SoundSampleCatalog.IsReadyForNames(names)
                     ? 0.98f
                     : 0.24f + 0.44f * SoundSampleCatalog.Progress,
             SoundActivationPhase.LoadingGroups => 0.68f + 0.30f * SoundGroupLibrary.Progress,
