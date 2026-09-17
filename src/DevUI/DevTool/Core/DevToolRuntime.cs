@@ -76,6 +76,11 @@ internal static class DevToolRuntime
         }
         EditorSession session = DevToolSessionHub.Current;
 
+        // Sound/Trigger may exist without a matching DevInterface page. Global New UI / Vanilla
+        // ownership changes are reconciled on the main thread here so render-thread presentation
+        // flags never construct or retire DevInterface objects directly.
+        NativeToolScheduler.SynchronizePresentationOwnership(session);
+
         bool restoredWorkspaceThisFrame;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DeferredWorkspaceRestore))
             restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
@@ -114,7 +119,8 @@ internal static class DevToolRuntime
             EditorInputRouter.FrontendAttached &&
             session != null &&
             session.LegacyUiVisible == false &&
-            ((session.ToolMode == EditorToolMode.Objects && self.activePage is ObjectsPage) ||
+            (NativeToolScheduler.IsVirtualToolActive(session) ||
+             (session.ToolMode == EditorToolMode.Objects && self.activePage is ObjectsPage) ||
              (session.ToolMode == EditorToolMode.Room && self.activePage is RoomSettingsPage) ||
              (session.ToolMode == EditorToolMode.Sound && self.activePage is SoundPage) ||
              (session.ToolMode == EditorToolMode.Triggers && self.activePage is TriggersPage) ||
@@ -516,16 +522,17 @@ public sealed class EditorSession
             return false;
 
         deferredViewRestorePending = false;
-        if (deferredRestoreLegacyUi && deferredRestoreMode == EditorToolMode.Sound)
+
+        if (deferredRestoreLegacyUi && NativeToolScheduler.Supports(deferredRestoreMode))
         {
-            using SoundPageConstructorOptimization.LegacyConstructionScope legacyConstruction =
-                SoundPageConstructorOptimization.EnterLegacyConstruction();
-            SetToolMode(deferredRestoreMode);
+            NativeToolScheduler.MaterializeLegacyTool(
+                this,
+                deferredRestoreMode,
+                explicitLegacyUi: true);
+            return true;
         }
-        else
-        {
-            SetToolMode(deferredRestoreMode);
-        }
+
+        SetToolMode(deferredRestoreMode);
         LegacyUiVisible = deferredRestoreLegacyUi;
         if (LegacyUiVisible)
         {
@@ -546,16 +553,33 @@ public sealed class EditorSession
             return;
         }
 
+        // Selecting a different workspace exits per-page Legacy presentation just like the old
+        // SwitchPage path did. Same-tool selection preserves an explicitly visible legacy page.
+        if (ToolMode != mode && LegacyUiVisible)
+            LegacyUiVisible = false;
+
+        long soundSwitchStarted = mode == EditorToolMode.Sound
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0L;
+
+        if (NativeToolScheduler.TryActivate(this, mode))
+        {
+            RecordSoundWorkspaceSwitch(soundSwitchStarted);
+            return;
+        }
+
         int pageIndex = PageIndex(mode);
         if (pageIndex < 0)
         {
             ToolMode = mode;
+            RecordSoundWorkspaceSwitch(soundSwitchStarted);
             return;
         }
 
         if (ResolveToolMode(Owner.activePage) == mode)
         {
             ToolMode = mode;
+            RecordSoundWorkspaceSwitch(soundSwitchStarted);
             return;
         }
 
@@ -563,23 +587,41 @@ public sealed class EditorSession
         LegacyTransactions.Reset();
         LegacyUiVisible = false;
 
-        long soundSwitchStarted = mode == EditorToolMode.Sound
-            ? System.Diagnostics.Stopwatch.GetTimestamp()
-            : 0L;
         Owner.SwitchPage(pageIndex);
-        if (soundSwitchStarted != 0L)
-        {
-            double milliseconds =
-                (System.Diagnostics.Stopwatch.GetTimestamp() - soundSwitchStarted) * 1000d /
-                System.Diagnostics.Stopwatch.Frequency;
-            SoundActivationPipeline.RecordPageSwitch(milliseconds);
-        }
+        RecordSoundWorkspaceSwitch(soundSwitchStarted);
 
         // SwitchPage constructs a new concrete Page immediately and can cross document boundaries
         // (Room <-> RegionMap <-> Relationships). Reconcile now so any later command in this same
         // queue batch writes to the correct History document and presentation identity. This keeps
         // stable frames cheap because the structural pass only happens on an actual page switch.
         Synchronize(Owner);
+    }
+
+    internal void AdoptVirtualToolMode(EditorToolMode mode)
+    {
+        ToolMode = mode;
+        LegacyUiVisible = false;
+        LegacyTransactions.Reset();
+        CancelPlacement();
+    }
+
+    internal void AdoptMaterializedToolMode(EditorToolMode mode, bool legacyUiVisible)
+    {
+        ToolMode = mode;
+        LegacyUiVisible = legacyUiVisible;
+        LegacyTransactions.Reset();
+        if (mode != EditorToolMode.Objects)
+            CancelPlacement();
+    }
+
+    private static void RecordSoundWorkspaceSwitch(long startedTimestamp)
+    {
+        if (startedTimestamp == 0L) return;
+
+        double milliseconds =
+            (System.Diagnostics.Stopwatch.GetTimestamp() - startedTimestamp) * 1000d /
+            System.Diagnostics.Stopwatch.Frequency;
+        SoundActivationPipeline.RecordPageSwitch(milliseconds);
     }
 
     public void BeginPlacement(string type)
@@ -617,6 +659,21 @@ public sealed class EditorSession
         if (ToolMode != EditorToolMode.Objects && ToolMode != EditorToolMode.Room &&
             ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers &&
             ToolMode != EditorToolMode.Map && ToolMode != EditorToolMode.Relationships) return;
+
+        if (NativeToolScheduler.Supports(ToolMode))
+        {
+            if (LegacyUiVisible)
+            {
+                if (NativeToolScheduler.ReturnToNativeTool(this))
+                    return;
+            }
+            else
+            {
+                if (NativeToolScheduler.MaterializeLegacyTool(this, ToolMode, explicitLegacyUi: true))
+                    return;
+            }
+        }
+
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
         {
