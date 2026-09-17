@@ -535,11 +535,7 @@ public sealed class EditorSession
         SetToolMode(deferredRestoreMode);
         LegacyUiVisible = deferredRestoreLegacyUi;
         if (LegacyUiVisible)
-        {
-            if (Owner?.activePage is SoundPage soundPage)
-                SoundPageConstructorOptimization.MaterializeLegacyFileButtons(soundPage);
             LegacyUiPresentationController.Restore(Owner?.activePage);
-        }
         return true;
     }
 
@@ -676,11 +672,7 @@ public sealed class EditorSession
 
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
-        {
-            if (Owner?.activePage is SoundPage soundPage)
-                SoundPageConstructorOptimization.MaterializeLegacyFileButtons(soundPage);
             LegacyUiPresentationController.Restore(Owner?.activePage);
-        }
     }
 
     private static int PageIndex(EditorToolMode mode)
