@@ -275,7 +275,7 @@ internal static class NativeSpatialGizmoView
                 Num.Vector2 world = ScreenToWorld(viewport, display, ImGui.GetIO().MousePos);
                 float dx = world.X - drag.CenterWorldX;
                 float dy = world.Y - drag.CenterWorldY;
-                float radius = MathF.Sqrt(dx * dx + dy * dy);
+                float radius = (float)Math.Sqrt(dx * dx + dy * dy);
                 NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
                     NativeGizmoCommandKind.Update,
                     drag.Target,
@@ -318,7 +318,7 @@ internal static class NativeSpatialGizmoView
             Num.Vector2 world = ScreenToWorld(viewport, display, ImGui.GetIO().MousePos);
             float dx = world.X - drag.CenterWorldX;
             float dy = world.Y - drag.CenterWorldY;
-            float radius = MathF.Sqrt(dx * dx + dy * dy);
+            float radius = (float)Math.Sqrt(dx * dx + dy * dy);
             NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
                 NativeGizmoCommandKind.Update,
                 drag.Target,
