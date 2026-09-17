@@ -22,13 +22,12 @@ internal static class MiscRuntime
         // Quiescence is part of the DevTool backend architecture, not a separately-discovered
         // BepInEx feature. Own its hook lifetime explicitly so the legacy backend always follows
         // the same enable/disable transaction as the rebuilt editor runtime.
-        DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Enable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
 
         // Install the Sound/Trigger native top-level pump after quiescence but before DevToolRuntime.
         // DevToolRuntime is therefore the outer DevUI.Update hook; its orig delegate reaches this
-        // scheduler, which replaces only the native Sound/Trigger active-page update. The two old
-        // derived Page.Update detours are retired by the scheduler itself.
+        // scheduler. Native Sound/Trigger uses a RoomSettingsPage anchor and never constructs its
+        // legacy page unless Vanilla/Legacy presentation is explicitly active.
         DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
@@ -66,7 +65,6 @@ internal static class MiscRuntime
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
         DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Disable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
-        DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Disable();
         DryCycle.DevUI.DevTool.Core.EditorRevisionHub.Reset();
         DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Disable();
 
