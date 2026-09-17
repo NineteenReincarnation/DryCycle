@@ -2,6 +2,7 @@ using System;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Preview;
@@ -251,38 +252,23 @@ internal static class RoomEditorActions
 
     internal static bool AddRoomEffect(EditorSession session, string typeName)
     {
-        if (session?.Owner == null || session.RoomSettings?.effects == null || string.IsNullOrEmpty(typeName)) return false;
+        if (session?.RoomSettings?.effects == null || string.IsNullOrEmpty(typeName)) return false;
         if (session.ToolMode != EditorToolMode.Room) session.SetToolMode(EditorToolMode.Room);
-        if (session.Owner.activePage is not RoomSettingsPage page) return false;
 
         RoomSettings settings = session.RoomSettings;
         RoomSettings.RoomEffect.Type type = new(typeName, false);
-        for (int i = 0; i < settings.effects.Count; i++)
-        {
-            RoomSettings.RoomEffect existing = settings.effects[i];
-            if (existing != null && !existing.inherited && existing.type == type)
-                return false;
-        }
-
         IEditorStateSnapshot before = RoomEffectCollectionStateSnapshot.Capture(settings);
         if (before == null) return false;
 
-        page.Signal(DevUISignalType.Create, page, typeName);
-
-        bool created = false;
-        for (int i = settings.effects.Count - 1; i >= 0; i--)
-        {
-            RoomSettings.RoomEffect candidate = settings.effects[i];
-            if (candidate != null && !candidate.inherited && candidate.type == type)
-            {
-                created = true;
-                break;
-            }
-        }
-        if (!created) return false;
+        if (!NativeRoomEffectFactory.TryCreate(session, type, out RoomSettings.RoomEffect created) || created == null)
+            return false;
 
         IEditorStateSnapshot after = RoomEffectCollectionStateSnapshot.Capture(settings);
         if (!SnapshotsDiffer(before, after)) return false;
+
+        // The native factory owns model creation. The hidden legacy page is only marked stale so it
+        // can be materialized once if the user explicitly returns to vanilla presentation.
+        RefreshLegacyPageOrDefer(session);
         PushHistory(session, "Add effect " + typeName, before, after);
         return true;
     }
