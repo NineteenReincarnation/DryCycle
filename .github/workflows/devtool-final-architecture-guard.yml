@@ -11,6 +11,7 @@ on:
       - 'scripts/validate-devtool-frontend-build-contract.sh'
       - 'scripts/validate-devtool-native-factory-boundaries.sh'
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
+      - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'scripts/validate-devtool-frontend-build-contract.sh'
       - 'scripts/validate-devtool-native-factory-boundaries.sh'
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
+      - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
 jobs:
@@ -44,3 +46,6 @@ jobs:
       - name: Validate DevTool Native Gizmo boundaries
         shell: bash
         run: bash scripts/validate-devtool-native-gizmo-boundaries.sh
+      - name: Validate DevTool Native Sound Trigger runtime boundaries
+        shell: bash
+        run: bash scripts/validate-devtool-native-sound-trigger-runtime.sh
