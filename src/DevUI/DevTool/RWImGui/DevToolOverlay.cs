@@ -8,9 +8,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Shared RWImGui editor chrome.
 ///
-/// Page-specific browser, inspector, workspace and scene content belong to registered page objects.
-/// This class owns only the common activity bar, Browser/Inspector shell, placement input and the
-/// standalone Lance Scavenger debug surface.
+/// Page-specific browser, inspector, workspace, scene and placement capabilities belong to registered
+/// page objects. This class owns only the common activity bar, Browser/Inspector shell, generic
+/// placement input chrome and the standalone Lance Scavenger debug surface.
 /// </summary>
 internal static class DevToolOverlay
 {
@@ -57,7 +57,7 @@ internal static class DevToolOverlay
                 DrawBrowserInspectorPanel(snapshot, display, page);
         }
 
-        HandlePlacement(snapshot, display, io);
+        HandlePlacement(snapshot, display, io, page);
     }
 
     internal static void ResetRetainedState()
@@ -329,9 +329,13 @@ internal static class DevToolOverlay
             DevToolTooltip.Show(tooltip);
     }
 
-    private static void HandlePlacement(EditorPresentationSnapshot snapshot, Num.Vector2 display, ImGuiIOPtr io)
+    private static void HandlePlacement(
+        EditorPresentationSnapshot snapshot,
+        Num.Vector2 display,
+        ImGuiIOPtr io,
+        IDevToolPageView page)
     {
-        if (!snapshot.PlacementActive || snapshot.ToolMode != EditorToolMode.Objects) return;
+        if (!snapshot.PlacementActive || page?.SupportsPlacementInput != true) return;
 
         bool overWindow = ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         if (!overWindow && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
