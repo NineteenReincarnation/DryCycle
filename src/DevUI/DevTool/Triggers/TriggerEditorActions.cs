@@ -1,4 +1,5 @@
 using System;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
@@ -61,10 +62,9 @@ internal static class TriggerEditorActions
         if (!NativeTriggerFactory.TryCreate(session, type, out EventTrigger created) || created == null)
             return false;
 
-        // Native construction mutates only the model. Until the Native Gizmo Engine replaces the
-        // remaining vanilla SpotTrigger handle, this compatibility refresh reconciles that spatial
-        // backend and marks the hidden legacy page stale for a one-time full rebuild on vanilla return.
-        RefreshPage(session);
+        // Native construction mutates only the model. Built-in Trigger authoring has no hidden
+        // runtime backend to reconcile; only the optional legacy presentation is marked stale.
+        NativeLegacyPresentationInvalidation.InvalidateCurrentSoundOrTriggerPage(session);
 
         IEditorStateSnapshot before = AbsentMemberSnapshots.Trigger(session.RoomSettings, created);
         IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, created);
@@ -95,7 +95,7 @@ internal static class TriggerEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
-        RefreshPage(session);
+        NativeLegacyPresentationInvalidation.InvalidateCurrentSoundOrTriggerPage(session);
         session.History.Push(entry);
 
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
@@ -347,7 +347,7 @@ internal static class TriggerEditorActions
         EventTrigger target,
         string label,
         Func<bool> mutation,
-        bool refreshPage = true)
+        bool syncLegacyPresentation = true)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
 
@@ -358,7 +358,8 @@ internal static class TriggerEditorActions
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
-        if (refreshPage) RefreshPage(session);
+        if (syncLegacyPresentation)
+            NativeLegacyPresentationInvalidation.InvalidateCurrentSoundOrTriggerPage(session);
         session.History.Push(entry);
         return true;
     }
@@ -370,14 +371,5 @@ internal static class TriggerEditorActions
             return false;
         trigger = session.RoomSettings.triggers[index];
         return trigger != null;
-    }
-
-    private static void RefreshPage(EditorSession session)
-    {
-        try { session?.Owner?.activePage?.Refresh(); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool trigger refresh failed: " + error.Message);
-        }
     }
 }
