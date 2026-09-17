@@ -50,6 +50,18 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         ObjectSceneWorkspaceView.Draw(snapshot);
 
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
+        new(
+            countA: snapshot.SceneObjects?.Length ?? 0,
+            countB: snapshot.Inspector?.SelectionCount ?? 0,
+            flag: snapshot.PlacementActive,
+            textA: snapshot.PlacementType);
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        DevToolUiSettings.T("物件 ", "Objects ") + state.CountA +
+        DevToolUiSettings.T(" · 已选 ", " · Selected ") + state.CountB +
+        (state.Flag ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + state.TextA : string.Empty);
+
     protected override void OnReset()
     {
         ObjectExplorerView.ResetRetainedState();
@@ -79,6 +91,12 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawSceneWorkspace(SoundEditorPresentationHub.Current);
 
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
+        new(countA: SoundEditorPresentationHub.Current.Sounds?.Length ?? 0);
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        DevToolUiSettings.T("声音 ", "Sounds ") + state.CountA;
+
     protected override void OnReset()
     {
         SoundEditorView.ResetRetainedState();
@@ -106,6 +124,12 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
 
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         TriggerEditorView.DrawSceneWorkspace(TriggerEditorPresentationHub.Current);
+
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
+        new(countA: TriggerEditorPresentationHub.Current.Triggers?.Length ?? 0);
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        DevToolUiSettings.T("触发器 ", "Triggers ") + state.CountA;
 
     protected override void OnReset() => TriggerEditorView.ResetRetainedState();
 }
@@ -135,6 +159,15 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
     public override void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
         WorldWorkspaceView.Draw(snapshot, display);
 
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot)
+    {
+        EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
+        return new(countA: map.Rooms?.Length ?? 0, textA: map.RegionName);
+    }
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        state.CountA + DevToolUiSettings.T(" 个房间 · ", " rooms · ") + state.TextA;
+
     protected override void OnReset()
     {
         MapEditorView.ResetRetainedState();
@@ -162,6 +195,15 @@ internal sealed class DialogDevToolPage : DevToolFrontendPageBase
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
 
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot)
+    {
+        EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
+        return new(countA: dialog.Events?.Length ?? 0, textA: dialog.SelectedFileName);
+    }
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        state.TextA + " · " + state.CountA + DevToolUiSettings.T(" 个事件", " events");
+
     protected override void OnReset() => DialogEditorView.ResetRetainedState();
 }
 
@@ -187,6 +229,12 @@ internal sealed class RelationshipsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
+
+    protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
+        new(textA: RelationshipEditorPresentationHub.Current.PrimaryCreature);
+
+    protected override string FormatSessionStatus(DevToolPageStatusState state) =>
+        DevToolUiSettings.T("主体 ", "Primary ") + state.TextA;
 
     protected override void OnReset() => RelationshipEditorView.ResetRetainedState();
 }
