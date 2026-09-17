@@ -9,7 +9,8 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// <summary>
 /// Turns the migrated vanilla DevInterface into a minimal compatibility backend while the rebuilt
 /// frontend owns presentation. Screen-space legacy controls stop participating in the per-frame
-/// update tree; only world-space gizmos and unknown third-party nodes that may still carry
+/// update tree. Objects temporarily retain world-space representations; Sound/Trigger use native
+/// gizmos and keep no built-in world Handle roots. Unknown third-party nodes that may still carry
 /// compatibility behaviour remain live. Unknown/custom pages always fall back to the complete
 /// vanilla update rather than being partially suspended by a heuristic.
 /// </summary>
@@ -21,12 +22,14 @@ internal static partial class LegacyDevUiQuiescenceController
             Type pageType,
             EditorToolMode toolMode,
             bool preserveWorldHandles,
+            bool useNativeBackendRefresh,
             bool materializeInitialRefresh,
             bool bypassPageOverride)
         {
             PageType = pageType;
             ToolMode = toolMode;
             PreserveWorldHandles = preserveWorldHandles;
+            UseNativeBackendRefresh = useNativeBackendRefresh;
             MaterializeInitialRefresh = materializeInitialRefresh;
             BypassPageOverride = bypassPageOverride;
         }
@@ -34,19 +37,20 @@ internal static partial class LegacyDevUiQuiescenceController
         internal Type PageType { get; }
         internal EditorToolMode ToolMode { get; }
         internal bool PreserveWorldHandles { get; }
+        internal bool UseNativeBackendRefresh { get; }
         internal bool MaterializeInitialRefresh { get; }
         internal bool BypassPageOverride { get; }
     }
 
     private static readonly PageProfile[] Profiles =
     {
-        new(typeof(RoomSettingsPage), EditorToolMode.Room, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: false),
-        new(typeof(ObjectsPage), EditorToolMode.Objects, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: true, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(MapPage), EditorToolMode.Map, preserveWorldHandles: false, materializeInitialRefresh: false, bypassPageOverride: true),
-        new(typeof(DialogPage), EditorToolMode.Dialog, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, materializeInitialRefresh: true, bypassPageOverride: true)
+        new(typeof(RoomSettingsPage), EditorToolMode.Room, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: false),
+        new(typeof(ObjectsPage), EditorToolMode.Objects, preserveWorldHandles: true, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: false, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: false, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(MapPage), EditorToolMode.Map, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: false, bypassPageOverride: true),
+        new(typeof(DialogPage), EditorToolMode.Dialog, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true)
     };
 
     private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(global::DevInterface.DevUI).Assembly;
@@ -77,9 +81,10 @@ internal static partial class LegacyDevUiQuiescenceController
         On.DevInterface.DialogPage.Update += DialogPage_Update;
         On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
 
-        // Recurring Refresh on Objects/Sound/Trigger pages is much heavier than the retained world
-        // backend needs. Intercept it only while the rebuilt UI owns presentation; first
-        // materialization, explicit legacy UI and opaque third-party pages still use vanilla Refresh.
+        // Recurring Refresh on Objects/Sound/Trigger pages is much heavier than the native backend
+        // needs. Objects reconcile compatibility representations; Sound only reconciles real audio
+        // players; Trigger has no built-in runtime backend. Explicit legacy UI and opaque third-party
+        // pages still use vanilla Refresh.
         On.DevInterface.ObjectsPage.Refresh += ObjectsPage_Refresh;
         On.DevInterface.SoundPage.Refresh += SoundPage_Refresh;
         On.DevInterface.TriggersPage.Refresh += TriggersPage_Refresh;
@@ -241,7 +246,7 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private static void ObjectsPage_Refresh(On.DevInterface.ObjectsPage.orig_Refresh orig, ObjectsPage self)
     {
-        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshObjects(self))
+        if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshObjects(self))
         {
             InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
@@ -255,7 +260,7 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private static void SoundPage_Refresh(On.DevInterface.SoundPage.orig_Refresh orig, SoundPage self)
     {
-        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshSound(self))
+        if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshSound(self))
         {
             InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
@@ -269,7 +274,7 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private static void TriggersPage_Refresh(On.DevInterface.TriggersPage.orig_Refresh orig, TriggersPage self)
     {
-        if (CanUseMinimalSpatialRefresh(self) && LegacySpatialBackendRefresh.TryRefreshTriggers(self))
+        if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshTriggers(self))
         {
             InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
@@ -281,12 +286,12 @@ internal static partial class LegacyDevUiQuiescenceController
         DeferredRefreshPages.Remove(self);
     }
 
-    private static bool CanUseMinimalSpatialRefresh(Page page)
+    private static bool CanUseNativeBackendRefresh(Page page)
     {
         if (fullCompatibilityDepth > 0 || page == null || HasExternalCompatibilityNodesNow(page))
             return false;
 
-        return TryGetQuiescentProfile(page, out PageProfile profile) && profile.PreserveWorldHandles;
+        return TryGetQuiescentProfile(page, out PageProfile profile) && profile.UseNativeBackendRefresh;
     }
 
     private static bool TryPumpDerivedPage(Page page)
@@ -301,10 +306,9 @@ internal static partial class LegacyDevUiQuiescenceController
 
     /// <summary>
     /// Preserve the tiny transient-state contract from the bypassed vanilla page Update methods.
-    /// Objects/Sound/Triggers reset draggedObject at the start of every frame before their world
-    /// handles repopulate it. Without this, one completed drag remains sticky forever and makes the
-    /// revision layer believe the model is still being edited on every stable frame. Trash-bin state
-    /// is also cleared because the hidden screen-space trash bin is intentionally not pumped.
+    /// Objects still let legacy representations repopulate draggedObject. Sound/Trigger now have no
+    /// built-in legacy spatial nodes, but clearing the same fields prevents stale values from a
+    /// previous Vanilla/compatibility frame from leaking back into native revision logic.
     /// </summary>
     private static void PrepareQuiescentFrame(Page page)
     {
@@ -341,9 +345,9 @@ internal static partial class LegacyDevUiQuiescenceController
             return;
         }
 
-        // World-space gizmos are invoked explicitly by the selective page traversal. Their derived
-        // Update implementations still run, but their base DevUINode recursion is filtered here so
-        // hidden panels/buttons beneath a representation do not wake back up every frame.
+        // World-space gizmos are invoked explicitly by the selective page traversal. At this stage
+        // that path is primarily Objects; built-in Sound/Trigger are native and no longer compile
+        // vanilla Handle roots into their backend plan.
         if (selectiveTraversalDepth > 0 && activeProfile != null && IsWorldBackendNode(self))
         {
             PumpChildren(self, activeProfile);
@@ -420,11 +424,10 @@ internal static partial class LegacyDevUiQuiescenceController
 
             if (profile.MaterializeInitialRefresh)
             {
-                // Materialize once so vanilla and third-party world representations still exist as
-                // a compatibility backend. Their screen-space controls become dormant immediately
-                // after construction unless explicitly needed by a bridge transaction. If a rebuilt
-                // edit already marked this page stale, this refresh contains that current model state
-                // and therefore consumes the deferred wake-up refresh as well.
+                // Materialize once as a compatibility probe so third-party Refresh hooks can attach
+                // their nodes. Objects keeps required representations. Pure built-in Sound/Trigger
+                // presentation is retired immediately after this frame by the native spatial owner;
+                // a deferred Refresh recreates it only if Vanilla/Legacy is later requested.
                 fullCompatibilityDepth++;
                 try
                 {
@@ -509,9 +512,9 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (!node.initRefresh) return;
 
-        // Refresh is allowed once for a live world-space gizmo so derived representations can place
-        // their sprites and synchronize handle geometry. The expensive recurring Update tree is
-        // still pruned on every subsequent frame.
+        // Refresh is allowed once for a retained world-space compatibility gizmo so derived
+        // representations can place their sprites and synchronize geometry. Built-in Sound/Trigger
+        // never enter this path now because their profiles do not preserve world handles.
         fullCompatibilityDepth++;
         try
         {
@@ -526,9 +529,9 @@ internal static partial class LegacyDevUiQuiescenceController
 
     private static bool IsWorldBackendNode(DevUINode node)
     {
-        // Handle covers PlacedObjectRepresentation, Spot/DirectionalSoundHandle,
-        // SpotTriggerHandle and their nested radius/vector handles. BezierControl is the other
-        // vanilla world-space editor primitive used by spline/terrain representations.
+        // Objects still uses Handle/BezierControl as a temporary compatibility backend. The same
+        // primitive types may also appear under an opaque third-party subtree, which is handled by
+        // the foreign-node branch before this predicate is consulted.
         return node is Handle || node is BezierControl;
     }
 
