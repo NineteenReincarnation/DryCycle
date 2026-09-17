@@ -62,8 +62,9 @@ if ! grep -Fq 'no Handle.Update hook to install' "$controller"; then
 fi
 
 # Generic native model inspection is the replacement for using a representation panel as the normal
-# property editor. It must stay headless and cache reflection schemas by Data runtime type.
-if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectRepresentation|DevUINode' "$reflection"; then
+# property editor. Comments may mention legacy classes while explaining the migration; reject only
+# actual imports/type uses/member access so documentation does not trip the architecture guard.
+if grep -Eq '^using DevInterface;|global::DevInterface|typeof\(ObjectsPage\)|is[[:space:]]+ObjectsPage|as[[:space:]]+ObjectsPage|ObjectsPage\.|ObjectsPage[[:space:]]*\(|PlacedObjectRepresentation[[:space:]]+[A-Za-z_]|DevUINode[[:space:]]+[A-Za-z_]' "$reflection"; then
   echo "Native reflected object inspector regained DevInterface UI dependencies." >&2
   exit 1
 fi
