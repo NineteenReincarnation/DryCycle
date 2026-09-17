@@ -9,11 +9,16 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class DialogEditorView
 {
-    private sealed class DialogBrowserRow
+    private sealed class DialogBrowserRow : IDevToolExplorerListItem
     {
         internal string Path;
         internal string File;
-        internal string Label;
+
+        public string StableId => Path ?? string.Empty;
+        public string PrimaryText => File ?? string.Empty;
+        public string SecondaryText => string.Empty;
+        public string StatusText => string.Empty;
+        public string Tooltip => Path ?? string.Empty;
     }
 
     private static string search = string.Empty;
@@ -50,10 +55,8 @@ internal static class DialogEditorView
         {
             DialogBrowserRow row = projectedRows[i];
             bool selected = string.Equals(row.Path, snapshot.SelectedPath, StringComparison.Ordinal);
-            if (ImGui.Selectable(row.Label, selected))
+            if (DevToolExplorerRowRenderer.DrawSelectable(row, selected, defaultFocus: true))
                 DialogEditorCommandQueue.Enqueue(new DialogEditorCommand(DialogEditorCommandKind.SelectDialog, row.Path));
-            if (selected) ImGui.SetItemDefaultFocus();
-            if (ImGui.IsItemHovered()) DevToolTooltip.Show(row.Path);
         }
 
         if (projectedRows.Count == 0)
@@ -184,8 +187,7 @@ internal static class DialogEditorView
             projectedRows.Add(new DialogBrowserRow
             {
                 Path = path,
-                File = file,
-                Label = file + "##DialogFile" + i
+                File = file
             });
         }
 
