@@ -12,7 +12,6 @@ public sealed class EditorTriggeredEventSnapshot
 {
     public bool HasEvent { get; init; }
     public string Type { get; init; } = string.Empty;
-
     public string SongName { get; init; } = string.Empty;
     public float Priority { get; init; }
     public float MaxThreatLevel { get; init; }
@@ -25,10 +24,8 @@ public sealed class EditorTriggeredEventSnapshot
     public bool StopAtGate { get; init; }
     public int RoomsRange { get; init; } = -1;
     public int CyclesRest { get; init; } = -1;
-
     public string StopMode { get; init; } = string.Empty;
     public float FadeOutSeconds { get; init; }
-
     public bool AfterEncounter { get; init; }
     public bool OnlyWhenShowingDirection { get; init; }
     public int FromCycle { get; init; }
@@ -123,7 +120,6 @@ public static class TriggerEditorPresentationHub
 
     private static EditorSession observedSession;
     private static global::RoomSettings observedSettings;
-    private static TriggersPage observedPage;
     private static string[] observedSongNames;
     private static long observedRevision;
     private static long observedSelectionRevision;
@@ -135,35 +131,39 @@ public static class TriggerEditorPresentationHub
 
     internal static void Publish(EditorSession session)
     {
-        if (session?.ToolMode != EditorToolMode.Triggers || session.RoomSettings?.triggers == null ||
-            session.Owner?.activePage is not TriggersPage page)
+        if (session?.ToolMode != EditorToolMode.Triggers || session.RoomSettings?.triggers == null)
         {
             Clear();
             return;
         }
 
-        TriggerEditorStateHub.SynchronizeFromLegacyNode(session, session.Owner.draggedNode ?? page.draggedObject);
+        DevUINode legacyDrag = session.Owner?.draggedNode;
+        if (legacyDrag == null && session.Owner?.activePage is TriggersPage legacyPage)
+            legacyDrag = legacyPage.draggedObject;
+        TriggerEditorStateHub.SynchronizeFromLegacyNode(session, legacyDrag);
+
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
         int count = session.RoomSettings.triggers.Count;
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
         bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
-        bool nativeDrag = session.Owner.draggedNode != null || page.draggedObject != null;
         if (opaqueLiveWriter)
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
             TriggerPresentationChangeHintHub.MarkFull(session);
         }
-        else if (nativeDrag)
+        else if (legacyDrag != null)
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
             TriggerPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
         }
 
+        TriggerSongCatalog.EnsureLoaded();
+
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Triggers);
         long selectionRevision = state.Revision;
-        string[] songNames = page.songNames ?? Array.Empty<string>();
+        string[] songNames = TriggerSongCatalog.CurrentNames ?? Array.Empty<string>();
         int entranceCount = session.Room?.abstractRoom?.connections?.Length ?? 0;
         bool staticListsStale =
             triggerTypeCount != ExtEnum<EventTrigger.TriggerType>.values.Count ||
@@ -173,7 +173,6 @@ public static class TriggerEditorPresentationHub
         bool sameIdentity =
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedSettings, session.RoomSettings) &&
-            ReferenceEquals(observedPage, page) &&
             current.Available;
         bool metadataStable =
             sameIdentity &&
@@ -219,33 +218,19 @@ public static class TriggerEditorPresentationHub
         EditorTriggerSnapshot[] triggers = CaptureAllTriggers(session, state.SelectedIndex);
         RebuildStaticListsIfNeeded();
 
-        // Song names are page/catalog metadata, not Trigger model data. Reuse the sorted immutable
-        // array across ordinary trigger edits and only sort again when the authoritative source array
-        // is replaced.
-        string[] songs;
-        if (sameIdentity && ReferenceEquals(observedSongNames, songNames) && current.SongNames != null)
-        {
-            songs = current.SongNames;
-        }
-        else
-        {
-            songs = songNames.Length == 0 ? Array.Empty<string>() : (string[])songNames.Clone();
-            Array.Sort(songs, StringComparer.OrdinalIgnoreCase);
-        }
-
         current = new EditorTriggerPresentationSnapshot
         {
             Available = true,
             TriggerTypes = triggerTypes,
             EventTypes = eventTypes,
-            SongNames = songs,
+            SongNames = songNames,
             SlugcatNames = slugcatNames,
             Triggers = triggers,
             SelectedIndex = state.SelectedIndex,
             EntranceCount = entranceCount
         };
 
-        Observe(session, page, songNames, revision, selectionRevision, count, state.SelectedIndex, entranceCount);
+        Observe(session, songNames, revision, selectionRevision, count, state.SelectedIndex, entranceCount);
         DevToolPerformanceMonitor.RecordPresentation(
             DevToolPresentationChannel.Triggers,
             DevToolPresentationOutcome.FullRebuild);
@@ -294,11 +279,9 @@ public static class TriggerEditorPresentationHub
             EntranceCount = current.EntranceCount
         };
 
-        TriggersPage page = session.Owner.activePage as TriggersPage;
         Observe(
             session,
-            page,
-            page?.songNames ?? Array.Empty<string>(),
+            TriggerSongCatalog.CurrentNames ?? Array.Empty<string>(),
             revision,
             selectionRevision,
             count,
@@ -413,7 +396,6 @@ public static class TriggerEditorPresentationHub
 
     private static void Observe(
         EditorSession session,
-        TriggersPage page,
         string[] songNames,
         long revision,
         long selectionRevision,
@@ -423,7 +405,6 @@ public static class TriggerEditorPresentationHub
     {
         observedSession = session;
         observedSettings = session?.RoomSettings;
-        observedPage = page;
         observedSongNames = songNames;
         observedRevision = revision;
         observedSelectionRevision = selectionRevision;
@@ -438,7 +419,6 @@ public static class TriggerEditorPresentationHub
         current = EditorTriggerPresentationSnapshot.Empty;
         observedSession = null;
         observedSettings = null;
-        observedPage = null;
         observedSongNames = null;
         observedRevision = 0L;
         observedSelectionRevision = 0L;
@@ -636,9 +616,6 @@ public static class TriggerEditorCommandQueue
                     continue;
 
                 MarkPresentationChange(session, command);
-
-                // Non-history model mutations retain the direct fallback for compatibility paths
-                // that cannot produce a snapshot history entry.
                 if ((session?.History.Revision ?? 0L) == historyBeforeCommand)
                     nonHistoryDirty = true;
             }
