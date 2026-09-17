@@ -43,7 +43,6 @@ internal static class WorldWorkspaceView
     {
         internal EditorMapRoomSnapshot Room;
         internal string LayerToken = string.Empty;
-        internal string Label = string.Empty;
     }
 
     private sealed class ConnectionExplorerRow
@@ -99,7 +98,7 @@ internal static class WorldWorkspaceView
     private static string selectedConnectionId = string.Empty;
     private static int lastObservedRoomIndex = -1;
 
-    private static float explorerWidth = 252f;
+    private static float explorerWidth = 310f;
     private static float inspectorWidth = 344f;
     private static bool draggingExplorerSplitter;
     private static bool draggingInspectorSplitter;
@@ -354,13 +353,13 @@ internal static class WorldWorkspaceView
         float reserved = (showExplorer ? splitter : 0f) + (showInspector ? splitter : 0f);
         float minCenter = 400f;
         float maxSideSpace = Math.Max(0f, available.X - minCenter - reserved);
-        float left = showExplorer ? Math.Max(176f, Math.Min(explorerWidth, maxSideSpace * 0.46f)) : 0f;
+        float left = showExplorer ? Math.Max(260f, Math.Min(explorerWidth, maxSideSpace * 0.46f)) : 0f;
         float right = showInspector ? Math.Max(238f, Math.Min(inspectorWidth, Math.Max(0f, maxSideSpace - left))) : 0f;
 
         if (showExplorer && showInspector && left + right > maxSideSpace)
         {
             float overflow = left + right - maxSideSpace;
-            float leftGive = Math.Min(Math.Max(0f, left - 176f), overflow * 0.5f);
+            float leftGive = Math.Min(Math.Max(0f, left - 260f), overflow * 0.5f);
             left -= leftGive;
             overflow -= leftGive;
             right -= Math.Min(Math.Max(0f, right - 238f), overflow);
@@ -373,7 +372,7 @@ internal static class WorldWorkspaceView
                 DrawExplorer(snapshot);
             ImGui.EndChild();
             ImGui.SameLine(0f, 0f);
-            DrawSplitter("##WorldExplorerSplitter", ref explorerWidth, ref draggingExplorerSplitter, +1f, available.Y, 176f, 450f);
+            DrawSplitter("##WorldExplorerSplitter", ref explorerWidth, ref draggingExplorerSplitter, +1f, available.Y, 260f, 450f);
             ImGui.SameLine(0f, 0f);
         }
 
@@ -464,12 +463,20 @@ internal static class WorldWorkspaceView
         {
             RoomExplorerRow row = roomExplorerRows[i];
             EditorMapRoomSnapshot room = row.Room;
-            if (!Matches(room.Name, room.Subregion, row.LayerToken)) continue;
+            string status = WorldRoomStatusText(room);
+            string detail = WorldRoomDetailText(room);
+            if (!Matches(room.Name, room.Subregion, row.LayerToken) && !Matches(status, detail)) continue;
             visible++;
-            ImGui.PushID(room.RoomIndex);
-            bool clicked = ImGui.Selectable(row.Label,
-                selectionKind == SelectionKind.Room && room.RoomIndex == snapshot.SelectedRoomIndex);
-            ImGui.PopID();
+
+            bool clicked = DevToolRoomExplorerEntry.Draw(
+                "WorldRoom:" + room.RoomIndex,
+                room.Name,
+                row.LayerToken,
+                status,
+                detail,
+                WorldRoomStatusColor(room),
+                selectionKind == SelectionKind.Room && room.RoomIndex == snapshot.SelectedRoomIndex,
+                WorldRoomTooltip(room));
             if (!clicked) continue;
 
             selectionKind = SelectionKind.Room;
@@ -490,19 +497,54 @@ internal static class WorldWorkspaceView
         for (int i = 0; i < rooms.Length; i++)
         {
             EditorMapRoomSnapshot room = rooms[i];
-            string layer = "L" + room.Layer;
-            string marker = room.CurrentRoom ? "● " : room.OffScreenDen ? "◆ " : "  ";
-            string label = marker + room.Name + "  " + layer;
-            if (!string.IsNullOrEmpty(room.Subregion)) label += "  ·  " + room.Subregion;
             rows[i] = new RoomExplorerRow
             {
                 Room = room,
-                LayerToken = layer,
-                Label = label
+                LayerToken = "L" + room.Layer
             };
         }
         projectedRoomRowsSource = rooms;
         roomExplorerRows = rows;
+    }
+
+    private static string WorldRoomStatusText(EditorMapRoomSnapshot room)
+    {
+        if (room.CurrentRoom)
+            return DevToolUiSettings.T("当前房间", "Current Room");
+        if (room.OffScreenDen)
+            return DevToolUiSettings.T("离屏巢穴", "Off-screen Den");
+        if (room.Disabled)
+            return DevToolUiSettings.T("已隐藏", "Hidden");
+        return DevToolUiSettings.T("地图房间", "Map Room");
+    }
+
+    private static string WorldRoomDetailText(EditorMapRoomSnapshot room) =>
+        string.IsNullOrWhiteSpace(room.Subregion)
+            ? DevToolUiSettings.T("未分配子区域", "No subregion")
+            : room.Subregion;
+
+    private static string WorldRoomTooltip(EditorMapRoomSnapshot room)
+    {
+        if (room.OffScreenDen)
+            return DevToolUiSettings.T(
+                "离屏巢穴只参与世界拓扑，不作为普通房间缩略图输出。",
+                "Off-screen dens participate in world topology but are not rendered as normal room thumbnails.");
+        if (room.Disabled)
+            return DevToolUiSettings.T("这个房间当前从地图输出中隐藏。", "This room is currently hidden from map output.");
+        return null;
+    }
+
+    private static uint WorldRoomStatusColor(EditorMapRoomSnapshot room)
+    {
+        if (room.Disabled)
+            return ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        if (room.CurrentRoom)
+            return ImGui.GetColorU32(ImGuiCol.HeaderActive);
+
+        Num.Vector4 color = room.OffScreenDen
+            ? new Num.Vector4(0.92f, 0.72f, 0.34f, 1f)
+            : new Num.Vector4(0.48f, 0.76f, 0.62f, 1f);
+        return ImGui.ColorConvertFloat4ToU32(color);
     }
 
     private static void DrawSubregionExplorer(EditorMapPresentationSnapshot snapshot)
@@ -757,13 +799,6 @@ internal static class WorldWorkspaceView
         if (ImGui.IsItemDeactivatedAfterEdit())
             MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SetRoomSubregion, roomIndex: room.RoomIndex, text: subregion));
         else if (!changed && !ImGui.IsAnyItemActive()) inspectorSubregion = room.Subregion ?? string.Empty;
-
-        EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T("缩略图：", "Thumbnail: ") +
-            (visual.DetailedRasterAvailable ? DevToolUiSettings.T("详细", "detailed") : DevToolUiSettings.T("等待房间数据", "waiting for room data")) +
-            " · " + (visual.Curves?.Length ?? 0) + DevToolUiSettings.T(" 条曲面层", " curve layer(s)"),
-            true);
 
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
 
