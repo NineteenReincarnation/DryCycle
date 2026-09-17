@@ -9,6 +9,7 @@ on:
       - 'scripts/validate-devtool-final-architecture.sh'
       - 'scripts/validate-devtool-page-view-boundaries.sh'
       - 'scripts/validate-devtool-frontend-build-contract.sh'
+      - 'scripts/validate-devtool-native-factory-boundaries.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'scripts/validate-devtool-final-architecture.sh'
       - 'scripts/validate-devtool-page-view-boundaries.sh'
       - 'scripts/validate-devtool-frontend-build-contract.sh'
+      - 'scripts/validate-devtool-native-factory-boundaries.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
 jobs:
@@ -34,3 +36,6 @@ jobs:
       - name: Validate DevTool RWImGui frontend build contract
         shell: bash
         run: bash scripts/validate-devtool-frontend-build-contract.sh
+      - name: Validate DevTool Native Factory boundaries
+        shell: bash
+        run: bash scripts/validate-devtool-native-factory-boundaries.sh
