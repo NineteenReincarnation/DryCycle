@@ -1,19 +1,23 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
-using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Keeps only the live world/backend part of migrated Objects/Sound/Trigger pages synchronized while
-/// the rebuilt frontend owns presentation. Vanilla page Refresh rebuilds every hidden panel and, for
-/// SoundPage, tears down every AmbientSoundPlayer even when one scalar changed. The rebuilt editor
-/// only needs object/spatial handles plus the actual ambient-audio runtime to stay live.
+/// Keeps only the backend state that still has real runtime value while the rebuilt frontend owns
+/// presentation.
 ///
-/// This class never runs before the page's first ordinary materialization and never owns legacy UI
-/// presentation. Callers must fall back to the original page Refresh whenever the page is visible,
-/// opaque third-party nodes are present, or a legacy transaction is in flight.
+/// Objects temporarily retain vanilla/custom representations because their native gizmo coverage is
+/// not complete yet. Sound is different: built-in spatial editing is now owned by Native Gizmo, so
+/// its only required legacy-side runtime is the actual AmbientSoundPlayer set. Trigger has no
+/// equivalent runtime object to retain, therefore a built-in Trigger page needs no hidden Panel or
+/// Handle backend at all.
+///
+/// This class intentionally never constructs AmbientSoundPanel, TriggerPanel, SpotSoundHandle,
+/// DirectionalSoundHandle or SpotTriggerHandle on the native path. Returning to explicit Vanilla /
+/// Legacy presentation still performs the deferred ordinary page Refresh and recreates the original
+/// DevInterface UI losslessly.
 /// </summary>
 internal static class LegacySpatialBackendRefresh
 {
@@ -41,13 +45,16 @@ internal static class LegacySpatialBackendRefresh
 
         try
         {
-            ReconcileSoundPanels(page);
+            // Native gizmos own every built-in Sound spatial semantic. Any vanilla panels left from
+            // the one-time compatibility materialization are dead presentation state and must not be
+            // recreated by an otherwise harmless model Refresh.
+            NativeLegacySpatialHandleRetirement.PruneBuiltinSoundNodes(page);
             ReconcileAmbientPlayers(page);
             return true;
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool minimal Sound backend refresh failed: " + error.Message);
+            Plugin.Logger?.LogWarning("DevTool native Sound backend refresh failed: " + error.Message);
             return false;
         }
     }
@@ -59,12 +66,15 @@ internal static class LegacySpatialBackendRefresh
 
         try
         {
-            ReconcileTriggerPanels(page);
+            // Trigger authoring has no separate runtime player that must be kept in sync. Built-in
+            // TriggerPanel/SpotTriggerHandle nodes are therefore pure legacy presentation and can be
+            // absent for the complete lifetime of the native workspace after compatibility probing.
+            NativeLegacySpatialHandleRetirement.PruneBuiltinTriggerNodes(page);
             return true;
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool minimal Trigger backend refresh failed: " + error.Message);
+            Plugin.Logger?.LogWarning("DevTool native Trigger backend refresh failed: " + error.Message);
             return false;
         }
     }
@@ -105,101 +115,6 @@ internal static class LegacySpatialBackendRefresh
         }
     }
 
-    private static void ReconcileSoundPanels(SoundPage page)
-    {
-        List<AmbientSound> sounds = page.RoomSettings.ambientSounds;
-        HashSet<AmbientSound> represented = new(ReferenceComparer<AmbientSound>.Instance);
-
-        // Remove only vanilla AmbientSoundPanel nodes whose model member disappeared (or a duplicate
-        // representation). Static page controls and foreign nodes are deliberately untouched.
-        for (int i = page.subNodes.Count - 1; i >= 0; i--)
-        {
-            if (page.subNodes[i] is not AmbientSoundPanel panel)
-                continue;
-
-            AmbientSound sound = panel.sound;
-            if (sound == null || !ContainsReference(sounds, sound) || !represented.Add(sound))
-            {
-                RemoveDynamicNode(page, panel, i);
-                continue;
-            }
-
-            SynchronizeSoundHandle(page, panel, sound);
-        }
-
-        // A newly-created spatial sound needs its world handle immediately. Omnidirectional sounds
-        // have no world-space backend, so do not construct their hidden vanilla panel just to keep a
-        // screen UI that is not currently visible. The deferred full Refresh will create it if the
-        // developer explicitly returns to legacy presentation.
-        for (int i = 0; i < sounds.Count; i++)
-        {
-            AmbientSound sound = sounds[i];
-            if (sound == null || represented.Contains(sound) || !NeedsSpatialSoundHandle(sound))
-                continue;
-
-            AmbientSoundPanel panel = new(page.owner, page, sound.panelPosition, sound);
-            panel.Move(sound.panelPosition);
-            AddDynamicNode(page, panel);
-            represented.Add(sound);
-            SynchronizeSoundHandle(page, panel, sound);
-        }
-    }
-
-    private static void SynchronizeSoundHandle(
-        SoundPage page,
-        AmbientSoundPanel panel,
-        AmbientSound sound)
-    {
-        RoomCamera camera = PrimaryCamera(page.owner);
-        if (camera == null) return;
-
-        if (sound is SpotSound spot)
-        {
-            SpotSoundHandle handle = FindDirectChild<SpotSoundHandle>(panel);
-            if (handle == null)
-            {
-                handle = new SpotSoundHandle(
-                    page.owner,
-                    "Spot_Sound_Handle",
-                    panel,
-                    spot,
-                    panel.pos + new Vector2(-50f, -100f),
-                    "Spot_Sound_Handle_" + (spot.sample ?? string.Empty));
-                panel.subNodes.Add(handle);
-            }
-
-            handle.absPos = spot.pos - camera.pos;
-            if (handle.subNodes.Count > 0 && handle.subNodes[0] is Handle radiusHandle)
-            {
-                radiusHandle.pos = spot.radHandlePosition;
-                radiusHandle.initRefresh = false;
-            }
-            handle.Refresh();
-            handle.initRefresh = false;
-            return;
-        }
-
-        if (sound is DirectionalSound directional)
-        {
-            DirectionalSoundHandle handle = FindDirectChild<DirectionalSoundHandle>(panel);
-            if (handle == null)
-            {
-                handle = new DirectionalSoundHandle(
-                    page.owner,
-                    "Directional_Sound_Handle",
-                    panel,
-                    directional,
-                    panel.pos,
-                    "Directional_Sound_Handle_" + (directional.sample ?? string.Empty));
-                panel.subNodes.Add(handle);
-            }
-
-            handle.absPos = handle.OnCirclePos(directional.direction);
-            handle.Refresh();
-            handle.initRefresh = false;
-        }
-    }
-
     private static void ReconcileAmbientPlayers(SoundPage page)
     {
         RoomCamera camera = PrimaryCamera(page.owner);
@@ -210,9 +125,9 @@ internal static class LegacySpatialBackendRefresh
 
         List<AmbientSoundPlayer> players = microphone.ambientSoundPlayers;
 
-        // Existing players hold the AmbientSound object by reference and already read volume, pitch,
-        // radius, position, direction and doppler live in DrawUpdate. Reusing them avoids restarting
-        // every ambient clip on each slider edit. Only removed/duplicate memberships are retired.
+        // Existing players hold AmbientSound by reference and read volume, pitch, position, radius,
+        // direction and doppler live in DrawUpdate. Scalar/native-gizmo edits therefore need no
+        // player rebuild. Only collection membership is reconciled here.
         for (int i = players.Count - 1; i >= 0; i--)
         {
             AmbientSoundPlayer player = players[i];
@@ -239,9 +154,9 @@ internal static class LegacySpatialBackendRefresh
             }
         }
 
-        // Add a player only for a model member that has no surviving runtime player. A player that
-        // was already slated by vanilla is intentionally not resurrected; replacing it mirrors the
-        // next-frame result of SoundPage.Refresh without reloading unrelated clips.
+        // A player already slated by vanilla is intentionally not resurrected. Add one fresh player
+        // for any model member that has no surviving runtime instance, without touching unrelated
+        // clips and without materializing SoundPage UI.
         for (int i = 0; i < sounds.Count; i++)
         {
             AmbientSound sound = sounds[i];
@@ -263,112 +178,15 @@ internal static class LegacySpatialBackendRefresh
         }
     }
 
-    private static void ReconcileTriggerPanels(TriggersPage page)
-    {
-        List<EventTrigger> triggers = page.RoomSettings.triggers;
-        HashSet<EventTrigger> represented = new(ReferenceComparer<EventTrigger>.Instance);
-
-        for (int i = page.subNodes.Count - 1; i >= 0; i--)
-        {
-            if (page.subNodes[i] is not TriggerPanel panel)
-                continue;
-
-            EventTrigger trigger = panel.trigger;
-            if (trigger == null || !ContainsReference(triggers, trigger) || !represented.Add(trigger))
-            {
-                RemoveDynamicNode(page, panel, i);
-                continue;
-            }
-
-            SynchronizeTriggerHandle(page, panel, trigger);
-        }
-
-        // Only SpotTrigger owns a retained world-space handle. Non-spatial trigger panels can stay
-        // unmaterialized until legacy UI is explicitly requested.
-        for (int i = 0; i < triggers.Count; i++)
-        {
-            EventTrigger trigger = triggers[i];
-            if (trigger is not SpotTrigger || represented.Contains(trigger))
-                continue;
-
-            TriggerPanel panel = new(page.owner, page, trigger.panelPosition, trigger);
-            panel.Move(trigger.panelPosition);
-            AddDynamicNode(page, panel);
-            represented.Add(trigger);
-            SynchronizeTriggerHandle(page, panel, trigger);
-        }
-    }
-
-    private static void SynchronizeTriggerHandle(
-        TriggersPage page,
-        TriggerPanel panel,
-        EventTrigger trigger)
-    {
-        if (trigger is not SpotTrigger spot)
-            return;
-
-        RoomCamera camera = PrimaryCamera(page.owner);
-        if (camera == null) return;
-
-        SpotTriggerHandle handle = FindDirectChild<SpotTriggerHandle>(panel);
-        if (handle == null)
-        {
-            handle = new SpotTriggerHandle(
-                page.owner,
-                "Spot_Trigger_Handle",
-                panel,
-                spot,
-                panel.pos + new Vector2(-50f, -100f));
-            panel.subNodes.Add(handle);
-        }
-
-        handle.absPos = spot.pos - camera.pos;
-        if (handle.subNodes.Count > 0 && handle.subNodes[0] is Handle radiusHandle)
-        {
-            radiusHandle.pos = spot.radHandlePosition;
-            radiusHandle.initRefresh = false;
-        }
-        handle.Refresh();
-        handle.initRefresh = false;
-    }
-
-    private static void AddDynamicNode(Page page, DevUINode node)
-    {
-        page.tempNodes ??= new List<DevUINode>();
-        page.tempNodes.Add(node);
-        page.subNodes.Add(node);
-    }
-
     private static void RemoveDynamicNode(Page page, DevUINode node, int subNodeIndex)
     {
         node.ClearSprites();
         page.subNodes.RemoveAt(subNodeIndex);
         page.tempNodes?.Remove(node);
 
-        switch (page)
-        {
-            case ObjectsPage objects when ReferenceEquals(objects.draggedObject, node):
-                objects.draggedObject = null;
-                break;
-            case SoundPage sound when ReferenceEquals(sound.draggedObject, node):
-                sound.draggedObject = null;
-                break;
-            case TriggersPage triggers when ReferenceEquals(triggers.draggedObject, node):
-                triggers.draggedObject = null;
-                break;
-        }
+        if (page is ObjectsPage objects && ReferenceEquals(objects.draggedObject, node))
+            objects.draggedObject = null;
     }
-
-    private static T FindDirectChild<T>(DevUINode parent) where T : DevUINode
-    {
-        if (parent?.subNodes == null) return null;
-        for (int i = 0; i < parent.subNodes.Count; i++)
-            if (parent.subNodes[i] is T typed) return typed;
-        return null;
-    }
-
-    private static bool NeedsSpatialSoundHandle(AmbientSound sound) =>
-        sound is SpotSound || sound is DirectionalSound;
 
     private static RoomCamera PrimaryCamera(global::DevInterface.DevUI owner)
     {
