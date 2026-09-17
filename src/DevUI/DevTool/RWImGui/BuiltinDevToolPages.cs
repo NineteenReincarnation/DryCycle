@@ -13,6 +13,9 @@ internal sealed class RoomDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "room";
     public override EditorToolMode Mode => EditorToolMode.Room;
+    public override int NavigationOrder => 100;
+    public override string NavigationLabel => DevToolUiSettings.T("房间", "Room");
+    public override string NavigationTooltip => DevToolUiSettings.T("房间设置", "Room settings");
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于尚未迁移的模板、地形或自定义房间设置控件。",
         "Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
@@ -30,6 +33,9 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "objects";
     public override EditorToolMode Mode => EditorToolMode.Objects;
+    public override int NavigationOrder => 200;
+    public override string NavigationLabel => DevToolUiSettings.T("物件", "Objects");
+    public override string NavigationTooltip => DevToolUiSettings.T("物件", "Objects");
     public override bool SupportsSceneSurface => true;
 
     public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
@@ -55,6 +61,9 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "sound";
     public override EditorToolMode Mode => EditorToolMode.Sound;
+    public override int NavigationOrder => 300;
+    public override string NavigationLabel => DevToolUiSettings.T("声音", "Sound");
+    public override string NavigationTooltip => DevToolUiSettings.T("声音", "Sound");
     public override bool SupportsSceneSurface => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于未迁移的自定义声音页面控件。",
@@ -80,6 +89,9 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "triggers";
     public override EditorToolMode Mode => EditorToolMode.Triggers;
+    public override int NavigationOrder => 400;
+    public override string NavigationLabel => DevToolUiSettings.T("触发器", "Triggers");
+    public override string NavigationTooltip => DevToolUiSettings.T("触发器", "Triggers");
     public override bool SupportsSceneSurface => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于新检查器无法表达的自定义触发器/事件控件。",
@@ -101,6 +113,9 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "map";
     public override EditorToolMode Mode => EditorToolMode.Map;
+    public override int NavigationOrder => 500;
+    public override string NavigationLabel => DevToolUiSettings.T("地图", "Map");
+    public override string NavigationTooltip => DevToolUiSettings.T("地图", "Map");
     public override bool UsesDedicatedWorkspace => true;
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -130,6 +145,9 @@ internal sealed class DialogDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "dialog";
     public override EditorToolMode Mode => EditorToolMode.Dialog;
+    public override int NavigationOrder => 600;
+    public override string NavigationLabel => DevToolUiSettings.T("对话", "Dialog");
+    public override string NavigationTooltip => DevToolUiSettings.T("对话", "Dialog");
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -150,6 +168,9 @@ internal sealed class RelationshipsDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "relationships";
     public override EditorToolMode Mode => EditorToolMode.Relationships;
+    public override int NavigationOrder => 700;
+    public override string NavigationLabel => DevToolUiSettings.T("关系", "Relationships");
+    public override string NavigationTooltip => DevToolUiSettings.T("关系", "Relationships");
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于矩阵编辑器尚未表达的关系页面扩展。",
         "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
