@@ -9,8 +9,8 @@ internal static partial class LegacyDevUiQuiescenceController
 {
     /// <summary>
     /// Runs the exact top-level input contract from vanilla DevUI.Update, then either leaves a
-    /// page-less native Sound/Trigger workspace completely dormant at its RoomSettingsPage anchor or
-    /// pumps the compatibility backend of an already-materialized legacy Sound/Trigger page.
+    /// page-less native Sound/Trigger workspace completely dormant at its inert NativeToolAnchorPage
+    /// or pumps the compatibility backend of an already-materialized legacy Sound/Trigger page.
     /// </summary>
     internal static bool TryRunNativeSoundTriggerTopLevelUpdate(global::DevInterface.DevUI owner)
     {
@@ -18,8 +18,8 @@ internal static partial class LegacyDevUiQuiescenceController
         if (session != null && object.ReferenceEquals(session.Owner, owner) &&
             NativeToolScheduler.IsVirtualToolActive(session))
         {
-            // Native Sound/Trigger owns no DevInterface page work. The RoomSettingsPage exists only
-            // to keep room/document lifetime attached to DevUI, so do not run its Update at all.
+            // Native Sound/Trigger owns no DevInterface page work. The DryCycle anchor exists only
+            // to keep DevUI's activePage lifetime valid, so do not run its Update at all.
             if (VanillaTopLevelUpdateIsGated(owner))
                 return true;
 
