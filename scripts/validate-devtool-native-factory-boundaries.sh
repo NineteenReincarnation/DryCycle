@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="src/DevUI/DevTool"
 factories="$root/Factories"
+registry="$factories/NativeAuthoringFactoryRegistry.cs"
 
 required_factories=(
   "$factories/NativePlacedObjectFactory.cs"
@@ -10,9 +11,9 @@ required_factories=(
   "$factories/NativeTriggerFactory.cs"
   "$factories/NativeRoomEffectFactory.cs"
 )
-for file in "${required_factories[@]}"; do
+for file in "$registry" "${required_factories[@]}"; do
   if [[ ! -f "$file" ]]; then
-    echo "Native authoring factory is missing: $file" >&2
+    echo "Native authoring factory contract is missing: $file" >&2
     exit 1
   fi
 done
@@ -63,9 +64,41 @@ for route in "${required_routes[@]}"; do
   fi
 done
 
+# Every concrete native factory must consult the shared provider registry before deciding that a
+# type is built-in or must fall back to Legacy. This keeps future extension support on one path.
+required_provider_routes=(
+  "$factories/NativePlacedObjectFactory.cs:NativeAuthoringFactoryRegistry.TryCreatePlacedObject"
+  "$factories/NativeSoundFactory.cs:NativeAuthoringFactoryRegistry.TryCreateSound"
+  "$factories/NativeTriggerFactory.cs:NativeAuthoringFactoryRegistry.TryCreateTrigger"
+  "$factories/NativeTriggerFactory.cs:NativeAuthoringFactoryRegistry.TryCreateTriggeredEvent"
+  "$factories/NativeRoomEffectFactory.cs:NativeAuthoringFactoryRegistry.TryCreateRoomEffect"
+)
+for route in "${required_provider_routes[@]}"; do
+  file="${route%%:*}"
+  symbol="${route#*:}"
+  if ! grep -Fq "$symbol" "$file"; then
+    echo "Native provider registry route missing: $file -> $symbol" >&2
+    exit 1
+  fi
+done
+
+required_registry_symbols=(
+  'RegisterPlacedObject'
+  'RegisterSound'
+  'RegisterTrigger'
+  'RegisterTriggeredEvent'
+  'RegisterRoomEffect'
+)
+for symbol in "${required_registry_symbols[@]}"; do
+  if ! grep -Fq "$symbol" "$registry"; then
+    echo "Native authoring registry contract is incomplete: missing $symbol" >&2
+    exit 1
+  fi
+done
+
 # Legacy materialization must remain visibly isolated in factory files instead of becoming a second
-# silent normal path. Unknown third-party ExtEnum IDs may still use it until the extension API gains
-# a stable native factory contract.
+# silent normal path. Unknown third-party ExtEnum IDs may still use it while public native provider
+# contracts remain internal/frozen for validation.
 for file in "${required_factories[@]}"; do
   if ! grep -Fq 'TryCreateLegacy' "$file" && [[ "$file" != *"NativeSoundFactory.cs" ]]; then
     echo "Factory lost its explicit Legacy fallback boundary: $file" >&2
