@@ -93,8 +93,9 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        if (snapshot.FocusMode)
-            DevToolOverlay.DrawMapCanvas(snapshot, display);
+        if (!snapshot.FocusMode) return;
+        DevToolWorkspaceLayout.GetCentralRect(display, out Num.Vector2 position, out Num.Vector2 size);
+        MapEditorView.DrawCanvas(MapEditorPresentationHub.Current, position, size);
     }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
@@ -118,8 +119,11 @@ internal sealed class DialogDevToolPage : DevToolFrontendPageBase
     public override string Id => "dialog";
     public override EditorToolMode Mode => EditorToolMode.Dialog;
 
-    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
-        DevToolOverlay.DrawDialogPreview(snapshot, display);
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        DevToolWorkspaceLayout.GetCentralRect(display, out Num.Vector2 position, out Num.Vector2 size);
+        DialogEditorView.DrawPreview(DialogEditorPresentationHub.Current, position, size);
+    }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         DialogEditorView.DrawBrowser(DialogEditorPresentationHub.Current);
@@ -138,8 +142,11 @@ internal sealed class RelationshipsDevToolPage : DevToolFrontendPageBase
         "用于矩阵编辑器尚未表达的关系页面扩展。",
         "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
 
-    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
-        DevToolOverlay.DrawRelationshipMatrix(snapshot, display);
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        DevToolWorkspaceLayout.GetCentralRect(display, out Num.Vector2 position, out Num.Vector2 size);
+        RelationshipEditorView.DrawMatrix(RelationshipEditorPresentationHub.Current, position, size);
+    }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
