@@ -10,15 +10,18 @@ using DryCycle.DevUI.DevTool.Sound;
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Removes the synchronous ambient-directory walk from the vanilla SoundPage constructor only while
-/// the rebuilt frontend owns presentation. The rest of SoundPage construction is untouched, which
-/// preserves world handles, third-party page assumptions, and vanilla fallback behaviour.
+/// Removes synchronous ambient-directory discovery and hidden file-button materialization from the
+/// vanilla SoundPage constructor while rebuilt presentation owns the workspace. One constructor IL
+/// boundary replaces both jobs; no separate RefreshFilesPage On-hook is required anymore.
+///
+/// Explicit Vanilla/Legacy construction bypasses the optimization and executes the complete original
+/// behaviour. Existing SoundPage instances can also materialize their file buttons later through the
+/// compatibility helper when the user exposes legacy presentation.
 /// </summary>
 internal static class SoundPageConstructorOptimization
 {
     private static bool enabled;
     private static bool constructorPatchInstalled;
-    private static bool refreshHookInstalled;
     private static int legacyConstructionBypassDepth;
 
     internal static void Enable()
@@ -29,20 +32,9 @@ internal static class SoundPageConstructorOptimization
         {
             IL.DevInterface.SoundPage.ctor += PatchConstructor;
             constructorPatchInstalled = true;
-            On.DevInterface.SoundPage.RefreshFilesPage += SoundPage_RefreshFilesPage;
-            refreshHookInstalled = true;
         }
         catch (Exception error)
         {
-            // Hook installation is transactional. Never leave only half of the optimization alive;
-            // an isolated constructor IL patch without the matching lazy-materialization hook would
-            // violate the legacy fallback contract.
-            if (refreshHookInstalled)
-            {
-                try { On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage; }
-                catch { }
-                refreshHookInstalled = false;
-            }
             if (constructorPatchInstalled)
             {
                 try { IL.DevInterface.SoundPage.ctor -= PatchConstructor; }
@@ -57,16 +49,6 @@ internal static class SoundPageConstructorOptimization
     internal static void Disable()
     {
         enabled = false;
-
-        if (refreshHookInstalled)
-        {
-            try { On.DevInterface.SoundPage.RefreshFilesPage -= SoundPage_RefreshFilesPage; }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning("DevTool SoundPage refresh optimization could not be removed cleanly: " + error.Message);
-            }
-            refreshHookInstalled = false;
-        }
 
         if (constructorPatchInstalled)
         {
@@ -86,6 +68,7 @@ internal static class SoundPageConstructorOptimization
         bool replacedLoadedFiles = false;
         bool replacedAssetList = false;
         bool replacedToArray = false;
+        bool replacedInitialFileButtons = false;
         ILCursor cursor = new(il);
 
         if (cursor.TryGotoNext(MoveType.Before, IsDirectoryInfoGetFiles))
@@ -111,11 +94,22 @@ internal static class SoundPageConstructorOptimization
             replacedToArray = true;
         }
 
-        if (!replacedLoadedFiles || !replacedAssetList || !replacedToArray)
+        cursor.Index = 0;
+        if (cursor.TryGotoNext(MoveType.Before, IsRefreshFilesPageCall))
+        {
+            // The call already has `this` on the evaluation stack. Replace it with one conditional
+            // delegate so native construction skips button allocation while explicit legacy
+            // construction still executes the ordinary method without another runtime hook.
+            cursor.Remove();
+            cursor.EmitDelegate<Action<DevInterface.SoundPage>>(RefreshFilesPageDuringConstruction);
+            replacedInitialFileButtons = true;
+        }
+
+        if (!replacedLoadedFiles || !replacedAssetList || !replacedToArray || !replacedInitialFileButtons)
         {
             throw new InvalidOperationException(
-                "DevTool: SoundPage constructor layout changed; ambient enumeration patch refused " +
-                "to run against an unknown method body.");
+                "DevTool: SoundPage constructor layout changed; ambient/file-button optimization " +
+                "refused to run against an unknown method body.");
         }
     }
 
@@ -145,6 +139,18 @@ internal static class SoundPageConstructorOptimization
                method.Name == "ToArray" && method.Parameters.Count == 0;
     }
 
+    private static bool IsRefreshFilesPageCall(Instruction instruction)
+    {
+        if (instruction == null ||
+            (instruction.OpCode != OpCodes.Call && instruction.OpCode != OpCodes.Callvirt) ||
+            instruction.Operand is not MethodReference method)
+            return false;
+
+        return method.DeclaringType?.FullName == typeof(DevInterface.SoundPage).FullName &&
+               method.Name == nameof(DevInterface.SoundPage.RefreshFilesPage) &&
+               method.Parameters.Count == 0;
+    }
+
     private static FileInfo[] GetLoadedAmbientFiles(DirectoryInfo directory)
     {
         if (!UseOptimizedConstructor())
@@ -153,8 +159,9 @@ internal static class SoundPageConstructorOptimization
             catch { return Array.Empty<FileInfo>(); }
         }
 
-        // The complete filename set is supplied by the second patched call below. Keeping this first
-        // source empty avoids duplicating entries while still skipping DirectoryInfo.GetFiles.
+        // The complete filename generation belongs to the headless native catalogue. Keep the
+        // constructor's first source empty and let the patched ToArray stage receive only the small
+        // bootstrap view required by compatibility state.
         SoundFileNameCatalog.EnsureStarted();
         return Array.Empty<FileInfo>();
     }
@@ -184,16 +191,12 @@ internal static class SoundPageConstructorOptimization
         return SoundFileNameCatalog.ConstructorNamesOrEmpty();
     }
 
-    private static void SoundPage_RefreshFilesPage(
-        On.DevInterface.SoundPage.orig_RefreshFilesPage orig,
-        DevInterface.SoundPage self)
+    private static void RefreshFilesPageDuringConstruction(DevInterface.SoundPage page)
     {
-        // The rebuilt frontend reads fileNames directly. Building up to 28 AddSoundButton nodes is
-        // pure hidden-UI work until legacy presentation is explicitly requested.
-        if (UseOptimizedConstructor())
+        if (page == null || UseOptimizedConstructor())
             return;
 
-        orig(self);
+        page.RefreshFilesPage();
     }
 
     internal readonly struct LegacyConstructionScope : IDisposable
@@ -215,9 +218,6 @@ internal static class SoundPageConstructorOptimization
     internal static void MaterializeLegacyFileButtons(DevInterface.SoundPage page)
     {
         if (page == null) return;
-        // Call through the normal hooked method after LegacyUiVisible has been set. At that point
-        // UseOptimizedConstructor() is false, so vanilla RefreshFilesPage performs the authoritative
-        // legacy materialization.
         page.RefreshFilesPage();
     }
 
