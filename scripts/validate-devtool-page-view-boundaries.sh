@@ -9,6 +9,7 @@ scene_placement="$frontend/ScenePlacementWindow.cs"
 page_contract="$frontend/IDevToolPageView.cs"
 builtin_pages="$frontend/BuiltinDevToolPages.cs"
 registry="$frontend/DevToolPageViewRegistry.cs"
+lifecycle="$frontend/DevToolRetainedViewLifecyclePlugin.cs"
 
 required_files=(
   "$overlay"
@@ -18,6 +19,7 @@ required_files=(
   "$page_contract"
   "$builtin_pages"
   "$registry"
+  "$lifecycle"
 )
 for file in "${required_files[@]}"; do
   if [[ ! -f "$file" ]]; then
@@ -121,6 +123,25 @@ if ! grep -Fq 'DevToolPageViewRegistry.NavigationPages' "$overlay"; then
 fi
 if ! grep -Fq 'NavigationPages' "$registry"; then
   echo "DevToolPageViewRegistry does not expose ordered navigation pages." >&2
+  exit 1
+fi
+
+# Retained page projections have exactly one lifecycle owner. The frontend lifetime edge resets the
+# page registry and generic chrome; it must not grow a second list of concrete page view reset calls.
+if ! grep -Fq 'DevToolPageViewRegistry.ResetAll();' "$lifecycle"; then
+  echo "Frontend retained-state lifetime is not resetting registered pages through the registry." >&2
+  exit 1
+fi
+if grep -Eq '(RoomSettingsView|ObjectExplorerView|ObjectSceneWorkspaceView|ObjectInspectorView|SoundEditorView|TriggerEditorView|MapEditorView|WorldWorkspaceView|DialogEditorView|RelationshipEditorView)\.ResetRetainedState' "$lifecycle"; then
+  echo "Frontend retained-state lifetime contains a duplicate concrete page reset fan-out." >&2
+  exit 1
+fi
+if grep -Fq 'SceneWorkspaceWindow.ResetRetainedState' "$lifecycle"; then
+  echo "Pure SceneWorkspaceWindow was given retained-state ownership again." >&2
+  exit 1
+fi
+if ! grep -Fq 'ScenePlacementWindow.ResetRetainedState();' "$lifecycle"; then
+  echo "Scene placement retained projection is not released with the frontend lifetime." >&2
   exit 1
 fi
 
