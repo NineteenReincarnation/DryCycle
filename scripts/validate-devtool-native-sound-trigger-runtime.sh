@@ -10,12 +10,13 @@ sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
 trigger_hydrator="$root/Compatibility/LegacyTriggerPageHydrator.cs"
 top_level_pump="$root/Compatibility/LegacyNativeSoundTriggerTopLevelPump.cs"
 scheduler="$root/Compatibility/NativeSoundTriggerDevUiScheduler.cs"
+sound_ctor="$root/Compatibility/SoundPageConstructorOptimization.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 misc_runtime="src/Misc/MiscRuntime.cs"
 
 for file in "$sound_runtime" "$trigger_runtime" "$trigger_catalog" "$selection_bridge" \
             "$sound_hydrator" "$trigger_hydrator" "$top_level_pump" "$scheduler" \
-            "$coordinator" "$misc_runtime"; do
+            "$sound_ctor" "$coordinator" "$misc_runtime"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Sound/Trigger runtime contract file missing: $file" >&2
     exit 1
@@ -85,6 +86,19 @@ fi
 if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate(self)' "$scheduler" ||
    ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks();' "$scheduler"; then
   echo "Native Sound/Trigger top-level scheduler no longer owns the replacement update path." >&2
+  exit 1
+fi
+
+# The remaining Sound constructor optimization is one IL boundary only. Hidden file-button suppression
+# is folded into the constructor patch; a separate RefreshFilesPage On-hook would reintroduce another
+# runtime interception point for presentation-only work.
+if grep -Eq 'On\.DevInterface\.SoundPage\.RefreshFilesPage' "$sound_ctor"; then
+  echo "Sound constructor optimization regained a RefreshFilesPage On-hook." >&2
+  exit 1
+fi
+if ! grep -Fq 'IL.DevInterface.SoundPage.ctor += PatchConstructor;' "$sound_ctor" ||
+   ! grep -Fq 'RefreshFilesPageDuringConstruction' "$sound_ctor"; then
+  echo "Sound constructor optimization no longer folds hidden file-button suppression into one IL boundary." >&2
   exit 1
 fi
 
