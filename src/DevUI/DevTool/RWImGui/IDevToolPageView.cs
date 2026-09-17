@@ -60,8 +60,8 @@ internal readonly struct DevToolPageStatusState : IEquatable<DevToolPageStatusSt
 ///
 /// This contract owns presentation only. Identity, lifecycle and retained-state ownership live on
 /// IDevToolPage, keeping frontend drawing concerns separate from editor-page identity.
-/// Navigation metadata and session status also live here because shared chrome must not know concrete
-/// page implementations or read page-specific PresentationHub objects directly.
+/// Navigation metadata, shared-surface capabilities and session status live here so shared chrome
+/// does not know concrete page implementations or read page-specific PresentationHub objects.
 /// </summary>
 internal interface IDevToolPageView
 {
@@ -70,6 +70,7 @@ internal interface IDevToolPageView
     string NavigationTooltip { get; }
     bool UsesDedicatedWorkspace { get; }
     bool SupportsSceneSurface { get; }
+    bool SupportsPlacementInput { get; }
     string LegacyFallbackTooltip { get; }
 
     string GetSessionStatus(EditorPresentationSnapshot snapshot);
@@ -111,6 +112,7 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public virtual string NavigationTooltip => NavigationLabel;
     public virtual bool UsesDedicatedWorkspace => false;
     public virtual bool SupportsSceneSurface => false;
+    public virtual bool SupportsPlacementInput => false;
     public virtual string LegacyFallbackTooltip => string.Empty;
 
     public string GetSessionStatus(EditorPresentationSnapshot snapshot)
