@@ -66,6 +66,11 @@ internal static class SoundEditorStateHub
     internal static SoundEditorState Get(EditorSession session) =>
         session == null ? null : states.GetValue(session, _ => new SoundEditorState());
 
+    /// <summary>
+    /// Compatibility-only selection import. Native selection does not depend on a DevInterface
+    /// panel, but an explicitly active legacy/third-party node may still become the user's selection
+    /// source and should be mirrored into the rebuilt presentation.
+    /// </summary>
     internal static void SynchronizeFromLegacyNode(EditorSession session, DevUINode node)
     {
         if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null || node == null)
@@ -92,7 +97,6 @@ public static class SoundEditorPresentationHub
     private static volatile EditorSoundPresentationSnapshot current = EditorSoundPresentationSnapshot.Empty;
     private static EditorSession observedSession;
     private static global::RoomSettings observedSettings;
-    private static SoundPage observedPage;
     private static string[] observedFileNames;
     private static long observedRevision;
     private static long observedSelectionRevision;
@@ -103,29 +107,32 @@ public static class SoundEditorPresentationHub
 
     internal static void Publish(EditorSession session)
     {
-        if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null ||
-            session.Owner?.activePage is not SoundPage page)
+        if (session?.ToolMode != EditorToolMode.Sound || session.RoomSettings?.ambientSounds == null)
         {
             Clear();
             return;
         }
 
-        SoundEditorStateHub.SynchronizeFromLegacyNode(session, session.Owner.draggedNode ?? page.draggedObject);
+        DevUINode legacyDrag = session.Owner?.draggedNode;
+        if (legacyDrag == null && session.Owner?.activePage is SoundPage legacyPage)
+            legacyDrag = legacyPage.draggedObject;
+        SoundEditorStateHub.SynchronizeFromLegacyNode(session, legacyDrag);
+
         SoundEditorState state = SoundEditorStateHub.Get(session);
         int count = session.RoomSettings.ambientSounds.Count;
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
         // Opaque compatibility writers do not provide member hints, so force the safe full-capture
-        // path. A known native drag can use the selected row when quiescence still owns the page.
+        // path. A live legacy drag is compatibility-only and can invalidate the selected row without
+        // making the native presentation depend on a SoundPage identity.
         bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
-        bool nativeDrag = session.Owner.draggedNode != null || page.draggedObject != null;
         if (opaqueLiveWriter)
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
             SoundPresentationChangeHintHub.MarkFull(session);
         }
-        else if (nativeDrag)
+        else if (legacyDrag != null)
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Sound);
             SoundPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
@@ -133,12 +140,11 @@ public static class SoundEditorPresentationHub
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Sound);
         long selectionRevision = state.Revision;
-        string[] fileNames = page.fileNames ?? Array.Empty<string>();
+        string[] fileNames = SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>();
 
         bool sameIdentity =
             ReferenceEquals(observedSession, session) &&
             ReferenceEquals(observedSettings, session.RoomSettings) &&
-            ReferenceEquals(observedPage, page) &&
             current.Available;
         bool resourceCatalogStable =
             sameIdentity &&
@@ -160,8 +166,6 @@ public static class SoundEditorPresentationHub
             return;
         }
 
-        // Selection-only changes never touch resource discovery or model capture. Clone the retained
-        // immutable array and replace only the old/new selected rows.
         if (modelStable)
         {
             PublishSelectionOnly(state.SelectedIndex, selectionRevision);
@@ -190,12 +194,17 @@ public static class SoundEditorPresentationHub
             sampleEntries = current.SampleEntries;
             samples = current.Samples;
         }
-        else
+        else if (SoundFileNameCatalog.IsReady && SoundSampleCatalog.IsReadyForNames(fileNames))
         {
-            sampleEntries = SoundSampleCatalog.Refresh(page);
+            sampleEntries = NativeSoundResourceSnapshot.Capture(fileNames);
             samples = new string[sampleEntries.Length];
             for (int i = 0; i < sampleEntries.Length; i++)
                 samples[i] = sampleEntries[i].Sample;
+        }
+        else
+        {
+            sampleEntries = Array.Empty<EditorSoundSampleSnapshot>();
+            samples = Array.Empty<string>();
         }
 
         SoundGroupLibrary.EnsureLoaded();
@@ -213,7 +222,7 @@ public static class SoundEditorPresentationHub
             SelectedIndex = state.SelectedIndex
         };
 
-        Observe(session, page, fileNames, revision, selectionRevision, count, state.SelectedIndex);
+        Observe(session, fileNames, revision, selectionRevision, count, state.SelectedIndex);
 
         DevToolPerformanceMonitor.RecordPresentation(
             DevToolPresentationChannel.Sound,
@@ -271,8 +280,7 @@ public static class SoundEditorPresentationHub
 
         Observe(
             session,
-            session.Owner.activePage as SoundPage,
-            (session.Owner.activePage as SoundPage)?.fileNames ?? Array.Empty<string>(),
+            SoundFileNameCatalog.CurrentNames ?? Array.Empty<string>(),
             revision,
             selectionRevision,
             count,
@@ -390,7 +398,6 @@ public static class SoundEditorPresentationHub
 
     private static void Observe(
         EditorSession session,
-        SoundPage page,
         string[] fileNames,
         long revision,
         long selectionRevision,
@@ -399,7 +406,6 @@ public static class SoundEditorPresentationHub
     {
         observedSession = session;
         observedSettings = session?.RoomSettings;
-        observedPage = page;
         observedFileNames = fileNames;
         observedRevision = revision;
         observedSelectionRevision = selectionRevision;
@@ -413,7 +419,6 @@ public static class SoundEditorPresentationHub
         current = EditorSoundPresentationSnapshot.Empty;
         observedSession = null;
         observedSettings = null;
-        observedPage = null;
         observedFileNames = null;
         observedRevision = 0L;
         observedSelectionRevision = 0L;
@@ -581,9 +586,6 @@ public static class SoundEditorCommandQueue
                 bool historyChanged = historyAfterCommand != historyBeforeCommand;
                 bool membershipChanged = soundCountAfter != soundCountBefore;
 
-                // CreateFromLibrary may succeed only because it wrote a local group while reusing an
-                // already-existing scene sound. Do not turn that library-only success into a false
-                // scene revision. All ordinary scene mutations either push history or change count.
                 bool directSceneMutation =
                     changed && command.Kind != SoundEditorCommandKind.CreateFromLibrary;
                 bool observableModelChange = historyChanged || membershipChanged || directSceneMutation;
