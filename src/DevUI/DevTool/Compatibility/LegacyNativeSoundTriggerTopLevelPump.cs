@@ -24,6 +24,7 @@ internal static partial class LegacyDevUiQuiescenceController
                 return true;
 
             UpdateVanillaMouseContract(owner);
+            PreserveNativeSoundPreviewContract(session, owner);
             return true;
         }
 
@@ -65,5 +66,22 @@ internal static partial class LegacyDevUiQuiescenceController
         owner.mouseClick = owner.mouseDown && !owner.lastMouseDown;
         owner.lastMouseDown = owner.mouseDown;
         owner.draggedNode = null;
+    }
+
+    /// <summary>
+    /// SoundPage.Update has one non-presentation side effect beyond its legacy drag/trash UI: while
+    /// the Sound tool is open it drives the music threat preview from horizontal mouse position.
+    /// Preserve that exact Rain World contract without keeping SoundPage alive just for one scalar.
+    /// TriggersPage.Update has no equivalent non-UI side effect.
+    /// </summary>
+    private static void PreserveNativeSoundPreviewContract(
+        EditorSession session,
+        global::DevInterface.DevUI owner)
+    {
+        if (session?.ToolMode != EditorToolMode.Sound) return;
+
+        ThreatDetermination threatTracker = owner?.game?.manager?.musicPlayer?.threatTracker;
+        if (threatTracker != null)
+            threatTracker.currentThreat = Mathf.InverseLerp(0f, 1300f, Futile.mousePosition.x);
     }
 }
