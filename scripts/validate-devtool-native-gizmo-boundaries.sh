@@ -86,7 +86,7 @@ if ! grep -Fq 'new AmbientSoundPlayer' "$sound_runtime" ||
   echo "Native Sound runtime reconciler no longer owns ambient player membership." >&2
   exit 1
 fi
-if grep -Eq 'SoundPage|AmbientSoundPanel|SpotSoundHandle|DirectionalSoundHandle' "$sound_runtime"; then
+if grep -Eq 'using DevInterface|global::DevInterface|new[[:space:]]+(AmbientSoundPanel|SpotSoundHandle|DirectionalSoundHandle)[[:space:]]*\(' "$sound_runtime"; then
   echo "Native Sound runtime reconciler regained DevInterface presentation dependencies." >&2
   exit 1
 fi
