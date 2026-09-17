@@ -83,6 +83,9 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
         "用于未迁移的自定义声音页面控件。",
         "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
 
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        NativeSpatialGizmoView.DrawSound(SoundEditorPresentationHub.Current, display);
+
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
 
@@ -100,6 +103,7 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
 
     protected override void OnReset()
     {
+        NativeSpatialGizmoView.ResetRetainedState();
         SoundEditorView.ResetRetainedState();
         SoundLibraryGroupsView.ResetRetainedState();
     }
@@ -117,6 +121,9 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
         "用于新检查器无法表达的自定义触发器/事件控件。",
         "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
 
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        NativeSpatialGizmoView.DrawTriggers(TriggerEditorPresentationHub.Current, display);
+
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
 
@@ -132,7 +139,11 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
     protected override string FormatSessionStatus(DevToolPageStatusState state) =>
         DevToolUiSettings.T("触发器 ", "Triggers ") + state.CountA;
 
-    protected override void OnReset() => TriggerEditorView.ResetRetainedState();
+    protected override void OnReset()
+    {
+        NativeSpatialGizmoView.ResetRetainedState();
+        TriggerEditorView.ResetRetainedState();
+    }
 }
 
 internal sealed class MapDevToolPage : DevToolFrontendPageBase
