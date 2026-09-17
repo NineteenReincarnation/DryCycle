@@ -14,7 +14,9 @@ internal static class SceneWorkspaceWindow
 {
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        if (snapshot == null || !snapshot.Available || snapshot.FocusMode || !DevToolUiSettings.SceneInCenter ||
+        if (snapshot == null || !snapshot.Available || snapshot.FocusMode ||
+            DevToolOverlay.SuppressesSharedPageSurfaces ||
+            !DevToolUiSettings.SceneInCenter ||
             !DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page) ||
             !page.SupportsSceneSurface)
             return;
