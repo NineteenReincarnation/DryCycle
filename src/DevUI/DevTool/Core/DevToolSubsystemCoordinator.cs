@@ -1,5 +1,6 @@
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Dialog;
+using DryCycle.DevUI.DevTool.Gizmos;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -29,6 +30,7 @@ internal static class DevToolSubsystemCoordinator
         RoomEditorCommandQueue.Process(session);
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
+        NativeGizmoCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
         if (PlayerMapActivityGate.ShouldProcess)
         {
@@ -39,6 +41,11 @@ internal static class DevToolSubsystemCoordinator
         RelationshipEditorCommandQueue.Process(session);
 
         SoundActivationPipeline.Step(session);
+
+        // Native scene-space tools consume only this detached camera snapshot. Publish after command
+        // processing so camera/tool changes observed this frame are visible to RWImGui immediately.
+        EditorViewportPresentationHub.Publish(session);
+
         UniversalDevUiCommandQueue.Process(session);
 
         if (DevUiDiagnosticsPolicy.Enabled && session?.Owner != null)
@@ -65,6 +72,7 @@ internal static class DevToolSubsystemCoordinator
     {
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
+        EditorViewportPresentationHub.Clear();
         EditorPresentationHub.Clear();
         ClearDetailPresentations();
         ResetWorkspaceState();
@@ -81,6 +89,7 @@ internal static class DevToolSubsystemCoordinator
         RoomEditorCommandQueue.Clear();
         SoundEditorCommandQueue.Clear();
         TriggerEditorCommandQueue.Clear();
+        NativeGizmoCommandQueue.Clear();
         MapEditorCommandQueue.Clear();
         PlayerMapCommandQueue.Clear();
         DialogEditorCommandQueue.Clear();
