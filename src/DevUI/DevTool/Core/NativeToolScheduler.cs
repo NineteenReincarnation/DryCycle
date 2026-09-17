@@ -8,7 +8,8 @@ namespace DryCycle.DevUI.DevTool.Core;
 /// <summary>
 /// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
 /// DevInterface Page. Sound and Triggers use an exact RoomSettingsPage only as a lightweight room
-/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode.
+/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or
+/// diagnostics that explicitly need to inspect the real DevInterface control tree.
 /// </summary>
 internal static class NativeToolScheduler
 {
@@ -22,8 +23,7 @@ internal static class NativeToolScheduler
     internal static bool IsVirtualToolActive(EditorSession session)
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return false;
-        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
-            return false;
+        if (!CanOwnNativePresentation(session)) return false;
 
         Page page = session.Owner.activePage;
         return page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage);
@@ -37,31 +37,26 @@ internal static class NativeToolScheduler
     internal static bool TryActivate(EditorSession session, EditorToolMode mode)
     {
         if (session?.Owner == null || !Supports(mode)) return false;
-        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
-            return false;
+        if (!CanOwnNativePresentation(session)) return false;
 
         return ActivateCore(session, mode);
     }
 
     /// <summary>
-    /// Reconciles global New UI / Vanilla ownership on Rain World's main thread. EditorUiModeState is
-    /// intentionally presentation-only and may be written by RWImGui, so actual Page construction or
-    /// retirement happens here rather than inside the mode setter.
+    /// Reconciles global New UI / Vanilla / diagnostics ownership on Rain World's main thread.
+    /// EditorUiModeState and diagnostics flags can change outside the core scheduler, so actual Page
+    /// construction or retirement happens here rather than inside presentation setters.
     /// </summary>
     internal static void SynchronizePresentationOwnership(EditorSession session)
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return;
 
-        bool rebuiltAvailable = EditorInputRouter.FrontendAttached && !EditorUiModeState.UseVanilla;
-        if (!rebuiltAvailable)
+        if (!CanOwnNativePresentation(session))
         {
             if (!session.LegacyUiVisible && IsRoomAnchor(session.Owner.activePage))
                 MaterializeLegacyTool(session, session.ToolMode, explicitLegacyUi: false);
             return;
         }
-
-        if (session.LegacyUiVisible)
-            return;
 
         if (IsExactLegacyPage(session.Owner.activePage, session.ToolMode))
             ActivateCore(session, session.ToolMode);
@@ -93,13 +88,20 @@ internal static class NativeToolScheduler
     internal static bool ReturnToNativeTool(EditorSession session)
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return false;
-        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla)
+        if (!CanOwnNativePresentation(session))
             return false;
 
         EditorToolMode mode = session.ToolMode;
         session.AdoptMaterializedToolMode(mode, legacyUiVisible: false);
         return ActivateCore(session, mode);
     }
+
+    private static bool CanOwnNativePresentation(EditorSession session) =>
+        session != null &&
+        EditorInputRouter.FrontendAttached &&
+        !EditorUiModeState.UseVanilla &&
+        !session.LegacyUiVisible &&
+        !DevUiDiagnosticsPolicy.Enabled;
 
     private static bool ActivateCore(EditorSession session, EditorToolMode mode)
     {
