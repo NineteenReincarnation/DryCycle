@@ -12,13 +12,14 @@ top_level_pump="$root/Compatibility/LegacyNativeSoundTriggerTopLevelPump.cs"
 scheduler="$root/Compatibility/NativeSoundTriggerDevUiScheduler.cs"
 native_tool_scheduler="$root/Core/NativeToolScheduler.cs"
 runtime="$root/Core/DevToolRuntime.cs"
+quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
 removed_sound_ctor="$root/Compatibility/SoundPageConstructorOptimization.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 misc_runtime="src/Misc/MiscRuntime.cs"
 
 for file in "$sound_runtime" "$trigger_runtime" "$trigger_catalog" "$selection_bridge" \
             "$sound_hydrator" "$trigger_hydrator" "$top_level_pump" "$scheduler" \
-            "$native_tool_scheduler" "$runtime" "$coordinator" "$misc_runtime"; do
+            "$native_tool_scheduler" "$runtime" "$quiescence" "$coordinator" "$misc_runtime"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Sound/Trigger runtime contract file missing: $file" >&2
     exit 1
@@ -112,20 +113,22 @@ if ! grep -Fq 'NativeToolScheduler.SynchronizePresentationOwnership(session);' "
   exit 1
 fi
 
-# Native Sound/Trigger no longer require separate derived Page.Update detours at runtime. The
-# top-level pump reproduces DevUI mouse bookkeeping; a virtual tool performs no activePage.Update at
-# all, while materialized compatibility pages fail open to vanilla when explicitly visible.
-if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate' "$top_level_pump" ||
-   ! grep -Fq 'NativeToolScheduler.IsVirtualToolActive(session)' "$top_level_pump" ||
-   ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks' "$top_level_pump" ||
-   ! grep -Fq 'On.DevInterface.SoundPage.Update -= SoundPage_Update;' "$top_level_pump" ||
-   ! grep -Fq 'On.DevInterface.TriggersPage.Update -= TriggersPage_Update;' "$top_level_pump"; then
-  echo "Sound/Trigger derived Page.Update hooks are no longer retired by the top-level pump." >&2
+# Native Sound/Trigger own no dedicated derived Page.Update hooks at all. The top-level DevUI
+# scheduler consumes virtual workspaces before activePage.Update; explicit Vanilla/Legacy pages fail
+# open to the original DevUI lifecycle. This is a structural rule, not an install-then-unsubscribe trick.
+if grep -R -n -E --include='*.cs' 'On\.DevInterface\.(SoundPage|TriggersPage)\.Update' "$root" >/tmp/devtool_sound_trigger_page_hooks.txt 2>/dev/null; then
+  echo "Dedicated Sound/Trigger Page.Update hook returned:" >&2
+  cat /tmp/devtool_sound_trigger_page_hooks.txt >&2
   exit 1
 fi
-if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate(self)' "$scheduler" ||
-   ! grep -Fq 'RetireNativeSoundTriggerPageUpdateHooks();' "$scheduler"; then
-  echo "Native Sound/Trigger top-level scheduler no longer owns the replacement update path." >&2
+if grep -Eq 'SoundPage_Update|TriggersPage_Update|RetireNativeSoundTriggerPageUpdateHooks' "$quiescence" "$top_level_pump" "$scheduler"; then
+  echo "Obsolete Sound/Trigger derived-page update handler/retirement code returned." >&2
+  exit 1
+fi
+if ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate' "$top_level_pump" ||
+   ! grep -Fq 'NativeToolScheduler.IsVirtualToolActive(session)' "$top_level_pump" ||
+   ! grep -Fq 'TryRunNativeSoundTriggerTopLevelUpdate(self)' "$scheduler"; then
+  echo "Native Sound/Trigger top-level update ownership is incomplete." >&2
   exit 1
 fi
 if ! grep -Fq 'EditorUiModeState.UseVanilla' "$top_level_pump" ||
@@ -137,15 +140,15 @@ fi
 # Once page virtualization is active, there is no reason to intercept SoundPage construction or its
 # file-list refresh. Native never constructs SoundPage; explicit Vanilla/Legacy must run the complete
 # original constructor. Reintroducing either hook would duplicate ownership and add startup risk.
-if grep -R -n -E 'IL\.DevInterface\.SoundPage\.ctor|On\.DevInterface\.SoundPage\.RefreshFilesPage|SoundPageConstructorOptimization' \
-    "$root" "$misc_runtime" --include='*.cs' >/tmp/devtool_sound_ctor_hits.txt 2>/dev/null; then
+if grep -R -n -E --include='*.cs' 'IL\.DevInterface\.SoundPage\.ctor|On\.DevInterface\.SoundPage\.RefreshFilesPage|SoundPageConstructorOptimization' \
+    "$root" "$misc_runtime" >/tmp/devtool_sound_ctor_hits.txt 2>/dev/null; then
   echo "Obsolete SoundPage constructor/file-list interception returned:" >&2
   cat /tmp/devtool_sound_ctor_hits.txt >&2
   exit 1
 fi
 
-# Hook order is semantic: quiescence installs compatibility hooks first, scheduler becomes the inner
-# DevUI layer second, and DevToolRuntime becomes the outer authoritative editor lifecycle last.
+# Hook order is semantic: quiescence installs generic compatibility hooks first, scheduler becomes the
+# inner DevUI layer second, and DevToolRuntime becomes the outer authoritative editor lifecycle last.
 q_line="$(grep -n 'LegacyDevUiQuiescenceController.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
 s_line="$(grep -n 'NativeSoundTriggerDevUiScheduler.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
 r_line="$(grep -n 'DevToolRuntime.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
