@@ -14,13 +14,12 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Rendering contract for one DevTool page.
 ///
-/// This contract deliberately owns presentation only. Lifecycle and retained-state ownership live on
-/// IDevToolPage; the frontend registration object composes both contracts without forcing a shared
-/// visual style on Browser or Inspector contents.
+/// This contract deliberately owns presentation only. Identity, lifecycle and retained-state ownership
+/// live on IDevToolPage; the frontend registration object composes both contracts without forcing a
+/// shared visual style on Browser or Inspector contents.
 /// </summary>
 internal interface IDevToolPageView
 {
-    EditorToolMode Mode { get; }
     bool UsesDedicatedWorkspace { get; }
     string LegacyFallbackTooltip { get; }
 
@@ -68,7 +67,7 @@ internal sealed class DelegateDevToolPage : IDevToolFrontendPage
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Page id must not be empty.", nameof(id));
 
-        Id = id;
+        Id = id.Trim();
         Mode = mode;
         UsesDedicatedWorkspace = usesDedicatedWorkspace;
         this.drawBrowser = drawBrowser;
@@ -130,14 +129,16 @@ internal sealed class DelegateDevToolPage : IDevToolFrontendPage
 /// <summary>
 /// Single registration point for all rebuilt DevTool pages.
 ///
-/// The registry owns one composite page object per ToolMode. Get() also synchronizes lifecycle so
-/// existing render callers automatically participate in Activate/Deactivate without another mode
-/// dispatch layer. The retained-view lifetime plugin mirrors ToolMode changes while the frontend is
-/// not drawing, keeping lifecycle state correct in Vanilla/New-UI transitions as well.
+/// The registry owns one composite page object per ToolMode and one stable ID per page. Get() also
+/// synchronizes lifecycle so existing render callers automatically participate in Activate/Deactivate
+/// without another mode dispatch layer. The retained-view lifetime plugin mirrors ToolMode changes
+/// while the frontend is not drawing, keeping lifecycle state correct in Vanilla/New-UI transitions.
 /// </summary>
 internal static class DevToolPageViewRegistry
 {
     private static readonly Dictionary<EditorToolMode, IDevToolFrontendPage> Pages = new();
+    private static readonly Dictionary<string, IDevToolFrontendPage> PagesById =
+        new(StringComparer.OrdinalIgnoreCase);
     private static IDevToolFrontendPage activePage;
 
     static DevToolPageViewRegistry()
@@ -229,6 +230,17 @@ internal static class DevToolPageViewRegistry
         return page;
     }
 
+    internal static bool TryGet(string id, out IDevToolPageView view)
+    {
+        view = null;
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        if (!PagesById.TryGetValue(id.Trim(), out IDevToolFrontendPage page)) return false;
+        view = page;
+        return true;
+    }
+
+    internal static string ActivePageId => activePage?.Id ?? string.Empty;
+
     internal static void SynchronizeActive(EditorToolMode mode)
     {
         Pages.TryGetValue(mode, out IDevToolFrontendPage next);
@@ -253,14 +265,14 @@ internal static class DevToolPageViewRegistry
     internal static void Register(IDevToolFrontendPage page)
     {
         if (page == null) throw new ArgumentNullException(nameof(page));
+        if (string.IsNullOrWhiteSpace(page.Id)) throw new ArgumentException("Page id must not be empty.", nameof(page));
+        if (Pages.ContainsKey(page.Mode))
+            throw new InvalidOperationException("A DevTool page is already registered for mode " + page.Mode + ".");
+        if (PagesById.ContainsKey(page.Id))
+            throw new InvalidOperationException("A DevTool page is already registered with id '" + page.Id + "'.");
 
-        if (Pages.TryGetValue(page.Mode, out IDevToolFrontendPage previous) &&
-            ReferenceEquals(activePage, previous))
-        {
-            DeactivateActive();
-        }
-
-        Pages[page.Mode] = page;
+        Pages.Add(page.Mode, page);
+        PagesById.Add(page.Id, page);
     }
 
     internal static void ResetAll()

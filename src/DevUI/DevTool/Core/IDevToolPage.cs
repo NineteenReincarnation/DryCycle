@@ -4,15 +4,20 @@ namespace DryCycle.DevUI.DevTool.Core;
 /// Common lifecycle contract for one DevTool page.
 ///
 /// The lifecycle contract is deliberately independent from rendering. A frontend may compose this
-/// contract with its own view interface, but page activation, deactivation and retained-state reset
-/// remain page responsibilities rather than drawing responsibilities.
+/// contract with its own view interface, but page identity, activation, deactivation and retained-state
+/// reset remain page responsibilities rather than drawing responsibilities.
 /// </summary>
 internal interface IDevToolPage
 {
     /// <summary>
-    /// Stable page identifier used by registration and state ownership.
+    /// Stable page identifier used by registration and retained-state ownership.
     /// </summary>
     string Id { get; }
+
+    /// <summary>
+    /// Editor mode owned by this page. Mode belongs to page identity, not to the rendering contract.
+    /// </summary>
+    EditorToolMode Mode { get; }
 
     /// <summary>
     /// Called once when the page becomes the active DevTool page.
