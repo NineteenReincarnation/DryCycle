@@ -156,10 +156,14 @@ internal static class DevToolPageViewRegistry
         Register(new DelegateDevToolPage(
             "objects",
             EditorToolMode.Objects,
-            DevToolOverlay.DrawObjectsBrowser,
+            ObjectExplorerView.Draw,
             snapshot => ObjectInspectorView.Draw(snapshot.Inspector),
             suppressInspector: snapshot => snapshot.Inspector?.HasSelection != true,
-            reset: ObjectInspectorView.ResetRetainedState));
+            reset: () =>
+            {
+                ObjectExplorerView.ResetRetainedState();
+                ObjectInspectorView.ResetRetainedState();
+            }));
 
         Register(new DelegateDevToolPage(
             "sound",
