@@ -12,11 +12,11 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Defines the frontend contract for one DevTool page.
+/// Rendering contract for one DevTool page.
 ///
-/// This contract deliberately owns dispatch only. It does not impose a common visual style on
-/// Browser or Inspector contents: each page keeps its existing view implementation and styling.
-/// Map is the exception by design: it owns a dedicated workspace through the same contract.
+/// This contract deliberately owns presentation only. Lifecycle and retained-state ownership live on
+/// IDevToolPage; the frontend registration object composes both contracts without forcing a shared
+/// visual style on Browser or Inspector contents.
 /// </summary>
 internal interface IDevToolPageView
 {
@@ -29,20 +29,31 @@ internal interface IDevToolPageView
     void DrawBrowser(EditorPresentationSnapshot snapshot);
     void DrawInspector(EditorPresentationSnapshot snapshot);
     void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display);
-    void ResetRetainedState();
 }
 
-internal sealed class DelegateDevToolPageView : IDevToolPageView
+/// <summary>
+/// One registered frontend page owns both its lifecycle and its rendering contract. Keeping the
+/// composition here prevents Page and PageView from becoming two independently managed registries.
+/// </summary>
+internal interface IDevToolFrontendPage : IDevToolPage, IDevToolPageView
+{
+}
+
+internal sealed class DelegateDevToolPage : IDevToolFrontendPage
 {
     private readonly Func<EditorPresentationSnapshot, bool> suppressInspector;
     private readonly Action<EditorPresentationSnapshot, Num.Vector2> drawBackground;
     private readonly Action<EditorPresentationSnapshot> drawBrowser;
     private readonly Action<EditorPresentationSnapshot> drawInspector;
     private readonly Action<EditorPresentationSnapshot, Num.Vector2> drawWorkspace;
-    private readonly Action resetRetainedState;
+    private readonly Action activate;
+    private readonly Action deactivate;
+    private readonly Action reset;
     private readonly Func<string> legacyFallbackTooltip;
+    private bool active;
 
-    internal DelegateDevToolPageView(
+    internal DelegateDevToolPage(
+        string id,
         EditorToolMode mode,
         Action<EditorPresentationSnapshot> drawBrowser,
         Action<EditorPresentationSnapshot> drawInspector,
@@ -51,8 +62,13 @@ internal sealed class DelegateDevToolPageView : IDevToolPageView
         Action<EditorPresentationSnapshot, Num.Vector2> drawWorkspace = null,
         Func<EditorPresentationSnapshot, bool> suppressInspector = null,
         Func<string> legacyFallbackTooltip = null,
-        Action resetRetainedState = null)
+        Action activate = null,
+        Action deactivate = null,
+        Action reset = null)
     {
+        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Page id must not be empty.", nameof(id));
+
+        Id = id;
         Mode = mode;
         UsesDedicatedWorkspace = usesDedicatedWorkspace;
         this.drawBrowser = drawBrowser;
@@ -61,9 +77,12 @@ internal sealed class DelegateDevToolPageView : IDevToolPageView
         this.drawWorkspace = drawWorkspace;
         this.suppressInspector = suppressInspector;
         this.legacyFallbackTooltip = legacyFallbackTooltip;
-        this.resetRetainedState = resetRetainedState;
+        this.activate = activate;
+        this.deactivate = deactivate;
+        this.reset = reset;
     }
 
+    public string Id { get; }
     public EditorToolMode Mode { get; }
     public bool UsesDedicatedWorkspace { get; }
     public string LegacyFallbackTooltip => legacyFallbackTooltip?.Invoke() ?? string.Empty;
@@ -83,59 +102,90 @@ internal sealed class DelegateDevToolPageView : IDevToolPageView
     public void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
         drawWorkspace?.Invoke(snapshot, display);
 
-    public void ResetRetainedState() => resetRetainedState?.Invoke();
+    public void Activate()
+    {
+        if (active) return;
+        active = true;
+        try
+        {
+            activate?.Invoke();
+        }
+        catch
+        {
+            active = false;
+            throw;
+        }
+    }
+
+    public void Deactivate()
+    {
+        if (!active) return;
+        active = false;
+        deactivate?.Invoke();
+    }
+
+    public void Reset() => reset?.Invoke();
 }
 
 /// <summary>
-/// Single registration point for all rebuilt DevTool page views.
-/// Adding a page or changing its presentation policy should happen here instead of adding another
-/// ToolMode branch to DevToolOverlay.
+/// Single registration point for all rebuilt DevTool pages.
+///
+/// The registry owns one composite page object per ToolMode. Get() also synchronizes lifecycle so
+/// existing render callers automatically participate in Activate/Deactivate without another mode
+/// dispatch layer. The retained-view lifetime plugin mirrors ToolMode changes while the frontend is
+/// not drawing, keeping lifecycle state correct in Vanilla/New-UI transitions as well.
 /// </summary>
 internal static class DevToolPageViewRegistry
 {
-    private static readonly Dictionary<EditorToolMode, IDevToolPageView> Pages = new();
+    private static readonly Dictionary<EditorToolMode, IDevToolFrontendPage> Pages = new();
+    private static IDevToolFrontendPage activePage;
 
     static DevToolPageViewRegistry()
     {
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "room",
             EditorToolMode.Room,
             _ => RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current),
             _ => RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current),
             legacyFallbackTooltip: () => DevToolUiSettings.T(
                 "用于尚未迁移的模板、地形或自定义房间设置控件。",
                 "Fallback for template, terrain or custom RoomSettings controls not migrated yet."),
-            resetRetainedState: RoomSettingsView.ResetRetainedState));
+            reset: RoomSettingsView.ResetRetainedState));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "objects",
             EditorToolMode.Objects,
             DevToolOverlay.DrawObjectsBrowser,
             snapshot => ObjectInspectorView.Draw(snapshot.Inspector),
             suppressInspector: snapshot => snapshot.Inspector?.HasSelection != true,
-            resetRetainedState: ObjectInspectorView.ResetRetainedState));
+            reset: ObjectInspectorView.ResetRetainedState));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "sound",
             EditorToolMode.Sound,
             _ => SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current),
             _ => SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current),
             legacyFallbackTooltip: () => DevToolUiSettings.T(
                 "用于未迁移的自定义声音页面控件。",
                 "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet."),
-            resetRetainedState: () =>
+            reset: () =>
             {
                 SoundEditorView.ResetRetainedState();
                 SoundLibraryGroupsView.ResetRetainedState();
             }));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "triggers",
             EditorToolMode.Triggers,
             _ => TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current),
             _ => TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current),
             legacyFallbackTooltip: () => DevToolUiSettings.T(
                 "用于新检查器无法表达的自定义触发器/事件控件。",
                 "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector."),
-            resetRetainedState: TriggerEditorView.ResetRetainedState));
+            reset: TriggerEditorView.ResetRetainedState));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "map",
             EditorToolMode.Map,
             _ => MapEditorView.DrawBrowser(MapEditorPresentationHub.Current),
             _ => MapEditorView.DrawInspector(MapEditorPresentationHub.Current),
@@ -146,20 +196,22 @@ internal static class DevToolPageViewRegistry
                     DevToolOverlay.DrawMapCanvas(snapshot, display);
             },
             drawWorkspace: (snapshot, display) => WorldWorkspaceView.Draw(snapshot, display),
-            resetRetainedState: () =>
+            reset: () =>
             {
                 MapEditorView.ResetRetainedState();
                 WorldWorkspaceView.ResetRetainedState();
             }));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "dialog",
             EditorToolMode.Dialog,
             _ => DialogEditorView.DrawBrowser(DialogEditorPresentationHub.Current),
             _ => DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current),
             drawBackground: DevToolOverlay.DrawDialogPreview,
-            resetRetainedState: DialogEditorView.ResetRetainedState));
+            reset: DialogEditorView.ResetRetainedState));
 
-        Register(new DelegateDevToolPageView(
+        Register(new DelegateDevToolPage(
+            "relationships",
             EditorToolMode.Relationships,
             _ => RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current),
             _ => RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current),
@@ -167,24 +219,54 @@ internal static class DevToolPageViewRegistry
             legacyFallbackTooltip: () => DevToolUiSettings.T(
                 "用于矩阵编辑器尚未表达的关系页面扩展。",
                 "Fallback for custom RelationshipPage extensions not represented by the matrix editor."),
-            resetRetainedState: RelationshipEditorView.ResetRetainedState));
+            reset: RelationshipEditorView.ResetRetainedState));
     }
 
     internal static IDevToolPageView Get(EditorToolMode mode)
     {
-        Pages.TryGetValue(mode, out IDevToolPageView page);
+        SynchronizeActive(mode);
+        Pages.TryGetValue(mode, out IDevToolFrontendPage page);
         return page;
     }
 
-    internal static void Register(IDevToolPageView page)
+    internal static void SynchronizeActive(EditorToolMode mode)
+    {
+        Pages.TryGetValue(mode, out IDevToolFrontendPage next);
+        if (ReferenceEquals(activePage, next)) return;
+
+        IDevToolFrontendPage previous = activePage;
+        activePage = null;
+        previous?.Deactivate();
+
+        if (next == null) return;
+        next.Activate();
+        activePage = next;
+    }
+
+    internal static void DeactivateActive()
+    {
+        IDevToolFrontendPage previous = activePage;
+        activePage = null;
+        previous?.Deactivate();
+    }
+
+    internal static void Register(IDevToolFrontendPage page)
     {
         if (page == null) throw new ArgumentNullException(nameof(page));
+
+        if (Pages.TryGetValue(page.Mode, out IDevToolFrontendPage previous) &&
+            ReferenceEquals(activePage, previous))
+        {
+            DeactivateActive();
+        }
+
         Pages[page.Mode] = page;
     }
 
     internal static void ResetAll()
     {
-        foreach (IDevToolPageView page in Pages.Values)
-            page.ResetRetainedState();
+        DeactivateActive();
+        foreach (IDevToolFrontendPage page in Pages.Values)
+            page.Reset();
     }
 }

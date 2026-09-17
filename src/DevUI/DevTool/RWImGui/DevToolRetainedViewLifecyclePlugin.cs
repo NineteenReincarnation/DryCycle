@@ -35,6 +35,12 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
             EditorSession session = DevToolSessionHub.Current;
             observedGame = session?.Owner?.game ?? observedGame;
             observedLiveSession = true;
+
+            // Page lifecycle follows the editor ToolMode even while RWImGui is temporarily hidden or
+            // Vanilla UI is primary. The render path performs the same synchronization defensively,
+            // so either update order remains correct and repeated calls are O(1) no-ops.
+            if (session != null)
+                DevToolPageViewRegistry.SynchronizeActive(session.ToolMode);
             return;
         }
 

@@ -1,12 +1,11 @@
-using System;
-
 namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
-/// Common lifecycle contract for DevTool pages.
-/// This interface intentionally does not define visual layout.
-/// Existing pages keep their own ImGui rendering and styling.
-/// Map pages may use this contract for the new workspace architecture.
+/// Common lifecycle contract for one DevTool page.
+///
+/// The lifecycle contract is deliberately independent from rendering. A frontend may compose this
+/// contract with its own view interface, but page activation, deactivation and retained-state reset
+/// remain page responsibilities rather than drawing responsibilities.
 /// </summary>
 internal interface IDevToolPage
 {
@@ -16,17 +15,17 @@ internal interface IDevToolPage
     string Id { get; }
 
     /// <summary>
-    /// Called when the page becomes active.
+    /// Called once when the page becomes the active DevTool page.
     /// </summary>
     void Activate();
 
     /// <summary>
-    /// Called when the page leaves active state.
+    /// Called once when the page leaves the active DevTool page.
     /// </summary>
     void Deactivate();
 
     /// <summary>
-    /// Clears retained state owned by this page.
+    /// Clears retained state owned by this page without changing editor document data.
     /// </summary>
     void Reset();
 }
