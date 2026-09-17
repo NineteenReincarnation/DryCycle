@@ -8,13 +8,15 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// Single registration point for all rebuilt DevTool pages.
 ///
 /// The registry owns exactly one composite page object per ToolMode and one stable ID per page.
-/// Rendering and lifecycle live on that same object, avoiding parallel Page/PageView ownership.
+/// Rendering, lifecycle and activity-bar metadata live on that same object, avoiding parallel maps
+/// or another hardcoded navigation table in the shared overlay.
 /// </summary>
 internal static class DevToolPageViewRegistry
 {
     private static readonly Dictionary<EditorToolMode, IDevToolFrontendPage> Pages = new();
     private static readonly Dictionary<string, IDevToolFrontendPage> PagesById =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<IDevToolFrontendPage> NavigationPagesInternal = new();
     private static IDevToolFrontendPage activePage;
 
     static DevToolPageViewRegistry()
@@ -56,6 +58,7 @@ internal static class DevToolPageViewRegistry
     internal static bool SupportsSceneSurface(EditorToolMode mode) =>
         Pages.TryGetValue(mode, out IDevToolFrontendPage page) && page.SupportsSceneSurface;
 
+    internal static IReadOnlyList<IDevToolFrontendPage> NavigationPages => NavigationPagesInternal;
     internal static string ActivePageId => activePage?.Id ?? string.Empty;
     internal static int RegisteredPageCount => Pages.Count;
 
@@ -85,6 +88,8 @@ internal static class DevToolPageViewRegistry
         if (page == null) throw new ArgumentNullException(nameof(page));
         if (string.IsNullOrWhiteSpace(page.Id))
             throw new ArgumentException("Page id must not be empty.", nameof(page));
+        if (string.IsNullOrWhiteSpace(page.NavigationLabel))
+            throw new ArgumentException("Page navigation label must not be empty.", nameof(page));
         if (Pages.ContainsKey(page.Mode))
             throw new InvalidOperationException("A DevTool page is already registered for mode " + page.Mode + ".");
         if (PagesById.ContainsKey(page.Id))
@@ -92,6 +97,8 @@ internal static class DevToolPageViewRegistry
 
         Pages.Add(page.Mode, page);
         PagesById.Add(page.Id, page);
+        NavigationPagesInternal.Add(page);
+        NavigationPagesInternal.Sort(CompareNavigationPages);
     }
 
     internal static void ResetAll()
@@ -99,6 +106,14 @@ internal static class DevToolPageViewRegistry
         DeactivateActive();
         foreach (IDevToolFrontendPage page in Pages.Values)
             page.Reset();
+    }
+
+    private static int CompareNavigationPages(IDevToolFrontendPage left, IDevToolFrontendPage right)
+    {
+        int order = left.NavigationOrder.CompareTo(right.NavigationOrder);
+        return order != 0
+            ? order
+            : StringComparer.OrdinalIgnoreCase.Compare(left.Id, right.Id);
     }
 
     private static void ValidateBuiltinCoverage()
