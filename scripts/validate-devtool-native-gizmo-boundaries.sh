@@ -8,9 +8,10 @@ transaction="$root/History/EditorContinuousTransaction.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
 retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
+spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
-required=("$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement" "$coordinator")
+required=("$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement" "$spatial_refresh" "$coordinator")
 for file in "${required[@]}"; do
   if [[ ! -f "$file" ]]; then
     echo "Native gizmo contract file missing: $file" >&2
@@ -47,13 +48,28 @@ for symbol in 'EditorContinuousTransactionHub.Begin' 'EditorContinuousTransactio
   fi
 done
 
-# Built-in Sound/Trigger legacy handles are retired as nodes, not intercepted through a new hook.
+# Built-in Sound/Trigger legacy spatial presentation is retired as nodes, not intercepted through a
+# new hook. The minimal refresh path may reconcile AmbientSoundPlayer runtime state, but it must never
+# rematerialize vanilla Panel/Handle trees behind the native editor.
 if grep -Eq 'On\.DevInterface|IL\.DevInterface' "$retirement"; then
-  echo "Legacy spatial handle retirement introduced a new DevInterface hook." >&2
+  echo "Legacy spatial retirement introduced a new DevInterface hook." >&2
   exit 1
 fi
 if ! grep -Fq 'NativeLegacySpatialHandleRetirement.Apply(session)' "$coordinator"; then
-  echo "Native legacy-handle retirement is not owned by the backend coordinator." >&2
+  echo "Native legacy spatial retirement is not owned by the backend coordinator." >&2
+  exit 1
+fi
+if grep -Eq 'new[[:space:]]+(AmbientSoundPanel|TriggerPanel|SpotSoundHandle|DirectionalSoundHandle|SpotTriggerHandle)[[:space:]]*\(' "$spatial_refresh"; then
+  echo "Native Sound/Trigger backend refresh started rebuilding legacy Panel/Handle nodes." >&2
+  exit 1
+fi
+if ! grep -Fq 'ReconcileAmbientPlayers(page)' "$spatial_refresh"; then
+  echo "Native Sound backend no longer reconciles the real ambient runtime." >&2
+  exit 1
+fi
+if ! grep -Fq 'PruneBuiltinSoundNodes(page)' "$spatial_refresh" ||
+   ! grep -Fq 'PruneBuiltinTriggerNodes(page)' "$spatial_refresh"; then
+  echo "Native Sound/Trigger refresh no longer prunes stale built-in legacy nodes." >&2
   exit 1
 fi
 
