@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-frontend="src/DevUI/DevTool/RWImGui"
+root="src/DevUI/DevTool"
+frontend="$root/RWImGui"
 overlay="$frontend/DevToolOverlay.cs"
 control_center="$frontend/ControlCenterWindow.cs"
 scene_workspace="$frontend/SceneWorkspaceWindow.cs"
 scene_placement="$frontend/ScenePlacementWindow.cs"
+core_page="$root/Core/IDevToolPage.cs"
 page_contract="$frontend/IDevToolPageView.cs"
 builtin_pages="$frontend/BuiltinDevToolPages.cs"
 registry="$frontend/DevToolPageViewRegistry.cs"
@@ -16,6 +18,7 @@ required_files=(
   "$control_center"
   "$scene_workspace"
   "$scene_placement"
+  "$core_page"
   "$page_contract"
   "$builtin_pages"
   "$registry"
@@ -52,6 +55,42 @@ shared_mode_hits="$(
 if [[ -n "$shared_mode_hits" ]]; then
   echo "Shared RWImGui chrome contains a concrete built-in ToolMode branch:" >&2
   echo "$shared_mode_hits" >&2
+  exit 1
+fi
+
+# Identity/lifecycle and rendering remain conceptually separate contracts, but the registry owns one
+# composite object per page. This prevents Page and PageView from drifting into two maps, two IDs or
+# two reset/activation lifetimes.
+required_core_page_symbols=(
+  'string Id { get; }'
+  'EditorToolMode Mode { get; }'
+  'void Activate();'
+  'void Deactivate();'
+  'void Reset();'
+)
+for symbol in "${required_core_page_symbols[@]}"; do
+  if ! grep -Fq "$symbol" "$core_page"; then
+    echo "IDevToolPage lifecycle contract is missing '$symbol'." >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'internal interface IDevToolFrontendPage : IDevToolPage, IDevToolPageView' "$page_contract"; then
+  echo "RWImGui no longer composes lifecycle and rendering into one authoritative page object." >&2
+  exit 1
+fi
+if ! grep -Fq 'Dictionary<EditorToolMode, IDevToolFrontendPage> Pages' "$registry" ||
+   ! grep -Fq 'Dictionary<string, IDevToolFrontendPage> PagesById' "$registry" ||
+   ! grep -Fq 'Register(IDevToolFrontendPage page)' "$registry"; then
+  echo "DevTool page registry is no longer backed exclusively by composite frontend pages." >&2
+  exit 1
+fi
+if grep -Eq 'Dictionary<[^>]*IDevToolPageView|Dictionary<[^>]*IDevToolPage>' "$registry"; then
+  echo "DevTool page registry reintroduced a parallel lifecycle/view map." >&2
+  exit 1
+fi
+if ! grep -Fq 'previous?.Deactivate();' "$registry" ||
+   ! grep -Fq 'next.Activate();' "$registry"; then
+  echo "DevTool page switching no longer owns paired Deactivate/Activate lifecycle calls." >&2
   exit 1
 fi
 
