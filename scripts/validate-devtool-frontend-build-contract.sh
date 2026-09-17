@@ -7,20 +7,24 @@ import xml.etree.ElementTree as ET
 
 backend_project = Path('src/DryCycle.csproj')
 targets_path = Path('src/Directory.Build.targets')
+core_page = Path('src/DevUI/DevTool/Core/IDevToolPage.cs')
 frontend_dir = Path('src/DevUI/DevTool/RWImGui')
 frontend_project = frontend_dir / 'DryCycle.DevTool.RWImGui.csproj'
+page_view = frontend_dir / 'IDevToolPageView.cs'
+registry_path = frontend_dir / 'DevToolPageViewRegistry.cs'
 
 required_paths = (
     backend_project,
     targets_path,
     frontend_project,
-    Path('src/DevUI/DevTool/Core/IDevToolPage.cs'),
-    frontend_dir / 'IDevToolPageView.cs',
+    core_page,
+    page_view,
     frontend_dir / 'BuiltinDevToolPages.cs',
-    frontend_dir / 'DevToolPageViewRegistry.cs',
+    registry_path,
     frontend_dir / 'ObjectSceneWorkspaceView.cs',
     frontend_dir / 'SceneWorkspaceWindow.cs',
     frontend_dir / 'ScenePlacementWindow.cs',
+    frontend_dir / 'PAGE_VIEW_ARCHITECTURE.md',
 )
 for path in required_paths:
     if not path.exists():
@@ -67,6 +71,21 @@ for item in compile_items:
     exclude = item.attrib.get('Exclude', '').strip()
     require(not remove and not exclude,
             'DevTool RWImGui project removes/excludes Compile items; keep source inclusion automatic')
+
+# Page/View composition is deliberately an implementation detail, not DevToolApi 1.x. Keep all three
+# lifecycle/rendering contracts and the registry internal even though InternalsVisibleTo lets the
+# separate frontend assembly consume the backend lifecycle interface.
+core_page_text = core_page.read_text(encoding='utf-8')
+page_view_text = page_view.read_text(encoding='utf-8')
+registry_text = registry_path.read_text(encoding='utf-8')
+require('internal interface IDevToolPage' in core_page_text,
+        'IDevToolPage became public; internal page lifecycle must not enter DevToolApi ABI')
+require('internal interface IDevToolPageView' in page_view_text,
+        'IDevToolPageView became public; frontend rendering contract must remain internal')
+require('internal interface IDevToolFrontendPage : IDevToolPage, IDevToolPageView' in page_view_text,
+        'IDevToolFrontendPage internal composite contract changed or became public')
+require('internal static class DevToolPageViewRegistry' in registry_text,
+        'DevToolPageViewRegistry became public; page registration is not a DevToolApi 1.x capability')
 
 # The gameplay/core assembly must never absorb the ImGui frontend source. The frontend is a separate
 # optional assembly and depends one-way on DryCycle.dll.
@@ -117,5 +136,5 @@ require('Rebuild' in frontend_targets,
 require("!Exists('$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll')" in targets_text,
         'DryCycle parent build no longer verifies the deployed DevTool RWImGui DLL exists')
 
-print('DevTool RWImGui frontend build contract passed: source glob, friend assembly boundary, backend reference and forced rebuild are intact.')
+print('DevTool RWImGui frontend build contract passed: source glob, internal page ABI, friend assembly boundary, backend reference and forced rebuild are intact.')
 PY
