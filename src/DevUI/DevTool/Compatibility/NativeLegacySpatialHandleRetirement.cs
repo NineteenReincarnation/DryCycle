@@ -52,7 +52,13 @@ internal static class NativeLegacySpatialHandleRetirement
         };
 
         if (changed)
+        {
             LegacyDevUiQuiescenceController.ReleasePage(page);
+            // The native workspace deliberately removed vanilla presentation nodes. Mark the page
+            // stale so switching to Vanilla/Legacy performs one authoritative Refresh and restores
+            // the original Panel/Handle tree before it becomes visible again.
+            LegacyDevUiQuiescenceController.TryDeferRefresh(session);
+        }
 
         observedSession = session;
         observedPage = page;
