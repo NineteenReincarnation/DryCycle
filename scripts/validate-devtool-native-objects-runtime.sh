@@ -56,14 +56,15 @@ fi
 
 # Secondary handle geometry is derived from the already-detached native inspector payload. The first
 # intentionally conservative pattern is Rain World's ubiquitous handlePos offset; do not re-reflect
-# Data in the frontend or invent a parallel live-object snapshot.
+# Data in the frontend or invent a parallel live-object snapshot. Comments may document the model
+# source, so reject only actual namespace/type/reflection API use.
 if ! grep -Fq 'NativeObjectGeometryGizmoView.Draw(snapshot, display);' "$pages" ||
    ! grep -Fq 'key.EndsWith(".handlePos", StringComparison.Ordinal)' "$geometry_frontend" ||
    ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Enqueue' "$geometry_frontend"; then
   echo "Native Objects secondary handle pipeline is incomplete." >&2
   exit 1
 fi
-if grep -Eq 'using DevInterface|global::DevInterface|PlacedObject|RoomSettings|ObjectsPage|PlacedObjectRepresentation|Reflection|GetField|GetProperty' "$geometry_frontend"; then
+if grep -Eq '^using DevInterface;|global::DevInterface|typeof\(PlacedObject\)|PlacedObject[[:space:]]+[A-Za-z_]|RoomSettings[[:space:]]+[A-Za-z_]|typeof\(ObjectsPage\)|ObjectsPage[[:space:]]+[A-Za-z_]|PlacedObjectRepresentation[[:space:]]+[A-Za-z_]|System\.Reflection|BindingFlags|GetField[[:space:]]*\(|GetProperty[[:space:]]*\(' "$geometry_frontend"; then
   echo "Native object geometry frontend regained live-model/reflection dependencies." >&2
   exit 1
 fi
