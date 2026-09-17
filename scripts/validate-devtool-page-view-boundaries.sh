@@ -3,26 +3,34 @@ set -euo pipefail
 
 root="src/DevUI/DevTool"
 frontend="$root/RWImGui"
+frontend_project="$frontend/DryCycle.DevTool.RWImGui.csproj"
 overlay="$frontend/DevToolOverlay.cs"
 control_center="$frontend/ControlCenterWindow.cs"
 scene_workspace="$frontend/SceneWorkspaceWindow.cs"
 scene_placement="$frontend/ScenePlacementWindow.cs"
+object_scene_workspace="$frontend/ObjectSceneWorkspaceView.cs"
 core_page="$root/Core/IDevToolPage.cs"
 page_contract="$frontend/IDevToolPageView.cs"
 builtin_pages="$frontend/BuiltinDevToolPages.cs"
 registry="$frontend/DevToolPageViewRegistry.cs"
 lifecycle="$frontend/DevToolRetainedViewLifecyclePlugin.cs"
+map_runtime="$root/Map/MapEditorRuntime.cs"
+dialog_runtime="$root/Dialog/DialogEditorRuntime.cs"
 
 required_files=(
+  "$frontend_project"
   "$overlay"
   "$control_center"
   "$scene_workspace"
   "$scene_placement"
+  "$object_scene_workspace"
   "$core_page"
   "$page_contract"
   "$builtin_pages"
   "$registry"
   "$lifecycle"
+  "$map_runtime"
+  "$dialog_runtime"
 )
 for file in "${required_files[@]}"; do
   if [[ ! -f "$file" ]]; then
@@ -30,6 +38,21 @@ for file in "${required_files[@]}"; do
     exit 1
   fi
 done
+
+# The RWImGui project intentionally relies on Microsoft.NET.Sdk's default Compile glob. Keeping the
+# project beside the frontend sources means every current/future .cs file in this directory tree is
+# compiled automatically; there must not be a parallel hand-maintained Compile list that can silently
+# omit a newly extracted page/view such as ObjectSceneWorkspaceView.
+if ! grep -Fq '<Project Sdk="Microsoft.NET.Sdk">' "$frontend_project" ||
+   ! grep -Fq '<AssemblyName>DryCycle.DevTool.RWImGui</AssemblyName>' "$frontend_project"; then
+  echo "RWImGui frontend project no longer uses the expected SDK/default compile contract." >&2
+  exit 1
+fi
+if grep -Eq '<EnableDefaultCompileItems>[[:space:]]*false[[:space:]]*</EnableDefaultCompileItems>' "$frontend_project" ||
+   grep -Eq '<Compile[[:space:]]+(Include|Remove|Update)=' "$frontend_project"; then
+  echo "RWImGui frontend introduced an explicit Compile item policy; page source inclusion can now drift." >&2
+  exit 1
+fi
 
 # Shared chrome must dispatch through IDevToolPageView instead of importing feature editors or
 # reading their PresentationHub snapshots directly. BuiltinDevToolPages is the deliberate composition
@@ -94,6 +117,15 @@ if ! grep -Fq 'previous?.Deactivate();' "$registry" ||
   exit 1
 fi
 
+# Compile-sensitive registry contracts are checked explicitly because C# out parameters are invariant.
+# Shared callers use `out IDevToolPageView`; changing TryGet to `out IDevToolFrontendPage` would look
+# structurally similar but fail the frontend build.
+if ! grep -Fq 'internal static bool TryGet(EditorToolMode mode, out IDevToolPageView view)' "$registry" ||
+   ! grep -Fq 'internal static bool TryGet(string id, out IDevToolPageView view)' "$registry"; then
+  echo "DevTool page registry TryGet signatures no longer match the shared IDevToolPageView callers." >&2
+  exit 1
+fi
+
 # Page-owned metadata/capabilities that the chrome depends on must stay in the common contract.
 required_page_contract_symbols=(
   'int NavigationOrder { get; }'
@@ -113,14 +145,32 @@ for symbol in "${required_page_contract_symbols[@]}"; do
   fi
 done
 
-# Objects currently owns room-click placement. The declaration belongs to the page composition root,
-# never to DevToolOverlay. This check also catches an accidental loss of the capability after refactors.
+# The composition root uses public detached backend snapshot types. Keep the exact type names guarded
+# so a backend rename cannot leave the separately-built RWImGui assembly with a stale type reference.
+if ! grep -Fq 'public sealed class EditorMapPresentationSnapshot' "$map_runtime" ||
+   ! grep -Fq 'EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;' "$builtin_pages"; then
+  echo "RWImGui Map page status references a missing/renamed EditorMapPresentationSnapshot contract." >&2
+  exit 1
+fi
+if ! grep -Fq 'public sealed class EditorDialogPresentationSnapshot' "$dialog_runtime" ||
+   ! grep -Fq 'EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;' "$builtin_pages"; then
+  echo "RWImGui Dialog page status references a missing/renamed EditorDialogPresentationSnapshot contract." >&2
+  exit 1
+fi
+
+# Objects currently owns room-click placement and its scene workspace is a real compiled frontend
+# source, not logic left behind in shared chrome. The declaration belongs to the page composition root.
 if ! grep -Fq 'public override bool SupportsPlacementInput => true;' "$builtin_pages"; then
   echo "Objects page no longer declares the placement-input capability." >&2
   exit 1
 fi
 if ! grep -Fq 'page?.SupportsPlacementInput != true' "$overlay"; then
   echo "DevToolOverlay is not gating placement input through the page capability." >&2
+  exit 1
+fi
+if ! grep -Fq 'ObjectSceneWorkspaceView.Draw(snapshot);' "$builtin_pages" ||
+   ! grep -Fq 'internal static class ObjectSceneWorkspaceView' "$object_scene_workspace"; then
+  echo "Objects Scene workspace is no longer owned by its compiled page-specific frontend view." >&2
   exit 1
 fi
 
