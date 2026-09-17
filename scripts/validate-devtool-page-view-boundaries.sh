@@ -99,6 +99,15 @@ for scene_file in "$scene_workspace" "$scene_placement"; do
   fi
 done
 
+# Standalone debug is a replacement workspace, not merely a visual overlay. The lifetime plugin runs
+# independently from Draw(), so it must keep the normal page deactivated instead of reactivating it
+# every LateUpdate from the unchanged backend ToolMode.
+if ! grep -Fq 'if (DevToolOverlay.SuppressesSharedPageSurfaces)' "$lifecycle" ||
+   ! grep -Fq 'DevToolPageViewRegistry.DeactivateActive();' "$lifecycle"; then
+  echo "Standalone debug workspace no longer suppresses normal page lifecycle activation." >&2
+  exit 1
+fi
+
 # Control Center status and tool labels belong to the page object. The base class caches status text
 # by semantic state and language so this ownership move must not regress stable-frame allocations.
 if ! grep -Fq 'page.GetSessionStatus(snapshot)' "$control_center"; then
