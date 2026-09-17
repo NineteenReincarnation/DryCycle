@@ -57,11 +57,17 @@ if ! grep -Fq 'NativeLegacySpatialHandleRetirement.Apply(session)' "$coordinator
   exit 1
 fi
 
-# One old Handle.Update hook is temporarily allowed for Objects until native object gizmo coverage is
-# complete. No other subsystem may add another Handle hook during this migration.
+# Two pre-existing Handle.Update hooks are intentionally allowed during the migration:
+# 1) EditorInputRouter is the single global mouse-arbitration boundary that prevents clicks captured
+#    by ImGui from starting unrelated legacy handle drags underneath the overlay;
+# 2) ObjectGizmoPresentationController temporarily owns Objects-only legacy gizmo suppression until
+#    native object gizmo coverage is complete.
+# Sound/Trigger migration must not add any additional Handle.Update interception point.
 handle_hook_hits="$(grep -R -n -E 'On\.DevInterface\.Handle\.Update' "$root" --include='*.cs' || true)"
 if [[ -n "$handle_hook_hits" ]]; then
-  invalid="$(printf '%s\n' "$handle_hook_hits" | grep -v '/Compatibility/ObjectGizmoPresentationController.cs:' || true)"
+  invalid="$(printf '%s\n' "$handle_hook_hits" |
+    grep -v '/Compatibility/ObjectGizmoPresentationController.cs:' |
+    grep -v '/Input/EditorInputRouter.cs:' || true)"
   if [[ -n "$invalid" ]]; then
     echo "A new DevInterface.Handle.Update hook was introduced:" >&2
     echo "$invalid" >&2
