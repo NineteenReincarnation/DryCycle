@@ -28,7 +28,7 @@ internal static class RelationshipEditorView
     private static bool changedOnly;
 
     private static string[] projectedCreatureTypes;
-    private static string[] projectedCreatureLabels = Array.Empty<string>();
+    private static DevToolExplorerListItem[] projectedCreatureRows = Array.Empty<DevToolExplorerListItem>();
     private static EditorRelationshipRowSnapshot[] projectedRowsSource;
     private static MatrixRowPresentation[] projectedRows = Array.Empty<MatrixRowPresentation>();
     private static string projectedMatrixFilter = string.Empty;
@@ -42,7 +42,7 @@ internal static class RelationshipEditorView
     internal static void ResetRetainedState()
     {
         projectedCreatureTypes = null;
-        projectedCreatureLabels = Array.Empty<string>();
+        projectedCreatureRows = Array.Empty<DevToolExplorerListItem>();
         projectedRowsSource = null;
         projectedRows = Array.Empty<MatrixRowPresentation>();
         projectedMatrixFilter = string.Empty;
@@ -74,7 +74,7 @@ internal static class RelationshipEditorView
         ImGui.Separator();
 
         string[] creatures = snapshot.CreatureTypes ?? Array.Empty<string>();
-        EnsureCreatureLabels(creatures);
+        EnsureCreatureRows(creatures);
         string primaryQuery = PrimarySearchQuery();
         int matches = 0;
         for (int i = 0; i < creatures.Length; i++)
@@ -83,13 +83,12 @@ internal static class RelationshipEditorView
             if (!Matches(type, primaryQuery)) continue;
             matches++;
             bool selected = string.Equals(type, snapshot.PrimaryCreature, StringComparison.Ordinal);
-            if (ImGui.Selectable(projectedCreatureLabels[i], selected))
+            if (DevToolExplorerRowRenderer.DrawSelectable(projectedCreatureRows[i], selected, defaultFocus: true))
             {
                 RelationshipEditorCommandQueue.Enqueue(new RelationshipEditorCommand(
                     RelationshipEditorCommandKind.SelectPrimary,
                     primary: type));
-                    }
-            if (selected) ImGui.SetItemDefaultFocus();
+            }
         }
         if (matches == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."), true);
 
@@ -300,14 +299,21 @@ internal static class RelationshipEditorView
         return null;
     }
 
-    private static void EnsureCreatureLabels(string[] creatures)
+    private static void EnsureCreatureRows(string[] creatures)
     {
         if (ReferenceEquals(projectedCreatureTypes, creatures)) return;
-        string[] labels = new string[creatures.Length];
+
+        DevToolExplorerListItem[] rows = new DevToolExplorerListItem[creatures.Length];
         for (int i = 0; i < creatures.Length; i++)
-            labels[i] = (creatures[i] ?? string.Empty) + "##RelationshipPrimary" + i;
+        {
+            string type = creatures[i] ?? string.Empty;
+            rows[i] = new DevToolExplorerListItem(
+                "RelationshipPrimary:" + type,
+                type);
+        }
+
         projectedCreatureTypes = creatures;
-        projectedCreatureLabels = labels;
+        projectedCreatureRows = rows;
     }
 
     private static void EnsureMatrixRows(EditorRelationshipRowSnapshot[] rows)
