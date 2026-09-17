@@ -42,6 +42,11 @@ internal static class DevToolSubsystemCoordinator
 
         SoundActivationPipeline.Step(session);
 
+        // Native Sound/Trigger gizmos own their built-in spatial handles. Retire the corresponding
+        // vanilla nodes instead of adding another Handle.Update interception layer. Unknown derived
+        // third-party handles remain on the compatibility path.
+        NativeLegacySpatialHandleRetirement.Apply(session);
+
         // Native scene-space tools consume only this detached camera snapshot. Publish after command
         // processing so camera/tool changes observed this frame are visible to RWImGui immediately.
         EditorViewportPresentationHub.Publish(session);
@@ -72,6 +77,7 @@ internal static class DevToolSubsystemCoordinator
     {
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
+        NativeLegacySpatialHandleRetirement.Reset();
         EditorViewportPresentationHub.Clear();
         EditorPresentationHub.Clear();
         ClearDetailPresentations();
