@@ -1,10 +1,5 @@
 using System;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Dialog;
-using DryCycle.DevUI.DevTool.Map;
-using DryCycle.DevUI.DevTool.Relationships;
-using DryCycle.DevUI.DevTool.Sound;
-using DryCycle.DevUI.DevTool.Triggers;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -48,16 +43,6 @@ internal static class ControlCenterWindow
     private static bool projectedCommandChinese;
     private static string undoCommandLabel = string.Empty;
     private static string redoCommandLabel = string.Empty;
-
-    private static bool statusProjectionValid;
-    private static EditorToolMode projectedStatusMode;
-    private static bool projectedStatusChinese;
-    private static int projectedStatusCountA;
-    private static int projectedStatusCountB;
-    private static bool projectedStatusPlacement;
-    private static string projectedStatusTextA = string.Empty;
-    private static string projectedStatusTextB = string.Empty;
-    private static string statusText = string.Empty;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -395,88 +380,9 @@ internal static class ControlCenterWindow
 
     private static string BuildStatusText(EditorPresentationSnapshot snapshot)
     {
-        int countA = 0;
-        int countB = 0;
-        bool placement = false;
-        string textA = string.Empty;
-        string textB = string.Empty;
-
-        switch (snapshot.ToolMode)
-        {
-            case EditorToolMode.Objects:
-                countA = snapshot.SceneObjects?.Length ?? 0;
-                countB = snapshot.Inspector?.SelectionCount ?? 0;
-                placement = snapshot.PlacementActive;
-                textA = snapshot.PlacementType ?? string.Empty;
-                break;
-
-            case EditorToolMode.Sound:
-                countA = SoundEditorPresentationHub.Current.Sounds?.Length ?? 0;
-                break;
-
-            case EditorToolMode.Triggers:
-                countA = TriggerEditorPresentationHub.Current.Triggers?.Length ?? 0;
-                break;
-
-            case EditorToolMode.Map:
-            {
-                EditorMapPresentationSnapshot map = MapEditorPresentationHub.Current;
-                countA = map.Rooms?.Length ?? 0;
-                textA = map.RegionName ?? string.Empty;
-                break;
-            }
-
-            case EditorToolMode.Dialog:
-            {
-                EditorDialogPresentationSnapshot dialog = DialogEditorPresentationHub.Current;
-                countA = dialog.Events?.Length ?? 0;
-                textA = dialog.SelectedFileName ?? string.Empty;
-                break;
-            }
-
-            case EditorToolMode.Relationships:
-                textA = RelationshipEditorPresentationHub.Current.PrimaryCreature ?? string.Empty;
-                break;
-
-            default:
-                textA = snapshot.Document ?? string.Empty;
-                break;
-        }
-
-        bool chinese = DevToolUiSettings.IsChinese;
-        if (statusProjectionValid &&
-            projectedStatusMode == snapshot.ToolMode &&
-            projectedStatusChinese == chinese &&
-            projectedStatusCountA == countA &&
-            projectedStatusCountB == countB &&
-            projectedStatusPlacement == placement &&
-            string.Equals(projectedStatusTextA, textA, StringComparison.Ordinal) &&
-            string.Equals(projectedStatusTextB, textB, StringComparison.Ordinal))
-            return statusText;
-
-        projectedStatusMode = snapshot.ToolMode;
-        projectedStatusChinese = chinese;
-        projectedStatusCountA = countA;
-        projectedStatusCountB = countB;
-        projectedStatusPlacement = placement;
-        projectedStatusTextA = textA;
-        projectedStatusTextB = textB;
-        statusProjectionValid = true;
-
-        statusText = snapshot.ToolMode switch
-        {
-            EditorToolMode.Objects =>
-                DevToolUiSettings.T("物件 ", "Objects ") + countA +
-                DevToolUiSettings.T(" · 已选 ", " · Selected ") + countB +
-                (placement ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + textA : string.Empty),
-            EditorToolMode.Sound => DevToolUiSettings.T("声音 ", "Sounds ") + countA,
-            EditorToolMode.Triggers => DevToolUiSettings.T("触发器 ", "Triggers ") + countA,
-            EditorToolMode.Map => countA + DevToolUiSettings.T(" 个房间 · ", " rooms · ") + textA,
-            EditorToolMode.Dialog => textA + " · " + countA + DevToolUiSettings.T(" 个事件", " events"),
-            EditorToolMode.Relationships => DevToolUiSettings.T("主体 ", "Primary ") + textA,
-            _ => textA
-        };
-        return statusText;
+        if (DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page))
+            return page.GetSessionStatus(snapshot);
+        return snapshot.Document ?? string.Empty;
     }
 
     private static void PushCardStyle()
