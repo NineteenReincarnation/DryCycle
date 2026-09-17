@@ -79,8 +79,13 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
     {
         DevToolNumericWidgets.Reset();
         DevToolOverlay.ResetRetainedState();
-        SceneWorkspaceWindow.ResetRetainedState();
+        ScenePlacementWindow.ResetRetainedState();
+
+        // Registered pages are the sole owners of page-specific retained projections. Resetting the
+        // registry replaces the old frontend fan-out and guarantees newly registered pages cannot be
+        // forgotten by this lifetime edge.
         DevToolPageViewRegistry.ResetAll();
+
         UniversalDevUiMirrorView.ResetRetainedState();
     }
 }
