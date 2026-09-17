@@ -73,16 +73,8 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
     {
         DevToolNumericWidgets.Reset();
         DevToolOverlay.ResetRetainedState();
-        ObjectInspectorView.ResetRetainedState();
         SceneWorkspaceWindow.ResetRetainedState();
-        SoundEditorView.ResetRetainedState();
-        SoundLibraryGroupsView.ResetRetainedState();
-        TriggerEditorView.ResetRetainedState();
-        MapEditorView.ResetRetainedState();
-        WorldWorkspaceView.ResetRetainedState();
-        RelationshipEditorView.ResetRetainedState();
-        RoomSettingsView.ResetRetainedState();
-        DialogEditorView.ResetRetainedState();
+        DevToolPageViewRegistry.ResetAll();
         UniversalDevUiMirrorView.ResetRetainedState();
     }
 }
