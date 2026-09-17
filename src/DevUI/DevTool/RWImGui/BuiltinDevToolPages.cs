@@ -42,8 +42,11 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
         snapshot.Inspector?.HasSelection != true;
 
-    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
         NativeSpatialGizmoView.DrawObjects(snapshot, display);
+        NativeObjectGeometryGizmoView.Draw(snapshot, display);
+    }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         ObjectExplorerView.Draw(snapshot);
@@ -69,6 +72,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     protected override void OnReset()
     {
         NativeSpatialGizmoView.ResetRetainedState();
+        NativeObjectGeometryGizmoView.ResetRetainedState();
         ObjectExplorerView.ResetRetainedState();
         ObjectSceneWorkspaceView.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
