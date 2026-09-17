@@ -8,7 +8,7 @@ transaction="$root/History/EditorContinuousTransaction.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
 removed_retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
-spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
+removed_spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 legacy_invalidation="$root/Compatibility/NativeLegacyPresentationInvalidation.cs"
 legacy_sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
 quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
@@ -24,7 +24,7 @@ coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
 required=(
   "$backend" "$viewport" "$transaction" "$frontend" "$pages"
-  "$spatial_refresh" "$legacy_invalidation" "$legacy_sound_hydrator" "$quiescence"
+  "$legacy_invalidation" "$legacy_sound_hydrator" "$quiescence"
   "$sound_actions" "$trigger_actions" "$sound_runtime" "$sound_activation" "$sound_catalog"
   "$sound_resource_snapshot" "$sound_presentation" "$history" "$coordinator"
 )
@@ -35,13 +35,15 @@ for file in "${required[@]}"; do
   fi
 done
 
-if [[ -e "$removed_retirement" ]]; then
-  echo "Obsolete Sound/Trigger spatial retirement layer returned: $removed_retirement" >&2
-  exit 1
-fi
-if grep -R -n -F --include='*.cs' 'NativeLegacySpatialHandleRetirement' "$root" >/tmp/devtool_retirement_hits.txt 2>/dev/null; then
-  echo "Sound/Trigger native path regained construct-then-prune spatial retirement:" >&2
-  cat /tmp/devtool_retirement_hits.txt >&2
+for removed in "$removed_retirement" "$removed_spatial_refresh"; do
+  if [[ -e "$removed" ]]; then
+    echo "Obsolete construct/retain legacy spatial backend returned: $removed" >&2
+    exit 1
+  fi
+done
+if grep -R -n -E --include='*.cs' 'NativeLegacySpatialHandleRetirement|LegacySpatialBackendRefresh' "$root" >/tmp/devtool_removed_spatial_hits.txt 2>/dev/null; then
+  echo "Native workspaces regained a removed legacy spatial backend layer:" >&2
+  cat /tmp/devtool_removed_spatial_hits.txt >&2
   exit 1
 fi
 
@@ -55,11 +57,15 @@ if ! grep -Fq 'EditorViewportPresentationHub.Current' "$frontend" ||
   exit 1
 fi
 
-if ! grep -Fq 'NativeSpatialGizmoView.DrawSound' "$pages" ||
-   ! grep -Fq 'NativeSpatialGizmoView.DrawTriggers' "$pages"; then
-  echo "Sound/Trigger pages are no longer routed through NativeSpatialGizmoView." >&2
-  exit 1
-fi
+for symbol in \
+  'NativeSpatialGizmoView.DrawObjects' \
+  'NativeSpatialGizmoView.DrawSound' \
+  'NativeSpatialGizmoView.DrawTriggers'; do
+  if ! grep -Fq "$symbol" "$pages"; then
+    echo "A native spatial page is no longer routed through NativeSpatialGizmoView: $symbol" >&2
+    exit 1
+  fi
+done
 
 for symbol in 'EditorContinuousTransactionHub.Begin' 'EditorContinuousTransactionHub.Commit' 'EditorContinuousTransactionHub.Cancel'; do
   if ! grep -Fq "$symbol" "$backend"; then
@@ -67,17 +73,6 @@ for symbol in 'EditorContinuousTransactionHub.Begin' 'EditorContinuousTransactio
     exit 1
   fi
 done
-
-# Page-less native Sound/Trigger must not rebuild or prune hidden legacy Panel/Handle trees. Objects
-# remains the only transitional spatial backend that may use reduced legacy representation refresh.
-if grep -Eq 'new[[:space:]]+(AmbientSoundPanel|TriggerPanel|SpotSoundHandle|DirectionalSoundHandle|SpotTriggerHandle)[[:space:]]*\(' "$spatial_refresh"; then
-  echo "Legacy backend refresh started rebuilding Sound/Trigger Panel/Handle nodes." >&2
-  exit 1
-fi
-if grep -Eq 'TryRefreshSound|TryRefreshTriggers|ReconcileAmbientPlayers' "$spatial_refresh"; then
-  echo "LegacySpatialBackendRefresh regained a Sound/Trigger backend path." >&2
-  exit 1
-fi
 
 if ! grep -Fq 'new AmbientSoundPlayer' "$sound_runtime" ||
    ! grep -Fq 'ReferenceEquals(player.aSound, sound)' "$sound_runtime"; then
@@ -121,12 +116,12 @@ if ! grep -Fq 'page.Refresh();' "$legacy_invalidation"; then
   exit 1
 fi
 
-if grep -Eq 'On\.DevInterface\.(SoundPage|TriggersPage)\.Refresh' "$quiescence"; then
-  echo "Sound/Trigger Refresh hooks returned to the quiescence controller." >&2
+if grep -Eq 'On\.DevInterface\.(ObjectsPage|SoundPage|TriggersPage)\.(Update|Refresh)' "$quiescence"; then
+  echo "A page-less native Objects/Sound/Trigger page hook returned to quiescence." >&2
   exit 1
 fi
-if ! grep -Fq 'On.DevInterface.ObjectsPage.Refresh += ObjectsPage_Refresh;' "$quiescence"; then
-  echo "Objects transitional Refresh hook unexpectedly disappeared during Sound/Trigger migration." >&2
+if grep -Eq 'PreserveWorldHandles|UseNativeBackendRefresh|IsWorldBackendNode|ObjectsPage_Refresh|ObjectsPage_Update' "$quiescence"; then
+  echo "Quiescence regained the removed vanilla world-handle backend contract." >&2
   exit 1
 fi
 
@@ -140,13 +135,13 @@ if ! grep -Fq 'ReconcileRuntimeAfterHistoryRestore(session)' "$history" ||
   exit 1
 fi
 
+# The only remaining Handle.Update hook is the generic input arbiter used while legacy-backed pages
+# such as Room/Map may still coexist with rebuilt overlay capture. No feature workspace owns one.
 handle_hook_hits="$(grep -R -n -E 'On\.DevInterface\.Handle\.Update' "$root" --include='*.cs' || true)"
 if [[ -n "$handle_hook_hits" ]]; then
-  invalid="$(printf '%s\n' "$handle_hook_hits" |
-    grep -v '/Compatibility/ObjectGizmoPresentationController.cs:' |
-    grep -v '/Input/EditorInputRouter.cs:' || true)"
+  invalid="$(printf '%s\n' "$handle_hook_hits" | grep -v '/Input/EditorInputRouter.cs:' || true)"
   if [[ -n "$invalid" ]]; then
-    echo "A new DevInterface.Handle.Update hook was introduced:" >&2
+    echo "A feature-specific DevInterface.Handle.Update hook was introduced:" >&2
     echo "$invalid" >&2
     exit 1
   fi
