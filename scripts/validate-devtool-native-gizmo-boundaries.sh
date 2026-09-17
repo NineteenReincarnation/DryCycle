@@ -7,7 +7,7 @@ viewport="$root/Core/EditorViewportPresentation.cs"
 transaction="$root/History/EditorContinuousTransaction.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
-retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
+removed_retirement="$root/Compatibility/NativeLegacySpatialHandleRetirement.cs"
 spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 legacy_invalidation="$root/Compatibility/NativeLegacyPresentationInvalidation.cs"
 legacy_sound_hydrator="$root/Compatibility/LegacySoundPageHydrator.cs"
@@ -23,7 +23,7 @@ history="$root/History/EditorHistoryService.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 
 required=(
-  "$backend" "$viewport" "$transaction" "$frontend" "$pages" "$retirement"
+  "$backend" "$viewport" "$transaction" "$frontend" "$pages"
   "$spatial_refresh" "$legacy_invalidation" "$legacy_sound_hydrator" "$quiescence"
   "$sound_actions" "$trigger_actions" "$sound_runtime" "$sound_activation" "$sound_catalog"
   "$sound_resource_snapshot" "$sound_presentation" "$history" "$coordinator"
@@ -34,6 +34,16 @@ for file in "${required[@]}"; do
     exit 1
   fi
 done
+
+if [[ -e "$removed_retirement" ]]; then
+  echo "Obsolete Sound/Trigger spatial retirement layer returned: $removed_retirement" >&2
+  exit 1
+fi
+if grep -R -n -F --include='*.cs' 'NativeLegacySpatialHandleRetirement' "$root" >/tmp/devtool_retirement_hits.txt 2>/dev/null; then
+  echo "Sound/Trigger native path regained construct-then-prune spatial retirement:" >&2
+  cat /tmp/devtool_retirement_hits.txt >&2
+  exit 1
+fi
 
 if grep -Eq 'using DevInterface|global::DevInterface|RoomCamera|RoomSettings|PlacedObject|AmbientSound|EventTrigger' "$frontend"; then
   echo "NativeSpatialGizmoView directly references backend/Rain World runtime objects." >&2
@@ -58,14 +68,8 @@ for symbol in 'EditorContinuousTransactionHub.Begin' 'EditorContinuousTransactio
   fi
 done
 
-if grep -Eq 'On\.DevInterface|IL\.DevInterface' "$retirement"; then
-  echo "Legacy spatial retirement introduced a new DevInterface hook." >&2
-  exit 1
-fi
-if ! grep -Fq 'NativeLegacySpatialHandleRetirement.Apply(session)' "$coordinator"; then
-  echo "Native legacy spatial retirement is not owned by the backend coordinator." >&2
-  exit 1
-fi
+# Page-less native Sound/Trigger must not rebuild or prune hidden legacy Panel/Handle trees. Objects
+# remains the only transitional spatial backend that may use reduced legacy representation refresh.
 if grep -Eq 'new[[:space:]]+(AmbientSoundPanel|TriggerPanel|SpotSoundHandle|DirectionalSoundHandle|SpotTriggerHandle)[[:space:]]*\(' "$spatial_refresh"; then
   echo "Legacy backend refresh started rebuilding Sound/Trigger Panel/Handle nodes." >&2
   exit 1
