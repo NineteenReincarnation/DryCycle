@@ -210,6 +210,7 @@ public sealed class EditorHistoryService
         history.Undo.RemoveAt(index);
         history.Redo.Add(entry);
         BumpRevision(modelMayHaveChanged: true);
+        DevToolSubsystemCoordinator.ReconcileRuntimeAfterHistoryRestore(session);
         return true;
     }
 
@@ -228,6 +229,7 @@ public sealed class EditorHistoryService
         if (history.Undo.Count > capacity)
             history.Undo.RemoveAt(0);
         BumpRevision(modelMayHaveChanged: true);
+        DevToolSubsystemCoordinator.ReconcileRuntimeAfterHistoryRestore(session);
         return true;
     }
 
@@ -302,12 +304,14 @@ public sealed class EditorHistoryService
         EditorPresentationHub.ObservePublishedHistoryRevision(session, revision);
 
         // A successful model-history mutation also means that any retained vanilla screen-space
-        // representation may now be stale. Exact migrated/quiescent pages therefore register one
-        // deferred full refresh here even if the specialized action only updated its live world
-        // handle. Page/document activation and history-stack-only changes do not dirty the model.
-        // Unknown/foreign pages fail closed because TryDeferRefresh refuses them.
-        if (modelMayHaveChanged)
-            LegacyDevUiQuiescenceController.TryDeferRefresh(session);
+        // representation may now be stale. Exact migrated/quiescent pages register one deferred full
+        // refresh. If defer is refused because Sound/Trigger is currently in explicit Vanilla mode or
+        // owns opaque third-party DevUI, refresh that compatibility presentation immediately instead.
+        if (modelMayHaveChanged &&
+            !LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+        {
+            NativeLegacyPresentationInvalidation.RefreshCurrentSoundOrTriggerFallback(session);
+        }
     }
 
     private DocumentHistory Current =>
