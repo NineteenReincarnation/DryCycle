@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
@@ -87,24 +86,6 @@ internal static class TriggerEditorStateHub
     internal static TriggerEditorState Get(EditorSession session) =>
         session == null ? null : states.GetValue(session, _ => new TriggerEditorState());
 
-    internal static void SynchronizeFromLegacyNode(EditorSession session, DevUINode node)
-    {
-        if (session?.ToolMode != EditorToolMode.Triggers || session.RoomSettings?.triggers == null || node == null)
-            return;
-
-        DevUINode current = node;
-        while (current != null)
-        {
-            if (current is TriggerPanel panel && panel.trigger != null)
-            {
-                int index = session.RoomSettings.triggers.IndexOf(panel.trigger);
-                if (index >= 0) Get(session)?.SetSelectedIndex(index);
-                return;
-            }
-            current = current.parentNode;
-        }
-    }
-
     internal static void Reset() => states = new ConditionalWeakTable<EditorSession, TriggerEditorState>();
 }
 
@@ -137,26 +118,15 @@ public static class TriggerEditorPresentationHub
             return;
         }
 
-        DevUINode legacyDrag = session.Owner?.draggedNode;
-        if (legacyDrag == null && session.Owner?.activePage is TriggersPage legacyPage)
-            legacyDrag = legacyPage.draggedObject;
-        TriggerEditorStateHub.SynchronizeFromLegacyNode(session, legacyDrag);
-
         TriggerEditorState state = TriggerEditorStateHub.Get(session);
         int count = session.RoomSettings.triggers.Count;
         if (state.SelectedIndex >= count) state.SetSelectedIndex(count - 1);
         if (state.SelectedIndex < -1) state.SetSelectedIndex(-1);
 
-        bool opaqueLiveWriter = EditorRevisionHub.RequiresLiveWorkspaceRefresh(session);
-        if (opaqueLiveWriter)
+        if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
             TriggerPresentationChangeHintHub.MarkFull(session);
-        }
-        else if (legacyDrag != null)
-        {
-            EditorRevisionHub.Mark(session, EditorRevisionKind.Triggers);
-            TriggerPresentationChangeHintHub.MarkMember(session, state.SelectedIndex);
         }
 
         TriggerSongCatalog.EnsureLoaded();
