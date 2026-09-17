@@ -1,20 +1,23 @@
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
 
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Imports selection only from explicitly live legacy Sound/Trigger nodes. Native presentation and
-/// authoring never depend on DevUINode/Panel types; this compatibility bridge is the sole translator
-/// when Vanilla or an opaque third-party backend still drives one of those nodes.
+/// Imports selection only from a genuinely live legacy Sound/Trigger backend. Native presentation
+/// and authoring never depend on DevUINode/Panel types; this compatibility bridge is the sole
+/// translator when Vanilla, a legacy transaction or an opaque third-party backend still drives one
+/// of those nodes.
 /// </summary>
 internal static class LegacySoundTriggerSelectionBridge
 {
     internal static void Synchronize(EditorSession session)
     {
-        if (session?.Owner == null) return;
+        if (session?.Owner == null || !LegacySelectionCanWrite(session))
+            return;
 
         switch (session.ToolMode)
         {
@@ -25,6 +28,17 @@ internal static class LegacySoundTriggerSelectionBridge
                 SynchronizeTrigger(session);
                 break;
         }
+    }
+
+    private static bool LegacySelectionCanWrite(EditorSession session)
+    {
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla || session.LegacyUiVisible)
+            return true;
+        if (session.LegacyTransactions.HasPendingTransaction)
+            return true;
+
+        Page page = session.Owner?.activePage;
+        return page != null && LegacyDevUiQuiescenceController.HasExternalCompatibilityNodes(page);
     }
 
     private static void SynchronizeSound(EditorSession session)
