@@ -7,9 +7,9 @@ namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
 /// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
-/// DevInterface Page. Sound and Triggers use a minimal DryCycle Page only as a room/document lifetime
-/// anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or diagnostics
-/// that explicitly need to inspect the real DevInterface control tree.
+/// DevInterface Page. Objects, Sound and Triggers use a minimal DryCycle Page only as a room/document
+/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or
+/// diagnostics that explicitly need to inspect the real DevInterface control tree.
 /// </summary>
 internal static class NativeToolScheduler
 {
@@ -22,7 +22,9 @@ internal static class NativeToolScheduler
     private const int RelationshipsPageIndex = 6;
 
     internal static bool Supports(EditorToolMode mode) =>
-        mode == EditorToolMode.Sound || mode == EditorToolMode.Triggers;
+        mode == EditorToolMode.Objects ||
+        mode == EditorToolMode.Sound ||
+        mode == EditorToolMode.Triggers;
 
     internal static bool IsVirtualToolActive(EditorSession session)
     {
@@ -33,7 +35,7 @@ internal static class NativeToolScheduler
 
     /// <summary>
     /// Handles both sides of the virtual-tool boundary before EditorSession falls back to ordinary
-    /// DevUI page switching. Entering Sound/Trigger installs the inert native anchor. Leaving that
+    /// DevUI page switching. Entering a native tool installs the inert native anchor. Leaving that
     /// anchor for any canonical non-native workspace materializes the requested real page directly,
     /// so the anchor can never be mistaken for Room merely because ResolveToolMode's unknown-page
     /// fallback is Room.
@@ -85,7 +87,7 @@ internal static class NativeToolScheduler
         {
             LegacyUiPresentationController.Restore(session.Owner.activePage);
             session.LegacyTransactions.Reset();
-            session.Owner.SwitchPage(mode == EditorToolMode.Sound ? SoundPageIndex : TriggerPageIndex);
+            session.Owner.SwitchPage(LegacyPageIndex(mode));
             session.Synchronize(session.Owner);
         }
 
@@ -128,7 +130,7 @@ internal static class NativeToolScheduler
             LegacyUiPresentationController.Restore(session.Owner.activePage);
             session.LegacyTransactions.Reset();
 
-            // DevUI.SwitchPage only constructs canonical legacy pages. Native Sound/Trigger instead
+            // DevUI.SwitchPage only constructs canonical legacy pages. Native workspaces instead
             // mirror its ClearSprites ownership boundary and install one tiny inert Page directly.
             session.Owner.ClearSprites();
             session.Owner.activePage = new NativeToolAnchorPage(session.Owner);
@@ -155,10 +157,17 @@ internal static class NativeToolScheduler
         return !IsNativeAnchor(session.Owner.activePage) && session.ToolMode == mode;
     }
 
+    private static int LegacyPageIndex(EditorToolMode mode) => mode switch
+    {
+        EditorToolMode.Objects => ObjectsPageIndex,
+        EditorToolMode.Sound => SoundPageIndex,
+        EditorToolMode.Triggers => TriggerPageIndex,
+        _ => -1
+    };
+
     private static int CanonicalPageIndex(EditorToolMode mode) => mode switch
     {
         EditorToolMode.Room => RoomPageIndex,
-        EditorToolMode.Objects => ObjectsPageIndex,
         EditorToolMode.Map => MapPageIndex,
         EditorToolMode.Dialog => DialogPageIndex,
         EditorToolMode.Relationships => RelationshipsPageIndex,
@@ -170,6 +179,7 @@ internal static class NativeToolScheduler
 
     private static bool IsExactLegacyPage(Page page, EditorToolMode mode) => mode switch
     {
+        EditorToolMode.Objects => page is ObjectsPage && page.GetType() == typeof(ObjectsPage),
         EditorToolMode.Sound => page is SoundPage && page.GetType() == typeof(SoundPage),
         EditorToolMode.Triggers => page is TriggersPage && page.GetType() == typeof(TriggersPage),
         _ => false
