@@ -1,0 +1,151 @@
+using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Dialog;
+using DryCycle.DevUI.DevTool.Map;
+using DryCycle.DevUI.DevTool.Relationships;
+using DryCycle.DevUI.DevTool.Room;
+using DryCycle.DevUI.DevTool.Sound;
+using DryCycle.DevUI.DevTool.Triggers;
+using Num = System.Numerics;
+
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+internal sealed class RoomDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "room";
+    public override EditorToolMode Mode => EditorToolMode.Room;
+    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
+        "用于尚未迁移的模板、地形或自定义房间设置控件。",
+        "Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        RoomSettingsView.DrawInspector(RoomEditorPresentationHub.Current);
+
+    protected override void OnReset() => RoomSettingsView.ResetRetainedState();
+}
+
+internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "objects";
+    public override EditorToolMode Mode => EditorToolMode.Objects;
+
+    public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
+        snapshot.Inspector?.HasSelection != true;
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        ObjectExplorerView.Draw(snapshot);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        ObjectInspectorView.Draw(snapshot.Inspector);
+
+    protected override void OnReset()
+    {
+        ObjectExplorerView.ResetRetainedState();
+        ObjectInspectorView.ResetRetainedState();
+    }
+}
+
+internal sealed class SoundDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "sound";
+    public override EditorToolMode Mode => EditorToolMode.Sound;
+    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
+        "用于未迁移的自定义声音页面控件。",
+        "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
+
+    protected override void OnReset()
+    {
+        SoundEditorView.ResetRetainedState();
+        SoundLibraryGroupsView.ResetRetainedState();
+    }
+}
+
+internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "triggers";
+    public override EditorToolMode Mode => EditorToolMode.Triggers;
+    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
+        "用于新检查器无法表达的自定义触发器/事件控件。",
+        "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
+
+    protected override void OnReset() => TriggerEditorView.ResetRetainedState();
+}
+
+internal sealed class MapDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "map";
+    public override EditorToolMode Mode => EditorToolMode.Map;
+    public override bool UsesDedicatedWorkspace => true;
+
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        if (snapshot.FocusMode)
+            DevToolOverlay.DrawMapCanvas(snapshot, display);
+    }
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
+
+    public override void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        WorldWorkspaceView.Draw(snapshot, display);
+
+    protected override void OnReset()
+    {
+        MapEditorView.ResetRetainedState();
+        WorldWorkspaceView.ResetRetainedState();
+    }
+}
+
+internal sealed class DialogDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "dialog";
+    public override EditorToolMode Mode => EditorToolMode.Dialog;
+
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        DevToolOverlay.DrawDialogPreview(snapshot, display);
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        DialogEditorView.DrawBrowser(DialogEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        DialogEditorView.DrawInspector(DialogEditorPresentationHub.Current);
+
+    protected override void OnReset() => DialogEditorView.ResetRetainedState();
+}
+
+internal sealed class RelationshipsDevToolPage : DevToolFrontendPageBase
+{
+    public override string Id => "relationships";
+    public override EditorToolMode Mode => EditorToolMode.Relationships;
+    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
+        "用于矩阵编辑器尚未表达的关系页面扩展。",
+        "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
+
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        DevToolOverlay.DrawRelationshipMatrix(snapshot, display);
+
+    public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
+        RelationshipEditorView.DrawBrowser(RelationshipEditorPresentationHub.Current);
+
+    public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
+        RelationshipEditorView.DrawInspector(RelationshipEditorPresentationHub.Current);
+
+    protected override void OnReset() => RelationshipEditorView.ResetRetainedState();
+}
