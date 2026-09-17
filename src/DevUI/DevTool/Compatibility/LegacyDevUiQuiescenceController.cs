@@ -46,8 +46,8 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         new(typeof(RoomSettingsPage), EditorToolMode.Room, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: false),
         new(typeof(ObjectsPage), EditorToolMode.Objects, preserveWorldHandles: true, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: false, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: false, useNativeBackendRefresh: true, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(SoundPage), EditorToolMode.Sound, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true),
+        new(typeof(TriggersPage), EditorToolMode.Triggers, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true),
         new(typeof(MapPage), EditorToolMode.Map, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: false, bypassPageOverride: true),
         new(typeof(DialogPage), EditorToolMode.Dialog, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true),
         new(typeof(RelationshipPage), EditorToolMode.Relationships, preserveWorldHandles: false, useNativeBackendRefresh: false, materializeInitialRefresh: true, bypassPageOverride: true)
@@ -81,13 +81,11 @@ internal static partial class LegacyDevUiQuiescenceController
         On.DevInterface.DialogPage.Update += DialogPage_Update;
         On.DevInterface.RelationshipPage.Update += RelationshipPage_Update;
 
-        // Recurring Refresh on Objects/Sound/Trigger pages is much heavier than the native backend
-        // needs. Objects reconcile compatibility representations; Sound only reconciles real audio
-        // players; Trigger has no built-in runtime backend. Explicit legacy UI and opaque third-party
-        // pages still use vanilla Refresh.
+        // Objects is the only migrated workspace that still needs a reduced legacy Refresh because
+        // its vanilla/custom PlacedObjectRepresentation backend remains transitional. Sound and
+        // Trigger have no native-mode Refresh hook at all: their built-in editing path is fully
+        // native and legacy presentation is recreated only when explicit compatibility requires it.
         On.DevInterface.ObjectsPage.Refresh += ObjectsPage_Refresh;
-        On.DevInterface.SoundPage.Refresh += SoundPage_Refresh;
-        On.DevInterface.TriggersPage.Refresh += TriggersPage_Refresh;
         enabled = true;
     }
 
@@ -95,8 +93,6 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (!enabled) return;
 
-        On.DevInterface.TriggersPage.Refresh -= TriggersPage_Refresh;
-        On.DevInterface.SoundPage.Refresh -= SoundPage_Refresh;
         On.DevInterface.ObjectsPage.Refresh -= ObjectsPage_Refresh;
         On.DevInterface.RelationshipPage.Update -= RelationshipPage_Update;
         On.DevInterface.DialogPage.Update -= DialogPage_Update;
@@ -247,34 +243,6 @@ internal static partial class LegacyDevUiQuiescenceController
     private static void ObjectsPage_Refresh(On.DevInterface.ObjectsPage.orig_Refresh orig, ObjectsPage self)
     {
         if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshObjects(self))
-        {
-            InvalidateBackendPlan(self);
-            DeferredRefreshPages.Add(self);
-            return;
-        }
-
-        orig(self);
-        InvalidateBackendPlan(self);
-        DeferredRefreshPages.Remove(self);
-    }
-
-    private static void SoundPage_Refresh(On.DevInterface.SoundPage.orig_Refresh orig, SoundPage self)
-    {
-        if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshSound(self))
-        {
-            InvalidateBackendPlan(self);
-            DeferredRefreshPages.Add(self);
-            return;
-        }
-
-        orig(self);
-        InvalidateBackendPlan(self);
-        DeferredRefreshPages.Remove(self);
-    }
-
-    private static void TriggersPage_Refresh(On.DevInterface.TriggersPage.orig_Refresh orig, TriggersPage self)
-    {
-        if (CanUseNativeBackendRefresh(self) && LegacySpatialBackendRefresh.TryRefreshTriggers(self))
         {
             InvalidateBackendPlan(self);
             DeferredRefreshPages.Add(self);
