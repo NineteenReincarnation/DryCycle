@@ -276,7 +276,7 @@ internal static class ControlCenterWindow
 
         DrawKeyValue(DevToolUiSettings.T("房间", "Room"), CurrentRoom(snapshot));
         ImGui.Spacing();
-        DrawKeyValue(DevToolUiSettings.T("工具", "Tool"), DevToolUiSettings.ToolMode(snapshot.ToolMode));
+        DrawKeyValue(DevToolUiSettings.T("工具", "Tool"), GetToolLabel(snapshot.ToolMode));
         ImGui.Spacing();
 
         DevToolWidgets.MutedText(DevToolUiSettings.T("状态", "Status"));
@@ -335,8 +335,15 @@ internal static class ControlCenterWindow
         projectedHeaderMode = mode;
         projectedHeaderChinese = chinese;
         headerModeProjectionValid = true;
-        headerModeLabel = "/ " + DevToolUiSettings.ToolMode(mode);
+        headerModeLabel = "/ " + GetToolLabel(mode);
         return headerModeLabel;
+    }
+
+    private static string GetToolLabel(EditorToolMode mode)
+    {
+        if (DevToolPageViewRegistry.TryGet(mode, out IDevToolPageView page))
+            return page.NavigationLabel;
+        return DevToolUiSettings.ToolMode(mode);
     }
 
     private static string GetPlacementLabel(string placementType)
