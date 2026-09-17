@@ -4,14 +4,20 @@ on:
   pull_request:
     paths:
       - 'src/DevUI/DevTool/**'
+      - 'src/Directory.Build.targets'
+      - 'src/DryCycle.csproj'
       - 'scripts/validate-devtool-final-architecture.sh'
       - 'scripts/validate-devtool-page-view-boundaries.sh'
+      - 'scripts/validate-devtool-frontend-build-contract.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
     paths:
       - 'src/DevUI/DevTool/**'
+      - 'src/Directory.Build.targets'
+      - 'src/DryCycle.csproj'
       - 'scripts/validate-devtool-final-architecture.sh'
       - 'scripts/validate-devtool-page-view-boundaries.sh'
+      - 'scripts/validate-devtool-frontend-build-contract.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
 jobs:
@@ -25,3 +31,6 @@ jobs:
       - name: Validate DevTool page-view boundaries
         shell: bash
         run: bash scripts/validate-devtool-page-view-boundaries.sh
+      - name: Validate DevTool RWImGui frontend build contract
+        shell: bash
+        run: bash scripts/validate-devtool-frontend-build-contract.sh
