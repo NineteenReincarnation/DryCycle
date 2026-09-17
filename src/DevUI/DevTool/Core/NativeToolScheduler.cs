@@ -13,8 +13,13 @@ namespace DryCycle.DevUI.DevTool.Core;
 /// </summary>
 internal static class NativeToolScheduler
 {
+    private const int RoomPageIndex = 0;
+    private const int ObjectsPageIndex = 1;
     private const int SoundPageIndex = 2;
+    private const int MapPageIndex = 3;
     private const int TriggerPageIndex = 4;
+    private const int DialogPageIndex = 5;
+    private const int RelationshipsPageIndex = 6;
 
     internal static bool Supports(EditorToolMode mode) =>
         mode == EditorToolMode.Sound || mode == EditorToolMode.Triggers;
@@ -27,16 +32,26 @@ internal static class NativeToolScheduler
     }
 
     /// <summary>
-    /// Activates a rebuilt Sound/Trigger workspace without constructing any legacy business page.
-    /// Keeping Objects would leak old gizmos and Map/Relationships would retain the wrong document,
-    /// so native tools always use their dedicated empty Page anchor.
+    /// Handles both sides of the virtual-tool boundary before EditorSession falls back to ordinary
+    /// DevUI page switching. Entering Sound/Trigger installs the inert native anchor. Leaving that
+    /// anchor for any canonical non-native workspace materializes the requested real page directly,
+    /// so the anchor can never be mistaken for Room merely because ResolveToolMode's unknown-page
+    /// fallback is Room.
     /// </summary>
     internal static bool TryActivate(EditorSession session, EditorToolMode mode)
     {
-        if (session?.Owner == null || !Supports(mode)) return false;
-        if (!CanOwnNativePresentation(session)) return false;
+        if (session?.Owner == null) return false;
 
-        return ActivateCore(session, mode);
+        if (Supports(mode))
+        {
+            if (!CanOwnNativePresentation(session)) return false;
+            return ActivateCore(session, mode);
+        }
+
+        if (IsNativeAnchor(session.Owner.activePage))
+            return LeaveNativeAnchor(session, mode);
+
+        return false;
     }
 
     /// <summary>
@@ -126,6 +141,29 @@ internal static class NativeToolScheduler
         session.AdoptVirtualToolMode(mode);
         return true;
     }
+
+    private static bool LeaveNativeAnchor(EditorSession session, EditorToolMode mode)
+    {
+        int pageIndex = CanonicalPageIndex(mode);
+        if (pageIndex < 0)
+            return false;
+
+        LegacyUiPresentationController.Restore(session.Owner.activePage);
+        session.LegacyTransactions.Reset();
+        session.Owner.SwitchPage(pageIndex);
+        session.Synchronize(session.Owner);
+        return !IsNativeAnchor(session.Owner.activePage) && session.ToolMode == mode;
+    }
+
+    private static int CanonicalPageIndex(EditorToolMode mode) => mode switch
+    {
+        EditorToolMode.Room => RoomPageIndex,
+        EditorToolMode.Objects => ObjectsPageIndex,
+        EditorToolMode.Map => MapPageIndex,
+        EditorToolMode.Dialog => DialogPageIndex,
+        EditorToolMode.Relationships => RelationshipsPageIndex,
+        _ => -1
+    };
 
     private static bool IsNativeAnchor(Page page) =>
         page is NativeToolAnchorPage && page.GetType() == typeof(NativeToolAnchorPage);
