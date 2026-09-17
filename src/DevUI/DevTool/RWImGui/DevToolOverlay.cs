@@ -23,6 +23,8 @@ internal static class DevToolOverlay
     private static bool placementLabelChinese;
     private static string placementLabelText = string.Empty;
 
+    internal static bool SuppressesSharedPageSurfaces => lanceDebugPage;
+
     internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
         ImGuiIOPtr io = frameContext.Io;
