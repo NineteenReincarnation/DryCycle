@@ -15,7 +15,7 @@ internal static partial class LegacyDevUiQuiescenceController
     internal static bool TryRunNativeSoundTriggerTopLevelUpdate(global::DevInterface.DevUI owner)
     {
         EditorSession session = DevToolRuntime.ActiveSession;
-        if (session != null && ReferenceEquals(session.Owner, owner) &&
+        if (session != null && object.ReferenceEquals(session.Owner, owner) &&
             NativeToolScheduler.IsVirtualToolActive(session))
         {
             // Native Sound/Trigger owns no DevInterface page work. The RoomSettingsPage exists only
@@ -65,16 +65,5 @@ internal static partial class LegacyDevUiQuiescenceController
         owner.mouseClick = owner.mouseDown && !owner.lastMouseDown;
         owner.lastMouseDown = owner.mouseDown;
         owner.draggedNode = null;
-    }
-
-    /// <summary>
-    /// Quiescence historically intercepted each derived page Update because DevUI.Update always
-    /// dispatched into the active page. Native Sound/Trigger stop that dispatch one level higher, so
-    /// their dedicated detours are redundant and are explicitly removed after Enable().
-    /// </summary>
-    internal static void RetireNativeSoundTriggerPageUpdateHooks()
-    {
-        On.DevInterface.SoundPage.Update -= SoundPage_Update;
-        On.DevInterface.TriggersPage.Update -= TriggersPage_Update;
     }
 }
