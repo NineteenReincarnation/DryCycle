@@ -24,6 +24,12 @@ internal static class MiscRuntime
         // the same enable/disable transaction as the rebuilt editor runtime.
         DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Enable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
+
+        // Install the Sound/Trigger native top-level pump after quiescence but before DevToolRuntime.
+        // DevToolRuntime is therefore the outer DevUI.Update hook; its orig delegate reaches this
+        // scheduler, which replaces only the native Sound/Trigger active-page update. The two old
+        // derived Page.Update detours are retired by the scheduler itself.
+        DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
         // Player Map is a first-class DevTool subsystem. Do not depend on BepInEx discovering every
@@ -58,6 +64,7 @@ internal static class MiscRuntime
         // jobs can cancel/clean temporary files while their owning editor state is still addressable.
         DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Disable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Disable();
+        DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Disable();
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Disable();
         DryCycle.DevUI.DevTool.Compatibility.SoundPageConstructorOptimization.Disable();
         DryCycle.DevUI.DevTool.Core.EditorRevisionHub.Reset();
