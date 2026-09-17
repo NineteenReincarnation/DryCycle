@@ -7,13 +7,12 @@ namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
 /// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
-/// DevInterface Page. Sound and Triggers use an exact RoomSettingsPage only as a lightweight room
-/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or
-/// diagnostics that explicitly need to inspect the real DevInterface control tree.
+/// DevInterface Page. Sound and Triggers use a minimal DryCycle Page only as a room/document lifetime
+/// anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or diagnostics
+/// that explicitly need to inspect the real DevInterface control tree.
 /// </summary>
 internal static class NativeToolScheduler
 {
-    private const int RoomAnchorPageIndex = 0;
     private const int SoundPageIndex = 2;
     private const int TriggerPageIndex = 4;
 
@@ -24,15 +23,13 @@ internal static class NativeToolScheduler
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return false;
         if (!CanOwnNativePresentation(session)) return false;
-
-        Page page = session.Owner.activePage;
-        return page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage);
+        return IsNativeAnchor(session.Owner.activePage);
     }
 
     /// <summary>
-    /// Activates a rebuilt Sound/Trigger workspace without constructing its legacy page. A room page
-    /// is the only valid anchor: keeping Objects would leak old gizmos, while Map/Relationships would
-    /// keep the wrong document identity alive.
+    /// Activates a rebuilt Sound/Trigger workspace without constructing any legacy business page.
+    /// Keeping Objects would leak old gizmos and Map/Relationships would retain the wrong document,
+    /// so native tools always use their dedicated empty Page anchor.
     /// </summary>
     internal static bool TryActivate(EditorSession session, EditorToolMode mode)
     {
@@ -53,7 +50,7 @@ internal static class NativeToolScheduler
 
         if (!CanOwnNativePresentation(session))
         {
-            if (!session.LegacyUiVisible && IsRoomAnchor(session.Owner.activePage))
+            if (!session.LegacyUiVisible && IsNativeAnchor(session.Owner.activePage))
                 MaterializeLegacyTool(session, session.ToolMode, explicitLegacyUi: false);
             return;
         }
@@ -111,23 +108,27 @@ internal static class NativeToolScheduler
     {
         if (session?.Owner == null || !Supports(mode)) return false;
 
-        if (!IsRoomAnchor(session.Owner.activePage))
+        if (!IsNativeAnchor(session.Owner.activePage))
         {
             LegacyUiPresentationController.Restore(session.Owner.activePage);
             session.LegacyTransactions.Reset();
-            session.Owner.SwitchPage(RoomAnchorPageIndex);
+
+            // DevUI.SwitchPage only constructs canonical legacy pages. Native Sound/Trigger instead
+            // mirror its ClearSprites ownership boundary and install one tiny inert Page directly.
+            session.Owner.ClearSprites();
+            session.Owner.activePage = new NativeToolAnchorPage(session.Owner);
             session.Synchronize(session.Owner);
         }
 
-        if (!IsRoomAnchor(session.Owner.activePage))
+        if (!IsNativeAnchor(session.Owner.activePage))
             return false;
 
         session.AdoptVirtualToolMode(mode);
         return true;
     }
 
-    private static bool IsRoomAnchor(Page page) =>
-        page is RoomSettingsPage && page.GetType() == typeof(RoomSettingsPage);
+    private static bool IsNativeAnchor(Page page) =>
+        page is NativeToolAnchorPage && page.GetType() == typeof(NativeToolAnchorPage);
 
     private static bool IsExactLegacyPage(Page page, EditorToolMode mode) => mode switch
     {
