@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
@@ -62,9 +63,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
 
-        // Transitional compatibility only: reconcile the retained vanilla spatial handle/audio
-        // backend without using SoundPage as the model factory. Native Gizmo will remove this edge.
-        RefreshSoundPage(session);
+        SynchronizeNativeMutation(session, collectionChanged: true);
         SoundEditorStateHub.Get(session)?.SetSelectedIndex(selectedIndex);
         return created != null;
     }
@@ -113,7 +112,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
-        RefreshSoundPage(session);
+        SynchronizeNativeMutation(session, collectionChanged: true);
         session.History.Push(entry);
 
         SoundEditorState state = SoundEditorStateHub.Get(session);
@@ -338,7 +337,7 @@ internal static class SoundEditorActions
                 out SnapshotHistoryEntry entry))
             return false;
 
-        RefreshSoundPage(session);
+        SynchronizeNativeMutation(session, collectionChanged: true);
         session.History.Push(entry);
         SoundEditorStateHub.Get(session)?.SetSelectedIndex(lastIndex);
         return true;
@@ -457,7 +456,7 @@ internal static class SoundEditorActions
         AmbientSound target,
         string label,
         Func<bool> mutation,
-        bool refreshSoundPage = true)
+        bool syncLegacyPresentation = true)
     {
         RoomSettings settings = session?.RoomSettings;
         if (settings == null || target == null || mutation == null) return false;
@@ -469,7 +468,8 @@ internal static class SoundEditorActions
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
-        if (refreshSoundPage) RefreshSoundPage(session);
+        if (syncLegacyPresentation)
+            SynchronizeNativeMutation(session, collectionChanged: false);
         session.History.Push(entry);
         return true;
     }
@@ -488,17 +488,16 @@ internal static class SoundEditorActions
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             return false;
 
+        SynchronizeNativeMutation(session, collectionChanged: false);
         session.History.Push(entry);
         return true;
     }
 
-    private static void RefreshSoundPage(EditorSession session)
+    private static void SynchronizeNativeMutation(EditorSession session, bool collectionChanged)
     {
-        try { session?.Owner?.activePage?.Refresh(); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool sound refresh failed: " + error.Message);
-        }
+        NativeLegacyPresentationInvalidation.InvalidateCurrentSoundOrTriggerPage(session);
+        if (collectionChanged)
+            NativeSoundRuntimeReconciler.Reconcile(session);
     }
 
     private static bool TryGetSound(EditorSession session, int index, out AmbientSound sound)
