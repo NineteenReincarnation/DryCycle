@@ -88,7 +88,11 @@ internal static class NativeToolScheduler
     internal static bool ReturnToNativeTool(EditorSession session)
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return false;
-        if (!CanOwnNativePresentation(session))
+
+        // LegacyUiVisible is expected to be true on this transition, so do not reuse
+        // CanOwnNativePresentation here. Only external ownership gates can refuse the hand-off.
+        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla ||
+            DevUiDiagnosticsPolicy.Enabled)
             return false;
 
         EditorToolMode mode = session.ToolMode;
