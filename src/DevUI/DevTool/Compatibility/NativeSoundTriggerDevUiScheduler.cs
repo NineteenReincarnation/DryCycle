@@ -6,7 +6,7 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// <summary>
 /// Inner DevUI lifecycle layer for rebuilt Sound/Trigger workspaces. It is installed after
 /// quiescence and before DevToolRuntime so the main runtime remains the single outer editor hook.
-/// Native Sound/Trigger can now run without matching legacy pages; this layer owns the final
+/// Native Sound/Trigger can run without matching legacy pages; this layer owns the final
 /// main-thread ownership hand-off immediately before vanilla would update activePage.
 ///
 /// If native ownership is not valid (Vanilla UI, diagnostics, legacy transaction, custom page,
@@ -19,10 +19,6 @@ internal static class NativeSoundTriggerDevUiScheduler
     internal static void Enable()
     {
         if (enabled) return;
-
-        // LegacyDevUiQuiescenceController.Enable() runs immediately before this method. Remove its
-        // now-redundant derived Sound/Trigger page detours before installing the top-level pump.
-        LegacyDevUiQuiescenceController.RetireNativeSoundTriggerPageUpdateHooks();
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
     }
