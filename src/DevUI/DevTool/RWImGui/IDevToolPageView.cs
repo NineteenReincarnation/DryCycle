@@ -9,9 +9,14 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 ///
 /// This contract owns presentation only. Identity, lifecycle and retained-state ownership live on
 /// IDevToolPage, keeping frontend drawing concerns separate from editor-page identity.
+/// Navigation metadata also lives here because labels/tooltips/order are frontend presentation,
+/// while the stable page ID and ToolMode remain lifecycle identity.
 /// </summary>
 internal interface IDevToolPageView
 {
+    int NavigationOrder { get; }
+    string NavigationLabel { get; }
+    string NavigationTooltip { get; }
     bool UsesDedicatedWorkspace { get; }
     bool SupportsSceneSurface { get; }
     string LegacyFallbackTooltip { get; }
@@ -45,6 +50,9 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
 
     public abstract string Id { get; }
     public abstract EditorToolMode Mode { get; }
+    public virtual int NavigationOrder => int.MaxValue;
+    public virtual string NavigationLabel => Id;
+    public virtual string NavigationTooltip => NavigationLabel;
     public virtual bool UsesDedicatedWorkspace => false;
     public virtual bool SupportsSceneSurface => false;
     public virtual string LegacyFallbackTooltip => string.Empty;
