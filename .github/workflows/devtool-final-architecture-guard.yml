@@ -5,11 +5,13 @@ on:
     paths:
       - 'src/DevUI/DevTool/**'
       - 'scripts/validate-devtool-final-architecture.sh'
+      - 'scripts/validate-devtool-page-view-boundaries.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
     paths:
       - 'src/DevUI/DevTool/**'
       - 'scripts/validate-devtool-final-architecture.sh'
+      - 'scripts/validate-devtool-page-view-boundaries.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
 jobs:
@@ -20,3 +22,6 @@ jobs:
       - name: Validate final DevTool architecture boundaries
         shell: bash
         run: bash scripts/validate-devtool-final-architecture.sh
+      - name: Validate DevTool page-view boundaries
+        shell: bash
+        run: bash scripts/validate-devtool-page-view-boundaries.sh
