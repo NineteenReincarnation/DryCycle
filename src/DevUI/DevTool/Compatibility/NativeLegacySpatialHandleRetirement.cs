@@ -6,16 +6,20 @@ using DryCycle.DevUI.DevTool.Input;
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Removes vanilla built-in Sound/Trigger Handle nodes while the native RWImGui gizmo owns those
-/// spatial semantics. This is node retirement, not a Handle.Update hook: the old gizmos simply stop
-/// existing on the native path. Returning to Vanilla/Legacy performs the normal deferred page
-/// Refresh, which recreates them losslessly.
+/// Removes vanilla built-in Sound/Trigger spatial presentation nodes while native RWImGui gizmos own
+/// those semantics. This is node retirement, not a Handle.Update hook: the old Panel/Handle subtree
+/// simply stops existing on the native path.
 ///
-/// Exact runtime types are intentional. A third-party Handle subclass is an unknown contract and is
-/// left alive for the legacy compatibility backend until that mod registers a native gizmo provider.
+/// The first ordinary page materialization is still allowed as a compatibility probe so third-party
+/// hooks can attach their own nodes. Exact vanilla panels are retired only when they contain no
+/// opaque foreign descendants. Returning to Vanilla/Legacy performs the normal deferred Refresh and
+/// recreates the original DevInterface presentation losslessly.
 /// </summary>
 internal static class NativeLegacySpatialHandleRetirement
 {
+    private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(global::DevInterface.DevUI).Assembly;
+    private static readonly System.Reflection.Assembly DryCycleAssembly = typeof(global::DryCycle.Plugin).Assembly;
+
     private static Page observedPage;
     private static EditorSession observedSession;
     private static long observedRevision;
@@ -24,7 +28,7 @@ internal static class NativeLegacySpatialHandleRetirement
     internal static void Apply(EditorSession session)
     {
         Page page = session?.Owner?.activePage;
-        if (!ShouldOwnNativeSpatialHandles(session, page))
+        if (!ShouldOwnNativeSpatialPresentation(session, page))
         {
             ResetObservation();
             return;
@@ -42,13 +46,11 @@ internal static class NativeLegacySpatialHandleRetirement
 
         bool changed = page switch
         {
-            SoundPage sound => RetireSoundHandles(sound),
-            TriggersPage triggers => RetireTriggerHandles(triggers),
+            SoundPage sound => PruneBuiltinSoundNodes(sound),
+            TriggersPage triggers => PruneBuiltinTriggerNodes(triggers),
             _ => false
         };
 
-        // Removal changes the relevant nested DevUI topology. Release the page-keyed compiled plan
-        // immediately so the next legacy backend pump cannot retain a stale handle root.
         if (changed)
             LegacyDevUiQuiescenceController.ReleasePage(page);
 
@@ -58,9 +60,56 @@ internal static class NativeLegacySpatialHandleRetirement
         observedTopLevelCount = page.subNodes?.Count ?? 0;
     }
 
+    internal static bool PruneBuiltinSoundNodes(SoundPage page)
+    {
+        if (page?.subNodes == null) return false;
+        bool changed = false;
+
+        for (int i = page.subNodes.Count - 1; i >= 0; i--)
+        {
+            if (page.subNodes[i] is not AmbientSoundPanel panel)
+                continue;
+
+            // A custom panel subtype is an explicit compatibility contract. Likewise, an exact
+            // vanilla panel that contains a foreign child may be serving as the host for a mod's
+            // authoring UI; keep that complete subtree alive rather than guessing its dependencies.
+            if (panel.GetType() != typeof(AmbientSoundPanel) || ContainsOpaqueForeignDescendant(panel))
+                continue;
+
+            RetireTopLevelNode(page, i, panel);
+            if (ReferenceEquals(page.draggedObject, panel))
+                page.draggedObject = null;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    internal static bool PruneBuiltinTriggerNodes(TriggersPage page)
+    {
+        if (page?.subNodes == null) return false;
+        bool changed = false;
+
+        for (int i = page.subNodes.Count - 1; i >= 0; i--)
+        {
+            if (page.subNodes[i] is not TriggerPanel panel)
+                continue;
+
+            if (panel.GetType() != typeof(TriggerPanel) || ContainsOpaqueForeignDescendant(panel))
+                continue;
+
+            RetireTopLevelNode(page, i, panel);
+            if (ReferenceEquals(page.draggedObject, panel))
+                page.draggedObject = null;
+            changed = true;
+        }
+
+        return changed;
+    }
+
     internal static void Reset() => ResetObservation();
 
-    private static bool ShouldOwnNativeSpatialHandles(EditorSession session, Page page)
+    private static bool ShouldOwnNativeSpatialPresentation(EditorSession session, Page page)
     {
         if (session == null || page == null || !EditorInputRouter.FrontendAttached ||
             EditorUiModeState.UseVanilla || session.LegacyUiVisible)
@@ -70,58 +119,36 @@ internal static class NativeLegacySpatialHandleRetirement
                (session.ToolMode == EditorToolMode.Triggers && page.GetType() == typeof(TriggersPage));
     }
 
-    private static bool RetireSoundHandles(SoundPage page)
+    private static bool ContainsOpaqueForeignDescendant(DevUINode parent)
     {
-        if (page?.subNodes == null) return false;
-        bool changed = false;
-        for (int i = 0; i < page.subNodes.Count; i++)
+        if (parent?.subNodes == null) return false;
+
+        for (int i = 0; i < parent.subNodes.Count; i++)
         {
-            if (page.subNodes[i] is not AmbientSoundPanel panel || panel.subNodes == null)
-                continue;
+            DevUINode child = parent.subNodes[i];
+            if (child == null) continue;
 
-            for (int child = panel.subNodes.Count - 1; child >= 0; child--)
-            {
-                DevUINode node = panel.subNodes[child];
-                Type type = node?.GetType();
-                if (type != typeof(SpotSoundHandle) && type != typeof(DirectionalSoundHandle))
-                    continue;
+            System.Reflection.Assembly assembly = child.GetType().Assembly;
+            if (assembly != VanillaDevUiAssembly && assembly != DryCycleAssembly)
+                return true;
 
-                RetireNode(panel, child, node);
-                changed = true;
-            }
+            if (ContainsOpaqueForeignDescendant(child))
+                return true;
         }
-        return changed;
+
+        return false;
     }
 
-    private static bool RetireTriggerHandles(TriggersPage page)
-    {
-        if (page?.subNodes == null) return false;
-        bool changed = false;
-        for (int i = 0; i < page.subNodes.Count; i++)
-        {
-            if (page.subNodes[i] is not TriggerPanel panel || panel.subNodes == null)
-                continue;
-
-            for (int child = panel.subNodes.Count - 1; child >= 0; child--)
-            {
-                DevUINode node = panel.subNodes[child];
-                if (node?.GetType() != typeof(SpotTriggerHandle))
-                    continue;
-
-                RetireNode(panel, child, node);
-                changed = true;
-            }
-        }
-        return changed;
-    }
-
-    private static void RetireNode(DevUINode parent, int index, DevUINode node)
+    private static void RetireTopLevelNode(Page page, int index, DevUINode node)
     {
         try { node?.ClearSprites(); }
         catch { }
-        if (parent?.subNodes != null && index >= 0 && index < parent.subNodes.Count &&
-            ReferenceEquals(parent.subNodes[index], node))
-            parent.subNodes.RemoveAt(index);
+
+        if (page?.subNodes != null && index >= 0 && index < page.subNodes.Count &&
+            ReferenceEquals(page.subNodes[index], node))
+            page.subNodes.RemoveAt(index);
+
+        page?.tempNodes?.Remove(node);
     }
 
     private static void ResetObservation()
