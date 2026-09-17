@@ -150,56 +150,22 @@ internal static class PlayerMapWorkspaceView
             if (!LayerVisible[Math.Max(0, Math.Min(2, room.Layer))]) continue;
             if (normalized.Length > 0 && room.Name.IndexOf(normalized, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-            const float rowHeight = 46f;
             string status = RoomStatusText(room);
-            string placement = RoomPlacementText(room);
-            string layerText = "L" + room.Layer;
-            uint statusColor = RoomStatusColor(room);
+            string placement = room.Disabled ? string.Empty : RoomPlacementText(room);
+            string tooltip = room.Bake.Status == RoomMapBakeStatus.Failed
+                ? room.Bake.Error
+                : null;
 
-            ImGui.PushID(room.RoomIndex);
-            bool clicked = ImGui.Selectable(
-                "##PlayerMapRoomEntry",
+            bool clicked = DevToolRoomExplorerEntry.Draw(
+                room.Name,
+                room.Name,
+                "L" + room.Layer,
+                status,
+                placement,
+                RoomStatusColor(room),
                 room.Selected,
-                ImGuiSelectableFlags.None,
-                new Num.Vector2(0f, rowHeight));
+                tooltip);
 
-            Num.Vector2 min = ImGui.GetItemRectMin();
-            Num.Vector2 max = ImGui.GetItemRectMax();
-            ImDrawListPtr draw = ImGui.GetWindowDrawList();
-            draw.AddRectFilled(
-                new Num.Vector2(min.X + 2f, min.Y + 6f),
-                new Num.Vector2(min.X + 5f, max.Y - 6f),
-                statusColor);
-
-            Num.Vector2 namePos = min + new Num.Vector2(11f, 5f);
-            draw.AddText(namePos, ImGui.GetColorU32(ImGuiCol.Text), room.Name ?? string.Empty);
-
-            Num.Vector2 layerSize = ImGui.CalcTextSize(layerText);
-            draw.AddText(
-                new Num.Vector2(max.X - layerSize.X - 8f, min.Y + 5f),
-                ImGui.GetColorU32(ImGuiCol.TextDisabled),
-                layerText);
-
-            Num.Vector2 metaPos = min + new Num.Vector2(11f, 25f);
-            draw.AddText(metaPos, statusColor, status);
-            if (!room.Disabled)
-            {
-                Num.Vector2 statusSize = ImGui.CalcTextSize(status);
-                draw.AddText(
-                    metaPos + new Num.Vector2(statusSize.X, 0f),
-                    ImGui.GetColorU32(ImGuiCol.TextDisabled),
-                    " · " + placement);
-            }
-
-            if (ImGui.IsItemHovered() && room.Bake.Status == RoomMapBakeStatus.Failed &&
-                !string.IsNullOrWhiteSpace(room.Bake.Error))
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextWrapped(room.Bake.Error);
-                ImGui.EndTooltip();
-            }
-
-            ImGui.PopID();
             if (clicked)
                 MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex: room.RoomIndex));
         }
