@@ -30,6 +30,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "objects";
     public override EditorToolMode Mode => EditorToolMode.Objects;
+    public override bool SupportsSceneSurface => true;
 
     public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
         snapshot.Inspector?.HasSelection != true;
@@ -39,6 +40,9 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         ObjectInspectorView.Draw(snapshot.Inspector);
+
+    public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
+        SceneWorkspaceWindow.DrawObjectSceneContent(snapshot);
 
     protected override void OnReset()
     {
@@ -51,6 +55,7 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "sound";
     public override EditorToolMode Mode => EditorToolMode.Sound;
+    public override bool SupportsSceneSurface => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于未迁移的自定义声音页面控件。",
         "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
@@ -60,6 +65,9 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawInspector(SoundEditorPresentationHub.Current);
+
+    public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
+        SoundEditorView.DrawSceneWorkspace(SoundEditorPresentationHub.Current);
 
     protected override void OnReset()
     {
@@ -72,6 +80,7 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
 {
     public override string Id => "triggers";
     public override EditorToolMode Mode => EditorToolMode.Triggers;
+    public override bool SupportsSceneSurface => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于新检查器无法表达的自定义触发器/事件控件。",
         "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
@@ -81,6 +90,9 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         TriggerEditorView.DrawInspector(TriggerEditorPresentationHub.Current);
+
+    public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
+        TriggerEditorView.DrawSceneWorkspace(TriggerEditorPresentationHub.Current);
 
     protected override void OnReset() => TriggerEditorView.ResetRetainedState();
 }

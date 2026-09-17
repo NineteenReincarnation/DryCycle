@@ -27,9 +27,7 @@ internal static class ScenePlacementWindow
     private static string projectedCenter = string.Empty;
 
     internal static bool Supports(EditorToolMode mode) =>
-        mode == EditorToolMode.Objects ||
-        mode == EditorToolMode.Sound ||
-        mode == EditorToolMode.Triggers;
+        DevToolPageViewRegistry.SupportsSceneSurface(mode);
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {

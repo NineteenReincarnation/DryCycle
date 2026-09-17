@@ -1,26 +1,30 @@
 using System;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Sound;
-using DryCycle.DevUI.DevTool.Triggers;
 using ImGuiNET;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Dedicated Scene surface shared by Objects, Sound and Triggers. The underlying editor state and
-/// command queues remain unchanged; this class only moves the scene list out of the Browser when the
-/// global Scene placement preference is Center.
+/// Dedicated Scene surface shared by pages that opt into the scene contract. The underlying editor
+/// state and command queues remain unchanged; this class owns only the shared window chrome plus the
+/// Objects scene projection. Page-specific scene content is dispatched through IDevToolPageView.
 /// </summary>
 internal static class SceneWorkspaceWindow
 {
-    private sealed class ObjectSceneRow
+    private sealed class ObjectSceneRow : IDevToolExplorerListItem
     {
         internal EditorObjectSnapshot Item;
         internal string Category;
         internal string Label;
-        internal string Tooltip;
+        internal string TooltipText;
+
+        public string StableId => "CenterSceneObject:" + (Item?.Index ?? -1);
+        public string PrimaryText => Label ?? string.Empty;
+        public string SecondaryText => string.Empty;
+        public string StatusText => string.Empty;
+        public string Tooltip => TooltipText ?? string.Empty;
     }
 
     private sealed class ObjectSceneGroup
@@ -33,10 +37,6 @@ internal static class SceneWorkspaceWindow
     private static string objectSceneSearch = string.Empty;
     private static int objectSelectionAnchor = -1;
 
-    // The object presentation hub already publishes immutable array snapshots and keeps their
-    // references stable on cache-hit/shell-only frames. Retain the expensive search/group projection
-    // against those array identities so a stable Scene window pays only for ImGui rows, not repeated
-    // metadata lookups, fuzzy matching and N x source regrouping every frame.
     private static EditorObjectSnapshot[] projectedObjects;
     private static EditorObjectTypeSnapshot[] projectedLibrary;
     private static string projectedSearch = string.Empty;
@@ -59,8 +59,9 @@ internal static class SceneWorkspaceWindow
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        if (snapshot == null || !snapshot.Available || snapshot.FocusMode ||
-            !DevToolUiSettings.SceneInCenter || !ScenePlacementWindow.Supports(snapshot.ToolMode))
+        if (snapshot == null || !snapshot.Available || snapshot.FocusMode || !DevToolUiSettings.SceneInCenter ||
+            !DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page) ||
+            !page.SupportsSceneSurface)
             return;
 
         float scale = Math.Max(0.78f, Math.Min(2.2f, DevToolUiSettings.UiScale));
@@ -90,20 +91,7 @@ internal static class SceneWorkspaceWindow
 
         FloatingWindowSnap.TrackCurrentWindow("SceneWorkspace");
         ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.18f : 1.12f);
-
-        switch (snapshot.ToolMode)
-        {
-            case EditorToolMode.Objects:
-                DrawObjectScene(snapshot);
-                break;
-            case EditorToolMode.Sound:
-                SoundEditorView.DrawSceneWorkspace(SoundEditorPresentationHub.Current);
-                break;
-            case EditorToolMode.Triggers:
-                TriggerEditorView.DrawSceneWorkspace(TriggerEditorPresentationHub.Current);
-                break;
-        }
-
+        page.DrawSceneWorkspace(snapshot);
         ImGui.End();
     }
 
@@ -127,7 +115,7 @@ internal static class SceneWorkspaceWindow
         statusText = string.Empty;
     }
 
-    private static void DrawObjectScene(EditorPresentationSnapshot snapshot)
+    internal static void DrawObjectSceneContent(EditorPresentationSnapshot snapshot)
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
@@ -187,12 +175,8 @@ internal static class SceneWorkspaceWindow
                     DevToolWidgets.MutedText(row.Category);
                 }
 
-                if (!ImGui.Selectable(row.Label, item.Selected))
-                {
-                    if (ImGui.IsItemHovered())
-                        DevToolTooltip.Show(row.Tooltip);
+                if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
                     continue;
-                }
 
                 if (io.KeyShift && objectSelectionAnchor >= 0)
                 {
@@ -291,15 +275,14 @@ internal static class SceneWorkspaceWindow
                 projectedGroups.Add(group);
             }
 
-            string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") +
-                           ")##CenterSceneObject" + item.Index;
+            string label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")";
             string tooltip = source + " · " + item.Type + " · " + category;
             group.Rows.Add(new ObjectSceneRow
             {
                 Item = item,
                 Category = category,
                 Label = label,
-                Tooltip = tooltip
+                TooltipText = tooltip
             });
             projectedMatchCount++;
         }

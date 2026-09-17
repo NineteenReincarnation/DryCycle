@@ -32,8 +32,16 @@ internal static class DevToolPageViewRegistry
     internal static IDevToolPageView Get(EditorToolMode mode)
     {
         SynchronizeActive(mode);
-        Pages.TryGetValue(mode, out IDevToolFrontendPage page);
+        TryGet(mode, out IDevToolPageView page);
         return page;
+    }
+
+    internal static bool TryGet(EditorToolMode mode, out IDevToolPageView view)
+    {
+        view = null;
+        if (!Pages.TryGetValue(mode, out IDevToolFrontendPage page)) return false;
+        view = page;
+        return true;
     }
 
     internal static bool TryGet(string id, out IDevToolPageView view)
@@ -44,6 +52,9 @@ internal static class DevToolPageViewRegistry
         view = page;
         return true;
     }
+
+    internal static bool SupportsSceneSurface(EditorToolMode mode) =>
+        Pages.TryGetValue(mode, out IDevToolFrontendPage page) && page.SupportsSceneSurface;
 
     internal static string ActivePageId => activePage?.Id ?? string.Empty;
     internal static int RegisteredPageCount => Pages.Count;

@@ -13,6 +13,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal interface IDevToolPageView
 {
     bool UsesDedicatedWorkspace { get; }
+    bool SupportsSceneSurface { get; }
     string LegacyFallbackTooltip { get; }
 
     bool SuppressInspector(EditorPresentationSnapshot snapshot);
@@ -20,6 +21,7 @@ internal interface IDevToolPageView
     void DrawBrowser(EditorPresentationSnapshot snapshot);
     void DrawInspector(EditorPresentationSnapshot snapshot);
     void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display);
+    void DrawSceneWorkspace(EditorPresentationSnapshot snapshot);
 }
 
 /// <summary>
@@ -44,6 +46,7 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public abstract string Id { get; }
     public abstract EditorToolMode Mode { get; }
     public virtual bool UsesDedicatedWorkspace => false;
+    public virtual bool SupportsSceneSurface => false;
     public virtual string LegacyFallbackTooltip => string.Empty;
 
     public virtual bool SuppressInspector(EditorPresentationSnapshot snapshot) => false;
@@ -51,6 +54,7 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public abstract void DrawBrowser(EditorPresentationSnapshot snapshot);
     public abstract void DrawInspector(EditorPresentationSnapshot snapshot);
     public virtual void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) { }
+    public virtual void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) { }
 
     public void Activate()
     {
