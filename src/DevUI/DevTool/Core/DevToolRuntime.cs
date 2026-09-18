@@ -33,7 +33,6 @@ internal static class DevToolRuntime
         if (enabled) return;
         BuiltinInspectorAdapters.Enable();
         NativeObjectInspectorBootstrap.Enable();
-        ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.Enable();
@@ -49,7 +48,6 @@ internal static class DevToolRuntime
         On.RainWorldGame.Update -= RainWorldGame_Update;
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.Disable();
-        ObjectGizmoPresentationController.Disable();
         LegacyUiPresentationController.Reset();
         EditorInputRouter.Disable();
         DevToolSubsystemCoordinator.ResetRuntimeState();
@@ -132,13 +130,6 @@ internal static class DevToolRuntime
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyPresentation))
             LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
 
-        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.ObjectGizmoPresentation))
-        {
-            ObjectGizmoPresentationController.Apply(
-                self.activePage as ObjectsPage,
-                session,
-                suppressMigratedLegacyUi && session?.ToolMode == EditorToolMode.Objects);
-        }
 
         bool shellOnly = session?.IsOpeningFrame == true || restoredWorkspaceThisFrame;
         PublishPresentations(session, shellOnly);
