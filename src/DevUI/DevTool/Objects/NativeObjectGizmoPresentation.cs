@@ -77,6 +77,18 @@ internal static class NativeObjectGizmoPresentation
         if (!specialized)
             CapturePropertyHandles(target, properties, handles);
 
+        if (target.data is PlacedObject.SuperSlopeData superSlope)
+        {
+            Vector2 bottom = target.pos + new Vector2(0f, 0f - superSlope.bottom);
+            handles.Add(Handle("superSlope:bottom", bottom, target.pos, drawLine: true));
+        }
+
+        if (target.data is PlacedObject.WaterFlowData waterFlow)
+        {
+            Vector2 width = target.pos + new Vector2(waterFlow.width * 20f, 0f);
+            handles.Add(Handle("waterFlow:width", width, target.pos, drawLine: true));
+        }
+
         if (handles.Count == 0 && beziers.Count == 0)
             return EditorObjectGizmoSnapshot.Empty;
 
