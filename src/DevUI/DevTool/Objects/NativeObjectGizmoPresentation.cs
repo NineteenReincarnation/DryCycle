@@ -64,6 +64,11 @@ internal static class NativeObjectGizmoPresentation
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
         {
             CaptureSpline(target, splineData.spline, handles, beziers);
+            if (splineData is PlacedObject.LocalTerrainData localTerrain)
+            {
+                Vector2 bottom = target.pos + new Vector2(0f, 0f - localTerrain.bottom);
+                handles.Add(Handle("localTerrain:bottom", bottom, target.pos, drawLine: true));
+            }
             specialized = true;
         }
 
