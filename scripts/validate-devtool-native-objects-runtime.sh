@@ -436,6 +436,20 @@ if ! grep -Fq 'BuiltinObjectRuntimeAdapters.Prepare(room, target);' "$runtime_re
   exit 1
 fi
 
+for symbol in \
+  'EnsureInsectGroupRuntime(room, target);' \
+  'room.insectCoordinator = new InsectCoordinator(room);' \
+  'room.insectCoordinator.AddGroup(target);' \
+  'swarm.Initiate();' \
+  'RemoveInsectGroupRuntime(room, target);' \
+  'coordinator.allInsects?.Remove(member);' \
+  'coordinator.swarms.RemoveAt(i);'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "Native InsectGroup swarm ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Builtin MSC runtimes such as LightningMachine/EnergySwirl do not retain the authored
 # PlacedObject. They require pre-mutation weak binding so moves can still update/remove the exact
 # live runtime after the model position changes.
