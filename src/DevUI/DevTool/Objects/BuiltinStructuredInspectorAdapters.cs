@@ -28,6 +28,7 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is PlacedObject.CustomDecalData ||
             target?.data is Rainbow.RainbowData ||
             target?.data is RainbowNoFade.RainbowNoFadeData ||
+            target?.data is PlacedObject.RippleStalkData ||
             target?.data is PlacedObject.FilterData ||
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData;
 
@@ -58,6 +59,9 @@ internal static class BuiltinStructuredInspectorAdapters
                 case RainbowNoFade.RainbowNoFadeData rainbowNoFade:
                     AppendRainbow(result, rainbowNoFade.fades);
                     break;
+                case PlacedObject.RippleStalkData ripple:
+                    AppendRippleCosmetics(result, ripple);
+                    break;
                 case PlacedObject.FilterData filter:
                     AppendFilterPlayers(result, filter);
                     break;
@@ -86,6 +90,10 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetRainbow(rainbowNoFade.fades, key, value))
                 return true;
 
+            if (target.data is PlacedObject.RippleStalkData ripple &&
+                TrySetRippleCosmetic(ripple, key, value))
+                return true;
+
             if (target.data is PlacedObject.FilterData filter &&
                 TrySetFilterPlayer(filter, key, value))
                 return true;
@@ -103,7 +111,16 @@ internal static class BuiltinStructuredInspectorAdapters
             return key.EndsWith(".vertices", StringComparison.Ordinal) ||
                    key.EndsWith(".fades", StringComparison.Ordinal) ||
                    key.EndsWith(".availableToPlayers", StringComparison.Ordinal) ||
-                   key.EndsWith(".availableOnTimelines", StringComparison.Ordinal);
+                   key.EndsWith(".availableOnTimelines", StringComparison.Ordinal) ||
+                   key.EndsWith(".testRippleAmount", StringComparison.Ordinal) ||
+                   key.EndsWith(".spiralCoils", StringComparison.Ordinal) ||
+                   key.EndsWith(".spiralAmount", StringComparison.Ordinal) ||
+                   key.EndsWith(".droopy", StringComparison.Ordinal) ||
+                   key.EndsWith(".depth", StringComparison.Ordinal) ||
+                   key.EndsWith(".sinWidth", StringComparison.Ordinal) ||
+                   key.EndsWith(".sinDist", StringComparison.Ordinal) ||
+                   key.EndsWith(".sinOffset", StringComparison.Ordinal) ||
+                   key.EndsWith(".update", StringComparison.Ordinal);
         }
 
         private static void AppendCustomDecal(
@@ -238,6 +255,104 @@ internal static class BuiltinStructuredInspectorAdapters
             }
 
             return false;
+        }
+
+        private static void AppendRippleCosmetics(
+            List<EditorPropertySnapshot> result,
+            PlacedObject.RippleStalkData data)
+        {
+            if (data == null) return;
+
+            AppendNullableFloat(result, "testRippleAmount", "Test Ripple Amount", data.testRippleAmount, 1f);
+            AppendNullableFloat(result, "spiralCoils", "Spiral Coils", data.spiralCoils, 10f);
+            AppendNullableFloat(result, "spiralAmount", "Spiral Amount", data.spiralAmount, 1f);
+            AppendNullableFloat(result, "droopy", "Droopy", data.droopy, 1f);
+            AppendNullableFloat(result, "depth", "Depth", data.depth, 30f);
+            AppendNullableFloat(result, "sinWidth", "Wave Width", data.sinWidth, 20f);
+            AppendNullableFloat(result, "sinDist", "Wave Length", data.sinDist, 100f);
+            AppendNullableFloat(result, "sinOffset", "Wave Offset", data.sinOffset, 100f);
+        }
+
+        private static void AppendNullableFloat(
+            List<EditorPropertySnapshot> result,
+            string name,
+            string displayName,
+            float? current,
+            float max)
+        {
+            const string group = "Ripple Cosmetics";
+            string prefix = "builtin.ripple." + name;
+
+            result.Add(Boolean(
+                prefix + ".override",
+                displayName + " · Override",
+                current.HasValue,
+                group));
+
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = prefix + ".value",
+                DisplayName = displayName,
+                Group = group,
+                Source = current.HasValue
+                    ? "Rain World model"
+                    : "Rain World model · inherited until edited",
+                Kind = EditorPropertyKind.Float,
+                HasRange = true,
+                Min = 0f,
+                Max = max,
+                Step = max <= 1f ? 0.01f : 0.1f,
+                X = current.GetValueOrDefault()
+            });
+        }
+
+        private static bool TrySetRippleCosmetic(
+            PlacedObject.RippleStalkData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null || string.IsNullOrEmpty(key))
+                return false;
+
+            bool changed =
+                TrySetNullableFloat(ref data.testRippleAmount, key, "testRippleAmount", value, 1f) ||
+                TrySetNullableFloat(ref data.spiralCoils, key, "spiralCoils", value, 10f) ||
+                TrySetNullableFloat(ref data.spiralAmount, key, "spiralAmount", value, 1f) ||
+                TrySetNullableFloat(ref data.droopy, key, "droopy", value, 1f) ||
+                TrySetNullableFloat(ref data.depth, key, "depth", value, 30f) ||
+                TrySetNullableFloat(ref data.sinWidth, key, "sinWidth", value, 20f) ||
+                TrySetNullableFloat(ref data.sinDist, key, "sinDist", value, 100f) ||
+                TrySetNullableFloat(ref data.sinOffset, key, "sinOffset", value, 100f);
+
+            if (changed)
+                data.update = true;
+            return changed;
+        }
+
+        private static bool TrySetNullableFloat(
+            ref float? field,
+            string key,
+            string name,
+            EditorPropertyValue value,
+            float max)
+        {
+            string prefix = "builtin.ripple." + name;
+            if (key == prefix + ".override")
+            {
+                if (value.Kind != EditorPropertyKind.Boolean)
+                    return false;
+                if (value.Boolean)
+                    field ??= 0f;
+                else
+                    field = null;
+                return true;
+            }
+
+            if (key != prefix + ".value" || value.Kind != EditorPropertyKind.Float)
+                return false;
+
+            field = Mathf.Clamp(value.X, 0f, max);
+            return true;
         }
 
         private static void AppendFilterPlayers(
