@@ -474,6 +474,28 @@ for symbol in \
   fi
 done
 
+for symbol in \
+  'target.type == PlacedObject.Type.FluxWaterfall' \
+  'RefreshFluxWaterfall(room, target);' \
+  'RegisterFluxWaterfall(room, runtime);' \
+  'ReferenceEquals(waterfall.data, flowData)' \
+  'runtime.topLoop.volume = 0f;' \
+  'target.type == PlacedObject.Type.ZapCoil' \
+  'RefreshZapCoil(room, target);' \
+  'FindZapCoilByPlacedObjectOrdinal' \
+  'runtime = new ZapCoil(desired, room);' \
+  'bool findExisting'; do
+  if ! grep -Fq "$symbol" "$detached_runtime_adapters"; then
+    echo "FluxWaterfall/ZapCoil detached runtime contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'Acquire(room, target, createIfMissing: true, findExisting: false)' "$detached_runtime_adapters" ||
+   ! grep -Fq 'Acquire(room, target, createIfMissing: true, findExisting: true)' "$detached_runtime_adapters"; then
+  echo "Detached runtime creation can once again steal an overlapping existing runtime." >&2
+  exit 1
+fi
+
 # Builtin MSC runtimes such as LightningMachine/EnergySwirl do not retain the authored
 # PlacedObject. They require pre-mutation weak binding so moves can still update/remove the exact
 # live runtime after the model position changes.
