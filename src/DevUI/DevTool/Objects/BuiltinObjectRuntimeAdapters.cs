@@ -19,26 +19,89 @@ internal static class BuiltinObjectRuntimeAdapters
         internal bool Captured;
     }
 
-    private static ConditionalWeakTable<PlacedObject, LightFixtureState> lightFixtureStates = new();
+    private sealed class UrbanLifeState
+    {
+        internal int LayerCount;
+        internal bool IsShadow;
+        internal bool Captured;
+    }
 
-    internal static void ResetRuntimeState() =>
+    private sealed class UrbanCandleHolderState
+    {
+        internal int Seed;
+        internal bool Captured;
+    }
+
+    private static ConditionalWeakTable<PlacedObject, LightFixtureState> lightFixtureStates = new();
+    private static ConditionalWeakTable<PlacedObject, UrbanLifeState> urbanLifeStates = new();
+    private static ConditionalWeakTable<PlacedObject, UrbanCandleHolderState> urbanCandleHolderStates = new();
+
+    internal static void ResetRuntimeState()
+    {
         lightFixtureStates = new ConditionalWeakTable<PlacedObject, LightFixtureState>();
+        urbanLifeStates = new ConditionalWeakTable<PlacedObject, UrbanLifeState>();
+        urbanCandleHolderStates = new ConditionalWeakTable<PlacedObject, UrbanCandleHolderState>();
+    }
 
     internal static void Prepare(global::Room room, PlacedObject target)
     {
-        if (room == null || target?.data is not PlacedObject.LightFixtureData data)
+        if (room == null || target == null)
             return;
 
-        LightFixtureState state = lightFixtureStates.GetValue(target, _ => new LightFixtureState());
-        state.TypeValue = data.type?.value ?? string.Empty;
-        state.RandomSeed = data.randomSeed;
-        state.Captured = true;
+        if (target.data is PlacedObject.LightFixtureData lightFixture)
+        {
+            LightFixtureState state = lightFixtureStates.GetValue(target, _ => new LightFixtureState());
+            state.TypeValue = lightFixture.type?.value ?? string.Empty;
+            state.RandomSeed = lightFixture.randomSeed;
+            state.Captured = true;
+        }
+
+        if (ModManager.Watcher && target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
+        {
+            UrbanLifeState state = urbanLifeStates.GetValue(target, _ => new UrbanLifeState());
+            state.LayerCount = DesiredUrbanLifeLayerCount(urbanLife);
+            state.IsShadow = urbanLife.isShadow;
+            state.Captured = true;
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.UrbanCandleHolder.UrbanCandleHolderData holder)
+        {
+            UrbanCandleHolderState state =
+                urbanCandleHolderStates.GetValue(target, _ => new UrbanCandleHolderState());
+            state.Seed = holder.seed;
+            state.Captured = true;
+        }
     }
 
     internal static void Refresh(global::Room room, PlacedObject target)
     {
         if (room?.updateList == null || target == null)
             return;
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.UrbanLife &&
+            target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
+        {
+            EnsureUrbanLifeRuntime(room, target, urbanLife);
+            return;
+        }
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.UrbanLifePath &&
+            target.data is Watcher.UrbanLifePath.UrbanLifePathData urbanPath)
+        {
+            EnsureUrbanLifePathRuntime(room, target, urbanPath);
+            return;
+        }
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder &&
+            target.data is Watcher.UrbanCandleHolder.UrbanCandleHolderData holder)
+        {
+            EnsureUrbanCandleHolderRuntime(room, target, holder);
+            return;
+        }
 
         if (target.type == PlacedObject.Type.ProjectedStars)
         {
@@ -199,6 +262,10 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
 
         lightFixtureStates.Remove(target);
+        urbanLifeStates.Remove(target);
+        urbanCandleHolderStates.Remove(target);
+
+        RemoveWatcherUrbanRuntime(room, target);
 
         if (target.type == PlacedObject.Type.InsectGroup)
             RemoveInsectGroupRuntime(room, target);
@@ -244,6 +311,150 @@ internal static class BuiltinObjectRuntimeAdapters
 
             DestroyRuntime(room, runtime);
         }
+    }
+
+    private static void EnsureUrbanLifeRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.UrbanLife.UrbanLifeData data)
+    {
+        data.pos = target.pos;
+
+        Watcher.UrbanLife runtime = data.obj;
+        UrbanLifeState state = urbanLifeStates.GetValue(target, _ => new UrbanLifeState());
+        int desiredLayers = DesiredUrbanLifeLayerCount(data);
+        bool rebuild =
+            runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion ||
+            state.Captured && (state.LayerCount != desiredLayers || state.IsShadow != data.isShadow);
+
+        if (rebuild)
+        {
+            if (runtime != null && ReferenceEquals(runtime.room, room))
+                DestroyRuntime(room, runtime);
+
+            try
+            {
+                runtime = Watcher.UrbanLife.FromPlacedObject(room, target);
+                data.obj = runtime;
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native UrbanLife runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        runtime.meshDirty = true;
+        state.LayerCount = desiredLayers;
+        state.IsShadow = data.isShadow;
+        state.Captured = true;
+    }
+
+    private static int DesiredUrbanLifeLayerCount(Watcher.UrbanLife.UrbanLifeData data) =>
+        Mathf.Max(1, Mathf.RoundToInt(
+            Mathf.Clamp01(data?.nLayers ?? 0f) * Watcher.UrbanLife.maxLayers));
+
+    private static void EnsureUrbanLifePathRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.UrbanLifePath.UrbanLifePathData data)
+    {
+        data.pos = target.pos;
+
+        Watcher.UrbanLifePath runtime = data.obj;
+        if (runtime != null &&
+            ReferenceEquals(runtime.room, room) &&
+            !runtime.slatedForDeletetion)
+            return;
+
+        try
+        {
+            runtime = Watcher.UrbanLifePath.FromPlacedObject(room, target);
+            data.obj = runtime;
+            room.AddObject(runtime);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native UrbanLifePath runtime creation failed: " + error.Message);
+        }
+    }
+
+    private static void EnsureUrbanCandleHolderRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.UrbanCandleHolder.UrbanCandleHolderData data)
+    {
+        data.pos = target.pos;
+
+        UrbanCandleHolderState state =
+            urbanCandleHolderStates.GetValue(target, _ => new UrbanCandleHolderState());
+        Watcher.UrbanCandleHolder runtime = data.obj;
+        bool rebuild =
+            runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion ||
+            state.Captured && state.Seed != data.seed;
+
+        if (rebuild)
+        {
+            if (runtime != null && ReferenceEquals(runtime.room, room))
+                DestroyRuntime(room, runtime);
+
+            try
+            {
+                runtime = new Watcher.UrbanCandleHolder(room, data);
+                data.obj = runtime;
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native UrbanCandleHolder runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        runtime.pos = target.pos;
+        runtime.tilt = data.tilt;
+        runtime.depth = data.depth;
+        runtime.height = data.height;
+        runtime.scale = data.scale;
+        runtime.candleWidthScale = data.candleWidth;
+
+        state.Seed = data.seed;
+        state.Captured = true;
+    }
+
+    private static void RemoveWatcherUrbanRuntime(global::Room room, PlacedObject target)
+    {
+        if (!ModManager.Watcher || target?.data == null)
+            return;
+
+        UpdatableAndDeletable runtime = null;
+
+        if (target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
+        {
+            runtime = urbanLife.obj;
+            urbanLife.obj = null;
+        }
+        else if (target.data is Watcher.UrbanLifePath.UrbanLifePathData path)
+        {
+            runtime = path.obj;
+            path.obj = null;
+        }
+        else if (target.data is Watcher.UrbanCandleHolder.UrbanCandleHolderData holder)
+        {
+            runtime = holder.obj;
+            holder.obj = null;
+        }
+
+        if (runtime != null && ReferenceEquals(runtime.room, room))
+            DestroyRuntime(room, runtime);
     }
 
     private static void EnsureProjectedStarsRuntime(global::Room room, PlacedObject target)
