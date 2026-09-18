@@ -44,6 +44,10 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         internal bool Writable;
         internal EditorPropertyKind Kind;
         internal EditorPropertyGizmoHint GizmoHint;
+        internal bool HasRange;
+        internal float Min;
+        internal float Max;
+        internal float Step;
         internal string[] Options = Array.Empty<string>();
 
         internal object Read(object target)
@@ -311,6 +315,8 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         if (kind == EditorPropertyKind.ReadOnly)
             writable = false;
 
+        ResolveRange(declaringType, name, kind, out bool hasRange, out float min, out float max, out float step);
+
         return new MemberBinding
         {
             Key = "native." + (declaringType.FullName ?? declaringType.Name) + "." + name,
@@ -320,8 +326,37 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             Writable = writable,
             Kind = kind,
             GizmoHint = ResolveGizmoHint(declaringType, name, valueType),
+            HasRange = hasRange,
+            Min = min,
+            Max = max,
+            Step = step,
             Options = options ?? Array.Empty<string>()
         };
+    }
+
+    private static void ResolveRange(
+        Type declaringType,
+        string name,
+        EditorPropertyKind kind,
+        out bool hasRange,
+        out float min,
+        out float max,
+        out float step)
+    {
+        hasRange = false;
+        min = 0f;
+        max = 0f;
+        step = kind == EditorPropertyKind.Integer ? 1f : 0.01f;
+
+        if (declaringType == typeof(PlacedObject.LightSourceData) &&
+            (string.Equals(name, "strength", StringComparison.Ordinal) ||
+             string.Equals(name, "blinkRate", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+        }
     }
 
     private static EditorPropertyGizmoHint ResolveGizmoHint(
@@ -391,6 +426,10 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             Source = "Rain World model",
             Kind = binding.Kind,
             GizmoHint = binding.GizmoHint,
+            HasRange = binding.HasRange,
+            Min = binding.Min,
+            Max = binding.Max,
+            Step = binding.Step,
             Options = binding.Options
         };
 
@@ -432,8 +471,11 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         {
             case EditorPropertyKind.Float:
                 if (value.Kind != EditorPropertyKind.Float) return null;
-                if (type == typeof(double)) return (double)value.X;
-                return value.X;
+                float floatValue = binding.HasRange
+                    ? Mathf.Clamp(value.X, binding.Min, binding.Max)
+                    : value.X;
+                if (type == typeof(double)) return (double)floatValue;
+                return floatValue;
             case EditorPropertyKind.Integer:
                 if (value.Kind != EditorPropertyKind.Integer) return null;
                 if (type == typeof(short)) return (short)value.Integer;
@@ -479,6 +521,10 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             Source = source.Source,
             Kind = source.Kind,
             GizmoHint = source.GizmoHint,
+            HasRange = source.HasRange,
+            Min = source.Min,
+            Max = source.Max,
+            Step = source.Step,
             X = x,
             Y = y,
             Z = z,
