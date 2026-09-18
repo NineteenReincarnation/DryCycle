@@ -263,6 +263,64 @@ if ! grep -Fq 'NativeObjectRuntimeReconciler.RemoveRuntime(session, target);' "$
   exit 1
 fi
 
+# LightSource must be bound before its PlacedObject moves, then synchronized without relying on
+# LightSourceRepresentation. All model properties and runtime membership are native-owned.
+for symbol in \
+  'internal static void PrepareForMutation(EditorSession session, PlacedObject target)' \
+  'ConditionalWeakTable<PlacedObject, LightBinding>' \
+  'EnsureLightSourceRuntime(room, target, createIfMissing: true)' \
+  'light.setPos = target.pos;' \
+  'light.setRad = data.Rad;' \
+  'light.setAlpha = data.strength;' \
+  'light.fadeWithSun = data.fadeWithSun;' \
+  'light.colorFromEnvironment = data.colorType == PlacedObject.LightSourceData.ColorType.Environment;' \
+  'light.flat = data.flat;' \
+  'light.effectColor = Math.Max(-1, (int)data.colorType - 2);' \
+  'light.setBlinkProperties(data.blinkType, data.blinkRate);' \
+  'light.nightLight = data.nightLight;' \
+  'RemoveLightSourceRuntime(room, target);'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "LightSource runtime binding/sync contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'NativeObjectRuntimeReconciler.PrepareForMutation(session, objectTarget);' "$backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.PrepareForMutation(session, target);' "$object_gizmo_backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.PrepareForMutation(session, target);' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.ResetRuntimeState();' "$coordinator"; then
+  echo "LightSource pre-mutation binding/runtime lifetime is no longer wired through all native mutation paths." >&2
+  exit 1
+fi
+
+# The last direct Handle-style special cases have verified native semantics.
+for symbol in \
+  '"weaver:direction"' \
+  '"lobeTree:root"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "Direct-handle object native coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'direction.normalized * 460f' "$object_gizmo_backend"; then
+  echo "WeaverSpot lost its fixed 460-unit direction contract." >&2
+  exit 1
+fi
+
+# Reflection fallback may expose native sliders, but known vanilla slider ranges must be carried as
+# detached metadata and clamped in the backend.
+for symbol in \
+  'declaringType == typeof(PlacedObject.LightSourceData)' \
+  'string.Equals(name, "strength", StringComparison.Ordinal)' \
+  'string.Equals(name, "blinkRate", StringComparison.Ordinal)' \
+  'Mathf.Clamp(value.X, binding.Min, binding.Max)' \
+  'HasRange = binding.HasRange'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Native LightSource inspector range contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
 if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
