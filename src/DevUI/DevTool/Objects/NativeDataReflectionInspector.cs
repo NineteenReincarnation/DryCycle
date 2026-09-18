@@ -369,6 +369,44 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             min = 0f;
             max = 1f;
             step = 0.01f;
+            return;
+        }
+
+        if ((declaringType == typeof(PlacedObject.EnergySwirlData) &&
+             string.Equals(name, "depth", StringComparison.Ordinal)) ||
+            (declaringType == typeof(PlacedObject.SnowSourceData) &&
+             (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+              string.Equals(name, "noisiness", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.LocalBlizzardData) &&
+             (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+              string.Equals(name, "scale", StringComparison.Ordinal) ||
+              string.Equals(name, "angle", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.CellDistortionData) &&
+             (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+              string.Equals(name, "scale", StringComparison.Ordinal) ||
+              string.Equals(name, "chromaticIntensity", StringComparison.Ordinal) ||
+              string.Equals(name, "timeMult", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.LightningMachineData) &&
+             (string.Equals(name, "chance", StringComparison.Ordinal) ||
+              string.Equals(name, "width", StringComparison.Ordinal) ||
+              string.Equals(name, "intensity", StringComparison.Ordinal) ||
+              string.Equals(name, "lifeTime", StringComparison.Ordinal) ||
+              string.Equals(name, "lightningParam", StringComparison.Ordinal) ||
+              string.Equals(name, "lightningType", StringComparison.Ordinal) ||
+              string.Equals(name, "volume", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.AdjustableFanData) &&
+             (string.Equals(name, "speed", StringComparison.Ordinal) ||
+              string.Equals(name, "scale", StringComparison.Ordinal) ||
+              string.Equals(name, "depth", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.HarmfulSteamData) &&
+             (string.Equals(name, "duration", StringComparison.Ordinal) ||
+              string.Equals(name, "frequency", StringComparison.Ordinal) ||
+              string.Equals(name, "lifetime", StringComparison.Ordinal))))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
         }
     }
 
@@ -385,7 +423,12 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                  declaringType == typeof(PlacedObject.LightSourceData) ||
                  declaringType == typeof(PlacedObject.HarmfulSteamData) ||
                  declaringType == typeof(PlacedObject.PomegranateData) ||
-                 declaringType == typeof(PlacedObject.SkyWhalePathfindingData)))
+                 declaringType == typeof(PlacedObject.SkyWhalePathfindingData) ||
+                 declaringType == typeof(PlacedObject.EnergySwirlData) ||
+                 declaringType == typeof(PlacedObject.SteamPipeData) ||
+                 declaringType == typeof(PlacedObject.SnowSourceData) ||
+                 declaringType == typeof(PlacedObject.LocalBlizzardData) ||
+                 declaringType == typeof(PlacedObject.CellDistortionData)))
                 return EditorPropertyGizmoHint.RelativePoint;
 
             if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
