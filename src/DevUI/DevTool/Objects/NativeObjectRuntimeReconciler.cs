@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using DryCycle.DevUI.DevTool.Core;
 
 namespace DryCycle.DevUI.DevTool.Objects;
@@ -10,6 +11,30 @@ namespace DryCycle.DevUI.DevTool.Objects;
 /// </summary>
 internal static class NativeObjectRuntimeReconciler
 {
+    private sealed class LightBinding
+    {
+        internal LightSource Runtime;
+    }
+
+    private static ConditionalWeakTable<PlacedObject, LightBinding> lightBindings = new();
+
+    internal static void ResetRuntimeState()
+    {
+        lightBindings = new ConditionalWeakTable<PlacedObject, LightBinding>();
+    }
+
+    internal static void PrepareForMutation(EditorSession session, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.LightSourceData)
+            return;
+
+        global::Room room = session?.Room;
+        if (room == null)
+            return;
+
+        EnsureLightSourceRuntime(room, target, createIfMissing: true);
+    }
+
     internal static void RefreshAfterMutation(EditorSession session, PlacedObject target)
     {
         if (target == null) return;
@@ -27,6 +52,7 @@ internal static class NativeObjectRuntimeReconciler
         if (room == null) return;
 
         EnsureRuntimePresence(room, target);
+        SyncLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.WaterFlowData)
         {
@@ -166,6 +192,7 @@ internal static class NativeObjectRuntimeReconciler
         }
 
         RemoveWaterMembership(room, target);
+        RemoveLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.SpawnMigrationStreamData streamData &&
             room.updateList != null)
@@ -289,6 +316,110 @@ internal static class NativeObjectRuntimeReconciler
                 }
             }
         }
+    }
+
+    private static void SyncLightSourceRuntime(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.LightSourceData data)
+            return;
+
+        LightSource light = EnsureLightSourceRuntime(room, target, createIfMissing: true);
+        if (light == null)
+            return;
+
+        bool enteringNightMode = !light.nightLight && data.nightLight;
+
+        light.setPos = target.pos;
+        light.setRad = data.Rad;
+        light.setAlpha = data.strength;
+        light.fadeWithSun = data.fadeWithSun;
+        light.color = Color.white;
+        light.colorFromEnvironment = data.colorType == PlacedObject.LightSourceData.ColorType.Environment;
+        light.flat = data.flat;
+        light.effectColor = Math.Max(-1, (int)data.colorType - 2);
+        light.setBlinkProperties(data.blinkType, data.blinkRate);
+        light.nightLight = data.nightLight;
+
+        if (enteringNightMode)
+            light.nightFade = 0f;
+    }
+
+    private static LightSource EnsureLightSourceRuntime(
+        global::Room room,
+        PlacedObject target,
+        bool createIfMissing)
+    {
+        if (room == null || target?.data is not PlacedObject.LightSourceData)
+            return null;
+
+        LightBinding binding = lightBindings.GetValue(target, _ => new LightBinding());
+        if (binding.Runtime != null &&
+            ReferenceEquals(binding.Runtime.room, room) &&
+            !binding.Runtime.slatedForDeletetion)
+            return binding.Runtime;
+
+        binding.Runtime = FindExistingLightSource(room, target.pos);
+        if (binding.Runtime != null || !createIfMissing)
+            return binding.Runtime;
+
+        try
+        {
+            LightSource created = new(
+                target.pos,
+                environmentalLight: true,
+                Color.white,
+                tiedToObject: null);
+            room.AddObject(created);
+            binding.Runtime = created;
+            return created;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native LightSource runtime creation failed: " + error.Message);
+            return null;
+        }
+    }
+
+    private static LightSource FindExistingLightSource(global::Room room, Vector2 position)
+    {
+        if (room?.lightSources != null)
+        {
+            for (int i = 0; i < room.lightSources.Count; i++)
+            {
+                LightSource light = room.lightSources[i];
+                if (light != null && !light.slatedForDeletetion && light.Pos == position)
+                    return light;
+            }
+        }
+
+        if (ModManager.MMF && room?.cosmeticLightSources != null)
+        {
+            for (int i = 0; i < room.cosmeticLightSources.Count; i++)
+            {
+                LightSource light = room.cosmeticLightSources[i];
+                if (light != null && !light.slatedForDeletetion && light.Pos == position)
+                    return light;
+            }
+        }
+
+        return null;
+    }
+
+    private static void RemoveLightSourceRuntime(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.LightSourceData)
+            return;
+
+        LightSource light = EnsureLightSourceRuntime(room, target, createIfMissing: false);
+        lightBindings.Remove(target);
+        if (light == null)
+            return;
+
+        try { light.Destroy(); }
+        catch { }
+        try { room.RemoveObject(light); }
+        catch { }
     }
 
     private static void EnsureSimpleRoomRuntime(global::Room room, PlacedObject target)
