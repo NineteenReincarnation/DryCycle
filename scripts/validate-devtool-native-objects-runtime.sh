@@ -131,9 +131,14 @@ for symbol in \
     exit 1
   fi
 done
-if ! grep -Fq '[ModuleInitializer]' "$bootstrap" ||
-   ! grep -Fq 'ObjectInspectorRegistry.Register(NativeDataReflectionInspector.Instance, -1000);' "$bootstrap"; then
-  echo "Native reflected object inspector is no longer registered below explicit typed adapters." >&2
+if ! grep -Fq 'internal static void Enable()' "$bootstrap" ||
+   ! grep -Fq 'ObjectInspectorRegistry.Register(NativeDataReflectionInspector.Instance, -1000);' "$bootstrap" ||
+   ! grep -Fq 'NativeObjectInspectorBootstrap.Enable();' "$root/Core/DevToolRuntime.cs"; then
+  echo "Native reflected object inspector is no longer registered below explicit typed adapters from the DevTool runtime lifecycle." >&2
+  exit 1
+fi
+if grep -Fq '[ModuleInitializer]' "$bootstrap"; then
+  echo "Native object inspector bootstrap regained a ModuleInitializer dependency; net48 runtime activation must stay explicit." >&2
   exit 1
 fi
 
