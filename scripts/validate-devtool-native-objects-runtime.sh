@@ -705,6 +705,20 @@ if ! grep -Fq 'typeof(PlacedObject.RippleTreeData)' "$reflection" ||
   exit 1
 fi
 
+# CollectToken player availability is a persisted builtin list just like Filter. Hidden/unplayable
+# slugcats remain excluded because CollectTokenData.ToString() does not persist them.
+for symbol in \
+  'target?.data is CollectToken.CollectTokenData' \
+  '"builtin.collectToken.player."' \
+  'TrySetCollectTokenPlayer' \
+  'SlugcatStats.HiddenOrUnplayableSlugcat(name)' \
+  'SetMembership(data.availableToPlayers, name, value.Boolean);'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "CollectToken native player availability regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
