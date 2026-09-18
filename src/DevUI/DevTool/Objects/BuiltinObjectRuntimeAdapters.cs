@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
+using RWCustom;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
