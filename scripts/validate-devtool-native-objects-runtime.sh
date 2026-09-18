@@ -195,6 +195,26 @@ if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, targe
   exit 1
 fi
 
+# Representation constructors used to create several gameplay/runtime objects as a side effect.
+# Native object creation/deletion/history must now own that membership explicitly.
+for symbol in \
+  'EnsureRuntimePresence(room, target);' \
+  'room.AddObject(new LocalTerrainCurve(room, localTerrain));' \
+  'room.AddObject(new CurvedSlope(room, localTerrain));' \
+  'room.AddObject(new VoidSpawnMigrationStream(room, streamData));' \
+  'internal static void RemoveRuntime(EditorSession session, PlacedObject target)'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "Native object runtime membership reconciliation is incomplete: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'NativeObjectRuntimeReconciler.RemoveRuntime(session, target);' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RemoveRuntime(session, selected[i]);' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RemoveRuntime(session, target);' "$root/History/PlacedObjectHistory.cs"; then
+  echo "Native object deletion/history no longer removes representation-owned runtime state." >&2
+  exit 1
+fi
+
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
 if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
