@@ -171,6 +171,38 @@ public static class NativeObjectGizmoEditCommandQueue
             ApplyWaterCurrent(target, water, command))
             return true;
 
+        if (target.data is WaterCutoffData waterCutoff &&
+            command.HandleId == "waterCutoff:end")
+        {
+            Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
+            if (!command.Snap)
+                relative.y = 0f;
+            waterCutoff.handlePos = relative;
+            return true;
+        }
+
+        if (target.data is AirPocketData airPocket)
+        {
+            if (command.HandleId == "airPocket:corner")
+            {
+                airPocket.handlePos = new Vector2(command.X, command.Y) - target.pos;
+                return true;
+            }
+
+            if (command.HandleId == "airPocket:waterLevel")
+            {
+                airPocket.waterLevel = command.Y - target.pos.y;
+                return true;
+            }
+        }
+
+        if (target.data is MudPit.MudPitData mudPit &&
+            command.HandleId == "mudPit:decalSize")
+        {
+            mudPit.decalSize = command.X - target.pos.x;
+            return true;
+        }
+
         if (target.data is PlacedObject.LocalTerrainData localTerrain &&
             command.HandleId == "localTerrain:bottom")
         {
