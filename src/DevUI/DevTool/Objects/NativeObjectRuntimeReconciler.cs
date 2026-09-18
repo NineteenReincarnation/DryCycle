@@ -90,6 +90,11 @@ internal static class NativeObjectRuntimeReconciler
             RefreshTerrainRubble(room);
         }
 
+        if (target.data is PlacedObject.RippleStalkData rippleData)
+        {
+            rippleData.update = true;
+        }
+
         if (target.data is PlacedObject.TerrainHandleData)
         {
             try
