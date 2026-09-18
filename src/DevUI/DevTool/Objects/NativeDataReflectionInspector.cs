@@ -525,6 +525,67 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(Watcher.UrbanLife.UrbanLifeData) &&
+            (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+             string.Equals(name, "nLayers", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(Watcher.UrbanLifePath.UrbanLifePathData) &&
+            string.Equals(name, "density", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(Watcher.UrbanCandleHolder.UrbanCandleHolderData))
+        {
+            if (string.Equals(name, "height", StringComparison.Ordinal) ||
+                string.Equals(name, "scale", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 8f;
+                step = 0.01f;
+                return;
+            }
+
+            if (string.Equals(name, "depth", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1f;
+                step = 0.01f;
+                return;
+            }
+
+            if (string.Equals(name, "tilt", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 0.8f;
+                step = 0.01f;
+                return;
+            }
+
+            if (string.Equals(name, "candleWidth", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 2f;
+                step = 0.01f;
+                return;
+            }
+        }
+
         if (declaringType == typeof(Watcher.BigSkyWhaleSpawner.Data))
         {
             if (string.Equals(name, "minDelay", StringComparison.Ordinal) ||
