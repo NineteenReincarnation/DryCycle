@@ -172,6 +172,21 @@ public static class NativeObjectGizmoEditCommandQueue
             ApplyWaterCurrent(target, water, command))
             return true;
 
+        if (target.data is PlacedObject.LightningMachineData lightning)
+        {
+            if (command.HandleId == "lightning:start")
+            {
+                lightning.startPoint = new Vector2(command.X, command.Y) - target.pos;
+                return true;
+            }
+
+            if (command.HandleId == "lightning:end")
+            {
+                lightning.endPoint = new Vector2(command.X, command.Y) - target.pos;
+                return true;
+            }
+        }
+
         if (ModManager.Watcher &&
             target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
             target.data is PlacedObject.ResizableObjectData weaver &&
