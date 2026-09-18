@@ -355,8 +355,9 @@ internal static class BuiltinObjectRuntimeAdapters
     }
 
     private static int DesiredUrbanLifeLayerCount(Watcher.UrbanLife.UrbanLifeData data) =>
-        Mathf.Max(1, Mathf.RoundToInt(
-            Mathf.Clamp01(data?.nLayers ?? 0f) * Watcher.UrbanLife.maxLayers));
+        (int)Mathf.Max(
+            1f,
+            Mathf.Clamp01(data?.nLayers ?? 0f) * Watcher.UrbanLife.maxLayers);
 
     private static void EnsureUrbanLifePathRuntime(
         global::Room room,
