@@ -178,6 +178,22 @@ public static class NativeObjectGizmoEditCommandQueue
             return true;
         }
 
+        if (target.data is PlacedObject.SuperSlopeData superSlope &&
+            command.HandleId == "superSlope:bottom")
+        {
+            superSlope.bottom = Mathf.Max(10f, target.pos.y - command.Y);
+            return true;
+        }
+
+        if (target.data is PlacedObject.WaterFlowData waterFlow &&
+            command.HandleId == "waterFlow:width")
+        {
+            waterFlow.width = Mathf.Max(
+                Mathf.RoundToInt((command.X - target.pos.x) / 20f),
+                1);
+            return true;
+        }
+
         if (target.data is PlacedObject.SplineObjectData splineData &&
             splineData.spline != null &&
             ApplySpline(target, splineData.spline, command))
