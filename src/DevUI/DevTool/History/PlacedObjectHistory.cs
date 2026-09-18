@@ -137,18 +137,18 @@ public sealed class PlacedObjectState
     /// </summary>
     internal static void RefreshCompatibilityPage(EditorSession session)
     {
-        global::DevInterface.Page page = session?.Owner?.activePage;
-        if (page == null) return;
-
-        if (page is global::DevInterface.ObjectsPage)
+        // Native Objects has no materialized page to invalidate. When explicit Vanilla/Legacy owns
+        // an ObjectsPage, the compatibility bridge refreshes it; unrelated legacy pages keep their
+        // existing deferred-refresh behavior.
+        if (session?.ToolMode == EditorToolMode.Objects)
         {
-            page.Refresh();
+            NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session);
             return;
         }
 
-        if (LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+        global::DevInterface.Page page = session?.Owner?.activePage;
+        if (page == null || LegacyDevUiQuiescenceController.TryDeferRefresh(session))
             return;
-
         page.Refresh();
     }
 
