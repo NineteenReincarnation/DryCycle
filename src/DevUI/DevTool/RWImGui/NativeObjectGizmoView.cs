@@ -67,6 +67,7 @@ internal static class NativeObjectGizmoView
         Num.Vector2 mouse = io.MousePos;
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
 
+        DrawLines(draw, viewport, display, gizmo.Lines);
         CurveCandidate nearestCurve = DrawCurves(draw, viewport, display, gizmo.BezierSegments, mouse);
         HandleCandidate nearestHandle = DrawHandles(draw, viewport, display, gizmo.Handles, mouse);
 
@@ -155,6 +156,24 @@ internal static class NativeObjectGizmoView
             drag.ObjectIndex,
             drag.HandleId));
         drag = default;
+    }
+
+    private static void DrawLines(
+        ImDrawListPtr draw,
+        EditorViewportSnapshot viewport,
+        Num.Vector2 display,
+        EditorObjectLineSegmentSnapshot[] lines)
+    {
+        if (lines == null) return;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            EditorObjectLineSegmentSnapshot line = lines[i];
+            if (line == null) continue;
+            Num.Vector2 a = WorldToScreen(viewport, display, line.X0, line.Y0);
+            Num.Vector2 b = WorldToScreen(viewport, display, line.X1, line.Y1);
+            draw.AddLine(a, b, RegionColor(), 1.2f);
+        }
     }
 
     private static HandleCandidate DrawHandles(
@@ -302,6 +321,9 @@ internal static class NativeObjectGizmoView
 
     private static uint CurveColor() =>
         ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.40f, 0.83f, 0.94f, 0.78f));
+
+    private static uint RegionColor() =>
+        ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.32f, 0.68f, 0.96f, 0.62f));
 
     private static void CancelIfOrphaned()
     {
