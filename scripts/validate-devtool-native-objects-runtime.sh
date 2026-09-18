@@ -4,6 +4,7 @@ set -euo pipefail
 root="src/DevUI/DevTool"
 reflection="$root/Objects/NativeDataReflectionInspector.cs"
 bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
+runtime_reconciler="$root/Objects/NativeObjectRuntimeReconciler.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
 removed_controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
@@ -18,7 +19,7 @@ geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
+for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
             "$geometry_frontend" "$pages" "$backend" "$geometry_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -118,7 +119,7 @@ for symbol in \
   'EditorContinuousTransactionHub.Commit' \
   'EditorContinuousTransactionHub.Cancel' \
   'ObjectInspectorRegistry.TrySetValue' \
-  'target.data?.RefreshLiveVisuals()' \
+  'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' \
   'ObjectPresentationChangeHintHub.MarkMember'; do
   if ! grep -Fq "$symbol" "$geometry_backend"; then
     echo "Native object geometry backend lost transaction/model behavior: $symbol" >&2
@@ -128,6 +129,26 @@ done
 if ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Process(session);' "$coordinator" ||
    ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Clear();' "$coordinator"; then
   echo "Native object geometry queue is not owned by the backend coordinator lifetime." >&2
+  exit 1
+fi
+
+# Representation-specific model/runtime side effects move into native services. TerrainHandle is
+# the first required contract: any position/geometry/history mutation must update TerrainCurve.
+for symbol in \
+  'target.data is not PlacedObject.TerrainHandleData' \
+  'TerrainManager.ITerrain' \
+  'terrain is TerrainCurve curve' \
+  'curve.UpdateHandles();'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "Native object runtime reconciler lost TerrainHandle behavior: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$geometry_backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$root/History/PlacedObjectHistory.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' "$root/Commands/EditorActions.cs"; then
+  echo "Native object mutations no longer converge on the runtime side-effect reconciler." >&2
   exit 1
 fi
 
