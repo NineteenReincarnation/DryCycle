@@ -134,6 +134,7 @@ for symbol in \
   'WaterCurrent.WaterCurrentData' \
   'PlacedObject.SplineObjectData' \
   'EditorObjectGizmoHandleSnapshot' \
+  'EditorObjectLineSegmentSnapshot' \
   'EditorObjectBezierSegmentSnapshot' \
   'Id = "property:" + property.Key' \
   '"water:end"' \
@@ -142,7 +143,11 @@ for symbol in \
   '"spline:mid:" + i + ":pos"' \
   '"localTerrain:bottom"' \
   '"superSlope:bottom"' \
-  '"waterFlow:width"'; do
+  '"waterFlow:width"' \
+  '"waterCutoff:end"' \
+  '"airPocket:corner"' \
+  '"airPocket:waterLevel"' \
+  '"mudPit:decalSize"'; do
   if ! grep -Fq "$symbol" "$gizmo_presentation"; then
     echo "Native object gizmo presentation lost a verified primitive mapping: $symbol" >&2
     exit 1
@@ -155,6 +160,19 @@ for symbol in \
   'Mathf.RoundToInt((command.X - target.pos.x) / 20f)'; do
   if ! grep -Fq "$symbol" "$object_gizmo_backend"; then
     echo "SuperSlope/WaterFlow native gizmo behavior regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
+for symbol in \
+  'command.HandleId == "waterCutoff:end"' \
+  'if (!command.Snap)' \
+  'relative.y = 0f;' \
+  'command.HandleId == "airPocket:corner"' \
+  'command.HandleId == "airPocket:waterLevel"' \
+  'command.HandleId == "mudPit:decalSize"'; do
+  if ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "WaterCutoff/AirPocket/MudPit native gizmo behavior regressed: $symbol" >&2
     exit 1
   fi
 done
@@ -180,6 +198,12 @@ done
 if ! grep -Fq 'NativeObjectGizmoEditCommandQueue.Process(session);' "$coordinator" ||
    ! grep -Fq 'NativeObjectGizmoEditCommandQueue.Clear();' "$coordinator"; then
   echo "Unified object gizmo queue is not owned by the backend coordinator lifetime." >&2
+  exit 1
+fi
+
+if ! grep -Fq 'DrawLines(draw, viewport, display, gizmo.Lines);' "$object_gizmo_frontend" ||
+   ! grep -Fq 'EditorObjectLineSegmentSnapshot[] lines' "$object_gizmo_frontend"; then
+  echo "Unified object gizmo frontend lost detached line rendering." >&2
   exit 1
 fi
 
@@ -212,10 +236,17 @@ fi
 # Native object creation/deletion/history must now own that membership explicitly.
 for symbol in \
   'EnsureRuntimePresence(room, target);' \
+  'EnsureWaterMembership(room, target);' \
+  'EnsureSimpleRoomRuntime(room, target);' \
   'room.AddObject(new LocalTerrainCurve(room, localTerrain));' \
   'room.AddObject(new CurvedSlope(room, localTerrain));' \
   'room.AddObject(new VoidSpawnMigrationStream(room, streamData));' \
   'room.AddObject(new SuperSlope(room, superSlope));' \
+  'room.AddObject(new Geyser(target));' \
+  'room.AddObject(new MudPit(target));' \
+  'water.MainSurface.waterCutoffs.Add(target);' \
+  'new Water.AirPocketSurface(water, target)' \
+  'RemoveWaterMembership(room, target);' \
   'target.data is PlacedObject.WaterFlowData' \
   'Mathf.Round(target.pos.x / 20f) * 20f' \
   'slope.thickness = superSlope.bottom;' \
