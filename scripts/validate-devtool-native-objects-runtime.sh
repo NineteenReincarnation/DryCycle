@@ -423,8 +423,8 @@ for symbol in \
   'new AdjustableFan(target, room)' \
   'new HarmfulSteam(target, room)' \
   'new SkyWhalePathfindingNode(target, room)' \
-  'runtime is AdjustableFan adjustableFan' \
-  'DestroyRuntime(room, adjustableFan.FanElement)'; do
+  'runtime is SpinningFan spinningFan' \
+  'DestroyRuntime(room, spinningFan.FanElement)'; do
   if ! grep -Fq "$symbol" "$runtime_adapters"; then
     echo "Direct-reference builtin runtime coverage regressed: $symbol" >&2
     exit 1
@@ -446,6 +446,30 @@ for symbol in \
   'coordinator.swarms.RemoveAt(i);'; do
   if ! grep -Fq "$symbol" "$runtime_adapters"; then
     echo "Native InsectGroup swarm ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
+for symbol in \
+  'EnsureCommonLinkedRuntime(room, target)' \
+  'new PlayerPushback(room, target)' \
+  'new WaterCurrent(target)' \
+  'new FluxDrain(room, target)' \
+  'new HugeTurbine(target, room)' \
+  'new ReliableIggyDirection(target)' \
+  'new ARKillRect(room, target)' \
+  'new SpotLight(target)' \
+  'new GravityDisruptor(target, room)' \
+  'runtime is PlayerPushback pushback' \
+  'runtime is WaterCurrent current' \
+  'runtime is FluxDrain drain' \
+  'runtime is SpinningFan fanRuntime' \
+  'runtime is ReliableIggyDirection iggy' \
+  'runtime is ARKillRect killRect' \
+  'runtime is SpotLight spot' \
+  'runtime is GravityDisruptor disruptor'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "Common linked builtin runtime coverage regressed: $symbol" >&2
     exit 1
   fi
 done
