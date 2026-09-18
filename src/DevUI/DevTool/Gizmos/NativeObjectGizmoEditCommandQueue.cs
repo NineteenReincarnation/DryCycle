@@ -345,7 +345,6 @@ public static class NativeObjectGizmoEditCommandQueue
         if (before == null || mutation == null || !mutation())
             return;
 
-        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
         MarkChanged(session, target);
 
         IEditorStateSnapshot after = before.CaptureCurrent(session);
