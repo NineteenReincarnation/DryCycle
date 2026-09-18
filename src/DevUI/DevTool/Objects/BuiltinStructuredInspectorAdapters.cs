@@ -30,7 +30,8 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is RainbowNoFade.RainbowNoFadeData ||
             target?.data is PlacedObject.RippleStalkData ||
             target?.data is PlacedObject.FilterData ||
-            target?.data is ReliableIggyDirection.ReliableIggyDirectionData;
+            target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
+            target?.data is CollectToken.CollectTokenData;
 
         public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target)
         {
@@ -68,6 +69,9 @@ internal static class BuiltinStructuredInspectorAdapters
                 case ReliableIggyDirection.ReliableIggyDirectionData direction:
                     AppendReliableDirectionPlayers(result, direction);
                     break;
+                case CollectToken.CollectTokenData token:
+                    AppendCollectTokenPlayers(result, token);
+                    break;
             }
 
             return result;
@@ -100,6 +104,10 @@ internal static class BuiltinStructuredInspectorAdapters
 
             if (target.data is ReliableIggyDirection.ReliableIggyDirectionData direction &&
                 TrySetReliableDirectionPlayer(direction, key, value))
+                return true;
+
+            if (target.data is CollectToken.CollectTokenData token &&
+                TrySetCollectTokenPlayer(token, key, value))
                 return true;
 
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
@@ -446,6 +454,52 @@ internal static class BuiltinStructuredInspectorAdapters
                 return false;
 
             SlugcatStats.Name name = new(entry);
+            data.availableToPlayers ??= new List<SlugcatStats.Name>();
+            SetMembership(data.availableToPlayers, name, value.Boolean);
+            return true;
+        }
+
+        private static void AppendCollectTokenPlayers(
+            List<EditorPropertySnapshot> result,
+            CollectToken.CollectTokenData data)
+        {
+            if (data == null) return;
+
+            for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.Count; i++)
+            {
+                string entry = ExtEnum<SlugcatStats.Name>.values.GetEntry(i);
+                SlugcatStats.Name name = new(entry);
+                if (SlugcatStats.HiddenOrUnplayableSlugcat(name))
+                    continue;
+
+                result.Add(Boolean(
+                    "builtin.collectToken.player." + entry,
+                    entry,
+                    data.availableToPlayers?.Contains(name) == true,
+                    "Player Availability"));
+            }
+        }
+
+        private static bool TrySetCollectTokenPlayer(
+            CollectToken.CollectTokenData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            const string prefix = "builtin.collectToken.player.";
+            if (data == null ||
+                value.Kind != EditorPropertyKind.Boolean ||
+                string.IsNullOrEmpty(key) ||
+                !key.StartsWith(prefix, StringComparison.Ordinal))
+                return false;
+
+            string entry = key.Substring(prefix.Length);
+            if (string.IsNullOrEmpty(entry))
+                return false;
+
+            SlugcatStats.Name name = new(entry);
+            if (SlugcatStats.HiddenOrUnplayableSlugcat(name))
+                return false;
+
             data.availableToPlayers ??= new List<SlugcatStats.Name>();
             SetMembership(data.availableToPlayers, name, value.Boolean);
             return true;
