@@ -5,6 +5,7 @@ root="src/DevUI/DevTool"
 reflection="$root/Objects/NativeDataReflectionInspector.cs"
 bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
 runtime_reconciler="$root/Objects/NativeObjectRuntimeReconciler.cs"
+runtime_adapters="$root/Objects/BuiltinObjectRuntimeAdapters.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
 removed_controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
@@ -22,7 +23,7 @@ removed_geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
+for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$runtime_adapters" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
             "$object_gizmo_frontend" "$gizmo_presentation" "$pages" "$backend" "$object_gizmo_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -347,6 +348,40 @@ for symbol in \
     exit 1
   fi
 done
+
+# Representation-created visual/gameplay runtimes are isolated behind builtin runtime adapters
+# instead of growing NativeObjectRuntimeReconciler into another CreateObjRep switch.
+if ! grep -Fq 'BuiltinObjectRuntimeAdapters.Refresh(room, target);' "$runtime_reconciler" ||
+   ! grep -Fq 'BuiltinObjectRuntimeAdapters.Remove(room, target);' "$runtime_reconciler"; then
+  echo "Builtin runtime adapters are no longer connected to the native object runtime boundary." >&2
+  exit 1
+fi
+for symbol in \
+  'target.type == PlacedObject.Type.CustomDecal' \
+  'runtime.UpdateAsset();' \
+  'runtime.UpdateMesh();' \
+  'target.type == PlacedObject.Type.GooDrips' \
+  'runtime.RefreshCeilingTiles();' \
+  'target.type == PlacedObject.Type.Rainbow' \
+  'target.type == PlacedObject.Type.RainbowNoFade' \
+  'runtime.Refresh();' \
+  'target.type == PlacedObject.Type.SSLightRod' \
+  'runtime.UpdateLightAmount();' \
+  'target.type == PlacedObject.Type.PlateTree' \
+  'target.type == PlacedObject.Type.RotPlateTree' \
+  'runtime.Reset();' \
+  'target.type == PlacedObject.Type.DeepProcessing' \
+  'runtime.meshDirty = true;' \
+  'customDecal.RoomUnloaded();'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "Builtin visual runtime adapter coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectRepresentation' "$runtime_adapters"; then
+  echo "Builtin runtime adapters regained DevInterface dependencies." >&2
+  exit 1
+fi
 
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
