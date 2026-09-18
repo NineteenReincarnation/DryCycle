@@ -267,7 +267,6 @@ internal static class LegacyUiPresentationController
         // Restore temporarily hidden legacy visuals and clear Compatibility-owned caches first.
         // Reset removes this lifetime hook; Apply installs it again on the next DevUI lifetime.
         Reset();
-        ObjectGizmoPresentationController.Reset();
 
         // Queue/Presentation/State/Revision/Session ownership is centralized here rather than
         // duplicated in the dormant compatibility path and DevToolRuntime.Disable().
