@@ -171,6 +171,26 @@ public static class NativeObjectGizmoEditCommandQueue
             ApplyWaterCurrent(target, water, command))
             return true;
 
+        if (ModManager.Watcher &&
+            target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
+            target.data is PlacedObject.ResizableObjectData weaver &&
+            command.HandleId == "weaver:direction")
+        {
+            Vector2 direction = new Vector2(command.X, command.Y) - target.pos;
+            if (direction.sqrMagnitude <= 0.0001f)
+                direction = Vector2.up;
+            weaver.handlePos = direction.normalized * 460f;
+            return true;
+        }
+
+        if (ModManager.Watcher &&
+            target.data is LobeTree.LobeTreeData lobeTree &&
+            command.HandleId == "lobeTree:root")
+        {
+            lobeTree.rootOffset = new Vector2(command.X, command.Y) - target.pos;
+            return true;
+        }
+
         if (target.data is WaterCutoffData waterCutoff &&
             command.HandleId == "waterCutoff:end")
         {
