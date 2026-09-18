@@ -36,7 +36,7 @@ internal static class DevToolSubsystemCoordinator
         SoundEditorCommandQueue.Process(session);
         TriggerEditorCommandQueue.Process(session);
         NativeGizmoCommandQueue.Process(session);
-        NativeObjectGeometryGizmoCommandQueue.Process(session);
+        NativeObjectGizmoEditCommandQueue.Process(session);
         MapEditorCommandQueue.Process(session);
         if (PlayerMapActivityGate.ShouldProcess)
         {
@@ -116,7 +116,7 @@ internal static class DevToolSubsystemCoordinator
         SoundEditorCommandQueue.Clear();
         TriggerEditorCommandQueue.Clear();
         NativeGizmoCommandQueue.Clear();
-        NativeObjectGeometryGizmoCommandQueue.Clear();
+        NativeObjectGizmoEditCommandQueue.Clear();
         MapEditorCommandQueue.Clear();
         PlayerMapCommandQueue.Clear();
         DialogEditorCommandQueue.Clear();
