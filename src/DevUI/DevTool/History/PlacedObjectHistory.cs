@@ -27,6 +27,7 @@ public sealed class PlacedObjectState
     private readonly string[] unrecognizedAttributes;
     private readonly PlacedObject.Data dataReference;
     private readonly string dataSerialized;
+    private readonly BuiltinObjectAuthoringStateSnapshot authoringState;
     private readonly string fingerprint;
 
     private PlacedObjectState(RoomSettings settings, PlacedObject target)
@@ -42,6 +43,7 @@ public sealed class PlacedObjectState
         unrecognizedAttributes = Clone(target?.unrecognizedAttributes);
         dataReference = target?.data;
         dataSerialized = target?.data?.ToString() ?? string.Empty;
+        authoringState = BuiltinObjectAuthoringStateSnapshot.Capture(target?.data);
         fingerprint = BuildFingerprint();
     }
 
@@ -127,7 +129,9 @@ public sealed class PlacedObjectState
         if (dataReference != null)
         {
             dataReference.owner = target;
+            authoringState?.PrepareSerializedRestore(dataReference);
             dataReference.FromString(dataSerialized);
+            authoringState?.Restore(dataReference);
             try { dataReference.RefreshLiveVisuals(); }
             catch (Exception error)
             {
@@ -171,7 +175,8 @@ public sealed class PlacedObjectState
             .Append(pos.y.ToString("R", CultureInfo.InvariantCulture)).Append('|')
             .Append(active ? '1' : '0').Append(deactivatedByWarpFilter ? '1' : '0').Append(save ? '1' : '0').Append('|')
             .Append(dataReference == null ? 0 : RuntimeHelpers.GetHashCode(dataReference)).Append('|')
-            .Append(dataSerialized).Append('|');
+            .Append(dataSerialized).Append('|')
+            .Append(authoringState?.Fingerprint ?? string.Empty).Append('|');
 
         if (unrecognizedAttributes != null)
         {
