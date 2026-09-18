@@ -333,6 +333,20 @@ for symbol in \
   fi
 done
 
+for symbol in \
+  'declaringType == typeof(PlacedObject.LightFixtureData)' \
+  'string.Equals(name, "randomSeed", StringComparison.Ordinal)' \
+  'max = 100f;' \
+  'string.Equals(name, "impact", StringComparison.Ordinal)' \
+  'max = 3f;' \
+  'string.Equals(name, "soundType", StringComparison.Ordinal)' \
+  'int integerValue = binding.HasRange'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Native LightFixture/Lightning integer range contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Runtime objects previously created by LightBeam/BlackSpot/Wind representations are native-owned.
 for symbol in \
   'target.type == PlacedObject.Type.LightBeam' \
@@ -391,6 +405,34 @@ for symbol in \
 done
 if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectRepresentation' "$runtime_adapters"; then
   echo "Builtin runtime adapters regained DevInterface dependencies." >&2
+  exit 1
+fi
+
+# Builtin runtimes that retain the authored PlacedObject are reconstructed directly from model
+# state; LightFixture additionally snapshots constructor-only type/randomSeed before mutation.
+for symbol in \
+  'private sealed class LightFixtureState' \
+  'internal static void Prepare(global::Room room, PlacedObject target)' \
+  'EnsureLightFixtureRuntime(room, target);' \
+  'new Redlight(room, target, data)' \
+  'new HolyFire(room, target, data)' \
+  'new ZapCoilLight(room, target, data)' \
+  'new DeepProcessingLight(room, target, data)' \
+  'new SlimeMoldLight(room, target, data)' \
+  'new GlowWeedLight(room, target, data)' \
+  'new AdjustableFan(target, room)' \
+  'new HarmfulSteam(target, room)' \
+  'new SkyWhalePathfindingNode(target, room)' \
+  'runtime is AdjustableFan adjustableFan' \
+  'DestroyRuntime(room, adjustableFan.FanElement)'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "Direct-reference builtin runtime coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'BuiltinObjectRuntimeAdapters.Prepare(room, target);' "$runtime_reconciler" ||
+   ! grep -Fq 'BuiltinObjectRuntimeAdapters.ResetRuntimeState();' "$runtime_reconciler"; then
+  echo "Direct-reference runtime constructor-state lifecycle is no longer wired." >&2
   exit 1
 fi
 
