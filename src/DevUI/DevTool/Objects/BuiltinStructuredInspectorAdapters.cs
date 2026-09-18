@@ -31,7 +31,8 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is PlacedObject.RippleStalkData ||
             target?.data is PlacedObject.FilterData ||
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
-            target?.data is CollectToken.CollectTokenData;
+            target?.data is CollectToken.CollectTokenData ||
+            ModManager.Watcher && target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData;
 
         public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target)
         {
@@ -44,7 +45,10 @@ internal static class BuiltinStructuredInspectorAdapters
             for (int i = 0; i < reflected.Count; i++)
             {
                 EditorPropertySnapshot property = reflected[i];
-                if (property == null || IsReplacedStructuredProperty(property.Key))
+                if (property == null ||
+                    IsReplacedStructuredProperty(property.Key) ||
+                    target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData &&
+                    IsUrbanCandlePlacerManagedProperty(property.Key))
                     continue;
                 result.Add(property);
             }
@@ -71,6 +75,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case CollectToken.CollectTokenData token:
                     AppendCollectTokenPlayers(result, token);
+                    break;
+                case Watcher.UrbanCandlePlacer.UrbanCandlePlacerData:
+                    AppendUrbanCandlePlacerActions(result);
                     break;
             }
 
@@ -111,6 +118,32 @@ internal static class BuiltinStructuredInspectorAdapters
                 return true;
 
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
+        }
+
+        private static void AppendUrbanCandlePlacerActions(
+            List<EditorPropertySnapshot> result)
+        {
+            result.Add(Action(
+                "builtin.urbanCandles.spawn",
+                "Spawn Candles",
+                "Candle Brush"));
+            result.Add(Action(
+                "builtin.urbanCandles.remove",
+                "Remove Candles",
+                "Candle Brush"));
+            result.Add(Action(
+                "builtin.urbanCandles.removeAll",
+                "Remove All Candles",
+                "Candle Brush"));
+        }
+
+        private static bool IsUrbanCandlePlacerManagedProperty(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            return key.EndsWith(".placedCandles", StringComparison.Ordinal) ||
+                   key.EndsWith(".candles", StringComparison.Ordinal) ||
+                   key.EndsWith(".radius", StringComparison.Ordinal) ||
+                   key.EndsWith(".pos", StringComparison.Ordinal);
         }
 
         private static bool IsReplacedStructuredProperty(string key)
@@ -516,6 +549,19 @@ internal static class BuiltinStructuredInspectorAdapters
             else if (!enabled && present)
                 values.Remove(name);
         }
+
+        private static EditorPropertySnapshot Action(
+            string key,
+            string displayName,
+            string group) =>
+            new()
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.Action
+            };
 
         private static EditorPropertySnapshot Boolean(
             string key,
