@@ -187,6 +187,9 @@ public static partial class EditorPresentationHub
             LegacyUiAvailable = singleSelection,
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
+            ObjectGizmo = singleSelection
+                ? NativeObjectGizmoPresentation.Capture(selected, selectedIndex, properties)
+                : EditorObjectGizmoSnapshot.Empty,
             MixedPropertyKeys = mixedPropertyKeys,
             LegacyControls = legacyControls
         };
