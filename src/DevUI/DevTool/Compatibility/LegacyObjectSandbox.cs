@@ -41,6 +41,17 @@ internal static class LegacyObjectSandbox
         return Run(session, target, action, false);
     }
 
+    internal static void Invalidate(EditorSession session, PlacedObject target)
+    {
+        if (session == null || target == null || !states.TryGetValue(session, out State state))
+            return;
+        if (!ReferenceEquals(state.Target, target))
+            return;
+
+        DisposeState(state);
+        states.Remove(session);
+    }
+
     internal static void Release(EditorSession session)
     {
         if (session == null || !states.TryGetValue(session, out State state))
