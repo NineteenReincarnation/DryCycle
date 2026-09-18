@@ -86,6 +86,14 @@ if ! grep -Fq 'LegacyObjectSandbox.Capture(session, selected)' "$root/Core/Edito
   exit 1
 fi
 
+# Selected-only compatibility nodes own real Futile sprites and must be explicitly released on
+# both runtime reset and DevUI-session replacement; GC alone is not a valid lifecycle.
+if ! grep -Fq 'Release(DevToolSessionHub.Current);' "$sandbox" ||
+   ! grep -Fq 'LegacyObjectSandbox.Release(previous);' "$root/Core/DevToolRuntime.cs"; then
+  echo "Selected-only sandbox is no longer released with session/runtime lifetime." >&2
+  exit 1
+fi
+
 # Native object interaction must be detached snapshot -> command, never a frontend reference to
 # PlacedObject/ObjectsPage/PlacedObjectRepresentation.
 if ! grep -Fq 'NativeSpatialGizmoView.DrawObjects(snapshot, display);' "$pages" ||
