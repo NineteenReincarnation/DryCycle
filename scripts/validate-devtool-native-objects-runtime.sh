@@ -678,6 +678,33 @@ if ! grep -Fq 'typeof(ReliableIggyDirection.ReliableIggyDirectionData)' "$reflec
   exit 1
 fi
 
+# RippleTree/RippleStalk nullable cosmetics preserve vanilla <R>/inherit semantics as explicit
+# Override + Value properties. Value edits enable the override; disabling restores null.
+for symbol in \
+  'target?.data is PlacedObject.RippleStalkData' \
+  'AppendNullableFloat(result, "testRippleAmount"' \
+  'AppendNullableFloat(result, "spiralCoils"' \
+  'AppendNullableFloat(result, "spiralAmount"' \
+  'AppendNullableFloat(result, "droopy"' \
+  'AppendNullableFloat(result, "depth"' \
+  'AppendNullableFloat(result, "sinWidth"' \
+  'AppendNullableFloat(result, "sinDist"' \
+  'AppendNullableFloat(result, "sinOffset"' \
+  'field ??= 0f;' \
+  'field = null;' \
+  'data.update = true;'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "RippleTree structured nullable cosmetic inspector regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'typeof(PlacedObject.RippleTreeData)' "$reflection" ||
+   ! grep -Fq 'string.Equals(name, "sproutThreshold", StringComparison.Ordinal)' "$reflection" ||
+   ! grep -Fq 'string.Equals(name, "sproutEnd", StringComparison.Ordinal)' "$reflection"; then
+  echo "RippleTree native growth range contract regressed." >&2
+  exit 1
+fi
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
