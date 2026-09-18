@@ -122,7 +122,7 @@ public static class EditorActions
 
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         target.pos = newPosition;
-        TryRefresh(target);
+        TryRefresh(session, target);
         PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, target);
         if (PlacedObjectHistoryEntry.TryCreate("Move " + (target.type?.value ?? "object"), before, after, out PlacedObjectHistoryEntry entry))
             session.History.Push(entry);
@@ -147,7 +147,7 @@ public static class EditorActions
             PlacedObject target = targets[i];
             if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
             target.pos += delta;
-            TryRefresh(target);
+            TryRefresh(session, target);
             moved++;
         }
 
@@ -176,7 +176,7 @@ public static class EditorActions
         if (!ObjectInspectorRegistry.TrySetValue(target, key, value))
             return false;
 
-        TryRefresh(target);
+        TryRefresh(session, target);
         PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, target);
         if (before != null && before.SameAs(after))
             return false;
@@ -199,7 +199,7 @@ public static class EditorActions
             PlacedObject target = targets[i];
             if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
             if (!ObjectInspectorRegistry.TrySetValue(target, key, value)) continue;
-            TryRefresh(target);
+            TryRefresh(session, target);
             changed++;
         }
 
@@ -286,7 +286,7 @@ public static class EditorActions
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         mutation();
-        TryRefresh(target);
+        TryRefresh(session, target);
         PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, target);
         if (PlacedObjectHistoryEntry.TryCreate(label, before, after, out PlacedObjectHistoryEntry entry))
             session.History.Push(entry);
@@ -300,7 +300,7 @@ public static class EditorActions
         if (!NativePlacedObjectFactory.TryCreate(session, type, worldPosition, out PlacedObject created) || created == null)
             return null;
 
-        TryRefresh(created);
+        TryRefresh(session, created);
         PlacedObjectState after = PlacedObjectState.Capture(session.RoomSettings, created);
         session.History.Push(new DelegateHistoryEntry(
             "Create " + (type.value ?? "object"),
@@ -377,7 +377,7 @@ public static class EditorActions
                 copy == null)
                 continue;
 
-            CopyObjectState(source, copy, offset);
+            CopyObjectState(session, source, copy, offset);
             copies.Add(copy);
         }
 
@@ -422,7 +422,7 @@ public static class EditorActions
         return true;
     }
 
-    private static void CopyObjectState(PlacedObject source, PlacedObject target, Vector2 offset)
+    private static void CopyObjectState(EditorSession session, PlacedObject source, PlacedObject target, Vector2 offset)
     {
         target.pos = source.pos + offset;
         target.active = source.active;
@@ -443,7 +443,7 @@ public static class EditorActions
             }
         }
 
-        TryRefresh(target);
+        TryRefresh(session, target);
     }
 
     private static string[] Clone(string[] source)
@@ -472,12 +472,6 @@ public static class EditorActions
     private static void RefreshLegacyObjectFallback(EditorSession session) =>
         NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session);
 
-    private static void TryRefresh(PlacedObject target)
-    {
-        try { target?.data?.RefreshLiveVisuals(); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool live visual refresh failed: " + error.Message);
-        }
-    }
+    private static void TryRefresh(EditorSession session, PlacedObject target) =>
+        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
 }
