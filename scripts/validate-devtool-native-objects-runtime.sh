@@ -160,6 +160,19 @@ for symbol in \
   fi
 done
 
+# Native Objects actions/history never refresh the current page directly. Only Compatibility may
+# refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
+if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
+  echo "Native object actions regained a direct Page.Refresh dependency." >&2
+  exit 1
+fi
+if ! grep -Fq 'NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session)' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session)' "$root/History/PlacedObjectHistory.cs" ||
+   ! grep -Fq 'internal static void RefreshCurrentObjectFallback(EditorSession session)' "$root/Compatibility/NativeLegacyPresentationInvalidation.cs"; then
+  echo "Objects legacy refresh fallback escaped the Compatibility boundary." >&2
+  exit 1
+fi
+
 # Builtin/game-defined creation remains data-first. CreateObjRep is allowed only inside the isolated
 # legacy fallback block for unknown third-party ExtEnum object IDs.
 if ! grep -Fq 'GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), type.value)' "$factory" ||
