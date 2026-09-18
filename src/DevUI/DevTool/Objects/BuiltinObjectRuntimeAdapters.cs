@@ -45,6 +45,12 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
         }
 
+        if (target.type == PlacedObject.Type.InsectGroup)
+        {
+            EnsureInsectGroupRuntime(room, target);
+            return;
+        }
+
         if (target.type == PlacedObject.Type.AdjustableFan)
         {
             if (FindAdjustableFan(room, target) == null)
@@ -177,6 +183,9 @@ internal static class BuiltinObjectRuntimeAdapters
 
         lightFixtureStates.Remove(target);
 
+        if (target.type == PlacedObject.Type.InsectGroup)
+            RemoveInsectGroupRuntime(room, target);
+
 
         for (int i = room.updateList.Count - 1; i >= 0; i--)
         {
@@ -207,6 +216,73 @@ internal static class BuiltinObjectRuntimeAdapters
                 DestroyRuntime(room, adjustableFan.FanElement);
 
             DestroyRuntime(room, runtime);
+        }
+    }
+
+    private static void EnsureInsectGroupRuntime(global::Room room, PlacedObject target)
+    {
+        if (room == null || target?.type != PlacedObject.Type.InsectGroup)
+            return;
+
+        if (room.insectCoordinator == null)
+        {
+            room.insectCoordinator = new InsectCoordinator(room);
+            room.AddObject(room.insectCoordinator);
+        }
+
+        for (int i = 0; i < room.insectCoordinator.swarms.Count; i++)
+            if (ReferenceEquals(room.insectCoordinator.swarms[i].placedObject, target))
+                return;
+
+        room.insectCoordinator.AddGroup(target);
+        InsectCoordinator.Swarm swarm =
+            room.insectCoordinator.swarms[room.insectCoordinator.swarms.Count - 1];
+
+        bool viewed = false;
+        if (room.game?.cameras != null)
+        {
+            for (int i = 0; i < room.game.cameras.Length; i++)
+            {
+                if (room.game.cameras[i]?.room != room) continue;
+                viewed = true;
+                break;
+            }
+        }
+
+        if (viewed)
+        {
+            try { swarm.Initiate(); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native InsectGroup live initialization failed: " + error.Message);
+            }
+        }
+    }
+
+    private static void RemoveInsectGroupRuntime(global::Room room, PlacedObject target)
+    {
+        InsectCoordinator coordinator = room?.insectCoordinator;
+        if (coordinator?.swarms == null || target == null)
+            return;
+
+        for (int i = coordinator.swarms.Count - 1; i >= 0; i--)
+        {
+            InsectCoordinator.Swarm swarm = coordinator.swarms[i];
+            if (!ReferenceEquals(swarm.placedObject, target))
+                continue;
+
+            for (int memberIndex = swarm.members.Count - 1; memberIndex >= 0; memberIndex--)
+            {
+                CosmeticInsect member = swarm.members[memberIndex];
+                if (member == null) continue;
+                try { member.Destroy(); }
+                catch { }
+                coordinator.allInsects?.Remove(member);
+            }
+
+            swarm.members.Clear();
+            coordinator.swarms.RemoveAt(i);
         }
     }
 
