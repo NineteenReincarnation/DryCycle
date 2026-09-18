@@ -152,7 +152,7 @@ public static class EditorActions
         }
 
         if (moved == 0) return false;
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
 
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
@@ -210,7 +210,7 @@ public static class EditorActions
             string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal))
             return false;
 
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         if (SnapshotHistoryEntry.TryCreate(
                 changed == 1 ? "Change " + key : "Change " + key + " on " + changed + " objects",
                 before,
@@ -305,7 +305,7 @@ public static class EditorActions
         // Transitional compatibility only. Native creation no longer depends on ObjectsPage; this
         // refresh merely reconciles the still-retained vanilla representation/gizmo backend until
         // the Native Gizmo Engine takes ownership of world-space editing.
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         return created;
     }
 
@@ -316,7 +316,7 @@ public static class EditorActions
         if (!session.RoomSettings.placedObjects.Remove(target)) return false;
 
         session.Selection.Toggle(target);
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         session.History.Push(new DelegateHistoryEntry(
             "Delete " + (target.type?.value ?? "object"),
             s => before?.Restore(s) ?? false,
@@ -339,7 +339,7 @@ public static class EditorActions
         if (removed == 0) return false;
 
         session.Selection.Clear();
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
                 removed == 1 ? "Delete object" : "Delete " + removed + " objects",
@@ -377,7 +377,7 @@ public static class EditorActions
 
         if (copies.Count == 0) return false;
 
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         session.Selection.Clear();
         for (int i = 0; i < copies.Count; i++) session.Selection.Toggle(copies[i]);
 
@@ -448,18 +448,12 @@ public static class EditorActions
             removed = true;
         }
         session.Selection.RemoveMissing(session.RoomSettings.placedObjects);
-        RefreshObjectBackend(session);
+        RefreshLegacyObjectFallback(session);
         return removed;
     }
 
-    private static void RefreshObjectBackend(EditorSession session)
-    {
-        try { session?.Owner?.activePage?.Refresh(); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool object backend refresh failed: " + error.Message);
-        }
-    }
+    private static void RefreshLegacyObjectFallback(EditorSession session) =>
+        NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session);
 
     private static void TryRefresh(PlacedObject target)
     {
