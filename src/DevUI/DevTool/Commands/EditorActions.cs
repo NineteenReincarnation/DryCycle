@@ -120,6 +120,7 @@ public static class EditorActions
         if (session?.RoomSettings == null || target == null) return false;
         if ((target.pos - newPosition).sqrMagnitude <= 0.000001f) return false;
 
+        NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         target.pos = newPosition;
         TryRefresh(session, target);
@@ -146,6 +147,7 @@ public static class EditorActions
         {
             PlacedObject target = targets[i];
             if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
+            NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
             target.pos += delta;
             TryRefresh(session, target);
             moved++;
@@ -172,6 +174,7 @@ public static class EditorActions
     {
         if (session?.RoomSettings == null || target == null || string.IsNullOrEmpty(key)) return false;
 
+        NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         if (!ObjectInspectorRegistry.TrySetValue(target, key, value))
             return false;
@@ -198,6 +201,7 @@ public static class EditorActions
         {
             PlacedObject target = targets[i];
             if (target == null || !session.RoomSettings.placedObjects.Contains(target)) continue;
+            NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
             if (!ObjectInspectorRegistry.TrySetValue(target, key, value)) continue;
             TryRefresh(session, target);
             changed++;
@@ -284,6 +288,7 @@ public static class EditorActions
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
     {
         if (session?.RoomSettings == null || target == null || mutation == null) return false;
+        NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         mutation();
         TryRefresh(session, target);
