@@ -63,6 +63,7 @@ internal static class LegacyObjectSandbox
 
     internal static void Reset()
     {
+        Release(DevToolSessionHub.Current);
         states = new ConditionalWeakTable<EditorSession, State>();
     }
 
