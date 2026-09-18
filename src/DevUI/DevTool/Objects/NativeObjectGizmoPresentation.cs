@@ -100,6 +100,20 @@ internal static class NativeObjectGizmoPresentation
                 target.pos + new Vector2(airPocket.handlePos.x, airPocket.waterLevel));
             specialized = true;
         }
+        else if (target.data is PlacedObject.LightningMachineData lightning)
+        {
+            handles.Add(Handle(
+                "lightning:start",
+                target.pos + lightning.startPoint,
+                target.pos,
+                drawLine: true));
+            handles.Add(Handle(
+                "lightning:end",
+                target.pos + lightning.endPoint,
+                target.pos,
+                drawLine: true));
+            specialized = true;
+        }
         else if (ModManager.Watcher &&
                  target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
                  target.data is PlacedObject.ResizableObjectData weaver)
