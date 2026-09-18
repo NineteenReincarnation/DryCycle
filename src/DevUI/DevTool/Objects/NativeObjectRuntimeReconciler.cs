@@ -23,23 +23,44 @@ internal static class NativeObjectRuntimeReconciler
             Plugin.Logger?.LogWarning("DevTool native object live visual refresh failed: " + error.Message);
         }
 
-        if (target.data is not PlacedObject.TerrainHandleData)
-            return;
+        global::Room room = session?.Room;
+        if (room == null) return;
 
-        try
+        if (target.data is PlacedObject.TerrainHandleData)
         {
-            global::Room room = session?.Room;
-            if (room?.terrain?.terrainList == null) return;
-
-            foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+            try
             {
-                if (terrain is TerrainCurve curve)
-                    curve.UpdateHandles();
+                if (room.terrain?.terrainList == null) return;
+                foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+                {
+                    if (terrain is TerrainCurve curve)
+                        curve.UpdateHandles();
+                }
             }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native terrain handle reconciliation failed: " + error.Message);
+            }
+            return;
         }
-        catch (Exception error)
+
+        if (target.data is PlacedObject.LocalTerrainData localTerrain)
         {
-            Plugin.Logger?.LogWarning("DevTool native terrain handle reconciliation failed: " + error.Message);
+            try
+            {
+                if (room.terrain?.terrainList == null) return;
+                foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+                {
+                    if (terrain is LocalTerrainCurve local && ReferenceEquals(local.data, localTerrain))
+                        local.RefreshCurve();
+                    else if (terrain is CurvedSlope slope && ReferenceEquals(slope.data, localTerrain))
+                        slope.RefreshCurve();
+                }
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native spline terrain reconciliation failed: " + error.Message);
+            }
         }
     }
 }
