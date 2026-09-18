@@ -53,6 +53,7 @@ internal static class NativeObjectRuntimeReconciler
         if (room == null) return;
 
         EnsureRuntimePresence(room, target);
+        BuiltinObjectRuntimeAdapters.Refresh(room, target);
         SyncLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.WaterFlowData)
@@ -217,6 +218,7 @@ internal static class NativeObjectRuntimeReconciler
         }
 
         RemoveWaterMembership(room, target);
+        BuiltinObjectRuntimeAdapters.Remove(room, target);
         RemoveLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.SpawnMigrationStreamData streamData &&
