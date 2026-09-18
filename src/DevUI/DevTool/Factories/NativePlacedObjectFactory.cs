@@ -70,6 +70,15 @@ internal static class NativePlacedObjectFactory
             }
         }
 
+        if (ModManager.Watcher &&
+            created?.type == Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder &&
+            created.data is Watcher.UrbanCandleHolder.UrbanCandleHolderData holder)
+        {
+            // Vanilla's representation constructor randomized this when first materialized. Native
+            // Objects never constructs that representation, so preserve the authored default here.
+            holder.seed = (int)(UnityEngine.Random.value * 111111f);
+        }
+
         if (created?.type == PlacedObject.Type.TerrainHandle && session.Room?.terrain == null)
         {
             // This is the one model/runtime side effect vanilla CreateObjRep performs at creation.
