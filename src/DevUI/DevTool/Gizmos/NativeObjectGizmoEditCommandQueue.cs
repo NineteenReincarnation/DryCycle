@@ -171,6 +171,13 @@ public static class NativeObjectGizmoEditCommandQueue
             ApplyWaterCurrent(target, water, command))
             return true;
 
+        if (target.data is PlacedObject.LocalTerrainData localTerrain &&
+            command.HandleId == "localTerrain:bottom")
+        {
+            localTerrain.bottom = Mathf.Max(0f, target.pos.y - command.Y);
+            return true;
+        }
+
         if (target.data is PlacedObject.SplineObjectData splineData &&
             splineData.spline != null &&
             ApplySpline(target, splineData.spline, command))
