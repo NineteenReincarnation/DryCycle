@@ -348,6 +348,36 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         max = 0f;
         step = kind == EditorPropertyKind.Integer ? 1f : 0.01f;
 
+        if (declaringType == typeof(PlacedObject.LightFixtureData) &&
+            string.Equals(name, "randomSeed", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 100f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.LightningMachineData) &&
+            string.Equals(name, "impact", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 3f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.LightningMachineData) &&
+            string.Equals(name, "soundType", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 1f;
+            return;
+        }
+
         if (declaringType == typeof(PlacedObject.LightSourceData) &&
             (string.Equals(name, "strength", StringComparison.Ordinal) ||
              string.Equals(name, "blinkRate", StringComparison.Ordinal)))
@@ -534,9 +564,12 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                 return floatValue;
             case EditorPropertyKind.Integer:
                 if (value.Kind != EditorPropertyKind.Integer) return null;
-                if (type == typeof(short)) return (short)value.Integer;
-                if (type == typeof(byte)) return (byte)Mathf.Clamp(value.Integer, byte.MinValue, byte.MaxValue);
-                return value.Integer;
+                int integerValue = binding.HasRange
+                    ? Mathf.Clamp(value.Integer, Mathf.RoundToInt(binding.Min), Mathf.RoundToInt(binding.Max))
+                    : value.Integer;
+                if (type == typeof(short)) return (short)integerValue;
+                if (type == typeof(byte)) return (byte)Mathf.Clamp(integerValue, byte.MinValue, byte.MaxValue);
+                return integerValue;
             case EditorPropertyKind.Boolean:
                 return value.Kind == EditorPropertyKind.Boolean ? value.Boolean : null;
             case EditorPropertyKind.String:
