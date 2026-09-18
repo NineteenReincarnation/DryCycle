@@ -333,7 +333,11 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         {
             if (string.Equals(name, "handlePos", StringComparison.Ordinal) &&
                 (declaringType == typeof(PlacedObject.ResizableObjectData) ||
-                 declaringType == typeof(PlacedObject.GridRectObjectData)))
+                 declaringType == typeof(PlacedObject.GridRectObjectData) ||
+                 declaringType == typeof(PlacedObject.LightSourceData) ||
+                 declaringType == typeof(PlacedObject.HarmfulSteamData) ||
+                 declaringType == typeof(PlacedObject.PomegranateData) ||
+                 declaringType == typeof(PlacedObject.SkyWhalePathfindingData)))
                 return EditorPropertyGizmoHint.RelativePoint;
 
             if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
