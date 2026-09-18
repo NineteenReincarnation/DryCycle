@@ -23,6 +23,7 @@ internal static class NativeObjectGeometryGizmoView
         internal bool Active;
         internal int ObjectIndex;
         internal string PropertyKey;
+        internal EditorPropertyGizmoHint GizmoHint;
         internal float CenterWorldX;
         internal float CenterWorldY;
     }
@@ -30,7 +31,7 @@ internal static class NativeObjectGeometryGizmoView
     private sealed class Candidate
     {
         internal string Key;
-        internal Num.Vector2 Screen;
+        internal EditorPropertyGizmoHint GizmoHint;
     }
 
     private static DragState drag;
@@ -61,20 +62,40 @@ internal static class NativeObjectGeometryGizmoView
         for (int i = 0; i < properties.Length; i++)
         {
             EditorPropertySnapshot property = properties[i];
-            if (!IsNativeOffsetHandle(property)) continue;
+            if (property == null || property.GizmoHint == EditorPropertyGizmoHint.None) continue;
+
+            float offsetX;
+            float offsetY;
+            switch (property.GizmoHint)
+            {
+                case EditorPropertyGizmoHint.RelativePoint:
+                    offsetX = property.X;
+                    offsetY = property.Y;
+                    break;
+                case EditorPropertyGizmoHint.VerticalDistance:
+                    offsetX = 0f;
+                    offsetY = property.X;
+                    break;
+                default:
+                    continue;
+            }
 
             Num.Vector2 endpoint = WorldToScreen(
                 viewport,
                 display,
-                inspector.X + property.X,
-                inspector.Y + property.Y);
+                inspector.X + offsetX,
+                inspector.Y + offsetY);
             DrawHandle(draw, center, endpoint);
 
             float distance = DistanceSquared(mouse, endpoint);
             if (distance <= HitRadius * HitRadius && distance < nearestDistance)
             {
                 nearestDistance = distance;
-                nearest = new Candidate { Key = property.Key, Screen = endpoint };
+                nearest = new Candidate
+                {
+                    Key = property.Key,
+                    GizmoHint = property.GizmoHint
+                };
             }
         }
 
@@ -93,6 +114,7 @@ internal static class NativeObjectGeometryGizmoView
             Active = true,
             ObjectIndex = inspector.ObjectIndex,
             PropertyKey = nearest.Key,
+            GizmoHint = nearest.GizmoHint,
             CenterWorldX = inspector.X,
             CenterWorldY = inspector.Y
         };
@@ -126,6 +148,9 @@ internal static class NativeObjectGeometryGizmoView
             Num.Vector2 world = ScreenToWorld(viewport, display, ImGui.GetIO().MousePos);
             float offsetX = world.X - drag.CenterWorldX;
             float offsetY = world.Y - drag.CenterWorldY;
+            if (drag.GizmoHint == EditorPropertyGizmoHint.VerticalDistance)
+                offsetX = 0f;
+
             NativeObjectGeometryGizmoCommandQueue.Enqueue(new NativeObjectGeometryGizmoCommand(
                 NativeGizmoCommandKind.Update,
                 drag.ObjectIndex,
