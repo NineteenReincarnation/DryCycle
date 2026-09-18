@@ -38,6 +38,18 @@ internal static class BuiltinObjectRuntimeAdapters
         if (room?.updateList == null || target == null)
             return;
 
+        if (target.type == PlacedObject.Type.ProjectedStars)
+        {
+            EnsureProjectedStarsRuntime(room, target);
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.SuperStructureFuses)
+        {
+            EnsureSuperStructureFusesRuntime(room, target);
+            return;
+        }
+
         if (EnsureCommonLinkedRuntime(room, target))
             return;
 
@@ -194,6 +206,8 @@ internal static class BuiltinObjectRuntimeAdapters
         {
             UpdatableAndDeletable runtime = room.updateList[i];
             bool matches =
+                runtime is StarMatrix stars && ReferenceEquals(stars.placedObject, target) ||
+                runtime is SuperStructureFuses fuses && ReferenceEquals(fuses.placedObject, target) ||
                 runtime is PlayerPushback pushback && ReferenceEquals(pushback.placedObj, target) ||
                 runtime is WaterCurrent current && ReferenceEquals(current.pObj, target) ||
                 runtime is FluxDrain drain && ReferenceEquals(drain.pObj, target) ||
@@ -229,6 +243,76 @@ internal static class BuiltinObjectRuntimeAdapters
             DestroyRuntime(room, runtime);
         }
     }
+
+    private static void EnsureProjectedStarsRuntime(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.ResizableObjectData data)
+            return;
+
+        StarMatrix runtime = null;
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is StarMatrix candidate &&
+                ReferenceEquals(candidate.placedObject, target))
+            {
+                runtime = candidate;
+                break;
+            }
+        }
+
+        float desiredRad = data.Rad + 50f;
+        if (runtime != null &&
+            runtime.pos == target.pos &&
+            Mathf.Abs(runtime.rad - desiredRad) <= 0.001f)
+            return;
+
+        if (runtime != null)
+            DestroyRuntime(room, runtime);
+
+        try { room.AddObject(new StarMatrix(target)); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native ProjectedStars runtime creation failed: " + error.Message);
+        }
+    }
+
+    private static void EnsureSuperStructureFusesRuntime(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.GridRectObjectData data)
+            return;
+
+        SuperStructureFuses runtime = null;
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is SuperStructureFuses candidate &&
+                ReferenceEquals(candidate.placedObject, target))
+            {
+                runtime = candidate;
+                break;
+            }
+        }
+
+        IntRect desired = data.Rect;
+        if (runtime != null && SameRect(runtime.rect, desired))
+            return;
+
+        if (runtime != null)
+            DestroyRuntime(room, runtime);
+
+        try { room.AddObject(new SuperStructureFuses(target, desired, room)); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native SuperStructureFuses runtime creation failed: " + error.Message);
+        }
+    }
+
+    private static bool SameRect(IntRect a, IntRect b) =>
+        a.left == b.left &&
+        a.right == b.right &&
+        a.bottom == b.bottom &&
+        a.top == b.top;
 
     private static bool EnsureCommonLinkedRuntime(global::Room room, PlacedObject target)
     {
