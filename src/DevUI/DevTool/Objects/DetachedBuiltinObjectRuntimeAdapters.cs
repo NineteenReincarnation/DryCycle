@@ -71,7 +71,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                     swirlData.colorType == PlacedObject.EnergySwirlData.ColorType.Environment;
                 swirl.effectColor = Math.Max(
                     -1,
-                    data.colorType.Index - PlacedObject.EnergySwirlData.ColorType.EffectColor1.Index);
+                    swirlData.colorType.Index - PlacedObject.EnergySwirlData.ColorType.EffectColor1.Index);
                 break;
 
             case SnowSource snow when target.data is PlacedObject.SnowSourceData snowData:
