@@ -319,6 +319,7 @@ public static class EditorActions
     {
         if (session?.RoomSettings?.placedObjects == null || target == null) return false;
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
+        NativeObjectRuntimeReconciler.RemoveRuntime(session, target);
         if (!session.RoomSettings.placedObjects.Remove(target)) return false;
 
         session.Selection.Toggle(target);
@@ -340,7 +341,9 @@ public static class EditorActions
         int removed = 0;
         for (int i = 0; i < selected.Count; i++)
         {
-            if (selected[i] != null && live.Remove(selected[i])) removed++;
+            if (selected[i] == null) continue;
+            NativeObjectRuntimeReconciler.RemoveRuntime(session, selected[i]);
+            if (live.Remove(selected[i])) removed++;
         }
         if (removed == 0) return false;
 
@@ -461,6 +464,8 @@ public static class EditorActions
         for (int i = session.RoomSettings.placedObjects.Count - 1; i >= 0; i--)
         {
             if (!ReferenceEquals(session.RoomSettings.placedObjects[i], target)) continue;
+            if (!removed)
+                NativeObjectRuntimeReconciler.RemoveRuntime(session, target);
             session.RoomSettings.placedObjects.RemoveAt(i);
             removed = true;
         }
