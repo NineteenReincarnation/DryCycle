@@ -224,6 +224,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy button",
             () => LegacyDevInterfaceBridge.ClickButton(session.Owner, target, path));
     }
@@ -232,6 +233,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy slider",
             () => LegacyDevInterfaceBridge.SetSlider(session.Owner, target, path, factor));
     }
@@ -240,6 +242,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy slider reset",
             () => LegacyDevInterfaceBridge.ResetSlider(session.Owner, target, path));
     }
@@ -248,6 +251,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy text",
             () => LegacyDevInterfaceBridge.SetText(session.Owner, target, path, value));
     }
@@ -256,6 +260,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy direction",
             () => LegacyDevInterfaceBridge.SetDirection(session.Owner, target, path, x, y));
     }
@@ -271,6 +276,7 @@ public static class EditorActions
     {
         return ExecuteLegacyControl(
             session,
+            target,
             "Legacy color",
             () => LegacyDevInterfaceBridge.SetColor(session.Owner, target, path, r, g, b, a));
     }
@@ -391,14 +397,25 @@ public static class EditorActions
         return true;
     }
 
-    private static bool ExecuteLegacyControl(EditorSession session, string label, Func<bool> action)
+    private static bool ExecuteLegacyControl(
+        EditorSession session,
+        PlacedObject target,
+        string label,
+        Func<bool> action)
     {
-        if (session?.Owner == null || action == null) return false;
+        if (session?.Owner == null || target == null || action == null) return false;
 
-        IEditorStateSnapshot before = LegacySnapshotFactory.CaptureForPointer(session);
-        bool succeeded = action();
-        if (!succeeded || before == null) return succeeded;
+        IEditorStateSnapshot before =
+            SinglePlacedObjectStateSnapshot.Capture(session.RoomSettings, target);
+        bool succeeded = LegacyObjectSandbox.Run(session, target, action);
+        if (!succeeded) return false;
 
+        // A legacy button may only open a custom sub-panel and leave the model unchanged. Mark the
+        // selected member anyway so the rebuilt inspector recaptures the sandbox control tree.
+        EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
+        ObjectPresentationChangeHintHub.MarkMember(session, target);
+
+        if (before == null) return true;
         IEditorStateSnapshot after = before.CaptureCurrent(session);
         if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             session.History.Push(entry);
