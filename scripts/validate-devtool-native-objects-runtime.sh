@@ -6,6 +6,7 @@ reflection="$root/Objects/NativeDataReflectionInspector.cs"
 bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
 runtime_reconciler="$root/Objects/NativeObjectRuntimeReconciler.cs"
 runtime_adapters="$root/Objects/BuiltinObjectRuntimeAdapters.cs"
+detached_runtime_adapters="$root/Objects/DetachedBuiltinObjectRuntimeAdapters.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
 removed_controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
@@ -23,7 +24,7 @@ removed_geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$runtime_adapters" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
+for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$detached_runtime_adapters" "$runtime_adapters" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
             "$object_gizmo_frontend" "$gizmo_presentation" "$pages" "$backend" "$object_gizmo_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -293,6 +294,16 @@ if ! grep -Fq 'NativeObjectRuntimeReconciler.PrepareForMutation(session, objectT
   exit 1
 fi
 
+for symbol in \
+  '"lightning:start"' \
+  '"lightning:end"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "LightningMachine endpoint native gizmo coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # The last direct Handle-style special cases have verified native semantics.
 for symbol in \
   '"weaver:direction"' \
@@ -380,6 +391,45 @@ for symbol in \
 done
 if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectRepresentation' "$runtime_adapters"; then
   echo "Builtin runtime adapters regained DevInterface dependencies." >&2
+  exit 1
+fi
+
+# Builtin MSC runtimes such as LightningMachine/EnergySwirl do not retain the authored
+# PlacedObject. They require pre-mutation weak binding so moves can still update/remove the exact
+# live runtime after the model position changes.
+for symbol in \
+  'ConditionalWeakTable<PlacedObject, Binding>' \
+  'using MoreSlugcats;' \
+  'PlacedObject.Type.LightningMachine' \
+  'PlacedObject.Type.EnergySwirl' \
+  'PlacedObject.Type.SteamPipe' \
+  'PlacedObject.Type.WallSteamer' \
+  'PlacedObject.Type.SnowSource' \
+  'PlacedObject.Type.LocalBlizzard' \
+  'PlacedObject.Type.CellDistortion' \
+  'machine.startPoint = lightningData.startPoint;' \
+  'swirl.setRad = swirlData.Rad;' \
+  'snow.shape = snowData.shape;' \
+  'blizzard.angle = blizzardData.angle;' \
+  'distortion.cromaticIntensity = distortionData.chromaticIntensity;' \
+  'steam.direction = Direction(steamData.handlePos);'; do
+  if ! grep -Fq "$symbol" "$detached_runtime_adapters"; then
+    echo "Detached MSC runtime adapter coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'DetachedBuiltinObjectRuntimeAdapters.ResetRuntimeState();' \
+  'DetachedBuiltinObjectRuntimeAdapters.Prepare(room, target);' \
+  'DetachedBuiltinObjectRuntimeAdapters.Refresh(room, target);' \
+  'DetachedBuiltinObjectRuntimeAdapters.Remove(room, target);'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "Detached MSC runtime adapter is no longer wired through native runtime reconciliation: $symbol" >&2
+    exit 1
+  fi
+done
+if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectRepresentation' "$detached_runtime_adapters"; then
+  echo "Detached MSC runtime adapters regained DevInterface dependencies." >&2
   exit 1
 fi
 
