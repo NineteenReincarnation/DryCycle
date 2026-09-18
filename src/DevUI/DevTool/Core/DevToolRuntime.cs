@@ -843,7 +843,10 @@ public static class DevToolSessionHub
             // caches before constructing the replacement session so those HashSets cannot root the
             // old DevUI graph.
             if (previous != null && !ReferenceEquals(previous.Owner, ui))
+            {
                 LegacyDevUiQuiescenceController.ReleasePage(previous.Owner?.activePage);
+                LegacyObjectSandbox.Release(previous);
+            }
 
             bool restoreViewState = CanRestoreViewState(previous, ui);
             int previousMapRoom = -1;
