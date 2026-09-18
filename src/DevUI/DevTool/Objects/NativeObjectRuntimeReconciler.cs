@@ -162,6 +162,30 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
+        if (room.updateList != null)
+        {
+            for (int i = room.updateList.Count - 1; i >= 0; i--)
+            {
+                UpdatableAndDeletable runtime = room.updateList[i];
+                bool matches =
+                    target.type == PlacedObject.Type.LightBeam &&
+                    runtime is LightBeam beam &&
+                    ReferenceEquals(beam.placedObject, target) ||
+                    target.type == PlacedObject.Type.BlackSpot &&
+                    runtime is BlackSpot blackSpot &&
+                    ReferenceEquals(blackSpot.pObj, target) ||
+                    target.type == PlacedObject.Type.WindRect &&
+                    runtime is WindRect wind &&
+                    ReferenceEquals(wind.placedObj, target);
+
+                if (!matches) continue;
+                try { runtime.Destroy(); }
+                catch { }
+                try { room.RemoveObject(runtime); }
+                catch { }
+            }
+        }
+
         if (target.data is GeyserData &&
             room.updateList != null)
         {
@@ -427,6 +451,43 @@ internal static class NativeObjectRuntimeReconciler
     {
         if (room.updateList == null) return;
 
+        if (target.type == PlacedObject.Type.LightBeam &&
+            target.data is LightBeam.LightBeamData)
+        {
+            EnsureLightBeamRuntime(room, target);
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.BlackSpot)
+        {
+            for (int i = 0; i < room.updateList.Count; i++)
+                if (room.updateList[i] is BlackSpot blackSpot &&
+                    ReferenceEquals(blackSpot.pObj, target))
+                    return;
+
+            try { room.AddObject(new BlackSpot(target)); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native BlackSpot runtime creation failed: " + error.Message);
+            }
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.WindRect)
+        {
+            for (int i = 0; i < room.updateList.Count; i++)
+                if (room.updateList[i] is WindRect wind &&
+                    ReferenceEquals(wind.placedObj, target))
+                    return;
+
+            try { room.AddObject(new WindRect(target)); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native WindRect runtime creation failed: " + error.Message);
+            }
+            return;
+        }
+
         if (target.data is GeyserData)
         {
             for (int i = 0; i < room.updateList.Count; i++)
@@ -467,6 +528,48 @@ internal static class NativeObjectRuntimeReconciler
                 Plugin.Logger?.LogWarning("DevTool native MudPit runtime creation failed: " + error.Message);
             }
         }
+    }
+
+    private static LightBeam EnsureLightBeamRuntime(global::Room room, PlacedObject target)
+    {
+        if (room?.updateList == null ||
+            target?.type != PlacedObject.Type.LightBeam ||
+            target.data is not LightBeam.LightBeamData data)
+            return null;
+
+        LightBeam beam = null;
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is LightBeam existing &&
+                ReferenceEquals(existing.placedObject, target))
+            {
+                beam = existing;
+                break;
+            }
+        }
+
+        if (beam == null)
+        {
+            try
+            {
+                beam = new LightBeam(target);
+                room.AddObject(beam);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native LightBeam runtime creation failed: " + error.Message);
+                return null;
+            }
+        }
+
+        bool enteringNightMode = !beam.nightLight && data.nightLight;
+        beam.meshDirty = true;
+        beam.SetBlinkProperties(data.blinkType, data.blinkRate);
+        beam.nightLight = data.nightLight;
+        if (enteringNightMode)
+            beam.nightFade = 0f;
+        return beam;
     }
 
     private static void EnsureWaterMembership(global::Room room, PlacedObject target)
