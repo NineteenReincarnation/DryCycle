@@ -12,15 +12,18 @@ sandbox="$root/Compatibility/LegacyObjectSandbox.cs"
 quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
 removed_spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
-geometry_frontend="$root/RWImGui/NativeObjectGeometryGizmoView.cs"
+object_gizmo_frontend="$root/RWImGui/NativeObjectGizmoView.cs"
+removed_geometry_frontend="$root/RWImGui/NativeObjectGeometryGizmoView.cs"
+gizmo_presentation="$root/Objects/NativeObjectGizmoPresentation.cs"
 pages="$root/RWImGui/BuiltinDevToolPages.cs"
 backend="$root/Gizmos/NativeGizmoCommandQueue.cs"
-geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
+object_gizmo_backend="$root/Gizmos/NativeObjectGizmoEditCommandQueue.cs"
+removed_geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
 for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
-            "$geometry_frontend" "$pages" "$backend" "$geometry_backend" "$coordinator" "$factory"; do
+            "$object_gizmo_frontend" "$gizmo_presentation" "$pages" "$backend" "$object_gizmo_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
     exit 1
@@ -33,6 +36,14 @@ if [[ -e "$removed_spatial_refresh" ]]; then
 fi
 if [[ -e "$removed_controller" ]]; then
   echo "Obsolete Objects gizmo presentation shim returned: $removed_controller" >&2
+  exit 1
+fi
+if [[ -e "$removed_geometry_frontend" ]]; then
+  echo "Superseded property-only object gizmo frontend returned: $removed_geometry_frontend" >&2
+  exit 1
+fi
+if [[ -e "$removed_geometry_backend" ]]; then
+  echo "Superseded property-only object gizmo queue returned: $removed_geometry_backend" >&2
   exit 1
 fi
 
@@ -106,37 +117,55 @@ if grep -Eq 'using DevInterface|global::DevInterface|PlacedObject|ObjectsPage|Pl
   exit 1
 fi
 
-# Secondary handle geometry is derived from the already-detached native inspector payload. The first
-# intentionally conservative pattern is Rain World's ubiquitous handlePos offset; do not re-reflect
-# Data in the frontend or invent a parallel live-object snapshot. Comments may document the model
-# source, so reject only actual namespace/type/reflection API use.
-if ! grep -Fq 'NativeObjectGeometryGizmoView.Draw(snapshot, display);' "$pages" ||
-   ! grep -Fq 'property.GizmoHint == EditorPropertyGizmoHint.None' "$geometry_frontend" ||
-   ! grep -Fq 'EditorPropertyGizmoHint.VerticalDistance' "$geometry_frontend" ||
-   ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Enqueue' "$geometry_frontend"; then
-  echo "Native Objects secondary handle pipeline is incomplete." >&2
+# Selected-object geometry is now one generic detached primitive protocol. The frontend may know
+# only world-space handles/anchor lines/Bezier segments and command IDs; Rain World object types stay
+# in backend presentation/command code.
+if ! grep -Fq 'NativeObjectGizmoView.Draw(snapshot, display);' "$pages" ||
+   ! grep -Fq 'NativeObjectGizmoEditCommandQueue.Enqueue' "$object_gizmo_frontend" ||
+   ! grep -Fq 'EditorObjectBezierSegmentSnapshot[]' "$object_gizmo_frontend"; then
+  echo "Unified detached Objects gizmo frontend is not wired." >&2
   exit 1
 fi
-if grep -Eq '^using DevInterface;|global::DevInterface|typeof\(PlacedObject\)|PlacedObject[[:space:]]+[A-Za-z_]|RoomSettings[[:space:]]+[A-Za-z_]|typeof\(ObjectsPage\)|ObjectsPage[[:space:]]+[A-Za-z_]|PlacedObjectRepresentation[[:space:]]+[A-Za-z_]|System\.Reflection|BindingFlags|GetField[[:space:]]*\(|GetProperty[[:space:]]*\(' "$geometry_frontend"; then
-  echo "Native object geometry frontend regained live-model/reflection dependencies." >&2
+if grep -Eq '^using DevInterface;|global::DevInterface|PlacedObject|ObjectsPage|PlacedObjectRepresentation|WaterCurrent|BezierSpline|System\.Reflection|BindingFlags|GetField[[:space:]]*\(|GetProperty[[:space:]]*\(' "$object_gizmo_frontend"; then
+  echo "Unified Objects gizmo frontend regained Rain World/DevInterface/reflection dependencies." >&2
   exit 1
 fi
+for symbol in \
+  'WaterCurrent.WaterCurrentData' \
+  'PlacedObject.SplineObjectData' \
+  'EditorObjectGizmoHandleSnapshot' \
+  'EditorObjectBezierSegmentSnapshot' \
+  'Id = "property:" + property.Key' \
+  'Id = "water:end"' \
+  'Id = "water:width"' \
+  'Id = "water:velocity"' \
+  '"spline:mid:" + i + ":pos"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation"; then
+    echo "Native object gizmo presentation lost a verified primitive mapping: $symbol" >&2
+    exit 1
+  fi
+done
 for symbol in \
   'SinglePlacedObjectStateSnapshot.Capture' \
   'EditorContinuousTransactionHub.Begin' \
   'EditorContinuousTransactionHub.Commit' \
   'EditorContinuousTransactionHub.Cancel' \
+  'NativeObjectGizmoEditKind.InsertCurvePoint' \
+  'NativeObjectGizmoEditKind.RemoveHandle' \
+  'SnapEightDirections' \
+  'SplitSpline' \
+  'RemoveSplineMidpoint' \
   'ObjectInspectorRegistry.TrySetValue' \
   'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' \
   'ObjectPresentationChangeHintHub.MarkMember'; do
-  if ! grep -Fq "$symbol" "$geometry_backend"; then
-    echo "Native object geometry backend lost transaction/model behavior: $symbol" >&2
+  if ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "Unified native object gizmo backend lost model/history behavior: $symbol" >&2
     exit 1
   fi
 done
-if ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Process(session);' "$coordinator" ||
-   ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Clear();' "$coordinator"; then
-  echo "Native object geometry queue is not owned by the backend coordinator lifetime." >&2
+if ! grep -Fq 'NativeObjectGizmoEditCommandQueue.Process(session);' "$coordinator" ||
+   ! grep -Fq 'NativeObjectGizmoEditCommandQueue.Clear();' "$coordinator"; then
+  echo "Unified object gizmo queue is not owned by the backend coordinator lifetime." >&2
   exit 1
 fi
 
@@ -153,7 +182,7 @@ for symbol in \
   fi
 done
 if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$backend" ||
-   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$geometry_backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' "$object_gizmo_backend" ||
    ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$root/History/PlacedObjectHistory.cs" ||
    ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' "$root/Commands/EditorActions.cs"; then
   echo "Native object mutations no longer converge on the runtime side-effect reconciler." >&2
