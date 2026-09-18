@@ -22,18 +22,19 @@ internal static class NativeObjectRuntimeReconciler
     internal static void ResetRuntimeState()
     {
         lightBindings = new ConditionalWeakTable<PlacedObject, LightBinding>();
+        DetachedBuiltinObjectRuntimeAdapters.ResetRuntimeState();
     }
 
     internal static void PrepareForMutation(EditorSession session, PlacedObject target)
     {
-        if (target?.data is not PlacedObject.LightSourceData)
-            return;
-
         global::Room room = session?.Room;
-        if (room == null)
+        if (room == null || target == null)
             return;
 
-        EnsureLightSourceRuntime(room, target, createIfMissing: true);
+        DetachedBuiltinObjectRuntimeAdapters.Prepare(room, target);
+
+        if (target.data is PlacedObject.LightSourceData)
+            EnsureLightSourceRuntime(room, target, createIfMissing: true);
     }
 
     internal static void RefreshAfterMutation(EditorSession session, PlacedObject target)
@@ -54,6 +55,7 @@ internal static class NativeObjectRuntimeReconciler
 
         EnsureRuntimePresence(room, target);
         BuiltinObjectRuntimeAdapters.Refresh(room, target);
+        DetachedBuiltinObjectRuntimeAdapters.Refresh(room, target);
         SyncLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.WaterFlowData)
@@ -219,6 +221,7 @@ internal static class NativeObjectRuntimeReconciler
 
         RemoveWaterMembership(room, target);
         BuiltinObjectRuntimeAdapters.Remove(room, target);
+        DetachedBuiltinObjectRuntimeAdapters.Remove(room, target);
         RemoveLightSourceRuntime(room, target);
 
         if (target.data is PlacedObject.SpawnMigrationStreamData streamData &&
