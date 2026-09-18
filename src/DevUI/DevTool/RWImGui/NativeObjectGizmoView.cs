@@ -280,7 +280,8 @@ internal static class NativeObjectGizmoView
         }
 
         Num.Vector2 ap = point - a;
-        along = Math.Clamp((ap.X * ab.X + ap.Y * ab.Y) / lengthSquared, 0f, 1f);
+        along = (ap.X * ab.X + ap.Y * ab.Y) / lengthSquared;
+        along = Math.Max(0f, Math.Min(1f, along));
         Num.Vector2 nearest = a + ab * along;
         return DistanceSquared(point, nearest);
     }
