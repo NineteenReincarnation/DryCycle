@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
@@ -9,10 +10,62 @@ namespace DryCycle.DevUI.DevTool.Objects;
 /// </summary>
 internal static class BuiltinObjectRuntimeAdapters
 {
+    private sealed class LightFixtureState
+    {
+        internal string TypeValue = string.Empty;
+        internal int RandomSeed;
+        internal bool Captured;
+    }
+
+    private static ConditionalWeakTable<PlacedObject, LightFixtureState> lightFixtureStates = new();
+
+    internal static void ResetRuntimeState() =>
+        lightFixtureStates = new ConditionalWeakTable<PlacedObject, LightFixtureState>();
+
+    internal static void Prepare(global::Room room, PlacedObject target)
+    {
+        if (room == null || target?.data is not PlacedObject.LightFixtureData data)
+            return;
+
+        LightFixtureState state = lightFixtureStates.GetValue(target, _ => new LightFixtureState());
+        state.TypeValue = data.type?.value ?? string.Empty;
+        state.RandomSeed = data.randomSeed;
+        state.Captured = true;
+    }
+
     internal static void Refresh(global::Room room, PlacedObject target)
     {
         if (room?.updateList == null || target == null)
             return;
+
+        if (target.type == PlacedObject.Type.LightFixture &&
+            target.data is PlacedObject.LightFixtureData)
+        {
+            EnsureLightFixtureRuntime(room, target);
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.AdjustableFan)
+        {
+            if (FindAdjustableFan(room, target) == null)
+                room.AddObject(new AdjustableFan(target, room));
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.HarmfulSteam)
+        {
+            if (FindHarmfulSteam(room, target) == null)
+                room.AddObject(new HarmfulSteam(target, room));
+            return;
+        }
+
+        if (target.type == PlacedObject.Type.SkyWhalePathfinding)
+        {
+            if (FindSkyWhaleNode(room, target) == null)
+                room.AddObject(new SkyWhalePathfindingNode(target, room));
+            return;
+        }
+
 
         if (target.type == PlacedObject.Type.CustomDecal)
         {
@@ -122,10 +175,17 @@ internal static class BuiltinObjectRuntimeAdapters
         if (room?.updateList == null || target == null)
             return;
 
+        lightFixtureStates.Remove(target);
+
+
         for (int i = room.updateList.Count - 1; i >= 0; i--)
         {
             UpdatableAndDeletable runtime = room.updateList[i];
             bool matches =
+                runtime is LightFixture fixture && ReferenceEquals(fixture.placedObject, target) ||
+                runtime is AdjustableFan fan && ReferenceEquals(fan.pObj, target) ||
+                runtime is HarmfulSteam steam && ReferenceEquals(steam.placedObject, target) ||
+                runtime is SkyWhalePathfindingNode whale && ReferenceEquals(whale.placedObject, target) ||
                 runtime is CustomDecal decal && ReferenceEquals(decal.placedObject, target) ||
                 runtime is GooDripSource drips && ReferenceEquals(drips.placedObject, target) ||
                 runtime is Rainbow rainbow && ReferenceEquals(rainbow.placedObject, target) ||
@@ -143,8 +203,106 @@ internal static class BuiltinObjectRuntimeAdapters
                 catch { }
             }
 
+            if (runtime is AdjustableFan adjustableFan && adjustableFan.FanElement != null)
+                DestroyRuntime(room, adjustableFan.FanElement);
+
             DestroyRuntime(room, runtime);
         }
+    }
+
+    private static void EnsureLightFixtureRuntime(global::Room room, PlacedObject target)
+    {
+        PlacedObject.LightFixtureData data = target.data as PlacedObject.LightFixtureData;
+        if (data == null) return;
+
+        LightFixtureState state = lightFixtureStates.GetValue(target, _ => new LightFixtureState());
+        LightFixture runtime = FindLightFixture(room, target);
+        string typeValue = data.type?.value ?? string.Empty;
+        bool constructorStateChanged =
+            state.Captured &&
+            (!string.Equals(state.TypeValue, typeValue, StringComparison.Ordinal) ||
+             state.RandomSeed != data.randomSeed);
+
+        if (runtime == null || constructorStateChanged)
+        {
+            if (runtime != null)
+                DestroyRuntime(room, runtime);
+
+            runtime = CreateLightFixture(room, target, data);
+            if (runtime != null)
+                room.AddObject(runtime);
+        }
+
+        state.TypeValue = typeValue;
+        state.RandomSeed = data.randomSeed;
+        state.Captured = true;
+    }
+
+    private static LightFixture CreateLightFixture(
+        global::Room room,
+        PlacedObject target,
+        PlacedObject.LightFixtureData data)
+    {
+        try
+        {
+            if (data.type == PlacedObject.LightFixtureData.Type.RedLight)
+                return new Redlight(room, target, data);
+            if (data.type == PlacedObject.LightFixtureData.Type.HolyFire)
+                return new HolyFire(room, target, data);
+            if (data.type == PlacedObject.LightFixtureData.Type.ZapCoilLight)
+                return new ZapCoilLight(room, target, data);
+            if (data.type == PlacedObject.LightFixtureData.Type.DeepProcessing)
+                return new DeepProcessingLight(room, target, data);
+            if (data.type == PlacedObject.LightFixtureData.Type.SlimeMoldLight)
+                return new SlimeMoldLight(room, target, data);
+            if (data.type == PlacedObject.LightFixtureData.Type.RedSubmersible)
+                return new Redlight(room, target, data, submersible: true);
+            if (data.type == PlacedObject.LightFixtureData.Type.GlowWeedLight)
+                return new GlowWeedLight(room, target, data);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native LightFixture runtime creation failed: " + error.Message);
+        }
+
+        return null;
+    }
+
+    private static LightFixture FindLightFixture(global::Room room, PlacedObject target)
+    {
+        for (int i = 0; i < room.updateList.Count; i++)
+            if (room.updateList[i] is LightFixture runtime &&
+                ReferenceEquals(runtime.placedObject, target))
+                return runtime;
+        return null;
+    }
+
+    private static AdjustableFan FindAdjustableFan(global::Room room, PlacedObject target)
+    {
+        for (int i = 0; i < room.updateList.Count; i++)
+            if (room.updateList[i] is AdjustableFan runtime &&
+                ReferenceEquals(runtime.pObj, target))
+                return runtime;
+        return null;
+    }
+
+    private static HarmfulSteam FindHarmfulSteam(global::Room room, PlacedObject target)
+    {
+        for (int i = 0; i < room.updateList.Count; i++)
+            if (room.updateList[i] is HarmfulSteam runtime &&
+                ReferenceEquals(runtime.placedObject, target))
+                return runtime;
+        return null;
+    }
+
+    private static SkyWhalePathfindingNode FindSkyWhaleNode(global::Room room, PlacedObject target)
+    {
+        for (int i = 0; i < room.updateList.Count; i++)
+            if (room.updateList[i] is SkyWhalePathfindingNode runtime &&
+                ReferenceEquals(runtime.placedObject, target))
+                return runtime;
+        return null;
     }
 
     private static CustomDecal FindCustomDecal(global::Room room, PlacedObject target)
