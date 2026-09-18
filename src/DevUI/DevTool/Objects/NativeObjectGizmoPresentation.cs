@@ -128,6 +128,31 @@ internal static class NativeObjectGizmoPresentation
                 drawLine: true));
             specialized = true;
         }
+        else if (ModManager.Watcher &&
+                 target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
+        {
+            Vector2 upLeft = target.pos + urbanLife.upLeft;
+            Vector2 downRight = target.pos + urbanLife.downRight;
+            handles.Add(Handle("urbanLife:upLeft", upLeft, target.pos, drawLine: false));
+            handles.Add(Handle("urbanLife:downRight", downRight, target.pos, drawLine: false));
+            handles.Add(Handle(
+                "urbanLife:direction",
+                target.pos + urbanLife.direction,
+                target.pos,
+                drawLine: true));
+            AddRectangle(lines, upLeft, downRight);
+            specialized = true;
+        }
+        else if (ModManager.Watcher &&
+                 target.data is Watcher.UrbanLifePath.UrbanLifePathData urbanPath)
+        {
+            Vector2 pointA = target.pos + urbanPath.pointA;
+            Vector2 pointB = target.pos + urbanPath.pointB;
+            handles.Add(Handle("urbanPath:pointA", pointA, target.pos, drawLine: true));
+            handles.Add(Handle("urbanPath:pointB", pointB, target.pos, drawLine: true));
+            AddLine(lines, pointA, pointB);
+            specialized = true;
+        }
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
         {
             CaptureSpline(target, splineData.spline, handles, beziers);
