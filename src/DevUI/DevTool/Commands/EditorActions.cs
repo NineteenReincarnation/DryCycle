@@ -326,6 +326,7 @@ public static class EditorActions
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
         NativeObjectRuntimeReconciler.RemoveRuntime(session, target);
         if (!session.RoomSettings.placedObjects.Remove(target)) return false;
+        NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);
 
         session.Selection.Toggle(target);
         RefreshLegacyObjectFallback(session);
@@ -348,7 +349,11 @@ public static class EditorActions
         {
             if (selected[i] == null) continue;
             NativeObjectRuntimeReconciler.RemoveRuntime(session, selected[i]);
-            if (live.Remove(selected[i])) removed++;
+            if (live.Remove(selected[i]))
+            {
+                NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, selected[i]);
+                removed++;
+            }
         }
         if (removed == 0) return false;
 
@@ -474,6 +479,8 @@ public static class EditorActions
             session.RoomSettings.placedObjects.RemoveAt(i);
             removed = true;
         }
+        if (removed)
+            NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);
         session.Selection.RemoveMissing(session.RoomSettings.placedObjects);
         RefreshLegacyObjectFallback(session);
         return removed;
