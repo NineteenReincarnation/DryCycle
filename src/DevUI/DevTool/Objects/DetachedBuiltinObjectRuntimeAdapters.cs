@@ -29,7 +29,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
         if (!Supports(target) || room == null)
             return;
 
-        Acquire(room, target, createIfMissing: true);
+        Acquire(room, target, createIfMissing: true, findExisting: true);
     }
 
     internal static void Refresh(global::Room room, PlacedObject target)
@@ -43,7 +43,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             return;
         }
 
-        UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: true);
+        UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: true, findExisting: false);
         if (runtime == null)
             return;
 
@@ -126,7 +126,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             return;
         }
 
-        UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: false);
+        UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: false, findExisting: true);
         bindings.Remove(target);
         DestroyRuntime(room, runtime);
     }
@@ -144,7 +144,8 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
     private static UpdatableAndDeletable Acquire(
         global::Room room,
         PlacedObject target,
-        bool createIfMissing)
+        bool createIfMissing,
+        bool findExisting)
     {
         Binding binding = bindings.GetValue(target, _ => new Binding());
         if (binding.Runtime != null &&
@@ -152,7 +153,8 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             !binding.Runtime.slatedForDeletetion)
             return binding.Runtime;
 
-        binding.Runtime = FindExisting(room, target);
+        if (findExisting)
+            binding.Runtime = FindExisting(room, target);
         if (binding.Runtime != null || !createIfMissing)
             return binding.Runtime;
 
