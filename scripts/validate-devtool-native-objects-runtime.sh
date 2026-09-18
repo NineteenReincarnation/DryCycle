@@ -4,6 +4,7 @@ set -euo pipefail
 root="src/DevUI/DevTool"
 reflection="$root/Objects/NativeDataReflectionInspector.cs"
 bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
+structured_inspectors="$root/Objects/BuiltinStructuredInspectorAdapters.cs"
 runtime_reconciler="$root/Objects/NativeObjectRuntimeReconciler.cs"
 runtime_adapters="$root/Objects/BuiltinObjectRuntimeAdapters.cs"
 detached_runtime_adapters="$root/Objects/DetachedBuiltinObjectRuntimeAdapters.cs"
@@ -24,7 +25,7 @@ removed_geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$runtime_reconciler" "$detached_runtime_adapters" "$runtime_adapters" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
+for file in "$reflection" "$bootstrap" "$structured_inspectors" "$runtime_reconciler" "$detached_runtime_adapters" "$runtime_adapters" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
             "$object_gizmo_frontend" "$gizmo_presentation" "$pages" "$backend" "$object_gizmo_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -629,6 +630,30 @@ for symbol in \
     exit 1
   fi
 done
+
+# Builtin array/matrix data that the generic reflection fallback keeps read-only is upgraded by
+# strongly typed native adapters while delegating ordinary/base members back to reflection.
+for symbol in \
+  'ObjectInspectorRegistry.Register(StructuredArrayInspector.Instance, 500);' \
+  'target?.data is PlacedObject.CustomDecalData' \
+  'target?.data is Rainbow.RainbowData' \
+  'target?.data is RainbowNoFade.RainbowNoFadeData' \
+  '"builtin.customDecal.alpha.all"' \
+  '"builtin.customDecal.erosion.all"' \
+  '"builtin.rainbow.fade."' \
+  '"builtin.rainbow.thickness"' \
+  '"builtin.rainbow.chance"' \
+  'NativeDataReflectionInspector.Instance.Capture(target)' \
+  'NativeDataReflectionInspector.Instance.TrySetValue(target, key, value)'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "Structured builtin inspector coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'BuiltinStructuredInspectorAdapters.Enable();' "$bootstrap"; then
+  echo "Structured builtin inspectors are no longer registered before reflection fallback." >&2
+  exit 1
+fi
 
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
