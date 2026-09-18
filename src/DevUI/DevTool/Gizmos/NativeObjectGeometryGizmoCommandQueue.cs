@@ -107,11 +107,7 @@ public static class NativeObjectGeometryGizmoCommandQueue
         if (!ObjectInspectorRegistry.TrySetValue(target, command.PropertyKey, value))
             return false;
 
-        try { target.data?.RefreshLiveVisuals(); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool native object geometry live refresh failed: " + error.Message);
-        }
+        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
         return true;
     }
 
