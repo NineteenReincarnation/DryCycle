@@ -77,7 +77,8 @@ fi
 # Data in the frontend or invent a parallel live-object snapshot. Comments may document the model
 # source, so reject only actual namespace/type/reflection API use.
 if ! grep -Fq 'NativeObjectGeometryGizmoView.Draw(snapshot, display);' "$pages" ||
-   ! grep -Fq 'key.EndsWith(".handlePos", StringComparison.Ordinal)' "$geometry_frontend" ||
+   ! grep -Fq 'property.GizmoHint == EditorPropertyGizmoHint.None' "$geometry_frontend" ||
+   ! grep -Fq 'EditorPropertyGizmoHint.VerticalDistance' "$geometry_frontend" ||
    ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Enqueue' "$geometry_frontend"; then
   echo "Native Objects secondary handle pipeline is incomplete." >&2
   exit 1
@@ -142,6 +143,22 @@ if grep -Fq '[ModuleInitializer]' "$bootstrap"; then
   echo "Native object inspector bootstrap regained a ModuleInitializer dependency; net48 runtime activation must stay explicit." >&2
   exit 1
 fi
+
+for symbol in \
+  'GizmoHint = ResolveGizmoHint(declaringType, name, valueType)' \
+  'declaringType == typeof(PlacedObject.ResizableObjectData)' \
+  'declaringType == typeof(PlacedObject.GridRectObjectData)' \
+  'declaringType == typeof(PlacedObject.TerrainHandleData)' \
+  'BuildVectorArrayBinding(current, field, handleIndex)' \
+  'GizmoHint = EditorPropertyGizmoHint.RelativePoint' \
+  'EditorPropertyGizmoHint.VerticalDistance' \
+  'Math.Min(0f, x)' \
+  'Math.Max(0f, x)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Native object geometry semantic whitelist lost verified model behavior: $symbol" >&2
+    exit 1
+  fi
+done
 
 # Builtin/game-defined creation remains data-first. CreateObjRep is allowed only inside the isolated
 # legacy fallback block for unknown third-party ExtEnum object IDs.
