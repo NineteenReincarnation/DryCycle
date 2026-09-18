@@ -557,6 +557,57 @@ if grep -Eq '^using DevInterface;|global::DevInterface|ObjectsPage|PlacedObjectR
   exit 1
 fi
 
+# Watcher Urban objects previously relied on Representation constructors/AxisHandles for live
+# runtime ownership and constrained authoring. Native Objects must preserve that without DevInterface.
+for symbol in \
+  'private sealed class UrbanLifeState' \
+  'private sealed class UrbanCandleHolderState' \
+  'EnsureUrbanLifeRuntime(room, target, urbanLife);' \
+  'EnsureUrbanLifePathRuntime(room, target, urbanPath);' \
+  'EnsureUrbanCandleHolderRuntime(room, target, holder);' \
+  'RemoveWatcherUrbanRuntime(room, target);' \
+  'state.Captured && (state.LayerCount != desiredLayers || state.IsShadow != data.isShadow)' \
+  'state.Captured && state.Seed != data.seed' \
+  'runtime.candleWidthScale = data.candleWidth;' \
+  '(int)Mathf.Max('; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "Watcher Urban authoring/runtime contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
+for symbol in \
+  '"urbanLife:upLeft"' \
+  '"urbanLife:downRight"' \
+  '"urbanLife:direction"' \
+  '"urbanPath:pointA"' \
+  '"urbanPath:pointB"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "Watcher Urban detached gizmo coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
+for symbol in \
+  'typeof(Watcher.UrbanLife.UrbanLifeData)' \
+  'typeof(Watcher.UrbanLifePath.UrbanLifePathData)' \
+  'typeof(Watcher.UrbanCandleHolder.UrbanCandleHolderData)' \
+  'string.Equals(name, "nLayers", StringComparison.Ordinal)' \
+  'string.Equals(name, "density", StringComparison.Ordinal)' \
+  'string.Equals(name, "candleWidth", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Watcher Urban native inspector range contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq 'Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder' "$factory" ||
+   ! grep -Fq 'holder.seed = (int)(UnityEngine.Random.value * 111111f);' "$factory"; then
+  echo "UrbanCandleHolder native creation no longer preserves vanilla seed initialization." >&2
+  exit 1
+fi
+
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
 if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
