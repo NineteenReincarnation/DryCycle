@@ -97,10 +97,13 @@ public static class NativeObjectGeometryGizmoCommandQueue
         PlacedObject target = ObjectAt(session, command.ObjectIndex);
         if (target == null) return false;
 
-        EditorPropertyValue value = new(
-            EditorPropertyKind.Vector2,
-            x: command.X,
-            y: command.Y);
+        if (!NativeDataReflectionInspector.TryBuildNativeGizmoValue(
+                target,
+                command.PropertyKey,
+                command.X,
+                command.Y,
+                out EditorPropertyValue value))
+            return false;
         if (!ObjectInspectorRegistry.TrySetValue(target, command.PropertyKey, value))
             return false;
 
