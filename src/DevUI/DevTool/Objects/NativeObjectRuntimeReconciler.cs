@@ -289,6 +289,8 @@ internal static class NativeObjectRuntimeReconciler
                 }
             }
         }
+    }
+
     private static void EnsureSimpleRoomRuntime(global::Room room, PlacedObject target)
     {
         if (room.updateList == null) return;
@@ -404,7 +406,5 @@ internal static class NativeObjectRuntimeReconciler
                     next[dst++] = water.surfaces[i];
             water.surfaces = next;
         }
-    }
-
     }
 }
