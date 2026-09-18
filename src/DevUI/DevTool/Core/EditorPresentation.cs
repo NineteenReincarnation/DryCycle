@@ -38,6 +38,7 @@ public sealed class EditorInspectorSnapshot
     public bool LegacyUiAvailable { get; init; }
     public bool LegacyUiVisible { get; init; }
     public EditorPropertySnapshot[] Properties { get; init; } = Array.Empty<EditorPropertySnapshot>();
+    public EditorObjectGizmoSnapshot ObjectGizmo { get; init; } = EditorObjectGizmoSnapshot.Empty;
     public string[] MixedPropertyKeys { get; init; } = Array.Empty<string>();
     public LegacyControlSnapshot[] LegacyControls { get; init; } = Array.Empty<LegacyControlSnapshot>();
 }
