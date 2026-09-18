@@ -38,6 +38,9 @@ internal static class BuiltinObjectRuntimeAdapters
         if (room?.updateList == null || target == null)
             return;
 
+        if (EnsureCommonLinkedRuntime(room, target))
+            return;
+
         if (target.type == PlacedObject.Type.LightFixture &&
             target.data is PlacedObject.LightFixtureData)
         {
@@ -191,6 +194,14 @@ internal static class BuiltinObjectRuntimeAdapters
         {
             UpdatableAndDeletable runtime = room.updateList[i];
             bool matches =
+                runtime is PlayerPushback pushback && ReferenceEquals(pushback.placedObj, target) ||
+                runtime is WaterCurrent current && ReferenceEquals(current.pObj, target) ||
+                runtime is FluxDrain drain && ReferenceEquals(drain.pObj, target) ||
+                runtime is SpinningFan fanRuntime && ReferenceEquals(fanRuntime.pObj, target) ||
+                runtime is ReliableIggyDirection iggy && ReferenceEquals(iggy.pObj, target) ||
+                runtime is ARKillRect killRect && ReferenceEquals(killRect.po, target) ||
+                runtime is SpotLight spot && ReferenceEquals(spot.placedObject, target) ||
+                runtime is GravityDisruptor disruptor && ReferenceEquals(disruptor.placedObject, target) ||
                 runtime is LightFixture fixture && ReferenceEquals(fixture.placedObject, target) ||
                 runtime is AdjustableFan fan && ReferenceEquals(fan.pObj, target) ||
                 runtime is HarmfulSteam steam && ReferenceEquals(steam.placedObject, target) ||
@@ -212,10 +223,85 @@ internal static class BuiltinObjectRuntimeAdapters
                 catch { }
             }
 
-            if (runtime is AdjustableFan adjustableFan && adjustableFan.FanElement != null)
-                DestroyRuntime(room, adjustableFan.FanElement);
+            if (runtime is SpinningFan spinningFan && spinningFan.FanElement != null)
+                DestroyRuntime(room, spinningFan.FanElement);
 
             DestroyRuntime(room, runtime);
+        }
+    }
+
+    private static bool EnsureCommonLinkedRuntime(global::Room room, PlacedObject target)
+    {
+        if (room?.updateList == null || target?.type == null)
+            return false;
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            UpdatableAndDeletable runtime = room.updateList[i];
+            bool exists =
+                target.type == PlacedObject.Type.PlayerPushback &&
+                runtime is PlayerPushback pushback &&
+                ReferenceEquals(pushback.placedObj, target) ||
+                target.type == PlacedObject.Type.WaterCurrent &&
+                runtime is WaterCurrent current &&
+                ReferenceEquals(current.pObj, target) ||
+                target.type == PlacedObject.Type.FluxDrain &&
+                runtime is FluxDrain drain &&
+                ReferenceEquals(drain.pObj, target) ||
+                target.type == PlacedObject.Type.HugeTurbine &&
+                runtime is HugeTurbine turbine &&
+                ReferenceEquals(turbine.pObj, target) ||
+                target.type == PlacedObject.Type.ReliableIggyDirection &&
+                runtime is ReliableIggyDirection iggy &&
+                ReferenceEquals(iggy.pObj, target) ||
+                target.type == PlacedObject.Type.ARKillRect &&
+                runtime is ARKillRect killRect &&
+                ReferenceEquals(killRect.po, target) ||
+                target.type == PlacedObject.Type.SpotLight &&
+                runtime is SpotLight spot &&
+                ReferenceEquals(spot.placedObject, target) ||
+                target.type == PlacedObject.Type.GravityDisruptor &&
+                runtime is GravityDisruptor disruptor &&
+                ReferenceEquals(disruptor.placedObject, target);
+
+            if (exists)
+                return true;
+        }
+
+        UpdatableAndDeletable created = null;
+        try
+        {
+            if (target.type == PlacedObject.Type.PlayerPushback)
+                created = new PlayerPushback(room, target);
+            else if (target.type == PlacedObject.Type.WaterCurrent)
+                created = new WaterCurrent(target);
+            else if (target.type == PlacedObject.Type.FluxDrain)
+                created = new FluxDrain(room, target);
+            else if (target.type == PlacedObject.Type.HugeTurbine)
+                created = new HugeTurbine(target, room);
+            else if (target.type == PlacedObject.Type.ReliableIggyDirection)
+                created = new ReliableIggyDirection(target);
+            else if (target.type == PlacedObject.Type.ARKillRect)
+                created = new ARKillRect(room, target);
+            else if (target.type == PlacedObject.Type.SpotLight)
+                created = new SpotLight(target);
+            else if (target.type == PlacedObject.Type.GravityDisruptor)
+                created = new GravityDisruptor(target, room);
+            else
+                return false;
+
+            room.AddObject(created);
+            return true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native linked runtime creation failed for '" +
+                (target.type?.value ?? string.Empty) + "': " + error.Message);
+            if (created is SpinningFan spinningFan && spinningFan.FanElement != null)
+                DestroyRuntime(room, spinningFan.FanElement);
+            DestroyRuntime(room, created);
+            return true;
         }
     }
 
