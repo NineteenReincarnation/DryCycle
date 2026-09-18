@@ -176,6 +176,7 @@ public static class NativeGizmoCommandQueue
         Vector2 next = new(x, y);
         if ((target.pos - next).sqrMagnitude <= 0.000001f) return false;
         target.pos = next;
+        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
         return true;
     }
 
