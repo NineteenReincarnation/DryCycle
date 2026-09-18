@@ -43,66 +43,66 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
 
         switch (runtime)
         {
-            case LightningMachine machine when target.data is PlacedObject.LightningMachineData data:
+            case LightningMachine machine when target.data is PlacedObject.LightningMachineData lightningData:
                 machine.pos = target.pos;
-                machine.startPoint = data.startPoint;
-                machine.endPoint = data.endPoint;
-                machine.chance = data.chance;
-                machine.permanent = data.permanent;
-                machine.radial = data.radial;
-                machine.width = data.width;
-                machine.intensity = data.intensity;
-                machine.lifeTime = data.lifeTime;
-                machine.lightningParam = data.lightningParam;
-                machine.lightningType = data.lightningType;
-                machine.impactType = data.impact;
-                machine.volume = data.volume;
-                machine.soundType = data.soundType;
-                machine.random = data.random;
-                machine.light = data.light;
+                machine.startPoint = lightningData.startPoint;
+                machine.endPoint = lightningData.endPoint;
+                machine.chance = lightningData.chance;
+                machine.permanent = lightningData.permanent;
+                machine.radial = lightningData.radial;
+                machine.width = lightningData.width;
+                machine.intensity = lightningData.intensity;
+                machine.lifeTime = lightningData.lifeTime;
+                machine.lightningParam = lightningData.lightningParam;
+                machine.lightningType = lightningData.lightningType;
+                machine.impactType = lightningData.impact;
+                machine.volume = lightningData.volume;
+                machine.soundType = lightningData.soundType;
+                machine.random = lightningData.random;
+                machine.light = lightningData.light;
                 break;
 
-            case EnergySwirl swirl when target.data is PlacedObject.EnergySwirlData data:
+            case EnergySwirl swirl when target.data is PlacedObject.EnergySwirlData swirlData:
                 swirl.setPos = target.pos;
-                swirl.setRad = data.Rad;
-                swirl.setDepth = data.depth;
+                swirl.setRad = swirlData.Rad;
+                swirl.setDepth = swirlData.depth;
                 swirl.color = Color.white;
                 swirl.colorFromEnviroment =
-                    data.colorType == PlacedObject.EnergySwirlData.ColorType.Environment;
+                    swirlData.colorType == PlacedObject.EnergySwirlData.ColorType.Environment;
                 swirl.effectColor = Math.Max(
                     -1,
                     data.colorType.Index - PlacedObject.EnergySwirlData.ColorType.EffectColor1.Index);
                 break;
 
-            case SnowSource snow when target.data is PlacedObject.SnowSourceData data:
+            case SnowSource snow when target.data is PlacedObject.SnowSourceData snowData:
                 snow.pos = target.pos;
-                snow.rad = data.Rad;
-                snow.intensity = data.intensity;
-                snow.noisiness = data.noisiness;
-                snow.shape = data.shape;
+                snow.rad = snowData.Rad;
+                snow.intensity = snowData.intensity;
+                snow.noisiness = snowData.noisiness;
+                snow.shape = snowData.shape;
                 break;
 
-            case LocalBlizzard blizzard when target.data is PlacedObject.LocalBlizzardData data:
+            case LocalBlizzard blizzard when target.data is PlacedObject.LocalBlizzardData blizzardData:
                 blizzard.pos = target.pos;
-                blizzard.rad = data.Rad;
-                blizzard.intensity = data.intensity;
-                blizzard.scale = data.scale;
-                blizzard.angle = data.angle;
+                blizzard.rad = blizzardData.Rad;
+                blizzard.intensity = blizzardData.intensity;
+                blizzard.scale = blizzardData.scale;
+                blizzard.angle = blizzardData.angle;
                 break;
 
-            case CellDistortion distortion when target.data is PlacedObject.CellDistortionData data:
+            case CellDistortion distortion when target.data is PlacedObject.CellDistortionData distortionData:
                 distortion.pos = target.pos;
-                distortion.rad = data.Rad;
-                distortion.intensity = data.intensity;
-                distortion.scale = data.scale;
-                distortion.cromaticIntensity = data.chromaticIntensity;
-                distortion.timeMult = data.timeMult;
+                distortion.rad = distortionData.Rad;
+                distortion.intensity = distortionData.intensity;
+                distortion.scale = distortionData.scale;
+                distortion.cromaticIntensity = distortionData.chromaticIntensity;
+                distortion.timeMult = distortionData.timeMult;
                 break;
 
-            case SteamPipe steam when target.data is PlacedObject.SteamPipeData data:
+            case SteamPipe steam when target.data is PlacedObject.SteamPipeData steamData:
                 steam.pos = target.pos;
-                steam.direction = Direction(data.handlePos);
-                steam.intensity = Mathf.Clamp(data.Rad / 250f, 0f, 1f);
+                steam.direction = Direction(steamData.handlePos);
+                steam.intensity = Mathf.Clamp(steamData.Rad / 250f, 0f, 1f);
                 steam.wallSteamer = target.type == PlacedObject.Type.WallSteamer;
                 break;
         }
