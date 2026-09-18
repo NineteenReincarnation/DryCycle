@@ -9,6 +9,7 @@ internal static class NativeObjectInspectorBootstrap
 {
     internal static void Enable()
     {
+        BuiltinStructuredInspectorAdapters.Enable();
         ObjectInspectorRegistry.Register(NativeDataReflectionInspector.Instance, -1000);
     }
 }
