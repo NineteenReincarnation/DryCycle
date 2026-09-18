@@ -6,7 +6,7 @@ reflection="$root/Objects/NativeDataReflectionInspector.cs"
 bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
-controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
+removed_controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
 quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
 removed_spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
@@ -17,7 +17,7 @@ geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$controller" "$quiescence" "$frontend" \
+for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$quiescence" "$frontend" \
             "$geometry_frontend" "$pages" "$backend" "$geometry_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -27,6 +27,10 @@ done
 
 if [[ -e "$removed_spatial_refresh" ]]; then
   echo "Obsolete Objects legacy spatial refresh layer returned: $removed_spatial_refresh" >&2
+  exit 1
+fi
+if [[ -e "$removed_controller" ]]; then
+  echo "Obsolete Objects gizmo presentation shim returned: $removed_controller" >&2
   exit 1
 fi
 
@@ -101,14 +105,11 @@ if ! grep -Fq 'NativeObjectGeometryGizmoCommandQueue.Process(session);' "$coordi
   exit 1
 fi
 
-# The old selected-representation controller is intentionally inert. Rebuilt Objects does not create
-# a representation tree, so there must be no dedicated Handle.Update hook left here.
-if grep -Fq 'On.DevInterface.Handle.Update' "$controller"; then
-  echo "Legacy Objects Handle.Update hook returned to ObjectGizmoPresentationController." >&2
-  exit 1
-fi
-if ! grep -Fq 'no Handle.Update hook to install' "$controller"; then
-  echo "ObjectGizmoPresentationController is no longer documented as an inert compatibility shim." >&2
+# Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
+# owns the original ObjectsPage directly; native mode owns detached gizmos.
+if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
+  echo "Obsolete Objects gizmo presentation shim reference returned:" >&2
+  cat /tmp/devtool_object_gizmo_shim_hits.txt >&2
   exit 1
 fi
 
