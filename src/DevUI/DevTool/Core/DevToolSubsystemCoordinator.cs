@@ -95,6 +95,7 @@ internal static class DevToolSubsystemCoordinator
     {
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
+        LegacyObjectSandbox.Reset();
         LegacySoundPageHydrator.Reset();
         LegacyTriggerPageHydrator.Reset();
         EditorViewportPresentationHub.Clear();
