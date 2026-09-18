@@ -136,10 +136,11 @@ for symbol in \
   'EditorObjectGizmoHandleSnapshot' \
   'EditorObjectBezierSegmentSnapshot' \
   'Id = "property:" + property.Key' \
-  'Id = "water:end"' \
-  'Id = "water:width"' \
-  'Id = "water:velocity"' \
-  '"spline:mid:" + i + ":pos"'; do
+  '"water:end"' \
+  '"water:width"' \
+  '"water:velocity"' \
+  '"spline:mid:" + i + ":pos"' \
+  '"localTerrain:bottom"'; do
   if ! grep -Fq "$symbol" "$gizmo_presentation"; then
     echo "Native object gizmo presentation lost a verified primitive mapping: $symbol" >&2
     exit 1
@@ -172,10 +173,15 @@ fi
 # Representation-specific model/runtime side effects move into native services. TerrainHandle is
 # the first required contract: any position/geometry/history mutation must update TerrainCurve.
 for symbol in \
-  'target.data is not PlacedObject.TerrainHandleData' \
+  'target.data is PlacedObject.TerrainHandleData' \
   'TerrainManager.ITerrain' \
   'terrain is TerrainCurve curve' \
-  'curve.UpdateHandles();'; do
+  'curve.UpdateHandles();' \
+  'target.data is PlacedObject.LocalTerrainData localTerrain' \
+  'terrain is LocalTerrainCurve local' \
+  'local.RefreshCurve();' \
+  'terrain is CurvedSlope slope' \
+  'slope.RefreshCurve();'; do
   if ! grep -Fq "$symbol" "$runtime_reconciler"; then
     echo "Native object runtime reconciler lost TerrainHandle behavior: $symbol" >&2
     exit 1
