@@ -27,7 +27,9 @@ internal static class BuiltinStructuredInspectorAdapters
         public bool CanInspect(PlacedObject target) =>
             target?.data is PlacedObject.CustomDecalData ||
             target?.data is Rainbow.RainbowData ||
-            target?.data is RainbowNoFade.RainbowNoFadeData;
+            target?.data is RainbowNoFade.RainbowNoFadeData ||
+            target?.data is PlacedObject.FilterData ||
+            target?.data is ReliableIggyDirection.ReliableIggyDirectionData;
 
         public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target)
         {
@@ -56,6 +58,12 @@ internal static class BuiltinStructuredInspectorAdapters
                 case RainbowNoFade.RainbowNoFadeData rainbowNoFade:
                     AppendRainbow(result, rainbowNoFade.fades);
                     break;
+                case PlacedObject.FilterData filter:
+                    AppendFilterPlayers(result, filter);
+                    break;
+                case ReliableIggyDirection.ReliableIggyDirectionData direction:
+                    AppendReliableDirectionPlayers(result, direction);
+                    break;
             }
 
             return result;
@@ -78,6 +86,14 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetRainbow(rainbowNoFade.fades, key, value))
                 return true;
 
+            if (target.data is PlacedObject.FilterData filter &&
+                TrySetFilterPlayer(filter, key, value))
+                return true;
+
+            if (target.data is ReliableIggyDirection.ReliableIggyDirectionData direction &&
+                TrySetReliableDirectionPlayer(direction, key, value))
+                return true;
+
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
         }
 
@@ -85,7 +101,9 @@ internal static class BuiltinStructuredInspectorAdapters
         {
             if (string.IsNullOrEmpty(key)) return false;
             return key.EndsWith(".vertices", StringComparison.Ordinal) ||
-                   key.EndsWith(".fades", StringComparison.Ordinal);
+                   key.EndsWith(".fades", StringComparison.Ordinal) ||
+                   key.EndsWith(".availableToPlayers", StringComparison.Ordinal) ||
+                   key.EndsWith(".availableOnTimelines", StringComparison.Ordinal);
         }
 
         private static void AppendCustomDecal(
@@ -221,6 +239,144 @@ internal static class BuiltinStructuredInspectorAdapters
 
             return false;
         }
+
+        private static void AppendFilterPlayers(
+            List<EditorPropertySnapshot> result,
+            PlacedObject.FilterData data)
+        {
+            if (data == null) return;
+
+            for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.Count; i++)
+            {
+                string entry = ExtEnum<SlugcatStats.Name>.values.GetEntry(i);
+                SlugcatStats.Name name = new(entry);
+                if (SlugcatStats.HiddenOrUnplayableSlugcat(name))
+                    continue;
+
+                result.Add(Boolean(
+                    "builtin.filter.player." + entry,
+                    entry,
+                    data.availableToPlayers?.Contains(name) == true,
+                    "Player Availability"));
+            }
+
+            string[] timelines = data.availableOnTimelines == null
+                ? Array.Empty<string>()
+                : data.availableOnTimelines.ConvertAll(x => x?.value ?? string.Empty).ToArray();
+            result.Add(ReadOnly(
+                "builtin.filter.timelines",
+                "Derived Timelines",
+                string.Join(", ", timelines),
+                "Player Availability"));
+        }
+
+        private static bool TrySetFilterPlayer(
+            PlacedObject.FilterData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            const string prefix = "builtin.filter.player.";
+            if (data == null ||
+                value.Kind != EditorPropertyKind.Boolean ||
+                string.IsNullOrEmpty(key) ||
+                !key.StartsWith(prefix, StringComparison.Ordinal))
+                return false;
+
+            string entry = key.Substring(prefix.Length);
+            if (string.IsNullOrEmpty(entry))
+                return false;
+
+            SlugcatStats.Name name = new(entry);
+            if (SlugcatStats.HiddenOrUnplayableSlugcat(name))
+                return false;
+
+            data.availableToPlayers ??= new List<SlugcatStats.Name>();
+            SetMembership(data.availableToPlayers, name, value.Boolean);
+            data.RefreshTimelineList();
+            return true;
+        }
+
+        private static void AppendReliableDirectionPlayers(
+            List<EditorPropertySnapshot> result,
+            ReliableIggyDirection.ReliableIggyDirectionData data)
+        {
+            if (data == null) return;
+
+            for (int i = 0; i < ExtEnum<SlugcatStats.Name>.values.Count; i++)
+            {
+                string entry = ExtEnum<SlugcatStats.Name>.values.GetEntry(i);
+                SlugcatStats.Name name = new(entry);
+                result.Add(Boolean(
+                    "builtin.reliableIggy.player." + entry,
+                    entry,
+                    data.availableToPlayers?.Contains(name) == true,
+                    "Player Availability"));
+            }
+        }
+
+        private static bool TrySetReliableDirectionPlayer(
+            ReliableIggyDirection.ReliableIggyDirectionData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            const string prefix = "builtin.reliableIggy.player.";
+            if (data == null ||
+                value.Kind != EditorPropertyKind.Boolean ||
+                string.IsNullOrEmpty(key) ||
+                !key.StartsWith(prefix, StringComparison.Ordinal))
+                return false;
+
+            string entry = key.Substring(prefix.Length);
+            if (string.IsNullOrEmpty(entry))
+                return false;
+
+            SlugcatStats.Name name = new(entry);
+            data.availableToPlayers ??= new List<SlugcatStats.Name>();
+            SetMembership(data.availableToPlayers, name, value.Boolean);
+            return true;
+        }
+
+        private static void SetMembership(
+            List<SlugcatStats.Name> values,
+            SlugcatStats.Name name,
+            bool enabled)
+        {
+            bool present = values.Contains(name);
+            if (enabled && !present)
+                values.Add(name);
+            else if (!enabled && present)
+                values.Remove(name);
+        }
+
+        private static EditorPropertySnapshot Boolean(
+            string key,
+            string displayName,
+            bool value,
+            string group) =>
+            new()
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.Boolean,
+                BooleanValue = value
+            };
+
+        private static EditorPropertySnapshot ReadOnly(
+            string key,
+            string displayName,
+            string value,
+            string group) =>
+            new()
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.ReadOnly,
+                StringValue = value ?? string.Empty
+            };
 
         private static bool TryParseIndexedKey(string key, string prefix, out int index)
         {
