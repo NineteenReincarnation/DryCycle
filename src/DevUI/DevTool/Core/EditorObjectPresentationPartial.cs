@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Core;
@@ -144,22 +145,50 @@ public static partial class EditorPresentationHub
             mixedPropertyKeys = Array.Empty<string>();
         }
 
+        bool singleSelection = selectionCount == 1 && selected != null && selectedIndex >= 0;
+        bool externalObject = singleSelection &&
+                              selected.type != null &&
+                              !GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), selected.type.value);
+
+        LegacyControlSnapshot[] legacyControls = Array.Empty<LegacyControlSnapshot>();
+        if (singleSelection)
+        {
+            if (session.LegacyUiVisible && session.Owner?.activePage is global::DevInterface.ObjectsPage)
+            {
+                legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
+                LegacyObjectSandbox.Release(session);
+            }
+            else if (externalObject)
+            {
+                // Unknown third-party objects receive only one selected-object legacy representation.
+                // Builtin/game-defined objects stay purely native unless the user explicitly opens
+                // full Legacy UI.
+                legacyControls = LegacyObjectSandbox.Capture(session, selected);
+            }
+            else
+            {
+                LegacyObjectSandbox.Release(session);
+            }
+        }
+        else
+        {
+            LegacyObjectSandbox.Release(session);
+        }
+
         return new EditorInspectorSnapshot
         {
-            HasSelection = selected != null && selectedIndex >= 0,
+            HasSelection = singleSelection,
             ObjectIndex = selectedIndex,
             SelectionCount = selectionCount,
             Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
             DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
-            LegacyUiAvailable = selectionCount == 1,
+            LegacyUiAvailable = singleSelection,
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
             MixedPropertyKeys = mixedPropertyKeys,
-            LegacyControls = selectionCount == 1
-                ? LegacyDevInterfaceBridge.Capture(session.Owner, selected)
-                : Array.Empty<LegacyControlSnapshot>()
+            LegacyControls = legacyControls
         };
     }
 
