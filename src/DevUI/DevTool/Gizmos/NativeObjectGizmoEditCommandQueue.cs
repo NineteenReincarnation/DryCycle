@@ -117,6 +117,7 @@ public static class NativeObjectGizmoEditCommandQueue
         {
             case NativeObjectGizmoEditKind.Begin:
             {
+                NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
                 IEditorStateSnapshot before =
                     SinglePlacedObjectStateSnapshot.Capture(session.RoomSettings, target);
                 if (before != null)
