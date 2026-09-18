@@ -135,6 +135,38 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
+        if (target.data is GeyserData &&
+            room.updateList != null)
+        {
+            for (int i = room.updateList.Count - 1; i >= 0; i--)
+            {
+                if (room.updateList[i] is not Geyser geyser ||
+                    !ReferenceEquals(geyser.pObj, target))
+                    continue;
+                try { geyser.Destroy(); }
+                catch { }
+                try { room.RemoveObject(geyser); }
+                catch { }
+            }
+        }
+
+        if (target.data is MudPit.MudPitData &&
+            room.updateList != null)
+        {
+            for (int i = room.updateList.Count - 1; i >= 0; i--)
+            {
+                if (room.updateList[i] is not MudPit pit ||
+                    !ReferenceEquals(pit.pObj, target))
+                    continue;
+                try { pit.Destroy(); }
+                catch { }
+                try { room.RemoveObject(pit); }
+                catch { }
+            }
+        }
+
+        RemoveWaterMembership(room, target);
+
         if (target.data is PlacedObject.SpawnMigrationStreamData streamData &&
             room.updateList != null)
         {
@@ -154,6 +186,9 @@ internal static class NativeObjectRuntimeReconciler
 
     private static void EnsureRuntimePresence(global::Room room, PlacedObject target)
     {
+        EnsureWaterMembership(room, target);
+        EnsureSimpleRoomRuntime(room, target);
+
         if (target.data is PlacedObject.LocalTerrainData localTerrain)
         {
             bool found = false;
@@ -254,5 +289,122 @@ internal static class NativeObjectRuntimeReconciler
                 }
             }
         }
+    private static void EnsureSimpleRoomRuntime(global::Room room, PlacedObject target)
+    {
+        if (room.updateList == null) return;
+
+        if (target.data is GeyserData)
+        {
+            for (int i = 0; i < room.updateList.Count; i++)
+                if (room.updateList[i] is Geyser geyser && ReferenceEquals(geyser.pObj, target))
+                    return;
+
+            try { room.AddObject(new Geyser(target)); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native Geyser runtime creation failed: " + error.Message);
+            }
+            return;
+        }
+
+        if (target.data is MudPit.MudPitData)
+        {
+            for (int i = 0; i < room.updateList.Count; i++)
+            {
+                if (room.updateList[i] is not MudPit pit || !ReferenceEquals(pit.pObj, target))
+                    continue;
+
+                int required = pit.SegmentCount + 1;
+                if (pit.heights != null && pit.heights.Length == required)
+                    return;
+
+                // Resizing a live pit changes its simulation segment count. Recreate only that
+                // runtime object; the authored PlacedObject identity remains unchanged.
+                try { pit.Destroy(); }
+                catch { }
+                try { room.RemoveObject(pit); }
+                catch { }
+                break;
+            }
+
+            try { room.AddObject(new MudPit(target)); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native MudPit runtime creation failed: " + error.Message);
+            }
+        }
+    }
+
+    private static void EnsureWaterMembership(global::Room room, PlacedObject target)
+    {
+        Water water = room.waterObject;
+        if (water?.surfaces == null || water.MainSurface == null)
+            return;
+
+        if (target.data is WaterCutoffData)
+        {
+            bool found = false;
+            for (int i = 0; i < water.MainSurface.waterCutoffs.Count; i++)
+            {
+                if (!ReferenceEquals(water.MainSurface.waterCutoffs[i], target)) continue;
+                found = true;
+                break;
+            }
+            if (!found)
+                water.MainSurface.waterCutoffs.Add(target);
+        }
+
+        if (target.data is AirPocketData)
+        {
+            for (int i = 1; i < water.surfaces.Length; i++)
+            {
+                if (water.surfaces[i] is Water.AirPocketSurface pocket &&
+                    ReferenceEquals(pocket.pObj, target))
+                    return;
+            }
+
+            Water.Surface[] next = new Water.Surface[water.surfaces.Length + 1];
+            Array.Copy(water.surfaces, next, water.surfaces.Length);
+            next[next.Length - 1] = new Water.AirPocketSurface(water, target);
+            water.surfaces = next;
+        }
+    }
+
+    private static void RemoveWaterMembership(global::Room room, PlacedObject target)
+    {
+        Water water = room.waterObject;
+        if (water?.surfaces == null || water.MainSurface == null)
+            return;
+
+        if (target.data is WaterCutoffData)
+        {
+            for (int i = water.MainSurface.waterCutoffs.Count - 1; i >= 0; i--)
+                if (ReferenceEquals(water.MainSurface.waterCutoffs[i], target))
+                    water.MainSurface.waterCutoffs.RemoveAt(i);
+        }
+
+        if (target.data is AirPocketData)
+        {
+            int match = -1;
+            for (int i = 1; i < water.surfaces.Length; i++)
+            {
+                if (water.surfaces[i] is Water.AirPocketSurface pocket &&
+                    ReferenceEquals(pocket.pObj, target))
+                {
+                    match = i;
+                    break;
+                }
+            }
+            if (match < 0) return;
+
+            Water.Surface[] next = new Water.Surface[water.surfaces.Length - 1];
+            int dst = 0;
+            for (int i = 0; i < water.surfaces.Length; i++)
+                if (i != match)
+                    next[dst++] = water.surfaces[i];
+            water.surfaces = next;
+        }
+    }
+
     }
 }
