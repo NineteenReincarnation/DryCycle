@@ -85,6 +85,11 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
+        if (target.type == PlacedObject.Type.TerrainRubble)
+        {
+            RefreshTerrainRubble(room);
+        }
+
         if (target.data is PlacedObject.TerrainHandleData)
         {
             try
@@ -121,6 +126,18 @@ internal static class NativeObjectRuntimeReconciler
                 Plugin.Logger?.LogWarning("DevTool native spline terrain reconciliation failed: " + error.Message);
             }
         }
+    }
+
+    internal static void RefreshAfterRemoval(EditorSession session, PlacedObject target)
+    {
+        if (target?.type != PlacedObject.Type.TerrainRubble)
+            return;
+
+        global::Room room = session?.Room;
+        if (room == null)
+            return;
+
+        RefreshTerrainRubble(room);
     }
 
     internal static void RemoveRuntime(EditorSession session, PlacedObject target)
@@ -347,6 +364,25 @@ internal static class NativeObjectRuntimeReconciler
                         "DevTool native spawn-migration runtime creation failed: " + error.Message);
                 }
             }
+        }
+    }
+
+    private static void RefreshTerrainRubble(global::Room room)
+    {
+        if (room?.terrain?.terrainList == null)
+            return;
+
+        try
+        {
+            foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+            {
+                if (terrain is TerrainCurve curve)
+                    curve.UpdateRubble();
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool native terrain rubble reconciliation failed: " + error.Message);
         }
     }
 
