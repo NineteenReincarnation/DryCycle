@@ -456,6 +456,17 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(PlacedObject.RippleTreeData) &&
+            (string.Equals(name, "sproutThreshold", StringComparison.Ordinal) ||
+             string.Equals(name, "sproutEnd", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
         if (declaringType == typeof(ReliableIggyDirection.ReliableIggyDirectionData) &&
             string.Equals(name, "cyclesToShow", StringComparison.Ordinal))
         {
