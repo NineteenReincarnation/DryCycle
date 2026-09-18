@@ -131,6 +131,13 @@ public static class NativeGizmoCommandQueue
     private static void Begin(EditorSession session, NativeGizmoCommand command)
     {
         if (session == null) return;
+
+        if (command.Target == NativeGizmoTargetKind.ObjectPosition)
+        {
+            PlacedObject objectTarget = ObjectAt(session, command.Index);
+            NativeObjectRuntimeReconciler.PrepareForMutation(session, objectTarget);
+        }
+
         IEditorStateSnapshot before = command.Target switch
         {
             NativeGizmoTargetKind.ObjectPosition =>
