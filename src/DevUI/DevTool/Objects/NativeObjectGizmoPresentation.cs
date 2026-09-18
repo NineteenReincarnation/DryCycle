@@ -100,6 +100,20 @@ internal static class NativeObjectGizmoPresentation
                 target.pos + new Vector2(airPocket.handlePos.x, airPocket.waterLevel));
             specialized = true;
         }
+        else if (ModManager.Watcher &&
+                 target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
+                 target.data is PlacedObject.ResizableObjectData weaver)
+        {
+            Vector2 direction = weaver.handlePos.sqrMagnitude > 0.0001f
+                ? weaver.handlePos.normalized * 460f
+                : Vector2.up * 460f;
+            handles.Add(Handle(
+                "weaver:direction",
+                target.pos + direction,
+                target.pos,
+                drawLine: true));
+            specialized = true;
+        }
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
         {
             CaptureSpline(target, splineData.spline, handles, beziers);
@@ -115,6 +129,15 @@ internal static class NativeObjectGizmoPresentation
         // source. Complex WaterCurrent/Spline models publish their own complete primitive set above.
         if (!specialized)
             CapturePropertyHandles(target, properties, handles);
+
+        if (ModManager.Watcher && target.data is LobeTree.LobeTreeData lobeTree)
+        {
+            handles.Add(Handle(
+                "lobeTree:root",
+                target.pos + lobeTree.rootOffset,
+                target.pos,
+                drawLine: true));
+        }
 
         if (target.data is PlacedObject.SuperSlopeData superSlope)
         {
