@@ -448,6 +448,7 @@ public static class EditorActions
             try
             {
                 target.data.FromString(source.data.ToString());
+                BuiltinObjectAuthoringStateSnapshot.Capture(source.data)?.Restore(target.data);
                 target.data.owner = target;
             }
             catch (Exception error)
