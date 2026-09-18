@@ -40,12 +40,21 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         internal Type ValueType;
         internal FieldInfo Field;
         internal PropertyInfo Property;
+        internal int ArrayIndex = -1;
         internal bool Writable;
         internal EditorPropertyKind Kind;
         internal string[] Options = Array.Empty<string>();
 
         internal object Read(object target)
         {
+            if (ArrayIndex >= 0)
+            {
+                if (Field?.GetValue(target) is Vector2[] vectors &&
+                    ArrayIndex < vectors.Length)
+                    return vectors[ArrayIndex];
+                return default(Vector2);
+            }
+
             if (Field != null) return Field.GetValue(target);
             return Property?.GetValue(target, null);
         }
@@ -53,6 +62,16 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         internal void Write(object target, object value)
         {
             if (!Writable) return;
+
+            if (ArrayIndex >= 0)
+            {
+                if (value is Vector2 vector &&
+                    Field?.GetValue(target) is Vector2[] vectors &&
+                    ArrayIndex < vectors.Length)
+                    vectors[ArrayIndex] = vector;
+                return;
+            }
+
             if (Field != null) Field.SetValue(target, value);
             else Property?.SetValue(target, value, null);
         }
@@ -170,6 +189,18 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             {
                 FieldInfo field = fields[i];
                 if (field.IsStatic || ShouldIgnore(field.Name) || !names.Add(field.Name)) continue;
+
+                // QuadObjectRepresentation exposes exactly three authored relative handles. Flatten
+                // only this verified Rain World model contract; arbitrary arrays remain read-only.
+                if (current == typeof(PlacedObject.QuadObjectData) &&
+                    field.Name == "handles" &&
+                    field.FieldType == typeof(Vector2[]))
+                {
+                    for (int handleIndex = 0; handleIndex < 3; handleIndex++)
+                        bindings.Add(BuildVectorArrayBinding(current, field, handleIndex));
+                    continue;
+                }
+
                 MemberBinding binding = BuildBinding(
                     current,
                     field.Name,
@@ -207,6 +238,25 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return group != 0 ? group : string.Compare(a.DisplayName, b.DisplayName, StringComparison.Ordinal);
         });
         return new Schema(bindings.ToArray());
+    }
+
+    private static MemberBinding BuildVectorArrayBinding(
+        Type declaringType,
+        FieldInfo field,
+        int index)
+    {
+        return new MemberBinding
+        {
+            Key = "native." + (declaringType.FullName ?? declaringType.Name) + "." + field.Name + "[" + index + "]",
+            DisplayName = Humanize(field.Name) + " " + (index + 1),
+            Group = "Geometry",
+            ValueType = typeof(Vector2),
+            Field = field,
+            ArrayIndex = index,
+            Writable = !field.IsInitOnly && !field.IsLiteral,
+            Kind = EditorPropertyKind.Vector2,
+            Options = Array.Empty<string>()
+        };
     }
 
     private static MemberBinding BuildBinding(
