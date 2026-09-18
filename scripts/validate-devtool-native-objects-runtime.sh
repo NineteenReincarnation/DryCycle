@@ -7,6 +7,7 @@ bootstrap="$root/Objects/NativeObjectInspectorBootstrap.cs"
 scheduler="$root/Core/NativeToolScheduler.cs"
 anchor="$root/Core/NativeToolAnchorPage.cs"
 removed_controller="$root/Compatibility/ObjectGizmoPresentationController.cs"
+sandbox="$root/Compatibility/LegacyObjectSandbox.cs"
 quiescence="$root/Compatibility/LegacyDevUiQuiescenceController.cs"
 removed_spatial_refresh="$root/Compatibility/LegacySpatialBackendRefresh.cs"
 frontend="$root/RWImGui/NativeSpatialGizmoView.cs"
@@ -17,7 +18,7 @@ geometry_backend="$root/Gizmos/NativeObjectGeometryGizmoCommandQueue.cs"
 coordinator="$root/Core/DevToolSubsystemCoordinator.cs"
 factory="$root/Factories/NativePlacedObjectFactory.cs"
 
-for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$quiescence" "$frontend" \
+for file in "$reflection" "$bootstrap" "$scheduler" "$anchor" "$quiescence" "$sandbox" "$frontend" \
             "$geometry_frontend" "$pages" "$backend" "$geometry_backend" "$coordinator" "$factory"; do
   if [[ ! -f "$file" ]]; then
     echo "Native Objects contract file missing: $file" >&2
@@ -57,6 +58,30 @@ fi
 # handle execution plan. Explicit Vanilla/Legacy materializes the original page and runs it normally.
 if grep -Eq 'On\.DevInterface\.ObjectsPage\.(Update|Refresh)|ObjectsPage_(Update|Refresh)|PreserveWorldHandles|UseNativeBackendRefresh|IsWorldBackendNode|LegacySpatialBackendRefresh' "$quiescence"; then
   echo "Objects regained a hidden legacy Page/Handle backend in quiescence." >&2
+  exit 1
+fi
+
+# Unknown third-party Objects may use a selected-only compatibility sandbox, but that sandbox must
+# never Refresh the ObjectsPage (which would materialize every room object). It reuses CreateObjRep
+# only with the already-existing selected PlacedObject and is reset with the DevTool runtime.
+if grep -Fq 'page.Refresh();' "$sandbox" || grep -Fq '.Refresh();' "$sandbox"; then
+  echo "Selected-only legacy object sandbox regained a full page refresh." >&2
+  exit 1
+fi
+for symbol in \
+  'page.CreateObjRep(target.type, target);' \
+  'LegacyDevInterfaceBridge.Capture(session.Owner, target)' \
+  'session.Owner.activePage = state.Page;' \
+  'session.Owner.activePage = previous;' \
+  'LegacyObjectSandbox.Reset();'; do
+  if ! grep -R -Fq "$symbol" "$sandbox" "$root/Core/DevToolSubsystemCoordinator.cs"; then
+    echo "Selected-only legacy object sandbox lost its no-full-refresh contract: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'LegacyObjectSandbox.Capture(session, selected)' "$root/Core/EditorObjectPresentationPartial.cs" ||
+   ! grep -Fq 'LegacyObjectSandbox.Run(session, target, action)' "$root/Commands/EditorActions.cs"; then
+  echo "Unknown object controls no longer route through the selected-only sandbox." >&2
   exit 1
 fi
 
