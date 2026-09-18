@@ -356,6 +356,19 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             min = 0f;
             max = 1f;
             step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(LightBeam.LightBeamData) &&
+            (string.Equals(name, "alpha", StringComparison.Ordinal) ||
+             string.Equals(name, "colorA", StringComparison.Ordinal) ||
+             string.Equals(name, "colorB", StringComparison.Ordinal) ||
+             string.Equals(name, "blinkRate", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
         }
     }
 
