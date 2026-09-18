@@ -321,6 +321,33 @@ for symbol in \
   fi
 done
 
+# Runtime objects previously created by LightBeam/BlackSpot/Wind representations are native-owned.
+for symbol in \
+  'target.type == PlacedObject.Type.LightBeam' \
+  'EnsureLightBeamRuntime(room, target);' \
+  'beam.meshDirty = true;' \
+  'beam.SetBlinkProperties(data.blinkType, data.blinkRate);' \
+  'beam.nightLight = data.nightLight;' \
+  'target.type == PlacedObject.Type.BlackSpot' \
+  'room.AddObject(new BlackSpot(target));' \
+  'target.type == PlacedObject.Type.WindRect' \
+  'room.AddObject(new WindRect(target));'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "LightBeam/BlackSpot/Wind runtime ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'declaringType == typeof(LightBeam.LightBeamData)' \
+  'string.Equals(name, "alpha", StringComparison.Ordinal)' \
+  'string.Equals(name, "colorA", StringComparison.Ordinal)' \
+  'string.Equals(name, "colorB", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Native LightBeam inspector range contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
 if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
