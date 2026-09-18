@@ -61,6 +61,29 @@ internal static class NativeObjectGizmoPresentation
             CaptureWaterCurrent(target, water, handles);
             specialized = true;
         }
+        else if (target.data is WaterCutoffData waterCutoff)
+        {
+            handles.Add(Handle(
+                "waterCutoff:end",
+                target.pos + waterCutoff.handlePos,
+                target.pos,
+                drawLine: true));
+            specialized = true;
+        }
+        else if (target.data is AirPocketData airPocket)
+        {
+            handles.Add(Handle(
+                "airPocket:corner",
+                target.pos + airPocket.handlePos,
+                target.pos,
+                drawLine: true));
+            handles.Add(Handle(
+                "airPocket:waterLevel",
+                target.pos + new Vector2(0f, airPocket.waterLevel),
+                target.pos,
+                drawLine: false));
+            specialized = true;
+        }
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
         {
             CaptureSpline(target, splineData.spline, handles, beziers);
@@ -87,6 +110,12 @@ internal static class NativeObjectGizmoPresentation
         {
             Vector2 width = target.pos + new Vector2(waterFlow.width * 20f, 0f);
             handles.Add(Handle("waterFlow:width", width, target.pos, drawLine: true));
+        }
+
+        if (target.data is MudPit.MudPitData mudPit)
+        {
+            Vector2 decal = target.pos + new Vector2(mudPit.decalSize, 0f);
+            handles.Add(Handle("mudPit:decalSize", decal, target.pos, drawLine: true));
         }
 
         if (handles.Count == 0 && beziers.Count == 0)
