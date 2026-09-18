@@ -719,6 +719,29 @@ for symbol in \
   fi
 done
 
+# Remaining vanilla/Watcher object sliders keep their original authored ranges instead of falling
+# back to unbounded numeric inputs. Consumable regeneration also preserves min<=max coupling.
+for symbol in \
+  'typeof(PlacedObject.PrinceFilterData)' \
+  'typeof(PlacedObject.RippleLevelFilterData)' \
+  'typeof(PlacedObject.RippleEggFilterData)' \
+  'typeof(GooDripSource.GooDripsData)' \
+  'typeof(PlacedObject.InsectGroupData)' \
+  'typeof(PlacedObject.MultiplayerItemData)' \
+  'typeof(PlacedObject.FanData)' \
+  'typeof(PlacedObject.SkyWhalePathfindingData)' \
+  'typeof(PlacedObject.ConsumableObjectData)' \
+  'typeof(Watcher.BigSkyWhaleSpawner.Data)' \
+  'typeof(Watcher.SandGrubNetwork.NetworkData)' \
+  'typeof(DaddyCorruption.CustomRotData)' \
+  'Math.Min(regen, consumable.maxRegen)' \
+  'Math.Max(regen, consumable.minRegen)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Remaining builtin slider range coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
