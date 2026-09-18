@@ -336,8 +336,9 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
 
     private static void RegisterFluxWaterfall(global::Room room, FluxWaterfall runtime)
     {
-        Array.Resize(ref room.waterFalls, room.waterFalls.Length + 1);
-        room.waterFalls[room.waterFalls.Length - 1] = runtime;
+        int count = room.waterFalls?.Length ?? 0;
+        Array.Resize(ref room.waterFalls, count + 1);
+        room.waterFalls[count] = runtime;
         if (room.waterObject != null)
             runtime.ConnectToWaterObject(room.waterObject);
     }
@@ -363,6 +364,19 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                         next[dst++] = room.waterFalls[i];
                 room.waterFalls = next;
             }
+        }
+
+        if (runtime.topLoop != null)
+        {
+            runtime.topLoop.volume = 0f;
+            try { runtime.topLoop.Update(); }
+            catch { }
+        }
+        if (runtime.bottomLoop != null)
+        {
+            runtime.bottomLoop.volume = 0f;
+            try { runtime.bottomLoop.Update(); }
+            catch { }
         }
 
         DestroyRuntime(room, runtime);
