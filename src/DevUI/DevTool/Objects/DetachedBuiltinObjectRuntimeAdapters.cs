@@ -212,24 +212,47 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
     {
         try
         {
-            UpdatableAndDeletable runtime = target.type switch
+            UpdatableAndDeletable runtime = null;
+
+            if (target.type == PlacedObject.Type.LightningMachine &&
+                target.data is PlacedObject.LightningMachineData lightning)
             {
-                PlacedObject.Type.LightningMachine when target.data is PlacedObject.LightningMachineData data =>
-                    CreateLightning(target, data),
-                PlacedObject.Type.EnergySwirl =>
-                    new EnergySwirl(target.pos, Color.white, null),
-                PlacedObject.Type.SnowSource =>
-                    new SnowSource(target.pos),
-                PlacedObject.Type.LocalBlizzard =>
-                    new LocalBlizzard(target.pos, 100f, 1f, 0.5f),
-                PlacedObject.Type.CellDistortion =>
-                    new CellDistortion(target.pos, 100f, 1f, 0.5f, 0f, 0f),
-                PlacedObject.Type.SteamPipe when target.data is PlacedObject.SteamPipeData data =>
-                    new SteamPipe(target.pos, Direction(data.handlePos), Mathf.Clamp(data.Rad / 250f, 0f, 1f), false),
-                PlacedObject.Type.WallSteamer when target.data is PlacedObject.SteamPipeData data =>
-                    new SteamPipe(target.pos, Direction(data.handlePos), Mathf.Clamp(data.Rad / 250f, 0f, 1f), true),
-                _ => null
-            };
+                runtime = CreateLightning(target, lightning);
+            }
+            else if (target.type == PlacedObject.Type.EnergySwirl)
+            {
+                runtime = new EnergySwirl(target.pos, Color.white, null);
+            }
+            else if (target.type == PlacedObject.Type.SnowSource)
+            {
+                runtime = new SnowSource(target.pos);
+            }
+            else if (target.type == PlacedObject.Type.LocalBlizzard)
+            {
+                runtime = new LocalBlizzard(target.pos, 100f, 1f, 0.5f);
+            }
+            else if (target.type == PlacedObject.Type.CellDistortion)
+            {
+                runtime = new CellDistortion(target.pos, 100f, 1f, 0.5f, 0f, 0f);
+            }
+            else if (target.type == PlacedObject.Type.SteamPipe &&
+                     target.data is PlacedObject.SteamPipeData steam)
+            {
+                runtime = new SteamPipe(
+                    target.pos,
+                    Direction(steam.handlePos),
+                    Mathf.Clamp(steam.Rad / 250f, 0f, 1f),
+                    false);
+            }
+            else if (target.type == PlacedObject.Type.WallSteamer &&
+                     target.data is PlacedObject.SteamPipeData wallSteam)
+            {
+                runtime = new SteamPipe(
+                    target.pos,
+                    Direction(wallSteam.handlePos),
+                    Mathf.Clamp(wallSteam.Rad / 250f, 0f, 1f),
+                    true);
+            }
 
             if (runtime == null)
                 return null;
