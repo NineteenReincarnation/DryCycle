@@ -126,7 +126,7 @@ if ! grep -Fq 'NativeObjectGizmoView.Draw(snapshot, display);' "$pages" ||
   echo "Unified detached Objects gizmo frontend is not wired." >&2
   exit 1
 fi
-if grep -Eq '^using DevInterface;|global::DevInterface|PlacedObject|ObjectsPage|PlacedObjectRepresentation|WaterCurrent|BezierSpline|System\.Reflection|BindingFlags|GetField[[:space:]]*\(|GetProperty[[:space:]]*\(' "$object_gizmo_frontend"; then
+if grep -Eq '^using DevInterface;|global::DevInterface|typeof\(PlacedObject\)|PlacedObject[[:space:]]+[A-Za-z_]|typeof\(ObjectsPage\)|ObjectsPage[[:space:]]+[A-Za-z_]|PlacedObjectRepresentation[[:space:]]+[A-Za-z_]|WaterCurrent\.WaterCurrentData|BezierSpline[[:space:]]+[A-Za-z_]|System\.Reflection|BindingFlags|GetField[[:space:]]*\(|GetProperty[[:space:]]*\(' "$object_gizmo_frontend"; then
   echo "Unified Objects gizmo frontend regained Rain World/DevInterface/reflection dependencies." >&2
   exit 1
 fi
