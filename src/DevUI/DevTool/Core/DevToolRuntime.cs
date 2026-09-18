@@ -32,6 +32,7 @@ internal static class DevToolRuntime
     {
         if (enabled) return;
         BuiltinInspectorAdapters.Enable();
+        NativeObjectInspectorBootstrap.Enable();
         ObjectGizmoPresentationController.Enable();
         EditorInputRouter.Enable();
         if (EffectLivePreviewEnabled)
