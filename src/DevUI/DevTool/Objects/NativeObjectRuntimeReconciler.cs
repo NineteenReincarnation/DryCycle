@@ -22,6 +22,7 @@ internal static class NativeObjectRuntimeReconciler
     internal static void ResetRuntimeState()
     {
         lightBindings = new ConditionalWeakTable<PlacedObject, LightBinding>();
+        BuiltinObjectRuntimeAdapters.ResetRuntimeState();
         DetachedBuiltinObjectRuntimeAdapters.ResetRuntimeState();
     }
 
@@ -31,6 +32,7 @@ internal static class NativeObjectRuntimeReconciler
         if (room == null || target == null)
             return;
 
+        BuiltinObjectRuntimeAdapters.Prepare(room, target);
         DetachedBuiltinObjectRuntimeAdapters.Prepare(room, target);
 
         if (target.data is PlacedObject.LightSourceData)
