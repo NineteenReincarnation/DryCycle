@@ -84,6 +84,7 @@ public sealed class PlacedObjectState
 
             if (index >= 0)
                 NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
+            LegacyObjectSandbox.Invalidate(session, target);
 
             int finalIndex = current.placedObjects.IndexOf(target);
             bool shouldBePresent = index >= 0;
