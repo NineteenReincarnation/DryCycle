@@ -456,6 +456,152 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(PlacedObject.PrinceFilterData) &&
+            string.Equals(name, "stage", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 3f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.RippleLevelFilterData) &&
+            (string.Equals(name, "minimumRippleLevel", StringComparison.Ordinal) ||
+             string.Equals(name, "maximumRippleLevel", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 5f;
+            step = 0.1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.RippleEggFilterData) &&
+            string.Equals(name, "threshold", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if ((declaringType == typeof(GooDripSource.GooDripsData) &&
+             string.Equals(name, "frequency", StringComparison.Ordinal)) ||
+            (declaringType == typeof(PlacedObject.InsectGroupData) &&
+             string.Equals(name, "density", StringComparison.Ordinal)) ||
+            (declaringType == typeof(PlacedObject.MultiplayerItemData) &&
+             string.Equals(name, "chance", StringComparison.Ordinal)) ||
+            (declaringType == typeof(PlacedObject.FanData) &&
+             (string.Equals(name, "speed", StringComparison.Ordinal) ||
+              string.Equals(name, "depth", StringComparison.Ordinal))))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.SkyWhalePathfindingData) &&
+            string.Equals(name, "index", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 5f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.ConsumableObjectData) &&
+            (string.Equals(name, "minRegen", StringComparison.Ordinal) ||
+             string.Equals(name, "maxRegen", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 50f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(Watcher.BigSkyWhaleSpawner.Data))
+        {
+            if (string.Equals(name, "minDelay", StringComparison.Ordinal) ||
+                string.Equals(name, "maxDelay", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 2400f;
+                step = 1f;
+                return;
+            }
+            if (string.Equals(name, "direction", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = -1f;
+                max = 1f;
+                step = 1f;
+                return;
+            }
+        }
+
+        if (declaringType == typeof(Watcher.SandGrubNetwork.NetworkData) &&
+            (string.Equals(name, "density", StringComparison.Ordinal) ||
+             string.Equals(name, "chance", StringComparison.Ordinal) ||
+             string.Equals(name, "adultChance", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(DaddyCorruption.CustomRotData))
+        {
+            if (string.Equals(name, "density", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 3f;
+                step = 0.01f;
+                return;
+            }
+            if (string.Equals(name, "minSize", StringComparison.Ordinal) ||
+                string.Equals(name, "maxSize", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 30f;
+                step = 0.1f;
+                return;
+            }
+            if (string.Equals(name, "darknessScale", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 2f;
+                step = 0.01f;
+                return;
+            }
+            if (string.Equals(name, "eyeChance", StringComparison.Ordinal) ||
+                string.Equals(name, "minEyeSize", StringComparison.Ordinal) ||
+                string.Equals(name, "maxEyeSize", StringComparison.Ordinal) ||
+                string.Equals(name, "minColor", StringComparison.Ordinal) ||
+                string.Equals(name, "maxColor", StringComparison.Ordinal) ||
+                string.Equals(name, "slowdown", StringComparison.Ordinal) ||
+                string.Equals(name, "legChance", StringComparison.Ordinal) ||
+                string.Equals(name, "darknessChance", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1f;
+                step = 0.01f;
+                return;
+            }
+        }
+
         if (declaringType == typeof(PlacedObject.RippleTreeData) &&
             (string.Equals(name, "sproutThreshold", StringComparison.Ordinal) ||
              string.Equals(name, "sproutEnd", StringComparison.Ordinal)))
@@ -690,6 +836,14 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         object value)
     {
         string name = binding.MemberName ?? string.Empty;
+
+        if (data is PlacedObject.ConsumableObjectData consumable && value is int regen)
+        {
+            if (string.Equals(name, "minRegen", StringComparison.Ordinal))
+                return Math.Min(regen, consumable.maxRegen);
+            if (string.Equals(name, "maxRegen", StringComparison.Ordinal))
+                return Math.Max(regen, consumable.minRegen);
+        }
 
         if (data is PlacedObject.CustomDecalData decal)
         {
