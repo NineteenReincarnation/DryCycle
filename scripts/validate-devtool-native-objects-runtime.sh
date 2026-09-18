@@ -655,6 +655,29 @@ if ! grep -Fq 'BuiltinStructuredInspectorAdapters.Enable();' "$bootstrap"; then
   exit 1
 fi
 
+# Player-availability lists that vanilla exposes as button arrays are native structured
+# booleans. Filter additionally recomputes its derived timeline list after every toggle.
+for symbol in \
+  'target?.data is PlacedObject.FilterData' \
+  'target?.data is ReliableIggyDirection.ReliableIggyDirectionData' \
+  '"builtin.filter.player."' \
+  'data.RefreshTimelineList();' \
+  '"builtin.filter.timelines"' \
+  '"builtin.reliableIggy.player."' \
+  'SlugcatStats.HiddenOrUnplayableSlugcat(name)' \
+  'SetMembership(data.availableToPlayers, name, value.Boolean);'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "Filter/ReliableIggy structured player availability regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'typeof(ReliableIggyDirection.ReliableIggyDirectionData)' "$reflection" ||
+   ! grep -Fq 'string.Equals(name, "cyclesToShow", StringComparison.Ordinal)' "$reflection" ||
+   ! grep -Fq 'max = 9f;' "$reflection"; then
+  echo "ReliableIggy native cycle range contract regressed." >&2
+  exit 1
+fi
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
