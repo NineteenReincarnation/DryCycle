@@ -140,12 +140,25 @@ for symbol in \
   '"water:width"' \
   '"water:velocity"' \
   '"spline:mid:" + i + ":pos"' \
-  '"localTerrain:bottom"'; do
+  '"localTerrain:bottom"' \
+  '"superSlope:bottom"' \
+  '"waterFlow:width"'; do
   if ! grep -Fq "$symbol" "$gizmo_presentation"; then
     echo "Native object gizmo presentation lost a verified primitive mapping: $symbol" >&2
     exit 1
   fi
 done
+for symbol in \
+  'command.HandleId == "superSlope:bottom"' \
+  'superSlope.bottom = Mathf.Max(10f, target.pos.y - command.Y);' \
+  'command.HandleId == "waterFlow:width"' \
+  'Mathf.RoundToInt((command.X - target.pos.x) / 20f)'; do
+  if ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "SuperSlope/WaterFlow native gizmo behavior regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 for symbol in \
   'SinglePlacedObjectStateSnapshot.Capture' \
   'EditorContinuousTransactionHub.Begin' \
@@ -202,6 +215,10 @@ for symbol in \
   'room.AddObject(new LocalTerrainCurve(room, localTerrain));' \
   'room.AddObject(new CurvedSlope(room, localTerrain));' \
   'room.AddObject(new VoidSpawnMigrationStream(room, streamData));' \
+  'room.AddObject(new SuperSlope(room, superSlope));' \
+  'target.data is PlacedObject.WaterFlowData' \
+  'Mathf.Round(target.pos.x / 20f) * 20f' \
+  'slope.thickness = superSlope.bottom;' \
   'internal static void RemoveRuntime(EditorSession session, PlacedObject target)'; do
   if ! grep -Fq "$symbol" "$runtime_reconciler"; then
     echo "Native object runtime membership reconciliation is incomplete: $symbol" >&2
