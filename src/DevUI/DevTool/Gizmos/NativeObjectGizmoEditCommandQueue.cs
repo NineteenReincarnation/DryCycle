@@ -207,6 +207,39 @@ public static class NativeObjectGizmoEditCommandQueue
             return true;
         }
 
+        if (ModManager.Watcher &&
+            target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
+        {
+            Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
+            switch (command.HandleId)
+            {
+                case "urbanLife:upLeft":
+                    urbanLife.upLeft = relative;
+                    return true;
+                case "urbanLife:downRight":
+                    urbanLife.downRight = relative;
+                    return true;
+                case "urbanLife:direction":
+                    urbanLife.direction = relative;
+                    return true;
+            }
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.UrbanLifePath.UrbanLifePathData urbanPath)
+        {
+            Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
+            switch (command.HandleId)
+            {
+                case "urbanPath:pointA":
+                    urbanPath.pointA = relative;
+                    return true;
+                case "urbanPath:pointB":
+                    urbanPath.pointB = relative;
+                    return true;
+            }
+        }
+
         if (target.data is WaterCutoffData waterCutoff &&
             command.HandleId == "waterCutoff:end")
         {
