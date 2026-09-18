@@ -36,6 +36,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
     {
         internal string Key;
         internal string DisplayName;
+        internal string MemberName;
         internal string Group;
         internal Type ValueType;
         internal FieldInfo Field;
@@ -156,7 +157,11 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             object next = ConvertValue(binding, value);
             if (next == null && binding.ValueType.IsValueType)
                 return false;
+            next = ConstrainModelValue(data, binding, next);
+            if (next == null && binding.ValueType.IsValueType)
+                return false;
             binding.Write(data, next);
+            ApplyPostWriteSemantics(data, binding);
             return true;
         }
         catch (Exception error)
@@ -294,6 +299,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         {
             Key = "native." + (declaringType.FullName ?? declaringType.Name) + "." + field.Name + "[" + index + "]",
             DisplayName = Humanize(field.Name) + " " + (index + 1),
+            MemberName = field.Name,
             Group = "Geometry",
             ValueType = typeof(Vector2),
             Field = field,
@@ -321,6 +327,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         {
             Key = "native." + (declaringType.FullName ?? declaringType.Name) + "." + name,
             DisplayName = Humanize(name),
+            MemberName = name,
             Group = ResolveGroup(name, kind),
             ValueType = valueType,
             Writable = writable,
@@ -400,6 +407,112 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             max = 1f;
             step = 0.01f;
             return;
+        }
+
+        if ((declaringType == typeof(PlacedObject.CustomDecalData) &&
+             (string.Equals(name, "fromDepth", StringComparison.Ordinal) ||
+              string.Equals(name, "toDepth", StringComparison.Ordinal) ||
+              string.Equals(name, "noise", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.DeepProcessingData) &&
+             (string.Equals(name, "fromDepth", StringComparison.Ordinal) ||
+              string.Equals(name, "toDepth", StringComparison.Ordinal) ||
+              string.Equals(name, "intensity", StringComparison.Ordinal))) ||
+            (declaringType == typeof(PlacedObject.SSLightRodData) &&
+             (string.Equals(name, "depth", StringComparison.Ordinal) ||
+              string.Equals(name, "brightness", StringComparison.Ordinal))) ||
+            (declaringType == typeof(GeyserData) &&
+             string.Equals(name, "timing", StringComparison.Ordinal)) ||
+            (declaringType == typeof(PlacedObject.ScavengerOutpostData) &&
+             string.Equals(name, "direction", StringComparison.Ordinal)) ||
+            (declaringType == typeof(Watcher.TowerCrabSpawner.Data) &&
+             (string.Equals(name, "frequency", StringComparison.Ordinal) ||
+              string.Equals(name, "minLayer", StringComparison.Ordinal) ||
+              string.Equals(name, "maxLayer", StringComparison.Ordinal))))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.SSLightRodData) &&
+            string.Equals(name, "rotation", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 315f;
+            step = 45f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.SSLightRodData) &&
+            string.Equals(name, "length", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 40f;
+            max = 800f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(PlacedObject.SpawnMigrationStreamData))
+        {
+            if (string.Equals(name, "width", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 1f;
+                max = 200f;
+                step = 1f;
+                return;
+            }
+            if (string.Equals(name, "maxCapacity", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 1f;
+                max = 400f;
+                step = 1f;
+                return;
+            }
+            if (string.Equals(name, "rate", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 5f;
+                max = 400f;
+                step = 1f;
+                return;
+            }
+        }
+
+        if (declaringType == typeof(PlacedObject.ScavengerOutpostData) &&
+            (string.Equals(name, "skullSeed", StringComparison.Ordinal) ||
+             string.Equals(name, "pearlsSeed", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 100f;
+            step = 1f;
+            return;
+        }
+
+        if (declaringType == typeof(Watcher.BigSkyWhaleTrigger.Data))
+        {
+            if (string.Equals(name, "waitCycles", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = -1f;
+                max = 10f;
+                step = 1f;
+                return;
+            }
+            if (string.Equals(name, "direction", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = -1f;
+                max = 1f;
+                step = 1f;
+                return;
+            }
         }
 
         if ((declaringType == typeof(PlacedObject.EnergySwirlData) &&
@@ -547,6 +660,47 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             }
             default:
                 return Copy(common, text: FormatReadOnly(raw));
+        }
+    }
+
+    private static object ConstrainModelValue(
+        PlacedObject.Data data,
+        MemberBinding binding,
+        object value)
+    {
+        string name = binding.MemberName ?? string.Empty;
+
+        if (data is PlacedObject.CustomDecalData decal)
+        {
+            if (string.Equals(name, "fromDepth", StringComparison.Ordinal) && value is float fromDepth)
+                return Mathf.Min(fromDepth, decal.toDepth);
+            if (string.Equals(name, "toDepth", StringComparison.Ordinal) && value is float toDepth)
+                return Mathf.Max(toDepth, decal.fromDepth);
+        }
+
+        if (data is PlacedObject.DeepProcessingData processing)
+        {
+            if (string.Equals(name, "fromDepth", StringComparison.Ordinal) && value is float fromDepth)
+                return Mathf.Min(fromDepth, processing.toDepth);
+            if (string.Equals(name, "toDepth", StringComparison.Ordinal) && value is float toDepth)
+                return Mathf.Max(toDepth, processing.fromDepth);
+        }
+
+        return value;
+    }
+
+    private static void ApplyPostWriteSemantics(
+        PlacedObject.Data data,
+        MemberBinding binding)
+    {
+        string name = binding.MemberName ?? string.Empty;
+
+        if (data is Watcher.TowerCrabSpawner.Data tower)
+        {
+            if (string.Equals(name, "minLayer", StringComparison.Ordinal))
+                tower.maxLayer = Mathf.Max(tower.minLayer, tower.maxLayer);
+            else if (string.Equals(name, "maxLayer", StringComparison.Ordinal))
+                tower.minLayer = Mathf.Min(tower.maxLayer, tower.minLayer);
         }
     }
 
