@@ -37,6 +37,12 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
         if (!Supports(target) || room == null)
             return;
 
+        if (target.type == PlacedObject.Type.FluxWaterfall)
+        {
+            RefreshFluxWaterfall(room, target);
+            return;
+        }
+
         UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: true);
         if (runtime == null)
             return;
@@ -113,12 +119,20 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
         if (!Supports(target) || room == null)
             return;
 
+        if (target.type == PlacedObject.Type.FluxWaterfall)
+        {
+            RemoveFluxWaterfall(room, target);
+            bindings.Remove(target);
+            return;
+        }
+
         UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: false);
         bindings.Remove(target);
         DestroyRuntime(room, runtime);
     }
 
     private static bool Supports(PlacedObject target) =>
+        target?.type == PlacedObject.Type.FluxWaterfall ||
         target?.type == PlacedObject.Type.LightningMachine ||
         target?.type == PlacedObject.Type.EnergySwirl ||
         target?.type == PlacedObject.Type.SnowSource ||
@@ -148,6 +162,17 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
 
     private static UpdatableAndDeletable FindExisting(global::Room room, PlacedObject target)
     {
+        if (target.type == PlacedObject.Type.FluxWaterfall &&
+            target.data is PlacedObject.WaterFlowData flowData &&
+            room.waterFalls != null)
+        {
+            for (int i = 0; i < room.waterFalls.Length; i++)
+                if (room.waterFalls[i] is FluxWaterfall waterfall &&
+                    ReferenceEquals(waterfall.data, flowData) &&
+                    !waterfall.slatedForDeletetion)
+                    return waterfall;
+        }
+
         if (target.type == PlacedObject.Type.LightningMachine && room.lightningMachines != null)
         {
             for (int i = 0; i < room.lightningMachines.Count; i++)
@@ -268,6 +293,79 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                 (target.type?.value ?? string.Empty) + "': " + error.Message);
             return null;
         }
+    }
+
+    private static void RefreshFluxWaterfall(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.WaterFlowData data)
+            return;
+
+        FluxWaterfall runtime = FindExisting(room, target) as FluxWaterfall;
+        IntVector2 desiredTile = room.GetTilePosition(target.pos + new Vector2(10f, -10f));
+        bool rebuild = runtime == null ||
+                       runtime.tilePos.x != desiredTile.x ||
+                       runtime.tilePos.y != desiredTile.y ||
+                       runtime.width != data.width;
+
+        if (!rebuild)
+            return;
+
+        if (runtime != null)
+            RemoveFluxWaterfallRuntime(room, runtime);
+
+        try
+        {
+            runtime = new FluxWaterfall(room, desiredTile, data);
+            RegisterFluxWaterfall(room, runtime);
+            room.AddObject(runtime);
+            bindings.GetValue(target, _ => new Binding()).Runtime = runtime;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native FluxWaterfall runtime rebuild failed: " + error.Message);
+        }
+    }
+
+    private static void RemoveFluxWaterfall(global::Room room, PlacedObject target)
+    {
+        FluxWaterfall runtime = FindExisting(room, target) as FluxWaterfall;
+        if (runtime != null)
+            RemoveFluxWaterfallRuntime(room, runtime);
+    }
+
+    private static void RegisterFluxWaterfall(global::Room room, FluxWaterfall runtime)
+    {
+        Array.Resize(ref room.waterFalls, room.waterFalls.Length + 1);
+        room.waterFalls[room.waterFalls.Length - 1] = runtime;
+        if (room.waterObject != null)
+            runtime.ConnectToWaterObject(room.waterObject);
+    }
+
+    private static void RemoveFluxWaterfallRuntime(global::Room room, FluxWaterfall runtime)
+    {
+        if (room.waterFalls != null)
+        {
+            int match = -1;
+            for (int i = 0; i < room.waterFalls.Length; i++)
+            {
+                if (!ReferenceEquals(room.waterFalls[i], runtime)) continue;
+                match = i;
+                break;
+            }
+
+            if (match >= 0)
+            {
+                WaterFall[] next = new WaterFall[room.waterFalls.Length - 1];
+                int dst = 0;
+                for (int i = 0; i < room.waterFalls.Length; i++)
+                    if (i != match)
+                        next[dst++] = room.waterFalls[i];
+                room.waterFalls = next;
+            }
+        }
+
+        DestroyRuntime(room, runtime);
     }
 
     private static LightningMachine CreateLightning(
