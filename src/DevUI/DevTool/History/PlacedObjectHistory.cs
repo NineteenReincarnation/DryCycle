@@ -82,6 +82,9 @@ public sealed class PlacedObjectState
                 current.placedObjects.Insert(Mathf.Clamp(index, 0, current.placedObjects.Count), target);
             }
 
+            if (index >= 0)
+                NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
+
             int finalIndex = current.placedObjects.IndexOf(target);
             bool shouldBePresent = index >= 0;
             bool membershipOrOrderChanged =
