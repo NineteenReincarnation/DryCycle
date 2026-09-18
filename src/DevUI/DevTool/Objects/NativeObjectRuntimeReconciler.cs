@@ -28,6 +28,31 @@ internal static class NativeObjectRuntimeReconciler
 
         EnsureRuntimePresence(room, target);
 
+        if (target.data is PlacedObject.WaterFlowData)
+        {
+            target.pos.x = Mathf.Round(target.pos.x / 20f) * 20f;
+            target.pos.y = Mathf.Round(target.pos.y / 20f) * 20f;
+        }
+
+        if (target.data is PlacedObject.SuperSlopeData superSlope)
+        {
+            try
+            {
+                if (room.terrain?.terrainList != null)
+                {
+                    foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+                    {
+                        if (terrain is SuperSlope slope && ReferenceEquals(slope.data, superSlope))
+                            slope.thickness = superSlope.bottom;
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool native SuperSlope reconciliation failed: " + error.Message);
+            }
+        }
+
         if (target.data is PlacedObject.TerrainHandleData)
         {
             try
@@ -93,6 +118,23 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
+        if (target.data is PlacedObject.SuperSlopeData superSlope &&
+            room.terrain?.terrainList != null)
+        {
+            for (int i = room.terrain.terrainList.Count - 1; i >= 0; i--)
+            {
+                if (room.terrain.terrainList[i] is not SuperSlope slope ||
+                    !ReferenceEquals(slope.data, superSlope))
+                    continue;
+
+                room.terrain.terrainList.RemoveAt(i);
+                try { slope.Destroy(); }
+                catch { }
+                try { room.RemoveObject(slope); }
+                catch { }
+            }
+        }
+
         if (target.data is PlacedObject.SpawnMigrationStreamData streamData &&
             room.updateList != null)
         {
@@ -150,6 +192,35 @@ internal static class NativeObjectRuntimeReconciler
                 {
                     Plugin.Logger?.LogWarning(
                         "DevTool native spline terrain runtime creation failed: " + error.Message);
+                }
+            }
+        }
+
+        if (target.data is PlacedObject.SuperSlopeData superSlope)
+        {
+            bool found = false;
+            if (room.terrain?.terrainList != null)
+            {
+                foreach (TerrainManager.ITerrain terrain in room.terrain.terrainList)
+                {
+                    if (terrain is SuperSlope slope && ReferenceEquals(slope.data, superSlope))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found)
+            {
+                try
+                {
+                    room.AddObject(new SuperSlope(room, superSlope));
+                }
+                catch (Exception error)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "DevTool native SuperSlope runtime creation failed: " + error.Message);
                 }
             }
         }
