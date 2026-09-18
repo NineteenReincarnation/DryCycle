@@ -265,6 +265,27 @@ if ! grep -Fq 'NativeObjectRuntimeReconciler.RemoveRuntime(session, target);' "$
   exit 1
 fi
 
+# TerrainRubble and RippleTree had non-visual Representation refresh side effects. They must stay
+# on the native runtime path after page-less Objects removed those representations.
+for symbol in \
+  'target.type == PlacedObject.Type.TerrainRubble' \
+  'RefreshTerrainRubble(room);' \
+  'curve.UpdateRubble();' \
+  'internal static void RefreshAfterRemoval(EditorSession session, PlacedObject target)' \
+  'target.data is PlacedObject.RippleStalkData rippleData' \
+  'rippleData.update = true;'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "TerrainRubble/RippleTree native cache reconciliation regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, selected[i]);' "$root/Commands/EditorActions.cs" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);' "$root/History/PlacedObjectHistory.cs"; then
+  echo "TerrainRubble after-removal cache rebuild is no longer wired to delete/history paths." >&2
+  exit 1
+fi
+
 # LightSource must be bound before its PlacedObject moves, then synchronized without relying on
 # LightSourceRepresentation. All model properties and runtime membership are native-owned.
 for symbol in \
@@ -585,6 +606,26 @@ for symbol in \
   'Math.Max(0f, x)'; do
   if ! grep -Fq "$symbol" "$reflection"; then
     echo "Native object geometry semantic whitelist lost verified model behavior: $symbol" >&2
+    exit 1
+  fi
+done
+
+# Native reflection fallback preserves builtin slider ranges and coupled constraints that used to
+# live only in DevInterface Panels.
+for symbol in \
+  'typeof(PlacedObject.CustomDecalData)' \
+  'typeof(PlacedObject.DeepProcessingData)' \
+  'typeof(PlacedObject.SSLightRodData)' \
+  'typeof(PlacedObject.SpawnMigrationStreamData)' \
+  'typeof(PlacedObject.ScavengerOutpostData)' \
+  'typeof(Watcher.TowerCrabSpawner.Data)' \
+  'typeof(Watcher.BigSkyWhaleTrigger.Data)' \
+  'Mathf.Min(fromDepth, decal.toDepth)' \
+  'Mathf.Max(toDepth, decal.fromDepth)' \
+  'tower.maxLayer = Mathf.Max(tower.minLayer, tower.maxLayer);' \
+  'tower.minLayer = Mathf.Min(tower.maxLayer, tower.minLayer);'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "Builtin inspector slider/coupling semantics regressed: $symbol" >&2
     exit 1
   fi
 done
