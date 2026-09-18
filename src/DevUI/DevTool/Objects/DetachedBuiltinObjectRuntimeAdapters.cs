@@ -42,6 +42,11 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             RefreshFluxWaterfall(room, target);
             return;
         }
+        if (target.type == PlacedObject.Type.ZapCoil)
+        {
+            RefreshZapCoil(room, target);
+            return;
+        }
 
         UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: true, findExisting: false);
         if (runtime == null)
@@ -125,6 +130,12 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             bindings.Remove(target);
             return;
         }
+        if (target.type == PlacedObject.Type.ZapCoil)
+        {
+            RemoveZapCoil(room, target);
+            bindings.Remove(target);
+            return;
+        }
 
         UpdatableAndDeletable runtime = Acquire(room, target, createIfMissing: false, findExisting: true);
         bindings.Remove(target);
@@ -133,6 +144,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
 
     private static bool Supports(PlacedObject target) =>
         target?.type == PlacedObject.Type.FluxWaterfall ||
+        target?.type == PlacedObject.Type.ZapCoil ||
         target?.type == PlacedObject.Type.LightningMachine ||
         target?.type == PlacedObject.Type.EnergySwirl ||
         target?.type == PlacedObject.Type.SnowSource ||
@@ -174,6 +186,9 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                     !waterfall.slatedForDeletetion)
                     return waterfall;
         }
+
+        if (target.type == PlacedObject.Type.ZapCoil)
+            return FindZapCoilByPlacedObjectOrdinal(room, target);
 
         if (target.type == PlacedObject.Type.LightningMachine && room.lightningMachines != null)
         {
@@ -296,6 +311,86 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             return null;
         }
     }
+
+    private static void RefreshZapCoil(global::Room room, PlacedObject target)
+    {
+        if (target?.data is not PlacedObject.GridRectObjectData data)
+            return;
+
+        Binding binding = bindings.GetValue(target, _ => new Binding());
+        ZapCoil runtime = binding.Runtime as ZapCoil;
+        IntRect desired = data.Rect;
+
+        if (runtime != null && SameRect(runtime.rect, desired) && !runtime.slatedForDeletetion)
+            return;
+
+        if (runtime != null)
+            DestroyRuntime(room, runtime);
+
+        try
+        {
+            runtime = new ZapCoil(desired, room);
+            room.AddObject(runtime);
+            binding.Runtime = runtime;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native ZapCoil runtime rebuild failed: " + error.Message);
+            binding.Runtime = null;
+        }
+    }
+
+    private static void RemoveZapCoil(global::Room room, PlacedObject target)
+    {
+        Binding binding = bindings.GetValue(target, _ => new Binding());
+        if (binding.Runtime == null)
+            binding.Runtime = FindZapCoilByPlacedObjectOrdinal(room, target);
+        DestroyRuntime(room, binding.Runtime);
+        binding.Runtime = null;
+    }
+
+    private static ZapCoil FindZapCoilByPlacedObjectOrdinal(global::Room room, PlacedObject target)
+    {
+        if (room?.roomSettings?.placedObjects == null || room.updateList == null)
+            return null;
+
+        int targetOrdinal = -1;
+        int ordinal = 0;
+        for (int i = 0; i < room.roomSettings.placedObjects.Count; i++)
+        {
+            PlacedObject candidate = room.roomSettings.placedObjects[i];
+            if (candidate?.type != PlacedObject.Type.ZapCoil)
+                continue;
+            if (ReferenceEquals(candidate, target))
+            {
+                targetOrdinal = ordinal;
+                break;
+            }
+            ordinal++;
+        }
+
+        if (targetOrdinal < 0)
+            return null;
+
+        ordinal = 0;
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is not ZapCoil coil)
+                continue;
+            if (ordinal == targetOrdinal)
+                return coil;
+            ordinal++;
+        }
+
+        return null;
+    }
+
+    private static bool SameRect(IntRect a, IntRect b) =>
+        a.left == b.left &&
+        a.right == b.right &&
+        a.bottom == b.bottom &&
+        a.top == b.top;
 
     private static void RefreshFluxWaterfall(global::Room room, PlacedObject target)
     {
