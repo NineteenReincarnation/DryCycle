@@ -456,6 +456,16 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(ReliableIggyDirection.ReliableIggyDirectionData) &&
+            string.Equals(name, "cyclesToShow", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 9f;
+            step = 1f;
+            return;
+        }
+
         if (declaringType == typeof(PlacedObject.SpawnMigrationStreamData))
         {
             if (string.Equals(name, "width", StringComparison.Ordinal))
