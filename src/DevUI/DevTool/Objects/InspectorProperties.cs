@@ -17,6 +17,13 @@ public enum EditorPropertyKind
     Action
 }
 
+public enum EditorPropertyGizmoHint
+{
+    None,
+    RelativePoint,
+    VerticalDistance
+}
+
 /// <summary>
 /// Detached property description consumed by the optional ImGui frontend. It contains
 /// only scalar/string data so the render callback never dereferences Rain World objects.
@@ -28,6 +35,7 @@ public sealed class EditorPropertySnapshot
     public string Group { get; init; } = "Properties";
     public string Source { get; init; } = string.Empty;
     public EditorPropertyKind Kind { get; init; }
+    public EditorPropertyGizmoHint GizmoHint { get; init; }
     public string SerializedValue { get; init; } = string.Empty;
     public string StringValue { get; init; } = string.Empty;
     public float X { get; init; }
