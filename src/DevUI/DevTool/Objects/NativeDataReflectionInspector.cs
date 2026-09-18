@@ -43,6 +43,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         internal int ArrayIndex = -1;
         internal bool Writable;
         internal EditorPropertyKind Kind;
+        internal EditorPropertyGizmoHint GizmoHint;
         internal string[] Options = Array.Empty<string>();
 
         internal object Read(object target)
@@ -175,6 +176,46 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
 
     internal static void ClearSchemaCache() => Schemas.Clear();
 
+    internal static bool TryBuildNativeGizmoValue(
+        PlacedObject target,
+        string key,
+        float x,
+        float y,
+        out EditorPropertyValue value)
+    {
+        value = default;
+        PlacedObject.Data data = target?.data;
+        if (data == null || string.IsNullOrEmpty(key)) return false;
+
+        Schema schema = Schemas.GetOrAdd(data.GetType(), BuildSchema);
+        if (!schema.ByKey.TryGetValue(key, out MemberBinding binding) ||
+            !binding.Writable ||
+            binding.GizmoHint == EditorPropertyGizmoHint.None)
+            return false;
+
+        switch (binding.GizmoHint)
+        {
+            case EditorPropertyGizmoHint.RelativePoint:
+                if (data is PlacedObject.TerrainHandleData)
+                {
+                    if (key.EndsWith(".leftOffset", StringComparison.Ordinal))
+                        x = Math.Min(0f, x);
+                    else if (key.EndsWith(".rightOffset", StringComparison.Ordinal))
+                        x = Math.Max(0f, x);
+                }
+
+                value = new EditorPropertyValue(EditorPropertyKind.Vector2, x: x, y: y);
+                return true;
+
+            case EditorPropertyGizmoHint.VerticalDistance:
+                value = new EditorPropertyValue(EditorPropertyKind.Float, x: y);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     private static Schema BuildSchema(Type dataType)
     {
         List<MemberBinding> bindings = new();
@@ -255,6 +296,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             ArrayIndex = index,
             Writable = !field.IsInitOnly && !field.IsLiteral,
             Kind = EditorPropertyKind.Vector2,
+            GizmoHint = EditorPropertyGizmoHint.RelativePoint,
             Options = Array.Empty<string>()
         };
     }
@@ -277,8 +319,35 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             ValueType = valueType,
             Writable = writable,
             Kind = kind,
+            GizmoHint = ResolveGizmoHint(declaringType, name, valueType),
             Options = options ?? Array.Empty<string>()
         };
+    }
+
+    private static EditorPropertyGizmoHint ResolveGizmoHint(
+        Type declaringType,
+        string name,
+        Type valueType)
+    {
+        if (valueType == typeof(Vector2))
+        {
+            if (string.Equals(name, "handlePos", StringComparison.Ordinal) &&
+                (declaringType == typeof(PlacedObject.ResizableObjectData) ||
+                 declaringType == typeof(PlacedObject.GridRectObjectData)))
+                return EditorPropertyGizmoHint.RelativePoint;
+
+            if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
+                (string.Equals(name, "leftOffset", StringComparison.Ordinal) ||
+                 string.Equals(name, "rightOffset", StringComparison.Ordinal)))
+                return EditorPropertyGizmoHint.RelativePoint;
+        }
+
+        if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
+            valueType == typeof(float) &&
+            string.Equals(name, "backHeight", StringComparison.Ordinal))
+            return EditorPropertyGizmoHint.VerticalDistance;
+
+        return EditorPropertyGizmoHint.None;
     }
 
     private static EditorPropertyKind ResolveKind(Type type, out string[] options)
@@ -317,6 +386,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             Group = binding.Group,
             Source = "Rain World model",
             Kind = binding.Kind,
+            GizmoHint = binding.GizmoHint,
             Options = binding.Options
         };
 
@@ -404,6 +474,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             Group = source.Group,
             Source = source.Source,
             Kind = source.Kind,
+            GizmoHint = source.GizmoHint,
             X = x,
             Y = y,
             Z = z,
