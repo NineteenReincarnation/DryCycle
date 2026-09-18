@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using MoreSlugcats;
 using RWCustom;
 using UnityEngine;
 
