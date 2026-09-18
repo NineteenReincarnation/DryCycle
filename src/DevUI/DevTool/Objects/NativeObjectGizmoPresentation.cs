@@ -20,6 +20,14 @@ public sealed class EditorObjectGizmoHandleSnapshot
     public bool Removable { get; init; }
 }
 
+public sealed class EditorObjectLineSegmentSnapshot
+{
+    public float X0 { get; init; }
+    public float Y0 { get; init; }
+    public float X1 { get; init; }
+    public float Y1 { get; init; }
+}
+
 public sealed class EditorObjectBezierSegmentSnapshot
 {
     public int SegmentIndex { get; init; }
@@ -39,6 +47,7 @@ public sealed class EditorObjectGizmoSnapshot
 
     public int ObjectIndex { get; init; } = -1;
     public EditorObjectGizmoHandleSnapshot[] Handles { get; init; } = Array.Empty<EditorObjectGizmoHandleSnapshot>();
+    public EditorObjectLineSegmentSnapshot[] Lines { get; init; } = Array.Empty<EditorObjectLineSegmentSnapshot>();
     public EditorObjectBezierSegmentSnapshot[] BezierSegments { get; init; } = Array.Empty<EditorObjectBezierSegmentSnapshot>();
 }
 
@@ -53,6 +62,7 @@ internal static class NativeObjectGizmoPresentation
             return EditorObjectGizmoSnapshot.Empty;
 
         List<EditorObjectGizmoHandleSnapshot> handles = new();
+        List<EditorObjectLineSegmentSnapshot> lines = new();
         List<EditorObjectBezierSegmentSnapshot> beziers = new();
 
         bool specialized = false;
@@ -72,16 +82,22 @@ internal static class NativeObjectGizmoPresentation
         }
         else if (target.data is AirPocketData airPocket)
         {
+            Vector2 corner = target.pos + airPocket.handlePos;
             handles.Add(Handle(
                 "airPocket:corner",
-                target.pos + airPocket.handlePos,
+                corner,
                 target.pos,
-                drawLine: true));
+                drawLine: false));
             handles.Add(Handle(
                 "airPocket:waterLevel",
                 target.pos + new Vector2(0f, airPocket.waterLevel),
                 target.pos,
                 drawLine: false));
+            AddRectangle(lines, target.pos, corner);
+            AddLine(
+                lines,
+                target.pos + new Vector2(0f, airPocket.waterLevel),
+                target.pos + new Vector2(airPocket.handlePos.x, airPocket.waterLevel));
             specialized = true;
         }
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
@@ -116,15 +132,17 @@ internal static class NativeObjectGizmoPresentation
         {
             Vector2 decal = target.pos + new Vector2(mudPit.decalSize, 0f);
             handles.Add(Handle("mudPit:decalSize", decal, target.pos, drawLine: true));
+            AddRectangle(lines, target.pos, target.pos + mudPit.handlePos);
         }
 
-        if (handles.Count == 0 && beziers.Count == 0)
+        if (handles.Count == 0 && lines.Count == 0 && beziers.Count == 0)
             return EditorObjectGizmoSnapshot.Empty;
 
         return new EditorObjectGizmoSnapshot
         {
             ObjectIndex = objectIndex,
             Handles = handles.ToArray(),
+            Lines = lines.ToArray(),
             BezierSegments = beziers.ToArray()
         };
     }
@@ -236,6 +254,33 @@ internal static class NativeObjectGizmoPresentation
                 C1Y = origin.y + curve.handleB.y
             });
         }
+    }
+
+    private static void AddRectangle(
+        List<EditorObjectLineSegmentSnapshot> lines,
+        Vector2 a,
+        Vector2 b)
+    {
+        Vector2 c = new Vector2(a.x, b.y);
+        Vector2 d = new Vector2(b.x, a.y);
+        AddLine(lines, a, c);
+        AddLine(lines, c, b);
+        AddLine(lines, b, d);
+        AddLine(lines, d, a);
+    }
+
+    private static void AddLine(
+        List<EditorObjectLineSegmentSnapshot> lines,
+        Vector2 a,
+        Vector2 b)
+    {
+        lines.Add(new EditorObjectLineSegmentSnapshot
+        {
+            X0 = a.x,
+            Y0 = a.y,
+            X1 = b.x,
+            Y1 = b.y
+        });
     }
 
     private static EditorObjectGizmoHandleSnapshot Handle(
