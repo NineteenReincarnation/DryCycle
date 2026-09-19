@@ -387,8 +387,12 @@ internal static class BuiltinObjectRuntimeAdapters
         runtime.intensityAnim = data.intensityAnim;
         runtime.temperatureAnim = data.temperatureAnim;
         runtime.activeDuring = data.activeDuring;
+        runtime.intensityMin = 0f;
+        runtime.intensityMax = 1f;
         runtime.intensityMin = data.intensityMin;
         runtime.intensityMax = data.intensityMax;
+        runtime.temperatureMin = 0f;
+        runtime.temperatureMax = 1f;
         runtime.temperatureMin = data.temperatureMin;
         runtime.temperatureMax = data.temperatureMax;
         runtime.linkTempToIntens = data.linkTempToIntens;
