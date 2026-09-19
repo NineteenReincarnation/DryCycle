@@ -455,6 +455,18 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             }
         }
 
+        if (declaringType == typeof(Watcher.WallLight.WallLightData) &&
+            (string.Equals(name, "hue", StringComparison.Ordinal) ||
+             string.Equals(name, "saturation", StringComparison.Ordinal) ||
+             string.Equals(name, "value", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
         if (declaringType == typeof(PlacedObject.LightFixtureData) &&
             string.Equals(name, "randomSeed", StringComparison.Ordinal))
         {
