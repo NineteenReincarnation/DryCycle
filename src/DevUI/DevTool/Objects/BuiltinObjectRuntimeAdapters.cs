@@ -142,6 +142,14 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
         }
 
+        if (ModManager.Watcher &&
+            target.type == PlacedObject.Type.CosmeticRipple &&
+            target.data is Watcher.CosmeticRippleData cosmeticRipple)
+        {
+            EnsureCosmeticRippleRuntime(room, target, cosmeticRipple);
+            return;
+        }
+
         if (target.type == PlacedObject.Type.ProjectedStars)
         {
             EnsureProjectedStarsRuntime(room, target);
@@ -330,6 +338,13 @@ internal static class BuiltinObjectRuntimeAdapters
                 DestroyRuntime(room, flameRuntime);
         }
 
+        if (ModManager.Watcher &&
+            target.type == PlacedObject.Type.CosmeticRipple &&
+            target.data is Watcher.CosmeticRippleData cosmeticRipple)
+        {
+            RemoveCosmeticRippleRuntime(room, target, cosmeticRipple);
+        }
+
         if (target.type == PlacedObject.Type.InsectGroup)
             RemoveInsectGroupRuntime(room, target);
 
@@ -383,6 +398,107 @@ internal static class BuiltinObjectRuntimeAdapters
 
         if (target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch)
             RefreshKarmaFlowerPatchRuntime(room);
+    }
+
+    private static void EnsureCosmeticRippleRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.CosmeticRippleData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        data.pos = target.pos;
+        data.scale = data.handlePos.magnitude;
+
+        Watcher.CosmeticRipple runtime = data.obj;
+        if (runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion ||
+            !ReferenceEquals(runtime.placedObject, target))
+        {
+            runtime = FindCosmeticRipple(room, target);
+        }
+
+        if (runtime == null)
+        {
+            try
+            {
+                runtime = new Watcher.CosmeticRipple(target);
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native CosmeticRipple runtime creation failed: " + error.Message);
+                data.obj = null;
+                return;
+            }
+        }
+
+        data.obj = runtime;
+        if (room.cosmeticRipples != null && !room.cosmeticRipples.Contains(runtime))
+            room.cosmeticRipples.Add(runtime);
+
+        runtime.pos = target.pos;
+        runtime.scale = data.scale;
+        runtime.intensity = data.intensity;
+        runtime.fallOff = data.fallOff;
+        runtime.depthMix = data.depthMix;
+        runtime.squish = data.squish;
+        runtime.square = data.square;
+        runtime.leavesTrail = data.leavesTrail;
+        runtime.isGameplay = data.isGameplay;
+        runtime.isTransition = data.isTransition;
+
+        if (runtime.isInverted != data.invert)
+            runtime.isInverted = data.invert;
+
+        runtime.UpdateRotation();
+    }
+
+    private static Watcher.CosmeticRipple FindCosmeticRipple(
+        global::Room room,
+        PlacedObject target)
+    {
+        if (room?.updateList == null || target == null)
+            return null;
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is Watcher.CosmeticRipple runtime &&
+                ReferenceEquals(runtime.placedObject, target) &&
+                !runtime.slatedForDeletetion)
+                return runtime;
+        }
+
+        return null;
+    }
+
+    private static void RemoveCosmeticRippleRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.CosmeticRippleData data)
+    {
+        Watcher.CosmeticRipple runtime = data?.obj;
+        if (runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            !ReferenceEquals(runtime.placedObject, target))
+        {
+            runtime = FindCosmeticRipple(room, target);
+        }
+
+        if (data != null)
+            data.obj = null;
+        if (runtime == null)
+            return;
+
+        if (room.cosmeticRipples != null)
+            room.cosmeticRipples.Remove(runtime);
+
+        try { runtime.RemoveObject(); }
+        catch { }
+        DestroyRuntime(room, runtime);
     }
 
     private static void EnsureFloatingDebrisRuntime(
