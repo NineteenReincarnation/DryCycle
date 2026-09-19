@@ -1156,6 +1156,11 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                 return Math.Max(regen, consumable.minRegen);
         }
 
+        if (data is Watcher.SpinningTopData &&
+            string.Equals(name, "spawnIdentifier", StringComparison.Ordinal) &&
+            value is int spawnIdentifier)
+            return Math.Max(0, spawnIdentifier);
+
         if (data is Watcher.GrassBlade.TerrainGrassPatchData)
         {
             if (string.Equals(name, "range", StringComparison.Ordinal) && value is float range)
