@@ -793,6 +793,54 @@ for symbol in \
   fi
 done
 
+# Watcher FlameJet and KarmaFlowerPatch no longer require their DevInterface Representations.
+# FlameJet owns a detached target handle plus live runtime synchronization; KarmaFlowerPatch owns its
+# tilt handle and room-level flower regeneration.
+for symbol in \
+  '"flameJet:target"' \
+  '"karmaPatch:tilt"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "FlameJet/KarmaFlowerPatch native gizmo coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'target.type == Watcher.WatcherEnums.PlacedObjectType.FlameJet' \
+  'EnsureFlameJetRuntime(room, target, flameJet);' \
+  'Watcher.FlameJet.FromPlacedObject(room, target)' \
+  'runtime.setTarget = data.target;' \
+  'runtime.intensityMin = 0f;' \
+  'runtime.temperatureMax = data.temperatureMax;' \
+  'target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch' \
+  'RefreshKarmaFlowerPatchRuntime(room);' \
+  'new Watcher.KarmaFlowerPatch()' \
+  'runtime.PlaceFlowers();'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "FlameJet/KarmaFlowerPatch native authoring regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'BuiltinObjectRuntimeAdapters.RefreshAfterRemoval(room, target);' "$runtime_reconciler"; then
+  echo "Room-level Watcher runtime reconciliation is no longer called after object deletion." >&2
+  exit 1
+fi
+for symbol in \
+  'typeof(Watcher.KarmaFlowerPatch.KarmaFlowerPatchData)' \
+  'string.Equals(name, "glowStrength", StringComparison.Ordinal)' \
+  'typeof(Watcher.FlameJet.FlameJetData)' \
+  'string.Equals(name, "intensityMin", StringComparison.Ordinal)' \
+  'string.Equals(name, "smokeVolumeMax", StringComparison.Ordinal)' \
+  'string.Equals(name, "lethality", StringComparison.Ordinal)' \
+  'ShouldIgnore(current, field.Name)' \
+  'string.Equals(name, "obj", StringComparison.Ordinal)' \
+  'string.Equals(name, "pos", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "FlameJet/KarmaFlowerPatch inspector semantics regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
