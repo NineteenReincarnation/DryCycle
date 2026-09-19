@@ -664,6 +664,45 @@ if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$ru
   exit 1
 fi
 
+# Watcher CosmeticRipple no longer depends on CosmeticRippleRepresentation. Its radius is a
+# detached relative-point gizmo; the four original sliders remain 0..1; derived/runtime-only fields
+# stay out of the inspector; and the room runtime/list/mask lifecycle is native-owned.
+for symbol in \
+  'typeof(Watcher.CosmeticRippleData)' \
+  'string.Equals(name, "intensity", StringComparison.Ordinal)' \
+  'string.Equals(name, "fallOff", StringComparison.Ordinal)' \
+  'string.Equals(name, "depthMix", StringComparison.Ordinal)' \
+  'string.Equals(name, "squish", StringComparison.Ordinal)' \
+  'declaringType == typeof(Watcher.CosmeticRippleData)' \
+  'string.Equals(name, "handlePos", StringComparison.Ordinal)' \
+  'string.Equals(name, "animateOnSpawn", StringComparison.Ordinal)' \
+  'string.Equals(name, "isGameplay", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "CosmeticRipple native inspector/gizmo contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'EnsureCosmeticRippleRuntime(room, target, cosmeticRipple);' \
+  'new Watcher.CosmeticRipple(target)' \
+  'FindCosmeticRipple(room, target)' \
+  'data.scale = data.handlePos.magnitude;' \
+  'runtime.intensity = data.intensity;' \
+  'runtime.fallOff = data.fallOff;' \
+  'runtime.depthMix = data.depthMix;' \
+  'runtime.squish = data.squish;' \
+  'runtime.square = data.square;' \
+  'runtime.leavesTrail = data.leavesTrail;' \
+  'runtime.UpdateRotation();' \
+  'room.cosmeticRipples.Add(runtime);' \
+  'room.cosmeticRipples.Remove(runtime);' \
+  'runtime.RemoveObject();'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "CosmeticRipple native runtime ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Watcher WallLight no longer depends on WallLightRepresentation: three geometry handles, HSV
 # ranges and live runtime ownership are native.
 for symbol in \
