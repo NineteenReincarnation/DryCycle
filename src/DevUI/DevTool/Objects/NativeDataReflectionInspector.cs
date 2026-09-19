@@ -355,6 +355,106 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         max = 0f;
         step = kind == EditorPropertyKind.Integer ? 1f : 0.01f;
 
+        if (declaringType == typeof(PlacedObject.FairyParticleData))
+        {
+            if (string.Equals(name, "scaleMin", StringComparison.Ordinal) ||
+                string.Equals(name, "scaleMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 1f;
+                max = 25f;
+                step = 0.1f;
+                return;
+            }
+
+            if (string.Equals(name, "dirMin", StringComparison.Ordinal) ||
+                string.Equals(name, "dirMax", StringComparison.Ordinal) ||
+                string.Equals(name, "dirDevMin", StringComparison.Ordinal) ||
+                string.Equals(name, "dirDevMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 360f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "colorHmin", StringComparison.Ordinal) ||
+                string.Equals(name, "colorHmax", StringComparison.Ordinal) ||
+                string.Equals(name, "colorSmin", StringComparison.Ordinal) ||
+                string.Equals(name, "colorSmax", StringComparison.Ordinal) ||
+                string.Equals(name, "colorLmin", StringComparison.Ordinal) ||
+                string.Equals(name, "colorLmax", StringComparison.Ordinal) ||
+                string.Equals(name, "alphaTrans", StringComparison.Ordinal) ||
+                string.Equals(name, "interpTrans", StringComparison.Ordinal) ||
+                string.Equals(name, "pulseRate", StringComparison.Ordinal) ||
+                string.Equals(name, "glowStrength", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1f;
+                step = 0.01f;
+                return;
+            }
+
+            if (string.Equals(name, "numKeyframes", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 1f;
+                max = 10f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "interpDistMin", StringComparison.Ordinal) ||
+                string.Equals(name, "interpDistMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1000f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "interpDurMin", StringComparison.Ordinal) ||
+                string.Equals(name, "interpDurMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 500f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "pulseMin", StringComparison.Ordinal) ||
+                string.Equals(name, "pulseMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 50f;
+                step = 0.1f;
+                return;
+            }
+
+            if (string.Equals(name, "glowRad", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 200f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "rotationRate", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 20f;
+                step = 0.1f;
+                return;
+            }
+        }
+
         if (declaringType == typeof(PlacedObject.LightFixtureData) &&
             string.Equals(name, "randomSeed", StringComparison.Ordinal))
         {
