@@ -60,6 +60,16 @@ internal static class NativeObjectRuntimeReconciler
         DetachedBuiltinObjectRuntimeAdapters.Refresh(room, target);
         SyncLightSourceRuntime(room, target);
 
+        if (target.data is PlacedObject.FairyParticleData fairyParticle)
+        {
+            try { fairyParticle.Apply(room); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native FairyParticle live preview failed: " + error.Message);
+            }
+        }
+
         if (target.data is PlacedObject.WaterFlowData)
         {
             target.pos.x = Mathf.Round(target.pos.x / 20f) * 20f;
