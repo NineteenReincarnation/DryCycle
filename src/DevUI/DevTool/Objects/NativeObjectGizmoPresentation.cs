@@ -198,6 +198,25 @@ internal static class NativeObjectGizmoPresentation
                 drawLine: true));
         }
 
+        if (ModManager.Watcher && target.data is Watcher.WallLight.WallLightData wallLight)
+        {
+            handles.Add(Handle(
+                "wallLight:up",
+                target.pos + wallLight.up,
+                target.pos,
+                drawLine: true));
+            handles.Add(Handle(
+                "wallLight:right",
+                target.pos + wallLight.right,
+                target.pos,
+                drawLine: true));
+            handles.Add(Handle(
+                "wallLight:one",
+                target.pos + wallLight.one,
+                target.pos + wallLight.right,
+                drawLine: true));
+        }
+
         if (ModManager.Watcher && target.data is LobeTree.LobeTreeData lobeTree)
         {
             handles.Add(Handle(
