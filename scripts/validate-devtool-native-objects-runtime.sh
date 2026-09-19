@@ -841,6 +841,24 @@ for symbol in \
   fi
 done
 
+# Watcher UrbanCandlePlacer owns a world-space brush center and a radius handle relative to that
+# center. Native gizmos must preserve both persisted handlePos and transient radius.
+for symbol in \
+  '"urbanCandle:brush"' \
+  '"urbanCandle:radius"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "UrbanCandlePlacer detached brush geometry regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'candlePlacer.brushHandlePos = world;' "$object_gizmo_backend" ||
+   ! grep -Fq 'candlePlacer.handlePos = world - candlePlacer.brushHandlePos;' "$object_gizmo_backend" ||
+   ! grep -Fq 'candlePlacer.radius = candlePlacer.handlePos.magnitude;' "$object_gizmo_backend"; then
+  echo "UrbanCandlePlacer brush/radius coupling regressed." >&2
+  exit 1
+fi
+
 # Native Objects actions/history never refresh the current page directly. Only Compatibility may
 # refresh a materialized ObjectsPage when Vanilla/Legacy/diagnostics actually owns it.
 if grep -Eq 'activePage[^;]*Refresh|Owner[^;]*activePage[^;]*Refresh|session[^;]*activePage[^;]*Refresh' "$root/Commands/EditorActions.cs"; then
