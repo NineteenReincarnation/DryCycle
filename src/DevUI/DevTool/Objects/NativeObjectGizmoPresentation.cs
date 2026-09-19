@@ -139,6 +139,15 @@ internal static class NativeObjectGizmoPresentation
             specialized = true;
         }
         else if (ModManager.Watcher &&
+                 target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData candlePlacer)
+        {
+            Vector2 brush = candlePlacer.brushHandlePos;
+            Vector2 radiusHandle = brush + candlePlacer.handlePos;
+            handles.Add(Handle("urbanCandle:brush", brush, target.pos, drawLine: true));
+            handles.Add(Handle("urbanCandle:radius", radiusHandle, brush, drawLine: true));
+            specialized = true;
+        }
+        else if (ModManager.Watcher &&
                  target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
         {
             Vector2 upLeft = target.pos + urbanLife.upLeft;
