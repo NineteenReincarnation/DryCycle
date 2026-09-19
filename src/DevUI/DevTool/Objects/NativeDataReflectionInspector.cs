@@ -497,6 +497,17 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if ((declaringType == typeof(Watcher.DaemonEyeData) ||
+             declaringType == typeof(Watcher.DaemonCrownData)) &&
+            string.Equals(name, "depth", StringComparison.Ordinal))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 30f;
+            step = 1f;
+            return;
+        }
+
         if (declaringType == typeof(PlacedObject.LightFixtureData) &&
             string.Equals(name, "randomSeed", StringComparison.Ordinal))
         {
@@ -987,7 +998,9 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                  declaringType == typeof(PlacedObject.SnowSourceData) ||
                  declaringType == typeof(PlacedObject.LocalBlizzardData) ||
                  declaringType == typeof(PlacedObject.CellDistortionData) ||
-                 declaringType == typeof(Watcher.CosmeticRippleData)))
+                 declaringType == typeof(Watcher.CosmeticRippleData) ||
+                 declaringType == typeof(Watcher.DaemonEyeData) ||
+                 declaringType == typeof(Watcher.DaemonCrownData)))
                 return EditorPropertyGizmoHint.RelativePoint;
 
             if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
