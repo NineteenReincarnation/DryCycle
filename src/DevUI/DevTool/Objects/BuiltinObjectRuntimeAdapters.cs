@@ -80,6 +80,14 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
 
         if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.WallLight &&
+            target.data is Watcher.WallLight.WallLightData wallLight)
+        {
+            EnsureWallLightRuntime(room, target, wallLight);
+            return;
+        }
+
+        if (ModManager.Watcher &&
             target.type == Watcher.WatcherEnums.PlacedObjectType.UrbanLife &&
             target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
         {
@@ -1092,6 +1100,58 @@ internal static class BuiltinObjectRuntimeAdapters
                 continue;
 
             DestroyRuntime(room, runtime);
+        }
+    }
+
+    private static void EnsureWallLightRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.WallLight.WallLightData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        Watcher.WallLight runtime = data.obj;
+        if (runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion)
+        {
+            try
+            {
+                runtime = Watcher.WallLight.FromPlacedObject(room, target);
+                runtime.pos = target.pos;
+                room.AddObject(runtime);
+                data.obj = runtime;
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native WallLight runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        data.pos = target.pos;
+        runtime.pos = target.pos;
+        runtime.up = data.up;
+        runtime.right = data.right;
+        runtime.one = data.one;
+        runtime.hue = data.hue;
+        runtime.saturation = data.saturation;
+        runtime.value = data.value;
+        runtime.usePalette = data.usePalette;
+        runtime.colorName = data.colorName;
+        runtime.useBrightestWaterColor = data.useBrightestWaterColor;
+        runtime.flat = data.flat;
+        runtime.activeDuring = data.activeDuring;
+        runtime.shadowType = data.shadowType;
+
+        if (data.usePalette &&
+            room.game?.cameras != null &&
+            room.game.cameras.Length > 0 &&
+            room.game.cameras[0]?.currentPalette != null)
+        {
+            runtime.UpdatePaletteColor(room.game.cameras[0].currentPalette);
         }
     }
 
