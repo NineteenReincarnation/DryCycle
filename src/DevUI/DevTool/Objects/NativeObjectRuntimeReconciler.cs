@@ -70,6 +70,16 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
+        if (target.data is PlacedObject.DayNightData dayNight)
+        {
+            try { dayNight.Apply(room); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native DayNight live preview failed: " + error.Message);
+            }
+        }
+
         if (target.data is PlacedObject.WaterFlowData)
         {
             target.pos.x = Mathf.Round(target.pos.x / 20f) * 20f;
