@@ -34,7 +34,9 @@ internal static class WorldMapView
     }
 
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
+    private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
     private static readonly bool[] layerVisible = { true, true, true };
+    private static EditorMapPresentationSnapshot hoverIndexedSnapshot;
 
     private static string region = string.Empty;
     private static Num.Vector2 pan;
@@ -641,6 +643,34 @@ internal static class WorldMapView
         Num.Vector2 canvasSize,
         Num.Vector2 mouse)
     {
+        // This is our own view method, so use the retained GPU room index directly instead of
+        // installing a RuntimeDetour hook back into WorldMapView. Besides removing trampoline/JIT
+        // risk during BepInEx startup, this keeps the optimized path explicit and debuggable.
+        if (WorldMapGpuScene.Ready)
+        {
+            try
+            {
+                int layerMask = 0;
+                for (int i = 0; i < layerVisible.Length && i < 31; i++)
+                    if (layerVisible[i]) layerMask |= 1 << i;
+
+                float safeZoom = Math.Max(0.0001f, zoom);
+                Num.Vector2 mapPoint = (mouse - canvasMin - pan) / safeZoom;
+                if (!WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out int roomIndex))
+                    return null;
+
+                EnsureHoverRoomLookup(snapshot);
+                return hoverRoomLookup.TryGetValue(roomIndex, out EditorMapRoomSnapshot indexedRoom)
+                    ? indexedRoom
+                    : null;
+            }
+            catch
+            {
+                // If the retained scene is not ready for this exact frame, preserve the original
+                // immediate-mode hit test below instead of failing interaction.
+            }
+        }
+
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = rooms.Length - 1; i >= 0; i--)
         {
@@ -652,6 +682,20 @@ internal static class WorldMapView
             if (Contains(min, max, mouse)) return room;
         }
         return null;
+    }
+
+    private static void EnsureHoverRoomLookup(EditorMapPresentationSnapshot snapshot)
+    {
+        if (ReferenceEquals(hoverIndexedSnapshot, snapshot)) return;
+        hoverIndexedSnapshot = snapshot;
+        hoverRoomLookup.Clear();
+
+        EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            EditorMapRoomSnapshot room = rooms[i];
+            if (room != null) hoverRoomLookup[room.RoomIndex] = room;
+        }
     }
 
     private static ExitPortHit FindHoveredExitPort(
