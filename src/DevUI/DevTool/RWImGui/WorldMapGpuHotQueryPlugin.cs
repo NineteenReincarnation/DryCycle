@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using BepInEx;
 using BepInEx.Logging;
+using UnityEngine;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -99,6 +100,18 @@ internal static class WorldMapGpuHotQuery
     [ThreadStatic] private static int[] roomVisitStamps;
     [ThreadStatic] private static int roomVisitGeneration;
     [ThreadStatic] private static List<RoomHitData> visibleRoomScratch;
+
+    // Duplicate connection hit tests can occur in the same Unity frame. Keep that cache inside
+    // the existing HotQuery detour instead of stacking a second RuntimeDetour hook on the same
+    // by-ref method. Older Rain World/BepInEx/MonoMod combinations can hard-crash while building
+    // that second trampoline before managed exception handling gets a chance to run.
+    private static object cachedRouteIndex;
+    private static int cachedRouteFrame = int.MinValue;
+    private static Num.Vector2 cachedRoutePoint;
+    private static float cachedRouteRadius;
+    private static WorldMapGpuScene.RouteHit cachedRouteHit;
+    private static bool cachedRouteResult;
+    private static bool cachedRouteValid;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -206,6 +219,7 @@ internal static class WorldMapGpuHotQuery
         roomVisitStamps = null;
         roomVisitGeneration = 0;
         visibleRoomScratch = null;
+        ResetRouteHitCache();
         enabled = false;
         log = null;
     }
@@ -223,10 +237,24 @@ internal static class WorldMapGpuHotQuery
         try
         {
             object index = getRouteIndex();
+            int frame = Time.frameCount;
+            if (cachedRouteValid &&
+                cachedRouteFrame == frame &&
+                ReferenceEquals(cachedRouteIndex, index) &&
+                cachedRoutePoint.Equals(mapPoint) &&
+                cachedRouteRadius.Equals(radius))
+            {
+                hit = cachedRouteHit;
+                return cachedRouteResult;
+            }
+
             WorldMapGpuScene.RouteHit[] routes = index == null ? null : getRoutes(index);
             Dictionary<long, int[]> cells = index == null ? null : getRouteCells(index);
             if (routes == null || routes.Length == 0 || cells == null || cells.Count == 0)
+            {
+                CacheRouteHit(index, frame, mapPoint, radius, null, false);
                 return false;
+            }
 
             int[] stamps = EnsureStampCapacity(ref routeVisitStamps, routes.Length);
             int generation = NextGeneration(ref routeVisitGeneration, stamps);
@@ -267,12 +295,42 @@ internal static class WorldMapGpuHotQuery
                 }
             }
 
-            return hit != null;
+            bool result = hit != null;
+            CacheRouteHit(index, frame, mapPoint, radius, hit, result);
+            return result;
         }
         catch
         {
             return orig(mapPoint, radius, out hit);
         }
+    }
+
+    private static void CacheRouteHit(
+        object index,
+        int frame,
+        Num.Vector2 mapPoint,
+        float radius,
+        WorldMapGpuScene.RouteHit hit,
+        bool result)
+    {
+        cachedRouteIndex = index;
+        cachedRouteFrame = frame;
+        cachedRoutePoint = mapPoint;
+        cachedRouteRadius = radius;
+        cachedRouteHit = hit;
+        cachedRouteResult = result;
+        cachedRouteValid = true;
+    }
+
+    private static void ResetRouteHitCache()
+    {
+        cachedRouteIndex = null;
+        cachedRouteFrame = int.MinValue;
+        cachedRoutePoint = default;
+        cachedRouteRadius = 0f;
+        cachedRouteHit = null;
+        cachedRouteResult = false;
+        cachedRouteValid = false;
     }
 
     private static int[] QueryVisibleRoomsHook(
