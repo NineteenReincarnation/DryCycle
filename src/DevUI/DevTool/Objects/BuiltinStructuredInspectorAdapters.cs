@@ -35,6 +35,7 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
             target?.data is CollectToken.CollectTokenData ||
             target?.data is PlacedObject.CompetitiveFilterData ||
+            target?.data is PlacedObject.RippleEggDestinationData ||
             ModManager.Watcher && target?.data is Watcher.WarpPoint.WarpPointData ||
             ModManager.Watcher && target?.data is Watcher.SpinningTopData ||
             ModManager.Watcher && (
@@ -62,6 +63,8 @@ internal static class BuiltinStructuredInspectorAdapters
                     IsWarpPointManagedProperty(property.Key) ||
                     target.data is Watcher.SpinningTopData &&
                     IsSpinningTopManagedProperty(property.Key) ||
+                    target.data is PlacedObject.RippleEggDestinationData &&
+                    IsRippleEggDestinationManagedProperty(property.Key) ||
                     target.data is PlacedObject.CompetitiveFilterData &&
                     property.Key.EndsWith(".name", StringComparison.Ordinal))
                     continue;
@@ -102,6 +105,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case Watcher.SpinningTopData spinningTop:
                     AppendSpinningTop(result, spinningTop);
+                    break;
+                case PlacedObject.RippleEggDestinationData rippleEggDestination:
+                    AppendRippleEggDestination(result, rippleEggDestination);
                     break;
                 case PlacedObject.CompetitiveFilterData competitive:
                     AppendCompetitiveFilter(result, competitive);
@@ -156,11 +162,93 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetSpinningTop(spinningTop, key, value))
                 return true;
 
+            if (target.data is PlacedObject.RippleEggDestinationData rippleEggDestination &&
+                TrySetRippleEggDestination(rippleEggDestination, key, value))
+                return true;
+
             if (target.data is PlacedObject.CompetitiveFilterData competitive &&
                 TrySetCompetitiveFilter(competitive, key, value))
                 return true;
 
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
+        }
+
+        private const string RippleEggNoDestination = "NO DEST";
+
+        private static void AppendRippleEggDestination(
+            List<EditorPropertySnapshot> result,
+            PlacedObject.RippleEggDestinationData data)
+        {
+            if (data == null) return;
+
+            result.Add(EnumProperty(
+                "builtin.rippleEggDestination.room",
+                "Destination Room",
+                RippleEggDestinationOptions(data),
+                string.IsNullOrEmpty(data.destRoom) ? RippleEggNoDestination : data.destRoom,
+                "Ripple Egg Destination"));
+        }
+
+        private static bool TrySetRippleEggDestination(
+            PlacedObject.RippleEggDestinationData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null ||
+                key != "builtin.rippleEggDestination.room" ||
+                value.Kind != EditorPropertyKind.Enum)
+                return false;
+
+            string[] options = RippleEggDestinationOptions(data);
+            if (value.Integer < 0 || value.Integer >= options.Length)
+                return false;
+
+            string selected = options[value.Integer];
+            data.destRoom = selected == RippleEggNoDestination ? null : selected;
+            return true;
+        }
+
+        private static string[] RippleEggDestinationOptions(
+            PlacedObject.RippleEggDestinationData data)
+        {
+            List<string> options = new() { RippleEggNoDestination };
+            global::Room room = DevToolSessionHub.Current?.Room;
+            string region = room?.world?.region?.name;
+            if (!string.IsNullOrEmpty(region) && room?.game?.rainWorld != null)
+            {
+                region = region.ToLowerInvariant();
+                AppendRippleEggRooms(options, room.game.rainWorld.regionWarpRooms, region);
+                AppendRippleEggRooms(options, room.game.rainWorld.regionSpinningTopRooms, region);
+            }
+
+            AddUniqueOption(options, data?.destRoom);
+            return options.ToArray();
+        }
+
+        private static void AppendRippleEggRooms(
+            List<string> options,
+            Dictionary<string, List<string>> source,
+            string region)
+        {
+            if (options == null ||
+                source == null ||
+                string.IsNullOrEmpty(region) ||
+                !source.TryGetValue(region, out List<string> rooms) ||
+                rooms == null)
+                return;
+
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                string entry = rooms[i];
+                if (string.IsNullOrEmpty(entry)) continue;
+                AddUniqueOption(options, entry.Split(':')[0].ToLowerInvariant());
+            }
+        }
+
+        private static bool IsRippleEggDestinationManagedProperty(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            return key.EndsWith(".destRoom", StringComparison.Ordinal);
         }
 
         private static void AppendCompetitiveFilter(
