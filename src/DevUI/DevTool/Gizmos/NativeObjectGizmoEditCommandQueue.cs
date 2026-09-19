@@ -228,6 +228,22 @@ public static class NativeObjectGizmoEditCommandQueue
         }
 
         if (ModManager.Watcher &&
+            target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData candlePlacer)
+        {
+            Vector2 world = new Vector2(command.X, command.Y);
+            switch (command.HandleId)
+            {
+                case "urbanCandle:brush":
+                    candlePlacer.brushHandlePos = world;
+                    return true;
+                case "urbanCandle:radius":
+                    candlePlacer.handlePos = world - candlePlacer.brushHandlePos;
+                    candlePlacer.radius = candlePlacer.handlePos.magnitude;
+                    return true;
+            }
+        }
+
+        if (ModManager.Watcher &&
             target.data is Watcher.UrbanLife.UrbanLifeData urbanLife)
         {
             Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
