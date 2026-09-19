@@ -1043,6 +1043,13 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
     {
         string name = binding.MemberName ?? string.Empty;
 
+        if (data is PlacedObject.DayNightData && value is int palette &&
+            (string.Equals(name, "duskPalette", StringComparison.Ordinal) ||
+             string.Equals(name, "nightPalette", StringComparison.Ordinal)))
+        {
+            return Math.Max(0, palette);
+        }
+
         if (data is PlacedObject.ConsumableObjectData consumable && value is int regen)
         {
             if (string.Equals(name, "minRegen", StringComparison.Ordinal))
