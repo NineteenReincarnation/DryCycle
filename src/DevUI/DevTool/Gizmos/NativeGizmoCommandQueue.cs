@@ -80,8 +80,14 @@ public static class NativeGizmoCommandQueue
                         Update(session, command);
                         break;
                     case NativeGizmoCommandKind.Commit:
-                        EditorContinuousTransactionHub.Commit(session, Key(command));
+                    {
+                        bool committed = EditorContinuousTransactionHub.Commit(session, Key(command));
+                        if (committed && command.Target == NativeGizmoTargetKind.ObjectPosition)
+                            NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(
+                                session,
+                                ObjectAt(session, command.Index));
                         break;
+                    }
                     case NativeGizmoCommandKind.Cancel:
                         EditorContinuousTransactionHub.Cancel(session, Key(command));
                         MarkChanged(session, command.Target, command.Index);
@@ -183,7 +189,7 @@ public static class NativeGizmoCommandQueue
         Vector2 next = new(x, y);
         if ((target.pos - next).sqrMagnitude <= 0.000001f) return false;
         target.pos = next;
-        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
+        NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target);
         return true;
     }
 
