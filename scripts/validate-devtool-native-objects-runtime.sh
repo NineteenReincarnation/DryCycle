@@ -608,6 +608,49 @@ if ! grep -Fq 'Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder' "$factor
   exit 1
 fi
 
+# Watcher WarpPointToRoom authoring used to live almost entirely inside nested DevInterface
+# panels. Native Objects owns destination position, limited uses, effect presets/sliders and the live
+# WarpPoint runtime directly.
+for symbol in \
+  'target?.data is Watcher.WarpPoint.WarpPointData' \
+  'AppendWarpPoint(result, warpPoint);' \
+  '"builtin.warpPoint.destRegion"' \
+  '"builtin.warpPoint.destRoom"' \
+  '"builtin.warpPoint.hasDestPos"' \
+  '"builtin.warpPoint.destPos"' \
+  '"builtin.warpPoint.uses"' \
+  '"builtin.warpPoint.effect.vignette"' \
+  '"builtin.warpPoint.effect.triggerDuration"' \
+  '"builtin.warpPoint.preset.default"' \
+  '"builtin.warpPoint.preset.outerRim"' \
+  '"builtin.warpPoint.preset.badWarp"' \
+  '"builtin.warpPoint.preset.dynamic"' \
+  'data.limitedUse = data.uses > 0;' \
+  'data.destCam = -1;'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "WarpPointToRoom native inspector contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'EnsureWarpPointRuntime(room, target, warpPoint);' \
+  'RemoveWarpPointRuntime(room, target);' \
+  'ReferenceEquals(candidate.placedObject, target)' \
+  'runtime.parameters.x =' \
+  'runtime.parameters.y =' \
+  'runtime.parameters.z =' \
+  'runtime.parameters.w =' \
+  'runtime.activateAnimationTime = 50f + data.effectSettings.activeDuration;' \
+  'runtime.triggerActivationTime = 50f + data.effectSettings.triggerDuration;' \
+  'runtime.successfullWarpCooldownFrames = data.rippleWarp ? 10 : 1200;' \
+  'Watcher.WarpPoint.GetDestCam(data)' \
+  'runtime.refreshGraphics = true;'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "WarpPointToRoom native authoring/runtime contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Rebuilt Objects must not retain a selected-representation controller at all. Explicit legacy mode
 # owns the original ObjectsPage directly; native mode owns detached gizmos.
 if grep -R -n -F --include='*.cs' 'ObjectGizmoPresentationController' "$root" >/tmp/devtool_object_gizmo_shim_hits.txt 2>/dev/null; then
