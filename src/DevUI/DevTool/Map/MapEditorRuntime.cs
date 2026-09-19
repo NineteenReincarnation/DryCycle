@@ -102,9 +102,9 @@ public static class MapEditorPresentationHub
     private static volatile EditorMapPresentationSnapshot current = EditorMapPresentationSnapshot.Empty;
     private static readonly Dictionary<int, EditorMapRoomNodeSnapshot[]> retainedNodes = new();
     private static EditorSession observedSession;
-    private static MapPage observedPage;
     private static global::World observedWorld;
     private static long observedRevision;
+    private static long observedAuthoringRevision;
     private static ulong observedPresentationFingerprint;
     private static ulong observedTopologyFingerprint;
     private static int observedWorldTextRevision = int.MinValue;
@@ -118,7 +118,8 @@ public static class MapEditorPresentationHub
 
     internal static void Publish(EditorSession session)
     {
-        if (session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page || page.world == null)
+        global::World world = session?.World;
+        if (session?.ToolMode != EditorToolMode.Map || world == null)
         {
             if (retainedValid || !ReferenceEquals(current, EditorMapPresentationSnapshot.Empty))
                 Clear();
@@ -130,6 +131,7 @@ public static class MapEditorPresentationHub
             EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
 
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Map);
+        long authoringRevision = NativeMapAuthoringStateHub.GetRevision(session);
         int worldTextRevision = WorldTextRegistry.Revision;
         int worldTopologyRevision = WorldTopologyRegistry.Revision;
         int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
@@ -138,12 +140,12 @@ public static class MapEditorPresentationHub
         bool sameIdentity =
             retainedValid &&
             ReferenceEquals(observedSession, session) &&
-            ReferenceEquals(observedPage, page) &&
-            ReferenceEquals(observedWorld, page.world) &&
+            ReferenceEquals(observedWorld, world) &&
             current.Available;
         bool modelRevisionsStable =
             sameIdentity &&
             observedRevision == revision &&
+            observedAuthoringRevision == authoringRevision &&
             observedWorldTextRevision == worldTextRevision &&
             observedWorldTopologyRevision == worldTopologyRevision;
         bool flagsChanged =
@@ -151,32 +153,39 @@ public static class MapEditorPresentationHub
             (observedCurrentRoomIndex != currentRoomIndex ||
              observedSelectedRoomIndex != selectedRoomIndex);
 
-        // Selection/current-room flags are presentation-only. When all authoritative model revisions
-        // are stable, update at most the affected room records and reuse nodes/connections without a
-        // semantic map scan. The periodic audit still runs on schedule to catch opaque writers.
+        // Selection/current-room flags are presentation-only. Native room placement/layer state has
+        // its own revision, so stable frames return without touching MapPage or scanning room nodes.
         if (modelRevisionsStable)
         {
             framesUntilIntegrityAudit--;
             if (framesUntilIntegrityAudit > 0)
             {
                 if (flagsChanged)
-                    PublishRoomFlagsOnly(page.world, state, currentRoomIndex);
+                    PublishRoomFlagsOnly(world, state, currentRoomIndex);
                 return;
             }
 
             framesUntilIntegrityAudit = IntegrityAuditInterval;
-            MapFingerprints audit = ComputeFingerprints(page);
-            if (observedPresentationFingerprint == audit.Presentation &&
-                observedTopologyFingerprint == audit.Topology)
+
+            // Compatibility-only audit: if a third-party writer still edits a live RoomPanel, import
+            // that edge into the Native state once. Page-less Native mode does no legacy scan here.
+            NativeMapAuthoringStateHub.AuditLegacy(session);
+            authoringRevision = NativeMapAuthoringStateHub.GetRevision(session);
+            if (authoringRevision == observedAuthoringRevision)
             {
-                if (flagsChanged)
-                    PublishRoomFlagsOnly(page.world, state, currentRoomIndex);
-                return;
+                MapFingerprints audit = ComputeFingerprints(session, world);
+                if (observedPresentationFingerprint == audit.Presentation &&
+                    observedTopologyFingerprint == audit.Topology)
+                {
+                    if (flagsChanged)
+                        PublishRoomFlagsOnly(world, state, currentRoomIndex);
+                    return;
+                }
             }
         }
 
         framesUntilIntegrityAudit = IntegrityAuditInterval;
-        MapFingerprints fingerprints = ComputeFingerprints(page);
+        MapFingerprints fingerprints = ComputeFingerprints(session, world);
 
         bool topologyChanged =
             !sameIdentity ||
@@ -186,30 +195,35 @@ public static class MapEditorPresentationHub
         bool roomPresentationChanged =
             !sameIdentity ||
             observedPresentationFingerprint != fingerprints.Presentation ||
+            observedAuthoringRevision != authoringRevision ||
             flagsChanged;
 
-        // An opaque compatibility backend may conservatively bump the workspace revision without
-        // changing any value. Consume that edge without allocating a new immutable object graph.
         if (!topologyChanged && !roomPresentationChanged)
         {
             observedRevision = revision;
+            observedAuthoringRevision = authoringRevision;
             return;
         }
 
         List<EditorMapRoomSnapshot> rooms = new();
         HashSet<int> roomIndices = new();
         Dictionary<string, int> roomIndexByName = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> disabled = BuildDisabledSet(page.world);
+        HashSet<string> disabled = BuildDisabledSet(world);
 
         if (topologyChanged)
             retainedNodes.Clear();
 
-        for (int i = 0; i < page.subNodes.Count; i++)
+        int roomEnd = world.firstRoomIndex + world.NumberOfRooms;
+        for (int roomIndex = world.firstRoomIndex; roomIndex < roomEnd; roomIndex++)
         {
-            if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
-            AbstractRoom room = panel.roomRep.room;
+            AbstractRoom room = world.GetAbstractRoom(roomIndex);
+            if (room == null ||
+                !NativeMapAuthoringStateHub.TryGet(session, roomIndex, out NativeMapRoomAuthoringValue authoring))
+                continue;
+
             roomIndices.Add(room.index);
-            if (!string.IsNullOrWhiteSpace(room.name)) roomIndexByName[room.name] = room.index;
+            if (!string.IsNullOrWhiteSpace(room.name))
+                roomIndexByName[room.name] = room.index;
 
             EditorMapRoomNodeSnapshot[] nodes;
             if (topologyChanged || !retainedNodes.TryGetValue(room.index, out nodes))
@@ -222,9 +236,9 @@ public static class MapEditorPresentationHub
             {
                 RoomIndex = room.index,
                 Name = room.name ?? string.Empty,
-                X = panel.devPos.x,
-                Y = panel.devPos.y,
-                Layer = panel.layer,
+                X = authoring.DevPosition.x,
+                Y = authoring.DevPosition.y,
+                Layer = authoring.Layer,
                 Subregion = room.subregionName ?? string.Empty,
                 OffScreenDen = room.offScreenDen,
                 Disabled = disabled.Contains(room.name ?? string.Empty),
@@ -246,7 +260,7 @@ public static class MapEditorPresentationHub
         if (topologyChanged || current.Connections == null)
         {
             connections = BuildConnections(
-                page.world,
+                world,
                 rooms,
                 roomIndices,
                 roomIndexByName).ToArray();
@@ -259,22 +273,20 @@ public static class MapEditorPresentationHub
         current = new EditorMapPresentationSnapshot
         {
             Available = true,
-            RegionName = page.world.name ?? string.Empty,
+            RegionName = world.name ?? string.Empty,
             SelectedRoomIndex = state.SelectedRoomIndex,
             Rooms = rooms.ToArray(),
             Connections = connections
         };
 
         observedSession = session;
-        observedPage = page;
-        observedWorld = page.world;
+        observedWorld = world;
         observedRevision = revision;
+        observedAuthoringRevision = NativeMapAuthoringStateHub.GetRevision(session);
         if (correctedSelection)
-            fingerprints = ComputeFingerprints(page);
+            fingerprints = ComputeFingerprints(session, world);
         observedPresentationFingerprint = fingerprints.Presentation;
         observedTopologyFingerprint = fingerprints.Topology;
-        // BuildConnections may lazily load world.txt/WorldTopology.json. Capture post-build
-        // revisions so first-load initialization does not cause an unnecessary second rebuild.
         observedWorldTextRevision = WorldTextRegistry.Revision;
         observedWorldTopologyRevision = WorldTopologyRegistry.Revision;
         observedCurrentRoomIndex = currentRoomIndex;
@@ -359,17 +371,17 @@ public static class MapEditorPresentationHub
     /// full room scan. The topology signature excludes room positions/layers/subregions, allowing
     /// visual map edits to retain exact node arrays and the expensive connection graph.
     /// </summary>
-    private static MapFingerprints ComputeFingerprints(MapPage page)
+    private static MapFingerprints ComputeFingerprints(EditorSession session, global::World world)
     {
         unchecked
         {
             ulong presentation = 1469598103934665603UL;
             ulong topology = 1469598103934665603UL;
-            int worldNameHash = StringHash(page.world?.name);
+            int worldNameHash = StringHash(world?.name);
             presentation = Mix(presentation, worldNameHash);
             topology = Mix(topology, worldNameHash);
 
-            var disabled = page.world?.DisabledMapRooms;
+            var disabled = world?.DisabledMapRooms;
             presentation = Mix(presentation, disabled?.Count ?? 0);
             if (disabled != null)
             {
@@ -377,23 +389,30 @@ public static class MapEditorPresentationHub
                     presentation = Mix(presentation, StringHash(disabled[i]));
             }
 
-            int subNodeCount = page.subNodes?.Count ?? 0;
-            presentation = Mix(presentation, subNodeCount);
-            topology = Mix(topology, subNodeCount);
-            if (page.subNodes == null)
+            int roomCount = world?.NumberOfRooms ?? 0;
+            presentation = Mix(presentation, roomCount);
+            topology = Mix(topology, roomCount);
+            if (world == null)
                 return new MapFingerprints(presentation, topology);
 
-            for (int i = 0; i < page.subNodes.Count; i++)
+            int end = world.firstRoomIndex + world.NumberOfRooms;
+            for (int roomIndex = world.firstRoomIndex; roomIndex < end; roomIndex++)
             {
-                if (page.subNodes[i] is not RoomPanel panel || panel.roomRep?.room == null) continue;
-                AbstractRoom room = panel.roomRep.room;
-                int roomNameHash = StringHash(room.name);
+                AbstractRoom room = world.GetAbstractRoom(roomIndex);
+                if (room == null) continue;
 
+                int roomNameHash = StringHash(room.name);
                 presentation = Mix(presentation, room.index);
                 presentation = Mix(presentation, roomNameHash);
-                presentation = Mix(presentation, panel.devPos.x.GetHashCode());
-                presentation = Mix(presentation, panel.devPos.y.GetHashCode());
-                presentation = Mix(presentation, panel.layer);
+                if (NativeMapAuthoringStateHub.TryGet(
+                        session,
+                        room.index,
+                        out NativeMapRoomAuthoringValue authoring))
+                {
+                    presentation = Mix(presentation, authoring.DevPosition.x.GetHashCode());
+                    presentation = Mix(presentation, authoring.DevPosition.y.GetHashCode());
+                    presentation = Mix(presentation, authoring.Layer);
+                }
                 presentation = Mix(presentation, StringHash(room.subregionName));
                 presentation = Mix(presentation, room.offScreenDen ? 1 : 0);
 
@@ -431,9 +450,9 @@ public static class MapEditorPresentationHub
     {
         retainedNodes.Clear();
         observedSession = null;
-        observedPage = null;
         observedWorld = null;
         observedRevision = 0L;
+        observedAuthoringRevision = 0L;
         observedPresentationFingerprint = 0UL;
         observedTopologyFingerprint = 0UL;
         observedWorldTextRevision = int.MinValue;
