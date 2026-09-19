@@ -198,6 +198,50 @@ internal static class NativeObjectGizmoPresentation
                 drawLine: true));
         }
 
+        if (ModManager.Watcher &&
+            target.data is Watcher.AetherRainbow.AetherRainbowData aether)
+        {
+            Vector2 start = target.pos + aether.start;
+            Vector2 arch = target.pos + aether.arch;
+            Vector2 end = target.pos + aether.end;
+
+            handles.Add(Handle("aether:start", start, target.pos, drawLine: true));
+            handles.Add(Handle("aether:arch", arch, target.pos, drawLine: true));
+            handles.Add(Handle("aether:end", end, target.pos, drawLine: true));
+
+            handles.Add(Handle(
+                "aether:startDepth",
+                start + new Vector2(aether.startDepth * 100f, -30f),
+                start,
+                drawLine: true));
+            handles.Add(Handle(
+                "aether:archDepth",
+                arch + new Vector2(aether.archDepth * 100f, -30f),
+                arch,
+                drawLine: true));
+            handles.Add(Handle(
+                "aether:endDepth",
+                end + new Vector2(aether.endDepth * 100f, -30f),
+                end,
+                drawLine: true));
+
+            handles.Add(Handle(
+                "aether:startWidth",
+                start + new Vector2(aether.startWidth * 100f, -60f),
+                start,
+                drawLine: true));
+            handles.Add(Handle(
+                "aether:archWidth",
+                arch + new Vector2(aether.archWidth * 100f, -60f),
+                arch,
+                drawLine: true));
+            handles.Add(Handle(
+                "aether:endWidth",
+                end + new Vector2(aether.endWidth * 100f, -60f),
+                end,
+                drawLine: true));
+        }
+
         if (ModManager.Watcher && target.data is Watcher.WallLight.WallLightData wallLight)
         {
             handles.Add(Handle(
