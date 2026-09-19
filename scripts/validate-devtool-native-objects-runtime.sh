@@ -227,8 +227,8 @@ for symbol in \
     exit 1
   fi
 done
-if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$backend" ||
-   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' "$object_gizmo_backend" ||
+if ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target);' "$backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target)' "$object_gizmo_backend" ||
    ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);' "$root/History/PlacedObjectHistory.cs" ||
    ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target)' "$root/Commands/EditorActions.cs"; then
   echo "Native object mutations no longer converge on the runtime side-effect reconciler." >&2
@@ -661,6 +661,67 @@ done
 if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$runtime_reconciler" ||
    ! grep -Fq 'fairyParticle.Apply(room);' "$runtime_reconciler"; then
   echo "FairyParticle native live preview no longer calls Data.Apply(room)." >&2
+  exit 1
+fi
+
+# Watcher TerrainGrassPatch no longer depends on TerrainGrassPatchRepresentation/AxisHandle.
+# Its eight authored axes are detached native gizmos. Grass regeneration is intentionally deferred
+# during continuous preview and finalized once per committed drag so large patches do not respawn
+# hundreds/thousands of blades every mouse frame.
+for symbol in \
+  'typeof(Watcher.GrassBlade.TerrainGrassPatchData)' \
+  'string.Equals(name, "amount", StringComparison.Ordinal)' \
+  'max = 2000f;' \
+  'step = 4f;' \
+  'string.Equals(name, "minHeight", StringComparison.Ordinal)' \
+  'max = 1000f;' \
+  'string.Equals(name, "fallOff", StringComparison.Ordinal)' \
+  'string.Equals(name, "width", StringComparison.Ordinal)' \
+  'max = 4f;' \
+  'string.Equals(name, "spawnedGrass", StringComparison.Ordinal)' \
+  'return Mathf.Abs(range);' \
+  'return Mathf.Clamp(amount, 0, 2000) / 4 * 4;'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "TerrainGrassPatch native inspector contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  '"terrainGrass:range"' \
+  '"terrainGrass:fallOff"' \
+  '"terrainGrass:width"' \
+  '"terrainGrass:depthOffset"' \
+  '"terrainGrass:depthRange"' \
+  '"terrainGrass:amount"' \
+  '"terrainGrass:minHeight"' \
+  '"terrainGrass:maxHeight"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "TerrainGrassPatch detached AxisHandle coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'internal static void RefreshInteractivePreview(EditorSession session, PlacedObject target)' \
+  'internal static void FinalizeInteractiveMutation(EditorSession session, PlacedObject target)' \
+  'target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch' \
+  'if (!interactivePreview)' \
+  'RespawnTerrainGrassPatch(room, grassPatch);' \
+  'Watcher.Grass.InitGrassInRoom(room);' \
+  'Watcher.GrassBlade.SpawnGrassPatch(room, data);' \
+  'RemoveTerrainGrassPatchRuntime(room, grassPatch);' \
+  'room.grass.grassBlades.Remove(data.spawnedGrass[i]);' \
+  'room.grass.needsShuffle = true;'; do
+  if ! grep -Fq "$symbol" "$runtime_reconciler"; then
+    echo "TerrainGrassPatch native runtime lifecycle regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(session, target);' "$object_gizmo_backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(' "$backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target);' "$object_gizmo_backend" ||
+   ! grep -Fq 'NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target);' "$backend"; then
+  echo "TerrainGrassPatch continuous preview/finalize boundary is not wired through both object gizmo paths." >&2
   exit 1
 fi
 
