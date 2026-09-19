@@ -1,4 +1,5 @@
 using BepInEx;
+using BepInEx.Logging;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -21,5 +22,21 @@ public sealed class WorldMapGpuInteractionIndexPlugin : BaseUnityPlugin
     {
         Logger?.LogInfo(
             "GPU World Map spatial hover index is integrated directly into WorldMapView; no detour attached.");
+    }
+}
+
+
+internal static class WorldMapGpuInteractionIndex
+{
+    // Hover acceleration now lives directly in WorldMapView.FindHoveredRoom. These methods retain
+    // the old lifecycle contract without installing a RuntimeDetour trampoline.
+    internal static void Enable(ManualLogSource logger)
+    {
+        WorldMapHotState.Invalidate();
+    }
+
+    internal static void Disable()
+    {
+        WorldMapHotState.Invalidate();
     }
 }
