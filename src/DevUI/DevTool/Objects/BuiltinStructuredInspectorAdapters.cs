@@ -32,7 +32,9 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is PlacedObject.FilterData ||
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
             target?.data is CollectToken.CollectTokenData ||
-            ModManager.Watcher && target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData;
+            ModManager.Watcher && (
+                target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData ||
+                target?.data is Watcher.FloatingDebrisData);
 
         public IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target)
         {
@@ -48,7 +50,9 @@ internal static class BuiltinStructuredInspectorAdapters
                 if (property == null ||
                     IsReplacedStructuredProperty(property.Key) ||
                     target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData &&
-                    IsUrbanCandlePlacerManagedProperty(property.Key))
+                    IsUrbanCandlePlacerManagedProperty(property.Key) ||
+                    target.data is Watcher.FloatingDebrisData &&
+                    IsFloatingDebrisManagedProperty(property.Key))
                     continue;
                 result.Add(property);
             }
@@ -78,6 +82,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case Watcher.UrbanCandlePlacer.UrbanCandlePlacerData:
                     AppendUrbanCandlePlacerActions(result);
+                    break;
+                case Watcher.FloatingDebrisData floatingDebris:
+                    AppendFloatingDebris(result, floatingDebris);
                     break;
             }
 
@@ -117,7 +124,193 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetCollectTokenPlayer(token, key, value))
                 return true;
 
+            if (target.data is Watcher.FloatingDebrisData floatingDebris &&
+                TrySetFloatingDebris(floatingDebris, key, value))
+                return true;
+
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
+        }
+
+        private static void AppendFloatingDebris(
+            List<EditorPropertySnapshot> result,
+            Watcher.FloatingDebrisData data)
+        {
+            if (data == null) return;
+
+            Watcher.FloatingDebris.UIText ui = null;
+            if (!string.IsNullOrEmpty(data.type) &&
+                Watcher.FloatingDebris.types.TryGetValue(data.type, out Watcher.FloatingDebris.Floater.IFloaterSpawner spawner))
+            {
+                try { ui = spawner.GetUIText(); }
+                catch { }
+            }
+
+            result.Add(EnumProperty(
+                "builtin.floatingDebris.type",
+                "Type",
+                FloatingDebrisTypeOptions(),
+                data.type,
+                "Floating Debris"));
+
+            result.Add(ReadOnly(
+                "builtin.floatingDebris.seed",
+                "Seed",
+                data.seed.ToString(),
+                "Floating Debris"));
+
+            if (ui?.amount?.hide != true)
+                result.Add(IntegerRange(
+                    "builtin.floatingDebris.amount",
+                    ui?.amount?.title ?? "Amount",
+                    data.numberOfFloaters,
+                    0,
+                    100,
+                    "Floating Debris"));
+
+            if (ui?.depthNear?.hide != true)
+                result.Add(IntegerRange(
+                    "builtin.floatingDebris.depthNear",
+                    ui?.depthNear?.title ?? "Depth, Near",
+                    data.depthNear,
+                    0,
+                    30,
+                    "Floating Debris"));
+
+            if (ui?.depthFar?.hide != true)
+                result.Add(IntegerRange(
+                    "builtin.floatingDebris.depthFar",
+                    ui?.depthFar?.title ?? "Depth, Far",
+                    data.depthFar,
+                    0,
+                    30,
+                    "Floating Debris"));
+
+            if (ui?.scaleMin?.hide != true)
+                result.Add(FloatRange(
+                    "builtin.floatingDebris.scaleMin",
+                    ui?.scaleMin?.title ?? "Scale Min",
+                    data.scaleMinimum,
+                    0f,
+                    3f,
+                    "Floating Debris"));
+
+            if (ui?.scaleMax?.hide != true)
+                result.Add(FloatRange(
+                    "builtin.floatingDebris.scaleMax",
+                    ui?.scaleMax?.title ?? "Scale Max",
+                    data.scaleMaximum,
+                    0f,
+                    3f,
+                    "Floating Debris"));
+
+            if (ui?.movementAmount?.hide != true)
+                result.Add(FloatRange(
+                    "builtin.floatingDebris.movement",
+                    ui?.movementAmount?.title ?? "Movement Amount",
+                    data.movement,
+                    0f,
+                    1f,
+                    "Floating Debris"));
+
+            result.Add(ReadOnly(
+                "builtin.floatingDebris.controlPoints",
+                "Control Points",
+                (data.controlPointPosX?.Count ?? 0).ToString(),
+                "Control Points"));
+
+            result.Add(Action("builtin.floatingDebris.newSeed", "New Seed", "Actions"));
+            result.Add(Action("builtin.floatingDebris.addLeft", "Add Control Point · Left", "Control Points"));
+            result.Add(Action("builtin.floatingDebris.addRight", "Add Control Point · Right", "Control Points"));
+            result.Add(Action("builtin.floatingDebris.removeLeft", "Remove Control Point · Left", "Control Points"));
+            result.Add(Action("builtin.floatingDebris.removeRight", "Remove Control Point · Right", "Control Points"));
+        }
+
+        private static bool TrySetFloatingDebris(
+            Watcher.FloatingDebrisData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null || string.IsNullOrEmpty(key))
+                return false;
+
+            switch (key)
+            {
+                case "builtin.floatingDebris.type":
+                    if (value.Kind != EditorPropertyKind.Enum)
+                        return false;
+                    string[] options = FloatingDebrisTypeOptions();
+                    if (value.Integer < 0 || value.Integer >= options.Length)
+                        return false;
+                    data.type = options[value.Integer];
+                    return true;
+
+                case "builtin.floatingDebris.amount":
+                    if (value.Kind != EditorPropertyKind.Integer) return false;
+                    data.numberOfFloaters = Mathf.Clamp(value.Integer, 0, 100);
+                    return true;
+
+                case "builtin.floatingDebris.depthNear":
+                    if (value.Kind != EditorPropertyKind.Integer) return false;
+                    data.depthNear = Mathf.Clamp(value.Integer, 0, 30);
+                    return true;
+
+                case "builtin.floatingDebris.depthFar":
+                    if (value.Kind != EditorPropertyKind.Integer) return false;
+                    data.depthFar = Mathf.Clamp(value.Integer, 0, 30);
+                    return true;
+
+                case "builtin.floatingDebris.scaleMin":
+                    if (value.Kind != EditorPropertyKind.Float) return false;
+                    data.scaleMinimum = Mathf.Clamp(value.X, 0f, 3f);
+                    return true;
+
+                case "builtin.floatingDebris.scaleMax":
+                    if (value.Kind != EditorPropertyKind.Float) return false;
+                    data.scaleMaximum = Mathf.Clamp(value.X, 0f, 3f);
+                    return true;
+
+                case "builtin.floatingDebris.movement":
+                    if (value.Kind != EditorPropertyKind.Float) return false;
+                    data.movement = Mathf.Clamp01(value.X);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsFloatingDebrisManagedProperty(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+
+            return key.EndsWith(".obj", StringComparison.Ordinal) ||
+                   key.EndsWith(".seed", StringComparison.Ordinal) ||
+                   key.EndsWith("._depthNear", StringComparison.Ordinal) ||
+                   key.EndsWith("._depthFar", StringComparison.Ordinal) ||
+                   key.EndsWith(".depthNear", StringComparison.Ordinal) ||
+                   key.EndsWith(".depthFar", StringComparison.Ordinal) ||
+                   key.EndsWith(".numberOfFloaters", StringComparison.Ordinal) ||
+                   key.EndsWith("._scaleMinimum", StringComparison.Ordinal) ||
+                   key.EndsWith("._scaleMaximum", StringComparison.Ordinal) ||
+                   key.EndsWith(".scaleMinimum", StringComparison.Ordinal) ||
+                   key.EndsWith(".scaleMaximum", StringComparison.Ordinal) ||
+                   key.EndsWith(".movement", StringComparison.Ordinal) ||
+                   key.EndsWith(".type", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointPosX", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointPosY", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointOffsetAmount", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointDepthOffset", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointScaleOffset", StringComparison.Ordinal) ||
+                   key.EndsWith(".controlPointExtraOffset", StringComparison.Ordinal);
+        }
+
+        private static string[] FloatingDebrisTypeOptions()
+        {
+            string[] result = new string[Watcher.FloatingDebris.types.Count];
+            int index = 0;
+            foreach (string name in Watcher.FloatingDebris.types.Keys)
+                result[index++] = name ?? string.Empty;
+            return result;
         }
 
         private static void AppendUrbanCandlePlacerActions(
@@ -548,6 +741,70 @@ internal static class BuiltinStructuredInspectorAdapters
                 values.Add(name);
             else if (!enabled && present)
                 values.Remove(name);
+        }
+
+        private static EditorPropertySnapshot FloatRange(
+            string key,
+            string displayName,
+            float value,
+            float min,
+            float max,
+            string group) =>
+            new()
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.Float,
+                HasRange = true,
+                Min = min,
+                Max = max,
+                Step = 0.01f,
+                X = value
+            };
+
+        private static EditorPropertySnapshot IntegerRange(
+            string key,
+            string displayName,
+            int value,
+            int min,
+            int max,
+            string group) =>
+            new()
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.Integer,
+                HasRange = true,
+                Min = min,
+                Max = max,
+                Step = 1f,
+                IntegerValue = value
+            };
+
+        private static EditorPropertySnapshot EnumProperty(
+            string key,
+            string displayName,
+            string[] options,
+            string current,
+            string group)
+        {
+            options ??= Array.Empty<string>();
+            int selected = Array.IndexOf(options, current ?? string.Empty);
+            return new EditorPropertySnapshot
+            {
+                Key = key,
+                DisplayName = displayName,
+                Group = group,
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.Enum,
+                IntegerValue = Math.Max(0, selected),
+                StringValue = current ?? string.Empty,
+                Options = options
+            };
         }
 
         private static EditorPropertySnapshot Action(
