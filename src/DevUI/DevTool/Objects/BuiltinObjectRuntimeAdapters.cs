@@ -290,6 +290,24 @@ internal static class BuiltinObjectRuntimeAdapters
 
         RemoveWatcherUrbanRuntime(room, target);
 
+        if (ModManager.Watcher &&
+            target.data is Watcher.FloatingDebrisData floatingDebris)
+        {
+            Watcher.FloatingDebris floatingRuntime = floatingDebris.obj;
+            floatingDebris.obj = null;
+            if (floatingRuntime != null && ReferenceEquals(floatingRuntime.room, room))
+                DestroyRuntime(room, floatingRuntime);
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.FlameJet.FlameJetData flameJet)
+        {
+            Watcher.FlameJet flameRuntime = flameJet.obj;
+            flameJet.obj = null;
+            if (flameRuntime != null && ReferenceEquals(flameRuntime.room, room))
+                DestroyRuntime(room, flameRuntime);
+        }
+
         if (target.type == PlacedObject.Type.InsectGroup)
             RemoveInsectGroupRuntime(room, target);
 
