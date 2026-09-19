@@ -172,6 +172,12 @@ internal static class NativeObjectGizmoPresentation
             AddLine(lines, pointA, pointB);
             specialized = true;
         }
+        else if (ModManager.Watcher &&
+                 target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch)
+        {
+            CaptureTerrainGrassPatch(target, grassPatch, handles);
+            specialized = true;
+        }
         else if (target.data is PlacedObject.SplineObjectData splineData && splineData.spline != null)
         {
             CaptureSpline(target, splineData.spline, handles, beziers);
@@ -340,6 +346,64 @@ internal static class NativeObjectGizmoPresentation
                 DrawAnchorLine = true
             });
         }
+    }
+
+    private static void CaptureTerrainGrassPatch(
+        PlacedObject target,
+        Watcher.GrassBlade.TerrainGrassPatchData data,
+        List<EditorObjectGizmoHandleSnapshot> handles)
+    {
+        Vector2 origin = target.pos;
+
+        Vector2 rangeAnchor = origin + Vector2.down * 30f;
+        Vector2 fallOffAnchor = origin + Vector2.down * 60f;
+        Vector2 widthAnchor = origin + Vector2.down * 90f;
+        Vector2 depthOffsetAnchor = origin + Vector2.down * 120f;
+        Vector2 depthRangeAnchor = origin + Vector2.down * 150f;
+        Vector2 amountAnchor = origin + Vector2.right * -30f;
+        Vector2 minHeightAnchor = origin + Vector2.right * 30f;
+        Vector2 maxHeightAnchor = origin + Vector2.right * 60f;
+
+        handles.Add(Handle(
+            "terrainGrass:range",
+            rangeAnchor + Vector2.right * Mathf.Abs(data.range),
+            rangeAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:fallOff",
+            fallOffAnchor + Vector2.right * (Mathf.Clamp01(data.fallOff) * 200f),
+            fallOffAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:width",
+            widthAnchor + Vector2.right * (Mathf.Clamp(data.width, 0f, 4f) * 50f),
+            widthAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:depthOffset",
+            depthOffsetAnchor + Vector2.right * ((Mathf.Clamp01(data.depthOffset) - 0.5f) * 200f),
+            depthOffsetAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:depthRange",
+            depthRangeAnchor + Vector2.right * (Mathf.Clamp01(data.depthRange) * 100f),
+            depthRangeAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:amount",
+            amountAnchor + Vector2.up * (Mathf.Clamp(data.amount, 0, 2000) / 4f),
+            amountAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:minHeight",
+            minHeightAnchor + Vector2.up * Mathf.Clamp(data.minHeight, 0f, 1000f),
+            minHeightAnchor,
+            drawLine: true));
+        handles.Add(Handle(
+            "terrainGrass:maxHeight",
+            maxHeightAnchor + Vector2.up * Mathf.Clamp(data.maxHeight, 0f, 1000f),
+            maxHeightAnchor,
+            drawLine: true));
     }
 
     private static void CaptureWaterCurrent(
