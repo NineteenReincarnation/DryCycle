@@ -111,6 +111,14 @@ internal static class BuiltinObjectRuntimeAdapters
         }
 
         if (ModManager.Watcher &&
+            target.type == PlacedObject.Type.WarpPoint &&
+            target.data is Watcher.WarpPoint.WarpPointData warpPoint)
+        {
+            EnsureWarpPointRuntime(room, target, warpPoint);
+            return;
+        }
+
+        if (ModManager.Watcher &&
             target.type == Watcher.WatcherEnums.PlacedObjectType.FlameJet &&
             target.data is Watcher.FlameJet.FlameJetData flameJet)
         {
@@ -297,6 +305,12 @@ internal static class BuiltinObjectRuntimeAdapters
             floatingDebris.obj = null;
             if (floatingRuntime != null && ReferenceEquals(floatingRuntime.room, room))
                 DestroyRuntime(room, floatingRuntime);
+        }
+
+        if (ModManager.Watcher &&
+            target.type == PlacedObject.Type.WarpPoint)
+        {
+            RemoveWarpPointRuntime(room, target);
         }
 
         if (ModManager.Watcher &&
@@ -987,6 +1001,98 @@ internal static class BuiltinObjectRuntimeAdapters
         }
 
         return null;
+    }
+
+    private static void EnsureWarpPointRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.WarpPoint.WarpPointData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        Watcher.WarpPoint runtime = null;
+        if (room.warpPoints != null)
+        {
+            for (int i = 0; i < room.warpPoints.Count; i++)
+            {
+                Watcher.WarpPoint candidate = room.warpPoints[i];
+                if (candidate != null && ReferenceEquals(candidate.placedObject, target))
+                {
+                    runtime = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (runtime == null)
+        {
+            try
+            {
+                runtime = new Watcher.WarpPoint(room, target);
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native WarpPoint runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        runtime.pos = target.pos;
+        runtime.lastPos = target.pos;
+
+        if (data.sourceTimeline == null && room.game != null)
+            data.sourceTimeline = room.game.TimelinePoint;
+
+        if (data.oneWay && !data.oneWayEntranceIdentified)
+        {
+            data.oneWayEntrance = true;
+            data.oneWayEntranceIdentified = true;
+        }
+
+        runtime.parameters.x =
+            (float)((data.effectSettings.vignette << 4) | data.effectSettings.darkness) / 255f;
+        runtime.parameters.y =
+            (float)((data.effectSettings.spiralGap << 4) | data.effectSettings.swirlIntensity) / 255f;
+        runtime.parameters.z =
+            (float)((data.effectSettings.lensingIntensity << 4) | data.effectSettings.noiseIntensity) / 255f;
+        runtime.parameters.w =
+            (float)((data.effectSettings.spiralTwist << 4) | data.effectSettings.agitationSpeed) / 255f;
+        runtime.activateAnimationTime = 50f + data.effectSettings.activeDuration;
+        runtime.triggerActivationTime = 50f + data.effectSettings.triggerDuration;
+        runtime.successfullWarpCooldownFrames = data.rippleWarp ? 10 : 1200;
+
+        try
+        {
+            data.destCam = string.IsNullOrEmpty(data.destRoom)
+                ? 0
+                : Watcher.WarpPoint.GetDestCam(data);
+        }
+        catch (Exception error)
+        {
+            data.destCam = 0;
+            Plugin.Logger?.LogWarning(
+                "DevTool native WarpPoint destination camera refresh failed: " + error.Message);
+        }
+
+        runtime.refreshGraphics = true;
+    }
+
+    private static void RemoveWarpPointRuntime(global::Room room, PlacedObject target)
+    {
+        if (room?.warpPoints == null || target == null)
+            return;
+
+        for (int i = room.warpPoints.Count - 1; i >= 0; i--)
+        {
+            Watcher.WarpPoint runtime = room.warpPoints[i];
+            if (runtime == null || !ReferenceEquals(runtime.placedObject, target))
+                continue;
+
+            DestroyRuntime(room, runtime);
+        }
     }
 
     private static LightFixture FindLightFixture(global::Room room, PlacedObject target)
