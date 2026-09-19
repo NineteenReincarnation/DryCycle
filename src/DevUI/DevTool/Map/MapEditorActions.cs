@@ -15,7 +15,10 @@ internal static class MapEditorActions
         MapEditorState state = MapEditorStateHub.Get(session);
         if (state == null) return;
 
-        int next = FindRoomPanel(session, roomIndex) != null ? roomIndex : -1;
+        // Selection belongs to the detached presentation boundary. Validate against the published
+        // immutable map snapshot rather than walking MapPage.subNodes; this keeps native selection
+        // usable after the legacy page stops being the Map workspace runtime owner.
+        int next = ContainsPublishedRoom(roomIndex) ? roomIndex : -1;
         if (state.SelectedRoomIndex == next) return;
 
         // Selection is an explicit presentation key in MapEditorPresentationHub. Do not dirty the
@@ -105,8 +108,16 @@ internal static class MapEditorActions
         return true;
     }
 
-    private static RoomPanel FindRoomPanel(EditorSession session, int roomIndex) =>
-        session?.Owner?.activePage is MapPage page ? FindRoomPanel(page, roomIndex) : null;
+    private static bool ContainsPublishedRoom(int roomIndex)
+    {
+        EditorMapRoomSnapshot[] rooms = MapEditorPresentationHub.Current?.Rooms;
+        if (rooms == null) return false;
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            if (rooms[i]?.RoomIndex == roomIndex) return true;
+        }
+        return false;
+    }
 
     private static RoomPanel FindRoomPanel(MapPage page, int roomIndex)
     {
