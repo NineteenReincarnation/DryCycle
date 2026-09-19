@@ -484,6 +484,19 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(Watcher.CosmeticRippleData) &&
+            (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+             string.Equals(name, "fallOff", StringComparison.Ordinal) ||
+             string.Equals(name, "depthMix", StringComparison.Ordinal) ||
+             string.Equals(name, "squish", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
         if (declaringType == typeof(PlacedObject.LightFixtureData) &&
             string.Equals(name, "randomSeed", StringComparison.Ordinal))
         {
@@ -973,7 +986,8 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                  declaringType == typeof(PlacedObject.SteamPipeData) ||
                  declaringType == typeof(PlacedObject.SnowSourceData) ||
                  declaringType == typeof(PlacedObject.LocalBlizzardData) ||
-                 declaringType == typeof(PlacedObject.CellDistortionData)))
+                 declaringType == typeof(PlacedObject.CellDistortionData) ||
+                 declaringType == typeof(Watcher.CosmeticRippleData)))
                 return EditorPropertyGizmoHint.RelativePoint;
 
             if (declaringType == typeof(PlacedObject.TerrainHandleData) &&
@@ -1207,6 +1221,18 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         if (declaringType == typeof(Watcher.FlameJet.FlameJetData) &&
             (string.Equals(name, "obj", StringComparison.Ordinal) ||
              string.Equals(name, "pos", StringComparison.Ordinal)))
+            return true;
+
+        if (declaringType == typeof(Watcher.CosmeticRippleData) &&
+            (string.Equals(name, "obj", StringComparison.Ordinal) ||
+             string.Equals(name, "pos", StringComparison.Ordinal) ||
+             string.Equals(name, "scale", StringComparison.Ordinal) ||
+             string.Equals(name, "animateOnSpawn", StringComparison.Ordinal) ||
+             string.Equals(name, "animationSpeed", StringComparison.Ordinal) ||
+             string.Equals(name, "cycleExpiry", StringComparison.Ordinal) ||
+             string.Equals(name, "cycleSpawnedOn", StringComparison.Ordinal) ||
+             string.Equals(name, "isGameplay", StringComparison.Ordinal) ||
+             string.Equals(name, "isTransition", StringComparison.Ordinal)))
             return true;
 
         return string.Equals(name, "owner", StringComparison.Ordinal) ||
