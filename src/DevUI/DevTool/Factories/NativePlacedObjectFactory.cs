@@ -71,6 +71,15 @@ internal static class NativePlacedObjectFactory
         }
 
         if (ModManager.Watcher &&
+            created?.data is Watcher.FloatingDebrisData floatingDebris)
+        {
+            // Vanilla randomized this from FloatingDebrisRepresentation's constructor. Native
+            // Objects never materializes that representation, so new authored debris needs the seed
+            // before its runtime is reconciled.
+            floatingDebris.seed = UnityEngine.Random.Range(0, int.MaxValue);
+        }
+
+        if (ModManager.Watcher &&
             created?.type == Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder &&
             created.data is Watcher.UrbanCandleHolder.UrbanCandleHolderData holder)
         {
