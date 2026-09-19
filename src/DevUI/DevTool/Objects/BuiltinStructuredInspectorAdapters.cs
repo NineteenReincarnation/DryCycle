@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Objects;
@@ -32,6 +33,7 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is PlacedObject.FilterData ||
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
             target?.data is CollectToken.CollectTokenData ||
+            target?.data is PlacedObject.CompetitiveFilterData ||
             ModManager.Watcher && target?.data is Watcher.WarpPoint.WarpPointData ||
             ModManager.Watcher && (
                 target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData ||
@@ -55,7 +57,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     target.data is Watcher.FloatingDebrisData &&
                     IsFloatingDebrisManagedProperty(property.Key) ||
                     target.data is Watcher.WarpPoint.WarpPointData &&
-                    IsWarpPointManagedProperty(property.Key))
+                    IsWarpPointManagedProperty(property.Key) ||
+                    target.data is PlacedObject.CompetitiveFilterData &&
+                    property.Key.EndsWith(".name", StringComparison.Ordinal))
                     continue;
                 result.Add(property);
             }
@@ -91,6 +95,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case Watcher.WarpPoint.WarpPointData warpPoint:
                     AppendWarpPoint(result, warpPoint);
+                    break;
+                case PlacedObject.CompetitiveFilterData competitive:
+                    AppendCompetitiveFilter(result, competitive);
                     break;
             }
 
@@ -138,7 +145,62 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetWarpPoint(warpPoint, key, value))
                 return true;
 
+            if (target.data is PlacedObject.CompetitiveFilterData competitive &&
+                TrySetCompetitiveFilter(competitive, key, value))
+                return true;
+
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
+        }
+
+        private static void AppendCompetitiveFilter(
+            List<EditorPropertySnapshot> result,
+            PlacedObject.CompetitiveFilterData data)
+        {
+            if (data == null) return;
+
+            string[] options = CompetitiveFilterOptions();
+            result.Add(EnumProperty(
+                "builtin.competitiveFilter.name",
+                "Spawn Filter",
+                options,
+                data.name ?? "NONE",
+                "Competitive Filter"));
+        }
+
+        private static bool TrySetCompetitiveFilter(
+            PlacedObject.CompetitiveFilterData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null ||
+                key != "builtin.competitiveFilter.name" ||
+                value.Kind != EditorPropertyKind.Enum)
+                return false;
+
+            string[] options = CompetitiveFilterOptions();
+            if (value.Integer < 0 || value.Integer >= options.Length)
+                return false;
+
+            data.name = options[value.Integer] ?? "NONE";
+            return true;
+        }
+
+        private static string[] CompetitiveFilterOptions()
+        {
+            List<string> options = new() { "NONE" };
+            CompetitiveGameSession session =
+                DevToolSessionHub.Current?.Owner?.game?.session as CompetitiveGameSession;
+            if (session?.spawnFilters == null)
+                return options.ToArray();
+
+            for (int i = 0; i < session.spawnFilters.Count; i++)
+            {
+                string name = session.spawnFilters[i]?.name;
+                if (!string.IsNullOrWhiteSpace(name) && !options.Contains(name))
+                    options.Add(name);
+            }
+
+            return options.ToArray();
         }
 
         private static void AppendWarpPoint(
