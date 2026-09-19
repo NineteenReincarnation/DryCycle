@@ -238,7 +238,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             for (int i = 0; i < fields.Length; i++)
             {
                 FieldInfo field = fields[i];
-                if (field.IsStatic || ShouldIgnore(field.Name) || !names.Add(field.Name)) continue;
+                if (field.IsStatic || ShouldIgnore(current, field.Name) || !names.Add(field.Name)) continue;
 
                 // QuadObjectRepresentation exposes exactly three authored relative handles. Flatten
                 // only this verified Rain World model contract; arbitrary arrays remain read-only.
@@ -266,7 +266,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             {
                 PropertyInfo property = properties[i];
                 if (!property.CanRead || property.GetIndexParameters().Length != 0 ||
-                    ShouldIgnore(property.Name) || !names.Add(property.Name))
+                    ShouldIgnore(current, property.Name) || !names.Add(property.Name))
                     continue;
 
                 MemberBinding binding = BuildBinding(
@@ -394,6 +394,51 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             max = 1f;
             step = 0.01f;
             return;
+        }
+
+        if (declaringType == typeof(Watcher.KarmaFlowerPatch.KarmaFlowerPatchData) &&
+            (string.Equals(name, "tilt", StringComparison.Ordinal) ||
+             string.Equals(name, "glowStrength", StringComparison.Ordinal) ||
+             string.Equals(name, "glowRadius", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
+        if (declaringType == typeof(Watcher.FlameJet.FlameJetData))
+        {
+            if (string.Equals(name, "lethality", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 2f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "intensity", StringComparison.Ordinal) ||
+                string.Equals(name, "temperature", StringComparison.Ordinal) ||
+                string.Equals(name, "intensityAnimSpeed", StringComparison.Ordinal) ||
+                string.Equals(name, "intensityAnimOffset", StringComparison.Ordinal) ||
+                string.Equals(name, "temperatureAnimSpeed", StringComparison.Ordinal) ||
+                string.Equals(name, "temperatureAnimOffset", StringComparison.Ordinal) ||
+                string.Equals(name, "intensityMin", StringComparison.Ordinal) ||
+                string.Equals(name, "intensityMax", StringComparison.Ordinal) ||
+                string.Equals(name, "temperatureMin", StringComparison.Ordinal) ||
+                string.Equals(name, "temperatureMax", StringComparison.Ordinal) ||
+                string.Equals(name, "width", StringComparison.Ordinal) ||
+                string.Equals(name, "fireVolumeMax", StringComparison.Ordinal) ||
+                string.Equals(name, "smokeVolumeMax", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1f;
+                step = 0.01f;
+                return;
+            }
         }
 
         if (declaringType == typeof(LightBeam.LightBeamData) &&
@@ -1015,10 +1060,17 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
         };
     }
 
-    private static bool ShouldIgnore(string name) =>
-        string.Equals(name, "owner", StringComparison.Ordinal) ||
-        string.Equals(name, "unrecognizedAttributes", StringComparison.Ordinal) ||
-        string.Equals(name, "panelPos", StringComparison.Ordinal);
+    private static bool ShouldIgnore(Type declaringType, string name)
+    {
+        if (declaringType == typeof(Watcher.FlameJet.FlameJetData) &&
+            (string.Equals(name, "obj", StringComparison.Ordinal) ||
+             string.Equals(name, "pos", StringComparison.Ordinal)))
+            return true;
+
+        return string.Equals(name, "owner", StringComparison.Ordinal) ||
+               string.Equals(name, "unrecognizedAttributes", StringComparison.Ordinal) ||
+               string.Equals(name, "panelPos", StringComparison.Ordinal);
+    }
 
     private static string ResolveGroup(string name, EditorPropertyKind kind)
     {
