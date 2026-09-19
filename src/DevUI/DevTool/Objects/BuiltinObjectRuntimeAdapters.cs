@@ -150,6 +150,22 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
         }
 
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.DaemonEye &&
+            target.data is Watcher.DaemonEyeData daemonEye)
+        {
+            EnsureDaemonEyeRuntime(room, target, daemonEye);
+            return;
+        }
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.DaemonCrown &&
+            target.data is Watcher.DaemonCrownData daemonCrown)
+        {
+            EnsureDaemonCrownRuntime(room, target, daemonCrown);
+            return;
+        }
+
         if (target.type == PlacedObject.Type.ProjectedStars)
         {
             EnsureProjectedStarsRuntime(room, target);
@@ -345,6 +361,18 @@ internal static class BuiltinObjectRuntimeAdapters
             RemoveCosmeticRippleRuntime(room, target, cosmeticRipple);
         }
 
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.DaemonEye)
+        {
+            RemoveDaemonEyeRuntime(room, target);
+        }
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.DaemonCrown)
+        {
+            RemoveDaemonCrownRuntime(room, target);
+        }
+
         if (target.type == PlacedObject.Type.InsectGroup)
             RemoveInsectGroupRuntime(room, target);
 
@@ -398,6 +426,138 @@ internal static class BuiltinObjectRuntimeAdapters
 
         if (target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch)
             RefreshKarmaFlowerPatchRuntime(room);
+    }
+
+    private static void EnsureDaemonEyeRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.DaemonEyeData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        Watcher.DaemonEye runtime = FindDaemonEye(room, target);
+        if (runtime == null)
+        {
+            try
+            {
+                runtime = new Watcher.DaemonEye(target, room, target.pos, data.Rad, data.depth);
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native DaemonEye runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        runtime.position = target.pos;
+        runtime.size = data.Rad;
+        runtime.depth = data.depth;
+    }
+
+    private static Watcher.DaemonEye FindDaemonEye(global::Room room, PlacedObject target)
+    {
+        if (room?.updateList == null || target == null)
+            return null;
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is Watcher.DaemonEye runtime &&
+                ReferenceEquals(runtime.placedObj, target) &&
+                !runtime.slatedForDeletetion)
+                return runtime;
+        }
+
+        return null;
+    }
+
+    private static void RemoveDaemonEyeRuntime(global::Room room, PlacedObject target)
+    {
+        Watcher.DaemonEye runtime = FindDaemonEye(room, target);
+        if (runtime != null)
+            DestroyRuntime(room, runtime);
+    }
+
+    private static void EnsureDaemonCrownRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.DaemonCrownData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        int desiredSegments = Mathf.Max(Mathf.FloorToInt(data.Rad / 20f), 1);
+        Watcher.DaemonCrown runtime = FindDaemonCrown(room, target);
+        if (runtime != null &&
+            (runtime.crownSegments == null || runtime.crownSegments.Length != desiredSegments))
+        {
+            RemoveDaemonCrownRuntime(room, target);
+            runtime = null;
+        }
+
+        if (runtime == null)
+        {
+            try
+            {
+                runtime = new Watcher.DaemonCrown(target, room, target.pos, data.Rad, data.depth);
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native DaemonCrown runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        runtime.position = target.pos;
+        runtime.radius = data.Rad;
+        runtime.depth = data.depth;
+
+        if (runtime.crownSegments != null)
+        {
+            for (int i = 0; i < runtime.crownSegments.Length; i++)
+            {
+                if (runtime.crownSegments[i] != null)
+                    runtime.crownSegments[i].pos = runtime.CrownSegmentPosition(i);
+            }
+        }
+    }
+
+    private static Watcher.DaemonCrown FindDaemonCrown(global::Room room, PlacedObject target)
+    {
+        if (room?.updateList == null || target == null)
+            return null;
+
+        for (int i = 0; i < room.updateList.Count; i++)
+        {
+            if (room.updateList[i] is Watcher.DaemonCrown runtime &&
+                ReferenceEquals(runtime.placedObj, target) &&
+                !runtime.slatedForDeletetion)
+                return runtime;
+        }
+
+        return null;
+    }
+
+    private static void RemoveDaemonCrownRuntime(global::Room room, PlacedObject target)
+    {
+        Watcher.DaemonCrown runtime = FindDaemonCrown(room, target);
+        if (runtime == null)
+            return;
+
+        if (runtime.crownSegments != null)
+        {
+            for (int i = runtime.crownSegments.Length - 1; i >= 0; i--)
+            {
+                if (runtime.crownSegments[i] != null)
+                    DestroyRuntime(room, runtime.crownSegments[i]);
+            }
+        }
+
+        DestroyRuntime(room, runtime);
     }
 
     private static void EnsureCosmeticRippleRuntime(
