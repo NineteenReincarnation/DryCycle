@@ -138,7 +138,8 @@ public static class NativeObjectGizmoEditCommandQueue
                 break;
 
             case NativeObjectGizmoEditKind.Commit:
-                EditorContinuousTransactionHub.Commit(session, transactionKey);
+                if (EditorContinuousTransactionHub.Commit(session, transactionKey))
+                    NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(session, target);
                 break;
 
             case NativeObjectGizmoEditKind.Cancel:
@@ -294,6 +295,11 @@ public static class NativeObjectGizmoEditCommandQueue
             }
         }
 
+        if (ModManager.Watcher &&
+            target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch &&
+            ApplyTerrainGrassPatch(target, grassPatch, command))
+            return true;
+
         if (target.data is WaterCutoffData waterCutoff &&
             command.HandleId == "waterCutoff:end")
         {
@@ -355,6 +361,45 @@ public static class NativeObjectGizmoEditCommandQueue
             return true;
 
         return false;
+    }
+
+    private static bool ApplyTerrainGrassPatch(
+        PlacedObject target,
+        Watcher.GrassBlade.TerrainGrassPatchData data,
+        NativeObjectGizmoEditCommand command)
+    {
+        float dx = command.X - target.pos.x;
+        float dy = command.Y - target.pos.y;
+
+        switch (command.HandleId)
+        {
+            case "terrainGrass:range":
+                data.range = Mathf.Abs(dx);
+                return true;
+            case "terrainGrass:fallOff":
+                data.fallOff = Mathf.Clamp01(dx / 200f);
+                return true;
+            case "terrainGrass:width":
+                data.width = Mathf.Clamp(dx / 50f, 0f, 4f);
+                return true;
+            case "terrainGrass:depthOffset":
+                data.depthOffset = Mathf.Clamp01(dx / 200f + 0.5f);
+                return true;
+            case "terrainGrass:depthRange":
+                data.depthRange = Mathf.Clamp01(dx / 100f);
+                return true;
+            case "terrainGrass:amount":
+                data.amount = Mathf.Clamp(Mathf.FloorToInt(Mathf.Max(0f, dy)), 0, 500) * 4;
+                return true;
+            case "terrainGrass:minHeight":
+                data.minHeight = Mathf.Clamp(dy, 0f, 1000f);
+                return true;
+            case "terrainGrass:maxHeight":
+                data.maxHeight = Mathf.Clamp(dy, 0f, 1000f);
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static bool ApplyWaterCurrent(
@@ -576,7 +621,7 @@ public static class NativeObjectGizmoEditCommandQueue
 
     private static void MarkChanged(EditorSession session, PlacedObject target)
     {
-        NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
+        NativeObjectRuntimeReconciler.RefreshInteractivePreview(session, target);
         EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
         ObjectPresentationChangeHintHub.MarkMember(session, target);
     }
