@@ -39,7 +39,16 @@ internal static class NativeObjectRuntimeReconciler
             EnsureLightSourceRuntime(room, target, createIfMissing: true);
     }
 
-    internal static void RefreshAfterMutation(EditorSession session, PlacedObject target)
+    internal static void RefreshAfterMutation(EditorSession session, PlacedObject target) =>
+        RefreshAfterMutationCore(session, target, interactivePreview: false);
+
+    internal static void RefreshInteractivePreview(EditorSession session, PlacedObject target) =>
+        RefreshAfterMutationCore(session, target, interactivePreview: true);
+
+    private static void RefreshAfterMutationCore(
+        EditorSession session,
+        PlacedObject target,
+        bool interactivePreview)
     {
         if (target == null) return;
 
@@ -78,6 +87,14 @@ internal static class NativeObjectRuntimeReconciler
                 Plugin.Logger?.LogWarning(
                     "DevTool native DayNight live preview failed: " + error.Message);
             }
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch)
+        {
+            grassPatch.pos = target.pos;
+            if (!interactivePreview)
+                RespawnTerrainGrassPatch(room, grassPatch);
         }
 
         if (target.data is PlacedObject.WaterFlowData)
@@ -150,6 +167,19 @@ internal static class NativeObjectRuntimeReconciler
             {
                 Plugin.Logger?.LogWarning("DevTool native spline terrain reconciliation failed: " + error.Message);
             }
+        }
+    }
+
+    internal static void FinalizeInteractiveMutation(EditorSession session, PlacedObject target)
+    {
+        global::Room room = session?.Room;
+        if (room == null || target == null || !ModManager.Watcher)
+            return;
+
+        if (target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch)
+        {
+            grassPatch.pos = target.pos;
+            RespawnTerrainGrassPatch(room, grassPatch);
         }
     }
 
@@ -261,6 +291,12 @@ internal static class NativeObjectRuntimeReconciler
                 try { room.RemoveObject(pit); }
                 catch { }
             }
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.GrassBlade.TerrainGrassPatchData grassPatch)
+        {
+            RemoveTerrainGrassPatchRuntime(room, grassPatch);
         }
 
         RemoveWaterMembership(room, target);
@@ -389,6 +425,54 @@ internal static class NativeObjectRuntimeReconciler
                         "DevTool native spawn-migration runtime creation failed: " + error.Message);
                 }
             }
+        }
+    }
+
+    private static void RespawnTerrainGrassPatch(
+        global::Room room,
+        Watcher.GrassBlade.TerrainGrassPatchData data)
+    {
+        if (room == null || data == null)
+            return;
+
+        try
+        {
+            if (data.spawnedGrass == null)
+                data.spawnedGrass = new System.Collections.Generic.List<Watcher.GrassBlade>();
+
+            Watcher.Grass.InitGrassInRoom(room);
+            Watcher.GrassBlade.SpawnGrassPatch(room, data);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native TerrainGrassPatch regeneration failed: " + error.Message);
+        }
+    }
+
+    private static void RemoveTerrainGrassPatchRuntime(
+        global::Room room,
+        Watcher.GrassBlade.TerrainGrassPatchData data)
+    {
+        if (room == null || data?.spawnedGrass == null)
+            return;
+
+        try
+        {
+            if (room.grass?.grassBlades != null)
+            {
+                for (int i = data.spawnedGrass.Count - 1; i >= 0; i--)
+                    room.grass.grassBlades.Remove(data.spawnedGrass[i]);
+
+                room.grass.needsShuffle = true;
+            }
+
+            data.spawnedGrass.Clear();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native TerrainGrassPatch removal failed: " + error.Message);
         }
     }
 
