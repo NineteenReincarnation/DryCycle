@@ -608,6 +608,38 @@ if ! grep -Fq 'Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder' "$factor
   exit 1
 fi
 
+# FairyParticle authoring is native: preserve every vanilla slider range and keep existing room
+# particles live by calling FairyParticleData.Apply(room) after model mutation.
+for symbol in \
+  'declaringType == typeof(PlacedObject.FairyParticleData)' \
+  'string.Equals(name, "scaleMin", StringComparison.Ordinal)' \
+  'max = 25f;' \
+  'string.Equals(name, "dirMin", StringComparison.Ordinal)' \
+  'max = 360f;' \
+  'string.Equals(name, "interpDistMin", StringComparison.Ordinal)' \
+  'max = 1000f;' \
+  'string.Equals(name, "interpDurMin", StringComparison.Ordinal)' \
+  'max = 500f;' \
+  'string.Equals(name, "pulseMin", StringComparison.Ordinal)' \
+  'max = 50f;' \
+  'string.Equals(name, "glowRad", StringComparison.Ordinal)' \
+  'max = 200f;' \
+  'string.Equals(name, "rotationRate", StringComparison.Ordinal)' \
+  'max = 20f;' \
+  'string.Equals(name, "numKeyframes", StringComparison.Ordinal)' \
+  'min = 1f;' \
+  'max = 10f;'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "FairyParticle native inspector/live-preview contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$runtime_reconciler" ||
+   ! grep -Fq 'fairyParticle.Apply(room);' "$runtime_reconciler"; then
+  echo "FairyParticle native live preview no longer calls Data.Apply(room)." >&2
+  exit 1
+fi
+
 # Watcher WarpPointToRoom authoring used to live almost entirely inside nested DevInterface
 # panels. Native Objects owns destination position, limited uses, effect presets/sliders and the live
 # WarpPoint runtime directly.
@@ -619,8 +651,9 @@ for symbol in \
   '"builtin.warpPoint.hasDestPos"' \
   '"builtin.warpPoint.destPos"' \
   '"builtin.warpPoint.uses"' \
-  '"builtin.warpPoint.effect.vignette"' \
-  '"builtin.warpPoint.effect.triggerDuration"' \
+  'AppendWarpEffect(result, "vignette", "Vignette", effect.vignette, 15);' \
+  'AppendWarpEffect(result, "triggerDuration", "Trigger Duration", effect.triggerDuration, 400);' \
+  'const string effectPrefix = "builtin.warpPoint.effect.";' \
   '"builtin.warpPoint.preset.default"' \
   '"builtin.warpPoint.preset.outerRim"' \
   '"builtin.warpPoint.preset.badWarp"' \
