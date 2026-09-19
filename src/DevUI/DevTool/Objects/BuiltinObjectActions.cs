@@ -12,17 +12,35 @@ internal static class BuiltinObjectActions
     internal const string UrbanCandlesSpawn = "builtin.urbanCandles.spawn";
     internal const string UrbanCandlesRemove = "builtin.urbanCandles.remove";
     internal const string UrbanCandlesRemoveAll = "builtin.urbanCandles.removeAll";
+    internal const string FloatingDebrisNewSeed = "builtin.floatingDebris.newSeed";
+    internal const string FloatingDebrisAddLeft = "builtin.floatingDebris.addLeft";
+    internal const string FloatingDebrisAddRight = "builtin.floatingDebris.addRight";
+    internal const string FloatingDebrisRemoveLeft = "builtin.floatingDebris.removeLeft";
+    internal const string FloatingDebrisRemoveRight = "builtin.floatingDebris.removeRight";
 
     internal static bool TryInvoke(
         EditorSession session,
         PlacedObject target,
         string key)
     {
-        if (!ModManager.Watcher ||
-            session?.Room == null ||
-            target?.data is not Watcher.UrbanCandlePlacer.UrbanCandlePlacerData data)
+        if (!ModManager.Watcher || session?.Room == null || target == null)
             return false;
 
+        if (target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData candles)
+            return TryInvokeUrbanCandles(session, target, candles, key);
+
+        if (target.data is Watcher.FloatingDebrisData debris)
+            return TryInvokeFloatingDebris(debris, key);
+
+        return false;
+    }
+
+    private static bool TryInvokeUrbanCandles(
+        EditorSession session,
+        PlacedObject target,
+        Watcher.UrbanCandlePlacer.UrbanCandlePlacerData data,
+        string key)
+    {
         data.pos = target.pos;
         data.radius = data.handlePos.magnitude;
 
@@ -70,6 +88,37 @@ internal static class BuiltinObjectActions
                     session.Room);
                 return true;
 
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryInvokeFloatingDebris(
+        Watcher.FloatingDebrisData data,
+        string key)
+    {
+        if (data == null)
+            return false;
+
+        switch (key)
+        {
+            case FloatingDebrisNewSeed:
+                data.seed = UnityEngine.Random.Range(0, int.MaxValue);
+                return true;
+            case FloatingDebrisAddLeft:
+                data.AddControlPointLeft();
+                return true;
+            case FloatingDebrisAddRight:
+                data.AddControlPointRight();
+                return true;
+            case FloatingDebrisRemoveLeft:
+                if (data.controlPointPosX?.Count <= 1) return false;
+                data.RemoveControlPointLeft();
+                return true;
+            case FloatingDebrisRemoveRight:
+                if (data.controlPointPosX?.Count <= 1) return false;
+                data.RemoveControlPointRight();
+                return true;
             default:
                 return false;
         }
