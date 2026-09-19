@@ -608,6 +608,20 @@ if ! grep -Fq 'Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder' "$factor
   exit 1
 fi
 
+# CompetitiveFilter uses a session-aware native enum instead of the legacy SelectPanel.
+for symbol in \
+  'target?.data is PlacedObject.CompetitiveFilterData' \
+  'AppendCompetitiveFilter(result, competitive);' \
+  '"builtin.competitiveFilter.name"' \
+  'CompetitiveGameSession session =' \
+  'DevToolSessionHub.Current?.Owner?.game?.session as CompetitiveGameSession' \
+  'data.name = options[value.Integer] ?? "NONE";'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "CompetitiveFilter native selector regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # DayNight palette editing is native: vanilla only clamps palettes at zero and immediately applies
 # them to rainCycle.
 if ! grep -Fq 'data is PlacedObject.DayNightData' "$reflection" ||
@@ -649,6 +663,47 @@ if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$ru
   echo "FairyParticle native live preview no longer calls Data.Apply(room)." >&2
   exit 1
 fi
+
+# Watcher WallLight no longer depends on WallLightRepresentation: three geometry handles, HSV
+# ranges and live runtime ownership are native.
+for symbol in \
+  '"wallLight:up"' \
+  '"wallLight:right"' \
+  '"wallLight:one"'; do
+  if ! grep -Fq "$symbol" "$gizmo_presentation" ||
+     ! grep -Fq "$symbol" "$object_gizmo_backend"; then
+    echo "WallLight native gizmo coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'typeof(Watcher.WallLight.WallLightData)' \
+  'string.Equals(name, "hue", StringComparison.Ordinal)' \
+  'string.Equals(name, "saturation", StringComparison.Ordinal)' \
+  'string.Equals(name, "value", StringComparison.Ordinal)' \
+  'string.Equals(name, "obj", StringComparison.Ordinal)' \
+  'string.Equals(name, "pos", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "WallLight native inspector contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'EnsureWallLightRuntime(room, target, wallLight);' \
+  'Watcher.WallLight.FromPlacedObject(room, target)' \
+  'data.obj = runtime;' \
+  'runtime.up = data.up;' \
+  'runtime.right = data.right;' \
+  'runtime.one = data.one;' \
+  'runtime.usePalette = data.usePalette;' \
+  'runtime.activeDuring = data.activeDuring;' \
+  'runtime.shadowType = data.shadowType;' \
+  'runtime.UpdatePaletteColor(room.game.cameras[0].currentPalette);'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "WallLight native authoring/runtime contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
 
 # Watcher WarpPointToRoom authoring used to live almost entirely inside nested DevInterface
 # panels. Native Objects owns destination position, limited uses, effect presets/sliders and the live
