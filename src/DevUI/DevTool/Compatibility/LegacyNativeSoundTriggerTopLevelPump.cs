@@ -62,7 +62,7 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         owner.lastMousePos = owner.mousePos;
         owner.mousePos = Futile.mousePosition;
-        owner.mouseDown = Input.GetMouseButton(0);
+        owner.mouseDown = UnityEngine.Input.GetMouseButton(0);
         owner.mouseClick = owner.mouseDown && !owner.lastMouseDown;
         owner.lastMouseDown = owner.mouseDown;
         owner.draggedNode = null;
@@ -80,7 +80,7 @@ internal static partial class LegacyDevUiQuiescenceController
     {
         if (session?.ToolMode != EditorToolMode.Sound) return;
 
-        ThreatDetermination threatTracker = owner?.game?.manager?.musicPlayer?.threatTracker;
+        Music.PlayerThreatTracker threatTracker = owner?.game?.manager?.musicPlayer?.threatTracker;
         if (threatTracker != null)
             threatTracker.currentThreat = Mathf.InverseLerp(0f, 1300f, Futile.mousePosition.x);
     }
