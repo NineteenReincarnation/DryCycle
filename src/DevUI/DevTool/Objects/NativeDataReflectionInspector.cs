@@ -455,6 +455,23 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             }
         }
 
+        if (declaringType == typeof(Watcher.AetherRainbow.AetherRainbowData) &&
+            (string.Equals(name, "width", StringComparison.Ordinal) ||
+             string.Equals(name, "specterScale", StringComparison.Ordinal) ||
+             string.Equals(name, "specterOffset", StringComparison.Ordinal) ||
+             string.Equals(name, "fade", StringComparison.Ordinal) ||
+             string.Equals(name, "opacity", StringComparison.Ordinal) ||
+             string.Equals(name, "depth", StringComparison.Ordinal) ||
+             string.Equals(name, "grain", StringComparison.Ordinal) ||
+             string.Equals(name, "chance", StringComparison.Ordinal)))
+        {
+            hasRange = true;
+            min = 0f;
+            max = 1f;
+            step = 0.01f;
+            return;
+        }
+
         if (declaringType == typeof(Watcher.WallLight.WallLightData) &&
             (string.Equals(name, "hue", StringComparison.Ordinal) ||
              string.Equals(name, "saturation", StringComparison.Ordinal) ||
@@ -1181,6 +1198,12 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
 
     private static bool ShouldIgnore(Type declaringType, string name)
     {
+        if ((declaringType == typeof(Watcher.WallLight.WallLightData) ||
+             declaringType == typeof(Watcher.AetherRainbow.AetherRainbowData)) &&
+            (string.Equals(name, "obj", StringComparison.Ordinal) ||
+             string.Equals(name, "pos", StringComparison.Ordinal)))
+            return true;
+
         if (declaringType == typeof(Watcher.FlameJet.FlameJetData) &&
             (string.Equals(name, "obj", StringComparison.Ordinal) ||
              string.Equals(name, "pos", StringComparison.Ordinal)))
