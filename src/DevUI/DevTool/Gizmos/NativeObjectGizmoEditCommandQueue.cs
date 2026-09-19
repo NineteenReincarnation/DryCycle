@@ -220,6 +220,24 @@ public static class NativeObjectGizmoEditCommandQueue
         }
 
         if (ModManager.Watcher &&
+            target.data is Watcher.WallLight.WallLightData wallLight)
+        {
+            Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
+            switch (command.HandleId)
+            {
+                case "wallLight:up":
+                    wallLight.up = relative;
+                    return true;
+                case "wallLight:right":
+                    wallLight.right = relative;
+                    return true;
+                case "wallLight:one":
+                    wallLight.one = relative;
+                    return true;
+            }
+        }
+
+        if (ModManager.Watcher &&
             target.data is LobeTree.LobeTreeData lobeTree &&
             command.HandleId == "lobeTree:root")
         {
