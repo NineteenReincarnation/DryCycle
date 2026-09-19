@@ -263,7 +263,7 @@ internal static class NativeObjectRuntimeReconciler
             }
         }
 
-        if (target.data is GeyserData &&
+        if (target.data is DevInterface.GeyserData &&
             room.updateList != null)
         {
             for (int i = room.updateList.Count - 1; i >= 0; i--)
@@ -640,7 +640,7 @@ internal static class NativeObjectRuntimeReconciler
             return;
         }
 
-        if (target.data is GeyserData)
+        if (target.data is DevInterface.GeyserData)
         {
             for (int i = 0; i < room.updateList.Count; i++)
                 if (room.updateList[i] is Geyser geyser && ReferenceEquals(geyser.pObj, target))
