@@ -1,4 +1,5 @@
 using BepInEx;
+using BepInEx.Logging;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -20,5 +21,23 @@ public sealed class WorldMapGpuStableCacheGatePlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Logger?.LogInfo("GPU World Map stable-cache gate is running in baseline mode; no self-detour attached.");
+    }
+}
+
+
+internal static class WorldMapGpuStableCacheGate
+{
+    // Compatibility lifecycle for callers that used to control the detour-backed optimization.
+    // Baseline WorldMapGpuCache remains authoritative while the self-detour implementation is retired.
+    internal static void Enable(ManualLogSource logger)
+    {
+    }
+
+    internal static void Disable()
+    {
+    }
+
+    internal static void ReleaseRetainedKey()
+    {
     }
 }
