@@ -125,7 +125,7 @@ internal static class NativeObjectGizmoPresentation
             specialized = true;
         }
         else if (ModManager.Watcher &&
-                 target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
+                 target.type == Watcher.WatcherEnums.PlacedObjectType.WeaverSpot &&
                  target.data is PlacedObject.ResizableObjectData weaver)
         {
             Vector2 direction = weaver.handlePos.sqrMagnitude > 0.0001f
