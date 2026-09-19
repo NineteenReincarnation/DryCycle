@@ -145,6 +145,29 @@ internal static class NativeMapAuthoringStateHub
         room.PendingLegacyPush = false;
     }
 
+    internal static void SynchronizeLegacyAfterMutation(EditorSession session, int roomIndex)
+    {
+        MirrorRoomToLegacy(session, roomIndex);
+
+        // Native Map owns the edit. The legacy page is refreshed only when it is actually visible;
+        // otherwise mark it stale and let the quiescence boundary materialize it on demand.
+        if (session?.Owner?.activePage is not MapPage page)
+            return;
+        if (DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.TryDeferRefresh(session))
+            return;
+
+        RoomPanel panel = FindRoomPanel(page, roomIndex);
+        try
+        {
+            panel?.Refresh();
+            page.Refresh();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning("DevTool legacy Map mirror refresh failed: " + error.Message);
+        }
+    }
+
     /// <summary>
     /// Low-frequency compatibility audit. Native state is authoritative, but third-party code can
     /// still mutate a live RoomPanel directly. When that happens after our last mirror, import the
