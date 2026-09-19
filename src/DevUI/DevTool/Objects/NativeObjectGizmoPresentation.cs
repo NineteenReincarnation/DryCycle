@@ -100,6 +100,16 @@ internal static class NativeObjectGizmoPresentation
                 target.pos + new Vector2(airPocket.handlePos.x, airPocket.waterLevel));
             specialized = true;
         }
+        else if (ModManager.Watcher &&
+                 target.data is Watcher.FlameJet.FlameJetData flameJet)
+        {
+            handles.Add(Handle(
+                "flameJet:target",
+                target.pos + flameJet.target,
+                target.pos,
+                drawLine: true));
+            specialized = true;
+        }
         else if (target.data is PlacedObject.LightningMachineData lightning)
         {
             handles.Add(Handle(
@@ -168,6 +178,16 @@ internal static class NativeObjectGizmoPresentation
         // source. Complex WaterCurrent/Spline models publish their own complete primitive set above.
         if (!specialized)
             CapturePropertyHandles(target, properties, handles);
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.KarmaFlowerPatch.KarmaFlowerPatchData karmaPatch)
+        {
+            handles.Add(Handle(
+                "karmaPatch:tilt",
+                target.pos + karmaPatch.handlePos * karmaPatch.tilt,
+                target.pos,
+                drawLine: true));
+        }
 
         if (ModManager.Watcher && target.data is LobeTree.LobeTreeData lobeTree)
         {
