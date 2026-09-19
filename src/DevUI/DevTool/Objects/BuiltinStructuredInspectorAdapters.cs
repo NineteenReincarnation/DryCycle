@@ -32,6 +32,7 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is PlacedObject.FilterData ||
             target?.data is ReliableIggyDirection.ReliableIggyDirectionData ||
             target?.data is CollectToken.CollectTokenData ||
+            ModManager.Watcher && target?.data is Watcher.WarpPoint.WarpPointData ||
             ModManager.Watcher && (
                 target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData ||
                 target?.data is Watcher.FloatingDebrisData);
@@ -52,7 +53,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     target.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData &&
                     IsUrbanCandlePlacerManagedProperty(property.Key) ||
                     target.data is Watcher.FloatingDebrisData &&
-                    IsFloatingDebrisManagedProperty(property.Key))
+                    IsFloatingDebrisManagedProperty(property.Key) ||
+                    target.data is Watcher.WarpPoint.WarpPointData &&
+                    IsWarpPointManagedProperty(property.Key))
                     continue;
                 result.Add(property);
             }
@@ -85,6 +88,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case Watcher.FloatingDebrisData floatingDebris:
                     AppendFloatingDebris(result, floatingDebris);
+                    break;
+                case Watcher.WarpPoint.WarpPointData warpPoint:
+                    AppendWarpPoint(result, warpPoint);
                     break;
             }
 
@@ -128,7 +134,246 @@ internal static class BuiltinStructuredInspectorAdapters
                 TrySetFloatingDebris(floatingDebris, key, value))
                 return true;
 
+            if (target.data is Watcher.WarpPoint.WarpPointData warpPoint &&
+                TrySetWarpPoint(warpPoint, key, value))
+                return true;
+
             return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
+        }
+
+        private static void AppendWarpPoint(
+            List<EditorPropertySnapshot> result,
+            Watcher.WarpPoint.WarpPointData data)
+        {
+            if (data == null) return;
+
+            result.Add(ReadOnly(
+                "builtin.warpPoint.uuid",
+                "UUID Pair",
+                data.uuidPair ?? string.Empty,
+                "Warp Identity"));
+
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = "builtin.warpPoint.destRegion",
+                DisplayName = "Destination Region",
+                Group = "Destination",
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.String,
+                StringValue = data.destRegion ?? string.Empty
+            });
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = "builtin.warpPoint.destRoom",
+                DisplayName = "Destination Room",
+                Group = "Destination",
+                Source = "Rain World model",
+                Kind = EditorPropertyKind.String,
+                StringValue = data.destRoom ?? string.Empty
+            });
+            result.Add(Boolean(
+                "builtin.warpPoint.hasDestPos",
+                "Use Destination Position",
+                data.destPos.HasValue,
+                "Destination"));
+
+            if (data.destPos.HasValue)
+            {
+                Vector2 position = data.destPos.Value;
+                result.Add(new EditorPropertySnapshot
+                {
+                    Key = "builtin.warpPoint.destPos",
+                    DisplayName = "Destination Position",
+                    Group = "Destination",
+                    Source = "Rain World model",
+                    Kind = EditorPropertyKind.Vector2,
+                    X = position.x,
+                    Y = position.y
+                });
+            }
+
+            result.Add(IntegerRange(
+                "builtin.warpPoint.uses",
+                "Uses · 0 = Unlimited",
+                data.limitedUse ? Mathf.Clamp(data.uses, 1, 15) : 0,
+                0,
+                15,
+                "Warp Modifiers"));
+
+            Watcher.WarpPoint.WarpPointData.EffectSettings effect = data.effectSettings;
+            AppendWarpEffect(result, "vignette", "Vignette", effect.vignette, 15);
+            AppendWarpEffect(result, "darkness", "Darkness", effect.darkness, 15);
+            AppendWarpEffect(result, "spiralGap", "Spiral Gap", effect.spiralGap, 15);
+            AppendWarpEffect(result, "swirlIntensity", "Swirl Intensity", effect.swirlIntensity, 15);
+            AppendWarpEffect(result, "lensingIntensity", "Lensing Intensity", effect.lensingIntensity, 15);
+            AppendWarpEffect(result, "noiseIntensity", "Noise Intensity", effect.noiseIntensity, 15);
+            AppendWarpEffect(result, "spiralTwist", "Spiral Twist", effect.spiralTwist, 15);
+            AppendWarpEffect(result, "agitationSpeed", "Agitation Speed", effect.agitationSpeed, 15);
+            AppendWarpEffect(result, "spaghettification", "Spaghettification", effect.spaghettification, 15);
+            AppendWarpEffect(result, "activeDuration", "Active Duration", effect.activeDuration, 400);
+            AppendWarpEffect(result, "triggerDuration", "Trigger Duration", effect.triggerDuration, 400);
+            result.Add(Boolean(
+                "builtin.warpPoint.effect.outerRimCosmetic",
+                "Outer Rim Cosmetic",
+                effect.outerRimCosmetic,
+                "Warp Effects"));
+            result.Add(Boolean(
+                "builtin.warpPoint.effect.badWarpCosmetic",
+                "Bad Warp Cosmetic",
+                effect.badWarpCosmetic,
+                "Warp Effects"));
+            result.Add(Boolean(
+                "builtin.warpPoint.effect.spawnBigRift",
+                "Spawn Big Rift",
+                effect.spawnBigRift,
+                "Warp Effects"));
+
+            result.Add(Action("builtin.warpPoint.preset.default", "Preset · Default", "Warp Effects"));
+            result.Add(Action("builtin.warpPoint.preset.outerRim", "Preset · Outer Rim", "Warp Effects"));
+            result.Add(Action("builtin.warpPoint.preset.badWarp", "Preset · Bad Warp", "Warp Effects"));
+            result.Add(Action("builtin.warpPoint.preset.dynamic", "Preset · Dynamic", "Warp Effects"));
+        }
+
+        private static void AppendWarpEffect(
+            List<EditorPropertySnapshot> result,
+            string key,
+            string displayName,
+            int value,
+            int max)
+        {
+            result.Add(IntegerRange(
+                "builtin.warpPoint.effect." + key,
+                displayName,
+                value,
+                0,
+                max,
+                "Warp Effects"));
+        }
+
+        private static bool TrySetWarpPoint(
+            Watcher.WarpPoint.WarpPointData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null || string.IsNullOrEmpty(key))
+                return false;
+
+            switch (key)
+            {
+                case "builtin.warpPoint.destRegion":
+                    if (value.Kind != EditorPropertyKind.String) return false;
+                    data.destRegion = string.IsNullOrWhiteSpace(value.Text) ? null : value.Text.Trim();
+                    data.destCam = -1;
+                    return true;
+
+                case "builtin.warpPoint.destRoom":
+                    if (value.Kind != EditorPropertyKind.String) return false;
+                    data.destRoom = string.IsNullOrWhiteSpace(value.Text) ? null : value.Text.Trim();
+                    data.destCam = -1;
+                    return true;
+
+                case "builtin.warpPoint.hasDestPos":
+                    if (value.Kind != EditorPropertyKind.Boolean) return false;
+                    data.destPos = value.Boolean ? data.destPos ?? Vector2.zero : null;
+                    data.destCam = -1;
+                    return true;
+
+                case "builtin.warpPoint.destPos":
+                    if (value.Kind != EditorPropertyKind.Vector2) return false;
+                    data.destPos = new Vector2(value.X, value.Y);
+                    data.destCam = -1;
+                    return true;
+
+                case "builtin.warpPoint.uses":
+                    if (value.Kind != EditorPropertyKind.Integer) return false;
+                    data.uses = Mathf.Clamp(value.Integer, 0, 15);
+                    data.limitedUse = data.uses > 0;
+                    return true;
+
+                case "builtin.warpPoint.preset.default":
+                    if (value.Kind != EditorPropertyKind.Action) return false;
+                    data.effectSettings = Watcher.WarpPoint.WarpPointData.EffectSettings.DefaultCosmetics();
+                    return true;
+
+                case "builtin.warpPoint.preset.outerRim":
+                    if (value.Kind != EditorPropertyKind.Action) return false;
+                    data.effectSettings = Watcher.WarpPoint.WarpPointData.EffectSettings.OuterRimCosmetics();
+                    return true;
+
+                case "builtin.warpPoint.preset.badWarp":
+                    if (value.Kind != EditorPropertyKind.Action) return false;
+                    data.effectSettings = Watcher.WarpPoint.WarpPointData.EffectSettings.BadWarpCosmetics();
+                    return true;
+
+                case "builtin.warpPoint.preset.dynamic":
+                    if (value.Kind != EditorPropertyKind.Action) return false;
+                    data.effectSettings = Watcher.WarpPoint.WarpPointData.EffectSettings.DynamicCosmetics();
+                    return true;
+            }
+
+            const string effectPrefix = "builtin.warpPoint.effect.";
+            if (!key.StartsWith(effectPrefix, StringComparison.Ordinal))
+                return false;
+
+            Watcher.WarpPoint.WarpPointData.EffectSettings effect = data.effectSettings;
+            string field = key.Substring(effectPrefix.Length);
+
+            if (value.Kind == EditorPropertyKind.Boolean)
+            {
+                switch (field)
+                {
+                    case "outerRimCosmetic":
+                        effect.outerRimCosmetic = value.Boolean;
+                        break;
+                    case "badWarpCosmetic":
+                        effect.badWarpCosmetic = value.Boolean;
+                        break;
+                    case "spawnBigRift":
+                        effect.spawnBigRift = value.Boolean;
+                        break;
+                    default:
+                        return false;
+                }
+
+                data.effectSettings = effect;
+                return true;
+            }
+
+            if (value.Kind != EditorPropertyKind.Integer)
+                return false;
+
+            int scalar = value.Integer;
+            switch (field)
+            {
+                case "vignette": effect.vignette = Mathf.Clamp(scalar, 0, 15); break;
+                case "darkness": effect.darkness = Mathf.Clamp(scalar, 0, 15); break;
+                case "spiralGap": effect.spiralGap = Mathf.Clamp(scalar, 0, 15); break;
+                case "swirlIntensity": effect.swirlIntensity = Mathf.Clamp(scalar, 0, 15); break;
+                case "lensingIntensity": effect.lensingIntensity = Mathf.Clamp(scalar, 0, 15); break;
+                case "noiseIntensity": effect.noiseIntensity = Mathf.Clamp(scalar, 0, 15); break;
+                case "spiralTwist": effect.spiralTwist = Mathf.Clamp(scalar, 0, 15); break;
+                case "agitationSpeed": effect.agitationSpeed = Mathf.Clamp(scalar, 0, 15); break;
+                case "spaghettification": effect.spaghettification = Mathf.Clamp(scalar, 0, 15); break;
+                case "activeDuration": effect.activeDuration = Mathf.Clamp(scalar, 0, 400); break;
+                case "triggerDuration": effect.triggerDuration = Mathf.Clamp(scalar, 0, 400); break;
+                default: return false;
+            }
+
+            data.effectSettings = effect;
+            return true;
+        }
+
+        private static bool IsWarpPointManagedProperty(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+
+            return key.EndsWith(".effectSettings", StringComparison.Ordinal) ||
+                   key.EndsWith(".destRegion", StringComparison.Ordinal) ||
+                   key.EndsWith(".destRoom", StringComparison.Ordinal) ||
+                   key.EndsWith(".destPos", StringComparison.Ordinal) ||
+                   key.EndsWith(".uuidPair", StringComparison.Ordinal) ||
+                   key.EndsWith(".limitedUse", StringComparison.Ordinal) ||
+                   key.EndsWith(".uses", StringComparison.Ordinal);
         }
 
         private static void AppendFloatingDebris(
