@@ -172,6 +172,26 @@ public static class NativeObjectGizmoEditCommandQueue
             ApplyWaterCurrent(target, water, command))
             return true;
 
+        if (ModManager.Watcher &&
+            target.data is Watcher.FlameJet.FlameJetData flameJet &&
+            command.HandleId == "flameJet:target")
+        {
+            flameJet.target = new Vector2(command.X, command.Y) - target.pos;
+            return true;
+        }
+
+        if (ModManager.Watcher &&
+            target.data is Watcher.KarmaFlowerPatch.KarmaFlowerPatchData karmaPatch &&
+            command.HandleId == "karmaPatch:tilt")
+        {
+            Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
+            float sqrMagnitude = karmaPatch.handlePos.sqrMagnitude;
+            karmaPatch.tilt = sqrMagnitude <= 0.0001f
+                ? 0f
+                : Mathf.Clamp01(Vector2.Dot(relative, karmaPatch.handlePos / sqrMagnitude));
+            return true;
+        }
+
         if (target.data is PlacedObject.LightningMachineData lightning)
         {
             if (command.HandleId == "lightning:start")
