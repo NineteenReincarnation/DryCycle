@@ -664,6 +664,37 @@ if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$ru
   exit 1
 fi
 
+# Watcher SpinningTopSpot no longer needs SpinningTopSpotRepresentation/SpinningTopPanel for
+# timeline -> region -> room -> tile destination authoring. The structured inspector owns the dynamic
+# choices and preserves the vanilla cascade that clears downstream destination fields.
+for symbol in \
+  'target?.data is Watcher.SpinningTopData' \
+  'AppendSpinningTop(result, spinningTop);' \
+  'TrySetSpinningTop(spinningTop, key, value)' \
+  '"builtin.spinningTop.timeline"' \
+  '"builtin.spinningTop.region"' \
+  '"builtin.spinningTop.room"' \
+  '"builtin.spinningTop.hasDestPos"' \
+  '"builtin.spinningTop.destPos"' \
+  'ExtEnum<SlugcatStats.Timeline>.values.entries' \
+  'Region.GetFullRegionOrder(data.destTimeline)' \
+  'AssetManager.ListDirectory("world/" + region + "-rooms")' \
+  'data.RegionString = null;' \
+  'data.destRoom = null;' \
+  'data.destPos = null;' \
+  'Mathf.Floor(pos.x / 20f) * 20f + 10f' \
+  'IsSpinningTopManagedProperty'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "SpinningTopSpot native structured inspector regressed: $symbol" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'data is Watcher.SpinningTopData' "$reflection" ||
+   ! grep -Fq 'return Math.Max(0, spawnIdentifier);' "$reflection"; then
+  echo "SpinningTopSpot spawn identifier lost its native non-negative invariant." >&2
+  exit 1
+fi
+
 # Watcher TerrainGrassPatch no longer depends on TerrainGrassPatchRepresentation/AxisHandle.
 # Its eight authored axes are detached native gizmos. Grass regeneration is intentionally deferred
 # during continuous preview and finalized once per committed drag so large patches do not respawn
