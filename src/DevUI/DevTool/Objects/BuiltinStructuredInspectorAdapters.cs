@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
@@ -35,6 +36,7 @@ internal static class BuiltinStructuredInspectorAdapters
             target?.data is CollectToken.CollectTokenData ||
             target?.data is PlacedObject.CompetitiveFilterData ||
             ModManager.Watcher && target?.data is Watcher.WarpPoint.WarpPointData ||
+            ModManager.Watcher && target?.data is Watcher.SpinningTopData ||
             ModManager.Watcher && (
                 target?.data is Watcher.UrbanCandlePlacer.UrbanCandlePlacerData ||
                 target?.data is Watcher.FloatingDebrisData);
@@ -58,6 +60,8 @@ internal static class BuiltinStructuredInspectorAdapters
                     IsFloatingDebrisManagedProperty(property.Key) ||
                     target.data is Watcher.WarpPoint.WarpPointData &&
                     IsWarpPointManagedProperty(property.Key) ||
+                    target.data is Watcher.SpinningTopData &&
+                    IsSpinningTopManagedProperty(property.Key) ||
                     target.data is PlacedObject.CompetitiveFilterData &&
                     property.Key.EndsWith(".name", StringComparison.Ordinal))
                     continue;
@@ -95,6 +99,9 @@ internal static class BuiltinStructuredInspectorAdapters
                     break;
                 case Watcher.WarpPoint.WarpPointData warpPoint:
                     AppendWarpPoint(result, warpPoint);
+                    break;
+                case Watcher.SpinningTopData spinningTop:
+                    AppendSpinningTop(result, spinningTop);
                     break;
                 case PlacedObject.CompetitiveFilterData competitive:
                     AppendCompetitiveFilter(result, competitive);
@@ -143,6 +150,10 @@ internal static class BuiltinStructuredInspectorAdapters
 
             if (target.data is Watcher.WarpPoint.WarpPointData warpPoint &&
                 TrySetWarpPoint(warpPoint, key, value))
+                return true;
+
+            if (target.data is Watcher.SpinningTopData spinningTop &&
+                TrySetSpinningTop(spinningTop, key, value))
                 return true;
 
             if (target.data is PlacedObject.CompetitiveFilterData competitive &&
@@ -201,6 +212,225 @@ internal static class BuiltinStructuredInspectorAdapters
             }
 
             return options.ToArray();
+        }
+
+        private const string SpinningTopUndefined = "UNDEFINED";
+
+        private static void AppendSpinningTop(
+            List<EditorPropertySnapshot> result,
+            Watcher.SpinningTopData data)
+        {
+            if (data == null) return;
+
+            result.Add(EnumProperty(
+                "builtin.spinningTop.timeline",
+                "Timeline",
+                SpinningTopTimelineOptions(data),
+                data.destTimeline?.ToString() ?? SpinningTopUndefined,
+                "Spinning Top Destination"));
+
+            result.Add(EnumProperty(
+                "builtin.spinningTop.region",
+                "Region",
+                SpinningTopRegionOptions(data),
+                data.RegionString ?? SpinningTopUndefined,
+                "Spinning Top Destination"));
+
+            result.Add(EnumProperty(
+                "builtin.spinningTop.room",
+                "Room",
+                SpinningTopRoomOptions(data),
+                data.destRoom ?? SpinningTopUndefined,
+                "Spinning Top Destination"));
+
+            if (data.destTimeline != null && !string.IsNullOrEmpty(data.destRoom))
+            {
+                result.Add(Boolean(
+                    "builtin.spinningTop.hasDestPos",
+                    "Use Destination Position",
+                    data.destPos.HasValue,
+                    "Spinning Top Destination"));
+
+                if (data.destPos.HasValue)
+                {
+                    Vector2 pos = data.destPos.Value;
+                    result.Add(new EditorPropertySnapshot
+                    {
+                        Key = "builtin.spinningTop.destPos",
+                        DisplayName = "Destination Position · Tile Center",
+                        Group = "Spinning Top Destination",
+                        Source = "Rain World model · snapped to 20px tile centers",
+                        Kind = EditorPropertyKind.Vector2,
+                        X = pos.x,
+                        Y = pos.y
+                    });
+                }
+            }
+            else
+            {
+                result.Add(ReadOnly(
+                    "builtin.spinningTop.positionUnavailable",
+                    "Destination Position",
+                    "Select timeline and room first",
+                    "Spinning Top Destination"));
+            }
+        }
+
+        private static bool TrySetSpinningTop(
+            Watcher.SpinningTopData data,
+            string key,
+            EditorPropertyValue value)
+        {
+            if (data == null || string.IsNullOrEmpty(key))
+                return false;
+
+            switch (key)
+            {
+                case "builtin.spinningTop.timeline":
+                {
+                    if (value.Kind != EditorPropertyKind.Enum) return false;
+                    string[] options = SpinningTopTimelineOptions(data);
+                    if (value.Integer < 0 || value.Integer >= options.Length) return false;
+
+                    string selected = options[value.Integer];
+                    data.destTimeline = selected == SpinningTopUndefined
+                        ? null
+                        : new SlugcatStats.Timeline(selected);
+                    data.RegionString = null;
+                    data.destRoom = null;
+                    data.destPos = null;
+                    return true;
+                }
+
+                case "builtin.spinningTop.region":
+                {
+                    if (value.Kind != EditorPropertyKind.Enum) return false;
+                    string[] options = SpinningTopRegionOptions(data);
+                    if (value.Integer < 0 || value.Integer >= options.Length) return false;
+
+                    string selected = options[value.Integer];
+                    data.RegionString = selected == SpinningTopUndefined ? null : selected;
+                    data.destRoom = null;
+                    data.destPos = null;
+                    return true;
+                }
+
+                case "builtin.spinningTop.room":
+                {
+                    if (value.Kind != EditorPropertyKind.Enum) return false;
+                    string[] options = SpinningTopRoomOptions(data);
+                    if (value.Integer < 0 || value.Integer >= options.Length) return false;
+
+                    string selected = options[value.Integer];
+                    data.destRoom = selected == SpinningTopUndefined ? null : selected;
+                    data.destPos = null;
+                    return true;
+                }
+
+                case "builtin.spinningTop.hasDestPos":
+                    if (value.Kind != EditorPropertyKind.Boolean ||
+                        data.destTimeline == null ||
+                        string.IsNullOrEmpty(data.destRoom))
+                        return false;
+                    data.destPos = value.Boolean
+                        ? data.destPos ?? new Vector2(10f, 10f)
+                        : null;
+                    return true;
+
+                case "builtin.spinningTop.destPos":
+                    if (value.Kind != EditorPropertyKind.Vector2 ||
+                        data.destTimeline == null ||
+                        string.IsNullOrEmpty(data.destRoom))
+                        return false;
+                    data.destPos = SnapSpinningTopDestination(new Vector2(value.X, value.Y));
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private static string[] SpinningTopTimelineOptions(Watcher.SpinningTopData data)
+        {
+            List<string> options = new() { SpinningTopUndefined };
+            try
+            {
+                List<string> entries = ExtEnum<SlugcatStats.Timeline>.values.entries;
+                for (int i = 0; i < entries.Count; i++)
+                    AddUniqueOption(options, entries[i]);
+            }
+            catch { }
+
+            AddUniqueOption(options, data?.destTimeline?.ToString());
+            return options.ToArray();
+        }
+
+        private static string[] SpinningTopRegionOptions(Watcher.SpinningTopData data)
+        {
+            List<string> options = new() { SpinningTopUndefined };
+            if (data?.destTimeline != null)
+            {
+                try
+                {
+                    List<string> regions = Region.GetFullRegionOrder(data.destTimeline);
+                    for (int i = 0; i < regions.Count; i++)
+                        AddUniqueOption(options, regions[i]);
+                }
+                catch { }
+            }
+
+            AddUniqueOption(options, data?.RegionString);
+            return options.ToArray();
+        }
+
+        private static string[] SpinningTopRoomOptions(Watcher.SpinningTopData data)
+        {
+            List<string> options = new() { SpinningTopUndefined };
+            string region = data?.RegionString;
+            if (!string.IsNullOrEmpty(region))
+            {
+                try
+                {
+                    string[] files = AssetManager.ListDirectory("world/" + region + "-rooms");
+                    for (int i = 0; i < files.Length; i++)
+                    {
+                        string file = Path.GetFileName(files[i]);
+                        string lower = file.ToLowerInvariant();
+                        if (!lower.EndsWith(".txt", StringComparison.Ordinal) ||
+                            lower.Contains("_settings"))
+                            continue;
+
+                        AddUniqueOption(options, Path.GetFileNameWithoutExtension(file));
+                    }
+                }
+                catch { }
+            }
+
+            AddUniqueOption(options, data?.destRoom);
+            return options.ToArray();
+        }
+
+        private static void AddUniqueOption(List<string> options, string value)
+        {
+            if (options == null || string.IsNullOrWhiteSpace(value) || options.Contains(value))
+                return;
+            options.Add(value);
+        }
+
+        private static Vector2 SnapSpinningTopDestination(Vector2 pos) =>
+            new(
+                Mathf.Floor(pos.x / 20f) * 20f + 10f,
+                Mathf.Floor(pos.y / 20f) * 20f + 10f);
+
+        private static bool IsSpinningTopManagedProperty(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+
+            return key.EndsWith(".destTimeline", StringComparison.Ordinal) ||
+                   key.EndsWith(".destRegion", StringComparison.Ordinal) ||
+                   key.EndsWith(".RegionString", StringComparison.Ordinal) ||
+                   key.EndsWith(".destRoom", StringComparison.Ordinal) ||
+                   key.EndsWith(".destPos", StringComparison.Ordinal);
         }
 
         private static void AppendWarpPoint(
