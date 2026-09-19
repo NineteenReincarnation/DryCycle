@@ -176,7 +176,13 @@ public static class EditorActions
 
         NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
         PlacedObjectState before = PlacedObjectState.Capture(session.RoomSettings, target);
-        if (!ObjectInspectorRegistry.TrySetValue(target, key, value))
+
+        bool changed =
+            value.Kind == EditorPropertyKind.Action &&
+            BuiltinObjectActions.TryInvoke(session, target, key);
+        if (!changed)
+            changed = ObjectInspectorRegistry.TrySetValue(target, key, value);
+        if (!changed)
             return false;
 
         TryRefresh(session, target);
