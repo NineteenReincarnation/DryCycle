@@ -110,6 +110,13 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                 distortion.timeMult = distortionData.timeMult;
                 break;
 
+            case OEsphere sphere when target.data is PlacedObject.OEsphereData sphereData:
+                sphere.pos = target.pos;
+                sphere.rad = sphereData.Rad;
+                sphere.depth = sphereData.depth;
+                sphere.lIntensity = sphereData.lIntensity;
+                break;
+
             case SteamPipe steam when target.data is PlacedObject.SteamPipeData steamData:
                 steam.pos = target.pos;
                 steam.direction = Direction(steamData.handlePos);
@@ -150,6 +157,7 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
         target?.type == PlacedObject.Type.SnowSource ||
         target?.type == PlacedObject.Type.LocalBlizzard ||
         target?.type == PlacedObject.Type.CellDistortion ||
+        target?.type == DLCSharedEnums.PlacedObjectType.OEsphere ||
         target?.type == PlacedObject.Type.SteamPipe ||
         target?.type == PlacedObject.Type.WallSteamer;
 
@@ -235,6 +243,15 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
                     return room.cellDistortions[i];
         }
 
+        if (target.type == DLCSharedEnums.PlacedObjectType.OEsphere && room.oeSpheres != null)
+        {
+            for (int i = 0; i < room.oeSpheres.Count; i++)
+                if (room.oeSpheres[i] != null &&
+                    !room.oeSpheres[i].slatedForDeletetion &&
+                    room.oeSpheres[i].pos == target.pos)
+                    return room.oeSpheres[i];
+        }
+
         if ((target.type == PlacedObject.Type.SteamPipe ||
              target.type == PlacedObject.Type.WallSteamer) &&
             room.updateList != null)
@@ -277,6 +294,10 @@ internal static class DetachedBuiltinObjectRuntimeAdapters
             else if (target.type == PlacedObject.Type.CellDistortion)
             {
                 runtime = new CellDistortion(target.pos, 100f, 1f, 0.5f, 0f, 0f);
+            }
+            else if (target.type == DLCSharedEnums.PlacedObjectType.OEsphere)
+            {
+                runtime = new OEsphere(target.pos, 100f, 0);
             }
             else if (target.type == PlacedObject.Type.SteamPipe &&
                      target.data is PlacedObject.SteamPipeData steam)
