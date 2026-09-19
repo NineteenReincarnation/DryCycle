@@ -1,102 +1,57 @@
-# DryCycle Project Progress
+# DryCycle development progress
 
-Last updated: 2026-09-08
-Active workstream: Desert Batfly Task14 architecture refactor
-Current branch: `task14-r6-b1-final`
-Current verified implementation baseline before B45 checkpoint: `71f53f3b29fbd83b658bd0474975215e300bd263`
+Last updated: 2026-09-19
 
-## Current architecture state
+## Current milestone
 
-Task14 R0-R5 are code-side complete. R6 remains **open** for further planned work, but the currently scheduled domain/type/file migration and responsibility-consolidation batches through B45 have reached a stable checkpoint.
+DryCycle's DevTool migration has reached a stable page-less native boundary for the **Objects**, **Sound**, and **Triggers** workspaces. `NativeToolScheduler` owns these three workspaces through `NativeToolAnchorPage`; the matching vanilla `DevInterface` pages are materialized only for explicit Vanilla/Legacy presentation or diagnostics.
 
-The current R6 baseline now includes:
+The most recent Objects pass closed the remaining direct `ObjectsPage.CreateObjRep` representation gaps, including native authoring/runtime ownership for TerrainGrassPatch, SpinningTopSpot, RippleEggDestination, OEsphere, Daemon objects, CosmeticRipple, AetherRainbow and the remaining direct-handle/structured-inspector cases. The Objects validation guard now treats the detached snapshot/command boundary and native runtime reconciliation as contracts.
 
-- Integration identities: `DB_RainWorldHooks`, `DB_RuntimePatch`, `DB_Sandbox`, `DB_WarpCompatibility`.
-- Core/runtime identities: `DB_Creature`, `DB_AI`, `DB_Runtime`, `DB_Definition`, `DB_Emergence`.
-- Event/context/ownership foundations: `DB_EventHub`, `DB_RoomContext`, `DB_FrameContext`, `DB_BehaviorArbiter`, `DB_FlightMotor`.
-- World domains: Colony, Travel and Environment formal owners.
-- Behavior domains: Combat, Injury, Social, Threat, Signals, Fear and Vengeance formal owners.
-- Presentation/debug domain identities and current Observatory enrichment chain.
-- Production Desert Batfly Task-number terminology exit.
-- Managed Desert Batfly test suite migration from Task-number identities to domain identities.
-- Removal of root-level historical DesertBatfly production `.cs` files and internal `DesertBatflyXxx` declarations.
+## Verified repository state
 
-## Recent R6 batches
+- `main` implementation head before this progress update: `eae5f2faafbf34459abbe59a4681e10e07f0ccad` (`Guard remaining direct Representation native coverage`).
+- GitHub Actions on the implementation head are green: `guard`, `build`, `verify-rainworld-binaries`, and `verify-rainworld-decompile` all completed successfully.
+- No open GitHub issues are currently tracking unfinished work, so this file is the canonical continuation pointer for unattended development runs.
 
-### B43 — managed regression modernization
+## Completed DevTool native boundaries
 
-- Historical Task-number test filenames/entry points were replaced by domain suite names.
-- Positive reflection probes now target current production owners rather than deleted bridges or stale owner names.
-- Threat tactics tests were rewritten to protect current `DB_ThreatRuntime`, `DB_ThreatTactics`, Arbiter, FlightMotor and Vengeance boundaries instead of historical bridge absence.
-- Managed-test Task-era terminology and stale positive reflection targets were audited.
+### Objects
 
-### B44 — Fear / Vengeance responsibility extraction
+- Page-less native workspace ownership.
+- Detached position and object-geometry gizmo snapshots/commands.
+- Continuous history transactions for drag/edit operations.
+- Structured inspectors for vanilla cases that cannot be represented faithfully by generic reflection alone.
+- Selected-only compatibility sandbox for unknown third-party representations without full `ObjectsPage.Refresh()` materialization.
+- Native runtime reconciliation for representation-created gameplay/visual runtime objects.
+- Runtime prepare/refresh/remove/reset lifecycle integrated with edit, history, creation and deletion paths.
+- Regression guard in `scripts/validate-devtool-native-objects-runtime.sh` covering the native boundary and migrated special cases.
 
-`DB_VengeanceRuntime` now owns its real state-machine implementation instead of forwarding into a `partial DB_FearRuntime`.
+### Sound
 
-Behavior-preserving lifecycle design:
+- Page-less native workspace ownership through the shared native scheduler/anchor boundary.
+- Native presentation remains independent from ordinary `SoundPage` lifetime except explicit legacy fallback.
 
-- `DB_FearRuntime` still owns the single per-bat `ConditionalWeakTable<DB_Creature, State>` host.
-- that host embeds one `DB_VengeanceRuntime.State`;
-- Vengeance owns no second weak table;
-- Fear collapse, persistent trauma, Reset and Forget therefore still cancel/retire Vengeance synchronously through the same object lifetime;
-- Vengeance owns Mode, Participation, group arming, target/leader/supporter state, rescue/contact behavior, cancellation and owner-gated FlightMotor execution.
+### Triggers
 
-B44 validation froze Fear/Vengeance tuning constants, critical gameplay-call counts, switch/case state-machine structure and runtime string payloads. Candidate and clean-promotion workflows passed.
+- Page-less native workspace ownership through the shared native scheduler/anchor boundary.
+- Native presentation remains independent from ordinary `TriggersPage` lifetime except explicit legacy fallback.
 
-### B45 — architecture consolidation checkpoint
+## Next development milestone
 
-B45 does **not** close R6. It consolidates the architecture already completed so later R6 work cannot accidentally regress it.
+Continue the DevTool rebuild with the remaining canonical workspaces rather than adding more Objects special cases blindly.
 
-Current B45 work:
+Priority order:
 
-- modernize `Program.ArchitectureDomainMigration.cs` to test the current formal owner set instead of only early B1 identities;
-- install `.github/workflows/desertbatfly-r6-architecture-guard.yml` as a long-lived read-only aggregate guard;
-- retire obsolete write-oriented migration facilities once the aggregate guard is verified;
-- refresh R6 documentation to current state without declaring the phase closed.
+1. **Map** — inventory the current `MapPage` responsibilities, split model/runtime behavior from presentation-only controls, and define a detached native snapshot/command boundary before making it page-less.
+2. **Dialog** — perform the same ownership inventory and migrate only after Map's boundary is stable.
+3. **Relationships** — migrate last because its editing semantics are more coupled to creature relationship data and should reuse the scheduler/presentation patterns established by Map/Dialog.
+4. After each workspace becomes genuinely page-less, extend `NativeToolScheduler.Supports`, `LegacyPageIndex`, exact legacy-page detection, native anchor documentation, and add a dedicated validation guard. Do not add a workspace to `Supports` until its native frontend/backend can operate without relying on the legacy page as a hidden runtime backend.
 
-The aggregate guard protects:
+## Immediate next run
 
-- R5 bridge-retention boundaries;
-- R6 source-retention boundaries;
-- production and managed-test Task-era terminology exit;
-- `DB_` production filenames/internal identities and absence of root-level source;
-- current positive managed reflection targets;
-- formal owner presence;
-- Fear/Vengeance single-host ownership;
-- external creature/save/world compatibility literals;
-- Roslyn syntax parsing for Desert Batfly production and managed-test C#.
+Start with a **Map ownership inventory**. Locate every DryCycle reference to `MapPage`, classify each as presentation, model mutation, runtime side effect, compatibility/diagnostics, or navigation/lifetime ownership, then implement the smallest first extraction that removes a real legacy dependency. Keep Vanilla/Legacy fallback intact while the native Map boundary is incomplete.
 
-## Compatibility identities intentionally unchanged
+## Completion criteria
 
-R6 internal naming work does not change published/game-data identities:
-
-- CreatureTemplate identity: `DesertBatfly`
-- Sandbox unlock identity: `DesertBatfly`
-- primary state key: `DCDesertBatflyV1`
-- Threat memory key: `DCDesertBatflyThreatV1`
-- colony persistence prefix: `DCBATCOLONY09<svB>`
-- authored room tag: `DESERTSWARMROOM`
-
-The numeric `09` in `DCBATCOLONY09<svB>` is a persisted protocol identifier, not Task architecture terminology, and remains intentionally unchanged.
-
-## Validation boundary
-
-The current CI/environment can execute source-retention guards and Roslyn syntax validation, but it does not provide the developer-local Rain World/BepInEx runtime assembly set or a running Rain World process.
-
-Therefore the following are **not** claimed as completed by this checkpoint:
-
-- developer-local full net48 build against the exact game assemblies;
-- execution of the managed integration binary against those assemblies;
-- Rain World save/load compatibility testing;
-- live scenario regression;
-- 20-30 Desert Batfly stress/performance profiling;
-- live Observatory review.
-
-These remain future validation/work items and do not imply R6 is closed.
-
-## R6 status
-
-**R6 remains open.**
-
-The current architecture migration baseline is stable and guarded, but additional R6 work may be added according to subsequent project arrangements. Do not advance the project status to R7 or write `FINAL_REPORT.md` unless explicitly requested after the remaining R6 work and later acceptance stages are defined.
+The DevTool migration is complete when all intended workspaces have native presentation/model boundaries, legacy pages are used only by explicit Vanilla/Legacy/diagnostic compatibility paths, repository guards encode those ownership rules, and all CI/build/decompile verification remains green. Do not declare the project complete merely because the Objects representation inventory is exhausted.
