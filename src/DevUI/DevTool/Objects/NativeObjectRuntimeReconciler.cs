@@ -135,14 +135,14 @@ internal static class NativeObjectRuntimeReconciler
 
     internal static void RefreshAfterRemoval(EditorSession session, PlacedObject target)
     {
-        if (target?.type != PlacedObject.Type.TerrainRubble)
-            return;
-
         global::Room room = session?.Room;
-        if (room == null)
+        if (room == null || target == null)
             return;
 
-        RefreshTerrainRubble(room);
+        BuiltinObjectRuntimeAdapters.RefreshAfterRemoval(room, target);
+
+        if (target.type == PlacedObject.Type.TerrainRubble)
+            RefreshTerrainRubble(room);
     }
 
     internal static void RemoveRuntime(EditorSession session, PlacedObject target)
