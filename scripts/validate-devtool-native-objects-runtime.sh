@@ -608,6 +608,16 @@ if ! grep -Fq 'Watcher.WatcherEnums.PlacedObjectType.UrbanCandleHolder' "$factor
   exit 1
 fi
 
+# DayNight palette editing is native: vanilla only clamps palettes at zero and immediately applies
+# them to rainCycle.
+if ! grep -Fq 'data is PlacedObject.DayNightData' "$reflection" ||
+   ! grep -Fq 'return Math.Max(0, palette);' "$reflection" ||
+   ! grep -Fq 'target.data is PlacedObject.DayNightData dayNight' "$runtime_reconciler" ||
+   ! grep -Fq 'dayNight.Apply(room);' "$runtime_reconciler"; then
+  echo "DayNight native authoring contract regressed." >&2
+  exit 1
+fi
+
 # FairyParticle authoring is native: preserve every vanilla slider range and keep existing room
 # particles live by calling FairyParticleData.Apply(room) after model mutation.
 for symbol in \
