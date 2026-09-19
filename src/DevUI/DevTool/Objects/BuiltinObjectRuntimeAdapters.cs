@@ -103,6 +103,22 @@ internal static class BuiltinObjectRuntimeAdapters
             return;
         }
 
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.FlameJet &&
+            target.data is Watcher.FlameJet.FlameJetData flameJet)
+        {
+            EnsureFlameJetRuntime(room, target, flameJet);
+            return;
+        }
+
+        if (ModManager.Watcher &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch &&
+            target.data is Watcher.KarmaFlowerPatch.KarmaFlowerPatchData)
+        {
+            RefreshKarmaFlowerPatchRuntime(room);
+            return;
+        }
+
         if (target.type == PlacedObject.Type.ProjectedStars)
         {
             EnsureProjectedStarsRuntime(room, target);
@@ -310,6 +326,139 @@ internal static class BuiltinObjectRuntimeAdapters
                 DestroyRuntime(room, spinningFan.FanElement);
 
             DestroyRuntime(room, runtime);
+        }
+    }
+
+    internal static void RefreshAfterRemoval(global::Room room, PlacedObject target)
+    {
+        if (room == null || target == null || !ModManager.Watcher)
+            return;
+
+        if (target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch)
+            RefreshKarmaFlowerPatchRuntime(room);
+    }
+
+    private static void EnsureFlameJetRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.FlameJet.FlameJetData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        data.pos = target.pos;
+
+        Watcher.FlameJet runtime = data.obj;
+        if (runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion)
+        {
+            if (runtime != null && ReferenceEquals(runtime.room, room))
+                DestroyRuntime(room, runtime);
+
+            try
+            {
+                runtime = Watcher.FlameJet.FromPlacedObject(room, target);
+                data.obj = runtime;
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native FlameJet runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        data.intensityMin = Mathf.Clamp01(data.intensityMin);
+        data.intensityMax = Mathf.Clamp(data.intensityMax, data.intensityMin, 1f);
+        data.temperatureMin = Mathf.Clamp01(data.temperatureMin);
+        data.temperatureMax = Mathf.Clamp(data.temperatureMax, data.temperatureMin, 1f);
+        data.lethality = Mathf.Clamp(data.lethality, 0, 2);
+
+        runtime.setPos = target.pos;
+        runtime.setTarget = data.target;
+        runtime.intensity = data.intensity;
+        runtime.temperature = data.temperature;
+        runtime.intensityAnimSpeed = data.intensityAnimSpeed;
+        runtime.intensityAnimOffset = data.intensityAnimOffset;
+        runtime.temperatureAnimSpeed = data.temperatureAnimSpeed;
+        runtime.temperatureAnimOffset = data.temperatureAnimOffset;
+        runtime.intensityAnim = data.intensityAnim;
+        runtime.temperatureAnim = data.temperatureAnim;
+        runtime.activeDuring = data.activeDuring;
+        runtime.intensityMin = data.intensityMin;
+        runtime.intensityMax = data.intensityMax;
+        runtime.temperatureMin = data.temperatureMin;
+        runtime.temperatureMax = data.temperatureMax;
+        runtime.linkTempToIntens = data.linkTempToIntens;
+        runtime.lethality = data.lethality;
+        runtime.width = data.width;
+        runtime.fireVolumeMax = data.fireVolumeMax;
+        runtime.smokeVolumeMax = data.smokeVolumeMax;
+    }
+
+    private static void RefreshKarmaFlowerPatchRuntime(global::Room room)
+    {
+        if (room == null || !ModManager.Watcher)
+            return;
+
+        bool anyActive = false;
+        if (room.roomSettings?.placedObjects != null)
+        {
+            for (int i = 0; i < room.roomSettings.placedObjects.Count; i++)
+            {
+                PlacedObject placed = room.roomSettings.placedObjects[i];
+                if (placed?.active == true &&
+                    placed.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch)
+                {
+                    anyActive = true;
+                    break;
+                }
+            }
+        }
+
+        Watcher.KarmaFlowerPatch runtime = null;
+        if (room.updateList != null)
+        {
+            for (int i = room.updateList.Count - 1; i >= 0; i--)
+            {
+                if (room.updateList[i] is not Watcher.KarmaFlowerPatch patch)
+                    continue;
+
+                if (runtime == null && anyActive)
+                {
+                    runtime = patch;
+                    continue;
+                }
+
+                DestroyRuntime(room, patch);
+            }
+        }
+
+        if (!anyActive)
+            return;
+
+        if (runtime == null)
+        {
+            try
+            {
+                runtime = new Watcher.KarmaFlowerPatch();
+                room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native KarmaFlowerPatch runtime creation failed: " + error.Message);
+                return;
+            }
+        }
+
+        try { runtime.PlaceFlowers(); }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool native KarmaFlowerPatch refresh failed: " + error.Message);
         }
     }
 
