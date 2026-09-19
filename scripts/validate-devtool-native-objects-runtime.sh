@@ -664,6 +664,40 @@ if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$ru
   exit 1
 fi
 
+# Watcher DaemonEye/DaemonCrown no longer depend on their DevInterface radius handles/panels.
+# Both expose native radius gizmos and 0..30 depth editing. Native runtime ownership adopts or creates
+# the room runtime; DaemonCrown additionally rebuilds its segment array when the authored radius
+# crosses a 20px segment-count boundary and destroys nested DynamicLevelElements on removal.
+for symbol in \
+  'typeof(Watcher.DaemonEyeData)' \
+  'typeof(Watcher.DaemonCrownData)' \
+  'string.Equals(name, "depth", StringComparison.Ordinal)' \
+  'max = 30f;' \
+  'declaringType == typeof(Watcher.DaemonEyeData)' \
+  'declaringType == typeof(Watcher.DaemonCrownData)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "DaemonEye/DaemonCrown native inspector/gizmo contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'EnsureDaemonEyeRuntime(room, target, daemonEye);' \
+  'new Watcher.DaemonEye(target, room, target.pos, data.Rad, data.depth)' \
+  'FindDaemonEye(room, target)' \
+  'RemoveDaemonEyeRuntime(room, target);' \
+  'EnsureDaemonCrownRuntime(room, target, daemonCrown);' \
+  'Mathf.Max(Mathf.FloorToInt(data.Rad / 20f), 1)' \
+  'new Watcher.DaemonCrown(target, room, target.pos, data.Rad, data.depth)' \
+  'runtime.crownSegments.Length != desiredSegments' \
+  'runtime.CrownSegmentPosition(i)' \
+  'RemoveDaemonCrownRuntime(room, target);' \
+  'DestroyRuntime(room, runtime.crownSegments[i]);'; do
+  if ! grep -Fq "$symbol" "$runtime_adapters"; then
+    echo "DaemonEye/DaemonCrown native runtime ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Watcher CosmeticRipple no longer depends on CosmeticRippleRepresentation. Its radius is a
 # detached relative-point gizmo; the four original sliders remain 0..1; derived/runtime-only fields
 # stay out of the inspector; and the room runtime/list/mask lifecycle is native-owned.
