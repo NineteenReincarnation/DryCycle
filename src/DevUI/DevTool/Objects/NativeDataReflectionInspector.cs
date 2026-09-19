@@ -508,6 +508,48 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return;
         }
 
+        if (declaringType == typeof(Watcher.GrassBlade.TerrainGrassPatchData))
+        {
+            if (string.Equals(name, "amount", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 2000f;
+                step = 4f;
+                return;
+            }
+
+            if (string.Equals(name, "minHeight", StringComparison.Ordinal) ||
+                string.Equals(name, "maxHeight", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1000f;
+                step = 1f;
+                return;
+            }
+
+            if (string.Equals(name, "fallOff", StringComparison.Ordinal) ||
+                string.Equals(name, "depthOffset", StringComparison.Ordinal) ||
+                string.Equals(name, "depthRange", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 1f;
+                step = 0.01f;
+                return;
+            }
+
+            if (string.Equals(name, "width", StringComparison.Ordinal))
+            {
+                hasRange = true;
+                min = 0f;
+                max = 4f;
+                step = 0.02f;
+                return;
+            }
+        }
+
         if (declaringType == typeof(PlacedObject.LightFixtureData) &&
             string.Equals(name, "randomSeed", StringComparison.Ordinal))
         {
@@ -1114,6 +1156,14 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
                 return Math.Max(regen, consumable.minRegen);
         }
 
+        if (data is Watcher.GrassBlade.TerrainGrassPatchData)
+        {
+            if (string.Equals(name, "range", StringComparison.Ordinal) && value is float range)
+                return Mathf.Abs(range);
+            if (string.Equals(name, "amount", StringComparison.Ordinal) && value is int amount)
+                return Mathf.Clamp(amount, 0, 2000) / 4 * 4;
+        }
+
         if (data is PlacedObject.CustomDecalData decal)
         {
             if (string.Equals(name, "fromDepth", StringComparison.Ordinal) && value is float fromDepth)
@@ -1246,6 +1296,11 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
              string.Equals(name, "cycleSpawnedOn", StringComparison.Ordinal) ||
              string.Equals(name, "isGameplay", StringComparison.Ordinal) ||
              string.Equals(name, "isTransition", StringComparison.Ordinal)))
+            return true;
+
+        if (declaringType == typeof(Watcher.GrassBlade.TerrainGrassPatchData) &&
+            (string.Equals(name, "pos", StringComparison.Ordinal) ||
+             string.Equals(name, "spawnedGrass", StringComparison.Ordinal)))
             return true;
 
         return string.Equals(name, "owner", StringComparison.Ordinal) ||
