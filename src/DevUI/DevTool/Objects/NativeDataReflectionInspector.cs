@@ -681,7 +681,7 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             (declaringType == typeof(PlacedObject.SSLightRodData) &&
              (string.Equals(name, "depth", StringComparison.Ordinal) ||
               string.Equals(name, "brightness", StringComparison.Ordinal))) ||
-            (declaringType == typeof(GeyserData) &&
+            (declaringType == typeof(DevInterface.GeyserData) &&
              string.Equals(name, "timing", StringComparison.Ordinal)) ||
             (declaringType == typeof(PlacedObject.ScavengerOutpostData) &&
              string.Equals(name, "direction", StringComparison.Ordinal)) ||
