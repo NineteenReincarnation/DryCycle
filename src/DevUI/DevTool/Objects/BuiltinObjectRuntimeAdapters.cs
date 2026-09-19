@@ -104,6 +104,13 @@ internal static class BuiltinObjectRuntimeAdapters
         }
 
         if (ModManager.Watcher &&
+            target.data is Watcher.FloatingDebrisData floatingDebris)
+        {
+            EnsureFloatingDebrisRuntime(room, target, floatingDebris);
+            return;
+        }
+
+        if (ModManager.Watcher &&
             target.type == Watcher.WatcherEnums.PlacedObjectType.FlameJet &&
             target.data is Watcher.FlameJet.FlameJetData flameJet)
         {
@@ -336,6 +343,88 @@ internal static class BuiltinObjectRuntimeAdapters
 
         if (target.type == Watcher.WatcherEnums.PlacedObjectType.KarmaFlowerPatch)
             RefreshKarmaFlowerPatchRuntime(room);
+    }
+
+    private static void EnsureFloatingDebrisRuntime(
+        global::Room room,
+        PlacedObject target,
+        Watcher.FloatingDebrisData data)
+    {
+        if (room == null || target == null || data == null)
+            return;
+
+        Watcher.FloatingDebris runtime = data.obj;
+        if (runtime == null ||
+            !ReferenceEquals(runtime.room, room) ||
+            runtime.slatedForDeletetion)
+        {
+            if (runtime != null && ReferenceEquals(runtime.room, room))
+                DestroyRuntime(room, runtime);
+
+            try
+            {
+                runtime = Watcher.FloatingDebris.TrySpawnFloatingDebris(room, target);
+                data.obj = runtime;
+                if (runtime != null)
+                    room.AddObject(runtime);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool native FloatingDebris runtime creation failed: " + error.Message);
+                data.obj = null;
+                return;
+            }
+        }
+
+        if (runtime == null)
+            return;
+
+        bool seedChanged = runtime.seed != data.seed;
+        bool typeChanged = !string.Equals(runtime._type, data.type, StringComparison.Ordinal);
+        bool countChanged = runtime.numberOfFloaters != data.numberOfFloaters;
+        bool randomRangeChanged =
+            runtime.depthNear != data.depthNear ||
+            runtime.depthFar != data.depthFar ||
+            Math.Abs(runtime.scaleMinimum - data.scaleMinimum) > 0.0001f ||
+            Math.Abs(runtime.scaleMaximum - data.scaleMaximum) > 0.0001f;
+
+        runtime.pos = target.pos;
+        runtime.seed = data.seed;
+        runtime.depthNear = data.depthNear;
+        runtime.depthFar = data.depthFar;
+        runtime.scaleMinimum = data.scaleMinimum;
+        runtime.scaleMaximum = data.scaleMaximum;
+        runtime.numberOfFloaters = data.numberOfFloaters;
+        runtime.movementAmount = data.movement;
+
+        // Type and seed affect the concrete floater instances themselves, not just their positions.
+        // Recreate only for those transitions; ordinary control-point drags stay incremental.
+        if (typeChanged || seedChanged)
+        {
+            runtime.RemoveAllFloaters();
+            runtime._type = data.type;
+            runtime.Init();
+            return;
+        }
+
+        if (countChanged)
+        {
+            runtime.Init();
+            return;
+        }
+
+        if (randomRangeChanged)
+            runtime.UpdateSeededRandomValues();
+
+        runtime.UpdateControlPointInfluence();
+        runtime.UpdatePositions();
+        runtime.UpdateOffsetAmounts();
+        runtime.UpdateDepthOffsets();
+        runtime.UpdateScaleOffsets();
+        runtime.UpdateExtraOffsets();
+        runtime.AddFloaters();
+        runtime.RefreshFloaters();
     }
 
     private static void EnsureFlameJetRuntime(
