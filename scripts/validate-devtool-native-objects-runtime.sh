@@ -664,6 +664,54 @@ if ! grep -Fq 'target.data is PlacedObject.FairyParticleData fairyParticle' "$ru
   exit 1
 fi
 
+# Final direct Representation gaps from ObjectsPage.CreateObjRep:
+# - HideVoidSpawn is fully covered by inherited ResizableObjectData handlePos + generic ExtEnum.
+# - RippleEggDestination gets its region-aware destination selector natively.
+# - OEsphere gets native radius/parameter editing plus detached runtime ownership.
+for symbol in \
+  'declaringType == typeof(PlacedObject.ResizableObjectData)' \
+  'typeof(ExtEnumBase).IsAssignableFrom(type)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "HideVoidSpawn inherited native Resizeable/ExtEnum coverage regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'target?.data is PlacedObject.RippleEggDestinationData' \
+  'AppendRippleEggDestination(result, rippleEggDestination);' \
+  '"builtin.rippleEggDestination.room"' \
+  'regionWarpRooms' \
+  'regionSpinningTopRooms' \
+  "entry.Split(':')[0].ToLowerInvariant()" \
+  'IsRippleEggDestinationManagedProperty'; do
+  if ! grep -Fq "$symbol" "$structured_inspectors"; then
+    echo "RippleEggDestination native room selector regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'typeof(PlacedObject.OEsphereData)' \
+  'string.Equals(name, "depth", StringComparison.Ordinal)' \
+  'string.Equals(name, "lIntensity", StringComparison.Ordinal)'; do
+  if ! grep -Fq "$symbol" "$reflection"; then
+    echo "OEsphere native inspector/gizmo contract regressed: $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in \
+  'case OEsphere sphere when target.data is PlacedObject.OEsphereData sphereData:' \
+  'target?.type == DLCSharedEnums.PlacedObjectType.OEsphere' \
+  'room.oeSpheres[i].pos == target.pos' \
+  'runtime = new OEsphere(target.pos, 100f, 0);' \
+  'sphere.rad = sphereData.Rad;' \
+  'sphere.depth = sphereData.depth;' \
+  'sphere.lIntensity = sphereData.lIntensity;'; do
+  if ! grep -Fq "$symbol" "$detached_runtime_adapters"; then
+    echo "OEsphere detached native runtime ownership regressed: $symbol" >&2
+    exit 1
+  fi
+done
+
 # Watcher SpinningTopSpot no longer needs SpinningTopSpotRepresentation/SpinningTopPanel for
 # timeline -> region -> room -> tile destination authoring. The structured inspector owns the dynamic
 # choices and preserves the vanilla cascade that clears downstream destination fields.
