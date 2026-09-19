@@ -209,7 +209,7 @@ public static class NativeObjectGizmoEditCommandQueue
         }
 
         if (ModManager.Watcher &&
-            target.type == WatcherEnums.PlacedObjectType.WeaverSpot &&
+            target.type == Watcher.WatcherEnums.PlacedObjectType.WeaverSpot &&
             target.data is PlacedObject.ResizableObjectData weaver &&
             command.HandleId == "weaver:direction")
         {
