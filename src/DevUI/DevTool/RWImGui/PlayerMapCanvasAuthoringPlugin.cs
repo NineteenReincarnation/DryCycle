@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -36,34 +35,6 @@ internal static class PlayerMapCanvasAuthoring
         HandleB
     }
 
-    private delegate void OrigDrawDefMaterials(ImDrawListPtr draw, PlayerMapPresentationSnapshot snapshot, Num.Vector2 canvasMin);
-    private delegate void HookDrawDefMaterials(OrigDrawDefMaterials orig, ImDrawListPtr draw, PlayerMapPresentationSnapshot snapshot, Num.Vector2 canvasMin);
-    private delegate void OrigDrawDefaultMaterialInspector(PlayerMapPresentationSnapshot snapshot, PlayerMapRoomSnapshot room);
-    private delegate void HookDrawDefaultMaterialInspector(OrigDrawDefaultMaterialInspector orig, PlayerMapPresentationSnapshot snapshot, PlayerMapRoomSnapshot room);
-    private delegate void OrigHandleRoomInteraction(
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-    private delegate void HookHandleRoomInteraction(
-        OrigHandleRoomInteraction orig,
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-
-    private static readonly HookDrawDefMaterials DrawDefMaterialsHookDelegate = DrawDefMaterialsHook;
-    private static readonly HookDrawDefaultMaterialInspector DrawDefaultMaterialInspectorHookDelegate = DrawDefaultMaterialInspectorHook;
-    private static readonly HookHandleRoomInteraction HandleRoomInteractionHookDelegate = HandleRoomInteractionHook;
-
-    private static IDisposable drawDefsHook;
-    private static IDisposable inspectorHook;
-    private static IDisposable roomInteractionHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo selectedDefField;
     private static ManualLogSource log;
     private static bool enabled;
 
@@ -77,72 +48,29 @@ internal static class PlayerMapCanvasAuthoring
     private static Vector2 previewB;
     private static bool consumedCanvasInput;
 
+    internal static bool OwnsCanvas =>
+        enabled && (consumedCanvasInput || createArmed || dragKind != DragKind.None);
+
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type view = typeof(PlayerMapWorkspaceView);
-            MethodInfo drawDefs = view.GetMethod("DrawDefMaterials", flags, null,
-                new[] { typeof(ImDrawListPtr), typeof(PlayerMapPresentationSnapshot), typeof(Num.Vector2) }, null);
-            MethodInfo inspector = view.GetMethod("DrawDefaultMaterialInspector", flags, null,
-                new[] { typeof(PlayerMapPresentationSnapshot), typeof(PlayerMapRoomSnapshot) }, null);
-            MethodInfo roomInteraction = view.GetMethod("HandleRoomInteraction", flags, null,
-                new[]
-                {
-                    typeof(PlayerMapPresentationSnapshot), typeof(bool), typeof(PlayerMapRoomSnapshot),
-                    typeof(Num.Vector2), typeof(ImGuiIOPtr)
-                }, null);
-            panField = view.GetField("pan", flags);
-            zoomField = view.GetField("zoom", flags);
-            selectedDefField = view.GetField("selectedDefMaterial", flags);
-            if (drawDefs == null || inspector == null || roomInteraction == null ||
-                panField == null || zoomField == null || selectedDefField == null)
-                throw new MissingMemberException("Player Map canvas authoring targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawDefsHook = constructor.Invoke(new object[] { drawDefs, DrawDefMaterialsHookDelegate }) as IDisposable;
-            inspectorHook = constructor.Invoke(new object[] { inspector, DrawDefaultMaterialInspectorHookDelegate }) as IDisposable;
-            roomInteractionHook = constructor.Invoke(new object[] { roomInteraction, HandleRoomInteractionHookDelegate }) as IDisposable;
-            if (drawDefsHook == null || inspectorHook == null || roomInteractionHook == null)
-                throw new InvalidOperationException("Player Map canvas authoring hooks were not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map direct Def_Mat authoring/output bounds enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map canvas authoring could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map direct Def_Mat authoring/output bounds enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref roomInteractionHook);
-        Dispose(ref inspectorHook);
-        Dispose(ref drawDefsHook);
-        panField = null;
-        zoomField = null;
-        selectedDefField = null;
         createArmed = false;
         ResetDrag();
         enabled = false;
         log = null;
     }
 
-    private static void DrawDefaultMaterialInspectorHook(
-        OrigDrawDefaultMaterialInspector orig,
+    internal static void DrawInspectorTools(
         PlayerMapPresentationSnapshot snapshot,
         PlayerMapRoomSnapshot room)
     {
-        orig(snapshot, room);
         if (!enabled) return;
 
         ImGui.Spacing();
@@ -163,15 +91,18 @@ internal static class PlayerMapCanvasAuthoring
                 "Drag on the center canvas to create a rectangle. Select one, then drag either corner or the body to move it."));
     }
 
-    private static void DrawDefMaterialsHook(
-        OrigDrawDefMaterials orig,
+    internal static void DrawCanvasOverlay(
         ImDrawListPtr draw,
         PlayerMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin)
     {
-        orig(draw, snapshot, canvasMin);
         consumedCanvasInput = false;
-        if (!enabled || snapshot?.Available != true || !TryViewState(out Num.Vector2 pan, out float zoom))
+        if (!enabled || snapshot?.Available != true)
+            return;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom))
             return;
 
         DrawOutputBounds(draw, snapshot, canvasMin, pan, zoom);
@@ -179,7 +110,7 @@ internal static class PlayerMapCanvasAuthoring
         bool canvasHovered = ImGui.IsItemHovered();
         Num.Vector2 mouse = ImGui.GetIO().MousePos;
         Vector2 mouseCanon = ScreenToCanon(mouse, canvasMin, pan, zoom);
-        int selectedId = GetSelectedDef();
+        int selectedId = PlayerMapWorkspaceView.SelectedDefMaterial;
         PlayerMapDefMaterialSnapshot? selected = FindDef(snapshot, selectedId);
 
         // Arm/Create mode owns the canvas until mouse-up so room dragging can never start beneath it.
@@ -224,7 +155,7 @@ internal static class PlayerMapCanvasAuthoring
             if (hit.HasValue)
             {
                 PlayerMapDefMaterialSnapshot def = hit.Value;
-                SetSelectedDef(def.Id);
+                PlayerMapWorkspaceView.SelectedDefMaterial = def.Id;
                 selected = def;
                 selectedId = def.Id;
                 dragDefId = def.Id;
@@ -277,19 +208,6 @@ internal static class PlayerMapCanvasAuthoring
                 ResetDrag();
             }
         }
-    }
-
-    private static void HandleRoomInteractionHook(
-        OrigHandleRoomInteraction orig,
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io)
-    {
-        if (enabled && (consumedCanvasInput || createArmed || dragKind != DragKind.None))
-            return;
-        orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
     }
 
     private static void DrawOutputBounds(
@@ -431,35 +349,6 @@ internal static class PlayerMapCanvasAuthoring
         float zoom) =>
         canvasMin + pan + new Num.Vector2(point.x, point.y) * zoom;
 
-    private static bool TryViewState(out Num.Vector2 pan, out float zoom)
-    {
-        pan = default;
-        zoom = 1f;
-        try
-        {
-            pan = (Num.Vector2)panField.GetValue(null);
-            zoom = (float)zoomField.GetValue(null);
-            return zoom > 0f && !float.IsNaN(zoom) && !float.IsInfinity(zoom);
-        }
-        catch (Exception error)
-        {
-            log?.LogDebug("Player Map canvas authoring view-state read failed: " + error.Message);
-            return false;
-        }
-    }
-
-    private static int GetSelectedDef()
-    {
-        try { return (int)selectedDefField.GetValue(null); }
-        catch { return -1; }
-    }
-
-    private static void SetSelectedDef(int id)
-    {
-        try { selectedDefField.SetValue(null, id); }
-        catch (Exception error) { log?.LogDebug("Player Map Def_Mat selection update failed: " + error.Message); }
-    }
-
     private static void ResetDrag()
     {
         dragKind = DragKind.None;
@@ -472,17 +361,4 @@ internal static class PlayerMapCanvasAuthoring
         consumedCanvasInput = false;
     }
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
