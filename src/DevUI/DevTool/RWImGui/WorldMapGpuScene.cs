@@ -261,6 +261,13 @@ internal static class WorldMapGpuScene
     internal static int RetainedRoomCount => roomIndex.Rooms.Length;
     internal static int VisibleRoomCount => visibleRoomCount;
 
+    internal static void SuppressScreenPresentation()
+    {
+        ready = false;
+        if (mapCamera != null) mapCamera.enabled = false;
+        if (root != null && root.activeSelf) root.SetActive(false);
+    }
+
     internal static void Disable()
     {
         ready = false;
@@ -309,6 +316,13 @@ internal static class WorldMapGpuScene
 
     internal static void Apply(FrameState frame, EditorSession session)
     {
+        if (WorldMapPresentationCorrectness.ShouldSuppressRetainedApply)
+        {
+            SuppressScreenPresentation();
+            WorldMapGpuPipeBatch.SuppressScreenPresentation();
+            return;
+        }
+
         if (frame?.Visible != true || frame.Snapshot?.Available != true ||
             session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page)
         {
