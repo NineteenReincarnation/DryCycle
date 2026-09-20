@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using BepInEx;
 using DryCycle.DevUI.DevTool.Core;
@@ -70,8 +67,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         {
             // Tool switches, detached frontend, explicit legacy UI and Escape-hidden presentation all
             // keep retained scene/cache data warm, but none of them owns the screen. Apply(null)
-            // disables the high-depth camera and, through the pipe-batch hook, hides retained map
-            // sockets too. This is the final same-frame ownership arbiter after all map pumps.
+            // disables the high-depth camera and direct pipe-batch presentation as well. This is
+            // the final same-frame ownership arbiter after all map pumps.
             WorldMapGpuScene.Apply(null, session);
         }
     }
@@ -80,8 +77,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     {
         // The stable-cache gate and region preload layer can otherwise retain the retired MapPage,
         // immutable snapshots and up to several regions of managed bake data for the entire gameplay
-        // session. Dispose their hooks/cache in dependency order; WorldMapGpuCache.FlushNow in the
-        // renderer shutdown below still preserves the active durable bake on disk.
+        // session. Retire their services in dependency order; renderer shutdown below still flushes
+        // the active durable bake to disk.
         WorldMapGpuStableCacheGate.Disable();
         WorldMapGpuRegionPreload.Disable();
 
@@ -99,9 +96,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
         // The basic shortcut presentation owns AbstractRoom/RoomRepresentation references but is
         // intentionally an internal presentation cache rather than a BepInEx runtime. Clear its
-        // private cache once at the lifetime boundary without adding a reverse dependency from the
-        // core DevTool assembly to the RWImGui frontend.
-        ClearShortcutPresentationCache();
+        // cache once at the lifetime boundary through its explicit lifecycle API.
+        WorldMapShortcutPresentation.Clear();
 
         // Geometry is also cleared by the core Page lifetime release. Calling it here is idempotent
         // and closes the edge even if DevUI disappears before that observer sees the retired page.
@@ -111,7 +107,7 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // in-memory active-region snapshot as well; otherwise one full region bake remains rooted for
         // the whole gameplay session even after the multi-region preload cache has been cleared.
         WorldMapGpuRuntime.Disable();
-        ClearGpuCacheWorkingSet();
+        WorldMapGpuCache.ReleaseWorkingSet();
     }
 
     private void ResumeDormantMapRuntime()
@@ -129,56 +125,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         WorldMapGpuInteractionIndex.Enable(Logger);
         WorldMapGpuRegionPreload.Enable(Logger);
         WorldMapGpuStableCacheGate.Enable(Logger);
-    }
-
-    private static void ClearShortcutPresentationCache()
-    {
-        try
-        {
-            MethodInfo clear = typeof(WorldMapShortcutPresentation).GetMethod(
-                "Clear",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            clear?.Invoke(null, null);
-        }
-        catch
-        {
-            // Cache retirement is best-effort during shutdown; a later Prime() also resets a stale
-            // region before publishing any shortcut data.
-        }
-    }
-
-    private static void ClearGpuCacheWorkingSet()
-    {
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type cacheType = typeof(WorldMapGpuCache);
-            FieldInfo currentField = cacheType.GetField("current", flags);
-            Type snapshotType = currentField?.FieldType;
-            object empty = snapshotType?.GetField("Empty", flags)?.GetValue(null);
-            if (currentField != null && empty != null)
-                currentField.SetValue(null, empty);
-
-            cacheType.GetField("activeRegion", flags)?.SetValue(null, string.Empty);
-            cacheType.GetField("activePath", flags)?.SetValue(null, string.Empty);
-            cacheType.GetField("validationCursor", flags)?.SetValue(null, 0);
-            cacheType.GetField("captureCursor", flags)?.SetValue(null, 0);
-            cacheType.GetField("dirtyFrame", flags)?.SetValue(null, -1);
-            cacheType.GetField("dirty", flags)?.SetValue(null, false);
-            cacheType.GetField("lastError", flags)?.SetValue(null, string.Empty);
-            cacheType.GetField("cacheHits", flags)?.SetValue(null, 0);
-            cacheType.GetField("cacheMisses", flags)?.SetValue(null, 0);
-
-            if (cacheType.GetField("validatedRooms", flags)?.GetValue(null) is HashSet<int> validated)
-                validated.Clear();
-            if (cacheType.GetField("liveSignatures", flags)?.GetValue(null) is Dictionary<int, ulong> signatures)
-                signatures.Clear();
-        }
-        catch
-        {
-            // The durable cache has already been flushed. Failing to trim the optional in-memory
-            // working set is therefore a memory-only fallback, not a data-integrity failure.
-        }
     }
 
     private void OnDisable()
