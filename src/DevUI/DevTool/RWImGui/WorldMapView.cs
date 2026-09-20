@@ -312,7 +312,8 @@ internal static class WorldMapView
         bool hovered)
     {
         WorldMapRenderOrder.UseBase(draw);
-        if (WorldMapGpuRuntime.TryDrawRoomGeometry(draw, room, visual, roomMin, selected, hovered, zoom))
+        if (WorldMapGpuRuntime.TryDrawRoomGeometry(draw, room, visual, roomMin, selected, hovered, zoom) ||
+            WorldMapPerformance.TryDrawOverviewRoom(draw, room, visual, roomMin, selected, hovered))
             return;
 
         int pushedStyleColors = WorldMapThumbnailVisibility.PushRoomStyle();
@@ -971,35 +972,14 @@ internal static class WorldMapView
         selectedConnectionId = string.Empty;
     }
 
-    private static bool IsEndpointFree(EditorMapPresentationSnapshot snapshot, int roomIndex, EditorMapRoomNodeSnapshot node)
-    {
-        if (node == null || !node.Exit || node.ConnectedRoomIndex >= 0) return false;
-        EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        for (int i = 0; i < connections.Length; i++)
-        {
-            EditorMapConnectionSnapshot connection = connections[i];
-            if ((connection.FromRoomIndex == roomIndex && connection.FromNodeIndex == node.NodeIndex) ||
-                (connection.ToRoomIndex == roomIndex && connection.ToNodeIndex == node.NodeIndex))
-                return false;
-        }
-        return true;
-    }
+    private static bool IsEndpointFree(EditorMapPresentationSnapshot snapshot, int roomIndex, EditorMapRoomNodeSnapshot node) =>
+        WorldMapPerformance.IsEndpointFree(snapshot, roomIndex, node);
 
     private static EditorMapConnectionSnapshot FindConnectionAtEndpoint(
         EditorMapPresentationSnapshot snapshot,
         int roomIndex,
-        int nodeIndex)
-    {
-        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        for (int i = 0; i < connections.Length; i++)
-        {
-            EditorMapConnectionSnapshot connection = connections[i];
-            if ((connection.FromRoomIndex == roomIndex && connection.FromNodeIndex == nodeIndex) ||
-                (connection.ToRoomIndex == roomIndex && connection.ToNodeIndex == nodeIndex))
-                return connection;
-        }
-        return null;
-    }
+        int nodeIndex) =>
+        WorldMapPerformance.FindConnectionAtEndpoint(snapshot, roomIndex, nodeIndex);
 
     private static void DrawShortcutSocket(
         ImDrawListPtr draw,
@@ -1313,13 +1293,8 @@ internal static class WorldMapView
         linkingNode = -1;
     }
 
-    private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
-            if (rooms[i].RoomIndex == roomIndex) return rooms[i];
-        return null;
-    }
+    private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex) =>
+        WorldMapPerformance.FindRoom(snapshot, roomIndex);
 
     private static EditorMapRoomNodeSnapshot FindNode(EditorMapRoomSnapshot room, int nodeIndex)
     {
@@ -1329,14 +1304,8 @@ internal static class WorldMapView
         return null;
     }
 
-    private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id)
-    {
-        if (string.IsNullOrEmpty(id)) return null;
-        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        for (int i = 0; i < connections.Length; i++)
-            if (string.Equals(connections[i].ConnectionId, id, StringComparison.Ordinal)) return connections[i];
-        return null;
-    }
+    private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id) =>
+        WorldMapPerformance.FindConnection(snapshot, id);
 
     private static bool IsLayerVisible(int layer) =>
         layer >= 0 && layer < layerVisible.Length ? layerVisible[layer] : true;
