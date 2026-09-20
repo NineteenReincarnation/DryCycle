@@ -60,7 +60,6 @@ internal static class DewPodRuntimeTuningHooks
         }
 
         _enabled = true;
-        On.Room.Update += Room_Update;
     }
 
     internal static void Disable()
@@ -71,14 +70,11 @@ internal static class DewPodRuntimeTuningHooks
         }
 
         _enabled = false;
-        On.Room.Update -= Room_Update;
     }
 
-    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    internal static void AfterRoomUpdate(Room self)
     {
-        orig(self);
-
-        if (self?.updateList == null)
+        if (!_enabled || self?.updateList == null)
         {
             return;
         }
