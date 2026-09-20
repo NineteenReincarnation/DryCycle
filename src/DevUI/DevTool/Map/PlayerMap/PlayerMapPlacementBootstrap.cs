@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using BepInEx.Logging;
 using DevInterface;
 using UnityEngine;
@@ -18,60 +17,25 @@ namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 /// </summary>
 internal static class PlayerMapPlacementBootstrap
 {
-    private delegate void OrigInitializeState(MapPage page, PlayerMapSessionState state);
-    private delegate void HookInitializeState(OrigInitializeState orig, MapPage page, PlayerMapSessionState state);
-
-    private static readonly HookInitializeState InitializeHookDelegate = InitializeHook;
-    private static IDisposable initializeHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo initialize = typeof(PlayerMapWorkspaceRuntime).GetMethod(
-                "InitializeState",
-                flags,
-                null,
-                new[] { typeof(MapPage), typeof(PlayerMapSessionState) },
-                null);
-            if (initialize == null)
-                throw new MissingMethodException("PlayerMapWorkspaceRuntime.InitializeState was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            initializeHook = constructor.Invoke(new object[] { initialize, InitializeHookDelegate }) as IDisposable;
-            if (initializeHook == null)
-                throw new InvalidOperationException("Player Map placement bootstrap hook was not created.");
-
-            enabled = true;
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map placement bootstrap could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map placement bootstrap enabled through direct initialization call; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { initializeHook?.Dispose(); }
-        catch { }
-        initializeHook = null;
         enabled = false;
         log = null;
     }
 
-    private static void InitializeHook(OrigInitializeState orig, MapPage page, PlayerMapSessionState state)
+    internal static void AfterInitialize(MapPage page, PlayerMapSessionState state)
     {
-        orig(page, state);
         if (!enabled || page?.subNodes == null || state == null) return;
 
         HashSet<string> persisted = ReadPersistedRoomRecords(page);
@@ -145,10 +109,4 @@ internal static class PlayerMapPlacementBootstrap
         return persisted;
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
