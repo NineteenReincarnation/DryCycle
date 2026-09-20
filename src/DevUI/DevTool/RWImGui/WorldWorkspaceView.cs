@@ -853,7 +853,7 @@ internal static class WorldWorkspaceView
                 ? FindRoom(snapshot, node.ConnectedRoomIndex)?.Name ?? node.ConnectedRoomIndex.ToString()
                 : DevToolUiSettings.T("未连接", "Disconnected");
             string line = node.NodeIndex + " · " + node.Type;
-            if (node.Exit) line += "  →  " + target;
+            if (node.Exit) line += "  ->  " + target;
             ImGui.TextUnformatted(line);
         }
     }
@@ -1402,7 +1402,7 @@ internal static class WorldWorkspaceView
         }
     }
 
-    private static void SelectConnection(EditorMapConnectionSnapshot connection)
+    internal static void SelectConnection(EditorMapConnectionSnapshot connection)
     {
         if (connection == null) return;
         selectedConnectionId = connection.ConnectionId;
@@ -1534,9 +1534,9 @@ internal static class WorldWorkspaceView
 
     private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
     {
-        WorldConnectionDirection.AToB => "→",
-        WorldConnectionDirection.BToA => "←",
-        _ => "↔"
+        WorldConnectionDirection.AToB => "->",
+        WorldConnectionDirection.BToA => "<-",
+        _ => "<->"
     };
 
     private static string NodeText(int node) => node < 0 ? "?" : node.ToString();
