@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using BepInEx;
 using BepInEx.Logging;
@@ -28,69 +27,28 @@ public sealed class PlayerMapRenderOutputValidatorPlugin : BaseUnityPlugin
 
 internal static class PlayerMapRenderOutputValidator
 {
-    private delegate void OrigCommitPair(string tempA, string targetA, string tempB, string targetB);
-    private delegate void HookCommitPair(OrigCommitPair orig, string tempA, string targetA, string tempB, string targetB);
-
     private static readonly byte[] PngSignature = { 137, 80, 78, 71, 13, 10, 26, 10 };
-    private static readonly HookCommitPair CommitPairHookDelegate = CommitPairHook;
-    private static IDisposable commitHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo commit = typeof(PlayerMapRenderScheduler).GetMethod(
-                "CommitPair",
-                flags,
-                null,
-                new[] { typeof(string), typeof(string), typeof(string), typeof(string) },
-                null);
-            if (commit == null)
-                throw new MissingMethodException("PlayerMapRenderScheduler.CommitPair was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            commitHook = constructor.Invoke(new object[] { commit, CommitPairHookDelegate }) as IDisposable;
-            if (commitHook == null)
-                throw new InvalidOperationException("Player Map staged-output validation hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map staged-output validation enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map output validator could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map staged-output validation enabled through direct commit call; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { commitHook?.Dispose(); }
-        catch { }
-        commitHook = null;
         enabled = false;
         log = null;
     }
 
-    private static void CommitPairHook(
-        OrigCommitPair orig,
-        string tempA,
-        string targetA,
-        string tempB,
-        string targetB)
+    internal static void ValidateBeforeCommit(string pngPath, string metadataPath)
     {
         if (enabled)
-            ValidatePair(tempA, tempB);
-        orig(tempA, targetA, tempB, targetB);
+            ValidatePair(pngPath, metadataPath);
     }
 
     private static void ValidatePair(string pngPath, string metadataPath)
@@ -219,10 +177,4 @@ internal static class PlayerMapRenderOutputValidator
         ((uint)data[offset + 2] << 8) |
         data[offset + 3];
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
