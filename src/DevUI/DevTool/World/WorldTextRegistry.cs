@@ -16,7 +16,7 @@ internal static class WorldTextRegistry
     internal static string LoadedRegion { get; private set; } = string.Empty;
     internal static string LoadedPath { get; private set; } = string.Empty;
     internal static string LoadError { get; private set; }
-    internal static bool Dirty => document?.Dirty == true;
+    internal static bool Dirty => document?.Dirty == true || WorldCreatureAuthoringHooks.AdditionalDirty;
     internal static int Revision => revision;
 
     internal static bool EnsureLoaded(string region)
@@ -218,6 +218,7 @@ internal static class WorldTextRegistry
         bool changed = document.TrySetConnection(roomName, exitIndex, storedDestination);
 
         WorldConnectionSyntax.SynchronizeRoute(region, roomName, exitIndex, storedDestination);
+        WorldTopologyLiveTraversalFix.OnConnectionChanged(region, roomName, exitIndex, storedDestination);
         if (changed)
         {
             BumpRevision();
@@ -281,6 +282,8 @@ internal static class WorldTextRegistry
             error = "Could not add the creature spawner to world.txt.";
             return false;
         }
+
+        WorldCreatureAuthoringHooks.OnCreatureAdded(region, roomName);
         return true;
     }
 
@@ -301,6 +304,7 @@ internal static class WorldTextRegistry
             error = LoadError ?? "world.txt is unavailable.";
             return false;
         }
+        string roomName = WorldCreatureAuthoringHooks.FindSpawnRoom(region, spawnId);
         if (!document.TryUpdateCreatureSpawn(
                 spawnId,
                 denNode,
@@ -313,6 +317,8 @@ internal static class WorldTextRegistry
             error = "Could not update the creature spawner.";
             return false;
         }
+
+        WorldCreatureAuthoringHooks.OnCreatureEdited(region, roomName);
         return true;
     }
 
@@ -324,47 +330,61 @@ internal static class WorldTextRegistry
             error = LoadError ?? "world.txt is unavailable.";
             return false;
         }
+        string roomName = WorldCreatureAuthoringHooks.FindSpawnRoom(region, spawnId);
         if (!document.TryDeleteCreatureSpawn(spawnId))
         {
             error = "Could not find the creature spawner to delete.";
             return false;
         }
+
+        WorldCreatureAuthoringHooks.OnCreatureEdited(region, roomName);
         return true;
     }
 
     internal static bool Save()
     {
         if (document == null || string.IsNullOrWhiteSpace(LoadedPath)) return false;
-        if (!document.Dirty)
-        {
-            WorldConnectionSyntax.SynchronizeRegion(LoadedRegion, document);
-            return true;
-        }
 
-        string temp = LoadedPath + ".tmp";
-        try
+        string region = LoadedRegion;
+        if (document.Dirty)
         {
-            File.WriteAllText(temp, document.Serialize());
-            if (File.Exists(LoadedPath))
+            string temp = LoadedPath + ".tmp";
+            try
             {
-                File.Copy(LoadedPath, LoadedPath + ".bak", overwrite: true);
-                File.Delete(LoadedPath);
-            }
-            File.Move(temp, LoadedPath);
-            document.MarkSaved(LoadedPath);
+                File.WriteAllText(temp, document.Serialize());
+                if (File.Exists(LoadedPath))
+                {
+                    File.Copy(LoadedPath, LoadedPath + ".bak", overwrite: true);
+                    File.Delete(LoadedPath);
+                }
+                File.Move(temp, LoadedPath);
+                document.MarkSaved(LoadedPath);
 
-            WorldConnectionSyntax.SynchronizeRegion(LoadedRegion, document);
-            WorldTopologyRuntime.NotifyTopologyChanged();
-            LoadError = null;
-            return true;
+                WorldConnectionSyntax.SynchronizeRegion(region, document);
+                WorldTopologyRuntime.NotifyTopologyChanged();
+                LoadError = null;
+            }
+            catch (Exception error)
+            {
+                LoadError = error.Message;
+                global::DryCycle.Plugin.Logger?.LogError("WorldText save failed: " + error);
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                return false;
+            }
         }
-        catch (Exception error)
+        else
         {
-            LoadError = error.Message;
-            global::DryCycle.Plugin.Logger?.LogError("WorldText save failed: " + error);
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            WorldConnectionSyntax.SynchronizeRegion(region, document);
+        }
+
+        if (!WorldCreatureAuthoringHooks.SaveAdditional(region))
+        {
+            LoadError = "Lineage save failed.";
             return false;
         }
+
+        LoadError = null;
+        return true;
     }
 
     internal static void Clear()
