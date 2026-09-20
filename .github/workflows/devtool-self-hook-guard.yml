@@ -1,0 +1,66 @@
+name: DevTool Self-Hook Guard
+
+on:
+  push:
+    paths:
+      - 'src/DevUI/DevTool/**'
+      - '.github/workflows/devtool-self-hook-guard.yml'
+  pull_request:
+    paths:
+      - 'src/DevUI/DevTool/**'
+      - '.github/workflows/devtool-self-hook-guard.yml'
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject new DryCycle-on-DryCycle RuntimeDetour sites
+        shell: python
+        run: |
+          from pathlib import Path
+          import sys
+
+          root = Path('src/DevUI/DevTool')
+
+          # Transitional debt only. Each entry must disappear as its behavior is wired directly
+          # into the owning DryCycle service. This allow-list is intentionally exact so new
+          # RuntimeDetour-based self hooks cannot be introduced while the migration is in flight.
+          allowed = {
+              'RWImGui/WorldMapBackgroundBudgetPlugin.cs',
+              'RWImGui/WorldMapExactShortcutPlugin.cs',
+              'RWImGui/WorldMapGpuPipeBatchPlugin.cs',
+              'RWImGui/WorldMapGpuRegionPreloadPlugin.cs',
+              'RWImGui/WorldMapGpuRetainedOptimizerPlugin.cs',
+              'RWImGui/WorldMapPerformancePlugin.cs',
+              'RWImGui/WorldMapPipeLayerPlugin.cs',
+              'RWImGui/WorldMapPresentationCorrectnessPlugin.cs',
+              'RWImGui/WorldMapRasterReadbackFallbackPlugin.cs',
+              'RWImGui/WorldMapRenderOrderPlugin.cs',
+              'RWImGui/WorldMapThumbnailVisibilityPlugin.cs',
+          }
+
+          marker = 'MonoMod.RuntimeDetour.Hook'
+          actual = set()
+          for path in root.rglob('*.cs'):
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              if marker in text:
+                  actual.add(path.relative_to(root).as_posix())
+
+          unexpected = sorted(actual - allowed)
+          retired = sorted(allowed - actual)
+
+          if unexpected:
+              print('New DevTool RuntimeDetour sites are forbidden. Use a direct interface/service/event for DryCycle-owned code:')
+              for path in unexpected:
+                  print(f'  + {path}')
+              sys.exit(1)
+
+          if retired:
+              print('Self-hook debt was removed but the guard allow-list was not tightened:')
+              for path in retired:
+                  print(f'  - {path}')
+              print('Remove retired entries from devtool-self-hook-guard.yml in the same change.')
+              sys.exit(1)
+
+          print(f'Guarded transitional self-hook debt: {len(actual)} files; no new sites added.')
