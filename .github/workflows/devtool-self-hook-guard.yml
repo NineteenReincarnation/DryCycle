@@ -27,7 +27,12 @@ jobs:
           # Read-only HookGen discovery is not an installation site. DryCycle-owned code must prefer
           # direct interfaces/services/events; any future external compatibility detour must be added
           # deliberately and reviewed rather than appearing implicitly.
-          allowed = set()
+          # Sole reviewed exception: this detours Rain World's external SoundLoader.GetAudioClip
+          # because some HookGen builds expose incompatible metadata for its two-out signature.
+          # It is not a DryCycle-on-DryCycle/self hook.
+          allowed = {
+              'Misc/SoundFormatSupport/SoundFormatSupportRuntime.cs',
+          }
 
           marker = 'MonoMod.RuntimeDetour.Hook'
           actual = set()
