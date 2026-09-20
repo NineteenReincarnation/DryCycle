@@ -29,19 +29,6 @@ jobs:
           # Native migrations retire DryCycle-on-DryCycle hooks; whenever a site disappears, remove
           # it here in the same change so the debt can only shrink.
           allowed = {
-              'Map/PlayerMap/PlayerMapConfigBuildPipeline.cs',
-              'Map/PlayerMap/PlayerMapDerivedLayoutBridge.cs',
-              'Map/PlayerMap/PlayerMapDisabledConfigFilter.cs',
-              'Map/PlayerMap/PlayerMapGroupCommandRuntime.cs',
-              'Map/PlayerMap/PlayerMapIncrementalRender.cs',
-              'Map/PlayerMap/PlayerMapLayerMutationFilter.cs',
-              'Map/PlayerMap/PlayerMapMigrationCommandBridge.cs',
-              'Map/PlayerMap/PlayerMapMigrationDirtyBridge.cs',
-              'Map/PlayerMap/PlayerMapPlacementBootstrap.cs',
-              'Map/PlayerMap/PlayerMapRenderOutputValidator.cs',
-              'Map/PlayerMap/PlayerMapRenderPreparation.cs',
-              'Map/PlayerMap/PlayerMapRenderRevisionGuard.cs',
-              'Map/PlayerMap/PlayerMapTerrainBakeBridge.cs',
               'Preview/EffectPreviewBootstrap.cs',
               'World/WorldCreatureLiveReload.cs',
               'World/WorldTopologyLiveTraversalFixPlugin.cs',
