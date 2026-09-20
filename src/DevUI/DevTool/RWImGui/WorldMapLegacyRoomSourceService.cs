@@ -14,6 +14,24 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class WorldMapLegacyRoomSourceService
 {
+    internal readonly struct RoomTextureSource
+    {
+        internal RoomTextureSource(Texture2D texture, Rect uv, float width, float height, int signature)
+        {
+            Texture = texture;
+            Uv = uv;
+            Width = width;
+            Height = height;
+            Signature = signature;
+        }
+
+        internal Texture2D Texture { get; }
+        internal Rect Uv { get; }
+        internal float Width { get; }
+        internal float Height { get; }
+        internal int Signature { get; }
+    }
+
     private const int SourceAuditIntervalFrames = 15;
     private static readonly Dictionary<int, RoomPanel> panelIndex = new();
 
@@ -52,6 +70,65 @@ internal static class WorldMapLegacyRoomSourceService
             cachedSourceHash = hash;
             nextSourceAuditFrame = Time.frameCount + SourceAuditIntervalFrames;
             return hash;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the exact vanilla texture source consumed by the retained renderer. All knowledge of
+    /// RoomPanel, RoomRepresentation.mapTex and its direct-texture fallback stays inside this legacy
+    /// adapter, so the Native scene can migrate without learning additional vanilla representation
+    /// details.
+    /// </summary>
+    internal static bool TryGetRoomTexture(MapPage page, int roomIndex, out RoomTextureSource source)
+    {
+        source = default;
+        if (!TryFindRoomPanel(page, roomIndex, out RoomPanel panel) || panel.roomRep == null)
+            return false;
+
+        MapObject.RoomRepresentation rep = panel.roomRep;
+        FAtlasElement element = rep.mapTex;
+        if (TryResolveRoomTextureAtlas(
+                element,
+                out Texture2D atlas,
+                out Rect uv,
+                out float width,
+                out float height))
+        {
+            unchecked
+            {
+                int signature = 17;
+                signature = signature * 397 ^ 1;
+                signature = signature * 397 ^ (element.name?.GetHashCode() ?? 0);
+                signature = signature * 397 ^ atlas.GetInstanceID();
+                signature = signature * 397 ^ atlas.width;
+                signature = signature * 397 ^ atlas.height;
+                signature = signature * 397 ^ Mathf.RoundToInt(width * 1000f);
+                signature = signature * 397 ^ Mathf.RoundToInt(height * 1000f);
+                signature = signature * 397 ^ Mathf.RoundToInt(uv.x * 1000000f);
+                signature = signature * 397 ^ Mathf.RoundToInt(uv.y * 1000000f);
+                signature = signature * 397 ^ Mathf.RoundToInt(uv.width * 1000000f);
+                signature = signature * 397 ^ Mathf.RoundToInt(uv.height * 1000000f);
+                source = new RoomTextureSource(atlas, uv, width, height, signature);
+                return true;
+            }
+        }
+
+        Texture2D direct = rep.texture;
+        if (direct == null) return false;
+        unchecked
+        {
+            int signature = 17;
+            signature = signature * 397 ^ 2;
+            signature = signature * 397 ^ direct.GetInstanceID();
+            signature = signature * 397 ^ direct.width;
+            signature = signature * 397 ^ direct.height;
+            source = new RoomTextureSource(
+                direct,
+                new Rect(0f, 0f, 1f, 1f),
+                Math.Max(1f, direct.width),
+                Math.Max(1f, direct.height),
+                signature);
+            return true;
         }
     }
 
@@ -97,42 +174,10 @@ internal static class WorldMapLegacyRoomSourceService
                 hash = hash * 397 ^ room.RoomIndex;
                 hash = hash * 397 ^ room.Layer;
 
-                if (TryFindRoomPanel(page, room.RoomIndex, out RoomPanel panel))
-                {
-                    MapObject.RoomRepresentation rep = panel.roomRep;
-                    FAtlasElement element = rep?.mapTex;
-                    if (TryResolveRoomTextureAtlas(
-                            element,
-                            out Texture2D atlas,
-                            out Rect sourceUv,
-                            out float sourceWidth,
-                            out float sourceHeight))
-                    {
-                        hash = hash * 397 ^ 1;
-                        hash = hash * 397 ^ (element.name?.GetHashCode() ?? 0);
-                        hash = hash * 397 ^ atlas.GetInstanceID();
-                        hash = hash * 397 ^ atlas.width;
-                        hash = hash * 397 ^ atlas.height;
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceWidth * 1000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceHeight * 1000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.x * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.y * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.width * 1000000f);
-                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.height * 1000000f);
-                    }
-                    else if (rep?.texture != null)
-                    {
-                        Texture2D direct = rep.texture;
-                        hash = hash * 397 ^ 2;
-                        hash = hash * 397 ^ direct.GetInstanceID();
-                        hash = hash * 397 ^ direct.width;
-                        hash = hash * 397 ^ direct.height;
-                    }
-                    else
-                    {
-                        hash = hash * 397;
-                    }
-                }
+                if (TryGetRoomTexture(page, room.RoomIndex, out RoomTextureSource source))
+                    hash = hash * 397 ^ source.Signature;
+                else
+                    hash = hash * 397;
 
                 if (WorldMapGpuCache.TryGetRoom(room.RoomIndex, out WorldMapGpuCache.RoomBake bake))
                 {
