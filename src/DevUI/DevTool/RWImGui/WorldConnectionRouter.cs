@@ -175,7 +175,10 @@ internal static class WorldConnectionRouter
     private static readonly Dictionary<string, CachedRoute> cache = new(StringComparer.Ordinal);
     private static int generation;
 
-    internal static Route[] BuildRoutes(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles)
+    internal static Route[] BuildRoutes(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles) =>
+        WorldMapPerformance.BuildRoutes(requests, sourceObstacles);
+
+    internal static Route[] BuildRoutesCore(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles)
     {
         generation++;
         if (requests == null || requests.Count == 0)
