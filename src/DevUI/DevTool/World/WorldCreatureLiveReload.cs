@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx;
 using BepInEx.Logging;
@@ -362,129 +361,64 @@ public sealed class WorldCreatureAuthoringRuntimePlugin : BaseUnityPlugin
 }
 
 /// <summary>
-/// Adds lineage dirty/save semantics to the existing WorldTextRegistry and invokes the safe
-/// room-local preview after ordinary creature edits. RuntimeDetour is used only against DryCycle's
-/// own WorldTextRegistry methods; no Rain World private population method is detoured here.
+/// Direct extension service for lineage dirty/save semantics and room-local creature preview.
+/// WorldTextRegistry calls this service explicitly at its authoritative mutation/save boundaries;
+/// no DryCycle-owned registry method is RuntimeDetoured.
 /// </summary>
 internal static class WorldCreatureAuthoringHooks
 {
-    private delegate bool OrigDirty();
-    private delegate bool HookDirty(OrigDirty orig);
-    private delegate bool OrigSave();
-    private delegate bool HookSave(OrigSave orig);
-    private delegate bool OrigAdd(string region, string roomName, int denNode, string creature, int amount, string spawnData, string timelineFilter, bool excludeTimeline, out int spawnId, out string error);
-    private delegate bool HookAdd(OrigAdd orig, string region, string roomName, int denNode, string creature, int amount, string spawnData, string timelineFilter, bool excludeTimeline, out int spawnId, out string error);
-    private delegate bool OrigUpdate(string region, int spawnId, int denNode, string creature, int amount, string spawnData, string timelineFilter, bool excludeTimeline, out string error);
-    private delegate bool HookUpdate(OrigUpdate orig, string region, int spawnId, int denNode, string creature, int amount, string spawnData, string timelineFilter, bool excludeTimeline, out string error);
-    private delegate bool OrigDelete(string region, int spawnId, out string error);
-    private delegate bool HookDelete(OrigDelete orig, string region, int spawnId, out string error);
-
-    private static readonly List<IDisposable> hooks = new();
     private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static bool AdditionalDirty => enabled && WorldLineageRegistry.Dirty;
 
     internal static void Enable(ManualLogSource logger)
     {
-        if (hooks.Count > 0) return;
+        if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            Hook("get_Dirty", new HookDirty(DirtyHook), Type.EmptyTypes);
-            Hook("Save", new HookSave(SaveHook), Type.EmptyTypes);
-            Hook("TryAddCreatureSpawn", new HookAdd(AddHook), new[]
-            {
-                typeof(string), typeof(string), typeof(int), typeof(string), typeof(int), typeof(string), typeof(string), typeof(bool),
-                typeof(int).MakeByRefType(), typeof(string).MakeByRefType()
-            });
-            Hook("TryUpdateCreatureSpawn", new HookUpdate(UpdateHook), new[]
-            {
-                typeof(string), typeof(int), typeof(int), typeof(string), typeof(int), typeof(string), typeof(string), typeof(bool),
-                typeof(string).MakeByRefType()
-            });
-            Hook("TryDeleteCreatureSpawn", new HookDelete(DeleteHook), new[]
-            {
-                typeof(string), typeof(int), typeof(string).MakeByRefType()
-            });
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Creature authoring hooks could not attach: " + error.Message);
-        }
+        logger?.LogInfo("Creature authoring integration enabled through direct WorldTextRegistry calls; no self-detours attached.");
     }
 
     internal static void Disable()
     {
-        for (int i = hooks.Count - 1; i >= 0; i--) try { hooks[i]?.Dispose(); } catch { }
-        hooks.Clear();
         WorldCreatureLiveReload.Reset();
+        enabled = false;
         log = null;
     }
 
-    private static bool DirtyHook(OrigDirty orig) => orig() || WorldLineageRegistry.Dirty;
-
-    private static bool SaveHook(OrigSave orig)
+    internal static bool SaveAdditional(string region)
     {
-        string region = WorldTextRegistry.LoadedRegion;
-        if (!orig()) return false;
-        if (!WorldLineageRegistry.Dirty) return true;
+        if (!enabled || !WorldLineageRegistry.Dirty)
+            return true;
+
         if (!WorldLineageRegistry.Save(out string error))
         {
             log?.LogWarning("Lineage save failed: " + error);
             return false;
         }
 
-        // WorldDocument deliberately ignores LINEAGE. Reparse after patching so its raw-line snapshot
-        // cannot restore an older lineage row during a later ordinary creature save.
-        if (!string.IsNullOrWhiteSpace(region)) WorldTextRegistry.Reload(region);
+        // WorldDocument deliberately ignores LINEAGE. Reparse after patching so its raw-line
+        // snapshot cannot restore an older lineage row during a later ordinary creature save.
+        if (!string.IsNullOrWhiteSpace(region) && !WorldTextRegistry.Reload(region))
+        {
+            log?.LogWarning("Lineage save succeeded, but world.txt could not be reloaded for region '" + region + "'.");
+            return false;
+        }
+
         return true;
     }
 
-    private static bool AddHook(
-        OrigAdd orig,
-        string region,
-        string roomName,
-        int denNode,
-        string creature,
-        int amount,
-        string spawnData,
-        string timelineFilter,
-        bool excludeTimeline,
-        out int spawnId,
-        out string error)
+    internal static void OnCreatureAdded(string region, string roomName)
     {
-        bool ok = orig(region, roomName, denNode, creature, amount, spawnData, timelineFilter, excludeTimeline, out spawnId, out error);
-        if (ok) WorldCreatureLiveReload.ReloadRoom(region, roomName);
-        return ok;
+        if (enabled && !string.IsNullOrWhiteSpace(roomName))
+            WorldCreatureLiveReload.ReloadRoom(region, roomName);
     }
 
-    private static bool UpdateHook(
-        OrigUpdate orig,
-        string region,
-        int spawnId,
-        int denNode,
-        string creature,
-        int amount,
-        string spawnData,
-        string timelineFilter,
-        bool excludeTimeline,
-        out string error)
+    internal static string FindSpawnRoom(string region, int spawnId)
     {
-        string room = FindSpawnRoom(region, spawnId);
-        bool ok = orig(region, spawnId, denNode, creature, amount, spawnData, timelineFilter, excludeTimeline, out error);
-        if (ok && room.Length > 0) WorldCreatureLiveReload.ReloadRoom(region, room);
-        return ok;
-    }
+        if (!enabled) return string.Empty;
 
-    private static bool DeleteHook(OrigDelete orig, string region, int spawnId, out string error)
-    {
-        string room = FindSpawnRoom(region, spawnId);
-        bool ok = orig(region, spawnId, out error);
-        if (ok && room.Length > 0) WorldCreatureLiveReload.ReloadRoom(region, room);
-        return ok;
-    }
-
-    private static string FindSpawnRoom(string region, int spawnId)
-    {
         RWWorld world = DevToolRuntime.ActiveSession?.World;
         if (world?.abstractRooms == null) return string.Empty;
         for (int i = 0; i < world.abstractRooms.Length; i++)
@@ -498,16 +432,9 @@ internal static class WorldCreatureAuthoringHooks
         return string.Empty;
     }
 
-    private static void Hook(string name, Delegate detour, Type[] parameters)
+    internal static void OnCreatureEdited(string region, string roomName)
     {
-        const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-        MethodInfo method = typeof(WorldTextRegistry).GetMethod(name, flags, null, parameters, null);
-        if (method == null) throw new MissingMethodException("WorldTextRegistry." + name + " was not found.");
-        Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: true);
-        ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-        if (constructor == null) throw new MissingMethodException("RuntimeDetour Hook(MethodBase, Delegate) is unavailable.");
-        IDisposable instance = constructor.Invoke(new object[] { method, detour }) as IDisposable;
-        if (instance == null) throw new InvalidOperationException("Could not create hook for " + name + ".");
-        hooks.Add(instance);
+        if (enabled && !string.IsNullOrWhiteSpace(roomName))
+            WorldCreatureLiveReload.ReloadRoom(region, roomName);
     }
 }
