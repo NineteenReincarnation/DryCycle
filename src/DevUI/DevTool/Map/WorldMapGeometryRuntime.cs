@@ -182,6 +182,9 @@ internal static partial class MapRoomGeometryPresentationHub
 
     internal static void Prime(EditorSession session)
     {
+        if (!DryCycle.DevUI.DevTool.RWImGui.WorldMapGpuRuntime.AllowPresentationPrime())
+            return;
+
         if (session?.Owner?.activePage is not MapPage page || page.world == null)
         {
             Clear();
