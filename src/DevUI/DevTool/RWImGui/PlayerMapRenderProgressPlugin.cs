@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -28,63 +27,28 @@ public sealed class PlayerMapRenderProgressPlugin : BaseUnityPlugin
 
 internal static class PlayerMapRenderProgressView
 {
-    private delegate void OrigDrawRenderReport(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawRenderReport(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot);
-
-    private static readonly HookDrawRenderReport DrawRenderReportHookDelegate = DrawRenderReportHook;
-    private static IDisposable drawReportHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo report = typeof(PlayerMapWorkspaceView).GetMethod(
-                "DrawRenderReport",
-                flags,
-                null,
-                new[] { typeof(PlayerMapPresentationSnapshot) },
-                null);
-            if (report == null)
-                throw new MissingMethodException("PlayerMapWorkspaceView.DrawRenderReport was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawReportHook = constructor.Invoke(new object[] { report, DrawRenderReportHookDelegate }) as IDisposable;
-            if (drawReportHook == null)
-                throw new InvalidOperationException("Player Map Render progress hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map live Render progress enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map Render progress could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map live Render progress enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { drawReportHook?.Dispose(); }
-        catch { }
-        drawReportHook = null;
         enabled = false;
         log = null;
     }
 
-    private static void DrawRenderReportHook(OrigDrawRenderReport orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void Draw(PlayerMapPresentationSnapshot snapshot)
     {
         if (!enabled)
         {
-            orig(snapshot);
+            PlayerMapWorkspaceView.DrawRenderReportBase(snapshot);
             return;
         }
 
@@ -102,7 +66,7 @@ internal static class PlayerMapRenderProgressView
             return;
         }
 
-        orig(snapshot);
+        PlayerMapWorkspaceView.DrawRenderReportBase(snapshot);
     }
 
     private static void DrawPreparationProgress(PlayerMapRenderPreparationSnapshot progress)
@@ -179,10 +143,4 @@ internal static class PlayerMapRenderProgressView
         draw.AddRect(min, max, border, 2f);
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
