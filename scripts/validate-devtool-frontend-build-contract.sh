@@ -93,6 +93,24 @@ targets_text = targets_path.read_text(encoding='utf-8')
 require('<Compile Remove="DevUI/DevTool/RWImGui/**/*.cs" />' in targets_text,
         'DryCycle backend no longer excludes the DevTool RWImGui frontend source tree')
 
+# The dependency direction is backend -> frontend contract only through neutral backend callbacks.
+# DryCycle.dll cannot name types from DryCycle.DevTool.RWImGui.dll because the frontend already
+# references DryCycle.dll. Catch accidental reverse references before they become CS0234/assembly
+# cycles in a real local build.
+backend_devtool_dir = Path('src/DevUI/DevTool')
+reverse_reference_hits = []
+for source in backend_devtool_dir.rglob('*.cs'):
+    if frontend_dir in source.parents:
+        continue
+    text = source.read_text(encoding='utf-8')
+    if 'DryCycle.DevUI.DevTool.RWImGui' in text:
+        reverse_reference_hits.append(str(source))
+require(
+    not reverse_reference_hits,
+    'DryCycle backend source references the RWImGui frontend namespace; use a backend bridge/callback instead: '
+    + ', '.join(reverse_reference_hits)
+)
+
 reference_nodes = {
     item.attrib.get('Include', ''): item
     for item in nodes(frontend, 'Reference')
