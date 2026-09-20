@@ -556,5 +556,6 @@ internal static class PlayerMapMigrationStreamRuntime
         revision = revision >= long.MaxValue ? 1L : revision + 1L;
         observedRevision = long.MinValue;
         EditorRevisionHub.Mark(session, EditorRevisionKind.Map);
+        PlayerMapMigrationDirtyBridge.MarkDirty(session);
     }
 }
