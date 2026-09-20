@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -41,48 +40,7 @@ internal static class WorldMapGpuPipeBatch
 {
     private const int RenderLayer = 31;
 
-    private delegate void OrigSceneApply(WorldMapGpuScene.FrameState frame, EditorSession session);
-    private delegate void HookSceneApply(
-        OrigSceneApply orig,
-        WorldMapGpuScene.FrameState frame,
-        EditorSession session);
-
-    private delegate void OrigDrawShortcutSocket(
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow,
-        uint color,
-        bool connected,
-        bool emphasized);
-    private delegate void HookDrawShortcutSocket(
-        OrigDrawShortcutSocket orig,
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow,
-        uint color,
-        bool connected,
-        bool emphasized);
-
-    private delegate void OrigDrawCreatureShortcutSocket(
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow);
-    private delegate void HookDrawCreatureShortcutSocket(
-        OrigDrawCreatureShortcutSocket orig,
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow);
-
-    private static readonly HookSceneApply SceneApplyHookDelegate = SceneApplyHook;
-    private static readonly HookDrawShortcutSocket ShortcutSocketHookDelegate = DrawShortcutSocketHook;
-    private static readonly HookDrawCreatureShortcutSocket CreatureSocketHookDelegate = DrawCreatureShortcutSocketHook;
-
     private static ManualLogSource log;
-    private static IDisposable sceneApplyHook;
-    private static IDisposable shortcutSocketHook;
-    private static IDisposable creatureSocketHook;
-    private static FieldInfo roomPipesVisibleField;
-    private static FieldInfo creaturePipesVisibleField;
 
     private static GameObject root;
     private static Mesh mesh;
@@ -98,66 +56,13 @@ internal static class WorldMapGpuPipeBatch
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo apply = typeof(WorldMapGpuScene).GetMethod(
-                "Apply", flags, null,
-                new[] { typeof(WorldMapGpuScene.FrameState), typeof(EditorSession) }, null);
-            MethodInfo drawShortcutSocket = typeof(WorldMapView).GetMethod(
-                "DrawShortcutSocket",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(ImDrawListPtr), typeof(Num.Vector2), typeof(uint), typeof(uint),
-                    typeof(bool), typeof(bool)
-                },
-                null);
-            MethodInfo drawCreatureSocket = typeof(WorldMapView).GetMethod(
-                "DrawCreatureShortcutSocket",
-                flags,
-                null,
-                new[] { typeof(ImDrawListPtr), typeof(Num.Vector2), typeof(uint) },
-                null);
-
-            Type pipeLayerType = typeof(WorldMapPipeLayers);
-            roomPipesVisibleField = pipeLayerType.GetField("roomPipesVisible", flags);
-            creaturePipesVisibleField = pipeLayerType.GetField("creaturePipesVisible", flags);
-
-            if (apply == null || drawShortcutSocket == null || drawCreatureSocket == null ||
-                roomPipesVisibleField == null || creaturePipesVisibleField == null)
-                throw new MissingMemberException("GPU pipe batch integration targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            sceneApplyHook = constructor.Invoke(new object[] { apply, SceneApplyHookDelegate }) as IDisposable;
-            shortcutSocketHook = constructor.Invoke(new object[] { drawShortcutSocket, ShortcutSocketHookDelegate }) as IDisposable;
-            creatureSocketHook = constructor.Invoke(new object[] { drawCreatureSocket, CreatureSocketHookDelegate }) as IDisposable;
-            enabled = true;
-            log?.LogInfo("GPU World Map pipe batching enabled.");
-        }
-        catch (Exception error)
-        {
-            string message = Unwrap(error).Message;
-            Disable();
-            logger?.LogWarning("GPU World Map pipe batching could not attach: " + message);
-        }
+        logger?.LogInfo("GPU World Map pipe batching enabled through direct scene/view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref creatureSocketHook);
-        DisposeHook(ref shortcutSocketHook);
-        DisposeHook(ref sceneApplyHook);
-        roomPipesVisibleField = null;
-        creaturePipesVisibleField = null;
         DestroyRenderer();
         region = string.Empty;
         lastHash = int.MinValue;
@@ -167,13 +72,10 @@ internal static class WorldMapGpuPipeBatch
         log = null;
     }
 
-    private static void SceneApplyHook(
-        OrigSceneApply orig,
+    internal static void AfterSceneApply(
         WorldMapGpuScene.FrameState frame,
         EditorSession session)
     {
-        orig(frame, session);
-
         if (!enabled || !WorldMapGpuScene.Ready || frame?.Visible != true ||
             frame.Snapshot?.Available != true || session?.ToolMode != EditorToolMode.Map)
         {
@@ -196,29 +98,19 @@ internal static class WorldMapGpuPipeBatch
         }
     }
 
-    private static void DrawShortcutSocketHook(
-        OrigDrawShortcutSocket orig,
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow,
-        uint color,
-        bool connected,
-        bool emphasized)
-    {
-        // Static sockets are already on the retained GPU mesh. Keep only emphasized states in the
-        // immediate overlay so hover/link/selection remains crisp and always appears above routes.
-        if (roomPipeGpuReady && !emphasized) return;
-        orig(draw, point, shadow, color, connected, emphasized);
-    }
+    internal static bool ShouldDrawRoomPipeSocket(bool emphasized) =>
+        !enabled || !roomPipeGpuReady || emphasized;
 
-    private static void DrawCreatureShortcutSocketHook(
-        OrigDrawCreatureShortcutSocket orig,
-        ImDrawListPtr draw,
-        Num.Vector2 point,
-        uint shadow)
+    internal static bool ShouldDrawCreaturePipeSocket() =>
+        !enabled || !creaturePipeGpuReady;
+
+    internal static void SuppressScreenPresentation()
     {
-        if (creaturePipeGpuReady) return;
-        orig(draw, point, shadow);
+        roomPipeGpuReady = false;
+        creaturePipeGpuReady = false;
+        SetRendererVisible(false);
+        if (root != null && root.activeSelf)
+            root.SetActive(false);
     }
 
     private static void Reconcile(WorldMapGpuScene.FrameState frame)
@@ -230,8 +122,8 @@ internal static class WorldMapGpuPipeBatch
             lastHash = int.MinValue;
         }
 
-        bool roomVisible = ReadBool(roomPipesVisibleField, true);
-        bool creatureVisible = ReadBool(creaturePipesVisibleField, true);
+        bool roomVisible = WorldMapPipeLayers.RoomPipesVisible;
+        bool creatureVisible = WorldMapPipeLayers.CreaturePipesVisible;
         bool cacheComplete = WorldMapGpuCache.HasCompleteCachedData(frame.Snapshot);
         roomPipeGpuReady = cacheComplete && roomVisible;
         creaturePipeGpuReady = cacheComplete && creatureVisible;
@@ -684,12 +576,6 @@ internal static class WorldMapGpuPipeBatch
         shader = null;
     }
 
-    private static bool ReadBool(FieldInfo field, bool fallback)
-    {
-        try { return field?.GetValue(null) is bool value ? value : fallback; }
-        catch { return fallback; }
-    }
-
     private static long EndpointKey(int roomIndex, int nodeIndex) =>
         ((long)(uint)roomIndex << 32) | (uint)nodeIndex;
 
@@ -697,20 +583,6 @@ internal static class WorldMapGpuPipeBatch
 
     private static string NormalizeRegion(string value) =>
         string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
-
-    private static void DisposeHook(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 
     private struct BoundsBuilder
     {
