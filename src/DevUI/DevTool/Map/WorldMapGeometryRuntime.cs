@@ -323,6 +323,9 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
     {
+        if (!DryCycle.DevUI.DevTool.RWImGui.WorldMapBackgroundBudget.ShouldProcessGeometry(world))
+            return;
+
         int count = roomOrder.Count;
         if (count == 0) return;
 
