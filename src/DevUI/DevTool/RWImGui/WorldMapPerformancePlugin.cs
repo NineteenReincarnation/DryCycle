@@ -117,11 +117,15 @@ internal static class WorldMapPerformance
         ResetCaches();
         ResetThrottles();
         ClearLookupIndex();
+        WorldMapFrontendBridge.RegisterShouldPublish(ShouldPublish);
+        WorldMapFrontendBridge.RegisterShouldPrimeGeometry(ShouldPrimeGeometry);
         logger?.LogInfo("World Map performance cache enabled through direct call sites; no self-detours attached.");
     }
 
     internal static void Disable()
     {
+        WorldMapFrontendBridge.UnregisterShouldPrimeGeometry(ShouldPrimeGeometry);
+        WorldMapFrontendBridge.UnregisterShouldPublish(ShouldPublish);
         WorldMapHotState.Invalidate();
         ResetCaches();
         ResetThrottles();
