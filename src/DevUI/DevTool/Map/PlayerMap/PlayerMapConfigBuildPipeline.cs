@@ -14,9 +14,9 @@ namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 /// <summary>
 /// Single authoritative writer for rebuilt Player Map / Canon View map configuration.
 ///
-/// The integration hook exists only at the old PlayerMapConfigSerializer.Save boundary. Everything
-/// after that point is new code: one immutable capture, one validation pass, one document build and
-/// one atomic commit. No vanilla MapPage/RoomPanel/MiniMap update lifecycle is driven here.
+/// PlayerMapConfigSerializer.Save delegates directly to this writer. Everything after that point is
+/// new code: one immutable capture, one validation pass, one document build and one atomic commit.
+/// No vanilla MapPage/RoomPanel/MiniMap update lifecycle is driven here.
 ///
 /// Exact Connection records are generated from DryCycle's node-to-node topology and static room
 /// shortcut bake. Repeated pipes between the same room pair therefore remain distinct and never use
