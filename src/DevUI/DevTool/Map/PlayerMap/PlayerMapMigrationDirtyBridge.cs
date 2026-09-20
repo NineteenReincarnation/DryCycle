@@ -49,7 +49,7 @@ internal static class PlayerMapMigrationDirtyBridge
             states.GetValue(session, _ => new State()).Dirty = false;
     }
 
-    internal static PlayerMapPresentationSnapshot Project(
+    internal static PlayerMapPresentationSnapshot ProjectPresentation(
         EditorSession session,
         PlayerMapPresentationSnapshot source)
     {
