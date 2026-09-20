@@ -43,11 +43,6 @@ jobs:
               'Map/PlayerMap/PlayerMapRenderRevisionGuard.cs',
               'Map/PlayerMap/PlayerMapTerrainBakeBridge.cs',
               'Preview/EffectPreviewBootstrap.cs',
-              'RWImGui/DevToolUserFacingCopyCleanupPlugin.cs',
-              'RWImGui/ScopedScrollChromePlugin.cs',
-              'RWImGui/WorldInspectorReadabilityPlugin.cs',
-              'RWImGui/WorldSubregionSelector.cs',
-              'RWImGui/WorldWorkspaceAsciiDirectionPlugin.cs',
               'World/WorldCreatureLiveReload.cs',
               'World/WorldTopologyLiveTraversalFixPlugin.cs',
           }
