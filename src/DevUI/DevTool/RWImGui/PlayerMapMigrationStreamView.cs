@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -17,31 +16,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class PlayerMapMigrationStreamView
 {
-    private delegate void OrigDrawToolbar(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawToolbar(OrigDrawToolbar orig, PlayerMapPresentationSnapshot snapshot);
-    private delegate void OrigDrawRooms(
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-    private delegate void HookDrawRooms(
-        OrigDrawRooms orig,
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-    private delegate void OrigDrawInspector(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawInspector(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot);
-
-    private static readonly HookDrawToolbar DrawToolbarHookDelegate = DrawToolbarHook;
-    private static readonly HookDrawRooms DrawRoomsHookDelegate = DrawRoomsHook;
-    private static readonly HookDrawInspector DrawInspectorHookDelegate = DrawInspectorHook;
-
-    private static IDisposable toolbarHook;
-    private static IDisposable roomsHook;
-    private static IDisposable inspectorHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
     private static bool enabled;
     private static bool streamMode;
     private static string selectedStream = string.Empty;
@@ -54,54 +28,12 @@ internal static class PlayerMapMigrationStreamView
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type view = typeof(PlayerMapWorkspaceView);
-            MethodInfo toolbar = view.GetMethod(
-                "DrawToolbar", flags, null, new[] { typeof(PlayerMapPresentationSnapshot) }, null);
-            MethodInfo rooms = view.GetMethod(
-                "DrawRooms", flags, null,
-                new[]
-                {
-                    typeof(ImDrawListPtr), typeof(PlayerMapPresentationSnapshot), typeof(Num.Vector2),
-                    typeof(PlayerMapRoomSnapshot)
-                }, null);
-            MethodInfo inspector = view.GetMethod(
-                "DrawInspector", flags, null, new[] { typeof(PlayerMapPresentationSnapshot) }, null);
-            panField = view.GetField("pan", flags);
-            zoomField = view.GetField("zoom", flags);
-            if (toolbar == null || rooms == null || inspector == null || panField == null || zoomField == null)
-                throw new MissingMemberException("Player Map migration stream view targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            toolbarHook = constructor.Invoke(new object[] { toolbar, DrawToolbarHookDelegate }) as IDisposable;
-            roomsHook = constructor.Invoke(new object[] { rooms, DrawRoomsHookDelegate }) as IDisposable;
-            inspectorHook = constructor.Invoke(new object[] { inspector, DrawInspectorHookDelegate }) as IDisposable;
-            if (toolbarHook == null || roomsHook == null || inspectorHook == null)
-                throw new InvalidOperationException("Player Map migration stream view hooks were not created.");
-
-            enabled = true;
-            logger?.LogInfo("Player Map migration stream ImGui view enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map migration stream view could not attach: " + Unwrap(error).Message);
-        }
+        enabled = true;
+        logger?.LogInfo("Player Map migration stream ImGui view enabled through direct view calls; no self-detours attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref inspectorHook);
-        Dispose(ref roomsHook);
-        Dispose(ref toolbarHook);
-        panField = null;
-        zoomField = null;
         streamMode = false;
         selectedStream = string.Empty;
         region = string.Empty;
@@ -110,9 +42,8 @@ internal static class PlayerMapMigrationStreamView
         enabled = false;
     }
 
-    private static void DrawToolbarHook(OrigDrawToolbar orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void DrawToolbar(PlayerMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
         PlayerMapMigrationPresentationSnapshot migration = CurrentMigration();
@@ -139,16 +70,17 @@ internal static class PlayerMapMigrationStreamView
         }
     }
 
-    private static void DrawRoomsHook(
-        OrigDrawRooms orig,
+    internal static void DrawOverlay(
         ImDrawListPtr draw,
         PlayerMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         PlayerMapRoomSnapshot hovered)
     {
-        orig(draw, snapshot, canvasMin, hovered);
-        if (!enabled || !streamMode || snapshot?.Available != true || !TryView(out Num.Vector2 pan, out float zoom))
+        if (!enabled || !streamMode || snapshot?.Available != true)
             return;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = Math.Max(0.01f, PlayerMapWorkspaceView.Zoom);
 
         PlayerMapMigrationPresentationSnapshot migration = CurrentMigration();
         Normalize(migration);
@@ -162,9 +94,8 @@ internal static class PlayerMapMigrationStreamView
         }
     }
 
-    private static void DrawInspectorHook(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void DrawInspector(PlayerMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
         if (!enabled || !streamMode || snapshot?.Available != true) return;
 
         PlayerMapMigrationPresentationSnapshot migration = CurrentMigration();
@@ -386,33 +317,4 @@ internal static class PlayerMapMigrationStreamView
     private static void QueueText(string name, PlayerMapMigrationCommandKind kind, string value) =>
         PlayerMapMigrationCommandQueue.Enqueue(new PlayerMapMigrationCommand(kind, name, text: value));
 
-    private static bool TryView(out Num.Vector2 pan, out float zoom)
-    {
-        pan = default;
-        zoom = 1f;
-        try
-        {
-            pan = (Num.Vector2)panField.GetValue(null);
-            zoom = Math.Max(0.01f, (float)zoomField.GetValue(null));
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
