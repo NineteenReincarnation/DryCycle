@@ -370,6 +370,7 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         state.Dirty = false;
+        PlayerMapMigrationDirtyBridge.OnSaveSucceeded(self);
         Touch(state, dirty: false);
     }
 
