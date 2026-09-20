@@ -858,6 +858,9 @@ internal static class PlayerMapConfigSerializer
 {
     internal static bool Save(MapPage page, PlayerMapSessionState state, out string error)
     {
+        if (PlayerMapConfigBuildPipeline.Enabled)
+            return PlayerMapConfigBuildPipeline.Save(page, state, out error);
+
         error = null;
         if (page?.world == null || state == null)
         {
