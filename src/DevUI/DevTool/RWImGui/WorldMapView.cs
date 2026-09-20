@@ -156,6 +156,7 @@ internal static class WorldMapView
 
     private static void DrawCanvas(EditorMapPresentationSnapshot snapshot)
     {
+        WorldMapExactShortcuts.BeforeCanvas(snapshot);
         Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
         if (canvasSize.X < 80f || canvasSize.Y < 80f) return;
@@ -220,6 +221,8 @@ internal static class WorldMapView
         HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
+        if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
+            selectedConnectionId = string.Empty;
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
     }
 
