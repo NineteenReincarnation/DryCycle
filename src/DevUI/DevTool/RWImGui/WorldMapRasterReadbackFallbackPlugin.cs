@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
-using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
@@ -33,9 +31,6 @@ public sealed class WorldMapRasterReadbackFallbackPlugin : BaseUnityPlugin
 
 internal static class WorldMapRasterReadbackFallback
 {
-    private delegate EditorMapRoomVisualSnapshot OrigGeometryGet(int roomIndex);
-    private delegate EditorMapRoomVisualSnapshot HookGeometryGet(OrigGeometryGet orig, int roomIndex);
-
     private readonly struct RasterSource
     {
         internal RasterSource(Texture2D texture, int x, int y, int width, int height, int key)
@@ -74,54 +69,23 @@ internal static class WorldMapRasterReadbackFallback
         internal bool Water { get; }
     }
 
-    private static readonly HookGeometryGet GeometryGetHookDelegate = GeometryGetHook;
     private static readonly Dictionary<int, CachedRaster> cache = new();
     private static readonly HashSet<int> loggedFailures = new();
 
     private static ManualLogSource log;
-    private static IDisposable geometryGetHook;
     private static bool enabled;
     private static string cachedRegion = string.Empty;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo geometryGet = typeof(MapRoomGeometryPresentationHub).GetMethod(
-                "Get", flags, null, new[] { typeof(int) }, null);
-            if (geometryGet == null)
-                throw new MissingMethodException("MapRoomGeometryPresentationHub.Get(int) was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            geometryGetHook = constructor.Invoke(new object[] { geometryGet, GeometryGetHookDelegate }) as IDisposable;
-            if (geometryGetHook == null)
-                throw new InvalidOperationException("World Map raster readback hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("World Map GPU raster readback fallback enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World Map raster readback fallback could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("World Map GPU raster readback fallback enabled through direct geometry fallback; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { geometryGetHook?.Dispose(); }
-        catch { }
-        geometryGetHook = null;
         cache.Clear();
         loggedFailures.Clear();
         cachedRegion = string.Empty;
@@ -129,13 +93,13 @@ internal static class WorldMapRasterReadbackFallback
         log = null;
     }
 
-    private static EditorMapRoomVisualSnapshot GeometryGetHook(OrigGeometryGet orig, int roomIndex)
+    internal static EditorMapRoomVisualSnapshot Enhance(int roomIndex, EditorMapRoomVisualSnapshot original)
     {
-        EditorMapRoomVisualSnapshot original = orig(roomIndex) ?? EditorMapRoomVisualSnapshot.Empty;
+        original ??= EditorMapRoomVisualSnapshot.Empty;
         if (!enabled || original.DetailedRasterAvailable) return original;
 
         EditorSession session = DevToolRuntime.ActiveSession;
-        if (session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page)
+        if (session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not DevInterface.MapPage page)
             return original;
 
         string region = page.world?.name ?? string.Empty;
@@ -146,8 +110,11 @@ internal static class WorldMapRasterReadbackFallback
             cachedRegion = region;
         }
 
-        if (!TryFindRoomPanel(page, roomIndex, out RoomPanel panel) ||
-            !TryGetRasterSource(panel.roomRep, out RasterSource source))
+        if (!WorldMapLegacyRoomSourceService.TryGetRoomTexture(
+                page,
+                roomIndex,
+                out WorldMapLegacyRoomSourceService.RoomTextureSource textureSource) ||
+            !TryGetRasterSource(textureSource, out RasterSource source))
             return original;
 
         if (!cache.TryGetValue(roomIndex, out CachedRaster cached) || cached.Key != source.Key)
@@ -155,7 +122,7 @@ internal static class WorldMapRasterReadbackFallback
             if (!TryReadPixels(source, out Color[] pixels))
             {
                 if (loggedFailures.Add(roomIndex))
-                    log?.LogDebug("World Map raster readback failed for " + (panel.roomRep?.room?.name ?? roomIndex.ToString()) + ".");
+                    log?.LogDebug("World Map raster readback failed for room " + roomIndex + ".");
                 return original;
             }
 
@@ -180,54 +147,36 @@ internal static class WorldMapRasterReadbackFallback
         };
     }
 
-    private static bool TryFindRoomPanel(MapPage page, int roomIndex, out RoomPanel panel)
-    {
-        panel = null;
-        if (page?.subNodes == null) return false;
-        for (int i = 0; i < page.subNodes.Count; i++)
-        {
-            if (page.subNodes[i] is not RoomPanel candidate || candidate.roomRep?.room == null ||
-                candidate.roomRep.room.index != roomIndex)
-                continue;
-            panel = candidate;
-            return true;
-        }
-        return false;
-    }
-
-    private static bool TryGetRasterSource(MapObject.RoomRepresentation roomRep, out RasterSource source)
+    private static bool TryGetRasterSource(
+        WorldMapLegacyRoomSourceService.RoomTextureSource roomSource,
+        out RasterSource source)
     {
         source = default;
         try
         {
-            if (roomRep?.texture != null)
-            {
-                Texture2D texture = roomRep.texture;
-                int key = texture.GetInstanceID();
-                key = unchecked(key * 397 ^ texture.width);
-                key = unchecked(key * 397 ^ texture.height);
-                source = new RasterSource(texture, 0, 0,
-                    Math.Max(1, texture.width), Math.Max(1, texture.height), key);
-                return true;
-            }
+            Texture2D texture = roomSource.Texture;
+            if (texture == null) return false;
 
-            FAtlasElement element = roomRep?.mapTex;
-            if (element?.atlas?.texture is not Texture2D atlas) return false;
-            Rect uv = element.uvRect;
-            int x = Mathf.Clamp(Mathf.RoundToInt(uv.x * atlas.width), 0, Math.Max(0, atlas.width - 1));
-            int y = Mathf.Clamp(Mathf.RoundToInt(uv.y * atlas.height), 0, Math.Max(0, atlas.height - 1));
-            int width = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.width) * atlas.width), 1, atlas.width - x);
-            int height = Mathf.Clamp(Mathf.RoundToInt(Mathf.Abs(uv.height) * atlas.height), 1, atlas.height - y);
+            Rect uv = roomSource.Uv;
+            int x = Mathf.Clamp(Mathf.RoundToInt(uv.x * texture.width), 0, Math.Max(0, texture.width - 1));
+            int y = Mathf.Clamp(Mathf.RoundToInt(uv.y * texture.height), 0, Math.Max(0, texture.height - 1));
+            int width = Mathf.Clamp(
+                Mathf.RoundToInt(Mathf.Abs(uv.width) * texture.width),
+                1,
+                Math.Max(1, texture.width - x));
+            int height = Mathf.Clamp(
+                Mathf.RoundToInt(Mathf.Abs(uv.height) * texture.height),
+                1,
+                Math.Max(1, texture.height - y));
 
             unchecked
             {
-                int key = atlas.GetInstanceID();
-                key = key * 397 ^ (element.name?.GetHashCode() ?? 0);
+                int key = roomSource.Signature;
                 key = key * 397 ^ x;
                 key = key * 397 ^ y;
                 key = key * 397 ^ width;
                 key = key * 397 ^ height;
-                source = new RasterSource(atlas, x, y, width, height, key);
+                source = new RasterSource(texture, x, y, width, height, key);
             }
             return true;
         }
@@ -410,10 +359,4 @@ internal static class WorldMapRasterReadbackFallback
         Math.Abs(color.g - g) <= tolerance &&
         Math.Abs(color.b - b) <= tolerance;
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
