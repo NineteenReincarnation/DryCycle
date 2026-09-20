@@ -419,7 +419,7 @@ internal static class WorldMapShortcutPresentation
         scansRemaining = 0;
     }
 
-    private static void Clear()
+    internal static void Clear()
     {
         cache.Clear();
         roomOrder.Clear();
