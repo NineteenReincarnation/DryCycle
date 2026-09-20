@@ -252,20 +252,23 @@ internal static class ControlCenterWindow
                 chinese ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
 
-        ImGui.Spacing();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("性能", "Profiling"));
-        ImGui.SameLine(keyColumn);
-        bool profiling = DevToolPerformanceMonitor.Enabled;
-        if (DevToolWidgets.ActionButton(
-                profiling
-                    ? DevToolUiSettings.T("监控中", "Monitoring")
-                    : DevToolUiSettings.T("开启", "Enable"),
-                "ControlCenterPerformance",
-                profiling ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        if (!DevToolUserFacingCopyCleanup.HideNormalDiagnostics)
         {
-            bool enable = !profiling;
-            DevToolPerformanceMonitor.SetEnabled(enable);
-            DevToolFrontendPerformanceMonitor.SetEnabled(enable);
+            ImGui.Spacing();
+            DevToolWidgets.MutedText(DevToolUiSettings.T("性能", "Profiling"));
+            ImGui.SameLine(keyColumn);
+            bool profiling = DevToolPerformanceMonitor.Enabled;
+            if (DevToolWidgets.ActionButton(
+                    profiling
+                        ? DevToolUiSettings.T("监控中", "Monitoring")
+                        : DevToolUiSettings.T("开启", "Enable"),
+                    "ControlCenterPerformance",
+                    profiling ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            {
+                bool enable = !profiling;
+                DevToolPerformanceMonitor.SetEnabled(enable);
+                DevToolFrontendPerformanceMonitor.SetEnabled(enable);
+            }
         }
     }
 
@@ -428,6 +431,8 @@ internal static class ControlCenterWindow
 
     private static void DrawPerformanceDiagnostics(Num.Vector2 display)
     {
+        if (DevToolUserFacingCopyCleanup.HideNormalDiagnostics)
+            return;
         if (DevToolPerformanceMonitor.Enabled)
             DevToolPerformanceWindow.Draw(display);
     }
