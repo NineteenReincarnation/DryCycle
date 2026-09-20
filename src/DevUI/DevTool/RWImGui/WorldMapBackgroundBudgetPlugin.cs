@@ -1,17 +1,16 @@
 using System;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
-using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Spreads non-essential World Map preview discovery over time. Current and selected rooms are
-/// still refreshed by the priority path in each presentation cache; this gate only limits the
-/// background sweep across the rest of the region.
+/// Spreads non-essential World Map preview discovery over time.
+///
+/// Geometry and shortcut presentation hubs call this budget directly. The plugin ID remains for
+/// dependency ordering, but no DryCycle-owned method is RuntimeDetoured.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapPerformancePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -22,37 +21,15 @@ public sealed class WorldMapBackgroundBudgetPlugin : BaseUnityPlugin
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
     private void OnEnable() => WorldMapBackgroundBudget.Enable(Logger);
-
     private void OnDisable() => WorldMapBackgroundBudget.Disable();
 }
 
 internal static class WorldMapBackgroundBudget
 {
-    // Below the renderer's overview LOD threshold detailed RoomSettings/MapTex geometry is not
-    // visible anyway. Avoid decoding every other room until the author actually zooms in.
     private const float DetailedBackgroundZoom = 0.42f;
     private const int GeometrySweepIntervalFrames = 4;
     private const int ShortcutSweepIntervalFrames = 4;
 
-    private delegate void OrigGeometryBackground(global::World world, int currentRoom, int selectedRoom);
-    private delegate void HookGeometryBackground(
-        OrigGeometryBackground orig,
-        global::World world,
-        int currentRoom,
-        int selectedRoom);
-
-    private delegate void OrigShortcutBackground(int currentRoom, int selectedRoom);
-    private delegate void HookShortcutBackground(
-        OrigShortcutBackground orig,
-        int currentRoom,
-        int selectedRoom);
-
-    private static readonly HookGeometryBackground GeometryBackgroundHookDelegate = GeometryBackgroundHook;
-    private static readonly HookShortcutBackground ShortcutBackgroundHookDelegate = ShortcutBackgroundHook;
-
-    private static ManualLogSource log;
-    private static IDisposable geometryHook;
-    private static IDisposable shortcutHook;
     private static bool enabled;
     private static int lastGeometrySweepFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
@@ -62,126 +39,64 @@ internal static class WorldMapBackgroundBudget
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            MethodInfo geometryBackground = typeof(MapRoomGeometryPresentationHub).GetMethod(
-                "ProcessBackground",
-                flags,
-                null,
-                new[] { typeof(global::World), typeof(int), typeof(int) },
-                null);
-            MethodInfo shortcutBackground = typeof(WorldMapShortcutPresentation).GetMethod(
-                "ProcessBackground",
-                flags,
-                null,
-                new[] { typeof(int), typeof(int) },
-                null);
-
-            if (geometryBackground == null || shortcutBackground == null)
-                throw new MissingMemberException("World Map background-budget hook targets were not found.");
-
-            geometryHook = constructor.Invoke(
-                new object[] { geometryBackground, GeometryBackgroundHookDelegate }) as IDisposable;
-            shortcutHook = constructor.Invoke(
-                new object[] { shortcutBackground, ShortcutBackgroundHookDelegate }) as IDisposable;
-
-            enabled = true;
-            log?.LogInfo("World Map background preview budget enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World Map background preview budget could not attach: " + Unwrap(error).Message);
-        }
+        enabled = true;
+        ResetState();
+        logger?.LogInfo("World Map background preview budget enabled through direct presentation calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref shortcutHook);
-        DisposeHook(ref geometryHook);
-        WorldMapHotState.Invalidate();
-        lastGeometrySweepFrame = -1000;
-        lastShortcutSweepFrame = -1000;
-        geometryRegion = string.Empty;
-        shortcutRegion = string.Empty;
         enabled = false;
-        log = null;
+        ResetState();
+        WorldMapHotState.Invalidate();
     }
 
-    private static void GeometryBackgroundHook(
-        OrigGeometryBackground orig,
-        global::World world,
-        int currentRoom,
-        int selectedRoom)
+    internal static bool ShouldProcessGeometry(global::World world)
     {
+        if (!enabled) return true;
+
         string region = world?.name ?? string.Empty;
         if (!string.Equals(region, geometryRegion, StringComparison.OrdinalIgnoreCase))
         {
             geometryRegion = region;
             lastGeometrySweepFrame = Time.frameCount;
-            return;
+            return false;
         }
 
         if (WorldMapHotState.Zoom < DetailedBackgroundZoom)
-            return;
+            return false;
 
         if (Time.frameCount - lastGeometrySweepFrame < GeometrySweepIntervalFrames)
-            return;
+            return false;
 
         lastGeometrySweepFrame = Time.frameCount;
-        orig(world, currentRoom, selectedRoom);
+        return true;
     }
 
-    private static void ShortcutBackgroundHook(
-        OrigShortcutBackground orig,
-        int currentRoom,
-        int selectedRoom)
+    internal static bool ShouldProcessShortcuts()
     {
+        if (!enabled) return true;
+
         string region = DevToolRuntime.ActiveSession?.World?.name ?? string.Empty;
         if (!string.Equals(region, shortcutRegion, StringComparison.OrdinalIgnoreCase))
         {
             shortcutRegion = region;
             lastShortcutSweepFrame = Time.frameCount;
-            return;
+            return false;
         }
 
         if (Time.frameCount - lastShortcutSweepFrame < ShortcutSweepIntervalFrames)
-            return;
+            return false;
 
         lastShortcutSweepFrame = Time.frameCount;
-        orig(currentRoom, selectedRoom);
+        return true;
     }
 
-    private static void DisposeHook(ref IDisposable hook)
+    private static void ResetState()
     {
-        try
-        {
-            hook?.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            hook = null;
-        }
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
+        lastGeometrySweepFrame = -1000;
+        lastShortcutSweepFrame = -1000;
+        geometryRegion = string.Empty;
+        shortcutRegion = string.Empty;
     }
 }
