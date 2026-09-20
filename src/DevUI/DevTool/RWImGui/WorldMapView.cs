@@ -142,6 +142,7 @@ internal static class WorldMapView
         }
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
+        WorldMapGpuRuntime.DrawToolbar(snapshot);
     }
 
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
@@ -199,6 +200,7 @@ internal static class WorldMapView
         EditorMapRoomSnapshot hoveredRoom = canvasHovered
             ? FindHoveredRoom(snapshot, canvasMin, canvasSize, io.MousePos)
             : null;
+        WorldMapGpuRuntime.SetHoveredRoom(hoveredRoom?.RoomIndex ?? -1);
         ExitPortHit hoveredPort = canvasHovered
             ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
             : null;
@@ -235,6 +237,18 @@ internal static class WorldMapView
             zoom,
             localPositions,
             layerVisible);
+        WorldMapGpuRuntime.PublishFrame(
+            snapshot,
+            canvasMin,
+            canvasSize,
+            io.DisplaySize,
+            pan,
+            zoom,
+            showConnections: false,
+            layerVisible,
+            localPositions,
+            selectedConnectionId,
+            hoveredConnectionId);
         WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
     }
@@ -298,6 +312,9 @@ internal static class WorldMapView
         bool hovered)
     {
         WorldMapRenderOrder.UseBase(draw);
+        if (WorldMapGpuRuntime.TryDrawRoomGeometry(draw, room, visual, roomMin, selected, hovered, zoom))
+            return;
+
         int pushedStyleColors = WorldMapThumbnailVisibility.PushRoomStyle();
         try
         {
