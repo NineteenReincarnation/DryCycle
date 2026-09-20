@@ -146,6 +146,8 @@ internal static class PlayerMapWorkspaceView
             PlayerMapCommandQueue.Enqueue(new PlayerMapCommand(PlayerMapCommandKind.RenderAndExport));
 
         PlayerMapLayoutAssist.DrawToolbar(snapshot);
+        PlayerMapGroupLayerControls.DrawToolbar(snapshot);
+        PlayerMapMigrationStreamView.DrawToolbar(snapshot);
     }
 
     private static void DrawExplorer(PlayerMapPresentationSnapshot snapshot)
@@ -321,6 +323,8 @@ internal static class PlayerMapWorkspaceView
 
         PlayerMapMultiSelection.DrawOverlay(draw, snapshot, canvasMin, hovered);
         PlayerMapLayoutAssist.DrawOverlay(draw, snapshot, canvasMin, hovered);
+        PlayerMapLiveOverlapPreview.DrawOverlay(draw, snapshot, canvasMin, hovered);
+        PlayerMapMigrationStreamView.DrawOverlay(draw, snapshot, canvasMin, hovered);
     }
 
     private static void DrawConnections(
@@ -367,6 +371,7 @@ internal static class PlayerMapWorkspaceView
         Num.Vector2 canvasMin,
         ImGuiIOPtr io)
     {
+        PlayerMapGroupLayerControls.HandleShortcuts(snapshot, canvasHovered, io);
         if (PlayerMapCanvasAuthoring.OwnsCanvas)
             return;
         if (PlayerMapMultiSelection.HandleInteraction(snapshot, canvasHovered, hoveredRoom, canvasMin, io))
@@ -409,6 +414,9 @@ internal static class PlayerMapWorkspaceView
         PlayerMapCanvasAuthoring.DrawInspectorTools(snapshot, room);
         ImGui.Separator();
         PlayerMapRenderProgressView.Draw(snapshot);
+        PlayerMapGroupPlacementControls.Draw(snapshot);
+        PlayerMapGroupLayoutControls.Draw(snapshot);
+        PlayerMapMigrationStreamView.DrawInspector(snapshot);
         PlayerMapPreflightPanel.Draw(snapshot);
     }
 
