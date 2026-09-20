@@ -28,7 +28,6 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
         On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
         On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
-        On.SoundLoader.ReleaseAllUnityAudio += SoundLoader_ReleaseAllUnityAudio;
 
         enabled = true;
         Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
@@ -50,7 +49,6 @@ internal static class SoundFormatSupportRuntime
 
     private static void RemoveOnHooks()
     {
-        On.SoundLoader.ReleaseAllUnityAudio -= SoundLoader_ReleaseAllUnityAudio;
         On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds;
         On.SoundLoader.RequestAmbientAudioClip -= SoundLoader_RequestAmbientAudioClip;
         On.SoundLoader.VariationsForSound -= SoundLoader_VariationsForSound;
@@ -140,14 +138,6 @@ internal static class SoundFormatSupportRuntime
 
     private static void SoundLoader_LoadSounds(
         On.SoundLoader.orig_LoadSounds orig,
-        SoundLoader self)
-    {
-        orig(self);
-        HydrateLoadedSoundEffectOverrides(self);
-    }
-
-    private static void SoundLoader_ReleaseAllUnityAudio(
-        On.SoundLoader.orig_ReleaseAllUnityAudio orig,
         SoundLoader self)
     {
         orig(self);
