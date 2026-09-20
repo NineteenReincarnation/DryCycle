@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 
@@ -30,11 +29,6 @@ public sealed class PlayerMapTerrainBakeBridgePlugin : BaseUnityPlugin
 
 internal static class PlayerMapTerrainBakeBridge
 {
-    private delegate bool OrigTryGetReady(int roomIndex, out RoomMapBake bake);
-    private delegate bool HookTryGetReady(OrigTryGetReady orig, int roomIndex, out RoomMapBake bake);
-    private delegate RoomMapBakeSnapshot OrigGetSnapshot(int roomIndex);
-    private delegate RoomMapBakeSnapshot HookGetSnapshot(OrigGetSnapshot orig, int roomIndex);
-
     private sealed class OverlayEntry
     {
         internal RoomMapBake BaseBake;
@@ -42,70 +36,29 @@ internal static class PlayerMapTerrainBakeBridge
         internal RoomMapBake Enhanced;
     }
 
-    private static readonly HookTryGetReady TryGetReadyHookDelegate = TryGetReadyHook;
-    private static readonly HookGetSnapshot GetSnapshotHookDelegate = GetSnapshotHook;
     private static readonly Dictionary<int, OverlayEntry> Cache = new();
 
-    private static IDisposable tryGetReadyHook;
-    private static IDisposable getSnapshotHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type cacheType = typeof(RoomMapBakeCache);
-            MethodInfo tryGetReady = cacheType.GetMethod(
-                "TryGetReady",
-                flags,
-                null,
-                new[] { typeof(int), typeof(RoomMapBake).MakeByRefType() },
-                null);
-            MethodInfo getSnapshot = cacheType.GetMethod(
-                "GetSnapshot",
-                flags,
-                null,
-                new[] { typeof(int) },
-                null);
-            if (tryGetReady == null || getSnapshot == null)
-                throw new MissingMemberException("RoomMapBakeCache terrain bridge targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            tryGetReadyHook = constructor.Invoke(new object[] { tryGetReady, TryGetReadyHookDelegate }) as IDisposable;
-            getSnapshotHook = constructor.Invoke(new object[] { getSnapshot, GetSnapshotHookDelegate }) as IDisposable;
-            if (tryGetReadyHook == null || getSnapshotHook == null)
-                throw new InvalidOperationException("Player Map terrain-bake hooks were not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map authored-terrain bake bridge enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map terrain-bake bridge could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map authored-terrain bake bridge enabled through direct cache calls; no self-detours attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref getSnapshotHook);
-        Dispose(ref tryGetReadyHook);
         Cache.Clear();
         enabled = false;
         log = null;
     }
 
-    private static bool TryGetReadyHook(OrigTryGetReady orig, int roomIndex, out RoomMapBake bake)
+    internal static bool TryEnhanceReady(int roomIndex, RoomMapBake baseBake, out RoomMapBake bake)
     {
-        if (!orig(roomIndex, out RoomMapBake baseBake) || baseBake == null)
+        if (baseBake == null)
         {
             bake = null;
             Cache.Remove(roomIndex);
@@ -123,8 +76,6 @@ internal static class PlayerMapTerrainBakeBridge
                 out EditorMapRectSnapshot[] terrainRuns,
                 out int terrainRevision))
         {
-            // Do not silently treat "not scanned yet" as "no authored terrain". Official render
-            // preflight must wait for a definite semantic result so output cannot depend on timing.
             bake = null;
             Cache.Remove(roomIndex);
             return false;
@@ -159,9 +110,11 @@ internal static class PlayerMapTerrainBakeBridge
         return true;
     }
 
-    private static RoomMapBakeSnapshot GetSnapshotHook(OrigGetSnapshot orig, int roomIndex)
+    internal static RoomMapBakeSnapshot ProjectSnapshot(
+        int roomIndex,
+        RoomMapBakeSnapshot source,
+        RoomMapBake baseBake)
     {
-        RoomMapBakeSnapshot source = orig(roomIndex);
         if (!enabled || source == null || source.Status != RoomMapBakeStatus.Ready)
             return source;
 
@@ -184,7 +137,7 @@ internal static class PlayerMapTerrainBakeBridge
         if (terrainRuns == null || terrainRuns.Length == 0)
             return source;
 
-        if (!RoomMapBakeCache.TryGetReady(roomIndex, out RoomMapBake enhanced) || enhanced == null)
+        if (!TryEnhanceReady(roomIndex, baseBake, out RoomMapBake enhanced) || enhanced == null)
         {
             return new RoomMapBakeSnapshot
             {
@@ -321,17 +274,4 @@ internal static class PlayerMapTerrainBakeBridge
         return runs.ToArray();
     }
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
