@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
@@ -38,80 +37,29 @@ internal static class PlayerMapLiveOverlapPreview
         internal float Top { get; }
     }
 
-    private delegate void OrigDrawRooms(
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-    private delegate void HookDrawRooms(
-        OrigDrawRooms orig,
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-
-    private static readonly HookDrawRooms DrawRoomsHookDelegate = DrawRoomsHook;
-    private static IDisposable drawHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo layerVisibleField;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type view = typeof(PlayerMapWorkspaceView);
-            MethodInfo drawRooms = view.GetMethod("DrawRooms", flags, null,
-                new[] { typeof(ImDrawListPtr), typeof(PlayerMapPresentationSnapshot), typeof(Num.Vector2), typeof(PlayerMapRoomSnapshot) }, null);
-            panField = view.GetField("pan", flags);
-            zoomField = view.GetField("zoom", flags);
-            layerVisibleField = view.GetField("LayerVisible", flags);
-            if (drawRooms == null || panField == null || zoomField == null || layerVisibleField == null)
-                throw new MissingMemberException("Player Map live-overlap targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawHook = constructor.Invoke(new object[] { drawRooms, DrawRoomsHookDelegate }) as IDisposable;
-            if (drawHook == null)
-                throw new InvalidOperationException("Player Map live-overlap hook was not created.");
-
-            enabled = true;
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map live overlap preview could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map live overlap preview enabled through direct room overlay calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { drawHook?.Dispose(); }
-        catch { }
-        drawHook = null;
-        panField = null;
-        zoomField = null;
-        layerVisibleField = null;
         enabled = false;
         log = null;
     }
 
-    private static void DrawRoomsHook(
-        OrigDrawRooms orig,
+    internal static void DrawOverlay(
         ImDrawListPtr draw,
         PlayerMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         PlayerMapRoomSnapshot hovered)
     {
-        orig(draw, snapshot, canvasMin, hovered);
         if (!enabled || snapshot?.Available != true) return;
 
         PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
@@ -129,7 +77,10 @@ internal static class PlayerMapLiveOverlapPreview
             }
             rects.Add(new RectRecord(room, position));
         }
-        if (!anyPreview || !TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers)) return;
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        if (!anyPreview || zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null) return;
 
         HashSet<int> overlaps = new();
         for (int i = 0; i < rects.Count; i++)
@@ -164,29 +115,4 @@ internal static class PlayerMapLiveOverlapPreview
         }
     }
 
-    private static bool TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers)
-    {
-        pan = default;
-        zoom = 1f;
-        layers = null;
-        try
-        {
-            pan = (Num.Vector2)panField.GetValue(null);
-            zoom = (float)zoomField.GetValue(null);
-            layers = layerVisibleField.GetValue(null) as bool[];
-            return zoom > 0f && !float.IsNaN(zoom) && !float.IsInfinity(zoom);
-        }
-        catch (Exception error)
-        {
-            log?.LogDebug("Player Map live-overlap view state failed: " + error.Message);
-            return false;
-        }
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
