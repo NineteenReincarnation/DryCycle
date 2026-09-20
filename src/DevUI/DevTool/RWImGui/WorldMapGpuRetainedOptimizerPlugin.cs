@@ -9,9 +9,10 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Transitional attachment for the retained World Map room-source service.
 ///
-/// The optimization policy now lives behind WorldMapLegacyRoomSourceService. RuntimeDetour remains
-/// here only until WorldMapGpuScene calls that service directly; no cache/data ownership lives in
-/// this hook adapter anymore.
+/// The optimization policy and all room-source ownership live behind
+/// WorldMapLegacyRoomSourceService. RuntimeDetour remains here only until WorldMapGpuScene calls
+/// that service directly; the hook adapter does not pass original DryCycle implementations back
+/// into the service and owns no cache/data behavior.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -106,11 +107,10 @@ internal static class WorldMapGpuRetainedOptimizer
         MapPage page,
         WorldMapGpuScene.FrameState frame)
     {
+        // RuntimeDetour requires the original delegate in the hook signature, but the service is now
+        // fully authoritative and deliberately does not call back into the DryCycle method it hooks.
         if (!enabled) return orig(page, frame);
-        return WorldMapLegacyRoomSourceService.ComputeSourceHash(
-            page,
-            frame,
-            (sourcePage, sourceFrame) => orig(sourcePage, sourceFrame));
+        return WorldMapLegacyRoomSourceService.ComputeSourceHash(page, frame);
     }
 
     private static bool TryFindRoomPanelHook(
@@ -120,12 +120,7 @@ internal static class WorldMapGpuRetainedOptimizer
         out RoomPanel panel)
     {
         if (!enabled) return orig(page, roomIndex, out panel);
-        return WorldMapLegacyRoomSourceService.TryFindRoomPanel(
-            page,
-            roomIndex,
-            (MapPage sourcePage, int sourceRoomIndex, out RoomPanel sourcePanel) =>
-                orig(sourcePage, sourceRoomIndex, out sourcePanel),
-            out panel);
+        return WorldMapLegacyRoomSourceService.TryFindRoomPanel(page, roomIndex, out panel);
     }
 
     private static void DisposeHook(ref IDisposable hook)
