@@ -27,8 +27,7 @@ jobs:
           # Read-only HookGen discovery is not an installation site. DryCycle-owned code must prefer
           # direct interfaces/services/events; any future external compatibility detour must be added
           # deliberately and reviewed rather than appearing implicitly.
-          allowed = {
-          }
+          allowed = set()
 
           marker = 'MonoMod.RuntimeDetour.Hook'
           actual = set()
