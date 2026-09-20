@@ -65,7 +65,6 @@ jobs:
               'RWImGui/WorldMapGpuPipeBatchPlugin.cs',
               'RWImGui/WorldMapGpuRegionPreloadPlugin.cs',
               'RWImGui/WorldMapGpuRendererPlugin.cs',
-              'RWImGui/WorldMapGpuRetainedOptimizerPlugin.cs',
               'RWImGui/WorldMapImGuiPresentationFallbackPlugin.cs',
               'RWImGui/WorldMapPerformancePlugin.cs',
               'RWImGui/WorldMapPipeLayerPlugin.cs',
