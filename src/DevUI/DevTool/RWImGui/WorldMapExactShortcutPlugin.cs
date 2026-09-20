@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
@@ -45,28 +44,6 @@ internal static class WorldMapExactShortcuts
     private const int FilePollFrames = 240;
     private const int ShortcutGuard = 1000;
 
-    private delegate void OrigDrawCanvas(EditorMapPresentationSnapshot snapshot);
-    private delegate void HookDrawCanvas(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot);
-
-    private delegate bool OrigTryGetExitMouth(
-        int roomIndex,
-        int nodeIndex,
-        out WorldMapShortcutPresentation.ShortcutMarker marker);
-    private delegate bool HookTryGetExitMouth(
-        OrigTryGetExitMouth orig,
-        int roomIndex,
-        int nodeIndex,
-        out WorldMapShortcutPresentation.ShortcutMarker marker);
-
-    private delegate WorldMapShortcutPresentation.ShortcutMarker[] OrigGetCreatureHoles(int roomIndex);
-    private delegate WorldMapShortcutPresentation.ShortcutMarker[] HookGetCreatureHoles(
-        OrigGetCreatureHoles orig,
-        int roomIndex);
-
-    private static readonly HookDrawCanvas DrawCanvasHookDelegate = DrawCanvasHook;
-    private static readonly HookTryGetExitMouth TryGetExitMouthHookDelegate = TryGetExitMouthHook;
-    private static readonly HookGetCreatureHoles GetCreatureHolesHookDelegate = GetCreatureHolesHook;
-
     private sealed class Entry
     {
         internal int RoomIndex;
@@ -94,10 +71,6 @@ internal static class WorldMapExactShortcuts
     }
 
     private static ManualLogSource log;
-    private static IDisposable drawCanvasHook;
-    private static IDisposable exitMouthHook;
-    private static IDisposable creatureHoleHook;
-    private static FieldInfo selectedConnectionIdField;
 
     private static readonly Dictionary<int, Entry> entries = new();
     private static readonly List<int> roomOrder = new();
@@ -111,74 +84,13 @@ internal static class WorldMapExactShortcuts
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type mapType = typeof(WorldMapView);
-            Type shortcutType = typeof(WorldMapShortcutPresentation);
-
-            MethodInfo drawCanvas = mapType.GetMethod(
-                "DrawCanvas",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot) },
-                null);
-            MethodInfo tryGetExit = shortcutType.GetMethod(
-                "TryGetExitMouth",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(int),
-                    typeof(int),
-                    typeof(WorldMapShortcutPresentation.ShortcutMarker).MakeByRefType()
-                },
-                null);
-            MethodInfo getCreatureHoles = shortcutType.GetMethod(
-                "GetCreatureHoles",
-                flags,
-                null,
-                new[] { typeof(int) },
-                null);
-
-            selectedConnectionIdField = mapType.GetField("selectedConnectionId", flags);
-
-            if (drawCanvas == null || tryGetExit == null || getCreatureHoles == null ||
-                selectedConnectionIdField == null)
-                throw new MissingMemberException("World Map exact shortcut targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawCanvasHook = constructor.Invoke(new object[] { drawCanvas, DrawCanvasHookDelegate }) as IDisposable;
-            exitMouthHook = constructor.Invoke(new object[] { tryGetExit, TryGetExitMouthHookDelegate }) as IDisposable;
-            creatureHoleHook = constructor.Invoke(new object[] { getCreatureHoles, GetCreatureHolesHookDelegate }) as IDisposable;
-
-            if (drawCanvasHook == null || exitMouthHook == null || creatureHoleHook == null)
-                throw new InvalidOperationException("One or more exact shortcut hooks were not created.");
-
-            enabled = true;
-            log?.LogInfo("World Map exact shortcut resolver enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World Map exact shortcut resolver could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("World Map exact shortcut resolver enabled through direct view/presentation calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref creatureHoleHook);
-        DisposeHook(ref exitMouthHook);
-        DisposeHook(ref drawCanvasHook);
-        selectedConnectionIdField = null;
         entries.Clear();
         roomOrder.Clear();
         region = string.Empty;
@@ -190,36 +102,40 @@ internal static class WorldMapExactShortcuts
         log = null;
     }
 
-    private static void DrawCanvasHook(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot)
+    internal static void BeforeCanvas(EditorMapPresentationSnapshot snapshot)
     {
         if (enabled && snapshot?.Available == true)
             UpdateExactCache(DevToolRuntime.ActiveSession, snapshot.SelectedRoomIndex);
-
-        orig(snapshot);
-
-        if (enabled && snapshot?.Available == true)
-            HandleConnectionDeleteShortcut(snapshot);
     }
 
-    private static bool TryGetExitMouthHook(
-        OrigTryGetExitMouth orig,
+    internal static bool TryGetExitMouth(
         int roomIndex,
         int nodeIndex,
         out WorldMapShortcutPresentation.ShortcutMarker marker)
     {
         marker = default;
-        if (enabled && entries.TryGetValue(roomIndex, out Entry entry) && entry.Ready)
-            return entry.ExitMouths.TryGetValue(nodeIndex, out marker);
-        return orig(roomIndex, nodeIndex, out marker);
+        return enabled &&
+               entries.TryGetValue(roomIndex, out Entry entry) &&
+               entry.Ready &&
+               entry.ExitMouths.TryGetValue(nodeIndex, out marker);
     }
 
-    private static WorldMapShortcutPresentation.ShortcutMarker[] GetCreatureHolesHook(
-        OrigGetCreatureHoles orig,
-        int roomIndex)
+    internal static bool TryGetCreatureHoles(
+        int roomIndex,
+        out WorldMapShortcutPresentation.ShortcutMarker[] holes)
     {
-        if (enabled && entries.TryGetValue(roomIndex, out Entry entry) && entry.Ready)
-            return entry.CreatureHoles ?? Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
-        return orig(roomIndex);
+        holes = null;
+        if (!enabled || !entries.TryGetValue(roomIndex, out Entry entry) || !entry.Ready)
+            return false;
+
+        holes = entry.CreatureHoles ?? Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
+        return true;
+    }
+
+    internal static bool AfterCanvas(EditorMapPresentationSnapshot snapshot, string selectedConnectionId)
+    {
+        return enabled && snapshot?.Available == true &&
+               HandleConnectionDeleteShortcut(snapshot, selectedConnectionId);
     }
 
     private static void UpdateExactCache(EditorSession session, int selectedRoomIndex)
@@ -571,27 +487,24 @@ internal static class WorldMapExactShortcuts
         return pos;
     }
 
-    private static void HandleConnectionDeleteShortcut(EditorMapPresentationSnapshot snapshot)
+    private static bool HandleConnectionDeleteShortcut(EditorMapPresentationSnapshot snapshot, string selected)
     {
         EditorSession session = DevToolRuntime.ActiveSession;
-        if (session?.ToolMode != EditorToolMode.Map || snapshot == null) return;
+        if (session?.ToolMode != EditorToolMode.Map || snapshot == null) return false;
 
         ImGuiIOPtr io = ImGui.GetIO();
-        if (io.WantTextInput) return;
+        if (io.WantTextInput) return false;
         bool requested = ImGui.IsKeyPressed(ImGuiKey.X) || ImGui.IsKeyPressed(ImGuiKey.Delete);
-        if (!requested) return;
-
-        string selected = selectedConnectionIdField?.GetValue(null) as string ?? string.Empty;
-        if (string.IsNullOrEmpty(selected)) return; // Delete may already have been handled by WorldMapView.
+        if (!requested || string.IsNullOrEmpty(selected)) return false;
 
         EditorMapConnectionSnapshot connection = FindConnection(snapshot, selected);
         if (connection == null || connection.Ambiguous ||
             connection.FromNodeIndex < 0 || connection.ToNodeIndex < 0)
-            return;
+            return false;
 
         EditorMapRoomSnapshot roomA = FindRoom(snapshot, connection.FromRoomIndex);
         EditorMapRoomSnapshot roomB = FindRoom(snapshot, connection.ToRoomIndex);
-        if (roomA == null || roomB == null) return;
+        if (roomA == null || roomB == null) return false;
 
         WorldTopologyCommandQueue.Enqueue(new WorldTopologyCommand(
             WorldTopologyCommandKind.DeleteConnection,
@@ -601,7 +514,7 @@ internal static class WorldMapExactShortcuts
             nodeA: connection.FromNodeIndex,
             roomB: roomB.Name,
             nodeB: connection.ToNodeIndex));
-        selectedConnectionIdField.SetValue(null, string.Empty);
+        return true;
     }
 
     private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id)
@@ -647,17 +560,4 @@ internal static class WorldMapExactShortcuts
         backgroundCursor = 0;
     }
 
-    private static void DisposeHook(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
