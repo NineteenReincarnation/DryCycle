@@ -107,7 +107,7 @@ internal static class WorldMapView
 
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
         ImGui.SameLine();
-        DrawCompactCheckbox(DevToolUiSettings.T("出口编号", "Exit IDs"), "WorldMapPortLabels", ref showPortLabels);
+        WorldMapPipeLayers.DrawToolbarControls(ref showPortLabels, ref linkingRoom, ref linkingNode);
         ImGui.SameLine();
         DrawCompactCheckbox(DevToolUiSettings.T("子区域", "Subregions"), "WorldMapSubregions", ref showSubregionLabels);
 
@@ -482,6 +482,7 @@ internal static class WorldMapView
         EditorMapRoomSnapshot hoveredRoom,
         ExitPortHit hoveredPort)
     {
+        if (!WorldMapPipeLayers.RoomPipesVisible) return;
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         bool linking = linkingRoom >= 0;
         for (int i = 0; i < rooms.Length; i++)
@@ -540,8 +541,12 @@ internal static class WorldMapView
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize)
     {
+        if (!WorldMapPipeLayers.CreaturePipesVisible) return;
+
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
+        uint labelBorder = ImGui.GetColorU32(new Num.Vector4(0.10f, 0.72f, 0.28f, 1f));
+        uint labelText = ImGui.GetColorU32(new Num.Vector4(0.32f, 1.00f, 0.46f, 1f));
 
         for (int i = 0; i < rooms.Length; i++)
         {
@@ -558,8 +563,22 @@ internal static class WorldMapView
 
             for (int h = 0; h < holes.Length; h++)
             {
-                Num.Vector2 point = LocalToScreen(min, visual, holes[h].X, holes[h].Y);
+                WorldMapShortcutPresentation.ShortcutMarker hole = holes[h];
+                Num.Vector2 point = LocalToScreen(min, visual, hole.X, hole.Y);
                 DrawCreatureShortcutSocket(draw, point, shadow);
+
+                if (hole.NodeIndex < 0 || (zoom < 0.48f && room.RoomIndex != snapshot.SelectedRoomIndex))
+                    continue;
+
+                string label = hole.NodeIndex.ToString();
+                Num.Vector2 labelSize = ImGui.CalcTextSize(label);
+                bool left = point.X <= (min.X + max.X) * 0.5f;
+                float x = left ? point.X - labelSize.X - 13f : point.X + 13f;
+                Num.Vector2 labelPos = new(x, point.Y - labelSize.Y * 0.5f);
+                Num.Vector2 pad = new(4f, 2f);
+                draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 3f);
+                draw.AddRect(labelPos - pad, labelPos + labelSize + pad, labelBorder, 3f, ImDrawFlags.None, 1f);
+                draw.AddText(labelPos, labelText, label);
             }
         }
     }
