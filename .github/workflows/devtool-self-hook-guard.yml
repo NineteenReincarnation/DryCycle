@@ -62,7 +62,6 @@ jobs:
               'RWImGui/WorldMapBackgroundBudgetPlugin.cs',
               'RWImGui/WorldMapExactShortcutPlugin.cs',
               'RWImGui/WorldMapGpuPipeBatchPlugin.cs',
-              'RWImGui/WorldMapGpuRegionPreloadPlugin.cs',
               'RWImGui/WorldMapGpuRendererPlugin.cs',
               'RWImGui/WorldMapImGuiPresentationFallbackPlugin.cs',
               'RWImGui/WorldMapPerformancePlugin.cs',
