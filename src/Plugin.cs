@@ -285,6 +285,8 @@ internal sealed class Plugin : BaseUnityPlugin
 
             InternalGateRuntime.Enable();
             MiscRuntime.Enable();
+            DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.HydrateExisting(
+                self?.processManager?.soundLoader);
             _initialized = true;
             AIDebuggerRuntime.Install(self, Logger);
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
