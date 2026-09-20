@@ -30,6 +30,7 @@ public sealed class PlayerMapMultiSelectionPlugin : BaseUnityPlugin
 internal static class PlayerMapMultiSelection
 {
     private static readonly HashSet<int> Selection = new();
+    internal static HashSet<int> SelectionSet => Selection;
     private static readonly Dictionary<int, Vector2> DragStartPositions = new();
 
     private static ManualLogSource log;
