@@ -114,6 +114,9 @@ internal static class WorldMapShortcutPresentation
 
     internal static bool TryGetExitMouth(int roomIndex, int nodeIndex, out ShortcutMarker marker)
     {
+        if (WorldMapExactShortcuts.TryGetExitMouth(roomIndex, nodeIndex, out marker))
+            return true;
+
         marker = default;
         return cache.TryGetValue(roomIndex, out CacheEntry entry) &&
                entry.ExitMouths.TryGetValue(nodeIndex, out marker);
@@ -121,6 +124,9 @@ internal static class WorldMapShortcutPresentation
 
     internal static ShortcutMarker[] GetCreatureHoles(int roomIndex)
     {
+        if (WorldMapExactShortcuts.TryGetCreatureHoles(roomIndex, out ShortcutMarker[] exact))
+            return exact;
+
         return cache.TryGetValue(roomIndex, out CacheEntry entry)
             ? entry.CreatureHoles
             : Array.Empty<ShortcutMarker>();
