@@ -260,7 +260,10 @@ internal static class PlayerMapWorkspaceRuntime
     {
         if (session == null) return PlayerMapPresentationSnapshot.Empty;
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        return state.Presentation;
+        PlayerMapPresentationSnapshot snapshot = state.Presentation;
+        snapshot = PlayerMapDerivedLayoutBridge.Project(session, snapshot);
+        snapshot = PlayerMapIncrementalRenderHooks.ProjectPresentation(session, snapshot);
+        return snapshot;
     }
 
     internal static bool IsDirty(EditorSession session)
@@ -292,11 +295,16 @@ internal static class PlayerMapWorkspaceRuntime
             state.ObservedSelectedRoom = selectedRoom;
             Publish(page, state, selectedRoom);
         }
+
+        PlayerMapIncrementalRenderHooks.AfterSynchronize(session);
     }
 
     internal static void Execute(EditorSession session, PlayerMapCommand command)
     {
         if (session?.Owner?.activePage is not MapPage page || page.world == null) return;
+        if (PlayerMapLayerMutationFilter.ShouldSkip(session, command)) return;
+        if (PlayerMapIncrementalRenderHooks.TryHandleExecute(session, command)) return;
+
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
         if (!ReferenceEquals(state.Page, page)) InitializeState(page, state);
 
@@ -382,6 +390,7 @@ internal static class PlayerMapWorkspaceRuntime
         LoadDefaultMaterials(page, state);
         SynchronizeRooms(page, state);
         Publish(page, state, MapEditorPresentationHub.Current?.SelectedRoomIndex ?? -1);
+        PlayerMapPlacementBootstrap.AfterInitialize(page, state);
     }
 
     private static bool SynchronizeRooms(MapPage page, PlayerMapSessionState state)
