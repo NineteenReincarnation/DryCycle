@@ -674,7 +674,10 @@ internal static class WorldConnectionOverlay
         }
     }
 
-    private static Num.Vector2[] BuildRoundedPolyline(Num.Vector2[] raw, float radius)
+    private static Num.Vector2[] BuildRoundedPolyline(Num.Vector2[] raw, float radius) =>
+        WorldMapPerformance.BuildRoundedPolyline(raw, radius);
+
+    internal static Num.Vector2[] BuildRoundedPolylineCore(Num.Vector2[] raw, float radius)
     {
         raw = WorldConnectionRouter.Simplify(raw);
         if (raw == null || raw.Length < 3) return raw ?? Array.Empty<Num.Vector2>();
@@ -717,7 +720,10 @@ internal static class WorldConnectionOverlay
         return RemoveNearDuplicates(output);
     }
 
-    private static Num.Vector2[] OffsetPolyline(Num.Vector2[] path, float offset)
+    private static Num.Vector2[] OffsetPolyline(Num.Vector2[] path, float offset) =>
+        WorldMapPerformance.OffsetPolyline(path, offset);
+
+    internal static Num.Vector2[] OffsetPolylineCore(Num.Vector2[] path, float offset)
     {
         if (path == null || path.Length < 2 || Math.Abs(offset) < 0.01f) return path ?? Array.Empty<Num.Vector2>();
         Num.Vector2[] result = new Num.Vector2[path.Length];
@@ -734,7 +740,10 @@ internal static class WorldConnectionOverlay
         return result;
     }
 
-    private static Num.Vector2[] TrimEnds(Num.Vector2[] path, float amount)
+    private static Num.Vector2[] TrimEnds(Num.Vector2[] path, float amount) =>
+        WorldMapPerformance.TrimEnds(path, amount);
+
+    internal static Num.Vector2[] TrimEndsCore(Num.Vector2[] path, float amount)
     {
         if (path == null || path.Length < 2 || amount <= 0f) return path ?? Array.Empty<Num.Vector2>();
         float total = WorldConnectionRouter.PathLength(path);
@@ -966,21 +975,11 @@ internal static class WorldConnectionOverlay
         return center + direction * t;
     }
 
-    private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
-    {
-        EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
-            if (rooms[i].RoomIndex == roomIndex) return rooms[i];
-        return null;
-    }
+    private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex) =>
+        WorldMapPerformance.FindRoom(snapshot, roomIndex);
 
-    private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id)
-    {
-        EditorMapConnectionSnapshot[] connections = snapshot?.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
-        for (int i = 0; i < connections.Length; i++)
-            if (string.Equals(connections[i].ConnectionId, id, StringComparison.Ordinal)) return connections[i];
-        return null;
-    }
+    private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id) =>
+        WorldMapPerformance.FindConnection(snapshot, id);
 
     private static bool IsLayerVisible(int layer, bool[] visibility) =>
         visibility == null || layer < 0 || layer >= visibility.Length || visibility[layer];
