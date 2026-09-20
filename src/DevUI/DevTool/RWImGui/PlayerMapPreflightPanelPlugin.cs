@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -27,61 +26,25 @@ public sealed class PlayerMapPreflightPanelPlugin : BaseUnityPlugin
 
 internal static class PlayerMapPreflightPanel
 {
-    private delegate void OrigDrawInspector(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawInspector(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot);
-
-    private static readonly HookDrawInspector DrawInspectorHookDelegate = DrawInspectorHook;
-    private static IDisposable inspectorHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo inspector = typeof(PlayerMapWorkspaceView).GetMethod(
-                "DrawInspector",
-                flags,
-                null,
-                new[] { typeof(PlayerMapPresentationSnapshot) },
-                null);
-            if (inspector == null)
-                throw new MissingMethodException("PlayerMapWorkspaceView.DrawInspector was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            inspectorHook = constructor.Invoke(new object[] { inspector, DrawInspectorHookDelegate }) as IDisposable;
-            if (inspectorHook == null)
-                throw new InvalidOperationException("Player Map preflight panel hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map live preflight inspector enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map preflight inspector could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map live preflight inspector enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { inspectorHook?.Dispose(); }
-        catch { }
-        inspectorHook = null;
         enabled = false;
         log = null;
     }
 
-    private static void DrawInspectorHook(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void Draw(PlayerMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
         EditorMapPresentationSnapshot world = MapEditorPresentationHub.Current;
@@ -130,10 +93,4 @@ internal static class PlayerMapPreflightPanel
         ImGui.TextUnformatted(value ?? string.Empty);
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
