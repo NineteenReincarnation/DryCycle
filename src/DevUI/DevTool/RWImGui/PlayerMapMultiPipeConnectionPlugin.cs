@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -32,111 +31,39 @@ public sealed class PlayerMapMultiPipeConnectionPlugin : BaseUnityPlugin
 
 internal static class PlayerMapMultiPipeConnections
 {
-    private delegate void OrigDrawConnections(
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        EditorMapPresentationSnapshot worldSnapshot,
-        Num.Vector2 canvasMin);
-
-    private delegate void HookDrawConnections(
-        OrigDrawConnections orig,
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        EditorMapPresentationSnapshot worldSnapshot,
-        Num.Vector2 canvasMin);
-
-    private static readonly HookDrawConnections DrawConnectionsHookDelegate = DrawConnectionsHook;
-
-    private static IDisposable drawConnectionsHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo layerVisibleField;
-    private static FieldInfo draggingRoomField;
-    private static FieldInfo dragPreviewPositionField;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type viewType = typeof(PlayerMapWorkspaceView);
-            MethodInfo drawConnections = viewType.GetMethod(
-                "DrawConnections",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(ImDrawListPtr),
-                    typeof(PlayerMapPresentationSnapshot),
-                    typeof(EditorMapPresentationSnapshot),
-                    typeof(Num.Vector2)
-                },
-                null);
-
-            panField = viewType.GetField("pan", flags);
-            zoomField = viewType.GetField("zoom", flags);
-            layerVisibleField = viewType.GetField("LayerVisible", flags);
-            draggingRoomField = viewType.GetField("draggingRoom", flags);
-            dragPreviewPositionField = viewType.GetField("dragPreviewPosition", flags);
-
-            if (drawConnections == null || panField == null || zoomField == null || layerVisibleField == null ||
-                draggingRoomField == null || dragPreviewPositionField == null)
-                throw new MissingMemberException("Player Map connection presentation targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawConnectionsHook = constructor.Invoke(new object[] { drawConnections, DrawConnectionsHookDelegate }) as IDisposable;
-            if (drawConnectionsHook == null)
-                throw new InvalidOperationException("Player Map multi-pipe connection hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map exact multi-pipe connection rendering enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map multi-pipe rendering could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map exact multi-pipe connection rendering enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { drawConnectionsHook?.Dispose(); }
-        catch { }
-        drawConnectionsHook = null;
-        panField = null;
-        zoomField = null;
-        layerVisibleField = null;
-        draggingRoomField = null;
-        dragPreviewPositionField = null;
         enabled = false;
         log = null;
     }
 
-    private static void DrawConnectionsHook(
-        OrigDrawConnections orig,
+    internal static bool Draw(
         ImDrawListPtr draw,
         PlayerMapPresentationSnapshot snapshot,
         EditorMapPresentationSnapshot worldSnapshot,
         Num.Vector2 canvasMin)
     {
-        if (!enabled || snapshot?.Available != true || worldSnapshot?.Connections == null ||
-            !TryReadViewState(out Num.Vector2 pan, out float zoom, out bool[] layers, out int draggingRoom,
-                out Vector2 dragPreviewPosition))
-        {
-            orig(draw, snapshot, worldSnapshot, canvasMin);
-            return;
-        }
+        if (!enabled || snapshot?.Available != true || worldSnapshot?.Connections == null)
+            return false;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        int draggingRoom = PlayerMapWorkspaceView.DraggingRoom;
+        Vector2 dragPreviewPosition = PlayerMapWorkspaceView.DragPreviewPosition;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null)
+            return false;
 
         EditorMapConnectionSnapshot[] links = worldSnapshot.Connections;
         Dictionary<string, int> pairCounts = CountRoomPairs(links);
@@ -183,6 +110,7 @@ internal static class PlayerMapMultiPipeConnections
             if (exactA) DrawUnresolvedEndpoint(draw, pa, unresolvedColor);
             if (exactB) DrawUnresolvedEndpoint(draw, pb, unresolvedColor);
         }
+        return true;
     }
 
     private static Dictionary<string, int> CountRoomPairs(EditorMapConnectionSnapshot[] links)
@@ -279,38 +207,4 @@ internal static class PlayerMapMultiPipeConnections
         draw.AddLine(point + new Num.Vector2(-radius, radius), point + new Num.Vector2(radius, -radius), color, 1.4f);
     }
 
-    private static bool TryReadViewState(
-        out Num.Vector2 pan,
-        out float zoom,
-        out bool[] layers,
-        out int draggingRoom,
-        out Vector2 dragPreviewPosition)
-    {
-        pan = default;
-        zoom = 1f;
-        layers = null;
-        draggingRoom = -1;
-        dragPreviewPosition = default;
-        try
-        {
-            pan = (Num.Vector2)panField.GetValue(null);
-            zoom = (float)zoomField.GetValue(null);
-            layers = layerVisibleField.GetValue(null) as bool[];
-            draggingRoom = (int)draggingRoomField.GetValue(null);
-            dragPreviewPosition = (Vector2)dragPreviewPositionField.GetValue(null);
-            return zoom > 0f && !float.IsNaN(zoom) && !float.IsInfinity(zoom) && layers != null;
-        }
-        catch (Exception error)
-        {
-            log?.LogDebug("Player Map connection view-state read failed: " + error.Message);
-            return false;
-        }
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
