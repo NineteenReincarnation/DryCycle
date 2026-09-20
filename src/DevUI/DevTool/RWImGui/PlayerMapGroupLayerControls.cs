@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
@@ -16,81 +15,22 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class PlayerMapGroupLayerControls
 {
-    private delegate void OrigDrawToolbar(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawToolbar(OrigDrawToolbar orig, PlayerMapPresentationSnapshot snapshot);
-    private delegate void OrigHandleRoomInteraction(
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-    private delegate void HookHandleRoomInteraction(
-        OrigHandleRoomInteraction orig,
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-
-    private static readonly HookDrawToolbar DrawToolbarHookDelegate = DrawToolbarHook;
-    private static readonly HookHandleRoomInteraction HandleRoomInteractionHookDelegate = HandleRoomInteractionHook;
-
-    private static IDisposable toolbarHook;
-    private static IDisposable interactionHook;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        try
-        {
-            if (!PlayerMapSelectionAccess.Available)
-                throw new InvalidOperationException("Player Map selection adapter is unavailable.");
-
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type view = typeof(PlayerMapWorkspaceView);
-            MethodInfo toolbar = view.GetMethod(
-                "DrawToolbar", flags, null, new[] { typeof(PlayerMapPresentationSnapshot) }, null);
-            MethodInfo interaction = view.GetMethod(
-                "HandleRoomInteraction", flags, null,
-                new[]
-                {
-                    typeof(PlayerMapPresentationSnapshot), typeof(bool), typeof(PlayerMapRoomSnapshot),
-                    typeof(Num.Vector2), typeof(ImGuiIOPtr)
-                }, null);
-            if (toolbar == null || interaction == null)
-                throw new MissingMemberException("Player Map grouped layer control targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            toolbarHook = constructor.Invoke(new object[] { toolbar, DrawToolbarHookDelegate }) as IDisposable;
-            interactionHook = constructor.Invoke(new object[] { interaction, HandleRoomInteractionHookDelegate }) as IDisposable;
-            if (toolbarHook == null || interactionHook == null)
-                throw new InvalidOperationException("Player Map grouped layer control hooks were not created.");
-
-            enabled = true;
-            logger?.LogInfo("Player Map grouped layer controls enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map grouped layer controls could not attach: " + Unwrap(error).Message);
-        }
+        enabled = PlayerMapSelectionAccess.Available;
+        if (enabled)
+            logger?.LogInfo("Player Map grouped layer controls enabled through direct view calls; no self-detour attached.");
+        else
+            logger?.LogWarning("Player Map grouped layer controls disabled because selection adapter is unavailable.");
     }
 
-    internal static void Disable()
-    {
-        Dispose(ref interactionHook);
-        Dispose(ref toolbarHook);
-        enabled = false;
-    }
+    internal static void Disable() => enabled = false;
 
-    private static void DrawToolbarHook(OrigDrawToolbar orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void DrawToolbar(PlayerMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
         List<PlayerMapRoomSnapshot> selected = PlayerMapSelectionAccess.Collect(snapshot);
@@ -117,15 +57,11 @@ internal static class PlayerMapGroupLayerControls
         }
     }
 
-    private static void HandleRoomInteractionHook(
-        OrigHandleRoomInteraction orig,
+    internal static void HandleShortcuts(
         PlayerMapPresentationSnapshot snapshot,
         bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
         ImGuiIOPtr io)
     {
-        orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
         if (!enabled || snapshot?.Available != true || !canvasHovered ||
             ImGui.IsAnyItemActive() || io.WantTextInput || io.KeyCtrl || io.KeyAlt ||
             ImGui.IsMouseDown(ImGuiMouseButton.Left))
@@ -160,17 +96,4 @@ internal static class PlayerMapGroupLayerControls
             changed.Count == 1 ? "Change player-map room layer" : "Change player-map room layers"));
     }
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
