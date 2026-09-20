@@ -30,8 +30,6 @@ jobs:
           # it here in the same change so the debt can only shrink.
           allowed = {
               'Preview/EffectPreviewBootstrap.cs',
-              'World/WorldCreatureLiveReload.cs',
-              'World/WorldTopologyLiveTraversalFixPlugin.cs',
           }
 
           marker = 'MonoMod.RuntimeDetour.Hook'
