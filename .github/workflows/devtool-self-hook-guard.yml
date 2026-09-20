@@ -68,8 +68,6 @@ jobs:
               'RWImGui/WorldMapPlayerLocator.cs',
               'RWImGui/WorldMapPresentationCorrectnessPlugin.cs',
               'RWImGui/WorldMapRasterReadbackFallbackPlugin.cs',
-              'RWImGui/WorldMapRenderOrderPlugin.cs',
-              'RWImGui/WorldMapThumbnailVisibilityPlugin.cs',
               'RWImGui/WorldSubregionSelector.cs',
               'RWImGui/WorldWorkspaceAsciiDirectionPlugin.cs',
               'World/WorldCreatureLiveReload.cs',
