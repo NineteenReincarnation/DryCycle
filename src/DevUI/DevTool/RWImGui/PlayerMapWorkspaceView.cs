@@ -409,7 +409,7 @@ internal static class PlayerMapWorkspaceView
         PlayerMapCanvasAuthoring.DrawInspectorTools(snapshot, room);
         ImGui.Separator();
         PlayerMapRenderProgressView.Draw(snapshot);
-        PlayerMapPreflightPanelView.Draw(snapshot);
+        PlayerMapPreflightPanel.Draw(snapshot);
     }
 
     private static void DrawRegionInspector(PlayerMapPresentationSnapshot snapshot)
@@ -580,7 +580,7 @@ internal static class PlayerMapWorkspaceView
         }
     }
 
-    private static void DrawRenderReport(PlayerMapPresentationSnapshot snapshot)
+    internal static void DrawRenderReportBase(PlayerMapPresentationSnapshot snapshot)
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 状态", "RENDER STATUS"));
         PlayerMapRenderReport report = snapshot.RenderReport;
