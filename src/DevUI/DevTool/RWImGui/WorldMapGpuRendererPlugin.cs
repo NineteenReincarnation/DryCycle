@@ -58,11 +58,13 @@ internal static class WorldMapGpuRuntime
         log = logger;
         mainThreadId = unityMainThreadId;
         enabled = true;
+        WorldMapFrontendBridge.RegisterAllowPresentationPrime(AllowPresentationPrime);
         logger?.LogInfo("Retained GPU World Map integration enabled through direct view/presentation APIs; no self-detours attached.");
     }
 
     internal static void Disable()
     {
+        WorldMapFrontendBridge.UnregisterAllowPresentationPrime(AllowPresentationPrime);
         latestFrame = null;
         cachedPlacements = Array.Empty<WorldMapGpuScene.RoomPlacement>();
         cachedLayoutHash = int.MinValue;
