@@ -5,9 +5,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Compatibility plugin marker for the duplicate route-hit cache.
 ///
-/// The cache now lives inside <see cref="WorldMapGpuHotQuery"/> so Rain World only installs one
-/// RuntimeDetour hook for WorldMapGpuScene.TryHitConnection. Keeping this BepInEx plugin ID avoids
-/// breaking dependency ordering for existing builds while intentionally attaching no detours here.
+/// The cache now lives directly inside WorldMapGpuScene.TryHitConnection. Keeping this BepInEx plugin
+/// ID avoids breaking dependency ordering for existing builds while intentionally attaching no
+/// detours here.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(WorldMapGpuHotQueryPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -20,6 +20,6 @@ public sealed class WorldMapGpuHitCachePlugin : BaseUnityPlugin
     private void OnEnable()
     {
         Logger?.LogInfo(
-            "GPU World Map duplicate route hit-test cache uses the Hot Query hook; no secondary detour attached.");
+            "GPU World Map duplicate route hit-test cache is integrated directly into WorldMapGpuScene; no detour attached.");
     }
 }
