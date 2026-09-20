@@ -23,13 +23,11 @@ jobs:
 
           root = Path('src/DevUI/DevTool')
 
-          # Exact baseline of pre-existing RuntimeDetour sites. RuntimeDetour is still legitimate at
-          # vanilla/third-party compatibility boundaries, so this guard deliberately does not call
-          # every site a DryCycle self-hook. The baseline prevents new sites from appearing while
-          # Native migrations retire DryCycle-on-DryCycle hooks; whenever a site disappears, remove
-          # it here in the same change so the debt can only shrink.
+          # Exact baseline of DevTool files that contain the RuntimeDetour Hook installation marker.
+          # Read-only HookGen discovery is not an installation site. DryCycle-owned code must prefer
+          # direct interfaces/services/events; any future external compatibility detour must be added
+          # deliberately and reviewed rather than appearing implicitly.
           allowed = {
-              'Preview/EffectPreviewBootstrap.cs',
           }
 
           marker = 'MonoMod.RuntimeDetour.Hook'
