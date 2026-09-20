@@ -34,6 +34,17 @@ internal static class PlayerMapWorkspaceView
     private static Num.Vector2 defA;
     private static Num.Vector2 defB;
 
+    internal static Num.Vector2 Pan => pan;
+    internal static float Zoom => zoom;
+    internal static bool[] LayerVisibility => LayerVisible;
+    internal static int SelectedDefMaterial
+    {
+        get => selectedDefMaterial;
+        set => selectedDefMaterial = value;
+    }
+    internal static int DraggingRoom => draggingRoom;
+    internal static Vector2 DragPreviewPosition => dragPreviewPosition;
+
     internal static void ResetRetainedState()
     {
         search = string.Empty;
@@ -133,6 +144,8 @@ internal static class PlayerMapWorkspaceView
                 "PlayerMapExport",
                 DevToolButtonTone.Primary))
             PlayerMapCommandQueue.Enqueue(new PlayerMapCommand(PlayerMapCommandKind.RenderAndExport));
+
+        PlayerMapLayoutAssist.DrawToolbar(snapshot);
     }
 
     private static void DrawExplorer(PlayerMapPresentationSnapshot snapshot)
@@ -247,6 +260,7 @@ internal static class PlayerMapWorkspaceView
 
         DrawGrid(draw, canvasMin, canvasSize);
         DrawDefMaterials(draw, snapshot, canvasMin);
+        PlayerMapCanvasAuthoring.DrawCanvasOverlay(draw, snapshot, canvasMin);
         if (showConnections) DrawConnections(draw, snapshot, worldSnapshot, canvasMin);
 
         PlayerMapRoomSnapshot hoveredRoom = hovered ? HitRoom(snapshot, canvasMin, io.MousePos) : null;
@@ -304,6 +318,9 @@ internal static class PlayerMapWorkspaceView
             if ((max - min).X > 42f && (max - min).Y > 18f)
                 draw.AddText(min + new Num.Vector2(4f, 3f), ImGui.GetColorU32(ImGuiCol.Text), room.Name);
         }
+
+        PlayerMapMultiSelection.DrawOverlay(draw, snapshot, canvasMin, hovered);
+        PlayerMapLayoutAssist.DrawOverlay(draw, snapshot, canvasMin, hovered);
     }
 
     private static void DrawConnections(
@@ -312,6 +329,8 @@ internal static class PlayerMapWorkspaceView
         EditorMapPresentationSnapshot worldSnapshot,
         Num.Vector2 canvasMin)
     {
+        if (PlayerMapMultiPipeConnections.Draw(draw, snapshot, worldSnapshot, canvasMin))
+            return;
         if (worldSnapshot?.Connections == null) return;
         uint color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
         for (int i = 0; i < worldSnapshot.Connections.Length; i++)
@@ -348,6 +367,11 @@ internal static class PlayerMapWorkspaceView
         Num.Vector2 canvasMin,
         ImGuiIOPtr io)
     {
+        if (PlayerMapCanvasAuthoring.OwnsCanvas)
+            return;
+        if (PlayerMapMultiSelection.HandleInteraction(snapshot, canvasHovered, hoveredRoom, canvasMin, io))
+            return;
+
         if (canvasHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && hoveredRoom != null)
         {
             MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex: hoveredRoom.RoomIndex));
@@ -382,8 +406,10 @@ internal static class PlayerMapWorkspaceView
 
         ImGui.Separator();
         DrawDefaultMaterialInspector(snapshot, room);
+        PlayerMapCanvasAuthoring.DrawInspectorTools(snapshot, room);
         ImGui.Separator();
-        DrawRenderReport(snapshot);
+        PlayerMapRenderProgressView.Draw(snapshot);
+        PlayerMapPreflightPanelView.Draw(snapshot);
     }
 
     private static void DrawRegionInspector(PlayerMapPresentationSnapshot snapshot)
