@@ -577,7 +577,7 @@ internal static class RoomMapBakeCache
         if (!Entries.TryGetValue(roomIndex, out RoomMapBakeCacheEntry entry))
             return new RoomMapBakeSnapshot { Status = RoomMapBakeStatus.Missing };
         RoomMapBake bake = entry.Bake;
-        return new RoomMapBakeSnapshot
+        RoomMapBakeSnapshot source = new()
         {
             Status = entry.Status,
             Width = bake?.Width ?? 0,
@@ -586,14 +586,18 @@ internal static class RoomMapBakeCache
             Runs = bake?.Runs ?? Array.Empty<RoomMapPreviewRun>(),
             NodeAnchors = bake?.NodeAnchors ?? Array.Empty<RoomMapNodeAnchorSnapshot>()
         };
+        return PlayerMapTerrainBakeBridge.ProjectSnapshot(roomIndex, source, bake);
     }
 
     internal static bool TryGetReady(int roomIndex, out RoomMapBake bake)
     {
         bake = null;
-        return Entries.TryGetValue(roomIndex, out RoomMapBakeCacheEntry entry) &&
-               entry.Status == RoomMapBakeStatus.Ready &&
-               (bake = entry.Bake) != null;
+        if (!Entries.TryGetValue(roomIndex, out RoomMapBakeCacheEntry entry) ||
+            entry.Status != RoomMapBakeStatus.Ready ||
+            entry.Bake == null)
+            return false;
+
+        return PlayerMapTerrainBakeBridge.TryEnhanceReady(roomIndex, entry.Bake, out bake);
     }
 
     internal static void Clear()
