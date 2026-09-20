@@ -42,16 +42,6 @@ internal static class SoundFormatSupportRuntime
         enabled = false;
     }
 
-    /// <summary>
-    /// Covers the startup ordering where Rain World's SoundLoader finished LoadSounds before
-    /// DryCycle's OnModsInit runtime transaction enabled this feature.
-    /// </summary>
-    internal static void HydrateExisting(SoundLoader self)
-    {
-        if (!enabled || self == null) return;
-        HydrateLoadedSoundEffectOverrides(self);
-    }
-
     internal static void HydrateExisting(SoundLoader loader)
     {
         if (!enabled || loader == null) return;
