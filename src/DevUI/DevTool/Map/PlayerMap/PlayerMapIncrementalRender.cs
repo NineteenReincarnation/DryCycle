@@ -122,6 +122,13 @@ internal static class PlayerMapRenderScheduler
 
     internal static bool Begin(EditorSession session, MapPage page, PlayerMapPresentationSnapshot snapshot, bool export)
     {
+        bool acceptedByPreparation = PlayerMapRenderPreparationController.TryBeginGate(
+            session, page, snapshot, export, out bool preparationHandled);
+        if (preparationHandled)
+            return acceptedByPreparation;
+
+        PlayerMapRenderRevisionGuard.BeforeBegin(snapshot);
+
         if (session == null || page?.world == null || snapshot?.Available != true)
             return false;
         if (active != null)
@@ -155,6 +162,7 @@ internal static class PlayerMapRenderScheduler
 
         PublishProgress(active, 0f, 0f, 0L, Math.Max(1, active.SourceRooms.Length),
             "Preflight · Rooms", "Checking room placement and baked map geometry.");
+        PlayerMapRenderRevisionGuard.AfterBegin(true, session, page, snapshot);
         return true;
     }
 
@@ -189,6 +197,19 @@ internal static class PlayerMapRenderScheduler
     }
 
     internal static void Step(EditorSession session)
+    {
+        PlayerMapRenderRevisionGuard.BeforeStep(session);
+        try
+        {
+            StepCore(session);
+        }
+        finally
+        {
+            PlayerMapRenderRevisionGuard.AfterStep();
+        }
+    }
+
+    private static void StepCore(EditorSession session)
     {
         Job job = active;
         if (job == null || !ReferenceEquals(job.Session, session)) return;
