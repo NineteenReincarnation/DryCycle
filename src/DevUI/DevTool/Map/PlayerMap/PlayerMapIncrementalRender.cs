@@ -840,6 +840,8 @@ internal static class PlayerMapRenderScheduler
         if (!File.Exists(tempA) || !File.Exists(tempB))
             throw new IOException("Render staging files are incomplete.");
 
+        PlayerMapRenderOutputValidator.ValidateBeforeCommit(tempA, tempB);
+
         string backupA = targetA + ".drycycle.bak";
         string backupB = targetB + ".drycycle.bak";
         TryDelete(backupA);
