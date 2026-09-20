@@ -181,13 +181,13 @@ internal static partial class MapRoomGeometryPresentationHub
             cache.TryGetValue(roomIndex, out CacheEntry entry)
                 ? entry.Snapshot
                 : EditorMapRoomVisualSnapshot.Empty;
-        return DryCycle.DevUI.DevTool.RWImGui.WorldMapRasterReadbackFallback.Enhance(roomIndex, original);
+        return WorldMapFrontendBridge.EnhanceRaster(roomIndex, original);
     }
 
     internal static void Prime(EditorSession session)
     {
-        if (!DryCycle.DevUI.DevTool.RWImGui.WorldMapGpuRuntime.AllowPresentationPrime() ||
-            !DryCycle.DevUI.DevTool.RWImGui.WorldMapPerformance.ShouldPrimeGeometry(session))
+        if (!WorldMapFrontendBridge.AllowPresentationPrime() ||
+            !WorldMapFrontendBridge.ShouldPrimeGeometry(session))
             return;
 
         if (session?.Owner?.activePage is not MapPage page || page.world == null)
@@ -331,7 +331,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
     {
-        if (!DryCycle.DevUI.DevTool.RWImGui.WorldMapBackgroundBudget.ShouldProcessGeometry(world))
+        if (!WorldMapFrontendBridge.ShouldProcessGeometryBackground(world))
             return;
 
         int count = roomOrder.Count;
