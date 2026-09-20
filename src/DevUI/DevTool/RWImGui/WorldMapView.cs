@@ -264,45 +264,53 @@ internal static class WorldMapView
         bool selected,
         bool hovered)
     {
-        float scale = TileDisplaySize * zoom;
-        float width = Math.Max(1f, visual.WidthTiles) * scale;
-        float height = Math.Max(1f, visual.HeightTiles) * scale;
-        Num.Vector2 roomMax = roomMin + new Num.Vector2(width, height);
-        uint outline = ImGui.GetColorU32(
-            selected ? ImGuiCol.ButtonActive :
-            room.CurrentRoom ? ImGuiCol.Header :
-            hovered ? ImGuiCol.ButtonHovered :
-            room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Border);
-
-        bool lowLod = zoom < 0.48f;
-        bool highLod = zoom >= 0.82f;
-
-        if (!visual.DetailedRasterAvailable)
+        int pushedStyleColors = WorldMapThumbnailVisibility.PushRoomStyle();
+        try
         {
-            uint fill = ImGui.GetColorU32(selected ? ImGuiCol.Button : ImGuiCol.FrameBg);
-            draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
-        }
+            float scale = TileDisplaySize * zoom;
+            float width = Math.Max(1f, visual.WidthTiles) * scale;
+            float height = Math.Max(1f, visual.HeightTiles) * scale;
+            Num.Vector2 roomMax = roomMin + new Num.Vector2(width, height);
+            uint outline = ImGui.GetColorU32(
+                selected ? ImGuiCol.ButtonActive :
+                room.CurrentRoom ? ImGuiCol.Header :
+                hovered ? ImGuiCol.ButtonHovered :
+                room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Border);
 
-        if (visual.DetailedRasterAvailable)
-        {
-            EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
-            for (int i = 0; i < runs.Length; i++)
+            bool lowLod = zoom < 0.48f;
+            bool highLod = zoom >= 0.82f;
+
+            if (!visual.DetailedRasterAvailable)
             {
-                EditorMapRectSnapshot run = runs[i];
-                if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
-                Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
-                Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
-                draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
+                uint fill = ImGui.GetColorU32(selected ? ImGuiCol.Button : ImGuiCol.FrameBg);
+                draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
             }
-        }
 
-        if (visual.Curves != null)
+            if (visual.DetailedRasterAvailable)
+            {
+                EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
+                for (int i = 0; i < runs.Length; i++)
+                {
+                    EditorMapRectSnapshot run = runs[i];
+                    if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
+                    Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
+                    Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
+                    draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
+                }
+            }
+
+            if (visual.Curves != null)
+            {
+                for (int i = 0; i < visual.Curves.Length; i++)
+                    DrawCurve(draw, visual, roomMin, visual.Curves[i], highLod);
+            }
+
+            draw.AddRect(roomMin, roomMax, outline, Math.Max(1f, 3f * zoom), ImDrawFlags.None, selected ? 2.2f : 1f);
+        }
+        finally
         {
-            for (int i = 0; i < visual.Curves.Length; i++)
-                DrawCurve(draw, visual, roomMin, visual.Curves[i], highLod);
+            WorldMapThumbnailVisibility.PopRoomStyle(pushedStyleColors);
         }
-
-        draw.AddRect(roomMin, roomMax, outline, Math.Max(1f, 3f * zoom), ImDrawFlags.None, selected ? 2.2f : 1f);
     }
 
     private static void DrawCurve(
@@ -342,7 +350,7 @@ internal static class WorldMapView
 
     private static uint GeometryColor(EditorMapGeometryKind kind)
     {
-        return kind switch
+        uint fallback = kind switch
         {
             EditorMapGeometryKind.Air => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.59f, 0.60f, 1.00f)),
             EditorMapGeometryKind.BackWall => ImGui.GetColorU32(new Num.Vector4(0.47f, 0.48f, 0.49f, 1.00f)),
@@ -357,6 +365,7 @@ internal static class WorldMapView
             EditorMapGeometryKind.QuicksandBody => ImGui.GetColorU32(ImGuiCol.Separator),
             _ => ImGui.GetColorU32(ImGuiCol.Border)
         };
+        return WorldMapThumbnailVisibility.ResolveGeometryColor(kind, fallback);
     }
 
     private static uint ShortcutGold(bool bright) =>
