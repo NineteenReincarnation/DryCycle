@@ -287,6 +287,10 @@ internal static class DevToolWidgets
 
     internal static void MutedText(string text, bool wrapped = false)
     {
+        text = DevToolUserFacingCopyCleanup.RewriteMutedText(text);
+        if (DevToolUserFacingCopyCleanup.ShouldSuppressMutedText(text))
+            return;
+
         ImGui.PushStyleColor(ImGuiCol.Text, Muted);
         if (wrapped) ImGui.TextWrapped(text);
         else ImGui.TextUnformatted(text);
