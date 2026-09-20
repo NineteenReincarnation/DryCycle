@@ -691,6 +691,9 @@ internal static class SoundLibraryGroupsView
 
     private static void DrawActivationShell(SoundActivationStatusSnapshot status)
     {
+        if (DevToolUserFacingCopyCleanup.DrawSoundActivationShell(status))
+            return;
+
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("正在准备声音工作区", "PREPARING SOUND WORKSPACE"), BrowserBodyFontScale);
         ImGui.TextWrapped(DevToolUiSettings.T(
             "声音资源正在按帧预算建立索引；场景不会等待完整资源库加载。",
@@ -714,6 +717,9 @@ internal static class SoundLibraryGroupsView
 
     private static void DrawProjectionShell(int totalSamples)
     {
+        if (DevToolUserFacingCopyCleanup.DrawSoundProjectionShell(totalSamples))
+            return;
+
         float progress = totalSamples <= 0
             ? 1f
             : Math.Max(0f, Math.Min(1f, buildingSampleIndex / (float)totalSamples));
