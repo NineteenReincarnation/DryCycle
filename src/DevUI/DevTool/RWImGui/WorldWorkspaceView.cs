@@ -757,6 +757,9 @@ internal static class WorldWorkspaceView
 
     private static void DrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
+        if (WorldSubregionSelector.Draw(snapshot, room))
+            return;
+
         if (inspectorRoom != room.RoomIndex)
         {
             inspectorRoom = room.RoomIndex;
