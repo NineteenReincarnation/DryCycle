@@ -254,6 +254,23 @@ internal static class WorldMapGpuCache
 
     internal static void FlushNow() => FlushIfNeeded(force: true);
 
+    internal static void ReleaseWorkingSet()
+    {
+        current = Snapshot.Empty;
+        activeRegion = string.Empty;
+        activePath = string.Empty;
+        validatedRooms.Clear();
+        liveSignatures.Clear();
+        validationCursor = 0;
+        captureCursor = 0;
+        dirtyFrame = -1;
+        dirty = false;
+        lastError = string.Empty;
+        cacheHits = 0;
+        cacheMisses = 0;
+        unchecked { generation++; }
+    }
+
     private static void EnsureRegion(string region)
     {
         if (string.Equals(activeRegion, region, StringComparison.OrdinalIgnoreCase)) return;
