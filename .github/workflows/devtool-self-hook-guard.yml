@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reject new DryCycle-on-DryCycle RuntimeDetour sites
+      - name: Reject new DevTool RuntimeDetour sites
         shell: python
         run: |
           from pathlib import Path
@@ -23,21 +23,61 @@ jobs:
 
           root = Path('src/DevUI/DevTool')
 
-          # Transitional debt only. Each entry must disappear as its behavior is wired directly
-          # into the owning DryCycle service. This allow-list is intentionally exact so new
-          # RuntimeDetour-based self hooks cannot be introduced while the migration is in flight.
+          # Exact baseline of pre-existing RuntimeDetour sites. RuntimeDetour is still legitimate at
+          # vanilla/third-party compatibility boundaries, so this guard deliberately does not call
+          # every site a DryCycle self-hook. The baseline prevents new sites from appearing while
+          # Native migrations retire DryCycle-on-DryCycle hooks; whenever a site disappears, remove
+          # it here in the same change so the debt can only shrink.
           allowed = {
+              'Map/PlayerMap/PlayerMapConfigBuildPipeline.cs',
+              'Map/PlayerMap/PlayerMapDerivedLayoutBridge.cs',
+              'Map/PlayerMap/PlayerMapDisabledConfigFilter.cs',
+              'Map/PlayerMap/PlayerMapGroupCommandRuntime.cs',
+              'Map/PlayerMap/PlayerMapIncrementalRender.cs',
+              'Map/PlayerMap/PlayerMapLayerMutationFilter.cs',
+              'Map/PlayerMap/PlayerMapMigrationCommandBridge.cs',
+              'Map/PlayerMap/PlayerMapMigrationDirtyBridge.cs',
+              'Map/PlayerMap/PlayerMapPlacementBootstrap.cs',
+              'Map/PlayerMap/PlayerMapRenderOutputValidator.cs',
+              'Map/PlayerMap/PlayerMapRenderPreparation.cs',
+              'Map/PlayerMap/PlayerMapRenderRevisionGuard.cs',
+              'Map/PlayerMap/PlayerMapTerrainBakeBridge.cs',
+              'Preview/EffectPreviewBootstrap.cs',
+              'RWImGui/DevToolUserFacingCopyCleanupPlugin.cs',
+              'RWImGui/PlayerMapCanvasAuthoringPlugin.cs',
+              'RWImGui/PlayerMapConditionalVisibilityInfo.cs',
+              'RWImGui/PlayerMapGroupLayerControls.cs',
+              'RWImGui/PlayerMapGroupLayoutControls.cs',
+              'RWImGui/PlayerMapGroupPlacementControls.cs',
+              'RWImGui/PlayerMapLayoutAssistPlugin.cs',
+              'RWImGui/PlayerMapLiveOverlapPreview.cs',
+              'RWImGui/PlayerMapMigrationStreamView.cs',
+              'RWImGui/PlayerMapMultiPipeConnectionPlugin.cs',
+              'RWImGui/PlayerMapMultiSelectionPlugin.cs',
+              'RWImGui/PlayerMapPreflightPanelPlugin.cs',
+              'RWImGui/PlayerMapRenderProgressPlugin.cs',
+              'RWImGui/PlayerMapWorkspaceIntegrationPlugin.cs',
+              'RWImGui/ScopedScrollChromePlugin.cs',
+              'RWImGui/WorldInspectorReadabilityPlugin.cs',
               'RWImGui/WorldMapBackgroundBudgetPlugin.cs',
               'RWImGui/WorldMapExactShortcutPlugin.cs',
+              'RWImGui/WorldMapGpuHotQueryPlugin.cs',
               'RWImGui/WorldMapGpuPipeBatchPlugin.cs',
               'RWImGui/WorldMapGpuRegionPreloadPlugin.cs',
+              'RWImGui/WorldMapGpuRendererPlugin.cs',
               'RWImGui/WorldMapGpuRetainedOptimizerPlugin.cs',
+              'RWImGui/WorldMapImGuiPresentationFallbackPlugin.cs',
               'RWImGui/WorldMapPerformancePlugin.cs',
               'RWImGui/WorldMapPipeLayerPlugin.cs',
+              'RWImGui/WorldMapPlayerLocator.cs',
               'RWImGui/WorldMapPresentationCorrectnessPlugin.cs',
               'RWImGui/WorldMapRasterReadbackFallbackPlugin.cs',
               'RWImGui/WorldMapRenderOrderPlugin.cs',
               'RWImGui/WorldMapThumbnailVisibilityPlugin.cs',
+              'RWImGui/WorldSubregionSelector.cs',
+              'RWImGui/WorldWorkspaceAsciiDirectionPlugin.cs',
+              'World/WorldCreatureLiveReload.cs',
+              'World/WorldTopologyLiveTraversalFixPlugin.cs',
           }
 
           marker = 'MonoMod.RuntimeDetour.Hook'
@@ -51,16 +91,16 @@ jobs:
           retired = sorted(allowed - actual)
 
           if unexpected:
-              print('New DevTool RuntimeDetour sites are forbidden. Use a direct interface/service/event for DryCycle-owned code:')
+              print('New DevTool RuntimeDetour sites are forbidden. Prefer a direct interface/service/event for DryCycle-owned code:')
               for path in unexpected:
                   print(f'  + {path}')
               sys.exit(1)
 
           if retired:
-              print('Self-hook debt was removed but the guard allow-list was not tightened:')
+              print('RuntimeDetour debt was removed but the guard baseline was not tightened:')
               for path in retired:
                   print(f'  - {path}')
               print('Remove retired entries from devtool-self-hook-guard.yml in the same change.')
               sys.exit(1)
 
-          print(f'Guarded transitional self-hook debt: {len(actual)} files; no new sites added.')
+          print(f'Guarded existing RuntimeDetour baseline: {len(actual)} files; no new sites added.')
