@@ -73,7 +73,7 @@ internal static class PlayerMapConfigBuildPipeline
         if (enabled) return;
         enabled = true;
         log = logger;
-        logger?.LogInfo("Player Map unified config build pipeline enabled through direct save calls; no self-detour attached.");
+        logger?.LogInfo("Player Map unified config build pipeline enabled through direct serializer call; no self-detour attached.");
     }
 
     internal static void Disable()
@@ -532,6 +532,7 @@ internal static class PlayerMapConfigBuildPipeline
 
     private static void AtomicWriteAllLines(string target, IReadOnlyList<string> lines)
     {
+        lines = PlayerMapDisabledConfigFilter.Filter(target, lines);
         string directory = Path.GetDirectoryName(target);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         string temp = target + ".drycycle.tmp";
