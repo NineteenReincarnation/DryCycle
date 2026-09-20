@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
@@ -43,72 +42,7 @@ internal static class WorldMapGpuRuntime
 {
     private const float SemanticRoomLodZoom = 0.52f;
 
-    private delegate void OrigDrawCanvas(EditorMapPresentationSnapshot snapshot);
-    private delegate void HookDrawCanvas(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot);
-    private delegate void OrigDrawRoomGeometry(
-        ImDrawListPtr draw,
-        EditorMapRoomSnapshot room,
-        EditorMapRoomVisualSnapshot visual,
-        Num.Vector2 roomMin,
-        bool selected,
-        bool hovered);
-    private delegate void HookDrawRoomGeometry(
-        OrigDrawRoomGeometry orig,
-        ImDrawListPtr draw,
-        EditorMapRoomSnapshot room,
-        EditorMapRoomVisualSnapshot visual,
-        Num.Vector2 roomMin,
-        bool selected,
-        bool hovered);
-    private delegate void OrigDrawToolbar(EditorMapPresentationSnapshot snapshot);
-    private delegate void HookDrawToolbar(OrigDrawToolbar orig, EditorMapPresentationSnapshot snapshot);
-    private delegate void OrigGeometryPrime(EditorSession session);
-    private delegate void HookGeometryPrime(OrigGeometryPrime orig, EditorSession session);
-    private delegate EditorMapRoomVisualSnapshot OrigGeometryGet(int roomIndex);
-    private delegate EditorMapRoomVisualSnapshot HookGeometryGet(OrigGeometryGet orig, int roomIndex);
-    private delegate void OrigShortcutPrime(EditorSession session, int selectedRoomIndex);
-    private delegate void HookShortcutPrime(OrigShortcutPrime orig, EditorSession session, int selectedRoomIndex);
-    private delegate bool OrigTryGetExit(
-        int roomIndex,
-        int nodeIndex,
-        out WorldMapShortcutPresentation.ShortcutMarker marker);
-    private delegate bool HookTryGetExit(
-        OrigTryGetExit orig,
-        int roomIndex,
-        int nodeIndex,
-        out WorldMapShortcutPresentation.ShortcutMarker marker);
-    private delegate WorldMapShortcutPresentation.ShortcutMarker[] OrigGetCreatureHoles(int roomIndex);
-    private delegate WorldMapShortcutPresentation.ShortcutMarker[] HookGetCreatureHoles(
-        OrigGetCreatureHoles orig,
-        int roomIndex);
-
-    private static readonly HookDrawCanvas DrawCanvasHookDelegate = DrawCanvasHook;
-    private static readonly HookDrawRoomGeometry DrawRoomGeometryHookDelegate = DrawRoomGeometryHook;
-    private static readonly HookDrawToolbar DrawToolbarHookDelegate = DrawToolbarHook;
-    private static readonly HookGeometryPrime GeometryPrimeHookDelegate = GeometryPrimeHook;
-    private static readonly HookGeometryGet GeometryGetHookDelegate = GeometryGetHook;
-    private static readonly HookShortcutPrime ShortcutPrimeHookDelegate = ShortcutPrimeHook;
-    private static readonly HookTryGetExit TryGetExitHookDelegate = TryGetExitHook;
-    private static readonly HookGetCreatureHoles GetCreatureHolesHookDelegate = GetCreatureHolesHook;
-
     private static ManualLogSource log;
-    private static IDisposable canvasHook;
-    private static IDisposable roomGeometryHook;
-    private static IDisposable toolbarHook;
-    private static IDisposable geometryPrimeHook;
-    private static IDisposable geometryGetHook;
-    private static IDisposable shortcutPrimeHook;
-    private static IDisposable shortcutExitHook;
-    private static IDisposable creatureHolesHook;
-
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo localPositionsField;
-    private static FieldInfo layerVisibleField;
-    private static FieldInfo showConnectionsField;
-    private static FieldInfo selectedConnectionIdField;
-    private static FieldInfo hoveredConnectionIdField;
-    private static FieldInfo draggingRoomField;
 
     private static volatile WorldMapGpuScene.FrameState latestFrame;
     private static int mainThreadId;
@@ -123,118 +57,28 @@ internal static class WorldMapGpuRuntime
         if (enabled) return;
         log = logger;
         mainThreadId = unityMainThreadId;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type mapType = typeof(WorldMapView);
-            MethodInfo drawCanvas = mapType.GetMethod(
-                "DrawCanvas", flags, null, new[] { typeof(EditorMapPresentationSnapshot) }, null);
-            MethodInfo drawRoomGeometry = mapType.GetMethod(
-                "DrawRoomGeometry",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(ImDrawListPtr), typeof(EditorMapRoomSnapshot), typeof(EditorMapRoomVisualSnapshot),
-                    typeof(Num.Vector2), typeof(bool), typeof(bool)
-                },
-                null);
-            MethodInfo drawToolbar = mapType.GetMethod(
-                "DrawToolbar", flags, null, new[] { typeof(EditorMapPresentationSnapshot) }, null);
-
-            panField = mapType.GetField("pan", flags);
-            zoomField = mapType.GetField("zoom", flags);
-            localPositionsField = mapType.GetField("localPositions", flags);
-            layerVisibleField = mapType.GetField("layerVisible", flags);
-            showConnectionsField = mapType.GetField("showConnections", flags);
-            selectedConnectionIdField = mapType.GetField("selectedConnectionId", flags);
-            hoveredConnectionIdField = mapType.GetField("hoveredConnectionId", flags);
-            draggingRoomField = mapType.GetField("draggingRoom", flags);
-
-            Type geometryType = typeof(MapRoomGeometryPresentationHub);
-            MethodInfo geometryPrime = geometryType.GetMethod(
-                "Prime", flags, null, new[] { typeof(EditorSession) }, null);
-            MethodInfo geometryGet = geometryType.GetMethod(
-                "Get", flags, null, new[] { typeof(int) }, null);
-
-            Type shortcutType = typeof(WorldMapShortcutPresentation);
-            MethodInfo shortcutPrime = shortcutType.GetMethod(
-                "Prime", flags, null, new[] { typeof(EditorSession), typeof(int) }, null);
-            MethodInfo tryGetExit = shortcutType.GetMethod(
-                "TryGetExitMouth",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(int), typeof(int),
-                    typeof(WorldMapShortcutPresentation.ShortcutMarker).MakeByRefType()
-                },
-                null);
-            MethodInfo getCreatureHoles = shortcutType.GetMethod(
-                "GetCreatureHoles", flags, null, new[] { typeof(int) }, null);
-
-            if (drawCanvas == null || drawRoomGeometry == null || drawToolbar == null ||
-                panField == null || zoomField == null || localPositionsField == null ||
-                layerVisibleField == null || showConnectionsField == null ||
-                selectedConnectionIdField == null || hoveredConnectionIdField == null ||
-                draggingRoomField == null || geometryPrime == null || geometryGet == null ||
-                shortcutPrime == null || tryGetExit == null || getCreatureHoles == null)
-                throw new MissingMemberException("World Map GPU integration targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null) throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            canvasHook = constructor.Invoke(new object[] { drawCanvas, DrawCanvasHookDelegate }) as IDisposable;
-            roomGeometryHook = constructor.Invoke(new object[] { drawRoomGeometry, DrawRoomGeometryHookDelegate }) as IDisposable;
-            toolbarHook = constructor.Invoke(new object[] { drawToolbar, DrawToolbarHookDelegate }) as IDisposable;
-            geometryPrimeHook = constructor.Invoke(new object[] { geometryPrime, GeometryPrimeHookDelegate }) as IDisposable;
-            geometryGetHook = constructor.Invoke(new object[] { geometryGet, GeometryGetHookDelegate }) as IDisposable;
-            shortcutPrimeHook = constructor.Invoke(new object[] { shortcutPrime, ShortcutPrimeHookDelegate }) as IDisposable;
-            shortcutExitHook = constructor.Invoke(new object[] { tryGetExit, TryGetExitHookDelegate }) as IDisposable;
-            creatureHolesHook = constructor.Invoke(new object[] { getCreatureHoles, GetCreatureHolesHookDelegate }) as IDisposable;
-
-            enabled = true;
-            log?.LogInfo("Retained GPU World Map room integration enabled; routed links stay on the native map layer.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            log?.LogWarning("Retained GPU World Map could not attach; keeping fallback map: " + Unwrap(error).Message);
-        }
+        enabled = true;
+        logger?.LogInfo("Retained GPU World Map integration enabled through direct view/presentation APIs; no self-detours attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref creatureHolesHook);
-        DisposeHook(ref shortcutExitHook);
-        DisposeHook(ref shortcutPrimeHook);
-        DisposeHook(ref geometryGetHook);
-        DisposeHook(ref geometryPrimeHook);
-        DisposeHook(ref toolbarHook);
-        DisposeHook(ref roomGeometryHook);
-        DisposeHook(ref canvasHook);
         latestFrame = null;
         cachedPlacements = Array.Empty<WorldMapGpuScene.RoomPlacement>();
         cachedLayoutHash = int.MinValue;
         frameHoveredRoomIndex = -1;
         requestRebuild = 0;
-        panField = null;
-        zoomField = null;
-        localPositionsField = null;
-        layerVisibleField = null;
-        showConnectionsField = null;
-        selectedConnectionIdField = null;
-        hoveredConnectionIdField = null;
-        draggingRoomField = null;
         WorldMapGpuCache.FlushNow();
         WorldMapGpuScene.Disable();
         enabled = false;
         log = null;
     }
+
+    internal static bool AllowPresentationPrime() =>
+        !enabled || Thread.CurrentThread.ManagedThreadId == mainThreadId;
+
+    internal static void SetHoveredRoom(int roomIndex) =>
+        frameHoveredRoomIndex = roomIndex;
 
     internal static void UpdateMainThread()
     {
@@ -264,78 +108,28 @@ internal static class WorldMapGpuRuntime
         WorldMapGpuScene.Apply(latestFrame, session);
     }
 
-    private static void DrawCanvasHook(OrigDrawCanvas orig, EditorMapPresentationSnapshot snapshot)
-    {
-        if (!enabled || snapshot?.Available != true)
-        {
-            orig(snapshot);
-            return;
-        }
-
-        Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
-        Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
-        if (canvasSize.X < 80f || canvasSize.Y < 80f)
-        {
-            orig(snapshot);
-            return;
-        }
-
-        bool gpuReady = WorldMapGpuScene.Ready;
-        ImGuiIOPtr io = ImGui.GetIO();
-        float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
-        Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
-        int layerMask = CurrentLayerMask();
-
-        bool mouseInside = PointInside(io.MousePos, canvasMin, canvasMin + canvasSize);
-        frameHoveredRoomIndex = -1;
-        if (gpuReady && mouseInside)
-        {
-            Num.Vector2 mapPoint = ScreenToMap(io.MousePos, canvasMin, pan, zoom);
-            WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out frameHoveredRoomIndex);
-        }
-
-        // The retained renderer now owns room pixels only. Do not suppress WorldMapView's Links
-        // state: the native routed layer must execute in both fallback and GPU modes.
-        if (gpuReady) ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
-        try
-        {
-            orig(snapshot);
-        }
-        finally
-        {
-            if (gpuReady) ImGui.PopStyleColor();
-        }
-
-        // Connections deliberately stay out of the retained scene. This removes the duplicate GPU
-        // route pipeline and makes one orthogonal route set authoritative for visuals and hit tests.
-        PublishFrame(snapshot, canvasMin, canvasSize, io.DisplaySize, pan, zoom, showConnections: false, layerMask);
-    }
-
-    private static void DrawRoomGeometryHook(
-        OrigDrawRoomGeometry orig,
+    internal static bool TryDrawRoomGeometry(
         ImDrawListPtr draw,
         EditorMapRoomSnapshot room,
         EditorMapRoomVisualSnapshot visual,
         Num.Vector2 roomMin,
         bool selected,
-        bool hovered)
+        bool hovered,
+        float zoom)
     {
-        if (!WorldMapGpuScene.Ready)
-        {
-            orig(draw, room, visual, roomMin, selected, hovered);
-            return;
-        }
+        if (!enabled || !WorldMapGpuScene.Ready)
+            return false;
 
         if (hovered && room != null) frameHoveredRoomIndex = room.RoomIndex;
 
-        float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
         if (zoom < SemanticRoomLodZoom && visual?.DetailedRasterAvailable == true)
         {
             DrawSemanticRoomLod(draw, room, visual, roomMin, zoom);
-            return;
+            return true;
         }
 
-        if (selected || hovered) return;
+        if (selected || hovered)
+            return true;
 
         float width = Math.Max(1f, visual?.WidthTiles ?? 12f) * WorldMapGpuScene.TileDisplaySize * zoom;
         float height = Math.Max(1f, visual?.HeightTiles ?? 6f) * WorldMapGpuScene.TileDisplaySize * zoom;
@@ -344,6 +138,7 @@ internal static class WorldMapGpuRuntime
             room?.CurrentRoom == true ? ImGuiCol.Header :
             room?.Disabled == true ? ImGuiCol.TextDisabled : ImGuiCol.Border);
         draw.AddRect(roomMin, max, color, Math.Max(1f, 3f * zoom), ImDrawFlags.None, 1f);
+        return true;
     }
 
     private static void DrawSemanticRoomLod(
@@ -404,10 +199,9 @@ internal static class WorldMapGpuRuntime
         };
     }
 
-    private static void DrawToolbarHook(OrigDrawToolbar orig, EditorMapPresentationSnapshot snapshot)
+    internal static void DrawToolbar(EditorMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
-        if (snapshot?.Available != true) return;
+        if (!enabled || snapshot?.Available != true) return;
 
         if (DevToolWidgets.SameLineIfFits(285f, 8f))
         {
@@ -428,40 +222,7 @@ internal static class WorldMapGpuRuntime
             DevToolTooltip.Draw(WorldMapGpuScene.Error);
     }
 
-    private static void GeometryPrimeHook(OrigGeometryPrime orig, EditorSession session)
-    {
-        if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
-        orig(session);
-    }
-
-    private static EditorMapRoomVisualSnapshot GeometryGetHook(OrigGeometryGet orig, int roomIndex)
-    {
-        return orig(roomIndex);
-    }
-
-    private static void ShortcutPrimeHook(OrigShortcutPrime orig, EditorSession session, int selectedRoomIndex)
-    {
-        if (Thread.CurrentThread.ManagedThreadId != mainThreadId) return;
-        orig(session, selectedRoomIndex);
-    }
-
-    private static bool TryGetExitHook(
-        OrigTryGetExit orig,
-        int roomIndex,
-        int nodeIndex,
-        out WorldMapShortcutPresentation.ShortcutMarker marker)
-    {
-        return orig(roomIndex, nodeIndex, out marker);
-    }
-
-    private static WorldMapShortcutPresentation.ShortcutMarker[] GetCreatureHolesHook(
-        OrigGetCreatureHoles orig,
-        int roomIndex)
-    {
-        return orig(roomIndex);
-    }
-
-    private static void PublishFrame(
+    internal static void PublishFrame(
         EditorMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize,
@@ -469,9 +230,17 @@ internal static class WorldMapGpuRuntime
         Num.Vector2 pan,
         float zoom,
         bool showConnections,
-        int layerMask)
+        bool[] layerVisible,
+        Dictionary<int, Num.Vector2> positions,
+        string selectedConnectionId,
+        string hoveredConnectionId)
     {
-        Dictionary<int, Num.Vector2> positions = localPositionsField?.GetValue(null) as Dictionary<int, Num.Vector2>;
+        if (!enabled || snapshot?.Available != true) return;
+
+        int layerMask = 0;
+        for (int i = 0; i < 3; i++)
+            if (layerVisible == null || i >= layerVisible.Length || layerVisible[i]) layerMask |= 1 << i;
+
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         int layoutHash = ComputeLayoutHash(rooms, positions);
         if (layoutHash != cachedLayoutHash || cachedPlacements.Length != rooms.Length)
@@ -504,20 +273,11 @@ internal static class WorldMapGpuRuntime
             ShowConnections = showConnections,
             SelectedRoomIndex = snapshot.SelectedRoomIndex,
             HoveredRoomIndex = frameHoveredRoomIndex,
-            SelectedConnectionId = selectedConnectionIdField?.GetValue(null) as string ?? string.Empty,
-            HoveredConnectionId = hoveredConnectionIdField?.GetValue(null) as string ?? string.Empty,
+            SelectedConnectionId = selectedConnectionId ?? string.Empty,
+            HoveredConnectionId = hoveredConnectionId ?? string.Empty,
             Snapshot = snapshot,
             Placements = cachedPlacements
         };
-    }
-
-    private static int CurrentLayerMask()
-    {
-        bool[] layers = layerVisibleField?.GetValue(null) as bool[];
-        int layerMask = 0;
-        for (int i = 0; i < 3; i++)
-            if (layers == null || i >= layers.Length || layers[i]) layerMask |= 1 << i;
-        return layerMask;
     }
 
     private static int ComputeLayoutHash(EditorMapRoomSnapshot[] rooms, Dictionary<int, Num.Vector2> positions)
@@ -556,17 +316,4 @@ internal static class WorldMapGpuRuntime
     private static bool PointInside(Num.Vector2 point, Num.Vector2 min, Num.Vector2 max) =>
         point.X >= min.X && point.X <= max.X && point.Y >= min.Y && point.Y <= max.Y;
 
-    private static void DisposeHook(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
