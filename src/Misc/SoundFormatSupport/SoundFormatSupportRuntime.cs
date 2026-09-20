@@ -42,6 +42,12 @@ internal static class SoundFormatSupportRuntime
         enabled = false;
     }
 
+    internal static void HydrateExisting(SoundLoader loader)
+    {
+        if (!enabled || loader == null) return;
+        HydrateLoadedSoundEffectOverrides(loader);
+    }
+
     private static void RemoveOnHooks()
     {
         On.SoundLoader.ReleaseAllUnityAudio -= SoundLoader_ReleaseAllUnityAudio;
