@@ -144,66 +144,30 @@ public sealed class PlayerMapGroupCommandPlugin : BaseUnityPlugin
 
 internal static class PlayerMapGroupCommandRuntime
 {
-    private delegate void OrigProcess(EditorSession session);
-    private delegate void HookProcess(OrigProcess orig, EditorSession session);
-
-    private static readonly HookProcess ProcessHookDelegate = ProcessHook;
-    private static IDisposable processHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const System.Reflection.BindingFlags flags =
-                System.Reflection.BindingFlags.Static |
-                System.Reflection.BindingFlags.NonPublic |
-                System.Reflection.BindingFlags.Public;
-            System.Reflection.MethodInfo process = typeof(PlayerMapCommandQueue).GetMethod(
-                "Process", flags, null, new[] { typeof(EditorSession) }, null);
-            if (process == null)
-                throw new MissingMethodException("PlayerMapCommandQueue.Process was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            System.Reflection.ConstructorInfo constructor =
-                hookType?.GetConstructor(new[] { typeof(System.Reflection.MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            processHook = constructor.Invoke(new object[] { process, ProcessHookDelegate }) as IDisposable;
-            if (processHook == null)
-                throw new InvalidOperationException("Player Map group command hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map grouped placement/layer command runtime enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map group command runtime could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map grouped placement/layer command runtime enabled through direct queue processing; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { processHook?.Dispose(); }
-        catch { }
-        processHook = null;
         PlayerMapGroupCommandQueue.Clear();
         enabled = false;
         log = null;
     }
 
-    private static void ProcessHook(OrigProcess orig, EditorSession session)
+    internal static bool Process(EditorSession session)
     {
-        orig(session);
         if (!enabled || session == null)
         {
             if (session == null) PlayerMapGroupCommandQueue.Clear();
-            return;
+            return false;
         }
 
         bool processed = false;
@@ -278,14 +242,6 @@ internal static class PlayerMapGroupCommandRuntime
             processed = true;
         }
 
-        if (processed)
-            PlayerMapWorkspaceRuntime.Synchronize(session);
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is System.Reflection.TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
+        return processed;
     }
 }
