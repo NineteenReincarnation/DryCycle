@@ -263,6 +263,7 @@ internal static class PlayerMapWorkspaceRuntime
         PlayerMapPresentationSnapshot snapshot = state.Presentation;
         snapshot = PlayerMapDerivedLayoutBridge.Project(session, snapshot);
         snapshot = PlayerMapIncrementalRenderHooks.ProjectPresentation(session, snapshot);
+        snapshot = PlayerMapMigrationDirtyBridge.ProjectPresentation(session, snapshot);
         return snapshot;
     }
 
@@ -360,7 +361,7 @@ internal static class PlayerMapWorkspaceRuntime
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
         if (!ReferenceEquals(state.Page, self)) InitializeState(self, state);
-        if (!PlayerMapConfigSerializer.Save(self, state, out string error))
+        if (!PlayerMapConfigBuildPipeline.Save(self, state, out string error))
         {
             state.RenderReport = PlayerMapRenderReport.Failure("Map config save failed", error);
             Touch(state, dirty: true);
