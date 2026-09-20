@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -30,11 +29,6 @@ public sealed class PlayerMapDerivedLayoutBridgePlugin : BaseUnityPlugin
 
 internal static class PlayerMapDerivedLayoutBridge
 {
-    private delegate PlayerMapPresentationSnapshot OrigGetPresentation(EditorSession session);
-    private delegate PlayerMapPresentationSnapshot HookGetPresentation(OrigGetPresentation orig, EditorSession session);
-
-    private static readonly HookGetPresentation GetPresentationHookDelegate = GetPresentationHook;
-    private static IDisposable getPresentationHook;
     private static ManualLogSource log;
     private static bool enabled;
 
@@ -46,41 +40,13 @@ internal static class PlayerMapDerivedLayoutBridge
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo getPresentation = typeof(PlayerMapWorkspaceRuntime).GetMethod(
-                "GetPresentation",
-                flags,
-                null,
-                new[] { typeof(EditorSession) },
-                null);
-            if (getPresentation == null)
-                throw new MissingMemberException("Player Map derived-layout presentation target was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            getPresentationHook = constructor.Invoke(new object[] { getPresentation, GetPresentationHookDelegate }) as IDisposable;
-            if (getPresentationHook == null)
-                throw new InvalidOperationException("Player Map derived-layout projection hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map live derived-layout/terrain projection enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map derived-layout bridge could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map live derived-layout/terrain projection enabled through direct runtime calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref getPresentationHook);
         cachedSourceRooms = null;
         cachedWorldRooms = null;
         cachedProjectedRooms = null;
@@ -90,9 +56,8 @@ internal static class PlayerMapDerivedLayoutBridge
         log = null;
     }
 
-    private static PlayerMapPresentationSnapshot GetPresentationHook(OrigGetPresentation orig, EditorSession session)
+    internal static PlayerMapPresentationSnapshot Project(EditorSession session, PlayerMapPresentationSnapshot source)
     {
-        PlayerMapPresentationSnapshot source = orig(session);
         if (!enabled || source?.Available != true) return source;
 
         EditorMapPresentationSnapshot world = MapEditorPresentationHub.Current;
@@ -208,17 +173,4 @@ internal static class PlayerMapDerivedLayoutBridge
                ReferenceEquals(a.NodeAnchors, b.NodeAnchors);
     }
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
