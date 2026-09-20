@@ -26,8 +26,8 @@ internal static class WorldMapLegacyRoomSourceService
 
     /// <summary>
     /// Returns the complete source signature used by the retained scene. The service owns both the
-    /// O(1) stable-frame cache and the slow vanilla texture audit; callers no longer need to provide
-    /// an implementation callback from a RuntimeDetour original method.
+    /// O(1) stable-frame cache and the slow vanilla texture audit. RuntimeDetour original-method
+    /// callbacks are deliberately not part of this boundary.
     /// </summary>
     internal static int ComputeSourceHash(MapPage page, WorldMapGpuScene.FrameState frame)
     {
@@ -55,16 +55,6 @@ internal static class WorldMapLegacyRoomSourceService
         }
     }
 
-    /// <summary>
-    /// Compatibility overload retained only while the old hook adapter exists. The callback is no
-    /// longer used: source ownership belongs entirely to this service now.
-    /// </summary>
-    internal static int ComputeSourceHash(
-        MapPage page,
-        WorldMapGpuScene.FrameState frame,
-        Func<MapPage, WorldMapGpuScene.FrameState, int> unusedLegacyCallback) =>
-        ComputeSourceHash(page, frame);
-
     internal static bool TryFindRoomPanel(MapPage page, int roomIndex, out RoomPanel panel)
     {
         panel = null;
@@ -82,19 +72,6 @@ internal static class WorldMapLegacyRoomSourceService
         panelIndex[roomIndex] = panel;
         return true;
     }
-
-    /// <summary>
-    /// Compatibility overload retained only while the old hook adapter exists. Native code should
-    /// use the overload without a fallback delegate.
-    /// </summary>
-    internal static bool TryFindRoomPanel(
-        MapPage page,
-        int roomIndex,
-        TryFindRoomPanelFallback unusedLegacyFallback,
-        out RoomPanel panel) =>
-        TryFindRoomPanel(page, roomIndex, out panel);
-
-    internal delegate bool TryFindRoomPanelFallback(MapPage page, int roomIndex, out RoomPanel panel);
 
     internal static void Reset()
     {
