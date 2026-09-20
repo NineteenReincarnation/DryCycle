@@ -24,13 +24,15 @@ internal static class WorldMapLegacyRoomSourceService
     private static int cachedSourceHash;
     private static int nextSourceAuditFrame;
 
-    internal static int ComputeSourceHash(
-        MapPage page,
-        WorldMapGpuScene.FrameState frame,
-        Func<MapPage, WorldMapGpuScene.FrameState, int> computeLiveHash)
+    /// <summary>
+    /// Returns the complete source signature used by the retained scene. The service owns both the
+    /// O(1) stable-frame cache and the slow vanilla texture audit; callers no longer need to provide
+    /// an implementation callback from a RuntimeDetour original method.
+    /// </summary>
+    internal static int ComputeSourceHash(MapPage page, WorldMapGpuScene.FrameState frame)
     {
-        if (frame?.Snapshot?.Available != true || computeLiveHash == null)
-            return computeLiveHash?.Invoke(page, frame) ?? 0;
+        if (frame?.Snapshot?.Available != true)
+            return 0;
 
         EditorMapPresentationSnapshot snapshot = frame.Snapshot;
         int generation = WorldMapGpuCache.Generation;
@@ -41,7 +43,7 @@ internal static class WorldMapLegacyRoomSourceService
         if (!snapshotChanged && !generationChanged && !auditDue)
             return cachedSourceHash;
 
-        int liveHash = computeLiveHash(page, frame);
+        int liveHash = ComputeLiveSourceHash(page, frame);
         unchecked
         {
             int hash = liveHash * 397 ^ generation;
@@ -53,28 +55,44 @@ internal static class WorldMapLegacyRoomSourceService
         }
     }
 
-    internal static bool TryFindRoomPanel(
+    /// <summary>
+    /// Compatibility overload retained only while the old hook adapter exists. The callback is no
+    /// longer used: source ownership belongs entirely to this service now.
+    /// </summary>
+    internal static int ComputeSourceHash(
         MapPage page,
-        int roomIndex,
-        TryFindRoomPanelFallback fallback,
-        out RoomPanel panel)
+        WorldMapGpuScene.FrameState frame,
+        Func<MapPage, WorldMapGpuScene.FrameState, int> unusedLegacyCallback) =>
+        ComputeSourceHash(page, frame);
+
+    internal static bool TryFindRoomPanel(MapPage page, int roomIndex, out RoomPanel panel)
     {
         panel = null;
-        if (page == null)
-            return fallback != null && fallback(page, roomIndex, out panel);
+        if (page == null) return false;
 
         EnsurePanelIndex(page);
         if (panelIndex.TryGetValue(roomIndex, out panel) && panel?.roomRep?.room?.index == roomIndex)
             return true;
 
         // Same-count replacement is rare, but third-party code can still replace vanilla nodes
-        // without participating in DryCycle invalidation. Repair the index through the slow path.
-        if (fallback == null || !fallback(page, roomIndex, out panel) || panel == null)
+        // without participating in DryCycle invalidation. Repair the index through one slow scan.
+        if (!TryFindRoomPanelSlow(page, roomIndex, out panel))
             return false;
 
         panelIndex[roomIndex] = panel;
         return true;
     }
+
+    /// <summary>
+    /// Compatibility overload retained only while the old hook adapter exists. Native code should
+    /// use the overload without a fallback delegate.
+    /// </summary>
+    internal static bool TryFindRoomPanel(
+        MapPage page,
+        int roomIndex,
+        TryFindRoomPanelFallback unusedLegacyFallback,
+        out RoomPanel panel) =>
+        TryFindRoomPanel(page, roomIndex, out panel);
 
     internal delegate bool TryFindRoomPanelFallback(MapPage page, int roomIndex, out RoomPanel panel);
 
@@ -87,6 +105,66 @@ internal static class WorldMapLegacyRoomSourceService
         cachedSourceGeneration = int.MinValue;
         cachedSourceHash = 0;
         nextSourceAuditFrame = 0;
+    }
+
+    private static int ComputeLiveSourceHash(MapPage page, WorldMapGpuScene.FrameState frame)
+    {
+        unchecked
+        {
+            int hash = 17;
+            EditorMapRoomSnapshot[] rooms = frame.Snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+            for (int i = 0; i < rooms.Length; i++)
+            {
+                EditorMapRoomSnapshot room = rooms[i];
+                if (room == null) continue;
+                hash = hash * 397 ^ room.RoomIndex;
+                hash = hash * 397 ^ room.Layer;
+
+                if (TryFindRoomPanel(page, room.RoomIndex, out RoomPanel panel))
+                {
+                    MapObject.RoomRepresentation rep = panel.roomRep;
+                    FAtlasElement element = rep?.mapTex;
+                    if (TryResolveRoomTextureAtlas(
+                            element,
+                            out Texture2D atlas,
+                            out Rect sourceUv,
+                            out float sourceWidth,
+                            out float sourceHeight))
+                    {
+                        hash = hash * 397 ^ 1;
+                        hash = hash * 397 ^ (element.name?.GetHashCode() ?? 0);
+                        hash = hash * 397 ^ atlas.GetInstanceID();
+                        hash = hash * 397 ^ atlas.width;
+                        hash = hash * 397 ^ atlas.height;
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceWidth * 1000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceHeight * 1000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.x * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.y * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.width * 1000000f);
+                        hash = hash * 397 ^ Mathf.RoundToInt(sourceUv.height * 1000000f);
+                    }
+                    else if (rep?.texture != null)
+                    {
+                        Texture2D direct = rep.texture;
+                        hash = hash * 397 ^ 2;
+                        hash = hash * 397 ^ direct.GetInstanceID();
+                        hash = hash * 397 ^ direct.width;
+                        hash = hash * 397 ^ direct.height;
+                    }
+                    else
+                    {
+                        hash = hash * 397;
+                    }
+                }
+
+                if (WorldMapGpuCache.TryGetRoom(room.RoomIndex, out WorldMapGpuCache.RoomBake bake))
+                {
+                    hash = hash * 397 ^ bake.SourceSignature.GetHashCode();
+                    hash = hash * 397 ^ (bake.GeometryReady ? 1 : 0);
+                }
+            }
+            return hash;
+        }
     }
 
     private static void EnsurePanelIndex(MapPage page)
@@ -104,5 +182,52 @@ internal static class WorldMapLegacyRoomSourceService
             if (page.subNodes[i] is RoomPanel panel && panel.roomRep?.room != null)
                 panelIndex[panel.roomRep.room.index] = panel;
         }
+    }
+
+    private static bool TryFindRoomPanelSlow(MapPage page, int roomIndex, out RoomPanel panel)
+    {
+        panel = null;
+        if (page?.subNodes == null) return false;
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is not RoomPanel candidate || candidate.roomRep?.room?.index != roomIndex)
+                continue;
+            panel = candidate;
+            return true;
+        }
+        return false;
+    }
+
+    private static bool TryResolveRoomTextureAtlas(
+        FAtlasElement element,
+        out Texture2D texture,
+        out Rect uv,
+        out float width,
+        out float height)
+    {
+        texture = null;
+        uv = new Rect(0f, 0f, 1f, 1f);
+        width = 0f;
+        height = 0f;
+
+        if (element?.atlas?.texture is not Texture2D atlas || atlas == null)
+            return false;
+
+        Rect candidateUv = element.uvRect;
+        float uvWidth = Math.Abs(candidateUv.width);
+        float uvHeight = Math.Abs(candidateUv.height);
+        if (uvWidth <= 0.000001f || uvHeight <= 0.000001f)
+            return false;
+
+        float sampledWidth = uvWidth * Math.Max(1, atlas.width);
+        float sampledHeight = uvHeight * Math.Max(1, atlas.height);
+        if (sampledWidth < 0.5f || sampledHeight < 0.5f)
+            return false;
+
+        texture = atlas;
+        uv = candidateUv;
+        width = Math.Max(1f, element.sourcePixelSize.x > 0.5f ? element.sourcePixelSize.x : sampledWidth);
+        height = Math.Max(1f, element.sourcePixelSize.y > 0.5f ? element.sourcePixelSize.y : sampledHeight);
+        return true;
     }
 }
