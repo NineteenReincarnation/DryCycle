@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
@@ -37,9 +36,6 @@ public sealed class PlayerMapConfigBuildPipelinePlugin : BaseUnityPlugin
 
 internal static class PlayerMapConfigBuildPipeline
 {
-    private delegate bool OrigSave(MapPage page, PlayerMapSessionState state, out string error);
-    private delegate bool HookSave(OrigSave orig, MapPage page, PlayerMapSessionState state, out string error);
-
     private sealed class RoomRecord
     {
         internal RoomPanel Panel;
@@ -69,60 +65,21 @@ internal static class PlayerMapConfigBuildPipeline
         internal int BDirection;
     }
 
-    private static readonly HookSave SaveHookDelegate = SaveHook;
-    private static IDisposable saveHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo target = typeof(PlayerMapConfigSerializer).GetMethod(
-                "Save",
-                flags,
-                null,
-                new[] { typeof(MapPage), typeof(PlayerMapSessionState), typeof(string).MakeByRefType() },
-                null);
-            if (target == null)
-                throw new MissingMethodException("PlayerMapConfigSerializer.Save was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            saveHook = constructor.Invoke(new object[] { target, SaveHookDelegate }) as IDisposable;
-            if (saveHook == null)
-                throw new InvalidOperationException("Player Map config build hook was not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map unified config build pipeline enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map config build pipeline could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map unified config build pipeline enabled through direct save calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        try { saveHook?.Dispose(); }
-        catch { }
-        saveHook = null;
         enabled = false;
         log = null;
-    }
-
-    private static bool SaveHook(OrigSave orig, MapPage page, PlayerMapSessionState state, out string error)
-    {
-        // Deliberately do not call the transitional writer. This hook is the compatibility boundary;
-        // all actual serialization below is owned by the rebuilt system.
-        return Save(page, state, out error);
     }
 
     internal static bool Save(MapPage page, PlayerMapSessionState state, out string error)
@@ -214,7 +171,9 @@ internal static class PlayerMapConfigBuildPipeline
                 InsertBlock(output, ref insertion, streamLines);
             }
 
-            AtomicWriteAllLines(page.filePath, output);
+            IReadOnlyList<string> filtered = PlayerMapDisabledConfigFilter.Filter(page.filePath, output);
+            AtomicWriteAllLines(page.filePath, filtered);
+            PlayerMapMigrationDirtyBridge.OnSaveSuccess(page);
             return true;
         }
         catch (Exception exception)
@@ -631,10 +590,4 @@ internal static class PlayerMapConfigBuildPipeline
         b = value;
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
