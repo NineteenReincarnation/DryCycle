@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
@@ -14,57 +13,19 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class PlayerMapConditionalVisibilityInfo
 {
-    private delegate void OrigDrawRoomInspector(PlayerMapRoomSnapshot room);
-    private delegate void HookDrawRoomInspector(OrigDrawRoomInspector orig, PlayerMapRoomSnapshot room);
-
-    private static readonly HookDrawRoomInspector DrawRoomInspectorHookDelegate = DrawRoomInspectorHook;
-    private static IDisposable inspectorHook;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo target = typeof(PlayerMapWorkspaceView).GetMethod(
-                "DrawRoomInspector",
-                flags,
-                null,
-                new[] { typeof(PlayerMapRoomSnapshot) },
-                null);
-            if (target == null)
-                throw new MissingMethodException("PlayerMapWorkspaceView.DrawRoomInspector was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            inspectorHook = constructor.Invoke(new object[] { target, DrawRoomInspectorHookDelegate }) as IDisposable;
-            if (inspectorHook == null)
-                throw new InvalidOperationException("Player Map conditional-visibility inspector hook was not created.");
-
-            enabled = true;
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map conditional-visibility inspector could not attach: " + Unwrap(error).Message);
-        }
+        enabled = true;
+        logger?.LogInfo("Player Map conditional-visibility info enabled through direct room-inspector calls; no self-detour attached.");
     }
 
-    internal static void Disable()
-    {
-        try { inspectorHook?.Dispose(); }
-        catch { }
-        inspectorHook = null;
-        enabled = false;
-    }
+    internal static void Disable() => enabled = false;
 
-    private static void DrawRoomInspectorHook(OrigDrawRoomInspector orig, PlayerMapRoomSnapshot room)
+    internal static void Draw(PlayerMapRoomSnapshot room)
     {
-        orig(room);
         if (!enabled || room == null || !room.Disabled) return;
 
         ImGui.Separator();
@@ -75,10 +36,4 @@ internal static class PlayerMapConditionalVisibilityInfo
             "This room is currently in World.DisabledMapRooms, so it is excluded from the player map, connections and Render output. The state comes from the active World/Timeline conditional rules; edit EXCLUSIVEROOM / HIDEROOM conditions in World data rather than Player Map."));
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
