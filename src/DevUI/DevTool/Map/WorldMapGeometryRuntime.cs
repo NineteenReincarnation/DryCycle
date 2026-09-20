@@ -175,10 +175,14 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
 
-    internal static EditorMapRoomVisualSnapshot Get(int roomIndex) =>
-        cache.TryGetValue(roomIndex, out CacheEntry entry)
-            ? entry.Snapshot
-            : EditorMapRoomVisualSnapshot.Empty;
+    internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
+    {
+        EditorMapRoomVisualSnapshot original =
+            cache.TryGetValue(roomIndex, out CacheEntry entry)
+                ? entry.Snapshot
+                : EditorMapRoomVisualSnapshot.Empty;
+        return DryCycle.DevUI.DevTool.RWImGui.WorldMapRasterReadbackFallback.Enhance(roomIndex, original);
+    }
 
     internal static void Prime(EditorSession session)
     {
