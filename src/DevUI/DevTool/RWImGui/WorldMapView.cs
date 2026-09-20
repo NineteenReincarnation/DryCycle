@@ -185,6 +185,7 @@ internal static class WorldMapView
             pan += io.MouseDelta;
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        bool renderChannels = WorldMapRenderOrder.BeginCanvas(draw, snapshot);
         Num.Vector2 canvasMax = canvasMin + canvasSize;
         draw.AddRectFilled(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.ChildBg));
         draw.AddRect(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.Border));
@@ -206,13 +207,20 @@ internal static class WorldMapView
 
         DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
         if (routedConnections)
+        {
+            WorldMapRenderOrder.UseConnections(draw);
             WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
+        }
         else if (showConnections)
+        {
             DrawConnections(draw, snapshot, canvasMin, canvasSize);
+        }
+        WorldMapRenderOrder.UseOverlay(draw);
 
         HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
+        WorldMapRenderOrder.EndCanvas(draw, renderChannels);
     }
 
     private static void DrawGrid(ImDrawListPtr draw, Num.Vector2 canvasMin, Num.Vector2 canvasSize)
@@ -264,6 +272,7 @@ internal static class WorldMapView
         bool selected,
         bool hovered)
     {
+        WorldMapRenderOrder.UseBase(draw);
         int pushedStyleColors = WorldMapThumbnailVisibility.PushRoomStyle();
         try
         {
@@ -397,6 +406,7 @@ internal static class WorldMapView
         bool selected,
         bool hovered)
     {
+        WorldMapRenderOrder.UseOverlay(draw);
         if (zoom < 0.34f && !selected && !hovered) return;
         uint text = ImGui.GetColorU32(room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Text);
         string name = room.Name;
@@ -420,6 +430,7 @@ internal static class WorldMapView
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize)
     {
+        WorldMapRenderOrder.UseConnections(draw);
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
         for (int i = 0; i < connections.Length; i++)
         {
