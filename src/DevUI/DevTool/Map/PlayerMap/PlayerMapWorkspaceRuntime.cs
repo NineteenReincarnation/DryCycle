@@ -205,6 +205,8 @@ public static class PlayerMapCommandQueue
         if (session == null)
         {
             Clear();
+            PlayerMapGroupCommandRuntime.Process(null);
+            PlayerMapMigrationCommandBridge.Process(null);
             return;
         }
 
@@ -221,6 +223,12 @@ public static class PlayerMapCommandQueue
             }
         }
         PlayerMapWorkspaceRuntime.Synchronize(session);
+
+        bool groupChanged = PlayerMapGroupCommandRuntime.Process(session);
+        if (groupChanged)
+            PlayerMapWorkspaceRuntime.Synchronize(session);
+
+        PlayerMapMigrationCommandBridge.Process(session);
     }
 
     public static void Clear()
