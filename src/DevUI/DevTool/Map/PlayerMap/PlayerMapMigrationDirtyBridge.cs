@@ -6,7 +6,8 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 /// <summary>
-/// Merges migration-stream dirty state into the Player Map presentation through explicit calls.
+/// Integrates migration-stream dirty state with the Player Map presentation through explicit runtime
+/// calls. No Save/GetPresentation/Touch method is RuntimeDetoured.
 /// </summary>
 internal static class PlayerMapMigrationDirtyBridge
 {
@@ -22,7 +23,7 @@ internal static class PlayerMapMigrationDirtyBridge
     {
         if (enabled) return;
         enabled = true;
-        logger?.LogInfo("Player Map migration dirty bridge enabled through direct runtime calls; no self-detours attached.");
+        logger?.LogInfo("Player Map migration dirty bridge enabled through direct runtime calls; no self-detour attached.");
     }
 
     internal static void Disable()
@@ -39,15 +40,16 @@ internal static class PlayerMapMigrationDirtyBridge
             states.GetValue(session, _ => new State()).Dirty = true;
     }
 
-    internal static void OnSaveSuccess(MapPage page)
+    internal static void OnSaveSucceeded(MapPage page)
     {
         if (!enabled || page == null) return;
+
         EditorSession session = DevToolSessionHub.Current;
         if (session != null && ReferenceEquals(session.Owner?.activePage, page))
             states.GetValue(session, _ => new State()).Dirty = false;
     }
 
-    internal static PlayerMapPresentationSnapshot ProjectPresentation(
+    internal static PlayerMapPresentationSnapshot Project(
         EditorSession session,
         PlayerMapPresentationSnapshot source)
     {
