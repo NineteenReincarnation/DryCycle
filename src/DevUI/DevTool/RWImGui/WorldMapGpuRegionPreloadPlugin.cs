@@ -51,6 +51,7 @@ internal static class WorldMapGpuRegionPreload
     private static CancellationTokenSource cancellation;
     private static string cacheRoot = string.Empty;
     private static long sequence;
+    private static bool preloadStarted;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -60,9 +61,9 @@ internal static class WorldMapGpuRegionPreload
         log = logger;
         cacheRoot = Path.Combine(Application.persistentDataPath, "DryCycle", "WorldMapGpuCache");
         cancellation = new CancellationTokenSource();
+        preloadStarted = false;
         enabled = true;
-        _ = Task.Run(() => PreloadRecentCaches(cancellation.Token), cancellation.Token);
-        log?.LogInfo("GPU World Map region memory/preload cache enabled through direct cache lifecycle calls.");
+        log?.LogInfo("GPU World Map region memory/preload cache enabled; disk preload is deferred until the Map cache is first used.");
     }
 
     internal static void Disable()
@@ -76,6 +77,7 @@ internal static class WorldMapGpuRegionPreload
         lock (Sync) resident.Clear();
         cacheRoot = string.Empty;
         sequence = 0;
+        preloadStarted = false;
         enabled = false;
         log = null;
     }
@@ -86,6 +88,8 @@ internal static class WorldMapGpuRegionPreload
     {
         if (!enabled || session?.ToolMode != EditorToolMode.Map || snapshot?.Available != true)
             return;
+
+        EnsureBackgroundPreloadStarted();
 
         string target = NormalizeRegion(snapshot.RegionName ?? session.World?.name);
         WorldMapGpuCache.CaptureResidentSnapshot(out string activeRaw, out _);
@@ -157,6 +161,16 @@ internal static class WorldMapGpuRegionPreload
             entry.Sequence = ++sequence;
             return true;
         }
+    }
+
+    private static void EnsureBackgroundPreloadStarted()
+    {
+        if (!enabled || preloadStarted || cancellation == null)
+            return;
+
+        preloadStarted = true;
+        CancellationToken token = cancellation.Token;
+        _ = Task.Run(() => PreloadRecentCaches(token), token);
     }
 
     private static void PreloadRecentCaches(CancellationToken token)
