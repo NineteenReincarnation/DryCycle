@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
@@ -879,105 +878,52 @@ public sealed class PlayerMapIncrementalRenderPlugin : BaseUnityPlugin
 
 internal static class PlayerMapIncrementalRenderHooks
 {
-    private delegate void OrigExecute(EditorSession session, PlayerMapCommand command);
-    private delegate void HookExecute(OrigExecute orig, EditorSession session, PlayerMapCommand command);
-    private delegate void OrigSynchronize(EditorSession session);
-    private delegate void HookSynchronize(OrigSynchronize orig, EditorSession session);
-    private delegate PlayerMapPresentationSnapshot OrigGetPresentation(EditorSession session);
-    private delegate PlayerMapPresentationSnapshot HookGetPresentation(OrigGetPresentation orig, EditorSession session);
-
-    private static readonly HookExecute ExecuteHookDelegate = ExecuteHook;
-    private static readonly HookSynchronize SynchronizeHookDelegate = SynchronizeHook;
-    private static readonly HookGetPresentation GetPresentationHookDelegate = GetPresentationHook;
-
-    private static IDisposable executeHook;
-    private static IDisposable synchronizeHook;
-    private static IDisposable getPresentationHook;
     private static ManualLogSource log;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type runtime = typeof(PlayerMapWorkspaceRuntime);
-            MethodInfo execute = runtime.GetMethod("Execute", flags, null,
-                new[] { typeof(EditorSession), typeof(PlayerMapCommand) }, null);
-            MethodInfo synchronize = runtime.GetMethod("Synchronize", flags, null,
-                new[] { typeof(EditorSession) }, null);
-            MethodInfo getPresentation = runtime.GetMethod("GetPresentation", flags, null,
-                new[] { typeof(EditorSession) }, null);
-            if (execute == null || synchronize == null || getPresentation == null)
-                throw new MissingMemberException("Player Map incremental render hook targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            executeHook = constructor.Invoke(new object[] { execute, ExecuteHookDelegate }) as IDisposable;
-            synchronizeHook = constructor.Invoke(new object[] { synchronize, SynchronizeHookDelegate }) as IDisposable;
-            getPresentationHook = constructor.Invoke(new object[] { getPresentation, GetPresentationHookDelegate }) as IDisposable;
-            if (executeHook == null || synchronizeHook == null || getPresentationHook == null)
-                throw new InvalidOperationException("One or more Player Map incremental render hooks were not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map incremental render scheduler enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map incremental render scheduler could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map incremental render scheduler enabled through direct runtime calls; no self-detours attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref getPresentationHook);
-        Dispose(ref synchronizeHook);
-        Dispose(ref executeHook);
         PlayerMapRenderScheduler.Reset();
         enabled = false;
         log = null;
     }
 
-    private static void ExecuteHook(OrigExecute orig, EditorSession session, PlayerMapCommand command)
+    internal static bool TryHandleExecute(EditorSession session, PlayerMapCommand command)
     {
-        if (!enabled)
-        {
-            orig(session, command);
-            return;
-        }
+        if (!enabled) return false;
 
         if (command.Kind == PlayerMapCommandKind.BuildPreview || command.Kind == PlayerMapCommandKind.RenderAndExport)
         {
-            if (PlayerMapRenderScheduler.IsRunning) return;
-            if (session?.Owner?.activePage is not MapPage page) return;
+            if (PlayerMapRenderScheduler.IsRunning) return true;
+            if (session?.Owner?.activePage is not MapPage page) return true;
             PlayerMapPresentationSnapshot snapshot = PlayerMapWorkspaceRuntime.GetPresentation(session);
             PlayerMapRenderScheduler.Begin(session, page, snapshot,
                 command.Kind == PlayerMapCommandKind.RenderAndExport);
-            return;
+            return true;
         }
 
         if (IsRenderAffectingMutation(command.Kind))
             PlayerMapRenderScheduler.InvalidateResult(session, "Player Map data changed.");
-        orig(session, command);
+        return false;
     }
 
-    private static void SynchronizeHook(OrigSynchronize orig, EditorSession session)
+    internal static void AfterSynchronize(EditorSession session)
     {
-        orig(session);
         if (enabled) PlayerMapRenderScheduler.Step(session);
     }
 
-    private static PlayerMapPresentationSnapshot GetPresentationHook(OrigGetPresentation orig, EditorSession session)
-    {
-        PlayerMapPresentationSnapshot source = orig(session);
-        return enabled ? PlayerMapRenderScheduler.ProjectPresentation(session, source) : source;
-    }
+    internal static PlayerMapPresentationSnapshot ProjectPresentation(
+        EditorSession session,
+        PlayerMapPresentationSnapshot source) =>
+        enabled ? PlayerMapRenderScheduler.ProjectPresentation(session, source) : source;
 
     private static bool IsRenderAffectingMutation(PlayerMapCommandKind kind) =>
         kind == PlayerMapCommandKind.SetEffectivePosition ||
@@ -990,17 +936,4 @@ internal static class PlayerMapIncrementalRenderHooks
         kind == PlayerMapCommandKind.SetDefaultMaterialAir ||
         kind == PlayerMapCommandKind.DeleteDefaultMaterial;
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
