@@ -157,6 +157,7 @@ internal static class WorldMapView
     private static void DrawCanvas(EditorMapPresentationSnapshot snapshot)
     {
         WorldMapExactShortcuts.BeforeCanvas(snapshot);
+        UpdateActiveDragBeforeDraw();
         Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
         if (canvasSize.X < 80f || canvasSize.Y < 80f) return;
@@ -187,6 +188,7 @@ internal static class WorldMapView
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         bool renderChannels = WorldMapRenderOrder.BeginCanvas(draw, snapshot);
+        bool canvasClip = WorldMapPresentationCorrectness.BeginCanvasClip(draw, snapshot, canvasMin, canvasSize);
         Num.Vector2 canvasMax = canvasMin + canvasSize;
         draw.AddRectFilled(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.ChildBg));
         draw.AddRect(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.Border));
@@ -223,7 +225,17 @@ internal static class WorldMapView
         HandleDelete(snapshot);
         if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
             selectedConnectionId = string.Empty;
+        WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
+    }
+
+    private static void UpdateActiveDragBeforeDraw()
+    {
+        if (draggingRoom < 0 || !ImGui.IsMouseDown(ImGuiMouseButton.Left) || zoom <= 0.0001f)
+            return;
+
+        Num.Vector2 mouse = ImGui.GetIO().MousePos;
+        localPositions[draggingRoom] = dragStartWorld + (mouse - dragStartMouse) / zoom;
     }
 
     private static void DrawGrid(ImDrawListPtr draw, Num.Vector2 canvasMin, Num.Vector2 canvasSize)
@@ -814,6 +826,9 @@ internal static class WorldMapView
     {
         a = Num.Vector2.Zero;
         b = Num.Vector2.Zero;
+        if (connection == null || connection.FromNodeIndex < 0 || connection.ToNodeIndex < 0)
+            return false;
+
         EditorMapRoomSnapshot roomA = FindRoom(snapshot, connection.FromRoomIndex);
         EditorMapRoomSnapshot roomB = FindRoom(snapshot, connection.ToRoomIndex);
         if (roomA == null || roomB == null || !IsLayerVisible(roomA.Layer) || !IsLayerVisible(roomB.Layer)) return false;
@@ -1067,6 +1082,10 @@ internal static class WorldMapView
         WorldConnectionDirection direction,
         bool dashed)
     {
+        if (WorldMapPresentationCorrectness.TryDrawBidirectionalStroke(
+                draw, a, b, shadow, core, shadowThickness, coreThickness, direction, dashed))
+            return;
+
         Num.Vector2 delta = b - a;
         float length = delta.Length();
         if (length <= 0.001f) return;
