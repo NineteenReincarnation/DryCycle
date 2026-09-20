@@ -306,6 +306,7 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         PlayerMapIncrementalRenderHooks.AfterSynchronize(session);
+        PlayerMapRenderPreparationController.AfterSynchronize(session);
     }
 
     internal static void Execute(EditorSession session, PlayerMapCommand command)
