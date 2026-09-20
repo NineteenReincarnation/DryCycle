@@ -61,9 +61,13 @@ public static class PlayerMapGroupCommandQueue
     private static readonly ConcurrentQueue<PlayerMapGroupMoveCommand> MoveQueue = new();
     private static readonly ConcurrentQueue<PlayerMapGroupLayerCommand> LayerQueue = new();
     private static readonly ConcurrentQueue<PlayerMapGroupPlacementCommand> PlacementQueue = new();
+    private static Func<PlayerMapGroupMoveCommand, PlayerMapGroupMoveCommand> moveTransformer;
 
     public static void Enqueue(PlayerMapGroupMoveCommand command)
     {
+        if (!Valid(command)) return;
+        if (moveTransformer != null)
+            command = moveTransformer(command);
         if (!Valid(command)) return;
         MoveQueue.Enqueue(command);
     }
@@ -97,6 +101,17 @@ public static class PlayerMapGroupCommandQueue
     internal static bool TryDequeue(out PlayerMapGroupMoveCommand command) => MoveQueue.TryDequeue(out command);
     internal static bool TryDequeue(out PlayerMapGroupLayerCommand command) => LayerQueue.TryDequeue(out command);
     internal static bool TryDequeue(out PlayerMapGroupPlacementCommand command) => PlacementQueue.TryDequeue(out command);
+
+    internal static void RegisterMoveTransformer(
+        Func<PlayerMapGroupMoveCommand, PlayerMapGroupMoveCommand> transformer) =>
+        moveTransformer = transformer;
+
+    internal static void UnregisterMoveTransformer(
+        Func<PlayerMapGroupMoveCommand, PlayerMapGroupMoveCommand> transformer)
+    {
+        if (Delegate.Equals(moveTransformer, transformer))
+            moveTransformer = null;
+    }
 
     internal static void Clear()
     {
