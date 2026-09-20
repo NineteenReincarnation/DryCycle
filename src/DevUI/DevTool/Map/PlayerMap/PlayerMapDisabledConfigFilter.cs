@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Reflection;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
@@ -20,62 +19,21 @@ namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 /// </summary>
 internal static class PlayerMapDisabledConfigFilter
 {
-    private delegate void OrigAtomicWriteAllLines(string target, IReadOnlyList<string> lines);
-    private delegate void HookAtomicWriteAllLines(OrigAtomicWriteAllLines orig, string target, IReadOnlyList<string> lines);
-
-    private static readonly HookAtomicWriteAllLines AtomicWriteHookDelegate = AtomicWriteHook;
-    private static IDisposable atomicWriteHook;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo target = typeof(PlayerMapConfigBuildPipeline).GetMethod(
-                "AtomicWriteAllLines",
-                flags,
-                null,
-                new[] { typeof(string), typeof(IReadOnlyList<string>) },
-                null);
-            if (target == null)
-                throw new MissingMethodException("PlayerMapConfigBuildPipeline.AtomicWriteAllLines was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            atomicWriteHook = constructor.Invoke(new object[] { target, AtomicWriteHookDelegate }) as IDisposable;
-            if (atomicWriteHook == null)
-                throw new InvalidOperationException("Player Map room-record contract filter hook was not created.");
-
-            enabled = true;
-            logger?.LogInfo("Player Map active room-record config contract filter enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map room-record config filter could not attach: " + Unwrap(error).Message);
-        }
+        enabled = true;
+        logger?.LogInfo("Player Map active room-record config contract filter enabled through direct save calls; no self-detour attached.");
     }
 
-    internal static void Disable()
-    {
-        try { atomicWriteHook?.Dispose(); }
-        catch { }
-        atomicWriteHook = null;
-        enabled = false;
-    }
+    internal static void Disable() => enabled = false;
 
-    private static void AtomicWriteHook(OrigAtomicWriteAllLines orig, string target, IReadOnlyList<string> lines)
+    internal static IReadOnlyList<string> Filter(string target, IReadOnlyList<string> lines)
     {
         if (!enabled || lines == null || !TryGetActiveMap(target, out MapPage page))
-        {
-            orig(target, lines);
-            return;
-        }
+            return lines;
 
         HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
         if (page.world?.DisabledMapRooms != null)
@@ -117,7 +75,7 @@ internal static class PlayerMapDisabledConfigFilter
             }
         }
 
-        orig(target, filtered ?? lines);
+        return filtered ?? lines;
     }
 
     private static bool TryGetActiveMap(string target, out MapPage page)
@@ -162,10 +120,4 @@ internal static class PlayerMapDisabledConfigFilter
     private static string NormalizePath(string value) =>
         (value ?? string.Empty).Replace('\\', '/').Trim();
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
