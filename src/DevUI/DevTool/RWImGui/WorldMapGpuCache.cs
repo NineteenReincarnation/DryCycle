@@ -137,21 +137,29 @@ internal static class WorldMapGpuCache
 
     internal static void Update(EditorSession session, EditorMapPresentationSnapshot snapshot)
     {
-        if (session?.ToolMode != EditorToolMode.Map ||
-            session.Owner?.activePage is not MapPage page ||
-            page.world == null || snapshot?.Available != true)
+        WorldMapGpuRegionPreload.BeforeCacheUpdate(session, snapshot);
+        try
         {
-            FlushIfNeeded(force: true);
-            return;
+            if (session?.ToolMode != EditorToolMode.Map ||
+                session.Owner?.activePage is not MapPage page ||
+                page.world == null || snapshot?.Available != true)
+            {
+                FlushIfNeeded(force: true);
+                return;
+            }
+
+            string region = NormalizeRegion(snapshot.RegionName ?? page.world.name);
+            EnsureRegion(region);
+            if (region.Length == 0) return;
+
+            ValidateSomeRooms(page, snapshot);
+            CaptureSomeRooms(snapshot);
+            FlushIfNeeded(force: false);
         }
-
-        string region = NormalizeRegion(snapshot.RegionName ?? page.world.name);
-        EnsureRegion(region);
-        if (region.Length == 0) return;
-
-        ValidateSomeRooms(page, snapshot);
-        CaptureSomeRooms(snapshot);
-        FlushIfNeeded(force: false);
+        finally
+        {
+            WorldMapGpuRegionPreload.AfterCacheUpdate();
+        }
     }
 
     internal static bool HasCompleteCachedData(EditorMapPresentationSnapshot snapshot)
@@ -186,6 +194,7 @@ internal static class WorldMapGpuCache
 
     internal static void ClearDiskCache(string region)
     {
+        WorldMapGpuRegionPreload.OnCacheClearing(region);
         string normalized = NormalizeRegion(region);
         try
         {
@@ -208,6 +217,40 @@ internal static class WorldMapGpuCache
             lastError = error.Message;
         }
     }
+
+    internal static object CaptureResidentSnapshot(out string region, out string path)
+    {
+        region = activeRegion;
+        path = activePath;
+        return current;
+    }
+
+    internal static bool RestoreResidentSnapshot(string region, string path, object snapshot)
+    {
+        if (snapshot is not Snapshot typed) return false;
+
+        string normalized = NormalizeRegion(region);
+        current = typed;
+        activeRegion = normalized;
+        activePath = string.IsNullOrWhiteSpace(path) ? CachePath(normalized) : path;
+        validatedRooms.Clear();
+        liveSignatures.Clear();
+        validationCursor = 0;
+        captureCursor = 0;
+        dirty = false;
+        dirtyFrame = -1;
+        lastError = string.Empty;
+        cacheHits = 0;
+        cacheMisses = 0;
+        unchecked { generation++; }
+        return true;
+    }
+
+    internal static object LoadResidentSnapshot(string region, string path) =>
+        Load(NormalizeRegion(region), path);
+
+    internal static string GetCachePath(string region) =>
+        CachePath(NormalizeRegion(region));
 
     internal static void FlushNow() => FlushIfNeeded(force: true);
 
