@@ -135,6 +135,9 @@ internal static class WorldMapShortcutPresentation
 
     private static void ProcessBackground(int currentRoom, int selectedRoom)
     {
+        if (!WorldMapBackgroundBudget.ShouldProcessShortcuts())
+            return;
+
         int count = roomOrder.Count;
         if (count == 0) return;
 
