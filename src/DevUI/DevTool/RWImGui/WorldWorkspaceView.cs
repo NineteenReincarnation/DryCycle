@@ -365,6 +365,7 @@ internal static class WorldWorkspaceView
         float minCenter = 400f;
         float maxSideSpace = Math.Max(0f, available.X - minCenter - reserved);
         float left = showExplorer ? Math.Max(260f, Math.Min(explorerWidth, maxSideSpace * 0.46f)) : 0f;
+        WorldInspectorReadability.NormalizeInspectorWidth(ref inspectorWidth);
         float right = showInspector ? Math.Max(238f, Math.Min(inspectorWidth, Math.Max(0f, maxSideSpace - left))) : 0f;
 
         if (showExplorer && showInspector && left + right > maxSideSpace)
@@ -714,6 +715,8 @@ internal static class WorldWorkspaceView
 
     private static void DrawInspector(EditorMapPresentationSnapshot snapshot)
     {
+        using (WorldInspectorReadability.Enter())
+        {
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
         if (selectionKind == SelectionKind.Connection && !string.IsNullOrEmpty(selectedConnectionId))
         {
@@ -741,6 +744,7 @@ internal static class WorldWorkspaceView
         {
             selectionKind = SelectionKind.Region;
             DrawRegionInspector(snapshot);
+        }
         }
     }
 
