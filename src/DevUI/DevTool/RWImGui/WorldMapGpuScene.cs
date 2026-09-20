@@ -155,6 +155,12 @@ internal static class WorldMapGpuScene
         internal Num.Vector2 Max;
     }
 
+    private sealed class RoomHitOrderComparer : IComparer<RoomHit>
+    {
+        internal static readonly RoomHitOrderComparer Instance = new();
+        public int Compare(RoomHit a, RoomHit b) => a.Order.CompareTo(b.Order);
+    }
+
     private sealed class RoomSpatialIndex
     {
         internal static readonly RoomSpatialIndex Empty =
@@ -219,6 +225,24 @@ internal static class WorldMapGpuScene
     private static volatile RouteSpatialIndex routeIndex = RouteSpatialIndex.Empty;
     private static volatile RoomSpatialIndex roomIndex = RoomSpatialIndex.Empty;
 
+    // Spatial queries run at hover/pan frequency. Keep scratch storage on the scene itself instead of
+    // RuntimeDetouring DryCycle-owned methods from a second plugin.
+    [ThreadStatic] private static int[] routeVisitStamps;
+    [ThreadStatic] private static int routeVisitGeneration;
+    [ThreadStatic] private static int[] roomVisitStamps;
+    [ThreadStatic] private static int roomVisitGeneration;
+    [ThreadStatic] private static List<RoomHit> visibleRoomScratch;
+
+    // The same route hit is commonly requested more than once in one Unity frame by hover and
+    // selection presentation. Cache that exact query without layering another self-detour.
+    private static RouteSpatialIndex cachedRouteIndex;
+    private static int cachedRouteFrame = int.MinValue;
+    private static Num.Vector2 cachedRoutePoint;
+    private static float cachedRouteRadius;
+    private static RouteHit cachedRouteHit;
+    private static bool cachedRouteResult;
+    private static bool cachedRouteValid;
+
     private static string region = string.Empty;
     private static int lastLayoutHash = int.MinValue;
     private static int lastRoomSourceHash = int.MinValue;
@@ -251,6 +275,7 @@ internal static class WorldMapGpuScene
         lastShowConnections = false;
         visibleRoomCount = 0;
         error = string.Empty;
+        ResetSpatialQueryScratch();
 
         DestroyChunk(ref dynamicOverlayRenderer);
         DestroyChunk(ref crossingRenderer);
@@ -329,14 +354,32 @@ internal static class WorldMapGpuScene
     {
         hit = null;
         RouteSpatialIndex index = routeIndex;
-        if (index.Routes.Length == 0) return false;
+        int frame = Time.frameCount;
 
+        if (cachedRouteValid &&
+            cachedRouteFrame == frame &&
+            ReferenceEquals(cachedRouteIndex, index) &&
+            cachedRoutePoint.Equals(mapPoint) &&
+            cachedRouteRadius.Equals(radius))
+        {
+            hit = cachedRouteHit;
+            return cachedRouteResult;
+        }
+
+        RouteHit[] routes = index.Routes;
+        if (routes.Length == 0 || index.Cells.Count == 0)
+        {
+            CacheRouteHit(index, frame, mapPoint, radius, null, false);
+            return false;
+        }
+
+        int[] stamps = EnsureStampCapacity(ref routeVisitStamps, routes.Length);
+        int generation = NextGeneration(ref routeVisitGeneration, stamps);
         int minCellX = FloorToInt((mapPoint.X - radius) / RouteGridSize);
         int maxCellX = FloorToInt((mapPoint.X + radius) / RouteGridSize);
         int minCellY = FloorToInt((mapPoint.Y - radius) / RouteGridSize);
         int maxCellY = FloorToInt((mapPoint.Y + radius) / RouteGridSize);
         float best = radius * radius;
-        HashSet<int> visited = new();
 
         for (int y = minCellY; y <= maxCellY; y++)
         {
@@ -345,17 +388,19 @@ internal static class WorldMapGpuScene
                 if (!index.Cells.TryGetValue(CellKey(x, y), out int[] candidates)) continue;
                 for (int c = 0; c < candidates.Length; c++)
                 {
-                    int routeIndexValue = candidates[c];
-                    if (!visited.Add(routeIndexValue) || routeIndexValue < 0 ||
-                        routeIndexValue >= index.Routes.Length)
+                    int candidateIndex = candidates[c];
+                    if ((uint)candidateIndex >= (uint)routes.Length || stamps[candidateIndex] == generation)
                         continue;
+                    stamps[candidateIndex] = generation;
 
-                    RouteHit candidate = index.Routes[routeIndexValue];
-                    if (mapPoint.X < candidate.Min.X - radius || mapPoint.X > candidate.Max.X + radius ||
+                    RouteHit candidate = routes[candidateIndex];
+                    if (candidate == null ||
+                        mapPoint.X < candidate.Min.X - radius || mapPoint.X > candidate.Max.X + radius ||
                         mapPoint.Y < candidate.Min.Y - radius || mapPoint.Y > candidate.Max.Y + radius)
                         continue;
 
                     Num.Vector2[] points = candidate.Points;
+                    if (points == null) continue;
                     for (int p = 1; p < points.Length; p++)
                     {
                         float distance = DistanceSqToSegment(mapPoint, points[p - 1], points[p]);
@@ -367,7 +412,9 @@ internal static class WorldMapGpuScene
             }
         }
 
-        return hit != null;
+        bool result = hit != null;
+        CacheRouteHit(index, frame, mapPoint, radius, hit, result);
+        return result;
     }
 
     internal static bool TryHitRoom(Num.Vector2 mapPoint, int layerMask, out int roomIndexValue)
@@ -399,14 +446,18 @@ internal static class WorldMapGpuScene
     internal static int[] QueryVisibleRooms(Num.Vector2 mapMin, Num.Vector2 mapMax, int layerMask)
     {
         RoomSpatialIndex index = roomIndex;
-        if (index.Rooms.Length == 0) return Array.Empty<int>();
+        RoomHit[] rooms = index.Rooms;
+        if (rooms.Length == 0 || index.Cells.Count == 0) return Array.Empty<int>();
+
+        int[] stamps = EnsureStampCapacity(ref roomVisitStamps, rooms.Length);
+        int generation = NextGeneration(ref roomVisitGeneration, stamps);
+        List<RoomHit> visible = visibleRoomScratch ??= new List<RoomHit>(Math.Min(rooms.Length, 64));
+        visible.Clear();
 
         int minCellX = FloorToInt(mapMin.X / RoomGridSize);
         int maxCellX = FloorToInt(mapMax.X / RoomGridSize);
         int minCellY = FloorToInt(mapMin.Y / RoomGridSize);
         int maxCellY = FloorToInt(mapMax.Y / RoomGridSize);
-        HashSet<int> visited = new();
-        List<RoomHit> visible = new();
 
         for (int y = minCellY; y <= maxCellY; y++)
         {
@@ -416,9 +467,11 @@ internal static class WorldMapGpuScene
                 for (int i = 0; i < candidates.Length; i++)
                 {
                     int candidateIndex = candidates[i];
-                    if (!visited.Add(candidateIndex) || candidateIndex < 0 || candidateIndex >= index.Rooms.Length)
+                    if ((uint)candidateIndex >= (uint)rooms.Length || stamps[candidateIndex] == generation)
                         continue;
-                    RoomHit candidate = index.Rooms[candidateIndex];
+                    stamps[candidateIndex] = generation;
+
+                    RoomHit candidate = rooms[candidateIndex];
                     if ((layerMask & (1 << candidate.Layer)) == 0 ||
                         candidate.Max.X < mapMin.X || candidate.Min.X > mapMax.X ||
                         candidate.Max.Y < mapMin.Y || candidate.Min.Y > mapMax.Y)
@@ -428,10 +481,77 @@ internal static class WorldMapGpuScene
             }
         }
 
-        visible.Sort((a, b) => a.Order.CompareTo(b.Order));
+        visible.Sort(RoomHitOrderComparer.Instance);
         int[] result = new int[visible.Count];
         for (int i = 0; i < visible.Count; i++) result[i] = visible[i].RoomIndex;
         return result;
+    }
+
+    private static void CacheRouteHit(
+        RouteSpatialIndex index,
+        int frame,
+        Num.Vector2 mapPoint,
+        float radius,
+        RouteHit hit,
+        bool result)
+    {
+        cachedRouteIndex = index;
+        cachedRouteFrame = frame;
+        cachedRoutePoint = mapPoint;
+        cachedRouteRadius = radius;
+        cachedRouteHit = hit;
+        cachedRouteResult = result;
+        cachedRouteValid = true;
+    }
+
+    private static void ResetSpatialQueryScratch()
+    {
+        routeVisitStamps = null;
+        routeVisitGeneration = 0;
+        roomVisitStamps = null;
+        roomVisitGeneration = 0;
+        visibleRoomScratch = null;
+        cachedRouteIndex = null;
+        cachedRouteFrame = int.MinValue;
+        cachedRoutePoint = default;
+        cachedRouteRadius = 0f;
+        cachedRouteHit = null;
+        cachedRouteResult = false;
+        cachedRouteValid = false;
+    }
+
+    private static int[] EnsureStampCapacity(ref int[] stamps, int count)
+    {
+        if (stamps != null && stamps.Length >= count) return stamps;
+
+        int size = Math.Max(16, stamps?.Length ?? 0);
+        while (size < count)
+        {
+            int next = size <= int.MaxValue / 2 ? size * 2 : count;
+            if (next <= size)
+            {
+                size = count;
+                break;
+            }
+            size = next;
+        }
+
+        stamps = new int[size];
+        return stamps;
+    }
+
+    private static int NextGeneration(ref int generation, int[] stamps)
+    {
+        if (generation == int.MaxValue)
+        {
+            Array.Clear(stamps, 0, stamps.Length);
+            generation = 1;
+            return generation;
+        }
+
+        generation++;
+        if (generation <= 0) generation = 1;
+        return generation;
     }
 
     private static bool EnsureRenderer()
@@ -1669,6 +1789,7 @@ internal static class WorldMapGpuScene
         routeIndex = RouteSpatialIndex.Empty;
         roomIndex = RoomSpatialIndex.Empty;
         visibleRoomCount = 0;
+        ResetSpatialQueryScratch();
         WorldConnectionRouter.Clear();
         lastLayoutHash = int.MinValue;
         lastRoomSourceHash = int.MinValue;
