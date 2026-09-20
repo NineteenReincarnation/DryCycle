@@ -41,11 +41,13 @@ internal static class WorldMapBackgroundBudget
         if (enabled) return;
         enabled = true;
         ResetState();
+        WorldMapFrontendBridge.RegisterGeometryBackgroundBudget(ShouldProcessGeometry);
         logger?.LogInfo("World Map background preview budget enabled through direct presentation calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
+        WorldMapFrontendBridge.UnregisterGeometryBackgroundBudget(ShouldProcessGeometry);
         enabled = false;
         ResetState();
         WorldMapHotState.Invalidate();
