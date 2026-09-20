@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -11,9 +10,8 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Replaces the room inspector's free-form subregion text field with a constrained selector.
-/// Existing subregions are derived from the current region snapshot; assigning a new name to the
-/// current room creates that subregion in the same data model used by Rain World's MapPage.
+/// Replaces the room inspector's free-form subregion text field with a constrained selector through
+/// an explicit WorldWorkspaceView call. No DryCycle-owned method is RuntimeDetoured.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -24,22 +22,12 @@ public sealed class WorldSubregionSelectorPlugin : BaseUnityPlugin
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
     private void OnEnable() => WorldSubregionSelector.Enable(Logger);
-
     private void OnDisable() => WorldSubregionSelector.Disable();
 }
 
 internal static class WorldSubregionSelector
 {
-    private delegate void OrigDrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room);
-    private delegate void HookDrawRoomInspector(
-        OrigDrawRoomInspector orig,
-        EditorMapPresentationSnapshot snapshot,
-        EditorMapRoomSnapshot room);
-
-    private static readonly HookDrawRoomInspector DrawRoomInspectorHookDelegate = DrawRoomInspectorHook;
-
     private static ManualLogSource log;
-    private static object hook;
     private static bool enabled;
 
     private static int inspectorRoom = -1;
@@ -50,57 +38,16 @@ internal static class WorldSubregionSelector
     private static int newSubregionRoom = -1;
     private static bool focusNewSubregionInput;
 
-    private static MethodInfo selectConnectionMethod;
-
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
-            Type workspaceType = typeof(WorldWorkspaceView);
-            MethodInfo drawRoomInspector = workspaceType.GetMethod(
-                "DrawRoomInspector",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot), typeof(EditorMapRoomSnapshot) },
-                null);
-            selectConnectionMethod = workspaceType.GetMethod(
-                "SelectConnection",
-                flags,
-                null,
-                new[] { typeof(EditorMapConnectionSnapshot) },
-                null);
-
-            if (drawRoomInspector == null)
-                throw new MissingMethodException("WorldWorkspaceView.DrawRoomInspector was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            hook = constructor.Invoke(new object[] { drawRoomInspector, DrawRoomInspectorHookDelegate });
-            enabled = true;
-            log?.LogInfo("World Map subregion selector enabled.");
-        }
-        catch (Exception error)
-        {
-            DisposeHook();
-            enabled = false;
-            log?.LogWarning("World Map subregion selector could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("World Map subregion selector enabled through direct inspector composition; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook();
-        selectConnectionMethod = null;
         inspectorRoom = -1;
         inspectorPosition = Num.Vector2.Zero;
         inspectorSubregion = string.Empty;
@@ -111,25 +58,11 @@ internal static class WorldSubregionSelector
         log = null;
     }
 
-    private static void DrawRoomInspectorHook(
-        OrigDrawRoomInspector orig,
-        EditorMapPresentationSnapshot snapshot,
-        EditorMapRoomSnapshot room)
+    internal static bool Draw(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        // This remains a full replacement because the selector must replace the old free-form
-        // subregion InputText. Any feature owned by the room inspector must therefore also be
-        // composed here; otherwise the replacement silently hides later additions to the base view.
-        if (snapshot == null || room == null)
-        {
-            orig(snapshot, room);
-            return;
-        }
+        if (!enabled || snapshot == null || room == null)
+            return false;
 
-        DrawRoomInspector(snapshot, room);
-    }
-
-    private static void DrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
-    {
         if (inspectorRoom != room.RoomIndex)
         {
             inspectorRoom = room.RoomIndex;
@@ -198,15 +131,13 @@ internal static class WorldSubregionSelector
             " · " + (visual.Curves?.Length ?? 0) + DevToolUiSettings.T(" 条曲面层", " curve layer(s)"),
             true);
 
-        // WorldSubregionSelector replaces the entire room inspector instead of calling the base
-        // implementation. Keep creature authoring explicitly in this composition so the selector
-        // cannot hide the creature-spawn/lineage editor that the base inspector owns.
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
         DrawRoomConnections(snapshot, room.RoomIndex);
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("节点", "NODES"));
         DrawRoomNodes(snapshot, room);
+        return true;
     }
 
     private static void DrawSubregionSelector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
@@ -344,10 +275,8 @@ internal static class WorldSubregionSelector
         if (string.IsNullOrWhiteSpace(name)) return false;
         EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = 0; i < rooms.Length; i++)
-        {
             if (string.Equals(rooms[i]?.Subregion?.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))
                 return true;
-        }
         return false;
     }
 
@@ -370,17 +299,8 @@ internal static class WorldSubregionSelector
             EditorMapConnectionSnapshot connection = connections[i];
             if (connection.FromRoomIndex != roomIndex && connection.ToRoomIndex != roomIndex) continue;
             count++;
-            if (!ImGui.Selectable(ConnectionLabel(snapshot, connection) + "##RoomConnection" + i)) continue;
-
-            try
-            {
-                selectConnectionMethod?.Invoke(null, new object[] { connection });
-            }
-            catch (Exception error)
-            {
-                log?.LogDebug("Could not select World Map connection: " + Unwrap(error).Message);
-                WorldMapView.SelectConnection(connection.ConnectionId);
-            }
+            if (ImGui.Selectable(ConnectionLabel(snapshot, connection) + "##RoomConnection" + i))
+                WorldWorkspaceView.SelectConnection(connection);
         }
 
         if (count == 0)
@@ -415,43 +335,20 @@ internal static class WorldSubregionSelector
         string left = (a?.Name ?? connection.FromRoomIndex.ToString()) + ":" + connection.FromNodeIndex;
         string right = (b?.Name ?? connection.ToRoomIndex.ToString()) + ":" +
                        (connection.ToNodeIndex >= 0 ? connection.ToNodeIndex.ToString() : "?");
-        return left + " " + DirectionLabel(connection.Direction) + " " + right;
+        string direction = connection.Direction switch
+        {
+            WorldConnectionDirection.AToB => "->",
+            WorldConnectionDirection.BToA => "<-",
+            _ => "<->"
+        };
+        return left + " " + direction + " " + right;
     }
-
-    private static string DirectionLabel(WorldConnectionDirection direction) => direction switch
-    {
-        WorldConnectionDirection.AToB => "->",
-        WorldConnectionDirection.BToA => "<-",
-        _ => "<->"
-    };
 
     private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
     {
         EditorMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = 0; i < rooms.Length; i++)
-            if (rooms[i].RoomIndex == roomIndex) return rooms[i];
+            if (rooms[i]?.RoomIndex == roomIndex) return rooms[i];
         return null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
-
-    private static void DisposeHook()
-    {
-        try
-        {
-            (hook as IDisposable)?.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            hook = null;
-        }
     }
 }
