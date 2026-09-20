@@ -140,6 +140,8 @@ internal static class WorldMapView
             if (DevToolWidgets.SameLineIfFits(120f, 4f))
                 ImGui.TextDisabled("· " + (source?.Name ?? linkingRoom.ToString()) + ":" + linkingNode + " " + DirectionGlyph(linkDirection) + " …");
         }
+
+        WorldMapPlayerLocator.DrawToolbar(snapshot);
     }
 
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
@@ -225,6 +227,14 @@ internal static class WorldMapView
         HandleDelete(snapshot);
         if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
             selectedConnectionId = string.Empty;
+        WorldMapPlayerLocator.DrawCanvas(
+            snapshot,
+            canvasMin,
+            canvasMax,
+            pan,
+            zoom,
+            localPositions,
+            layerVisible);
         WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
     }
