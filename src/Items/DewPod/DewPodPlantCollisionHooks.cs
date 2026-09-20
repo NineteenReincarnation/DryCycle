@@ -122,8 +122,6 @@ internal static class DewPodPlantCollisionHooks
 
         _enabled = true;
         On.Weapon.Update += Weapon_Update;
-        On.Room.Update += Room_Update;
-        On.RoomCamera.DrawUpdate += RoomCamera_DrawUpdate;
     }
 
     public static void Disable()
@@ -135,8 +133,6 @@ internal static class DewPodPlantCollisionHooks
 
         _enabled = false;
         On.Weapon.Update -= Weapon_Update;
-        On.Room.Update -= Room_Update;
-        On.RoomCamera.DrawUpdate -= RoomCamera_DrawUpdate;
     }
 
     private static void Weapon_Update(On.Weapon.orig_Update orig, Weapon self, bool eu)
@@ -349,11 +345,9 @@ internal static class DewPodPlantCollisionHooks
         // that a thrown spear punches through it instead of lodging or bouncing.
     }
 
-    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    internal static void AfterRoomUpdate(Room self)
     {
-        orig(self);
-
-        if (self?.updateList == null)
+        if (!_enabled || self?.updateList == null)
         {
             return;
         }
@@ -754,15 +748,12 @@ internal static class DewPodPlantCollisionHooks
         return false;
     }
 
-    private static void RoomCamera_DrawUpdate(
-        On.RoomCamera.orig_DrawUpdate orig,
+    internal static void AfterRoomCameraDrawUpdate(
         RoomCamera self,
         float timeStacker,
         float timeSpeed)
     {
-        orig(self, timeStacker, timeSpeed);
-
-        if (self?.room == null || self.spriteLeasers == null)
+        if (!_enabled || self?.room == null || self.spriteLeasers == null)
         {
             return;
         }
