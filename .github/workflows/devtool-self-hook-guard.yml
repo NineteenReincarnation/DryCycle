@@ -61,7 +61,6 @@ jobs:
               'RWImGui/WorldInspectorReadabilityPlugin.cs',
               'RWImGui/WorldMapBackgroundBudgetPlugin.cs',
               'RWImGui/WorldMapExactShortcutPlugin.cs',
-              'RWImGui/WorldMapGpuHotQueryPlugin.cs',
               'RWImGui/WorldMapGpuPipeBatchPlugin.cs',
               'RWImGui/WorldMapGpuRegionPreloadPlugin.cs',
               'RWImGui/WorldMapGpuRendererPlugin.cs',
