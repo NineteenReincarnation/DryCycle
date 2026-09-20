@@ -118,7 +118,7 @@ public static class MapEditorPresentationHub
 
     internal static void Publish(EditorSession session)
     {
-        if (!DryCycle.DevUI.DevTool.RWImGui.WorldMapPerformance.ShouldPublish(session))
+        if (!WorldMapFrontendBridge.ShouldPublish(session))
             return;
 
         global::World world = session?.World;
