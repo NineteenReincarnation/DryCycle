@@ -91,6 +91,12 @@ internal static class WorldWorkspaceView
     }
 
     private static WorkspaceMode workspaceMode = WorkspaceMode.WorldMap;
+    internal static int WorkspaceModeValue
+    {
+        get => (int)workspaceMode;
+        set => workspaceMode = (WorkspaceMode)Math.Max(0, Math.Min(2, value));
+    }
+
     private static ExplorerMode explorerMode = ExplorerMode.Rooms;
     private static SelectionKind selectionKind = SelectionKind.Region;
     private static string search = string.Empty;
@@ -322,6 +328,8 @@ internal static class WorldWorkspaceView
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注", "Focus"), "WorldWorkspaceFocus", DevToolButtonTone.Subtle))
             Send(EditorUiCommandKind.ToggleFocus);
+
+        PlayerMapWorkspaceIntegration.DrawToolbar(editor, snapshot);
     }
 
     private static string GetToolbarRoomCount(int count)
@@ -346,6 +354,9 @@ internal static class WorldWorkspaceView
 
     private static void DrawBody(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)
     {
+        if (PlayerMapWorkspaceIntegration.DrawBodyIfActive(editor, snapshot))
+            return;
+
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         bool showExplorer = editor.BrowserOpen;
         bool showInspector = editor.InspectorOpen;
