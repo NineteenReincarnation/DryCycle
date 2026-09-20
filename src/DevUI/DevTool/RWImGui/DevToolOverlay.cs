@@ -24,6 +24,7 @@ internal static class DevToolOverlay
     private static string placementLabelText = string.Empty;
 
     internal static bool SuppressesSharedPageSurfaces => lanceDebugPage;
+    internal static bool IsDebugWorkspace => lanceDebugPage;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
