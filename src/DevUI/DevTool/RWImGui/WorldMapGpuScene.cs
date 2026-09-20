@@ -261,10 +261,15 @@ internal static class WorldMapGpuScene
     internal static int RetainedRoomCount => roomIndex.Rooms.Length;
     internal static int VisibleRoomCount => visibleRoomCount;
 
+    internal static void SuppressStandaloneCamera()
+    {
+        if (mapCamera != null) mapCamera.enabled = false;
+    }
+
     internal static void SuppressScreenPresentation()
     {
         ready = false;
-        if (mapCamera != null) mapCamera.enabled = false;
+        SuppressStandaloneCamera();
         if (root != null && root.activeSelf) root.SetActive(false);
     }
 
