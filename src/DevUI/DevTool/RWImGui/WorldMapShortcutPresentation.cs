@@ -81,6 +81,9 @@ internal static class WorldMapShortcutPresentation
 
     internal static void Prime(EditorSession session, int selectedRoomIndex)
     {
+        if (!WorldMapGpuRuntime.AllowPresentationPrime())
+            return;
+
         if (session?.Owner?.activePage is not MapPage page || page.world == null)
         {
             Clear();
