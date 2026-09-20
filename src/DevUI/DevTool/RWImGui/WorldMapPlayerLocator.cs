@@ -628,11 +628,4 @@ internal static class WorldMapPlayerLocator
     private static float Clamp(float value, float min, float max) =>
         value < min ? min : value > max ? max : value;
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
-
 }
