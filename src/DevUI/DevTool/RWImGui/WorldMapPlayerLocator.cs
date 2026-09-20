@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -35,9 +34,6 @@ public sealed class WorldMapPlayerLocatorPlugin : BaseUnityPlugin
 internal static class WorldMapPlayerLocator
 {
     private const float TileDisplaySize = 2f;
-
-    private delegate void OrigWorldMapMethod(EditorMapPresentationSnapshot snapshot);
-    private delegate void HookWorldMapMethod(OrigWorldMapMethod orig, EditorMapPresentationSnapshot snapshot);
 
     internal sealed class Marker
     {
@@ -81,84 +77,23 @@ internal static class WorldMapPlayerLocator
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly Marker[] EmptyMarkers = Array.Empty<Marker>();
 
-    private static readonly HookWorldMapMethod CanvasHookDelegate = DrawCanvasHook;
-    private static readonly HookWorldMapMethod ToolbarHookDelegate = DrawToolbarHook;
-
     private static ManualLogSource log;
-    private static object canvasHook;
-    private static object toolbarHook;
     private static bool enabled;
     private static bool showPlayers = true;
     private static volatile Marker[] currentMarkers = EmptyMarkers;
 
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo localPositionsField;
-    private static FieldInfo layerVisibleField;
-
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
-            Type mapType = typeof(WorldMapView);
-            MethodInfo drawCanvas = mapType.GetMethod(
-                "DrawCanvas",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot) },
-                null);
-            MethodInfo drawToolbar = mapType.GetMethod(
-                "DrawToolbar",
-                flags,
-                null,
-                new[] { typeof(EditorMapPresentationSnapshot) },
-                null);
-
-            panField = mapType.GetField("pan", flags);
-            zoomField = mapType.GetField("zoom", flags);
-            localPositionsField = mapType.GetField("localPositions", flags);
-            layerVisibleField = mapType.GetField("layerVisible", flags);
-
-            if (drawCanvas == null || drawToolbar == null || panField == null || zoomField == null ||
-                localPositionsField == null || layerVisibleField == null)
-                throw new MissingMemberException("WorldMapView layout members required by the player locator were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-
-            ConstructorInfo hookConstructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (hookConstructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            canvasHook = hookConstructor.Invoke(new object[] { drawCanvas, CanvasHookDelegate });
-            toolbarHook = hookConstructor.Invoke(new object[] { drawToolbar, ToolbarHookDelegate });
-            enabled = true;
-            log?.LogInfo("World Map player locator enabled.");
-        }
-        catch (Exception error)
-        {
-            DisposeHook(ref canvasHook);
-            DisposeHook(ref toolbarHook);
-            enabled = false;
-            log?.LogWarning("World Map player locator could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("World Map player locator enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        DisposeHook(ref canvasHook);
-        DisposeHook(ref toolbarHook);
         currentMarkers = EmptyMarkers;
         IconCache.Clear();
-        panField = null;
-        zoomField = null;
-        localPositionsField = null;
-        layerVisibleField = null;
         enabled = false;
         log = null;
     }
@@ -187,9 +122,9 @@ internal static class WorldMapPlayerLocator
         }
     }
 
-    private static void DrawToolbarHook(OrigWorldMapMethod orig, EditorMapPresentationSnapshot snapshot)
+    internal static void DrawToolbar(EditorMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
+        if (!enabled) return;
 
         string label = DevToolUiSettings.T("玩家位置", "Players");
         float width = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 16f;
@@ -198,26 +133,20 @@ internal static class WorldMapPlayerLocator
         ImGui.Checkbox(label + "##WorldMapPlayerLocator", ref showPlayers);
     }
 
-    private static void DrawCanvasHook(OrigWorldMapMethod orig, EditorMapPresentationSnapshot snapshot)
+    internal static void DrawCanvas(
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasMax,
+        Num.Vector2 pan,
+        float zoom,
+        Dictionary<int, Num.Vector2> localPositions,
+        bool[] layerVisible)
     {
-        orig(snapshot);
-        if (!showPlayers || snapshot?.Available != true) return;
-
-        // DrawCanvas creates one full-canvas InvisibleButton before issuing draw-list commands.
-        // No later map operation replaces that item, so its rectangle remains the exact map
-        // viewport here without duplicating WorldMapView's window-layout calculations.
-        Num.Vector2 canvasMin = ImGui.GetItemRectMin();
-        Num.Vector2 canvasMax = ImGui.GetItemRectMax();
+        if (!enabled || !showPlayers || snapshot?.Available != true) return;
         if (canvasMax.X <= canvasMin.X || canvasMax.Y <= canvasMin.Y) return;
 
         Marker[] markers = currentMarkers;
         if (markers == null || markers.Length == 0) return;
-
-        Num.Vector2 pan = panField?.GetValue(null) is Num.Vector2 p ? p : Num.Vector2.Zero;
-        float zoom = zoomField?.GetValue(null) is float z ? z : 1f;
-        Dictionary<int, Num.Vector2> localPositions =
-            localPositionsField?.GetValue(null) as Dictionary<int, Num.Vector2>;
-        bool[] layerVisible = layerVisibleField?.GetValue(null) as bool[];
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         ImGuiIOPtr io = ImGui.GetIO();
@@ -233,9 +162,10 @@ internal static class WorldMapPlayerLocator
                 if (room == null || !IsLayerVisible(room.Layer, layerVisible)) continue;
 
                 EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
-                Num.Vector2 worldPosition = localPositions != null && localPositions.TryGetValue(room.RoomIndex, out Num.Vector2 local)
-                    ? local
-                    : new Num.Vector2(room.X, room.Y);
+                Num.Vector2 worldPosition =
+                    localPositions != null && localPositions.TryGetValue(room.RoomIndex, out Num.Vector2 local)
+                        ? local
+                        : new Num.Vector2(room.X, room.Y);
                 Num.Vector2 roomMin = canvasMin + pan + worldPosition * zoom;
 
                 float tileX = marker.HasTilePosition
@@ -705,18 +635,4 @@ internal static class WorldMapPlayerLocator
         return error;
     }
 
-    private static void DisposeHook(ref object hook)
-    {
-        try
-        {
-            (hook as IDisposable)?.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            hook = null;
-        }
-    }
 }
