@@ -298,6 +298,7 @@ internal static class DevToolOverlay
         }
 
         page.DrawBrowser(snapshot);
+        ScopedScrollChrome.Draw("Browser");
     }
 
     private static void DrawInspectorContents(EditorPresentationSnapshot snapshot, IDevToolPageView page)
@@ -309,6 +310,7 @@ internal static class DevToolOverlay
         }
 
         page.DrawInspector(snapshot);
+        ScopedScrollChrome.Draw("Inspector");
         string legacyTooltip = page.LegacyFallbackTooltip;
         if (!string.IsNullOrEmpty(legacyTooltip))
             DrawLegacyFallback(snapshot, legacyTooltip);
