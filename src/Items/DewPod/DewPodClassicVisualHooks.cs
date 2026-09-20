@@ -63,8 +63,6 @@ internal static class DewPodClassicVisualHooks
         }
 
         _enabled = true;
-        On.Room.Update += Room_Update;
-        On.RoomCamera.DrawUpdate += RoomCamera_DrawUpdate;
     }
 
     internal static void Disable()
@@ -75,15 +73,11 @@ internal static class DewPodClassicVisualHooks
         }
 
         _enabled = false;
-        On.Room.Update -= Room_Update;
-        On.RoomCamera.DrawUpdate -= RoomCamera_DrawUpdate;
     }
 
-    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    internal static void AfterRoomUpdate(Room self)
     {
-        orig(self);
-
-        if (self?.updateList == null)
+        if (!_enabled || self?.updateList == null)
         {
             return;
         }
@@ -172,15 +166,12 @@ internal static class DewPodClassicVisualHooks
         PlantHasLiquidColorField?.SetValue(plant, true);
     }
 
-    private static void RoomCamera_DrawUpdate(
-        On.RoomCamera.orig_DrawUpdate orig,
+    internal static void AfterRoomCameraDrawUpdate(
         RoomCamera self,
         float timeStacker,
         float timeSpeed)
     {
-        orig(self, timeStacker, timeSpeed);
-
-        if (self?.room == null || self.spriteLeasers == null)
+        if (!_enabled || self?.room == null || self.spriteLeasers == null)
         {
             return;
         }
