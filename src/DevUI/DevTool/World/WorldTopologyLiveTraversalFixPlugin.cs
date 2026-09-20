@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -33,71 +32,16 @@ public sealed class WorldTopologyLiveTraversalFixPlugin : BaseUnityPlugin
 
 internal static class WorldTopologyLiveTraversalFix
 {
-    private delegate bool OrigTrySetConnection(
-        string region,
-        string roomName,
-        int exitIndex,
-        string destinationRoom,
-        out string error);
-
-    private delegate bool HookTrySetConnection(
-        OrigTrySetConnection orig,
-        string region,
-        string roomName,
-        int exitIndex,
-        string destinationRoom,
-        out string error);
-
-    private static readonly HookTrySetConnection TrySetConnectionHookDelegate = TrySetConnectionHook;
-
     private static ManualLogSource log;
-    private static IDisposable trySetConnectionHook;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
         log = logger;
-
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo trySetConnection = typeof(WorldTextRegistry).GetMethod(
-                "TrySetConnection",
-                flags,
-                null,
-                new[]
-                {
-                    typeof(string), typeof(string), typeof(int), typeof(string),
-                    typeof(string).MakeByRefType()
-                },
-                null);
-
-            if (trySetConnection == null)
-                throw new MissingMethodException("WorldTextRegistry.TrySetConnection was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            if (hookType == null)
-                throw new TypeLoadException("MonoMod.RuntimeDetour.Hook is unavailable.");
-
-            ConstructorInfo constructor = hookType.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            trySetConnectionHook = constructor.Invoke(
-                new object[] { trySetConnection, TrySetConnectionHookDelegate }) as IDisposable;
-            if (trySetConnectionHook == null)
-                throw new InvalidOperationException("Live world connection hook was not created.");
-
-            On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
-            enabled = true;
-            log?.LogInfo("World topology live traversal synchronization enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("World topology live traversal synchronization could not attach: " + Unwrap(error).Message);
-        }
+        On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
+        enabled = true;
+        logger?.LogInfo("World topology live traversal synchronization enabled through direct WorldTextRegistry calls; only Rain World shortcut runtime is hooked.");
     }
 
     internal static void Disable()
@@ -105,35 +49,23 @@ internal static class WorldTopologyLiveTraversalFix
         if (enabled)
             On.ShortcutHandler.SuckInCreature -= ShortcutHandler_SuckInCreature;
 
-        try
-        {
-            trySetConnectionHook?.Dispose();
-        }
-        catch
-        {
-        }
-
-        trySetConnectionHook = null;
         enabled = false;
         log = null;
     }
 
-    private static bool TrySetConnectionHook(
-        OrigTrySetConnection orig,
+    internal static void OnConnectionChanged(
         string region,
         string roomName,
         int exitIndex,
-        string destinationRoom,
-        out string error)
+        string destinationToken)
     {
-        bool result = orig(region, roomName, exitIndex, destinationRoom, out error);
-        if (!result) return false;
+        if (!enabled) return;
 
         try
         {
             global::World world = ResolveLiveWorld(region);
             if (world != null)
-                SynchronizeEndpoint(world, roomName, exitIndex, destinationRoom);
+                SynchronizeEndpoint(world, roomName, exitIndex, destinationToken);
         }
         catch (Exception syncError)
         {
@@ -141,8 +73,6 @@ internal static class WorldTopologyLiveTraversalFix
             // a transient live World reference disappeared during a process/region transition.
             log?.LogWarning("WorldTopology live endpoint sync skipped: " + syncError.Message);
         }
-
-        return true;
     }
 
     private static void ShortcutHandler_SuckInCreature(
@@ -296,10 +226,4 @@ internal static class WorldTopologyLiveTraversalFix
     private static string NormalizeRegion(string region) =>
         string.IsNullOrWhiteSpace(region) ? string.Empty : region.Trim().ToUpperInvariant();
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
