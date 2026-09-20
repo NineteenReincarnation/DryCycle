@@ -17,7 +17,7 @@ internal static class PlayerMapBackendLifecycle
     {
         if (enabled) return;
 
-        // Base state must exist before any hook redirects its command/presentation boundaries.
+        // Base state must exist before auxiliary services consume command/presentation boundaries.
         PlayerMapWorkspaceRuntime.Enable();
         PlayerMapMigrationStreamRuntime.Enable(logger);
         PlayerMapPlacementBootstrap.Enable(logger);
@@ -31,8 +31,8 @@ internal static class PlayerMapBackendLifecycle
         PlayerMapMigrationCommandBridge.Enable(logger);
         PlayerMapLayerMutationFilter.Enable(logger);
         PlayerMapRenderRevisionGuard.Enable(logger);
-        // Install last so it becomes the outer Scheduler.Begin/synchronize gate: pending bakes are
-        // allowed to finish before the incremental renderer freezes its authoritative input snapshot.
+        // Enable preparation last so its direct scheduler/synchronize gate sees every prerequisite
+        // service ready before the incremental renderer freezes its authoritative input snapshot.
         PlayerMapRenderPreparationController.Enable(logger);
 
         enabled = true;
@@ -47,7 +47,7 @@ internal static class PlayerMapBackendLifecycle
             return;
         }
 
-        // Remove outer hooks first, then their inner dependencies.
+        // Disable consumers before the services they depend on.
         PlayerMapRenderPreparationController.Disable();
         PlayerMapRenderRevisionGuard.Disable();
         PlayerMapLayerMutationFilter.Disable();
