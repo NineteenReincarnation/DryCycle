@@ -1,15 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Narrow adapter around PlayerMapMultiSelection's retained selection set. Auxiliary Player Map UI
-/// modules use this adapter instead of each reflecting private selection state independently. The
-/// multi-selection controller remains the owner; this type only exposes a filtered snapshot view.
+/// Narrow adapter around PlayerMapMultiSelection's retained selection set.
+/// The multi-selection controller remains the owner; this type only exposes a filtered snapshot view.
 /// </summary>
 internal static class PlayerMapSelectionAccess
 {
@@ -20,21 +18,7 @@ internal static class PlayerMapSelectionAccess
 
     internal static void Enable(ManualLogSource logger)
     {
-        if (selection != null) return;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            FieldInfo field = typeof(PlayerMapMultiSelection).GetField("Selection", flags);
-            selection = field?.GetValue(null) as HashSet<int>;
-            if (selection == null)
-                throw new MissingMemberException("PlayerMapMultiSelection.Selection was not found.");
-        }
-        catch (Exception error)
-        {
-            selection = null;
-            region = string.Empty;
-            logger?.LogWarning("Player Map selection adapter could not attach: " + Unwrap(error).Message);
-        }
+        selection ??= PlayerMapMultiSelection.SelectionSet;
     }
 
     internal static void Disable()
@@ -71,12 +55,5 @@ internal static class PlayerMapSelectionAccess
         selection.Clear();
         if (snapshot.SelectedRoomIndex >= 0)
             selection.Add(snapshot.SelectedRoomIndex);
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
     }
 }
