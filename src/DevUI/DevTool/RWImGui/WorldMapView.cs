@@ -967,6 +967,7 @@ internal static class WorldMapView
         bool connected,
         bool emphasized)
     {
+        if (!WorldMapGpuPipeBatch.ShouldDrawRoomPipeSocket(emphasized)) return;
         float iconScale = zoom < 0.30f ? 0.92f : 1f;
         float half = (emphasized ? 10.2f : connected ? 9.2f : 8.4f) * iconScale;
         float halo = half + 3.3f * iconScale;
@@ -1012,6 +1013,7 @@ internal static class WorldMapView
 
     private static void DrawCreatureShortcutSocket(ImDrawListPtr draw, Num.Vector2 point, uint shadow)
     {
+        if (!WorldMapGpuPipeBatch.ShouldDrawCreaturePipeSocket()) return;
         float iconScale = zoom < 0.30f ? 0.90f : 1f;
         float half = 7.8f * iconScale;
         float halo = half + 2.8f * iconScale;
