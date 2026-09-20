@@ -381,7 +381,10 @@ internal static class WorldWorkspaceView
         if (showExplorer)
         {
             if (ImGui.BeginChild("##WorldExplorer", new Num.Vector2(left, available.Y), ImGuiChildFlags.Borders))
+            {
                 DrawExplorer(snapshot);
+                ScopedScrollChrome.Draw("WorldExplorer");
+            }
             ImGui.EndChild();
             ImGui.SameLine(0f, 0f);
             DrawSplitter("##WorldExplorerSplitter", ref explorerWidth, ref draggingExplorerSplitter, +1f, available.Y, 260f, 450f);
@@ -389,7 +392,10 @@ internal static class WorldWorkspaceView
         }
 
         if (ImGui.BeginChild("##WorldCanvas", new Num.Vector2(center, available.Y), ImGuiChildFlags.Borders))
+        {
             DrawCenter(snapshot);
+            ScopedScrollChrome.Draw("WorldCenter");
+        }
         ImGui.EndChild();
         SynchronizeCanvasSelection(snapshot);
 
@@ -399,7 +405,10 @@ internal static class WorldWorkspaceView
             DrawSplitter("##WorldInspectorSplitter", ref inspectorWidth, ref draggingInspectorSplitter, -1f, available.Y, 238f, 590f);
             ImGui.SameLine(0f, 0f);
             if (ImGui.BeginChild("##WorldInspector", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
+            {
                 DrawInspector(snapshot);
+                ScopedScrollChrome.Draw("WorldInspector", pruneAfter: true);
+            }
             ImGui.EndChild();
         }
     }
