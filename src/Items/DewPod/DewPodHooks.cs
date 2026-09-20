@@ -55,6 +55,8 @@ internal static class DewPodHooks
         On.Player.Grabability += Player_Grabability;
         On.Player.GrabUpdate += Player_GrabUpdate;
         On.PlayerGraphics.Update += PlayerGraphics_Update;
+        On.Room.Update += Room_Update;
+        On.RoomCamera.DrawUpdate += RoomCamera_DrawUpdate;
     }
 
     public static void Disable()
@@ -76,6 +78,8 @@ internal static class DewPodHooks
         On.Player.Grabability -= Player_Grabability;
         On.Player.GrabUpdate -= Player_GrabUpdate;
         On.PlayerGraphics.Update -= PlayerGraphics_Update;
+        On.Room.Update -= Room_Update;
+        On.RoomCamera.DrawUpdate -= RoomCamera_DrawUpdate;
 
         DevCategory?.Unregister();
         DevCategory = null;
@@ -85,6 +89,29 @@ internal static class DewPodHooks
 
         ObjectType?.Unregister();
         ObjectType = null;
+    }
+
+    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    {
+        // Preserve the previous nested HookGen order explicitly while invoking Rain World's
+        // Room.Update exactly once.
+        DewPodAudioHooks.BeforeRoomUpdate(self);
+        orig(self);
+        DewPodPlantCollisionHooks.AfterRoomUpdate(self);
+        DewPodClassicVisualHooks.AfterRoomUpdate(self);
+        DewPodRuntimeTuningHooks.AfterRoomUpdate(self);
+        DewPodAudioHooks.AfterRoomUpdate(self);
+    }
+
+    private static void RoomCamera_DrawUpdate(
+        On.RoomCamera.orig_DrawUpdate orig,
+        RoomCamera self,
+        float timeStacker,
+        float timeSpeed)
+    {
+        orig(self, timeStacker, timeSpeed);
+        DewPodPlantCollisionHooks.AfterRoomCameraDrawUpdate(self, timeStacker, timeSpeed);
+        DewPodClassicVisualHooks.AfterRoomCameraDrawUpdate(self, timeStacker, timeSpeed);
     }
 
     private static void AbstractPhysicalObject_Realize(
