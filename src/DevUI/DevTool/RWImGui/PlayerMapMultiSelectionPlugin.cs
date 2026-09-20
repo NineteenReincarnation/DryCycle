@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -30,44 +29,9 @@ public sealed class PlayerMapMultiSelectionPlugin : BaseUnityPlugin
 
 internal static class PlayerMapMultiSelection
 {
-    private delegate void OrigDrawRooms(
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-    private delegate void HookDrawRooms(
-        OrigDrawRooms orig,
-        ImDrawListPtr draw,
-        PlayerMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        PlayerMapRoomSnapshot hovered);
-    private delegate void OrigHandleRoomInteraction(
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-    private delegate void HookHandleRoomInteraction(
-        OrigHandleRoomInteraction orig,
-        PlayerMapPresentationSnapshot snapshot,
-        bool canvasHovered,
-        PlayerMapRoomSnapshot hoveredRoom,
-        Num.Vector2 canvasMin,
-        ImGuiIOPtr io);
-
-    private static readonly HookDrawRooms DrawRoomsHookDelegate = DrawRoomsHook;
-    private static readonly HookHandleRoomInteraction HandleRoomInteractionHookDelegate = HandleRoomInteractionHook;
     private static readonly HashSet<int> Selection = new();
     private static readonly Dictionary<int, Vector2> DragStartPositions = new();
 
-    private static IDisposable drawRoomsHook;
-    private static IDisposable interactionHook;
-    private static FieldInfo panField;
-    private static FieldInfo zoomField;
-    private static FieldInfo layerVisibleField;
-    private static FieldInfo defCreateArmedField;
-    private static FieldInfo defDragKindField;
-    private static FieldInfo defConsumedField;
     private static ManualLogSource log;
     private static bool enabled;
 
@@ -86,66 +50,13 @@ internal static class PlayerMapMultiSelection
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
+        enabled = true;
         log = logger;
-        try
-        {
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            Type view = typeof(PlayerMapWorkspaceView);
-            MethodInfo drawRooms = view.GetMethod("DrawRooms", flags, null,
-                new[]
-                {
-                    typeof(ImDrawListPtr), typeof(PlayerMapPresentationSnapshot), typeof(Num.Vector2),
-                    typeof(PlayerMapRoomSnapshot)
-                }, null);
-            MethodInfo interaction = view.GetMethod("HandleRoomInteraction", flags, null,
-                new[]
-                {
-                    typeof(PlayerMapPresentationSnapshot), typeof(bool), typeof(PlayerMapRoomSnapshot),
-                    typeof(Num.Vector2), typeof(ImGuiIOPtr)
-                }, null);
-            panField = view.GetField("pan", flags);
-            zoomField = view.GetField("zoom", flags);
-            layerVisibleField = view.GetField("LayerVisible", flags);
-
-            Type defTools = typeof(PlayerMapCanvasAuthoring);
-            defCreateArmedField = defTools.GetField("createArmed", flags);
-            defDragKindField = defTools.GetField("dragKind", flags);
-            defConsumedField = defTools.GetField("consumedCanvasInput", flags);
-
-            if (drawRooms == null || interaction == null || panField == null || zoomField == null ||
-                layerVisibleField == null || defCreateArmedField == null || defDragKindField == null || defConsumedField == null)
-                throw new MissingMemberException("Player Map multi-selection targets were not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            drawRoomsHook = constructor.Invoke(new object[] { drawRooms, DrawRoomsHookDelegate }) as IDisposable;
-            interactionHook = constructor.Invoke(new object[] { interaction, HandleRoomInteractionHookDelegate }) as IDisposable;
-            if (drawRoomsHook == null || interactionHook == null)
-                throw new InvalidOperationException("Player Map multi-selection hooks were not created.");
-
-            enabled = true;
-            log?.LogInfo("Player Map multi-selection/group movement enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map multi-selection could not attach: " + Unwrap(error).Message);
-        }
+        logger?.LogInfo("Player Map multi-selection/group movement enabled through direct view calls; no self-detour attached.");
     }
 
     internal static void Disable()
     {
-        Dispose(ref interactionHook);
-        Dispose(ref drawRoomsHook);
-        panField = null;
-        zoomField = null;
-        layerVisibleField = null;
-        defCreateArmedField = null;
-        defDragKindField = null;
-        defConsumedField = null;
         ResetSelection();
         enabled = false;
         log = null;
@@ -162,15 +73,19 @@ internal static class PlayerMapMultiSelection
         return false;
     }
 
-    private static void DrawRoomsHook(
-        OrigDrawRooms orig,
+    internal static void DrawOverlay(
         ImDrawListPtr draw,
         PlayerMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         PlayerMapRoomSnapshot hovered)
     {
-        orig(draw, snapshot, canvasMin, hovered);
-        if (!enabled || snapshot?.Available != true || !TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers))
+        if (!enabled || snapshot?.Available != true)
+            return;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null)
             return;
 
         SynchronizeRegionAndInspector(snapshot);
@@ -200,24 +115,21 @@ internal static class PlayerMapMultiSelection
         }
     }
 
-    private static void HandleRoomInteractionHook(
-        OrigHandleRoomInteraction orig,
+    internal static bool HandleInteraction(
         PlayerMapPresentationSnapshot snapshot,
         bool canvasHovered,
         PlayerMapRoomSnapshot hoveredRoom,
         Num.Vector2 canvasMin,
         ImGuiIOPtr io)
     {
-        if (!enabled || snapshot?.Available != true || DefToolOwnsCanvas())
-        {
-            orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
-            return;
-        }
-        if (!TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers))
-        {
-            orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
-            return;
-        }
+        if (!enabled || snapshot?.Available != true || PlayerMapCanvasAuthoring.OwnsCanvas)
+            return false;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null)
+            return false;
 
         SynchronizeRegionAndInspector(snapshot);
         Vector2 mouseCanon = ScreenToCanon(io.MousePos, canvasMin, pan, zoom);
@@ -244,23 +156,22 @@ internal static class PlayerMapMultiSelection
                 SetInspectorRoom(hoveredRoom.RoomIndex);
                 if (Selection.Contains(hoveredRoom.RoomIndex))
                     BeginGroupDrag(snapshot, hoveredRoom.RoomIndex, mouseCanon);
-                return;
+                return true;
             }
 
-            // Empty canvas starts a box selection. Without Shift, replacement semantics are used at
-            // mouse-up; with Shift the new hits are added to the current group.
             boxSelecting = true;
             boxAdditive = io.KeyShift;
             boxStartCanon = mouseCanon;
             boxEndCanon = mouseCanon;
             groupDragging = false;
             DragStartPositions.Clear();
-            return;
+            return true;
         }
 
         if (groupDragging)
         {
-            dragDelta = mouseCanon - dragStartMouseCanon;
+            Vector2 rawDelta = mouseCanon - dragStartMouseCanon;
+            dragDelta = PlayerMapLayoutAssist.AdjustPreviewDelta(rawDelta);
             if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
                 CommitGroupDrag();
@@ -269,7 +180,7 @@ internal static class PlayerMapMultiSelection
                 DragStartPositions.Clear();
                 dragDelta = Vector2.zero;
             }
-            return;
+            return true;
         }
 
         if (boxSelecting)
@@ -280,14 +191,10 @@ internal static class PlayerMapMultiSelection
                 CommitBoxSelection(snapshot, layers);
                 boxSelecting = false;
             }
-            return;
+            return true;
         }
 
-        // Middle/right canvas panning is handled before this method by PlayerMapWorkspaceView. There
-        // is no reason to call the old single-room left-drag implementation when our selection model
-        // is active; group-of-one movement covers that case too.
-        if (!canvasHovered)
-            orig(snapshot, canvasHovered, hoveredRoom, canvasMin, io);
+        return canvasHovered;
     }
 
     private static void BeginGroupDrag(PlayerMapPresentationSnapshot snapshot, int anchorRoom, Vector2 mouseCanon)
@@ -422,40 +329,6 @@ internal static class PlayerMapMultiSelection
         MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex: roomIndex));
     }
 
-    private static bool DefToolOwnsCanvas()
-    {
-        try
-        {
-            if ((bool)defCreateArmedField.GetValue(null)) return true;
-            if ((bool)defConsumedField.GetValue(null)) return true;
-            object drag = defDragKindField.GetValue(null);
-            return drag != null && Convert.ToInt32(drag) != 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool TryViewState(out Num.Vector2 pan, out float zoom, out bool[] layers)
-    {
-        pan = default;
-        zoom = 1f;
-        layers = null;
-        try
-        {
-            pan = (Num.Vector2)panField.GetValue(null);
-            zoom = (float)zoomField.GetValue(null);
-            layers = layerVisibleField.GetValue(null) as bool[];
-            return zoom > 0f && !float.IsNaN(zoom) && !float.IsInfinity(zoom) && layers != null;
-        }
-        catch (Exception error)
-        {
-            log?.LogDebug("Player Map multi-selection view-state read failed: " + error.Message);
-            return false;
-        }
-    }
-
     private static bool LayerVisible(PlayerMapRoomSnapshot room, bool[] layers)
     {
         int layer = Math.Max(0, Math.Min(PlayerMapCoordinateSystem.LayerCount - 1, room.Layer));
@@ -515,17 +388,4 @@ internal static class PlayerMapMultiSelection
         boxEndCanon = default;
     }
 
-    private static void Dispose(ref IDisposable hook)
-    {
-        try { hook?.Dispose(); }
-        catch { }
-        hook = null;
-    }
-
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
