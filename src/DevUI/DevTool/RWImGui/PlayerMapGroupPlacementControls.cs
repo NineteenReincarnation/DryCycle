@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
@@ -13,57 +12,22 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class PlayerMapGroupPlacementControls
 {
-    private delegate void OrigDrawInspector(PlayerMapPresentationSnapshot snapshot);
-    private delegate void HookDrawInspector(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot);
-
-    private static readonly HookDrawInspector DrawInspectorHookDelegate = DrawInspectorHook;
-    private static IDisposable inspectorHook;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
-        try
-        {
-            if (!PlayerMapSelectionAccess.Available)
-                throw new InvalidOperationException("Player Map selection adapter is unavailable.");
-
-            const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-            MethodInfo inspector = typeof(PlayerMapWorkspaceView).GetMethod(
-                "DrawInspector", flags, null, new[] { typeof(PlayerMapPresentationSnapshot) }, null);
-            if (inspector == null)
-                throw new MissingMemberException("Player Map grouped placement control target was not found.");
-
-            Type hookType = Type.GetType("MonoMod.RuntimeDetour.Hook, MonoMod.RuntimeDetour", throwOnError: false);
-            ConstructorInfo constructor = hookType?.GetConstructor(new[] { typeof(MethodBase), typeof(Delegate) });
-            if (constructor == null)
-                throw new MissingMethodException("MonoMod.RuntimeDetour.Hook(MethodBase, Delegate) is unavailable.");
-
-            inspectorHook = constructor.Invoke(new object[] { inspector, DrawInspectorHookDelegate }) as IDisposable;
-            if (inspectorHook == null)
-                throw new InvalidOperationException("Player Map grouped placement inspector hook was not created.");
-
-            enabled = true;
-            logger?.LogInfo("Player Map grouped placement controls enabled.");
-        }
-        catch (Exception error)
-        {
-            Disable();
-            logger?.LogWarning("Player Map grouped placement controls could not attach: " + Unwrap(error).Message);
-        }
+        enabled = PlayerMapSelectionAccess.Available;
+        if (enabled)
+            logger?.LogInfo("Player Map grouped placement controls enabled through direct inspector calls; no self-detour attached.");
+        else
+            logger?.LogWarning("Player Map grouped placement controls disabled because selection adapter is unavailable.");
     }
 
-    internal static void Disable()
-    {
-        try { inspectorHook?.Dispose(); }
-        catch { }
-        inspectorHook = null;
-        enabled = false;
-    }
+    internal static void Disable() => enabled = false;
 
-    private static void DrawInspectorHook(OrigDrawInspector orig, PlayerMapPresentationSnapshot snapshot)
+    internal static void Draw(PlayerMapPresentationSnapshot snapshot)
     {
-        orig(snapshot);
         if (!enabled || snapshot?.Available != true) return;
 
         List<PlayerMapRoomSnapshot> selected = PlayerMapSelectionAccess.Collect(snapshot);
@@ -116,10 +80,4 @@ internal static class PlayerMapGroupPlacementControls
         PlayerMapGroupCommandQueue.Enqueue(new PlayerMapGroupPlacementCommand(rooms, operation, label));
     }
 
-    private static Exception Unwrap(Exception error)
-    {
-        while (error is TargetInvocationException invocation && invocation.InnerException != null)
-            error = invocation.InnerException;
-        return error;
-    }
 }
