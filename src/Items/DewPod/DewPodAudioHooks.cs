@@ -67,7 +67,6 @@ internal static class DewPodAudioHooks
 
         InitializeSoundIds();
         _enabled = true;
-        On.Room.Update += Room_Update;
     }
 
     internal static void Disable()
@@ -78,24 +77,22 @@ internal static class DewPodAudioHooks
         }
 
         _enabled = false;
-        On.Room.Update -= Room_Update;
     }
 
-    private static void Room_Update(On.Room.orig_Update orig, Room self)
+    internal static void BeforeRoomUpdate(Room self)
     {
+        if (!_enabled) return;
+
         // DewPod.MarkDrinking still owns the pose state and previously played the
         // vanilla Water Nut bite sample. Keep its tiny cooldown above zero before
-        // the room update so that legacy sound never fires. A value of 3 is used
-        // rather than a huge sentinel, so disabling this hook restores vanilla
-        // behavior naturally within a few ticks.
+        // the room update so that legacy sound never fires.
         SuppressLegacyDrinkSound(self);
+    }
 
-        orig(self);
-
-        if (self?.updateList == null)
-        {
+    internal static void AfterRoomUpdate(Room self)
+    {
+        if (!_enabled || self?.updateList == null)
             return;
-        }
 
         for (int i = 0; i < self.updateList.Count; i++)
         {
