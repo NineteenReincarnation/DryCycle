@@ -3,7 +3,7 @@ name: DevTool Self-Hook Guard
 on:
   push:
     paths:
-      - 'src/DevUI/DevTool/**'
+      - 'src/**'
       - '.github/workflows/devtool-self-hook-guard.yml'
   pull_request:
     paths:
@@ -21,9 +21,9 @@ jobs:
           from pathlib import Path
           import sys
 
-          root = Path('src/DevUI/DevTool')
+          root = Path('src')
 
-          # Exact baseline of DevTool files that contain the RuntimeDetour Hook installation marker.
+          # Exact baseline of repository source files that contain the RuntimeDetour Hook installation marker.
           # Read-only HookGen discovery is not an installation site. DryCycle-owned code must prefer
           # direct interfaces/services/events; any future external compatibility detour must be added
           # deliberately and reviewed rather than appearing implicitly.
@@ -40,7 +40,7 @@ jobs:
           retired = sorted(allowed - actual)
 
           if unexpected:
-              print('New DevTool RuntimeDetour sites are forbidden. Prefer a direct interface/service/event for DryCycle-owned code:')
+              print('New RuntimeDetour sites are forbidden by default. Prefer a direct interface/service/event for DryCycle-owned code; external compatibility detours require explicit review:')
               for path in unexpected:
                   print(f'  + {path}')
               sys.exit(1)
@@ -52,4 +52,4 @@ jobs:
               print('Remove retired entries from devtool-self-hook-guard.yml in the same change.')
               sys.exit(1)
 
-          print(f'Guarded existing RuntimeDetour baseline: {len(actual)} files; no new sites added.')
+          print(f'Guarded repository RuntimeDetour baseline: {len(actual)} files; no new sites added.')
