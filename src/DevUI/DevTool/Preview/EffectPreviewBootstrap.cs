@@ -622,8 +622,9 @@ internal static class HookGenLoadedHookDiscovery
 
         try
         {
+            const string runtimeDetourAssembly = "MonoMod.RuntimeDetour";
             Type manager = Type.GetType(
-                "MonoMod.RuntimeDetour.HookGen.HookEndpointManager, MonoMod.RuntimeDetour",
+                runtimeDetourAssembly + ".HookGen.HookEndpointManager, " + runtimeDetourAssembly,
                 throwOnError: false);
             if (manager == null) return Array.Empty<On.Room.hook_Loaded>();
 
