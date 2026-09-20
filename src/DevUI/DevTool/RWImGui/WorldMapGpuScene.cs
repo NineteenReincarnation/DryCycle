@@ -313,6 +313,7 @@ internal static class WorldMapGpuScene
             session?.ToolMode != EditorToolMode.Map || session.Owner?.activePage is not MapPage page)
         {
             if (mapCamera != null) mapCamera.enabled = false;
+            WorldMapGpuPipeBatch.AfterSceneApply(frame, session);
             return;
         }
 
@@ -348,6 +349,7 @@ internal static class WorldMapGpuScene
 
         UpdateDynamicOverlay(frame, topologyHash);
         lastLayerMask = frame.LayerMask;
+        WorldMapGpuPipeBatch.AfterSceneApply(frame, session);
     }
 
     internal static bool TryHitConnection(Num.Vector2 mapPoint, float radius, out RouteHit hit)
