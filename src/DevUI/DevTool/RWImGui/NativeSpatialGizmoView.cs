@@ -28,9 +28,13 @@ internal static class NativeSpatialGizmoView
     }
 
     private static DragState drag;
+    private static bool claimedMouseThisFrame;
+
+    internal static bool OwnsMouse => drag.Active || claimedMouseThisFrame;
 
     internal static void DrawObjects(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        claimedMouseThisFrame = false;
         EditorViewportSnapshot viewport = EditorViewportPresentationHub.Current;
         if (!Ready(viewport, display) || snapshot?.SceneObjects == null) return;
 
@@ -191,6 +195,7 @@ internal static class NativeSpatialGizmoView
                 drag.Target,
                 drag.Index));
         drag = default;
+        claimedMouseThisFrame = false;
     }
 
     private static void HandlePointInteraction(
@@ -224,6 +229,7 @@ internal static class NativeSpatialGizmoView
         float centerWorldX,
         float centerWorldY)
     {
+        claimedMouseThisFrame = true;
         drag = new DragState
         {
             Active = true,
@@ -352,7 +358,9 @@ internal static class NativeSpatialGizmoView
     }
 
     private static bool CanStartInteraction() =>
-        !drag.Active && !ImGui.GetIO().WantCaptureMouse;
+        !drag.Active &&
+        !NativeObjectGizmoView.OwnsMouse &&
+        !ImGui.GetIO().WantCaptureMouse;
 
     private static bool Ready(EditorViewportSnapshot viewport, Num.Vector2 display) =>
         viewport?.Available == true && viewport.Width > 0f && viewport.Height > 0f && display.X > 0f && display.Y > 0f;
