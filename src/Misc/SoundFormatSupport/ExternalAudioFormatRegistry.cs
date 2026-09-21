@@ -247,8 +247,9 @@ internal static class ExternalAudioFormatRegistry
         {
             ExternalAudioFormat format = snapshot[i];
             string relativePath = relativeDirectory + Path.DirectorySeparatorChar + stem + format.Extension;
-            string resolved = AssetManager.ResolveFilePath(relativePath);
-            if (!File.Exists(resolved)) continue;
+            if (!TryResolveExistingFile(relativePath, out string resolved))
+                continue;
+
             file = new ResolvedAudioFile(resolved, format);
             return true;
         }
@@ -275,17 +276,52 @@ internal static class ExternalAudioFormatRegistry
     {
         file = default;
         string relativePath = relativeDirectory + Path.DirectorySeparatorChar + fileName;
-        string resolved = AssetManager.ResolveFilePath(relativePath);
-        if (!File.Exists(resolved)) return false;
+        if (!TryResolveExistingFile(relativePath, out string resolved))
+            return false;
 
         // Match vanilla LoadedSoundEffects semantics: only a path redirected by the asset/mod
         // resolver counts as a loose override; the bare game-root fallback still belongs to the
         // AssetBundle path.
-        string vanillaFallback = Path.Combine(Custom.RootFolderDirectory(), relativePath.ToLowerInvariant());
+        string vanillaFallback;
+        try
+        {
+            vanillaFallback = Path.Combine(
+                Custom.RootFolderDirectory(),
+                relativePath.ToLowerInvariant());
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "ExternalAudioFormatRegistry/VanillaFallback/" + relativePath,
+                error);
+            return false;
+        }
+
         if (PathsEqual(resolved, vanillaFallback)) return false;
 
         file = new ResolvedAudioFile(resolved, format);
         return true;
+    }
+
+    private static bool TryResolveExistingFile(string relativePath, out string resolved)
+    {
+        resolved = null;
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return false;
+
+        try
+        {
+            resolved = AssetManager.ResolveFilePath(relativePath);
+            return !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved);
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "ExternalAudioFormatRegistry/Resolve/" + relativePath,
+                error);
+            resolved = null;
+            return false;
+        }
     }
 
     private static ExternalAudioFormat[] SnapshotFormats()
