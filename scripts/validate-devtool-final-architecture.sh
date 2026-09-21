@@ -273,6 +273,16 @@ if ! grep -Fq "history stack was left unchanged" "$history" ||
   exit 1
 fi
 
+# History batches are document-scoped. A logical document switch must commit already-applied batch
+# edits to the old key, while replacement of the same runtime document must discard stale-reference
+# batch state before clearing its stack.
+if ! grep -Fq 'CommitOpenBatchBeforeDocumentSwitch' "$history" ||
+   ! grep -Fq 'DiscardOpenBatch' "$history" ||
+   ! grep -Fq 'if (changed && batchDepth > 0 && hasActiveDocument)' "$history"; then
+  echo "Editor history batch state can cross document/runtime-instance boundaries." >&2
+  exit 1
+fi
+
 # Compatibility diagnostics are session/lifetime state and must be reset together. The loaded-type
 # inventory is intentionally process-level and is therefore not required here.
 required_diagnostic_resets=(
