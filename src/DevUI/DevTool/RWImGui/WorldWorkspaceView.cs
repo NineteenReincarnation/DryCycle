@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Objects;
@@ -112,6 +113,17 @@ internal static class WorldWorkspaceView
     private static int inspectorRoom = -1;
     private static Num.Vector2 inspectorPosition;
     private static string inspectorSubregion = string.Empty;
+    private static string attractionSearch = string.Empty;
+    private static string newAttraction = "Neutral";
+    private static readonly string[] AttractionValues =
+    {
+        "Inherit",
+        "Neutral",
+        "Forbidden",
+        "Avoid",
+        "Like",
+        "Stay"
+    };
 
     private static string mappingConnectionId = string.Empty;
     private static int mappingTargetNode = -1;
@@ -168,6 +180,7 @@ internal static class WorldWorkspaceView
     private static bool statusWorldTextDirty;
     private static bool statusTopologyDirty;
     private static bool statusWorldDataDirty;
+    private static bool statusPropertiesDirty;
     private static bool statusChinese;
     private static string statusText = string.Empty;
 
@@ -269,6 +282,7 @@ internal static class WorldWorkspaceView
         statusWorldTextDirty = false;
         statusTopologyDirty = false;
         statusWorldDataDirty = false;
+        statusPropertiesDirty = false;
         statusChinese = false;
         statusText = string.Empty;
 
@@ -279,6 +293,8 @@ internal static class WorldWorkspaceView
         inspectorRoom = -1;
         inspectorPosition = default;
         inspectorSubregion = string.Empty;
+        attractionSearch = string.Empty;
+        newAttraction = "Neutral";
         mappingConnectionId = string.Empty;
         mappingTargetNode = -1;
         mappingDirection = WorldConnectionDirection.Bidirectional;
@@ -301,7 +317,8 @@ internal static class WorldWorkspaceView
         DrawWorkspaceModeButton(WorkspaceMode.Validation, DevToolUiSettings.T("验证", "Validation"), "WorldWorkspaceModeValidation");
 
         ImGui.SameLine(0f, 18f);
-        bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty || WorldTextRegistry.Dirty;
+        bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty ||
+                        WorldTextRegistry.Dirty || WorldRoomAttractionRegistry.Dirty;
         if (DevToolWidgets.ActionButton(
                 anyDirty ? DevToolUiSettings.T("保存修改", "Save Changes") : DevToolUiSettings.T("保存", "Save"),
                 "WorldWorkspaceSave",
@@ -309,6 +326,7 @@ internal static class WorldWorkspaceView
         {
             Send(EditorUiCommandKind.Save);
             if (WorldWorkspaceDataView.HasDirtyData) WorldWorkspaceDataView.SaveDirty();
+            if (WorldRoomAttractionRegistry.Dirty) WorldRoomAttractionRegistry.Save();
             if (WorldTextRegistry.Dirty) WorldTextRegistry.Save();
             if (WorldTopologyRegistry.Dirty) WorldTopologyRegistry.Save();
         }
@@ -828,11 +846,150 @@ internal static class WorldWorkspaceView
         else if (!changed && !ImGui.IsAnyItemActive()) inspectorSubregion = room.Subregion ?? string.Empty;
 
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
+        DrawRoomAttractions(room);
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
         DrawRoomConnections(snapshot, room.RoomIndex);
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("节点", "NODES"));
         DrawRoomNodes(snapshot, room);
+    }
+
+    private static void DrawRoomAttractions(EditorMapRoomSnapshot room)
+    {
+        EditorSession session = DevToolSessionHub.Current;
+        if (session == null || room == null) return;
+
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("生物吸引度", "CREATURE ATTRACTION"));
+
+        if (!WorldRoomAttractionRegistry.EnsureLoaded(session))
+        {
+            ImGui.TextColored(
+                new Num.Vector4(0.92f, 0.42f, 0.42f, 1f),
+                WorldRoomAttractionRegistry.LoadError ?? DevToolUiSettings.T("Properties.txt 无法读取", "Properties.txt unavailable"));
+            return;
+        }
+
+        string source = Path.GetFileName(WorldRoomAttractionRegistry.LoadedPath ?? string.Empty);
+        if (!string.IsNullOrEmpty(source))
+            DevToolWidgets.MutedText(DevToolUiSettings.T("来源：", "Source: ") + source, true);
+
+        WorldRoomAttractionEntry[] overrides =
+            WorldRoomAttractionRegistry.GetRoomOverrides(session, room.RoomIndex);
+        HashSet<string> overridden = new(StringComparer.Ordinal);
+
+        if (overrides.Length == 0)
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "当前房间没有显式覆盖，全部继承区域默认值。",
+                    "No explicit room overrides; all creatures inherit region defaults."),
+                true);
+        }
+        else
+        {
+            for (int i = 0; i < overrides.Length; i++)
+            {
+                WorldRoomAttractionEntry entry = overrides[i];
+                overridden.Add(entry.CreatureId);
+                ImGui.PushID("RoomAttr:" + entry.CreatureId);
+                ImGui.TextUnformatted(entry.CreatureId);
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(-1f);
+                if (ImGui.BeginCombo("##Value", entry.Attraction))
+                {
+                    for (int v = 0; v < AttractionValues.Length; v++)
+                    {
+                        string value = AttractionValues[v];
+                        bool selected = string.Equals(entry.Attraction, value, StringComparison.Ordinal);
+                        if (ImGui.Selectable(
+                                DevToolUiSettings.T(
+                                    value == "Inherit" ? "继承" : value,
+                                    value),
+                                selected))
+                        {
+                            QueueRoomAttraction(room.RoomIndex, entry.CreatureId, value);
+                        }
+                        if (selected) ImGui.SetItemDefaultFocus();
+                    }
+                    ImGui.EndCombo();
+                }
+                ImGui.PopID();
+            }
+        }
+
+        ImGui.Spacing();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("添加覆盖", "Add override"));
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputText(
+            DevToolUiSettings.T("搜索生物##RoomAttrSearch", "Search creature##RoomAttrSearch"),
+            ref attractionSearch,
+            128);
+
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo(
+                DevToolUiSettings.T("新值##RoomAttrNewValue", "New value##RoomAttrNewValue"),
+                newAttraction))
+        {
+            for (int v = 1; v < AttractionValues.Length; v++)
+            {
+                string value = AttractionValues[v];
+                bool selected = string.Equals(newAttraction, value, StringComparison.Ordinal);
+                if (ImGui.Selectable(value, selected))
+                    newAttraction = value;
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        var registered = ExtEnum<CreatureTemplate.Type>.values?.entries;
+        if (registered == null || registered.Count == 0)
+            return;
+
+        if (ImGui.BeginChild("##RoomAttrCreatureList", new Num.Vector2(0f, 132f), ImGuiChildFlags.Borders))
+        {
+            string filter = (attractionSearch ?? string.Empty).Trim();
+            int shown = 0;
+            for (int i = 0; i < registered.Count; i++)
+            {
+                string creatureId = registered[i];
+                if (string.IsNullOrWhiteSpace(creatureId) || overridden.Contains(creatureId))
+                    continue;
+                if (filter.Length > 0 &&
+                    creatureId.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                string effective = WorldRoomAttractionRegistry.GetEffective(
+                    session,
+                    room.RoomIndex,
+                    creatureId);
+                string label = creatureId +
+                               (string.IsNullOrEmpty(effective)
+                                   ? string.Empty
+                                   : DevToolUiSettings.T(" · 继承=", " · inherited=") + effective);
+                if (ImGui.Selectable(label + "##AddRoomAttr" + i))
+                    QueueRoomAttraction(room.RoomIndex, creatureId, newAttraction);
+
+                shown++;
+            }
+
+            if (shown == 0)
+                DevToolWidgets.MutedText(
+                    DevToolUiSettings.T("没有匹配的未覆盖生物。", "No matching creature without an override."),
+                    true);
+        }
+        ImGui.EndChild();
+    }
+
+    private static void QueueRoomAttraction(
+        int roomIndex,
+        string creatureId,
+        string attraction)
+    {
+        MapEditorCommandQueue.Enqueue(new MapEditorCommand(
+            MapEditorCommandKind.SetRoomAttraction,
+            roomIndex: roomIndex,
+            text: attraction,
+            key: creatureId));
     }
 
     private static void DrawRoomConnections(EditorMapPresentationSnapshot snapshot, int roomIndex)
@@ -1132,6 +1289,7 @@ internal static class WorldWorkspaceView
         if (WorldTextRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("world.txt · 未保存", "world.txt · unsaved"));
         if (WorldTopologyRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("WorldTopology.json · 未保存", "WorldTopology.json · unsaved"));
         if (WorldWorkspaceDataView.HasDirtyData) DevToolWidgets.MutedText(DevToolUiSettings.T("世界数据 · 未保存", "World data · unsaved"));
+        if (WorldRoomAttractionRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("Properties.txt · 未保存", "Properties.txt · unsaved"));
     }
 
     private static void DrawStatus(EditorMapPresentationSnapshot snapshot)
@@ -1146,6 +1304,7 @@ internal static class WorldWorkspaceView
         bool worldTextDirty = WorldTextRegistry.Dirty;
         bool topologyDirty = WorldTopologyRegistry.Dirty;
         bool worldDataDirty = WorldWorkspaceDataView.HasDirtyData;
+        bool propertiesDirty = WorldRoomAttractionRegistry.Dirty;
         bool chinese = DevToolUiSettings.IsChinese;
 
         if (ReferenceEquals(statusRooms, rooms) && ReferenceEquals(statusConnections, connections) &&
@@ -1154,6 +1313,7 @@ internal static class WorldWorkspaceView
             string.Equals(statusSubregion, selectedSubregion, StringComparison.Ordinal) &&
             statusWorkspaceMode == workspaceMode && statusWorldTextDirty == worldTextDirty &&
             statusTopologyDirty == topologyDirty && statusWorldDataDirty == worldDataDirty &&
+            statusPropertiesDirty == propertiesDirty &&
             statusChinese == chinese && statusText.Length > 0)
             return statusText;
 
@@ -1183,6 +1343,7 @@ internal static class WorldWorkspaceView
         if (worldTextDirty) dirty += DevToolUiSettings.T(" · world.txt 未保存", " · world.txt dirty");
         if (topologyDirty) dirty += DevToolUiSettings.T(" · 拓扑未保存", " · topology dirty");
         if (worldDataDirty) dirty += DevToolUiSettings.T(" · 世界数据未保存", " · world data dirty");
+        if (propertiesDirty) dirty += DevToolUiSettings.T(" · Properties 未保存", " · Properties dirty");
         statusText = selection + "   ·   " + mode + "   ·   " + connections.Length +
                      DevToolUiSettings.T(" 条连接", " links") + dirty;
 
@@ -1196,6 +1357,7 @@ internal static class WorldWorkspaceView
         statusWorldTextDirty = worldTextDirty;
         statusTopologyDirty = topologyDirty;
         statusWorldDataDirty = worldDataDirty;
+        statusPropertiesDirty = propertiesDirty;
         statusChinese = chinese;
         return statusText;
     }
