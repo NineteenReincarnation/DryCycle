@@ -116,14 +116,13 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <!-- M4A/AAC is not decoded by Rain World's Unity AudioType.ACC path. Keep the Windows
-         Media Foundation backend isolated behind the shared audio-format support layer. -->
-    <!-- Runtime-only optional Media Foundation backend. DryCycle.dll never references NAudio
-         types directly; ExternalAudioLoader discovers this assembly via reflection and falls back
-         to Unity decoding when it is absent or incompatible. Keep runtime assets deployable
-         without turning NAudio into an assembly-load prerequisite for the gameplay DLL. -->
-    <PackageReference Include="NAudio.Wasapi" Version="2.2.1">
-      <ExcludeAssets>compile</ExcludeAssets>
+    <!-- Full Windows Media Foundation decoding for M4A/AAC/FLAC/WMA/etc. These managed
+         assemblies are compile-time inputs, then ILRepack merges NAudio.Wasapi + NAudio.Core into
+         DryCycle.dll so deployment remains a single gameplay DLL with no hidden runtime sidecar. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
   </ItemGroup>
 
