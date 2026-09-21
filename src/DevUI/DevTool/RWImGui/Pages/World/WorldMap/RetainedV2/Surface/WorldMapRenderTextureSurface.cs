@@ -24,6 +24,7 @@ internal sealed class WorldMapRenderTextureSurface
     private const int RejectedResizeRetryFrames = 30;
 
     private readonly object gate = new();
+    private readonly object presentationGate = new();
     private readonly WorldMapTextureBridge bridge = new();
     private readonly List<RenderTexture> pendingRelease = new();
 
@@ -245,6 +246,15 @@ internal sealed class WorldMapRenderTextureSurface
         Num.Vector2 min,
         Num.Vector2 max)
     {
+        lock (presentationGate)
+            return TryPresentCore(draw, min, max);
+    }
+
+    private bool TryPresentCore(
+        ImDrawListPtr draw,
+        Num.Vector2 min,
+        Num.Vector2 max)
+    {
         RenderTexture current;
         RenderTexture fallback;
         bool valid;
@@ -305,6 +315,12 @@ internal sealed class WorldMapRenderTextureSurface
     }
 
     internal void Reset()
+    {
+        lock (presentationGate)
+            ResetAfterPresentationDrained();
+    }
+
+    private void ResetAfterPresentationDrained()
     {
         GameObject oldCamera;
 

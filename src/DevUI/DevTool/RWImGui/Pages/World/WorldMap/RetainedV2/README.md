@@ -515,6 +515,10 @@ the front texture itself is being presented it skips that render attempt and ret
 dirty frame. This prevents use-after-release and render/present resource races without putting a
 blocking lock back on navigation.
 
+Reset/disable uses a separate presentation-lifecycle gate. That gate is never taken by normal
+main-thread rendering; it exists only so shutdown can wait for an already-running Present call to
+finish before unregistering the RWImGUI texture and releasing Unity resources.
+
 A failed candidate binding does not mutate/destroy Unity resources from Present. Present draws the
 retained last-known-good surface and posts rollback feedback; the next main-thread pump restores the
 old front target, disposes the rejected target, refreshes it for the current view, and retries the
