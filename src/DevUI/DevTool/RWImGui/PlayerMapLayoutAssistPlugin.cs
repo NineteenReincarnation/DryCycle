@@ -23,8 +23,15 @@ public sealed class PlayerMapLayoutAssistPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Layout Assist";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapLayoutAssist.Enable(Logger);
-    private void OnDisable() => PlayerMapLayoutAssist.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapLayoutAssist.Enable(Logger),
+            PlayerMapLayoutAssist.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapLayoutAssist.Disable);
 }
 
 internal static class PlayerMapLayoutAssist
