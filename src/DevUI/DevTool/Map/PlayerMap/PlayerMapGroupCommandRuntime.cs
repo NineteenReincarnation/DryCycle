@@ -138,8 +138,15 @@ public sealed class PlayerMapGroupCommandPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Group Commands";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapGroupCommandRuntime.Enable(Logger);
-    private void OnDisable() => PlayerMapGroupCommandRuntime.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapGroupCommandRuntime.Enable(Logger),
+            PlayerMapGroupCommandRuntime.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapGroupCommandRuntime.Disable);
 }
 
 internal static class PlayerMapGroupCommandRuntime
