@@ -5,13 +5,11 @@ on:
     branches: [main]
     paths:
       - 'src/**'
-      - 'tests/**'
       - 'Guard/**'
       - '.github/workflows/guard.yml'
   pull_request:
     paths:
       - 'src/**'
-      - 'tests/**'
       - 'Guard/**'
       - '.github/workflows/guard.yml'
   workflow_dispatch:
