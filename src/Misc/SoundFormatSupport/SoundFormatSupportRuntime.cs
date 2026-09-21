@@ -24,19 +24,31 @@ internal static class SoundFormatSupportRuntime
     {
         if (enabled) return;
 
-        On.SoundLoader.SoundImporter.validFileType += SoundImporter_validFileType;
-        On.SoundLoader.SoundImporter.loadFile += SoundImporter_loadFile;
-        On.SoundLoader.AmbientImporter.validFileType += AmbientImporter_validFileType;
-        On.SoundLoader.AmbientImporter.loadFile += AmbientImporter_loadFile;
-        On.SoundLoader.CheckIfFileExistsAsExternal += SoundLoader_CheckIfFileExistsAsExternal;
-        On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
-        On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
-        On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
-        On.VirtualMicrophone.SoundClipReady += VirtualMicrophone_SoundClipReady;
-        On.MenuMicrophone.SoundClipReady += MenuMicrophone_SoundClipReady;
+        try
+        {
+            On.SoundLoader.SoundImporter.validFileType += SoundImporter_validFileType;
+            On.SoundLoader.SoundImporter.loadFile += SoundImporter_loadFile;
+            On.SoundLoader.AmbientImporter.validFileType += AmbientImporter_validFileType;
+            On.SoundLoader.AmbientImporter.loadFile += AmbientImporter_loadFile;
+            On.SoundLoader.CheckIfFileExistsAsExternal += SoundLoader_CheckIfFileExistsAsExternal;
+            On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
+            On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
+            On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
+            On.VirtualMicrophone.SoundClipReady += VirtualMicrophone_SoundClipReady;
+            On.MenuMicrophone.SoundClipReady += MenuMicrophone_SoundClipReady;
 
-        enabled = true;
-        Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
+            enabled = true;
+            Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
+        }
+        catch
+        {
+            // Hook installation is a transaction. A signature/API mismatch on one optional audio
+            // hook must not leave the earlier hooks installed in a half-enabled state.
+            RemoveOnHooks();
+            customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
+            enabled = false;
+            throw;
+        }
     }
 
     internal static void Disable()
