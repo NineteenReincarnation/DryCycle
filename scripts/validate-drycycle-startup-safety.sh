@@ -117,4 +117,22 @@ if ! grep -Fq 'catch' "$audio" ||
   exit 1
 fi
 
+# Optional audio codecs must never become an assembly-load prerequisite for DryCycle.dll.
+# NAudio is runtime-discovered through reflection; compile-time type references can make BepInEx
+# fail before Plugin.OnEnable and before startup diagnostics exist.
+if grep -R --include='*.cs' -E '(^|[[:space:]])using[[:space:]]+NAudio\.|NAudio\.(Wave|CoreAudioApi|MediaFoundation)' src/Misc/SoundFormatSupport; then
+  echo "SoundFormatSupport reintroduced a compile-time NAudio type dependency." >&2
+  exit 1
+fi
+if ! grep -A4 -F '<PackageReference Include="NAudio.Wasapi" Version="2.2.1">' src/DryCycle.csproj |
+     grep -Fq '<ExcludeAssets>compile</ExcludeAssets>'; then
+  echo "NAudio.Wasapi must remain runtime-only so DryCycle.dll has no hard codec assembly dependency." >&2
+  exit 1
+fi
+if ! grep -Fq 'Type.GetType(' src/Misc/SoundFormatSupport/ExternalAudioLoader.cs ||
+   ! grep -Fq 'NAudio.Wave.MediaFoundationReader, NAudio.Wasapi' src/Misc/SoundFormatSupport/ExternalAudioLoader.cs; then
+  echo "Optional Media Foundation backend is no longer reflection-isolated." >&2
+  exit 1
+fi
+
 echo "DryCycle startup-safety guard passed."
