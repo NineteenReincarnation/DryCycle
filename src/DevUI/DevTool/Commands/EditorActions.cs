@@ -86,6 +86,19 @@ public static class EditorActions
             }
         }
 
+        if (WorldRoomAttractionRegistry.Dirty)
+        {
+            if (WorldRoomAttractionRegistry.EnsureLoaded(DevToolSessionHub.Current))
+                ok &= WorldRoomAttractionRegistry.Save();
+            else
+            {
+                ok = false;
+                Plugin.Logger?.LogWarning(
+                    "DevTool Map save could not persist Room_Attr: " +
+                    (WorldRoomAttractionRegistry.LoadError ?? "Properties.txt is unavailable."));
+            }
+        }
+
         WorldTopologyRegistry.EnsureLoaded();
         if (WorldTopologyRegistry.Dirty)
             ok &= WorldTopologyRegistry.Save();
