@@ -33,23 +33,15 @@ public sealed class WorldTopologyLiveTraversalFixPlugin : BaseUnityPlugin
 internal static class WorldTopologyLiveTraversalFix
 {
     private static ManualLogSource log;
-    private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
     {
-        if (enabled) return;
         log = logger;
-        On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
-        enabled = true;
-        logger?.LogInfo("World topology live traversal synchronization enabled through direct WorldTextRegistry calls; only Rain World shortcut runtime is hooked.");
+        logger?.LogInfo("World topology live traversal synchronization uses direct runtime calls; no duplicate SuckInCreature hook attached.");
     }
 
     internal static void Disable()
     {
-        if (enabled)
-            On.ShortcutHandler.SuckInCreature -= ShortcutHandler_SuckInCreature;
-
-        enabled = false;
         log = null;
     }
 
@@ -59,8 +51,6 @@ internal static class WorldTopologyLiveTraversalFix
         int exitIndex,
         string destinationToken)
     {
-        if (!enabled) return;
-
         try
         {
             global::World world = ResolveLiveWorld(region);
@@ -75,23 +65,18 @@ internal static class WorldTopologyLiveTraversalFix
         }
     }
 
-    private static void ShortcutHandler_SuckInCreature(
-        On.ShortcutHandler.orig_SuckInCreature orig,
-        ShortcutHandler self,
-        Creature creature,
+    internal static void BeforeShortcutTraversal(
         global::Room room,
-        ShortcutData shortCut)
+        ShortcutData shortcut)
     {
         try
         {
-            RepairSourceConnectionBeforeTraversal(room, shortCut);
+            RepairSourceConnectionBeforeTraversal(room, shortcut);
         }
         catch (Exception error)
         {
             log?.LogWarning("WorldTopology pre-traversal repair failed: " + error.Message);
         }
-
-        orig(self, creature, room, shortCut);
     }
 
     private static void RepairSourceConnectionBeforeTraversal(global::Room room, ShortcutData shortcut)
