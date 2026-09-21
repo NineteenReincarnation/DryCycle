@@ -85,6 +85,7 @@ fi
 if ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "$world_text" ||
    ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllLines' "$room_attr" ||
    ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "src/DevUI/DevTool/World/WorldTopologyRegistry.cs" ||
+   ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "src/DevUI/DevTool/World/WorldLineageRegistry.cs" ||
    ! grep -Fq 'World authoring rollback could not restore' "$resolver"; then
   echo "World authoring files lost rollback-safe save semantics." >&2
   exit 1
