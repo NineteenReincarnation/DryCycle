@@ -502,7 +502,7 @@ internal static class DevToolFrontend
             // WantCaptureMouse=false. Reserve the mouse explicitly so selection never clicks or
             // drags a vanilla world-space DevInterface handle underneath the layout gesture.
             EditorInputRouter.SetFrontendCapture(
-                io.WantCaptureMouse || FloatingWindowSnap.OwnsMouse,
+                io.WantCaptureMouse || FloatingWindowSnap.OwnsMouse || ObjectMarqueeSelectionView.OwnsMouse,
                 io.WantCaptureKeyboard,
                 io.WantTextInput);
         }
