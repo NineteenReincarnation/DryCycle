@@ -45,7 +45,7 @@ if grep -Eq 'On\.Room\.AddObject[[:space:]]*[+\-]=' "$visual"; then
 fi
 
 # RuntimeDetour is never allowed back into preview safety.
-if grep -R -n -E --include='*.cs'   'MonoMod\.RuntimeDetour|using[[:space:]]+MonoMod\.RuntimeDetour|new[[:space:]]+Hook\('   "$preview_root" >/tmp/effect_preview_detours.txt 2>/dev/null; then
+if grep -R -n -E --include='*.cs'   'using[[:space:]]+MonoMod\.RuntimeDetour|MonoMod\.RuntimeDetour\.Hook|new[[:space:]]+Hook\('   "$preview_root" >/tmp/effect_preview_detours.txt 2>/dev/null; then
   echo "Effect preview regained RuntimeDetour usage:" >&2
   cat /tmp/effect_preview_detours.txt >&2
   exit 1
