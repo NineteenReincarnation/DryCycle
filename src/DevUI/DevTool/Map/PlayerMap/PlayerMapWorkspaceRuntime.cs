@@ -290,6 +290,18 @@ internal static class PlayerMapWorkspaceRuntime
         return state?.Dirty == true;
     }
 
+    internal static void MarkDirty(EditorSession session)
+    {
+        if (session?.Owner?.activePage is not MapPage page || page.world == null)
+            return;
+
+        PlayerMapSessionState state = GetOrCreateState(session, page);
+        if (!EnsureStateForPage(page, state))
+            return;
+
+        Touch(state, dirty: true);
+    }
+
     internal static void RetainDirtyState(EditorSession session)
     {
         if (session == null || !states.TryGetValue(session, out PlayerMapSessionState state))
