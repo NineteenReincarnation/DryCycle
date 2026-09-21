@@ -130,8 +130,20 @@ internal static class ObjectSceneWorkspaceView
                         label,
                         "ObjectGridStep" + i,
                         gridStepIndex == i ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                {
                     gridStepIndex = i;
+                    ObjectMarqueeSelectionView.GridStep = GridSteps[i];
+                }
             }
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    ObjectMarqueeSelectionView.GridVisible
+                        ? DevToolUiSettings.T("隐藏网格", "Hide Grid")
+                        : DevToolUiSettings.T("显示网格", "Show Grid"),
+                    "ObjectToggleSceneGrid",
+                    DevToolButtonTone.Subtle))
+                ObjectMarqueeSelectionView.GridVisible = !ObjectMarqueeSelectionView.GridVisible;
 
             ImGui.SameLine();
             if (DevToolWidgets.ActionButton(
