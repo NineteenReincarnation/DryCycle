@@ -18,6 +18,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 [BepInDependency("rwimgui", BepInDependency.DependencyFlags.HardDependency)]
 public sealed class BridgePlugin : BaseUnityPlugin
 {
+    private readonly DevToolRetainedViewLifecycle retainedViewLifecycle = new();
     public const string PluginId = "DryCycle.DevTool.RWImGui";
     public const string PluginName = "DryCycle DevTool RWImGui Frontend";
     public const string PluginVersion = "0.1.1";
@@ -66,6 +67,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapThumbnailVisibility.Enable", () => WorldMapThumbnailVisibility.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPipeLayers.Enable", () => WorldMapPipeLayers.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/PlayerMapFrontendLifecycle.Enable", () => PlayerMapFrontendLifecycle.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/RetainedViewLifecycle.Enable", retainedViewLifecycle.Enable);
 
             // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
             // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -94,6 +96,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         if (!bridgeEnabled) return;
         WorldMapImGuiPresentationFallback.LateUpdate();
         WorldMapPresentationCorrectness.LateUpdate();
+        retainedViewLifecycle.LateUpdate();
     }
 
     private void OnApplicationFocus(bool hasFocus)
@@ -255,6 +258,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world map thumbnail visibility", WorldMapThumbnailVisibility.Disable);
         SafeFrontendCleanup("world map pipe layers", WorldMapPipeLayers.Disable);
         SafeFrontendCleanup("player map frontend lifecycle", PlayerMapFrontendLifecycle.Disable);
+        SafeFrontendCleanup("retained view lifecycle", retainedViewLifecycle.Disable);
         SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }
@@ -820,5 +824,87 @@ internal sealed class DevToolInputContext : IMGUIContext
     public override void OnDestroyed()
     {
         EditorInputRouter.SetFrontendCapture(false, false, false);
+    }
+}
+
+internal sealed class DevToolRetainedViewLifecycle
+{
+    private bool observedLiveSession;
+    private RainWorldGame observedGame;
+
+    internal void Enable() =>
+        InitializeState();
+
+    private void InitializeState()
+    {
+        observedLiveSession = false;
+        observedGame = null;
+    }
+
+    internal void LateUpdate()
+    {
+        if (DevToolSessionHub.IsCurrentSessionLive)
+        {
+            EditorSession session = DevToolSessionHub.Current;
+            observedGame = session?.Owner?.game ?? observedGame;
+            observedLiveSession = true;
+
+            // Page lifecycle follows the editor ToolMode even while RWImGui is temporarily hidden or
+            // Vanilla UI is primary. The standalone debug workspace is different: it deliberately
+            // replaces every normal page surface, so a normal page must stay deactivated for the
+            // entire debug lifetime instead of being reactivated here from the stale ToolMode.
+            if (DevToolOverlay.SuppressesSharedPageSurfaces)
+                DevToolPageViewRegistry.DeactivateActive();
+            else if (session != null)
+                DevToolPageViewRegistry.SynchronizeActive(session.ToolMode);
+            return;
+        }
+
+        if (!observedLiveSession)
+            return;
+
+        // A temporary owner/page mismatch can occur around Alt+Tab and fullscreen transitions.
+        // Release only when the RainWorldGame itself gives positive evidence that the editor lifetime
+        // ended. This mirrors BridgePlugin's frontend-lifetime rule without creating a core ->
+        // frontend dependency.
+        if (!IsDefinitelyClosed(observedGame))
+            return;
+
+        ReleaseRetainedState();
+        observedLiveSession = false;
+        observedGame = null;
+    }
+
+    internal void Disable() =>
+        Shutdown();
+
+    private void Shutdown()
+    {
+        ReleaseRetainedState();
+        observedLiveSession = false;
+        observedGame = null;
+    }
+
+    private static bool IsDefinitelyClosed(RainWorldGame game)
+    {
+        if (game == null) return true;
+        if (!game.processActive || !game.devToolsActive) return true;
+
+        return game.manager?.currentMainLoop != null &&
+               !object.ReferenceEquals(game.manager.currentMainLoop, game);
+    }
+
+    private static void ReleaseRetainedState()
+    {
+        DevToolNumericWidgets.Reset();
+        DevToolOverlay.ResetRetainedState();
+        ScenePlacementWindow.ResetRetainedState();
+
+        // Registered pages are the sole owners of page-specific retained projections. Resetting the
+        // registry replaces the old frontend fan-out and guarantees newly registered pages cannot be
+        // forgotten by this lifetime edge.
+        DevToolPageViewRegistry.ResetAll();
+
+        UniversalDevUiMirrorView.ResetRetainedState();
     }
 }

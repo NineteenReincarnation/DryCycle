@@ -829,3 +829,194 @@ internal static class PlayerMapWorkspaceIntegration
         return true;
     }
 }
+
+internal static class PlayerMapPreflightPanel
+{
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("Player Map live preflight inspector enabled through direct view calls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        enabled = false;
+        log = null;
+    }
+
+    internal static void Draw(PlayerMapPresentationSnapshot snapshot)
+    {
+        if (!enabled || snapshot?.Available != true) return;
+
+        EditorMapPresentationSnapshot world = MapEditorPresentationHub.Current;
+        PlayerMapPreflightSnapshot preflight = PlayerMapPreflightDiagnostics.Evaluate(snapshot, world);
+        if (!preflight.Available) return;
+
+        ImGui.Separator();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 预检", "RENDER PREFLIGHT"));
+        string state = preflight.CanRender
+            ? DevToolUiSettings.T("可 Render", "Ready to Render")
+            : DevToolUiSettings.T("需要处理", "Needs Attention");
+        ImGui.TextUnformatted(state);
+
+        DrawMetric("Rooms",
+            preflight.ReadyRooms + " ready / " +
+            preflight.PendingRooms + " pending / " +
+            preflight.MissingRooms + " missing / " +
+            preflight.FailedRooms + " failed");
+        DrawMetric("Pipes",
+            preflight.ExactConnections + " exact / " + preflight.AmbiguousConnections + " unresolved");
+        if (preflight.InvalidEndpoints > 0)
+            DrawMetric("Invalid endpoints", preflight.InvalidEndpoints.ToString());
+        if (preflight.DuplicateEndpointClaims > 0)
+            DrawMetric("Endpoint conflicts", preflight.DuplicateEndpointClaims.ToString());
+        DrawMetric("Overlaps", preflight.OverlapPairs.ToString());
+        if (preflight.Width > 0 && preflight.Height > 0)
+            DrawMetric("Output", preflight.Width + " × " + preflight.Height);
+
+        int errorLimit = Math.Min(6, preflight.Errors.Length);
+        for (int i = 0; i < errorLimit; i++)
+            ImGui.TextWrapped("ERROR · " + preflight.Errors[i]);
+        if (preflight.Errors.Length > errorLimit)
+            ImGui.TextDisabled("… +" + (preflight.Errors.Length - errorLimit) + " errors");
+
+        int warningLimit = Math.Min(5, preflight.Warnings.Length);
+        for (int i = 0; i < warningLimit; i++)
+            ImGui.TextWrapped("WARN · " + preflight.Warnings[i]);
+        if (preflight.Warnings.Length > warningLimit)
+            ImGui.TextDisabled("… +" + (preflight.Warnings.Length - warningLimit) + " warnings");
+    }
+
+    private static void DrawMetric(string label, string value)
+    {
+        ImGui.TextDisabled(label);
+        ImGui.SameLine();
+        ImGui.TextUnformatted(value ?? string.Empty);
+    }
+
+}
+
+internal static class PlayerMapRenderProgressView
+{
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("Player Map live Render progress enabled through direct view calls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        enabled = false;
+        log = null;
+    }
+
+    internal static void Draw(PlayerMapPresentationSnapshot snapshot)
+    {
+        if (!enabled)
+        {
+            PlayerMapWorkspaceView.DrawRenderReportBase(snapshot);
+            return;
+        }
+
+        PlayerMapRenderProgressSnapshot render = PlayerMapRenderScheduler.Progress;
+        if (render?.Running == true)
+        {
+            DrawRenderProgress(render);
+            return;
+        }
+
+        PlayerMapRenderPreparationSnapshot preparation = PlayerMapRenderPreparationController.Progress;
+        if (preparation?.Running == true)
+        {
+            DrawPreparationProgress(preparation);
+            return;
+        }
+
+        PlayerMapWorkspaceView.DrawRenderReportBase(snapshot);
+    }
+
+    private static void DrawPreparationProgress(PlayerMapRenderPreparationSnapshot progress)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 进度", "RENDER PROGRESS"));
+        ImGui.TextUnformatted(DevToolUiSettings.T("准备房间 Bake", "Preparing room bakes"));
+        DrawProgressBar(progress.Progress);
+
+        string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        string units = progress.ReadyRooms.ToString(CultureInfo.InvariantCulture) + " / " +
+                       progress.TotalRooms.ToString(CultureInfo.InvariantCulture) + " rooms";
+        ImGui.TextDisabled(percent + "  ·  " + units);
+        if (!string.IsNullOrWhiteSpace(progress.Detail))
+            ImGui.TextWrapped(progress.Detail);
+
+        if (progress.CanCancel && DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("取消 Render", "Cancel Render"),
+                "PlayerMapCancelRenderPreparation",
+                DevToolButtonTone.Danger))
+            PlayerMapRenderPreparationController.RequestCancel();
+    }
+
+    private static void DrawRenderProgress(PlayerMapRenderProgressSnapshot progress)
+    {
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Render 进度", "RENDER PROGRESS"));
+        ImGui.TextUnformatted(progress.StageLabel ?? string.Empty);
+        DrawProgressBar(progress.Progress);
+
+        string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        string stagePercent = (progress.StageProgress * 100f).ToString("0", CultureInfo.InvariantCulture) + "%";
+        ImGui.TextDisabled(percent + "  ·  " + stagePercent + " " + DevToolUiSettings.T("阶段", "stage"));
+
+        if (progress.TotalUnits > 1)
+        {
+            string units = progress.CompletedUnits.ToString("N0", CultureInfo.InvariantCulture) + " / " +
+                           progress.TotalUnits.ToString("N0", CultureInfo.InvariantCulture);
+            ImGui.TextDisabled(units);
+        }
+        if (!string.IsNullOrWhiteSpace(progress.Detail))
+            ImGui.TextWrapped(progress.Detail);
+
+        if (progress.CanCancel)
+        {
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("取消 Render", "Cancel Render"),
+                    "PlayerMapCancelRender",
+                    DevToolButtonTone.Danger))
+                PlayerMapRenderScheduler.RequestCancel();
+        }
+        else
+        {
+            ImGui.TextDisabled(DevToolUiSettings.T("正在提交文件，已不可取消。", "Committing files; cancellation is disabled."));
+        }
+    }
+
+    private static void DrawProgressBar(float fraction)
+    {
+        fraction = Math.Max(0f, Math.Min(1f, fraction));
+        float width = Math.Max(80f, ImGui.GetContentRegionAvail().X);
+        float height = Math.Max(8f, ImGui.GetFrameHeight() * 0.62f);
+        Num.Vector2 min = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton("##PlayerMapRenderProgressBar", new Num.Vector2(width, height));
+        Num.Vector2 max = min + new Num.Vector2(width, height);
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        uint bg = ImGui.GetColorU32(ImGuiCol.FrameBg);
+        uint fill = ImGui.GetColorU32(ImGuiCol.HeaderActive);
+        uint border = ImGui.GetColorU32(ImGuiCol.Border);
+        draw.AddRectFilled(min, max, bg, 2f);
+        if (fraction > 0f)
+        {
+            Num.Vector2 fillMax = new(min.X + width * fraction, max.Y);
+            draw.AddRectFilled(min, fillMax, fill, 2f);
+        }
+        draw.AddRect(min, max, border, 2f);
+    }
+
+}
