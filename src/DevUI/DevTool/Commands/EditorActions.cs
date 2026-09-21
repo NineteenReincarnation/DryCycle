@@ -14,6 +14,22 @@ using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Commands;
 
+internal enum ObjectSelectionAlignment
+{
+    Left,
+    HorizontalCenter,
+    Right,
+    Bottom,
+    VerticalCenter,
+    Top
+}
+
+internal enum ObjectSelectionDistribution
+{
+    Horizontal,
+    Vertical
+}
+
 public static class EditorActions
 {
     public static bool Save(EditorSession session)
@@ -164,6 +180,178 @@ public static class EditorActions
                 out SnapshotHistoryEntry entry))
             session.History.Push(entry);
         return true;
+    }
+
+    internal static bool SnapSelectionToGrid(EditorSession session, float gridSize)
+    {
+        if (gridSize < 1f || float.IsNaN(gridSize) || float.IsInfinity(gridSize))
+            return false;
+
+        return ApplySelectionPositions(
+            session,
+            "Snap selection to grid",
+            targets =>
+            {
+                Vector2[] positions = new Vector2[targets.Count];
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    Vector2 position = targets[i].pos;
+                    positions[i] = new Vector2(
+                        Mathf.Round(position.x / gridSize) * gridSize,
+                        Mathf.Round(position.y / gridSize) * gridSize);
+                }
+                return positions;
+            });
+    }
+
+    internal static bool AlignSelection(EditorSession session, ObjectSelectionAlignment alignment)
+    {
+        if (!TryGetSelectedObjects(session, out List<PlacedObject> targets) || targets.Count < 2)
+            return false;
+
+        float minX = targets[0].pos.x;
+        float maxX = minX;
+        float minY = targets[0].pos.y;
+        float maxY = minY;
+        for (int i = 1; i < targets.Count; i++)
+        {
+            Vector2 position = targets[i].pos;
+            minX = Mathf.Min(minX, position.x);
+            maxX = Mathf.Max(maxX, position.x);
+            minY = Mathf.Min(minY, position.y);
+            maxY = Mathf.Max(maxY, position.y);
+        }
+
+        float horizontalCenter = (minX + maxX) * 0.5f;
+        float verticalCenter = (minY + maxY) * 0.5f;
+
+        return ApplySelectionPositions(
+            session,
+            "Align selection",
+            selected =>
+            {
+                Vector2[] positions = new Vector2[selected.Count];
+                for (int i = 0; i < selected.Count; i++)
+                {
+                    Vector2 position = selected[i].pos;
+                    positions[i] = alignment switch
+                    {
+                        ObjectSelectionAlignment.Left => new Vector2(minX, position.y),
+                        ObjectSelectionAlignment.HorizontalCenter => new Vector2(horizontalCenter, position.y),
+                        ObjectSelectionAlignment.Right => new Vector2(maxX, position.y),
+                        ObjectSelectionAlignment.Bottom => new Vector2(position.x, minY),
+                        ObjectSelectionAlignment.VerticalCenter => new Vector2(position.x, verticalCenter),
+                        ObjectSelectionAlignment.Top => new Vector2(position.x, maxY),
+                        _ => position
+                    };
+                }
+                return positions;
+            });
+    }
+
+    internal static bool DistributeSelection(EditorSession session, ObjectSelectionDistribution distribution)
+    {
+        if (!TryGetSelectedObjects(session, out List<PlacedObject> targets) || targets.Count < 3)
+            return false;
+
+        List<PlacedObject> ordered = new(targets);
+        if (distribution == ObjectSelectionDistribution.Horizontal)
+            ordered.Sort((a, b) => a.pos.x.CompareTo(b.pos.x));
+        else
+            ordered.Sort((a, b) => a.pos.y.CompareTo(b.pos.y));
+
+        float first = distribution == ObjectSelectionDistribution.Horizontal
+            ? ordered[0].pos.x
+            : ordered[0].pos.y;
+        float last = distribution == ObjectSelectionDistribution.Horizontal
+            ? ordered[ordered.Count - 1].pos.x
+            : ordered[ordered.Count - 1].pos.y;
+        float step = (last - first) / (ordered.Count - 1);
+
+        Dictionary<PlacedObject, Vector2> projected = new(ordered.Count);
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            Vector2 position = ordered[i].pos;
+            float value = first + step * i;
+            projected[ordered[i]] = distribution == ObjectSelectionDistribution.Horizontal
+                ? new Vector2(value, position.y)
+                : new Vector2(position.x, value);
+        }
+
+        return ApplySelectionPositions(
+            session,
+            distribution == ObjectSelectionDistribution.Horizontal
+                ? "Distribute selection horizontally"
+                : "Distribute selection vertically",
+            selected =>
+            {
+                Vector2[] positions = new Vector2[selected.Count];
+                for (int i = 0; i < selected.Count; i++)
+                    positions[i] = projected.TryGetValue(selected[i], out Vector2 position)
+                        ? position
+                        : selected[i].pos;
+                return positions;
+            });
+    }
+
+    private static bool ApplySelectionPositions(
+        EditorSession session,
+        string label,
+        Func<List<PlacedObject>, Vector2[]> project)
+    {
+        if (project == null || !TryGetSelectedObjects(session, out List<PlacedObject> targets))
+            return false;
+
+        Vector2[] positions = project(targets);
+        if (positions == null || positions.Length != targets.Count)
+            return false;
+
+        bool changed = false;
+        for (int i = 0; i < targets.Count; i++)
+        {
+            if ((targets[i].pos - positions[i]).sqrMagnitude > 0.000001f)
+            {
+                changed = true;
+                break;
+            }
+        }
+        if (!changed) return false;
+
+        PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        for (int i = 0; i < targets.Count; i++)
+        {
+            PlacedObject target = targets[i];
+            Vector2 position = positions[i];
+            if ((target.pos - position).sqrMagnitude <= 0.000001f)
+                continue;
+
+            NativeObjectRuntimeReconciler.PrepareForMutation(session, target);
+            target.pos = position;
+            TryRefresh(session, target);
+        }
+
+        RefreshLegacyObjectFallback(session);
+        PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
+            session.History.Push(entry);
+        return true;
+    }
+
+    private static bool TryGetSelectedObjects(EditorSession session, out List<PlacedObject> targets)
+    {
+        targets = new List<PlacedObject>();
+        List<PlacedObject> live = session?.RoomSettings?.placedObjects;
+        if (live == null || session.Selection.Count == 0)
+            return false;
+
+        IReadOnlyList<PlacedObject> selected = session.Selection.PlacedObjects;
+        for (int i = 0; i < selected.Count; i++)
+        {
+            PlacedObject target = selected[i];
+            if (target != null && live.Contains(target))
+                targets.Add(target);
+        }
+        return targets.Count > 0;
     }
 
     public static bool SetObjectProperty(
