@@ -692,8 +692,11 @@ public sealed class EditorSession
             return new EditorDocumentKey(EditorDocumentKind.Relationships, "global");
 
         global::Room room = ui?.room;
+        string worldName = ui?.game?.world?.name ?? "<world>";
         string roomName = room?.abstractRoom?.name ?? room?.roomSettings?.name ?? "<room>";
-        return new EditorDocumentKey(EditorDocumentKind.Room, roomName);
+        return new EditorDocumentKey(
+            EditorDocumentKind.Room,
+            worldName + "/" + roomName);
     }
 
     private static EditorToolMode ResolveToolMode(Page page)
