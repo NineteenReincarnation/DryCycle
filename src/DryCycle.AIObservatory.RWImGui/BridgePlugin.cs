@@ -20,20 +20,38 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
+    private bool bridgeEnabled;
 
     private void OnEnable()
     {
         log = Logger;
-        ObservatoryFrontend.SetLogger(Logger);
-        AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
-        On.RainWorld.OnModsInit += RainWorld_OnModsInit;
-        Logger.LogInfo(
-            "DryCycle RWImGUI bridge loaded. RWImGUI is a hard dependency for this optional bridge; " +
-            "waiting for RainWorld.OnModsInit before registering AddAlwaysCallback.");
+        bridgeEnabled = false;
+        Logger?.LogInfo("[DryCycle.Startup][AIObservatoryBridge][BEGIN] OnEnable");
+
+        try
+        {
+            ObservatoryFrontend.SetLogger(Logger);
+            AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
+            On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+            bridgeEnabled = true;
+            Logger?.LogInfo(
+                "[DryCycle.Startup][AIObservatoryBridge][OK] OnEnable · waiting for RainWorld.OnModsInit before registering AddAlwaysCallback.");
+        }
+        catch (Exception error)
+        {
+            Logger?.LogError(
+                "[DryCycle.Startup][AIObservatoryBridge][FAIL-OPTIONAL] OnEnable · " +
+                error.GetType().FullName + ": " + error.Message);
+            Logger?.LogError(error);
+            ShutdownBridgeState("RWImGUI bridge startup failed");
+        }
     }
 
     private void Update()
     {
+        if (!bridgeEnabled)
+            return;
+
         // Visibility and RWImGUI context ownership are changed only from Unity's main
         // thread. Do not switch RWImGUI contexts from inside the Present callback.
         ObservatoryFrontend.SetVisibleFromMainThread(AIDebuggerRuntime.Visible);
@@ -41,12 +59,38 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private void OnDisable()
     {
-        On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        ObservatoryFrontend.Enabled = false;
-        ObservatoryFrontend.SetVisibleFromMainThread(false);
-        AIDebugPresentationHub.SetCaptureState(false, false);
+        Logger?.LogInfo("[DryCycle.Startup][AIObservatoryBridge][BEGIN] OnDisable");
+        ShutdownBridgeState("RWImGUI bridge disabled");
+        Logger?.LogInfo("[DryCycle.Startup][AIObservatoryBridge][OK] OnDisable");
+    }
+
+    private void ShutdownBridgeState(string reason)
+    {
+        bridgeEnabled = false;
+
+        try { On.RainWorld.OnModsInit -= RainWorld_OnModsInit; }
+        catch (Exception error)
+        {
+            Logger?.LogWarning(
+                "[DryCycle.Startup][AIObservatoryBridge][FAIL-OPTIONAL] OnModsInit hook cleanup · " +
+                error.Message);
+        }
+
+        try
+        {
+            ObservatoryFrontend.Enabled = false;
+            ObservatoryFrontend.SetVisibleFromMainThread(false);
+            AIDebugPresentationHub.SetCaptureState(false, false);
+        }
+        catch (Exception error)
+        {
+            Logger?.LogWarning(
+                "[DryCycle.Startup][AIObservatoryBridge][FAIL-OPTIONAL] frontend cleanup · " +
+                error.Message);
+        }
+
         TryUnregisterCallback();
-        AIDebugPresentationBridgeStatus.MarkFailure("RWImGUI bridge disabled");
+        AIDebugPresentationBridgeStatus.MarkFailure(reason);
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
