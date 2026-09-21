@@ -19,6 +19,7 @@ on:
       - 'scripts/validate-devtool-native-objects-runtime.sh'
       - 'scripts/validate-devtool-effect-preview-safety.sh'
       - 'scripts/validate-csharp-syntax.sh'
+      - 'scripts/validate-auxiliary-plugin-startup.sh'
       - 'scripts/validate-world-authoring-safety.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
@@ -40,6 +41,7 @@ on:
       - 'scripts/validate-devtool-native-objects-runtime.sh'
       - 'scripts/validate-devtool-effect-preview-safety.sh'
       - 'scripts/validate-csharp-syntax.sh'
+      - 'scripts/validate-auxiliary-plugin-startup.sh'
       - 'scripts/validate-world-authoring-safety.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
@@ -76,6 +78,9 @@ jobs:
       - name: Validate C# syntax with Roslyn
         shell: bash
         run: bash scripts/validate-csharp-syntax.sh
+      - name: Validate auxiliary plugin startup safety
+        shell: bash
+        run: bash scripts/validate-auxiliary-plugin-startup.sh
       - name: Validate world authoring source safety
         shell: bash
         run: bash scripts/validate-world-authoring-safety.sh
