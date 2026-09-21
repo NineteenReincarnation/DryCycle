@@ -18,6 +18,8 @@ internal static class SpinebackLizardHooks
     }
 
     private static readonly ConditionalWeakTable<LizardGraphics, GraphicsState> GraphicsStates = new();
+    private static bool _coreTemplateHookInstalled;
+    private static bool _coreRelationshipHookInstalled;
     private static bool _enabled;
 
     internal static void Enable()
@@ -27,21 +29,109 @@ internal static class SpinebackLizardHooks
             return;
         }
 
-        SpinebackLizardEnums.Register();
+        EnsureCoreHooksInstalled();
 
-        _enabled = true;
-        On.StaticWorld.InitCustomTemplates += StaticWorld_InitCustomTemplates;
-        On.StaticWorld.InitStaticWorld += StaticWorld_InitStaticWorld;
-        On.LizardAI.Update += LizardAI_Update;
-        On.LizardAI.AggressiveBehavior += LizardAI_AggressiveBehavior;
-        On.LizardAI.TravelPreference += LizardAI_TravelPreference;
-        On.LizardAI.IdleSpotScore += LizardAI_IdleSpotScore;
-        On.LizardGraphics.ctor += LizardGraphics_ctor;
-        On.LizardGraphics.DrawSprites += LizardGraphics_DrawSprites;
-        On.LizardGraphics.ApplyPalette += LizardGraphics_ApplyPalette;
+        try
+        {
+            SpinebackLizardEnums.Register();
+
+            _enabled = true;
+            On.LizardAI.Update += LizardAI_Update;
+            On.LizardAI.AggressiveBehavior += LizardAI_AggressiveBehavior;
+            On.LizardAI.TravelPreference += LizardAI_TravelPreference;
+            On.LizardAI.IdleSpotScore += LizardAI_IdleSpotScore;
+            On.LizardGraphics.ctor += LizardGraphics_ctor;
+            On.LizardGraphics.DrawSprites += LizardGraphics_DrawSprites;
+            On.LizardGraphics.ApplyPalette += LizardGraphics_ApplyPalette;
+        }
+        catch
+        {
+            DisableRuntimeHooksBestEffort();
+
+            // If ExtEnum registration never completed, nothing requires the StaticWorld bridge.
+            // Once Type exists it is process-lifetime state, so the core hooks must remain active.
+            if (SpinebackLizardEnums.Type == null)
+                DisableCoreHooksBestEffort();
+
+            throw;
+        }
     }
 
     internal static void Disable()
+    {
+        DisableRuntimeHooksBestEffort();
+
+        // CreatureTemplate.Type registration cannot be safely undone after other systems may have
+        // observed its ExtEnum index. Preserve the two StaticWorld ownership hooks for the rest of
+        // this process once SpinebackLizard has been registered.
+        if (SpinebackLizardEnums.Type == null)
+        {
+            DisableCoreHooksBestEffort();
+        }
+        else
+        {
+            global::DryCycle.StartupDiagnostics.Marker(
+                "SpinebackLizardHooks",
+                "CORE-PRESERVED",
+                "registered Type requires StaticWorld template ownership");
+        }
+    }
+
+    private static void EnsureCoreHooksInstalled()
+    {
+        try
+        {
+            if (!_coreTemplateHookInstalled)
+            {
+                On.StaticWorld.InitCustomTemplates += StaticWorld_InitCustomTemplates;
+                _coreTemplateHookInstalled = true;
+            }
+
+            if (!_coreRelationshipHookInstalled)
+            {
+                On.StaticWorld.InitStaticWorld += StaticWorld_InitStaticWorld;
+                _coreRelationshipHookInstalled = true;
+            }
+        }
+        catch
+        {
+            DisableCoreHooksBestEffort();
+            throw;
+        }
+    }
+
+    private static void DisableCoreHooksBestEffort()
+    {
+        if (_coreRelationshipHookInstalled)
+        {
+            try
+            {
+                On.StaticWorld.InitStaticWorld -= StaticWorld_InitStaticWorld;
+                _coreRelationshipHookInstalled = false;
+            }
+            catch (Exception error)
+            {
+                global::DryCycle.Plugin.Logger?.LogWarning(
+                    "SpinebackLizard failed to detach StaticWorld.InitStaticWorld: " + error);
+            }
+        }
+
+        if (_coreTemplateHookInstalled)
+        {
+            try
+            {
+                On.StaticWorld.InitCustomTemplates -= StaticWorld_InitCustomTemplates;
+                _coreTemplateHookInstalled = false;
+            }
+            catch (Exception error)
+            {
+                global::DryCycle.Plugin.Logger?.LogWarning(
+                    "SpinebackLizard failed to detach StaticWorld.InitCustomTemplates: " + error);
+            }
+        }
+    }
+
+    private static void DisableRuntimeHooksBestEffort()
     {
         if (!_enabled)
         {
@@ -49,15 +139,26 @@ internal static class SpinebackLizardHooks
         }
 
         _enabled = false;
-        On.StaticWorld.InitCustomTemplates -= StaticWorld_InitCustomTemplates;
-        On.StaticWorld.InitStaticWorld -= StaticWorld_InitStaticWorld;
-        On.LizardAI.Update -= LizardAI_Update;
-        On.LizardAI.AggressiveBehavior -= LizardAI_AggressiveBehavior;
-        On.LizardAI.TravelPreference -= LizardAI_TravelPreference;
-        On.LizardAI.IdleSpotScore -= LizardAI_IdleSpotScore;
-        On.LizardGraphics.ctor -= LizardGraphics_ctor;
-        On.LizardGraphics.DrawSprites -= LizardGraphics_DrawSprites;
-        On.LizardGraphics.ApplyPalette -= LizardGraphics_ApplyPalette;
+        try { On.LizardAI.Update -= LizardAI_Update; }
+        catch (Exception error) { LogDetachFailure("LizardAI.Update", error); }
+        try { On.LizardAI.AggressiveBehavior -= LizardAI_AggressiveBehavior; }
+        catch (Exception error) { LogDetachFailure("LizardAI.AggressiveBehavior", error); }
+        try { On.LizardAI.TravelPreference -= LizardAI_TravelPreference; }
+        catch (Exception error) { LogDetachFailure("LizardAI.TravelPreference", error); }
+        try { On.LizardAI.IdleSpotScore -= LizardAI_IdleSpotScore; }
+        catch (Exception error) { LogDetachFailure("LizardAI.IdleSpotScore", error); }
+        try { On.LizardGraphics.ctor -= LizardGraphics_ctor; }
+        catch (Exception error) { LogDetachFailure("LizardGraphics.ctor", error); }
+        try { On.LizardGraphics.DrawSprites -= LizardGraphics_DrawSprites; }
+        catch (Exception error) { LogDetachFailure("LizardGraphics.DrawSprites", error); }
+        try { On.LizardGraphics.ApplyPalette -= LizardGraphics_ApplyPalette; }
+        catch (Exception error) { LogDetachFailure("LizardGraphics.ApplyPalette", error); }
+    }
+
+    private static void LogDetachFailure(string hook, Exception error)
+    {
+        global::DryCycle.Plugin.Logger?.LogWarning(
+            "SpinebackLizard failed to detach " + hook + ": " + error);
     }
 
     internal static Color GetBodyColor(Lizard lizard)
@@ -123,13 +224,66 @@ internal static class SpinebackLizardHooks
     private static void StaticWorld_InitCustomTemplates(On.StaticWorld.orig_InitCustomTemplates orig)
     {
         orig();
-        InstallTemplateFromGreenLizard();
+
+        try
+        {
+            InstallTemplateFromGreenLizard();
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "SpinebackLizard/StaticWorld.InitCustomTemplates",
+                error);
+            InstallSafeGreenFallback();
+        }
     }
 
     private static void StaticWorld_InitStaticWorld(On.StaticWorld.orig_InitStaticWorld orig)
     {
         orig();
-        SyncRelationshipsFromGreenLizard();
+
+        try
+        {
+            SyncRelationshipsFromGreenLizard();
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "SpinebackLizard/StaticWorld.InitStaticWorld",
+                error);
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "SpinebackLizard relationship setup failed and was isolated so StaticWorld startup can continue.");
+        }
+    }
+
+    private static void InstallSafeGreenFallback()
+    {
+        try
+        {
+            CreatureTemplate.Type spinebackType = SpinebackLizardEnums.Type;
+            CreatureTemplate[] templates = StaticWorld.creatureTemplates;
+            int greenIndex = CreatureTemplate.Type.GreenLizard.Index;
+            if (spinebackType == null ||
+                templates == null ||
+                spinebackType.Index < 0 ||
+                spinebackType.Index >= templates.Length ||
+                greenIndex < 0 ||
+                greenIndex >= templates.Length ||
+                templates[greenIndex] == null)
+            {
+                return;
+            }
+
+            templates[spinebackType.Index] = templates[greenIndex];
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "SpinebackLizard template construction failed; its StaticWorld slot temporarily uses GreenLizard so startup can continue.");
+        }
+        catch (Exception fallbackError)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "SpinebackLizard/StaticWorld/FallbackGreen",
+                fallbackError);
+        }
     }
 
     private static void InstallTemplateFromGreenLizard()
