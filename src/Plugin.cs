@@ -64,12 +64,33 @@ internal sealed class Plugin : BaseUnityPlugin
             StartupDiagnostics.Step("Plugin.OnEnable/IteratorHooks.Install", Iterators.IteratorHooks.Install);
             StartupDiagnostics.Step("Plugin.OnEnable/PwnIteratorExample.Enable", Iterators.PwnIteratorExample.Enable);
 
+            // CreatureTemplate.Type / descriptor registration is process-lifetime state. Install
+            // the core bridge before creating any custom type so a later registration failure can
+            // never leave parseable ExtEnums without the StaticWorld/realization hooks that own them.
+            StartupDiagnostics.Step("Plugin.OnEnable/CreatureCoreRegistry.Enable", CreatureCoreRegistry.Enable);
+
             if (!_contentRegistered)
             {
-                StartupDiagnostics.Step("Plugin.OnEnable/MossySpiderDefinition.Register", MossySpiderDefinition.Register);
-                StartupDiagnostics.Step("Plugin.OnEnable/MantleCrabDefinition.Register", MantleCrabDefinition.Register);
-                StartupDiagnostics.Step("Plugin.OnEnable/DesertBatflyDefinition.Register", DB_Definition.Register);
-                StartupDiagnostics.Step("Plugin.OnEnable/LanceScavengerDefinition.Register", LanceScavengerDefinition.Register);
+                EnsureCreatureDefinitionRegistered(
+                    "MossySpider",
+                    "Plugin.OnEnable/MossySpiderDefinition.Register",
+                    MossySpiderDefinition.Register);
+                EnsureCreatureDefinitionRegistered(
+                    "MantleCrab",
+                    "Plugin.OnEnable/MantleCrabDefinition.Register",
+                    MantleCrabDefinition.Register);
+                EnsureCreatureDefinitionRegistered(
+                    "DesertBatfly",
+                    "Plugin.OnEnable/DesertBatflyDefinition.Register",
+                    DB_Definition.Register);
+                EnsureCreatureDefinitionRegistered(
+                    "LanceScavenger",
+                    "Plugin.OnEnable/LanceScavengerDefinition.Register",
+                    () =>
+                    {
+                        LanceScavengerDefinition.Register();
+                        return CreatureCoreRegistry.Get("LanceScavenger");
+                    });
                 _contentRegistered = true;
             }
 
@@ -86,7 +107,6 @@ internal sealed class Plugin : BaseUnityPlugin
             // resolve correctly during normal play.
             StartupDiagnostics.Step("Plugin.OnEnable/WorldTopologyRuntime.Enable", WorldTopologyRuntime.Enable);
 
-            StartupDiagnostics.Step("Plugin.OnEnable/CreatureCoreRegistry.Enable", CreatureCoreRegistry.Enable);
             StartupDiagnostics.Step("Plugin.OnEnable/DryCycleContent.Enable", DryCycleContent.Enable);
             StartupDiagnostics.Step("Plugin.OnEnable/ScavengerLanceHooks.Enable", ScavengerLanceHooks.Enable);
             StartupDiagnostics.Step("Plugin.OnEnable/LanceScavengerHooks.Enable", LanceScavengerHooks.Enable);
@@ -132,7 +152,7 @@ internal sealed class Plugin : BaseUnityPlugin
         SafeBootstrapCleanup("OnDisable/LanceScavengerHooks.Disable", LanceScavengerHooks.Disable);
         SafeBootstrapCleanup("OnDisable/ScavengerLanceHooks.Disable", ScavengerLanceHooks.Disable);
         SafeBootstrapCleanup("OnDisable/LanceScavengerAssets.Unload", LanceScavengerAssets.Unload);
-        SafeBootstrapCleanup("OnDisable/CreatureCoreRegistry.Disable", CreatureCoreRegistry.Disable);
+        SafeBootstrapCleanup("OnDisable/CreatureCoreRegistry lifetime", PreserveCreatureCoreRegistryIfRegistered);
         SafeBootstrapCleanup("OnDisable/DryCycleContent.Disable", DryCycleContent.Disable);
         SafeBootstrapCleanup("OnDisable/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
         SafeBootstrapCleanup("OnDisable/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
@@ -169,13 +189,48 @@ internal sealed class Plugin : BaseUnityPlugin
         SafeBootstrapCleanup("Lance Scavenger hooks", LanceScavengerHooks.Disable);
         SafeBootstrapCleanup("Scavenger Lance hooks", ScavengerLanceHooks.Disable);
         SafeBootstrapCleanup("DryCycle content runtime", DryCycleContent.Disable);
-        SafeBootstrapCleanup("Creature Core registry", CreatureCoreRegistry.Disable);
+        SafeBootstrapCleanup("Creature Core registry lifetime", PreserveCreatureCoreRegistryIfRegistered);
         SafeBootstrapCleanup("world topology runtime", WorldTopologyRuntime.Disable);
         SafeBootstrapCleanup("palette direct input", PaletteDirectInputRuntime.Disable);
         SafeBootstrapCleanup("shader assets", DryCycleShaderAssets.Disable);
         SafeBootstrapCleanup("PWN iterator example", Iterators.PwnIteratorExample.Unregister);
         SafeBootstrapCleanup("iterator hooks", Iterators.IteratorHooks.Uninstall);
         SafeBootstrapCleanup("iterator log bridge", Iterators.IteratorLogBridge.Disable);
+    }
+
+    private static void EnsureCreatureDefinitionRegistered(
+        string typeName,
+        string startupSource,
+        Func<CreatureDescriptor> register)
+    {
+        if (CreatureCoreRegistry.TryGet(typeName, out _))
+        {
+            StartupDiagnostics.Marker(startupSource, "SKIP-ALREADY-REGISTERED");
+            return;
+        }
+
+        StartupDiagnostics.Step(startupSource, register);
+    }
+
+    private static void PreserveCreatureCoreRegistryIfRegistered()
+    {
+        if (CreatureCoreRegistry.Registered.Count == 0)
+        {
+            CreatureCoreRegistry.Disable();
+            return;
+        }
+
+        // Descriptor/ExtEnum registration is intentionally process-lifetime. Removing the core
+        // hooks while those IDs remain registered creates a harder half-state than leaving the
+        // registry active: world.txt can resolve the custom Type but StaticWorld has no template
+        // owner. Keep/recover the core bridge until process exit.
+        if (!CreatureCoreRegistry.IsEnabled)
+            CreatureCoreRegistry.Enable();
+
+        StartupDiagnostics.Marker(
+            "CreatureCoreRegistry",
+            "PRESERVED",
+            "registered descriptors=" + CreatureCoreRegistry.Registered.Count);
     }
 
     private static void SafeBootstrapCleanup(string name, Action action)
