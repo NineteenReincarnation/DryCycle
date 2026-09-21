@@ -66,7 +66,10 @@ internal static class AIDebuggerRuntime
             UnityEngine.Object.DontDestroyOnLoad(hostObject);
         });
 
-        StartupDiagnostics.Step("AIDebuggerRuntime/AddHostComponent", () => host = hostObject.AddComponent<AIDebuggerHost>());
+        StartupDiagnostics.Step("AIDebuggerRuntime/AddHostComponent", () =>
+        {
+            host = hostObject.AddComponent<AIDebuggerHost>();
+        });
         StartupDiagnostics.Step("AIDebuggerRuntime/BindHost", () => host.Bind(rainWorld, logger));
         StartupDiagnostics.Step("AIDebuggerRuntime/SetStartupVisible", () => host.SetStartupVisible(AIDebugSettings.AutoOpen));
         logger?.LogInfo($"DryCycle AI Observatory controller created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, " +
