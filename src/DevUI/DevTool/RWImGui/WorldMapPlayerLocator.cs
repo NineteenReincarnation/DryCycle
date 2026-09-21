@@ -24,11 +24,18 @@ public sealed class WorldMapPlayerLocatorPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Player Locator";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapPlayerLocator.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapPlayerLocator.Enable(Logger),
+            WorldMapPlayerLocator.Disable);
 
     private void Update() => WorldMapPlayerLocator.UpdateFromMainThread();
 
-    private void OnDisable() => WorldMapPlayerLocator.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapPlayerLocator.Disable);
 }
 
 internal static class WorldMapPlayerLocator
