@@ -5,7 +5,7 @@ DryCycle 的 Guard 统一放在这里。Guard 只保护能够长期、客观、�
 ## 当前结构
 
 - `build-safety.sh`：CI 可执行的 C# 语法验证、直接部署写入安全检查和构建依赖方向检查。
-- `tools/local-build.ps1`：使用真实 Rain World 引用进行隔离编译的本地高保真验证工具，不是独立 Guard 类别。
+- `tools/local-build.ps1`：使用真实 Rain World 引用进行隔离编译并检查最终程序集依赖/合并结果的本地高保真验证工具，不是独立 Guard 类别。它验证核心 DLL 的 NAudio 托管合并契约、可选 UI 依赖隔离，并编译当前两个 RWImGui 前端；不宣称验证游戏运行时行为。
 - `run-all.sh`：本地统一入口。
 
 功能行为、存档兼容、作者格式兼容、启动/回滚语义和性能预算应通过对应测试、真实构建、游戏运行或性能分析验证，不放进按功能增长的字符串 Guard。
