@@ -46,14 +46,14 @@ internal static class DryCycleShaderAssets
         string path = ResolveWeatherAssetPath("assets/drycycle/drycyclecreatures");
         if (!File.Exists(path))
         {
-            Plugin.Logger?.LogWarning("MantleCrab creature bundle missing; using opaque procedural CPU geometry/material fallback.");
+            SafeLogWarning("MantleCrab creature bundle missing; using opaque procedural CPU geometry/material fallback.");
             return;
         }
         try
         {
             string version = ResolveWeatherAssetPath("assets/drycycle/drycyclecreatures.version.txt");
             if (!File.Exists(version) || File.ReadAllText(version).Trim() != Application.unityVersion)
-                Plugin.Logger?.LogWarning("MantleCrab bundle editor/player version differs or metadata is missing. Player: " + Application.unityVersion);
+                SafeLogWarning("MantleCrab bundle editor/player version differs or metadata is missing. Player: " + Application.unityVersion);
             _creatureBundle = AssetBundle.LoadFromFile(path);
             if (_creatureBundle == null) return;
             Shader shader = _creatureBundle.LoadAsset<Shader>("assets/drycycle/creatures/mantlecrab/mantlecrabsurface.shader");
@@ -65,7 +65,7 @@ internal static class DryCycleShaderAssets
             if (SystemInfo.supportsComputeShaders)
                 MantleCrabBake = _creatureBundle.LoadAsset<ComputeShader>("assets/drycycle/creatures/mantlecrab/mantlecrabmaterialbake.compute");
         }
-        catch (Exception ex) { Plugin.Logger?.LogError("MantleCrab assets: " + ex); }
+        catch (Exception ex) { SafeLogError("MantleCrab assets: " + ex); }
     }
     private static bool _enabled;
     private static bool _missingBundleLogged;
@@ -170,7 +170,7 @@ internal static class DryCycleShaderAssets
             _bundle = AssetBundle.LoadFromFile(path);
             if (_bundle == null)
             {
-                Plugin.Logger?.LogError(
+                SafeLogError(
                     $"DryCycle failed to load weather AssetBundle '{path}'. " +
                     $"Runtime Unity version: {Application.unityVersion}.");
                 return;
@@ -183,13 +183,13 @@ internal static class DryCycleShaderAssets
 
             if (!SystemInfo.supportsComputeShaders)
             {
-                Plugin.Logger?.LogWarning(
+                SafeLogWarning(
                     "This graphics device reports no compute-shader support. DryCycle " +
                     "fog will use its non-fluid fallback. HeatWave and IntenseHeat do " +
                     "not depend on compute shaders.");
             }
 
-            Plugin.Logger?.LogInfo(
+            SafeLogInfo(
                 "DryCycle weather rendering assets loaded: " +
                 $"FogComposite={(FogComposite != null ? "yes" : "no")}, " +
                 $"FogFluid={(FogFluidCompute != null ? "yes" : "no")}, " +
@@ -223,12 +223,12 @@ internal static class DryCycleShaderAssets
         Shader fogShader = _bundle.LoadAsset<Shader>(FogCompositeAssetPath);
         if (fogShader == null)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle weather bundle is missing shader '{FogCompositeAssetPath}'.");
         }
         else if (!fogShader.isSupported)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle fog shader '{fogShader.name}' is not supported by the " +
                 $"current graphics device '{SystemInfo.graphicsDeviceName}' " +
                 $"({SystemInfo.graphicsDeviceType}). The compatibility fog " +
@@ -247,7 +247,7 @@ internal static class DryCycleShaderAssets
         {
             if (FogFluidCompute == null)
             {
-                Plugin.Logger?.LogWarning(
+                SafeLogWarning(
                     $"DryCycle weather bundle is missing compute shader " +
                     $"'{FogFluidAssetPath}'. Fog will render without room-fluid " +
                     "advection.");
@@ -255,7 +255,7 @@ internal static class DryCycleShaderAssets
 
             if (FogNoiseCompute == null)
             {
-                Plugin.Logger?.LogWarning(
+                SafeLogWarning(
                     $"DryCycle weather bundle is missing compute shader " +
                     $"'{FogNoiseAssetPath}'. Fog will use Rain World's 2D-noise " +
                     "pseudo-volume fallback.");
@@ -268,14 +268,14 @@ internal static class DryCycleShaderAssets
         Shader heatShader = _bundle.LoadAsset<Shader>(HeatWaveAtmosphereAssetPath);
         if (heatShader == null)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle weather bundle is missing shader '{HeatWaveAtmosphereAssetPath}'. " +
                 "HeatWave LevelHeat will still function, but custom atmosphere rendering " +
                 "requires rebuilding the weather bundle.");
         }
         else if (!heatShader.isSupported)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle HeatWave atmosphere shader '{heatShader.name}' is not " +
                 $"supported by '{SystemInfo.graphicsDeviceName}' " +
                 $"({SystemInfo.graphicsDeviceType}).");
@@ -292,14 +292,14 @@ internal static class DryCycleShaderAssets
         Shader intenseShader = _bundle.LoadAsset<Shader>(IntenseHeatAtmosphereAssetPath);
         if (intenseShader == null)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle weather bundle is missing shader '{IntenseHeatAtmosphereAssetPath}'. " +
                 "IntenseHeat gameplay exposure will still run, but the disaster-grade " +
                 "solar atmosphere requires rebuilding the weather bundle.");
         }
         else if (!intenseShader.isSupported)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle IntenseHeat atmosphere shader '{intenseShader.name}' is not " +
                 $"supported by '{SystemInfo.graphicsDeviceName}' " +
                 $"({SystemInfo.graphicsDeviceType}).");
@@ -318,7 +318,7 @@ internal static class DryCycleShaderAssets
         Shader dehydrationShader = _bundle.LoadAsset<Shader>(DehydrationCompositeAssetPath);
         if (dehydrationShader == null)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle weather bundle is missing shader '{DehydrationCompositeAssetPath}'. " +
                 "Dehydration will keep its mesh-based compatibility presentation, but " +
                 "advanced tear-film, focus and retinal processing require rebuilding " +
@@ -326,7 +326,7 @@ internal static class DryCycleShaderAssets
         }
         else if (!dehydrationShader.isSupported)
         {
-            Plugin.Logger?.LogError(
+            SafeLogError(
                 $"DryCycle dehydration composite shader '{dehydrationShader.name}' is not " +
                 $"supported by '{SystemInfo.graphicsDeviceName}' " +
                 $"({SystemInfo.graphicsDeviceType}).");
@@ -345,7 +345,7 @@ internal static class DryCycleShaderAssets
         string metadataPath = ResolveWeatherAssetPath(BundleVersionRelativePath);
         if (string.IsNullOrEmpty(metadataPath) || !File.Exists(metadataPath))
         {
-            Plugin.Logger?.LogWarning(
+            SafeLogWarning(
                 "DryCycle weather AssetBundle has no Unity-version sidecar. " +
                 $"Expected '{BundleVersionRelativePath}'. Runtime Unity is " +
                 $"{Application.unityVersion}; if the bundle fails, rebuild it with " +
@@ -367,7 +367,7 @@ internal static class DryCycleShaderAssets
                     playerVersion,
                     StringComparison.OrdinalIgnoreCase))
             {
-                Plugin.Logger?.LogWarning(
+                SafeLogWarning(
                     $"DryCycle weather AssetBundle was built with Unity " +
                     $"'{editorVersion}', while Rain World is running Unity " +
                     $"'{playerVersion}'. Unity AssetBundles are not forward-compatible; " +
@@ -376,16 +376,34 @@ internal static class DryCycleShaderAssets
             }
             else
             {
-                Plugin.Logger?.LogInfo(
+                SafeLogInfo(
                     $"DryCycle weather AssetBundle Unity version matches Rain World: " +
                     $"{playerVersion}.");
             }
         }
         catch (Exception ex)
         {
-            Plugin.Logger?.LogWarning(
+            SafeLogWarning(
                 $"DryCycle could not read AssetBundle version metadata: {ex.Message}");
         }
+    }
+
+    private static void SafeLogInfo(string message)
+    {
+        try { Plugin.Logger?.LogInfo(message); }
+        catch { }
+    }
+
+    private static void SafeLogWarning(string message)
+    {
+        try { Plugin.Logger?.LogWarning(message); }
+        catch { }
+    }
+
+    private static void SafeLogError(object message)
+    {
+        try { Plugin.Logger?.LogError(message); }
+        catch { }
     }
 
     private static string ResolveWeatherAssetPath(string relativePath)
