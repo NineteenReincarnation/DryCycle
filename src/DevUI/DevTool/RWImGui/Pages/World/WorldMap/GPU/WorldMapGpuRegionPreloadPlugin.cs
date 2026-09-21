@@ -59,6 +59,7 @@ internal static class WorldMapGpuRegionPreload
     private static string cacheRoot = string.Empty;
     private static long sequence;
     private static bool preloadStarted;
+    private static int generation;
     private static bool enabled;
 
     internal static void Enable(ManualLogSource logger)
@@ -69,23 +70,38 @@ internal static class WorldMapGpuRegionPreload
         cacheRoot = Path.Combine(Application.persistentDataPath, "DryCycle", "WorldMapGpuCache");
         cancellation = new CancellationTokenSource();
         preloadStarted = false;
+        unchecked { generation++; }
         enabled = true;
         log?.LogInfo("GPU World Map region memory/preload cache enabled; disk preload is deferred until the Map cache is first used.");
     }
 
     internal static void Disable()
     {
-        try { cancellation?.Cancel(); }
-        catch { }
+        enabled = false;
+        unchecked { generation++; }
 
-        cancellation?.Dispose();
+        CancellationTokenSource source = cancellation;
         cancellation = null;
+        if (source != null)
+        {
+            try
+            {
+                source.Cancel();
+            }
+            catch (Exception error)
+            {
+                log?.LogWarning("GPU World Map region preload cancellation failed: " + error);
+            }
+            finally
+            {
+                source.Dispose();
+            }
+        }
 
         lock (Sync) resident.Clear();
         cacheRoot = string.Empty;
         sequence = 0;
         preloadStarted = false;
-        enabled = false;
         log = null;
     }
 
@@ -177,22 +193,27 @@ internal static class WorldMapGpuRegionPreload
 
         preloadStarted = true;
         CancellationToken token = cancellation.Token;
-        _ = Task.Run(() => PreloadRecentCaches(token), token);
+        int workerGeneration = generation;
+        string workerCacheRoot = cacheRoot;
+        _ = Task.Run(() => PreloadRecentCaches(token, workerGeneration, workerCacheRoot), token);
     }
 
-    private static void PreloadRecentCaches(CancellationToken token)
+    private static void PreloadRecentCaches(
+        CancellationToken token,
+        int workerGeneration,
+        string workerCacheRoot)
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(cacheRoot) || !Directory.Exists(cacheRoot)) return;
-            FileInfo[] files = new DirectoryInfo(cacheRoot).GetFiles("*.dcwm", SearchOption.TopDirectoryOnly);
+            if (string.IsNullOrWhiteSpace(workerCacheRoot) || !Directory.Exists(workerCacheRoot)) return;
+            FileInfo[] files = new DirectoryInfo(workerCacheRoot).GetFiles("*.dcwm", SearchOption.TopDirectoryOnly);
             Array.Sort(files, (a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
 
             long acceptedBytes = 0;
             int acceptedRegions = 0;
             for (int i = 0; i < files.Length && acceptedRegions < MaxResidentRegions; i++)
             {
-                if (token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested || workerGeneration != generation || !enabled) return;
 
                 FileInfo file = files[i];
                 if (file.Length <= 0 || acceptedBytes + file.Length > MaxPreloadBytes) continue;
@@ -209,14 +230,17 @@ internal static class WorldMapGpuRegionPreload
                 {
                     snapshot = WorldMapGpuCache.LoadResidentSnapshot(region, file.FullName);
                 }
-                catch
+                catch (Exception error)
                 {
+                    log?.LogDebug("World Map background cache preload skipped " + file.Name + ": " + error.Message);
                     continue;
                 }
                 if (snapshot == null) continue;
 
                 lock (Sync)
                 {
+                    if (token.IsCancellationRequested || workerGeneration != generation || !enabled)
+                        return;
                     if (!resident.ContainsKey(region))
                     {
                         resident[region] = new ResidentEntry
