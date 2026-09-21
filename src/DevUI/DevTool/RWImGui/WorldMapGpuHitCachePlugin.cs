@@ -17,9 +17,9 @@ public sealed class WorldMapGpuHitCachePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Hit Cache";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo(
-            "GPU World Map duplicate route hit-test cache is integrated directly into WorldMapGpuScene; no detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("GPU World Map duplicate route hit-test cache is integrated directly into WorldMapGpuScene; no detour attached."),
+            null);
 }
