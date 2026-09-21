@@ -21,8 +21,15 @@ public sealed class PlayerMapRenderOutputValidatorPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Render Output Validator";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapRenderOutputValidator.Enable(Logger);
-    private void OnDisable() => PlayerMapRenderOutputValidator.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapRenderOutputValidator.Enable(Logger),
+            PlayerMapRenderOutputValidator.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapRenderOutputValidator.Disable);
 }
 
 internal static class PlayerMapRenderOutputValidator
