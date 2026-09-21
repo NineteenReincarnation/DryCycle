@@ -25,7 +25,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// in ImGui until the map-space glyph atlas is introduced.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(WorldMapGpuIncrementalRouterPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldMapGpuPipeBatchPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapGPU.PipeBatch";
