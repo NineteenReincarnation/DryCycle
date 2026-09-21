@@ -67,6 +67,44 @@ internal static class WorldAuthoringPathResolver
         return resolved;
     }
 
+    internal static bool TryResolveMapConfigSource(
+        string regionName,
+        string resolvedMapPath,
+        out string sourcePath,
+        out string error)
+    {
+        sourcePath = string.Empty;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(regionName) || string.IsNullOrWhiteSpace(resolvedMapPath))
+        {
+            error = "Map config region or resolved path is unavailable.";
+            return false;
+        }
+
+        string fileName = Path.GetFileName(resolvedMapPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            error = "Map config file name could not be resolved.";
+            return false;
+        }
+
+        string relativePath =
+            "World" + Path.DirectorySeparatorChar +
+            regionName + Path.DirectorySeparatorChar +
+            fileName;
+        sourcePath = ResolveExistingSource(relativePath);
+        if (!string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath))
+            return true;
+
+        string readPath = ResolveReadPath(relativePath);
+        error = IsMergedCachePath(readPath)
+            ? "Map config resolves only to generated mergedmods data; no lossless writable mod source was found."
+            : "Map config could not be resolved to a writable source file.";
+        sourcePath = string.Empty;
+        return false;
+    }
+
     internal static string ResolveReadPath(string relativePath) =>
         string.IsNullOrWhiteSpace(relativePath)
             ? string.Empty
