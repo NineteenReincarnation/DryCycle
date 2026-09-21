@@ -58,8 +58,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
         // terminate the process before BepInEx has a chance to print a managed exception.
         On.RainWorld.Start += RainWorld_Start;
-        On.RainWorld.PreModsInit += RainWorld_PreModsInit;
-        On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit += DryCycle_BeforePreModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit += DryCycle_AfterPreModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit += DryCycle_BeforeModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit;
     }
 
     private void OnApplicationFocus(bool hasFocus)
@@ -170,8 +172,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void OnDisable()
     {
         On.RainWorld.Start -= RainWorld_Start;
-        On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
-        On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.AfterModsInit -= DryCycle_AfterModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit -= DryCycle_BeforeModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit -= DryCycle_AfterPreModsInit;
+        global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit -= DryCycle_BeforePreModsInit;
         nativeImGuiReady = false;
         DevToolFrontend.SetVisibleFromMainThread(false);
         DevToolFrontend.SetApplicationFocusedFromMainThread(true);
@@ -200,20 +204,25 @@ public sealed class BridgePlugin : BaseUnityPlugin
         TryRegisterLocalFontsDuringSafeStartup();
     }
 
-    private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
+    private static void DryCycle_BeforePreModsInit(RainWorld self)
     {
         // Different RWImGui releases create/configure the shared atlas at slightly different
-        // points. Probe both sides of PreModsInit, but the helper remains a no-op until Start has
-        // established that ImGui.NET's native function pointers are safe to call.
-        TryRegisterLocalFontsDuringSafeStartup();
-        orig(self);
+        // points. Preserve the old outer-hook timing without stacking another RainWorld hook.
         TryRegisterLocalFontsDuringSafeStartup();
     }
 
-    private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
+    private static void DryCycle_AfterPreModsInit(RainWorld self)
     {
         TryRegisterLocalFontsDuringSafeStartup();
-        orig(self);
+    }
+
+    private static void DryCycle_BeforeModsInit(RainWorld self)
+    {
+        TryRegisterLocalFontsDuringSafeStartup();
+    }
+
+    private static void DryCycle_AfterModsInit(RainWorld self)
+    {
         TryRegisterLocalFontsDuringSafeStartup();
         TryRegisterCallback();
     }
