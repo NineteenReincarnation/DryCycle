@@ -711,7 +711,8 @@ public enum MapEditorCommandKind
     SelectRoom,
     SetRoomPosition,
     SetRoomLayer,
-    SetRoomSubregion
+    SetRoomSubregion,
+    SetRoomAttraction
 }
 
 public readonly struct MapEditorCommand
@@ -720,18 +721,21 @@ public readonly struct MapEditorCommand
         MapEditorCommandKind kind,
         int roomIndex = -1,
         string text = null,
-        EditorPropertyValue value = default)
+        EditorPropertyValue value = default,
+        string key = null)
     {
         Kind = kind;
         RoomIndex = roomIndex;
         Text = text;
         Value = value;
+        Key = key;
     }
 
     public MapEditorCommandKind Kind { get; }
     public int RoomIndex { get; }
     public string Text { get; }
     public EditorPropertyValue Value { get; }
+    public string Key { get; }
 }
 
 public static class MapEditorCommandQueue
@@ -759,6 +763,13 @@ public static class MapEditorCommandQueue
                         break;
                     case MapEditorCommandKind.SetRoomSubregion:
                         MapEditorActions.SetRoomSubregion(session, command.RoomIndex, command.Text);
+                        break;
+                    case MapEditorCommandKind.SetRoomAttraction:
+                        MapEditorActions.SetRoomAttraction(
+                            session,
+                            command.RoomIndex,
+                            command.Key,
+                            command.Text);
                         break;
                 }
             }
