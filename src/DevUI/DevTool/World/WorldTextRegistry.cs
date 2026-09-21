@@ -352,16 +352,11 @@ internal static class WorldTextRegistry
         string region = LoadedRegion;
         if (document.Dirty)
         {
-            string temp = LoadedPath + ".tmp";
             try
             {
-                File.WriteAllText(temp, document.Serialize());
-                if (File.Exists(LoadedPath))
-                {
-                    File.Copy(LoadedPath, LoadedPath + ".bak", overwrite: true);
-                    File.Delete(LoadedPath);
-                }
-                File.Move(temp, LoadedPath);
+                WorldAuthoringPathResolver.AtomicWriteAllText(
+                    LoadedPath,
+                    document.Serialize());
                 document.MarkSaved(LoadedPath);
 
                 WorldConnectionSyntax.SynchronizeRegion(region, document);
@@ -372,7 +367,6 @@ internal static class WorldTextRegistry
             {
                 LoadError = error.Message;
                 global::DryCycle.Plugin.Logger?.LogError("WorldText save failed: " + error);
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
                 return false;
             }
         }
