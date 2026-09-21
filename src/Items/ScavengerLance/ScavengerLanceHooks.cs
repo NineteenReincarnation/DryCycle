@@ -12,22 +12,39 @@ internal static class ScavengerLanceHooks
     internal static void Enable()
     {
         if (_enabled) return;
-        ObjectType = new AbstractPhysicalObject.AbstractObjectType("ScavengerLance", true);
-        _definition = new ScavengerLanceDefinition();
-        ItemRegistry.Register(_definition);
-        On.Player.Grabability += Grabability;
-        On.Player.CanIPickThisUp += CanIPickThisUp;
-        On.Player.HeavyCarry += HeavyCarry;
-        On.Player.GetHeldItemDirection += GetHeldItemDirection;
-        On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
-        On.Player.ThrowObject += ThrowObject;
-        On.Player.Update += PlayerUpdate;
-        _enabled = true;
+
+        try
+        {
+            ObjectType = new AbstractPhysicalObject.AbstractObjectType("ScavengerLance", true);
+            _definition = new ScavengerLanceDefinition();
+            ItemRegistry.Register(_definition);
+
+            // Mark enabled before the HookGen transaction so Disable can unwind a partial
+            // installation if any later endpoint fails.
+            _enabled = true;
+            On.Player.Grabability += Grabability;
+            On.Player.CanIPickThisUp += CanIPickThisUp;
+            On.Player.HeavyCarry += HeavyCarry;
+            On.Player.GetHeldItemDirection += GetHeldItemDirection;
+            On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
+            On.Player.ThrowObject += ThrowObject;
+            On.Player.Update += PlayerUpdate;
+        }
+        catch
+        {
+            Disable();
+            throw;
+        }
     }
     internal static void Disable()
     {
-        if (!_enabled) return;
+        if (!_enabled && _definition == null && ObjectType == null) return;
+
+        _enabled = false;
         ScavengerLanceDevConsoleSupport.ResetRegistration();
+
+        // Removing an uninstalled HookGen delegate is harmless, which lets this method also
+        // serve as the rollback path for a partially completed Enable.
         On.Player.Grabability -= Grabability;
         On.Player.CanIPickThisUp -= CanIPickThisUp;
         On.Player.HeavyCarry -= HeavyCarry;
@@ -35,11 +52,15 @@ internal static class ScavengerLanceHooks
         On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
         On.Player.ThrowObject -= ThrowObject;
         On.Player.Update -= PlayerUpdate;
+
         ItemRegistry.Unregister(_definition);
         _definition = null;
-        ObjectType.Unregister();
-        ObjectType = null;
-        _enabled = false;
+
+        if (ObjectType != null)
+        {
+            ObjectType.Unregister();
+            ObjectType = null;
+        }
     }
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
         obj is ScavengerLance ? Player.ObjectGrabability.BigOneHand : orig(self, obj);
