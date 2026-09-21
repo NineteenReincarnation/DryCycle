@@ -327,13 +327,6 @@ internal static class UniversalDevUiMirrorView
     private static void Send(UniversalDevUiCommand command) => UniversalDevUiCommandQueue.Enqueue(command);
 }
 
-using System;
-using DryCycle.DevUI.DevTool.Compatibility;
-using ImGuiNET;
-using Num = System.Numerics;
-
-namespace DryCycle.DevUI.DevTool.RWImGui;
-
 /// <summary>
 /// Standalone movable diagnostics surface for the page-agnostic semantic mirror and migration audits.
 /// It deliberately stays outside page-specific inspectors and normal editor workflows.
