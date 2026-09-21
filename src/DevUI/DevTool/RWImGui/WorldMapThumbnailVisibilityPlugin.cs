@@ -20,8 +20,15 @@ public sealed class WorldMapThumbnailVisibilityPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Thumbnail Visibility";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapThumbnailVisibility.Enable(Logger);
-    private void OnDisable() => WorldMapThumbnailVisibility.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapThumbnailVisibility.Enable(Logger),
+            WorldMapThumbnailVisibility.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapThumbnailVisibility.Disable);
 }
 
 internal static class WorldMapThumbnailVisibility
