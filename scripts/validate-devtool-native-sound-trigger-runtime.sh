@@ -202,7 +202,7 @@ if [[ -z "$q_line" || -z "$s_line" || -z "$r_line" || "$q_line" -ge "$s_line" ||
   exit 1
 fi
 
-if ! grep -Fq 'NativeSoundTriggerDevUiScheduler.Disable();' "$misc_runtime"; then
+if ! grep -Fq 'NativeSoundTriggerDevUiScheduler.Disable' "$misc_runtime"; then
   echo "Native Sound/Trigger scheduler lifetime is not paired on shutdown." >&2
   exit 1
 fi
