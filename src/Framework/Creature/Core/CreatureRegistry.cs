@@ -280,12 +280,14 @@ public static class CreatureRegistry
 
             _enabled = true;
         }
-        catch
+        catch (Exception error)
         {
-            // Hook installation is a transaction. If one HookGen endpoint is unavailable, detach
-            // every endpoint installed earlier in this attempt before propagating the original
-            // startup error to the owning plugin transaction.
-            RemoveInstalledHooksBestEffort("enable rollback");
+            // Hook installation is a transaction. Log the original endpoint failure first, then
+            // report every cleanup endpoint separately so rollback problems cannot hide the cause.
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "CreatureRegistry.Enable",
+                error,
+                () => RemoveInstalledHooksBestEffort("enable rollback"));
             _enabled = false;
             throw;
         }
@@ -354,15 +356,11 @@ public static class CreatureRegistry
             return;
         }
 
-        try
+        if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                "CreatureRegistry/" + phase + "/" + hookName,
+                remove))
         {
-            remove();
             installed = false;
-        }
-        catch (Exception error)
-        {
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "CreatureRegistry " + phase + " could not detach " + hookName + ": " + error);
         }
     }
 
