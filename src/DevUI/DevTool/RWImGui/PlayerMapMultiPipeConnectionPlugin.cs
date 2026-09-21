@@ -25,8 +25,15 @@ public sealed class PlayerMapMultiPipeConnectionPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Multi-Pipe Connections";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapMultiPipeConnections.Enable(Logger);
-    private void OnDisable() => PlayerMapMultiPipeConnections.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapMultiPipeConnections.Enable(Logger),
+            PlayerMapMultiPipeConnections.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapMultiPipeConnections.Disable);
 }
 
 internal static class PlayerMapMultiPipeConnections
