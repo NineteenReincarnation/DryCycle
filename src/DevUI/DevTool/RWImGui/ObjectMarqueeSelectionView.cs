@@ -18,10 +18,23 @@ internal static class ObjectMarqueeSelectionView
 
     private static bool armed;
     private static bool dragging;
+    private static bool gridVisible = true;
+    private static float gridStep = 20f;
     private static Num.Vector2 start;
     private static Num.Vector2 current;
 
     internal static bool OwnsMouse => armed || dragging;
+    internal static bool GridVisible
+    {
+        get => gridVisible;
+        set => gridVisible = value;
+    }
+
+    internal static float GridStep
+    {
+        get => gridStep;
+        set => gridStep = Math.Max(1f, value);
+    }
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -39,6 +52,9 @@ internal static class ObjectMarqueeSelectionView
         }
 
         ImGuiIOPtr io = ImGui.GetIO();
+
+        if (gridVisible)
+            DrawGrid(viewport, display, gridStep);
 
         if (!armed && !dragging)
         {
@@ -165,6 +181,42 @@ internal static class ObjectMarqueeSelectionView
         float nx = (worldX - viewport.CameraX) / Math.Max(1f, viewport.Width);
         float ny = (worldY - viewport.CameraY) / Math.Max(1f, viewport.Height);
         return new Num.Vector2(nx * display.X, display.Y - ny * display.Y);
+    }
+
+    private static void DrawGrid(
+        EditorViewportSnapshot viewport,
+        Num.Vector2 display,
+        float step)
+    {
+        step = Math.Max(1f, step);
+        ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
+        uint minor = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.72f, 0.82f, 0.92f, 0.10f));
+        uint major = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.82f, 0.90f, 1.00f, 0.18f));
+
+        float leftWorld = viewport.CameraX;
+        float rightWorld = viewport.CameraX + viewport.Width;
+        float bottomWorld = viewport.CameraY;
+        float topWorld = viewport.CameraY + viewport.Height;
+
+        int firstX = (int)Math.Floor(leftWorld / step);
+        int lastX = (int)Math.Ceiling(rightWorld / step);
+        for (int gx = firstX; gx <= lastX; gx++)
+        {
+            float worldX = gx * step;
+            Num.Vector2 a = WorldToScreen(worldX, bottomWorld, viewport, display);
+            Num.Vector2 b = WorldToScreen(worldX, topWorld, viewport, display);
+            draw.AddLine(a, b, gx % 5 == 0 ? major : minor, gx % 5 == 0 ? 1.25f : 1f);
+        }
+
+        int firstY = (int)Math.Floor(bottomWorld / step);
+        int lastY = (int)Math.Ceiling(topWorld / step);
+        for (int gy = firstY; gy <= lastY; gy++)
+        {
+            float worldY = gy * step;
+            Num.Vector2 a = WorldToScreen(leftWorld, worldY, viewport, display);
+            Num.Vector2 b = WorldToScreen(rightWorld, worldY, viewport, display);
+            draw.AddLine(a, b, gy % 5 == 0 ? major : minor, gy % 5 == 0 ? 1.25f : 1f);
+        }
     }
 
     private static void DrawMarquee(Num.Vector2 a, Num.Vector2 b)
