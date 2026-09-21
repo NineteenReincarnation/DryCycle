@@ -81,7 +81,7 @@ internal static class NativeObjectGizmoView
             return;
         }
 
-        if (io.WantCaptureMouse || NativeSpatialGizmoView.OwnsMouse ||
+        if (io.WantCaptureMouse || NativeSpatialGizmoView.IsDragging ||
             !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             return;
 
