@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    DryCycle's gameplay assembly must stay single-DLL deployable.
+    NAudio.Wasapi and NAudio.Core provide the full Media Foundation decoder implementation,
+    but are merged into DryCycle.dll after compilation instead of being shipped as sidecar DLLs.
+  -->
+  <Target Name="ILRepacker"
+          AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(IsCrossTargetingBuild)' != 'true'">
+    <ItemGroup>
+      <DryCycleNAudioInput Include="$(TargetPath)" />
+      <DryCycleNAudioInput Include="$(TargetDir)NAudio.Wasapi.dll" />
+      <DryCycleNAudioInput Include="$(TargetDir)NAudio.Core.dll" />
+    </ItemGroup>
+
+    <Error Condition="!Exists('$(TargetDir)NAudio.Wasapi.dll')"
+           Text="DryCycle single-DLL build requires NAudio.Wasapi.dll as an ILRepack input." />
+    <Error Condition="!Exists('$(TargetDir)NAudio.Core.dll')"
+           Text="DryCycle single-DLL build requires NAudio.Core.dll as an ILRepack input." />
+
+    <ILRepack
+        Parallel="true"
+        Internalize="true"
+        InputAssemblies="@(DryCycleNAudioInput)"
+        TargetKind="Dll"
+        OutputFile="$(TargetPath)" />
+
+    <!-- Do not leave misleading runtime sidecars next to the merged gameplay assembly. -->
+    <Delete Files="$(TargetDir)NAudio.Wasapi.dll;$(TargetDir)NAudio.Core.dll;$(TargetDir)NAudio.Wasapi.pdb;$(TargetDir)NAudio.Core.pdb" />
+
+    <Message Importance="high"
+             Text="DryCycle single-DLL build: merged NAudio.Wasapi + NAudio.Core into $(TargetPath)." />
+  </Target>
+</Project>
