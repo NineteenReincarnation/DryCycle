@@ -188,8 +188,10 @@ internal static class LanceScavengerHooks
 
         if (CreatureRegistry.IsQuarantined(LanceScavengerDefinition.Type))
         {
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "LanceScavenger relationships were skipped because its creature template is quarantined.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "LanceScavenger/StaticWorld.InitStaticWorld",
+                "SKIP-QUARANTINED",
+                "LanceScavenger template is quarantined");
             return;
         }
 
@@ -233,8 +235,10 @@ internal static class LanceScavengerHooks
             global::DryCycle.StartupDiagnostics.Failure(
                 "LanceScavenger/StaticWorld.InitStaticWorld",
                 error);
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "LanceScavenger relationship setup failed and was isolated so StaticWorld startup can continue.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "LanceScavenger/StaticWorld.InitStaticWorld",
+                "ISOLATED",
+                "relationship setup failed; StaticWorld startup will continue");
         }
     }
 }
