@@ -16,8 +16,18 @@ public sealed class PlayerMapRuntimePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool Player Map Runtime";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapWorkspaceRuntime.Enable();
-    private void OnDisable()
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            PlayerMapWorkspaceRuntime.Enable,
+            Shutdown);
+
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            Shutdown);
+
+    private static void Shutdown()
     {
         PlayerMapRenderPreparationController.Reset();
         PlayerMapRenderScheduler.Reset();
