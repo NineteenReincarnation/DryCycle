@@ -23,17 +23,24 @@ jobs:
 
           root = Path('src')
 
-          # Exact baseline of repository source files that contain the RuntimeDetour Hook installation marker.
+          # Exact baseline of repository source files that install or import RuntimeDetour Hook.
+          # The old guard only matched the fully-qualified spelling MonoMod.RuntimeDetour.Hook and
+          # therefore missed "using MonoMod.RuntimeDetour; ... new Hook(...)". Guard both forms.
           # Read-only HookGen discovery is not an installation site. DryCycle-owned code must prefer
           # direct interfaces/services/events; any future external compatibility detour must be added
           # deliberately and reviewed rather than appearing implicitly.
           allowed = set()
 
-          marker = 'MonoMod.RuntimeDetour.Hook'
+          markers = (
+              'MonoMod.RuntimeDetour.Hook',
+              'using MonoMod.RuntimeDetour;',
+              'new Hook(',
+              'new MonoMod.RuntimeDetour.Hook(',
+          )
           actual = set()
           for path in root.rglob('*.cs'):
               text = path.read_text(encoding='utf-8', errors='ignore')
-              if marker in text:
+              if any(marker in text for marker in markers):
                   actual.add(path.relative_to(root).as_posix())
 
           unexpected = sorted(actual - allowed)
