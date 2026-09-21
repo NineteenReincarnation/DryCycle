@@ -113,6 +113,14 @@ if ! grep -Fq 'WorldAuthoringPathResolver.IsMergedCachePath(resolved)' "$tempera
   exit 1
 fi
 
+# Migration-stream edits share the Player Map persistence document. Their dirty signal must feed
+# the canonical workspace state so save-failure detection and cross-session retention see them.
+if ! grep -Fq 'PlayerMapWorkspaceRuntime.MarkDirty(session)' "src/DevUI/DevTool/Map/PlayerMap/PlayerMapMigrationDirtyBridge.cs" ||
+   ! grep -Fq 'internal static void MarkDirty(EditorSession session)' "$map_runtime"; then
+  echo "Player Map migration dirty state is detached from the canonical document." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
