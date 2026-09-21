@@ -131,6 +131,15 @@ if ! grep -Fq 'TryParseText(' "$lineage" ||
   exit 1
 fi
 
+# A retained dirty Player Map can be rebound to a rebuilt World whose AbstractRoom indexes differ.
+# Stable room name must re-key the old state before stale-index cleanup runs.
+if ! grep -Fq 'A rebuilt World may assign different AbstractRoom indexes' "$map_runtime" ||
+   ! grep -Fq 'state.Rooms.Remove(previousIndex)' "$map_runtime" ||
+   ! grep -Fq 'roomState.RoomIndex = room.index' "$map_runtime"; then
+  echo "Retained Player Map rooms are not re-keyed by stable room identity after World rebuild." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
