@@ -6,7 +6,6 @@ DryCycle 的 Guard 统一放在这里。Guard 只保护已经确认的重要不�
 
 - `build-compile.sh`：构建契约、C# 语法、前后端程序集边界。
 - `startup-safety.sh`：主插件与辅助插件启动安全、依赖/部署边界。
-- `runtime-hook-safety.sh`：运行时 Hook 安全。禁止 DryCycle 源码直接安装 `MonoMod.RuntimeDetour.Hook`。
 - `persistence-authoring-safety.sh`：保存、原子写入、回滚与 `mergedmods` 写保护。
 - `devtool-architecture.sh`：DevTool 公共 API、页面/视图、Factory、Gizmo、Sound/Trigger、Objects 等架构边界。
 - `feature-specific.sh`：确实需要独立保留的功能级回归约束，目前主要是 DesertBatfly。
@@ -22,6 +21,9 @@ GitHub Actions 只能从仓库根目录的 `.github/workflows/` 自动发现工�
 它不保存具体 Guard 规则，只负责调用本目录的分类 Guard。以后新增规则应优先加入现有分类；只有出现新的长期不变量类别时才新增分类。
 
 ## 原则
+
+Hook/Detour 的使用取舍属于工程设计规范，见仓库根目录 `AGENTS.md`；需要理解上下文的设计判断不做成字符串 Guard。
+
 
 1. 编译和真实运行验证的优先级高于静态字符串检查。
 2. Guard 保护行为/架构不变量，不保护某次重构时的私有方法名、调用顺序或文件布局。
