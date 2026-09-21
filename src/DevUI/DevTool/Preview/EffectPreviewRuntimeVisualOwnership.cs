@@ -523,6 +523,185 @@ internal static class EffectPreviewRuntimeVisualOwnership
         internal static RuntimeCameraRollbackReport Clean => new(false, string.Empty);
     }
 
+    private static class RuntimeMutationSafetyScanner
+    {
+        private const int MaxDepth = 4;
+        private const int MaxMethods = 192;
+        private static readonly Dictionary<Type, string> Cache = new();
+
+        internal static bool TryValidate(
+            HashSet<UpdatableAndDeletable> objects,
+            out string failureReason)
+        {
+            failureReason = string.Empty;
+            if (objects == null) return true;
+
+            HashSet<Type> types = new();
+            foreach (UpdatableAndDeletable obj in objects)
+            {
+                Type type = obj?.GetType();
+                if (type != null) types.Add(type);
+            }
+
+            foreach (Type type in types)
+            {
+                if (TryValidateType(type, out failureReason))
+                    continue;
+                return false;
+            }
+
+            return true;
+        }
+
+        internal static bool TryValidateType(Type type, out string failureReason)
+        {
+            failureReason = string.Empty;
+            if (type == null) return true;
+
+            lock (Cache)
+            {
+                if (Cache.TryGetValue(type, out string cached))
+                {
+                    failureReason = cached;
+                    return string.IsNullOrEmpty(cached);
+                }
+            }
+
+            string reason = ScanType(type);
+            lock (Cache)
+                Cache[type] = reason ?? string.Empty;
+
+            failureReason = reason ?? string.Empty;
+            return string.IsNullOrEmpty(failureReason);
+        }
+
+        internal static void Clear()
+        {
+            lock (Cache)
+                Cache.Clear();
+        }
+
+        private static string ScanType(Type rootType)
+        {
+            MethodInfo[] methods;
+            try
+            {
+                methods = rootType.GetMethods(
+                    BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+                    BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            }
+            catch (Exception error)
+            {
+                return "could not inspect runtime type " + rootType.FullName + ": " + error.Message;
+            }
+
+            HashSet<MethodBase> visited = new();
+            for (int i = 0; i < methods.Length; i++)
+            {
+                string reason = ScanMethod(
+                    methods[i],
+                    rootType,
+                    rootType.Assembly,
+                    visited,
+                    0);
+                if (!string.IsNullOrEmpty(reason))
+                    return reason;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ScanMethod(
+            MethodBase method,
+            Type rootType,
+            Assembly rootAssembly,
+            HashSet<MethodBase> visited,
+            int depth)
+        {
+            if (method == null || depth > MaxDepth ||
+                visited.Count >= MaxMethods || !visited.Add(method))
+                return string.Empty;
+
+            List<DecodedInstruction> il = DecodedInstructionReader.Read(method);
+            for (int i = 0; i < il.Count; i++)
+            {
+                DecodedInstruction instruction = il[i];
+
+                if (instruction.OpCode == OpCodes.Stsfld &&
+                    instruction.Operand is FieldInfo staticField)
+                {
+                    return "runtime method " + method.Name +
+                           " writes static field " +
+                           (staticField.DeclaringType?.FullName ?? "<unknown>") +
+                           "." + staticField.Name;
+                }
+
+                if (instruction.OpCode == OpCodes.Stfld &&
+                    instruction.Operand is FieldInfo field)
+                {
+                    Type owner = field.DeclaringType;
+                    bool ownState = owner != null &&
+                                    (owner.IsAssignableFrom(rootType) ||
+                                     rootType.IsAssignableFrom(owner));
+                    bool cameraState = owner != null &&
+                                       typeof(RoomCamera).IsAssignableFrom(owner);
+
+                    if (!ownState && !cameraState)
+                    {
+                        return "runtime method " + method.Name +
+                               " writes external field " +
+                               (owner?.FullName ?? "<unknown>") +
+                               "." + field.Name;
+                    }
+                }
+
+                if (instruction.Operand is not MethodBase called)
+                    continue;
+
+                Type declaring = called.DeclaringType;
+                if (IsMutableFutileCall(declaring, called.Name))
+                {
+                    return "runtime method " + method.Name +
+                           " calls mutable Futile API " +
+                           (declaring?.FullName ?? "<unknown>") +
+                           "." + called.Name;
+                }
+
+                if (called.Module?.Assembly == rootAssembly && called != method)
+                {
+                    string nested = ScanMethod(
+                        called,
+                        rootType,
+                        rootAssembly,
+                        visited,
+                        depth + 1);
+                    if (!string.IsNullOrEmpty(nested))
+                        return nested;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsMutableFutileCall(Type declaring, string name)
+        {
+            if (declaring == null || string.IsNullOrEmpty(name))
+                return false;
+
+            bool container = typeof(FContainer).IsAssignableFrom(declaring);
+            bool node = typeof(FNode).IsAssignableFrom(declaring);
+            if (!container && !node)
+                return false;
+
+            return name == "AddChild" ||
+                   name == "AddChildAtIndex" ||
+                   name == "RemoveChild" ||
+                   name == "RemoveAllChildren" ||
+                   name == "RemoveFromContainer" ||
+                   name.StartsWith("Move", StringComparison.Ordinal);
+        }
+    }
+
     private static class RuntimeCameraUsageScanner
     {
         private const int MaxDepth = 4;
