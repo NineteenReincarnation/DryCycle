@@ -300,9 +300,26 @@ internal static class WorldLineageRegistry
 
             string result = string.Join(newline, output);
             if (terminalNewline) result += newline;
+
+            // Validate the exact final document before touching disk. This avoids the dangerous
+            // state where persistence succeeds but a destructive post-save reload fails after the
+            // registry has already forgotten its authoring records.
+            if (!TryParseText(
+                    result,
+                    out List<WorldLineageRecord> parsedRecords,
+                    out int parsedNextId,
+                    out string parseError))
+            {
+                LoadError = parseError;
+                error = parseError;
+                return false;
+            }
+
             WorldAuthoringPathResolver.AtomicWriteAllText(loadedPath, result);
+            ReplaceLoadedRecords(parsedRecords, parsedNextId);
             Dirty = false;
-            return LoadFromPath(loadedRegion, loadedPath);
+            LoadError = null;
+            return true;
         }
         catch (Exception ex)
         {
@@ -325,42 +342,100 @@ internal static class WorldLineageRegistry
 
     private static bool LoadFromPath(string region, string path)
     {
-        records.Clear();
-        roomSnapshots.Clear();
-        nextId = 1;
-        loadedRegion = region;
-        loadedPath = path ?? string.Empty;
-        LoadError = null;
-        Dirty = false;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            LoadError = "world.txt is unavailable for lineage load.";
+            return false;
+        }
 
         try
         {
-            string[] source = File.ReadAllText(path).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            Dictionary<string, int> occurrence = new(StringComparer.Ordinal);
-            bool inCreatures = false;
-            for (int i = 0; i < source.Length; i++)
+            string text = File.ReadAllText(path);
+            if (!TryParseText(
+                    text,
+                    out List<WorldLineageRecord> parsedRecords,
+                    out int parsedNextId,
+                    out string parseError))
             {
-                string raw = source[i];
-                if (string.Equals(raw, "CREATURES", StringComparison.Ordinal)) { inCreatures = true; continue; }
-                if (string.Equals(raw, "END CREATURES", StringComparison.Ordinal)) { inCreatures = false; continue; }
-                if (!inCreatures || !TryParseLineage(raw, out WorldLineageRecord record)) continue;
-                occurrence.TryGetValue(raw, out int nth);
-                occurrence[raw] = nth + 1;
-                record.Id = nextId++;
-                record.SourceRaw = raw;
-                record.SourceOccurrence = nth;
-                records.Add(record);
+                LoadError = parseError;
+                return false;
             }
+
+            ReplaceLoadedRecords(parsedRecords, parsedNextId);
+            loadedRegion = region;
+            loadedPath = path;
+            LoadError = null;
+            Dirty = false;
             return true;
         }
         catch (Exception ex)
         {
             LoadError = ex.Message;
-            records.Clear();
-            roomSnapshots.Clear();
             return false;
         }
+    }
+
+    private static bool TryParseText(
+        string text,
+        out List<WorldLineageRecord> parsedRecords,
+        out int parsedNextId,
+        out string error)
+    {
+        parsedRecords = new List<WorldLineageRecord>();
+        parsedNextId = 1;
+        error = null;
+
+        try
+        {
+            string[] source = (text ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Replace('\r', '\n')
+                .Split('\n');
+            Dictionary<string, int> occurrence = new(StringComparer.Ordinal);
+            bool inCreatures = false;
+            for (int i = 0; i < source.Length; i++)
+            {
+                string raw = source[i];
+                if (string.Equals(raw, "CREATURES", StringComparison.Ordinal))
+                {
+                    inCreatures = true;
+                    continue;
+                }
+                if (string.Equals(raw, "END CREATURES", StringComparison.Ordinal))
+                {
+                    inCreatures = false;
+                    continue;
+                }
+                if (!inCreatures || !TryParseLineage(raw, out WorldLineageRecord record))
+                    continue;
+
+                occurrence.TryGetValue(raw, out int nth);
+                occurrence[raw] = nth + 1;
+                record.Id = parsedNextId++;
+                record.SourceRaw = raw;
+                record.SourceOccurrence = nth;
+                parsedRecords.Add(record);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            parsedRecords.Clear();
+            parsedNextId = 1;
+            return false;
+        }
+    }
+
+    private static void ReplaceLoadedRecords(
+        List<WorldLineageRecord> parsedRecords,
+        int parsedNextId)
+    {
+        records.Clear();
+        if (parsedRecords != null && parsedRecords.Count > 0)
+            records.AddRange(parsedRecords);
+        roomSnapshots.Clear();
+        nextId = Math.Max(1, parsedNextId);
     }
 
     private static void AppendNew(List<string> output)
