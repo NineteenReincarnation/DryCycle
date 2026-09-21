@@ -13,7 +13,7 @@ internal static class MiscRuntime
         if (_enabled)
             return;
 
-        DryCycleOptions.Register();
+        StartupDiagnostics.Step("MiscRuntime/DryCycleOptions.Register", DryCycleOptions.Register);
 
         // Extra loose-audio formats are useful, but they are not allowed to decide whether Rain
         // World can finish booting. Hook/API mismatches disable only this optional feature.
@@ -21,9 +21,15 @@ internal static class MiscRuntime
 
         // Core DryCycle runtime facilities. Failures here are still propagated to Plugin's guarded
         // post-mod transaction because gameplay systems can depend on these services.
-        DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable();
-        PaletteDirectInputRuntime.Enable();
-        DryCycle.WorldLink.WorldLinkRuntime.Enable();
+        StartupDiagnostics.Step(
+            "MiscRuntime/RoomSettingsExtRuntime.Enable",
+            DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Enable);
+        StartupDiagnostics.Step(
+            "MiscRuntime/PaletteDirectInputRuntime.Enable",
+            PaletteDirectInputRuntime.Enable);
+        StartupDiagnostics.Step(
+            "MiscRuntime/WorldLinkRuntime.Enable",
+            DryCycle.WorldLink.WorldLinkRuntime.Enable);
 
         // The rebuilt editor is an optional development surface. A broken DevTool hook, Player Map
         // backend, or catalog warm-up must never take the whole gameplay mod (or Rain World) down.
@@ -65,15 +71,17 @@ internal static class MiscRuntime
     {
         try
         {
-            DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable();
+            StartupDiagnostics.Step(
+                "MiscRuntime/SoundFormatSupportRuntime.Enable",
+                DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable);
             _soundFormatSupportEnabled = true;
         }
         catch (Exception error)
         {
             _soundFormatSupportEnabled = false;
+            StartupDiagnostics.Failure("MiscRuntime/SoundFormatSupportRuntime.Enable", error);
             Plugin.Logger?.LogError(
                 "Optional sound-format support failed to initialize and has been disabled; Rain World startup will continue.");
-            Plugin.Logger?.LogError(error);
             SafeDisable(
                 "partially initialized sound format support",
                 DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Disable);
@@ -86,28 +94,38 @@ internal static class MiscRuntime
         {
             // Quiescence is part of the DevTool backend architecture, not a separately-discovered
             // BepInEx feature. Own its hook lifetime explicitly with the rebuilt editor runtime.
-            DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
+            StartupDiagnostics.Step(
+                "MiscRuntime/DevTool/LegacyDevUiQuiescenceController.Enable",
+                DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable);
 
             // DevToolRuntime owns the single DevUI.Update hook and invokes the native Sound/Trigger
             // scheduler directly at the vanilla-dispatch boundary.
-            DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Enable();
-            DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
+            StartupDiagnostics.Step(
+                "MiscRuntime/DevTool/NativeSoundTriggerDevUiScheduler.Enable",
+                DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Enable);
+            StartupDiagnostics.Step(
+                "MiscRuntime/DevTool/DevToolRuntime.Enable",
+                DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable);
 
             // Player Map is a first-class DevTool subsystem and follows the same optional lifetime.
-            DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Enable(
-                global::DryCycle.Plugin.Logger);
+            StartupDiagnostics.Step(
+                "MiscRuntime/DevTool/PlayerMapBackendLifecycle.Enable",
+                () => DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Enable(
+                    global::DryCycle.Plugin.Logger));
 
             // Static catalogs are a cold-start optimization only. They belong to the optional editor
             // transaction so a bad asset/catalog scan cannot block normal gameplay startup.
-            DryCycle.DevUI.DevTool.Room.RoomSettingsPresentation.WarmStaticCatalogs();
+            StartupDiagnostics.Step(
+                "MiscRuntime/DevTool/RoomSettingsPresentation.WarmStaticCatalogs",
+                DryCycle.DevUI.DevTool.Room.RoomSettingsPresentation.WarmStaticCatalogs);
 
             _devToolEnabled = true;
         }
         catch (Exception error)
         {
+            StartupDiagnostics.Failure("MiscRuntime/DevToolBackend", error);
             Plugin.Logger?.LogError(
                 "DryCycle DevTool backend failed to initialize and has been disabled; gameplay startup will continue.");
-            Plugin.Logger?.LogError(error);
             DisableDevToolBackendSafely();
         }
     }
