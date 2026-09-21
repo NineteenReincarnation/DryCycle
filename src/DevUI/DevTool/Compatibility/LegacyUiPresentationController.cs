@@ -239,6 +239,7 @@ internal static class LegacyUiPresentationController
     private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
     {
         orig(self);
+        DevToolRuntime.AfterRainWorldGameUpdate(self);
 
         bool live = DevToolSessionHub.IsCurrentSessionLive;
         if (live)
