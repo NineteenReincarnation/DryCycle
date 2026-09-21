@@ -63,7 +63,13 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
 
     internal static string DiagnosticLogPath => Path.Combine(Paths.BepInExRootPath, LogFileName);
 
-    private void OnEnable()
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            InitializeState,
+            Shutdown);
+
+    private void InitializeState()
     {
         captureActive = false;
         runLogInitialized = false;
@@ -135,7 +141,12 @@ public sealed class LanceScavengerRealtimeLogPlugin : BaseUnityPlugin
         EnforceSizeLimit(now);
     }
 
-    private void OnDisable()
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            Shutdown);
+
+    private void Shutdown()
     {
         if (captureActive)
             EndCaptureSession("game/plugin shutdown");
