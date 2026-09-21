@@ -54,13 +54,40 @@ internal static class WorldAuthoringPathResolver
                 "World authoring source resolution failed for '" + relativePath + "': " + error.Message);
         }
 
-        // Base-game/console files are not redirected. This preserves existing behavior when there is
-        // no active mod source, while preventing writes to mergedmods whenever a real source exists.
-        return AssetManager.ResolveFilePath(relativePath);
+        string resolved = AssetManager.ResolveFilePath(relativePath);
+        if (string.IsNullOrWhiteSpace(resolved))
+            return string.Empty;
+
+        // Never return the generated merge cache as an authoring target. A file that exists only in
+        // mergedmods may have been synthesized from modify/ patches or multiple mods and therefore
+        // has no lossless single-source destination.
+        if (IsMergedCachePath(resolved))
+            return string.Empty;
+
+        return resolved;
     }
 
     internal static string ResolveReadPath(string relativePath) =>
         string.IsNullOrWhiteSpace(relativePath)
             ? string.Empty
             : AssetManager.ResolveFilePath(relativePath);
+
+    internal static bool IsMergedCachePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            string root = Path.GetFullPath(global::RWCustom.Custom.RootFolderDirectory())
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string merged = Path.GetFullPath(Path.Combine(root, "mergedmods"))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+            string candidate = Path.GetFullPath(path);
+            return candidate.StartsWith(merged, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
