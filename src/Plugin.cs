@@ -235,14 +235,16 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void SafeBootstrapCleanup(string name, Action action)
     {
-        try
+        if (action == null)
         {
-            action?.Invoke();
+            return;
         }
-        catch (Exception cleanupError)
+
+        if (!StartupDiagnostics.RollbackStep("Rollback/" + name, action))
         {
-            StartupDiagnostics.Failure("Rollback/" + name, cleanupError);
-            Logger?.LogWarning("DryCycle bootstrap rollback failed for " + name + ": " + cleanupError);
+            Logger?.LogWarning(
+                "DryCycle rollback step failed for '" + name +
+                "'. See the preceding [ROLLBACK-FAIL] startup entry for the full exception.");
         }
     }
 
