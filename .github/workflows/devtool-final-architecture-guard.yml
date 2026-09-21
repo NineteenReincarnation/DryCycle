@@ -17,6 +17,7 @@ on:
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
+      - 'scripts/validate-devtool-effect-preview-safety.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
@@ -35,6 +36,7 @@ on:
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
+      - 'scripts/validate-devtool-effect-preview-safety.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
@@ -64,6 +66,9 @@ jobs:
       - name: Validate DevTool Native Objects runtime boundaries
         shell: bash
         run: bash scripts/validate-devtool-native-objects-runtime.sh
+      - name: Validate DevTool effect preview safety
+        shell: bash
+        run: bash scripts/validate-devtool-effect-preview-safety.sh
       - name: Validate DryCycle startup safety
         shell: bash
         run: bash scripts/validate-drycycle-startup-safety.sh
