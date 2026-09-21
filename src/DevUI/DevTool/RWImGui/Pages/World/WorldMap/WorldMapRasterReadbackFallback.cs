@@ -6,36 +6,10 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;
-
-/// <summary>
-/// Supplies a detailed minimap raster when Futile's MapTex atlas is GPU-readable but not CPU-readable.
-///
-/// The normal geometry hub intentionally tries Texture2D.GetPixels first because it is cheap. Some
-/// atlas/import configurations reject that CPU read even though the texture renders correctly. In
-/// that case this compatibility layer copies only the room's atlas rectangle through a temporary
-/// RenderTexture and feeds the resulting pixel classifications back into the normal presentation
-/// snapshot. Results are cached by texture/UV identity, so the readback is a one-shot room bake.
+namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
+/// Main-thread compatibility service that supplies semantic minimap raster data when Futile's atlas
+/// is renderable but not CPU-readable. Results are cached and published through the geometry hub.
 /// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class WorldMapRasterReadbackFallbackPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapGPU.RasterReadbackFallback";
-    public const string PluginName = "DryCycle DevTool World Map Raster Readback Fallback";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => WorldMapRasterReadbackFallback.Enable(Logger),
-            WorldMapRasterReadbackFallback.Disable);
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            WorldMapRasterReadbackFallback.Disable);
-}
-
 internal static class WorldMapRasterReadbackFallback
 {
     private readonly struct RasterSource

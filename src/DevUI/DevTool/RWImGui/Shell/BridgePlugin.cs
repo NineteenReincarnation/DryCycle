@@ -63,6 +63,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapUpdateThrottle.Enable", () => WorldMapUpdateThrottle.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRasterReadbackFallback.Enable", () => WorldMapRasterReadbackFallback.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapExactShortcuts.Enable", () => WorldMapExactShortcuts.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapLegacyVisualGuard.Enable", () => WorldMapLegacyVisualGuard.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Runtime.Enable", () => WorldMapRetainedV2Runtime.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapImGuiPresentationFallback.Enable", () => WorldMapImGuiPresentationFallback.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPresentationCorrectness.Enable", () => WorldMapPresentationCorrectness.Enable(Logger));
@@ -100,6 +103,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
         WorldMapImGuiPresentationFallback.LateUpdate();
+        WorldMapLegacyVisualGuard.LateUpdate();
         retainedViewLifecycle.LateUpdate();
     }
 
@@ -275,6 +279,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         creatureCatalogFallbackChecked = false;
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
+        SafeFrontendCleanup("world map legacy visual guard", WorldMapLegacyVisualGuard.Disable);
+        SafeFrontendCleanup("world map exact shortcuts", WorldMapExactShortcuts.Disable);
+        SafeFrontendCleanup("world map raster readback fallback", WorldMapRasterReadbackFallback.Disable);
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
         SafeFrontendCleanup("world map update throttle", WorldMapUpdateThrottle.Disable);
         SafeFrontendCleanup("world map retained v2 runtime", WorldMapRetainedV2Runtime.Disable);

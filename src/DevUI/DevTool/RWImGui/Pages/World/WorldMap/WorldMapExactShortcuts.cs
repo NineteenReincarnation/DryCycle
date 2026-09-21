@@ -12,37 +12,12 @@ using ImGuiNET;
 using RWCustom;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;
-
-/// <summary>
+namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
 /// Exact shortcut-mouth resolver for the World Map.
 ///
-/// MapTex tells us where RoomExit / CreatureHole entrance pixels are, but it does not encode which
-/// RoomExit pixel belongs to which abstract node. Pairing those pixels by scan order is therefore
-/// fundamentally unsafe. Rain World resolves the identity by following the authored shortcut tunnel
-/// from its visible entrance to the shortCut=2/3/5 terminal tile and indexing that terminal in the
-/// room's node table. This plugin mirrors that lightweight part of ShortcutMapper directly from the
-/// room .txt data, without realizing every room.
+/// Live MapPage/room-file work is pumped by BridgePlugin on Unity's main thread. RWImGUI Draw reads
+/// only published shortcut snapshots.
 /// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class WorldMapExactShortcutPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMap.ExactShortcuts";
-    public const string PluginName = "DryCycle DevTool World Map Exact Shortcuts";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => WorldMapExactShortcuts.Enable(Logger),
-            WorldMapExactShortcuts.Disable);
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            WorldMapExactShortcuts.Disable);
-}
-
 internal static class WorldMapExactShortcuts
 {
     private const int RoomsPerFrame = 4;

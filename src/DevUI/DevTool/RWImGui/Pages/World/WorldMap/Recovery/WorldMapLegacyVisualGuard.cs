@@ -7,43 +7,10 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;
-
-/// <summary>
-/// Keeps the vanilla MapPage alive as an authoring/data source without allowing its Futile visuals
-/// to leak through the rebuilt RWImGui world map.
-///
-/// The core compatibility layer already suppresses migrated legacy UI after DevUI.Update. Some map
-/// cache/materialization paths can still refresh RoomPanel/MiniMap later in the frame and make those
-/// Futile nodes visible again. Refresh hooks mark the guard dirty and LateUpdate performs one
-/// presentation-only suppression pass only when needed. A sparse safety audit covers unusual mods
-/// that mutate visibility directly without calling Refresh, avoiding an O(N) MapPage walk on every
-/// stable frame.
+namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
+/// Keeps the vanilla MapPage alive as a data source while suppressing its Futile presentation after
+/// refreshes. BridgePlugin owns enable/disable and LateUpdate scheduling.
 /// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapGPU.LegacyVisualGuard";
-    public const string PluginName = "DryCycle DevTool World Map Legacy Visual Guard";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => WorldMapLegacyVisualGuard.Enable(Logger),
-            WorldMapLegacyVisualGuard.Disable);
-
-    // LateUpdate is deliberate. A RoomPanel/MiniMap refresh can happen after the core suppression
-    // pass; applying a dirty suppression immediately before rendering closes that same-frame leak.
-    private void LateUpdate() => WorldMapLegacyVisualGuard.LateUpdate();
-
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            WorldMapLegacyVisualGuard.Disable);
-}
-
 internal static class WorldMapLegacyVisualGuard
 {
     private const int SafetyAuditIntervalFrames = 120;

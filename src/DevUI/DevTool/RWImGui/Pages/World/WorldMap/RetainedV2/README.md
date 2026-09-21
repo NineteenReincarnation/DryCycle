@@ -16,7 +16,7 @@ phase percentage below 100%.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
-- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots.
+- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
 
@@ -449,6 +449,11 @@ legacy presentation:
 `WorldMapLegacyVisualGuard` also remains while vanilla `MapPage` is kept alive as a data source;
 its dependency is the frontend bridge, not the retired GPU renderer.
 
+These compatibility components are services, not standalone BepInEx plugins. `BridgePlugin` is the
+single lifecycle owner for exact shortcuts, raster fallback and legacy visual suppression. This
+removes redundant startup guards/plugin ordering while keeping each service's responsibility
+separate.
+
 ### Final pan/zoom invariant
 
 After Phase 7, normal retained navigation has one state transition:
@@ -503,6 +508,11 @@ Only texture-handle/state exchange uses a short lock. `Camera.Render()` and ImGu
 never executed while holding the same lock, so navigation cannot stall because the two threads wait
 on an entire render/present operation. RenderTexture release/destruction is deferred back to the
 Unity main-thread pump; Present only reports accept/reject feedback.
+
+A failed candidate binding does not mutate/destroy Unity resources from Present. Present draws the
+retained last-known-good surface and posts rollback feedback; the next main-thread pump restores the
+old front target, disposes the rejected target, refreshes it for the current view, and retries the
+requested canvas size after cooldown.
 
 ### Interaction freeze
 
