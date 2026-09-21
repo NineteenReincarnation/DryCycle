@@ -161,6 +161,7 @@ internal static class MiscRuntime
         }
         catch (Exception error)
         {
+            StartupDiagnostics.Failure("MiscRuntime.Cleanup/" + name, error);
             Plugin.Logger?.LogWarning("DryCycle cleanup failed for " + name + ": " + error);
         }
     }
