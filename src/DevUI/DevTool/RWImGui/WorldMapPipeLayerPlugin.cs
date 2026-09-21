@@ -17,8 +17,15 @@ public sealed class WorldMapPipeLayerPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Pipe Layers";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapPipeLayers.Enable(Logger);
-    private void OnDisable() => WorldMapPipeLayers.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapPipeLayers.Enable(Logger),
+            WorldMapPipeLayers.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapPipeLayers.Disable);
 }
 
 internal static class WorldMapPipeLayers
