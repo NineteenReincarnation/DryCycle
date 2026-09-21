@@ -21,8 +21,15 @@ public sealed class WorldSubregionSelectorPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Subregion Selector";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldSubregionSelector.Enable(Logger);
-    private void OnDisable() => WorldSubregionSelector.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldSubregionSelector.Enable(Logger),
+            WorldSubregionSelector.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldSubregionSelector.Disable);
 }
 
 internal static class WorldSubregionSelector
