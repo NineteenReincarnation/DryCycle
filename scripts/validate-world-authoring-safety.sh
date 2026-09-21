@@ -45,11 +45,28 @@ if ! grep -Fq 'DryCycle will not author generated mergedmods data.' "$room_attr"
   exit 1
 fi
 
+# MapPage.filePath may point at AssetManager's mergedmods winner. Rebuilt, fallback and Vanilla
+# Map saves must all resolve a real source before writing.
+map_pipeline="src/DevUI/DevTool/Map/PlayerMap/PlayerMapConfigBuildPipeline.cs"
+map_runtime="src/DevUI/DevTool/Map/PlayerMap/PlayerMapWorkspaceRuntime.cs"
+if ! grep -Fq 'TryResolveMapConfigSource' "$map_pipeline" ||
+   ! grep -Fq 'AtomicWriteAllLines(authoringPath' "$map_pipeline"; then
+  echo "Rebuilt Player Map writer can bypass the real-source authoring path." >&2
+  exit 1
+fi
+if ! grep -Fq 'SaveVanillaMapConfigToAuthoringSource' "$map_runtime" ||
+   ! grep -Fq 'TryResolveMapConfigSource' "$map_runtime" ||
+   ! grep -Fq 'AtomicWriteAllLines(authoringPath' "$map_runtime"; then
+  echo "Fallback or Vanilla MapPage save can bypass the real-source authoring path." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
 world_view="src/DevUI/DevTool/RWImGui/WorldWorkspaceView.cs"
 if ! grep -Fq 'SaveMapWorkspace(session, map)' "$editor_actions" ||
+   ! grep -Fq 'PlayerMapWorkspaceRuntime.IsDirty(session)' "$editor_actions" ||
    ! grep -Fq 'WorldRoomAttractionRegistry.Save()' "$editor_actions" ||
    ! grep -Fq 'WorldTextRegistry.Save()' "$editor_actions"; then
   echo "Canonical map save path does not persist dirty world documents through Core." >&2
