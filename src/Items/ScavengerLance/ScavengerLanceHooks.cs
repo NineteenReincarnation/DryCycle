@@ -10,111 +10,190 @@ internal static class ScavengerLanceHooks
     internal static AbstractPhysicalObject.AbstractObjectType ObjectType { get; private set; }
     private static ScavengerLanceDefinition _definition;
     private static bool _enabled;
+    private static bool _grababilityHook;
+    private static bool _canPickUpHook;
+    private static bool _heavyCarryHook;
+    private static bool _heldDirectionHook;
+    private static bool _graphicsUpdatedHook;
+    private static bool _throwObjectHook;
+    private static bool _playerUpdateHook;
     internal static void Enable()
     {
-        if (_enabled) return;
+        if (_enabled && AllHooksInstalled() && _definition != null && ObjectType?.Index >= 0)
+        {
+            return;
+        }
 
+        _enabled = false;
         try
         {
-            ObjectType = new AbstractPhysicalObject.AbstractObjectType("ScavengerLance", true);
-            _definition = new ScavengerLanceDefinition();
-            ItemRegistry.Register(_definition);
+            EnsureRegistration();
 
-            // Mark enabled before the HookGen transaction so Disable can unwind a partial
-            // installation if any later endpoint fails.
+            InstallHook(ref _grababilityHook, () => On.Player.Grabability += Grabability);
+            InstallHook(ref _canPickUpHook, () => On.Player.CanIPickThisUp += CanIPickThisUp);
+            InstallHook(ref _heavyCarryHook, () => On.Player.HeavyCarry += HeavyCarry);
+            InstallHook(ref _heldDirectionHook, () => On.Player.GetHeldItemDirection += GetHeldItemDirection);
+            InstallHook(ref _graphicsUpdatedHook, () => On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated);
+            InstallHook(ref _throwObjectHook, () => On.Player.ThrowObject += ThrowObject);
+            InstallHook(ref _playerUpdateHook, () => On.Player.Update += PlayerUpdate);
+
             _enabled = true;
-            On.Player.Grabability += Grabability;
-            On.Player.CanIPickThisUp += CanIPickThisUp;
-            On.Player.HeavyCarry += HeavyCarry;
-            On.Player.GetHeldItemDirection += GetHeldItemDirection;
-            On.Player.GraphicsModuleUpdated += GraphicsModuleUpdated;
-            On.Player.ThrowObject += ThrowObject;
-            On.Player.Update += PlayerUpdate;
         }
         catch (Exception error)
         {
             global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
                 "ScavengerLanceHooks.Enable",
                 error,
-                RollbackPartialEnable);
+                () => CleanupInstalledState("enable rollback"));
             throw;
-        }
-    }
-    private static void RollbackPartialEnable()
-    {
-        _enabled = false;
-
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/DevConsole.ResetRegistration",
-            ScavengerLanceDevConsoleSupport.ResetRegistration);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.Update",
-            () => On.Player.Update -= PlayerUpdate);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.ThrowObject",
-            () => On.Player.ThrowObject -= ThrowObject);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.GraphicsModuleUpdated",
-            () => On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.GetHeldItemDirection",
-            () => On.Player.GetHeldItemDirection -= GetHeldItemDirection);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.HeavyCarry",
-            () => On.Player.HeavyCarry -= HeavyCarry);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.CanIPickThisUp",
-            () => On.Player.CanIPickThisUp -= CanIPickThisUp);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "ScavengerLanceHooks.Enable/Player.Grabability",
-            () => On.Player.Grabability -= Grabability);
-
-        if (_definition != null &&
-            global::DryCycle.StartupDiagnostics.RollbackStep(
-                "ScavengerLanceHooks.Enable/ItemRegistry.Unregister",
-                () => ItemRegistry.Unregister(_definition)))
-        {
-            _definition = null;
-        }
-
-        if (ObjectType != null)
-        {
-            AbstractPhysicalObject.AbstractObjectType rollbackType = ObjectType;
-            if (global::DryCycle.StartupDiagnostics.RollbackStep(
-                    "ScavengerLanceHooks.Enable/ObjectType.Unregister",
-                    rollbackType.Unregister))
-            {
-                ObjectType = null;
-            }
         }
     }
 
     internal static void Disable()
     {
-        if (!_enabled && _definition == null && ObjectType == null) return;
-
-        _enabled = false;
-        ScavengerLanceDevConsoleSupport.ResetRegistration();
-
-        // Removing an uninstalled HookGen delegate is harmless, which lets this method also
-        // serve as the rollback path for a partially completed Enable.
-        On.Player.Grabability -= Grabability;
-        On.Player.CanIPickThisUp -= CanIPickThisUp;
-        On.Player.HeavyCarry -= HeavyCarry;
-        On.Player.GetHeldItemDirection -= GetHeldItemDirection;
-        On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated;
-        On.Player.ThrowObject -= ThrowObject;
-        On.Player.Update -= PlayerUpdate;
-
-        ItemRegistry.Unregister(_definition);
-        _definition = null;
-
-        if (ObjectType != null)
+        if (!_enabled &&
+            !AnyHookInstalled() &&
+            _definition == null &&
+            ObjectType == null)
         {
-            ObjectType.Unregister();
-            ObjectType = null;
+            return;
+        }
+
+        CleanupInstalledState("disable");
+    }
+
+    private static void EnsureRegistration()
+    {
+        if (ObjectType == null || ObjectType.Index < 0)
+        {
+            ObjectType = new AbstractPhysicalObject.AbstractObjectType("ScavengerLance", true);
+            _definition = null;
+        }
+
+        if (_definition == null || !ReferenceEquals(_definition.Type, ObjectType))
+        {
+            _definition = new ScavengerLanceDefinition();
+        }
+
+        // Register is safe to repeat for the same definition/type and repairs a registry entry
+        // that may have been removed during a previous partial cleanup.
+        ItemRegistry.Register(_definition);
+    }
+
+    private static void InstallHook(ref bool installed, Action install)
+    {
+        if (installed)
+        {
+            return;
+        }
+
+        install();
+        installed = true;
+    }
+
+    private static void CleanupInstalledState(string phase)
+    {
+        _enabled = false;
+
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks/" + phase + "/DevConsole.ResetRegistration",
+            ScavengerLanceDevConsoleSupport.ResetRegistration);
+
+        RemoveHook(
+            ref _playerUpdateHook,
+            phase + "/Player.Update",
+            () => On.Player.Update -= PlayerUpdate);
+        RemoveHook(
+            ref _throwObjectHook,
+            phase + "/Player.ThrowObject",
+            () => On.Player.ThrowObject -= ThrowObject);
+        RemoveHook(
+            ref _graphicsUpdatedHook,
+            phase + "/Player.GraphicsModuleUpdated",
+            () => On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated);
+        RemoveHook(
+            ref _heldDirectionHook,
+            phase + "/Player.GetHeldItemDirection",
+            () => On.Player.GetHeldItemDirection -= GetHeldItemDirection);
+        RemoveHook(
+            ref _heavyCarryHook,
+            phase + "/Player.HeavyCarry",
+            () => On.Player.HeavyCarry -= HeavyCarry);
+        RemoveHook(
+            ref _canPickUpHook,
+            phase + "/Player.CanIPickThisUp",
+            () => On.Player.CanIPickThisUp -= CanIPickThisUp);
+        RemoveHook(
+            ref _grababilityHook,
+            phase + "/Player.Grabability",
+            () => On.Player.Grabability -= Grabability);
+
+        if (_definition != null)
+        {
+            ScavengerLanceDefinition definition = _definition;
+            if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                    "ScavengerLanceHooks/" + phase + "/ItemRegistry.Unregister",
+                    () => ItemRegistry.Unregister(definition)))
+            {
+                _definition = null;
+            }
+        }
+
+        // Keep the ExtEnum registered if ItemRegistry cleanup itself failed. Removing the type
+        // while a definition still points at it would manufacture a worse half-state.
+        if (_definition == null && ObjectType != null)
+        {
+            AbstractPhysicalObject.AbstractObjectType objectType = ObjectType;
+            if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                    "ScavengerLanceHooks/" + phase + "/ObjectType.Unregister",
+                    objectType.Unregister))
+            {
+                ObjectType = null;
+            }
+        }
+
+        if (AnyHookInstalled() || _definition != null || ObjectType != null)
+        {
+            global::DryCycle.StartupDiagnostics.Marker(
+                "ScavengerLanceHooks/" + phase,
+                "ROLLBACK-INCOMPLETE",
+                "residual registration state retained for safe retry; next Enable will reuse it instead of duplicating it");
         }
     }
+
+    private static void RemoveHook(ref bool installed, string source, Action remove)
+    {
+        if (!installed)
+        {
+            return;
+        }
+
+        if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                "ScavengerLanceHooks/" + source,
+                remove))
+        {
+            installed = false;
+        }
+    }
+
+    private static bool AllHooksInstalled() =>
+        _grababilityHook &&
+        _canPickUpHook &&
+        _heavyCarryHook &&
+        _heldDirectionHook &&
+        _graphicsUpdatedHook &&
+        _throwObjectHook &&
+        _playerUpdateHook;
+
+    private static bool AnyHookInstalled() =>
+        _grababilityHook ||
+        _canPickUpHook ||
+        _heavyCarryHook ||
+        _heldDirectionHook ||
+        _graphicsUpdatedHook ||
+        _throwObjectHook ||
+        _playerUpdateHook;
+
     private static Player.ObjectGrabability Grabability(On.Player.orig_Grabability orig, Player self, PhysicalObject obj) =>
         obj is ScavengerLance ? Player.ObjectGrabability.BigOneHand : orig(self, obj);
 
