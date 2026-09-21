@@ -129,6 +129,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
         if (WorldMapBackgroundBudget.AllowSourceRecovery())
             MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
 
+        // V2 room resources capture only from the main thread after legacy MapTex/source recovery.
+        // Draw never scans RoomPanel/MapPage.
+        WorldMapRetainedV2Runtime.UpdateMainThread();
+
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)
             WorldCreatureCatalogPicker.PumpMainThread();

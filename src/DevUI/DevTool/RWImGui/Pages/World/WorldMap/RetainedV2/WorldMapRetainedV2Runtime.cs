@@ -13,10 +13,13 @@ internal static class WorldMapRetainedV2Runtime
 {
     private static readonly WorldMapScene SceneState = new();
     private static readonly WorldMapSceneSynchronizer Synchronizer = new();
+    private static readonly WorldMapRoomResourceStore RoomResources = new();
+    private static readonly WorldMapDirtySet pendingRoomResourceDirty = new();
     private static WorldMapDirtySet lastDirty = new();
 
     internal static WorldMapScene Scene => SceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
+    internal static WorldMapRoomResourceStore Resources => RoomResources;
 
     internal static void Synchronize(
         EditorMapPresentationSnapshot snapshot,
@@ -32,12 +35,30 @@ internal static class WorldMapRetainedV2Runtime
             layoutRevision,
             interactiveRoom,
             viewTransform);
+
+        pendingRoomResourceDirty.MergeFrom(lastDirty);
+    }
+
+    internal static void UpdateMainThread()
+    {
+        EditorSession session = DevToolRuntime.ActiveSession;
+        EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
+
+        if (!pendingRoomResourceDirty.IsEmpty)
+        {
+            RoomResources.ApplyDirty(SceneState, pendingRoomResourceDirty);
+            pendingRoomResourceDirty.Clear();
+        }
+
+        RoomResources.UpdateMainThread(session, snapshot, SceneState);
     }
 
     internal static void ResetRetainedState()
     {
         Synchronizer.Reset();
         SceneState.Reset();
+        RoomResources.Reset();
+        pendingRoomResourceDirty.Clear();
         lastDirty = new WorldMapDirtySet();
     }
 
@@ -55,6 +76,9 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted("World Map Retained V2 · Phase 1");
         ImGui.TextUnformatted("rooms: " + SceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + SceneState.Connections.Count);
+        ImGui.TextUnformatted(
+            "room resources: " + RoomResources.Count +
+            " · thumbnails " + RoomResources.CommittedThumbnailCount);
         ImGui.TextUnformatted("scene revision: " + SceneState.SceneRevision);
         ImGui.TextUnformatted("view revision: " + SceneState.ViewRevision);
         ImGui.TextUnformatted("last scene dirty count: " + lastDirty.ChangeCount);

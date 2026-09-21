@@ -10,7 +10,8 @@ phase percentage below 100%.
 
 - **Phase 0 — 100%**: runtime contract probe, RenderTexture probe and timing baseline instrumentation.
 - **Phase 1 — 100%**: world-space retained scene, view transform and frontend dirty graph.
-- **Phase 2 — next**: retained room thumbnail/geometry resources.
+- **Phase 2 — 100%**: retained room thumbnail/geometry resources with last-known-good continuity.
+- **Phase 3 — next**: world-space connection router and retained route resources.
 
 The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
 subsystem.
@@ -144,6 +145,42 @@ Runtime verification is complete after a real Rain World run confirms:
 
 If the installed RWImGUI exposes no public Unity-texture adapter, Phase 1/2 must not invent one.
 The next step is to inspect the exact installed API/source and introduce a verified adapter boundary.
+
+## Phase 2 implementation
+
+### Immutable room geometry
+
+`RoomGeometryBlob` is the retained CPU representation of a room. It contains world-local vertices,
+triangle indices, curve segments and shortcut-node positions. `RoomGeometryBuilder` consumes only
+detached `EditorMapRoomVisualSnapshot` data; it does not touch Unity objects, so the build step can be
+moved to worker jobs later without changing its contract.
+
+Every blob contains a visible Air base quad. This is the non-black fallback when no valid MapTex
+thumbnail has ever been committed.
+
+### Last-known-good thumbnail resource
+
+`RoomThumbnailResource` has separate pending and committed descriptors.
+
+A replacement becomes visible only after its texture, UV and dimensions are valid. A missing or
+failed replacement clears only the pending descriptor; the committed descriptor remains untouched.
+The resource does not destroy the Futile/vanilla texture because it does not own that texture.
+
+This implements the thumbnail continuity invariant independently of zoom.
+
+### Main-thread source capture
+
+`WorldMapRoomResourceStore` runs from `BridgePlugin.Update`, after the existing source-recovery
+pump. Live `MapPage / RoomPanel / MapTex` access remains isolated behind
+`WorldMapLegacyRoomSourceService`; Draw never scans the live DevInterface tree.
+
+Room resources are updated from Phase 1 dirty IDs first, then through a bounded readiness audit for
+late MapTex/geometry availability. Interaction frames use a smaller capture budget.
+
+### Derived-resource lifetime
+
+Removing a room drops only its V2 derived resource. Region/page reset clears the V2 store and retained
+references without touching authoring data or destroying vanilla-owned textures.
 
 ## Legacy retirement policy
 

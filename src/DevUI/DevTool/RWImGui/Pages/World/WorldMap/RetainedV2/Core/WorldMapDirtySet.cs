@@ -49,6 +49,20 @@ internal sealed class WorldMapDirtySet
         TopologyChanged = false;
     }
 
+    internal void MergeFrom(WorldMapDirtySet other)
+    {
+        if (other == null || other.IsEmpty) return;
+
+        FullRebuild |= other.FullRebuild;
+        TopologyChanged |= other.TopologyChanged;
+        RoomTransforms.UnionWith(other.RoomTransforms);
+        RoomMetadata.UnionWith(other.RoomMetadata);
+        RoomPorts.UnionWith(other.RoomPorts);
+        RemovedRooms.UnionWith(other.RemovedRooms);
+        Connections.UnionWith(other.Connections);
+        RemovedConnections.UnionWith(other.RemovedConnections);
+    }
+
     internal WorldMapDirtySet Clone()
     {
         WorldMapDirtySet clone = new()
