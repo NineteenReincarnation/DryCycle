@@ -37,6 +37,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         log = Logger;
         bridgeEnabled = false;
+        global::DryCycle.StartupDiagnostics.Marker("BridgePlugin.OnEnable", "ENTER");
 
         try
         {
@@ -47,34 +48,35 @@ public sealed class BridgePlugin : BaseUnityPlugin
             applicationFocused = UnityEngine.Application.isFocused;
             creatureCatalogFallbackChecked = false;
             ownsCreatureCatalogRuntime = false;
-            EditorUiModeState.SetOverlayHidden(false);
-            EditorInputRouter.SetFrontendAttached(true);
-            DevToolFrontend.SetLogger(Logger);
-            DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorUiModeState.SetOverlayHidden", () => EditorUiModeState.SetOverlayHidden(false));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(true));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetLogger", () => DevToolFrontend.SetLogger(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetApplicationFocused", () => DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused));
 
             // The room inspector is composed by the bridge itself, so its authoring sections must share
             // the bridge lifetime as well. Dedicated helper plugins may also call these methods; both
             // Enable paths are idempotent.
-            WorldCreatureSpawnInspector.Enable(Logger);
-            WorldLineageInspector.Enable(Logger);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldCreatureSpawnInspector.Enable", () => WorldCreatureSpawnInspector.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
 
             // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
             // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
             // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
             // terminate the process before BepInEx has a chance to print a managed exception.
-            On.RainWorld.Start += RainWorld_Start;
-            global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit += DryCycle_BeforePreModsInit;
-            global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit += DryCycle_AfterPreModsInit;
-            global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit += DryCycle_BeforeModsInit;
-            global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit;
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Hook RainWorld.Start", () => On.RainWorld.Start += RainWorld_Start);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe BeforePreModsInit", () => global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit += DryCycle_BeforePreModsInit);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterPreModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit += DryCycle_AfterPreModsInit);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe BeforeModsInit", () => global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit += DryCycle_BeforeModsInit);
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit);
 
             bridgeEnabled = true;
+            global::DryCycle.StartupDiagnostics.Marker("BridgePlugin.OnEnable", "EXIT");
         }
         catch (Exception error)
         {
+            global::DryCycle.StartupDiagnostics.Failure("BridgePlugin.OnEnable", error);
             Logger?.LogError(
                 "DryCycle DevTool RWImGui frontend failed during OnEnable and has been isolated; Rain World startup will continue.");
-            Logger?.LogError(error);
             ShutdownBridgeState();
         }
     }
@@ -239,6 +241,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         }
         catch (Exception cleanupError)
         {
+            global::DryCycle.StartupDiagnostics.Failure("BridgePlugin.Cleanup/" + name, cleanupError);
             Logger?.LogWarning("DryCycle DevTool frontend cleanup failed for " + name + ": " + cleanupError);
         }
     }
