@@ -25,8 +25,15 @@ public sealed class WorldMapRasterReadbackFallbackPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Raster Readback Fallback";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapRasterReadbackFallback.Enable(Logger);
-    private void OnDisable() => WorldMapRasterReadbackFallback.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapRasterReadbackFallback.Enable(Logger),
+            WorldMapRasterReadbackFallback.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapRasterReadbackFallback.Disable);
 }
 
 internal static class WorldMapRasterReadbackFallback
