@@ -5,8 +5,6 @@ namespace DryCycle.Misc;
 internal static class MiscRuntime
 {
     private static bool _enabled;
-    private static bool _devToolEnabled;
-    private static bool _soundFormatSupportEnabled;
 
     public static void Enable()
     {
@@ -56,7 +54,6 @@ internal static class MiscRuntime
         SafeDisable(
             "sound format support",
             DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Disable);
-        _soundFormatSupportEnabled = false;
 
         SafeDisable("legacy fade palette combiner", FadePaletteCombiner.Disable);
         SafeDisable("legacy individual object viewer", IndividualPlacedObjectViewer.Disable);
@@ -74,11 +71,9 @@ internal static class MiscRuntime
             StartupDiagnostics.Step(
                 "MiscRuntime/SoundFormatSupportRuntime.Enable",
                 DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable);
-            _soundFormatSupportEnabled = true;
         }
         catch (Exception error)
         {
-            _soundFormatSupportEnabled = false;
             StartupDiagnostics.Failure("MiscRuntime/SoundFormatSupportRuntime.Enable", error);
             Plugin.Logger?.LogError(
                 "Optional sound-format support failed to initialize and has been disabled; Rain World startup will continue.");
@@ -119,7 +114,6 @@ internal static class MiscRuntime
                 "MiscRuntime/DevTool/RoomSettingsPresentation.WarmStaticCatalogs",
                 DryCycle.DevUI.DevTool.Room.RoomSettingsPresentation.WarmStaticCatalogs);
 
-            _devToolEnabled = true;
         }
         catch (Exception error)
         {
@@ -132,8 +126,8 @@ internal static class MiscRuntime
 
     private static void DisableDevToolBackendSafely()
     {
-        // Always run the full reverse-order cleanup, even when _devToolEnabled is false: an exception
-        // may have occurred midway through Enable before the success flag was set.
+        // Always run the full reverse-order cleanup: an exception may have occurred midway through
+        // Enable, so cleanup must not depend on a separate success flag.
         SafeDisable(
             "Player Map backend",
             DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Disable);
@@ -150,7 +144,6 @@ internal static class MiscRuntime
             "DevTool revision hub",
             DryCycle.DevUI.DevTool.Core.EditorRevisionHub.Reset);
 
-        _devToolEnabled = false;
     }
 
     private static void SafeDisable(string name, Action disable)
