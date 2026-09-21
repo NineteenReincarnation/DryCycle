@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 
@@ -34,8 +35,11 @@ internal static class ObjectSceneWorkspaceView
         internal readonly List<ObjectSceneRow> Rows = new();
     }
 
+    private static readonly float[] GridSteps = { 10f, 20f, 40f };
+
     private static string search = string.Empty;
     private static int selectionAnchor = -1;
+    private static int gridStepIndex = 1;
 
     private static EditorObjectSnapshot[] projectedObjects;
     private static EditorObjectTypeSnapshot[] projectedLibrary;
@@ -71,6 +75,7 @@ internal static class ObjectSceneWorkspaceView
         observedSearch = null;
         normalizedSearch = string.Empty;
         selectionAnchor = -1;
+        gridStepIndex = 1;
         statusObjectCount = -1;
         statusSelectionCount = -1;
         statusChinese = false;
@@ -106,6 +111,99 @@ internal static class ObjectSceneWorkspaceView
                     DevToolButtonTone.Danger))
             {
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteSelection));
+            }
+        }
+
+        if (selectedCount > 0)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            DevToolWidgets.SectionHeader(DevToolUiSettings.T("布局", "LAYOUT"), 1.08f);
+
+            DevToolWidgets.MutedText(DevToolUiSettings.T("网格", "Grid"));
+            for (int i = 0; i < GridSteps.Length; i++)
+            {
+                if (i > 0) ImGui.SameLine();
+                string label = GridSteps[i].ToString("0");
+                if (DevToolWidgets.ActionButton(
+                        label,
+                        "ObjectGridStep" + i,
+                        gridStepIndex == i ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                    gridStepIndex = i;
+            }
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("吸附", "Snap"),
+                    "ObjectSnapSelectionToGrid",
+                    DevToolButtonTone.Normal))
+            {
+                EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                    EditorUiCommandKind.SnapSelectionToGrid,
+                    x: GridSteps[Math.Max(0, Math.Min(gridStepIndex, GridSteps.Length - 1))]));
+            }
+
+            if (selectedCount >= 2)
+            {
+                ImGui.Spacing();
+                DevToolWidgets.MutedText(DevToolUiSettings.T("对齐", "Align"));
+
+                DrawAlignButton(
+                    DevToolUiSettings.T("左", "Left"),
+                    "ObjectAlignLeft",
+                    ObjectSelectionAlignment.Left);
+                ImGui.SameLine();
+                DrawAlignButton(
+                    DevToolUiSettings.T("中X", "Center X"),
+                    "ObjectAlignCenterX",
+                    ObjectSelectionAlignment.HorizontalCenter);
+                ImGui.SameLine();
+                DrawAlignButton(
+                    DevToolUiSettings.T("右", "Right"),
+                    "ObjectAlignRight",
+                    ObjectSelectionAlignment.Right);
+
+                DrawAlignButton(
+                    DevToolUiSettings.T("下", "Bottom"),
+                    "ObjectAlignBottom",
+                    ObjectSelectionAlignment.Bottom);
+                ImGui.SameLine();
+                DrawAlignButton(
+                    DevToolUiSettings.T("中Y", "Center Y"),
+                    "ObjectAlignCenterY",
+                    ObjectSelectionAlignment.VerticalCenter);
+                ImGui.SameLine();
+                DrawAlignButton(
+                    DevToolUiSettings.T("上", "Top"),
+                    "ObjectAlignTop",
+                    ObjectSelectionAlignment.Top);
+            }
+
+            if (selectedCount >= 3)
+            {
+                ImGui.Spacing();
+                DevToolWidgets.MutedText(DevToolUiSettings.T("分布", "Distribute"));
+                if (DevToolWidgets.ActionButton(
+                        DevToolUiSettings.T("水平等距", "Horizontal"),
+                        "ObjectDistributeHorizontal",
+                        DevToolButtonTone.Subtle))
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.DistributeSelection,
+                        index: (int)ObjectSelectionDistribution.Horizontal));
+                }
+
+                ImGui.SameLine();
+                if (DevToolWidgets.ActionButton(
+                        DevToolUiSettings.T("垂直等距", "Vertical"),
+                        "ObjectDistributeVertical",
+                        DevToolButtonTone.Subtle))
+                {
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.DistributeSelection,
+                        index: (int)ObjectSelectionDistribution.Vertical));
+                }
             }
         }
 
@@ -164,6 +262,19 @@ internal static class ObjectSceneWorkspaceView
 
         if (projectedMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
+    }
+
+    private static void DrawAlignButton(
+        string label,
+        string id,
+        ObjectSelectionAlignment alignment)
+    {
+        if (!DevToolWidgets.ActionButton(label, id, DevToolButtonTone.Subtle))
+            return;
+
+        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+            EditorUiCommandKind.AlignSelection,
+            index: (int)alignment));
     }
 
     private static string GetStatusText(int objectCount, int selectedCount)
