@@ -17,8 +17,15 @@ public sealed class WorldLineageInspectorPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Lineages";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldLineageInspector.Enable(Logger);
-    private void OnDisable() => WorldLineageInspector.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldLineageInspector.Enable(Logger),
+            WorldLineageInspector.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldLineageInspector.Disable);
 }
 
 /// <summary>
