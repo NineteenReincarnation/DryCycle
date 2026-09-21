@@ -75,9 +75,11 @@ public static class EditorActions
 
         if (WorldTextRegistry.Dirty)
         {
-            if (WorldTextRegistry.EnsureLoaded(region))
-                ok &= WorldTextRegistry.Save();
-            else
+            // Dirty state already belongs to an authoritative loaded document. Save that exact
+            // document even if the player switched region before pressing Ctrl/Cmd+S; forcing
+            // EnsureLoaded(currentRegion) first would correctly refuse the switch but also make the
+            // previous unsaved document impossible to persist from the new region.
+            if (!WorldTextRegistry.Save())
             {
                 ok = false;
                 Plugin.Logger?.LogWarning(
@@ -88,9 +90,7 @@ public static class EditorActions
 
         if (WorldRoomAttractionRegistry.Dirty)
         {
-            if (WorldRoomAttractionRegistry.EnsureLoaded(session))
-                ok &= WorldRoomAttractionRegistry.Save();
-            else
+            if (!WorldRoomAttractionRegistry.Save())
             {
                 ok = false;
                 Plugin.Logger?.LogWarning(
