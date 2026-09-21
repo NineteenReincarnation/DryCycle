@@ -13,11 +13,14 @@ internal static class MiscRuntime
 
         StartupDiagnostics.Step("MiscRuntime/DryCycleOptions.Register", DryCycleOptions.Register);
 
-        // Extra loose-audio formats are useful, but they are not allowed to decide whether Rain
-        // World can finish booting. Hook/API mismatches disable only this optional feature.
-        TryEnableSoundFormatSupport();
+        // Extended loose-audio decoding is a required DryCycle feature. If its hook/API contract
+        // is broken, propagate the failure into Plugin's guarded post-mod transaction instead of
+        // pretending the mod started successfully with the feature silently disabled.
+        StartupDiagnostics.Step(
+            "MiscRuntime/SoundFormatSupportRuntime.Enable",
+            DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable);
 
-        // Core DryCycle runtime facilities. Failures here are still propagated to Plugin's guarded
+        // Core DryCycle runtime facilities. Failures here are propagated to Plugin's guarded
         // post-mod transaction because gameplay systems can depend on these services.
         StartupDiagnostics.Step(
             "MiscRuntime/RoomSettingsExtRuntime.Enable",
@@ -62,25 +65,6 @@ internal static class MiscRuntime
         SafeDisable("RoomSettingsExt runtime", DryCycle.RoomSettingsExt.RoomSettingsExtRuntime.Disable);
 
         _enabled = false;
-    }
-
-    private static void TryEnableSoundFormatSupport()
-    {
-        try
-        {
-            StartupDiagnostics.Step(
-                "MiscRuntime/SoundFormatSupportRuntime.Enable",
-                DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Enable);
-        }
-        catch (Exception error)
-        {
-            StartupDiagnostics.Failure("MiscRuntime/SoundFormatSupportRuntime.Enable", error);
-            Plugin.Logger?.LogError(
-                "Optional sound-format support failed to initialize and has been disabled; Rain World startup will continue.");
-            SafeDisable(
-                "partially initialized sound format support",
-                DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.Disable);
-        }
     }
 
     private static void TryEnableDevToolBackend()
@@ -148,14 +132,16 @@ internal static class MiscRuntime
 
     private static void SafeDisable(string name, Action disable)
     {
-        try
+        if (disable == null)
         {
-            disable?.Invoke();
+            return;
         }
-        catch (Exception error)
+
+        if (!StartupDiagnostics.RollbackStep("MiscRuntime.Cleanup/" + name, disable))
         {
-            StartupDiagnostics.Failure("MiscRuntime.Cleanup/" + name, error);
-            Plugin.Logger?.LogWarning("DryCycle cleanup failed for " + name + ": " + error);
+            Plugin.Logger?.LogWarning(
+                "DryCycle cleanup failed for '" + name +
+                "'. See the preceding [ROLLBACK-FAIL] entry for the full exception.");
         }
     }
 }
