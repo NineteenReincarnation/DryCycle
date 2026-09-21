@@ -36,6 +36,7 @@ internal static class WorldMapView
 
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
     private static readonly List<int> retainedVisibleRoomIds = new();
+    private static readonly List<int> retainedHoverRoomIds = new();
     private static long localPositionRevision;
     private static EditorMapRoomSnapshot[] synchronizedPositionRooms;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
@@ -78,6 +79,7 @@ internal static class WorldMapView
     {
         localPositions.Clear();
         retainedVisibleRoomIds.Clear();
+        retainedHoverRoomIds.Clear();
         localPositionRevision = 0L;
         synchronizedPositionRooms = null;
         hoverRoomLookup.Clear();
@@ -429,8 +431,22 @@ internal static class WorldMapView
         // operations from large regions and they return on the first idle frame.
         if (!fastNavigation)
         {
-            DrawExitPorts(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
-            DrawCreatureShortcuts(draw, snapshot, canvasMin, canvasSize);
+            IReadOnlyList<int> overlayRooms =
+                useSpatial ? retainedVisibleRoomIds : null;
+            DrawExitPorts(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                hoveredRoom,
+                hoveredPort,
+                overlayRooms);
+            DrawCreatureShortcuts(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                overlayRooms);
         }
     }
 
@@ -736,15 +752,24 @@ internal static class WorldMapView
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize,
         EditorMapRoomSnapshot hoveredRoom,
-        ExitPortHit hoveredPort)
+        ExitPortHit hoveredPort,
+        IReadOnlyList<int> candidateRooms)
     {
         if (!WorldMapPipeLayers.RoomPipesVisible) return;
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+
+        EditorMapRoomSnapshot[] rooms =
+            candidateRooms == null
+                ? snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>()
+                : null;
+        int count = candidateRooms?.Count ?? rooms.Length;
         bool linking = linkingRoom >= 0;
-        for (int i = 0; i < rooms.Length; i++)
+
+        for (int i = 0; i < count; i++)
         {
-            EditorMapRoomSnapshot room = rooms[i];
-            if (!IsLayerVisible(room.Layer)) continue;
+            EditorMapRoomSnapshot room = candidateRooms != null
+                ? FindRoom(snapshot, candidateRooms[i])
+                : rooms[i];
+            if (room == null || !IsLayerVisible(room.Layer)) continue;
 
             EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
@@ -795,19 +820,27 @@ internal static class WorldMapView
         ImDrawListPtr draw,
         EditorMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
-        Num.Vector2 canvasSize)
+        Num.Vector2 canvasSize,
+        IReadOnlyList<int> candidateRooms)
     {
         if (!WorldMapPipeLayers.CreaturePipesVisible) return;
 
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        EditorMapRoomSnapshot[] rooms =
+            candidateRooms == null
+                ? snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>()
+                : null;
+        int count = candidateRooms?.Count ?? rooms.Length;
+
         uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
         uint labelBorder = ImGui.GetColorU32(new Num.Vector4(0.10f, 0.72f, 0.28f, 1f));
         uint labelText = ImGui.GetColorU32(new Num.Vector4(0.32f, 1.00f, 0.46f, 1f));
 
-        for (int i = 0; i < rooms.Length; i++)
+        for (int i = 0; i < count; i++)
         {
-            EditorMapRoomSnapshot room = rooms[i];
-            if (!IsLayerVisible(room.Layer)) continue;
+            EditorMapRoomSnapshot room = candidateRooms != null
+                ? FindRoom(snapshot, candidateRooms[i])
+                : rooms[i];
+            if (room == null || !IsLayerVisible(room.Layer)) continue;
 
             WorldMapShortcutPresentation.ShortcutMarker[] holes =
                 WorldMapShortcutPresentation.GetCreatureHoles(room.RoomIndex);
@@ -1063,13 +1096,31 @@ internal static class WorldMapView
         Num.Vector2 mouse,
         EditorMapRoomSnapshot hoveredRoom)
     {
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        float safeZoom = Math.Max(0.0001f, zoom);
+        Num.Vector2 worldPoint = (mouse - canvasMin - pan) / safeZoom;
+        float worldRadius = 36f / safeZoom;
+        Num.Vector2 radius = new(worldRadius, worldRadius);
+
+        bool useSpatial = WorldMapRetainedV2Runtime.QueryRooms(
+            worldPoint - radius,
+            worldPoint + radius,
+            CurrentLayerMask(),
+            retainedHoverRoomIds);
+
+        EditorMapRoomSnapshot[] rooms =
+            useSpatial
+                ? null
+                : snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        int count = useSpatial ? retainedHoverRoomIds.Count : rooms.Length;
+
         ExitPortHit best = null;
         float bestDistanceSq = 400f;
-        for (int i = 0; i < rooms.Length; i++)
+        for (int i = 0; i < count; i++)
         {
-            EditorMapRoomSnapshot room = rooms[i];
-            if (!IsLayerVisible(room.Layer)) continue;
+            EditorMapRoomSnapshot room = useSpatial
+                ? FindRoom(snapshot, retainedHoverRoomIds[i])
+                : rooms[i];
+            if (room == null || !IsLayerVisible(room.Layer)) continue;
             EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
