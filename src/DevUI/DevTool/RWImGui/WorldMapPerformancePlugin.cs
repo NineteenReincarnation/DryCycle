@@ -37,9 +37,16 @@ public sealed class WorldMapPerformancePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Performance";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapPerformance.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapPerformance.Enable(Logger),
+            WorldMapPerformance.Disable);
 
-    private void OnDisable() => WorldMapPerformance.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapPerformance.Disable);
 }
 
 internal static class WorldMapPerformance
