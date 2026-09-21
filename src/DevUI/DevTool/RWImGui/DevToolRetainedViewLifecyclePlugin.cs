@@ -22,7 +22,13 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
     private bool observedLiveSession;
     private RainWorldGame observedGame;
 
-    private void OnEnable()
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            InitializeState,
+            Shutdown);
+
+    private void InitializeState()
     {
         observedLiveSession = false;
         observedGame = null;
@@ -62,7 +68,12 @@ public sealed class DevToolRetainedViewLifecyclePlugin : BaseUnityPlugin
         observedGame = null;
     }
 
-    private void OnDisable()
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            Shutdown);
+
+    private void Shutdown()
     {
         ReleaseRetainedState();
         observedLiveSession = false;
