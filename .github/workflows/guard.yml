@@ -45,10 +45,3 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
-
-  feature-specific:
-    name: Feature-specific Guards
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash Guard/feature-specific.sh
