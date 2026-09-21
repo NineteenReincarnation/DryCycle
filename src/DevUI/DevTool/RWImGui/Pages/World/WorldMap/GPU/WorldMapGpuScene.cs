@@ -27,7 +27,7 @@ internal static class WorldMapGpuScene
     private const float LaneSpacing = 9f;
     private const float MaxLaneOffset = 27f;
     private const float ArrowSpacing = 72f;
-    private const float ArrowSize = 7f;
+    private const float ArrowSize = 12f;
     private const float CrossingRadius = 7f;
     private const float CrossingRise = 5.5f;
 

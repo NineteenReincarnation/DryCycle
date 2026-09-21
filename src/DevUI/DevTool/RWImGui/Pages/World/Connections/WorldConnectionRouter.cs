@@ -171,6 +171,8 @@ internal static class WorldConnectionRouter
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
     private const int MaxGridExtent = 112;
+    private const float ParallelLaneSpacing = 18f;
+    private const float MinimumSharedRun = 24f;
 
     private static readonly Dictionary<string, CachedRoute> cache = new(StringComparer.Ordinal);
     private static int generation;
@@ -233,8 +235,104 @@ internal static class WorldConnectionRouter
             RegisterOccupancy(route, occupancy);
         }
 
+        SeparateSharedCorridors(result, requests, obstacles);
         PruneCache();
         return result;
+    }
+
+    private static void SeparateSharedCorridors(
+        Route[] routes,
+        IReadOnlyList<Request> requests,
+        List<Obstacle> obstacles)
+    {
+        // Endpoint lane offsets alone do not separate the long vertical/horizontal runs chosen by
+        // the simple router. Reserve those runs in stable request order, keeping sockets fixed.
+        // Work on clones: the per-route cache retains the original obstacle route, so adding or
+        // removing neighbours never accumulates offsets or permanently displaces a lone link.
+        for (int routeIndex = 1; routeIndex < routes.Length; routeIndex++)
+        {
+            Route original = routes[routeIndex];
+            Num.Vector2[] points = original?.Points;
+            if (points == null || points.Length < 4) continue;
+            bool changed = false;
+
+            for (int segment = 1; segment < points.Length - 2; segment++)
+            {
+                Num.Vector2 a = points[segment];
+                Num.Vector2 b = points[segment + 1];
+                bool vertical = Math.Abs(a.X - b.X) < 0.01f;
+                if (!vertical && Math.Abs(a.Y - b.Y) >= 0.01f) continue;
+                if (!SharesCorridor(a, b, routes, routeIndex)) continue;
+
+                // Include collinear neck adjustments, even when a small endpoint lane jog doubles
+                // back. Shifting only half of that run would introduce a diagonal or split the line.
+                int first = segment;
+                int last = segment + 1;
+                float coordinate = vertical ? a.X : a.Y;
+                while (first > 0 && OnAxis(points[first - 1], vertical, coordinate)) first--;
+                while (last < points.Length - 1 && OnAxis(points[last + 1], vertical, coordinate)) last++;
+                if (first == 0 || last == points.Length - 1) continue;
+
+                for (int lane = 1; lane <= 8; lane++)
+                {
+                    bool placed = false;
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        Num.Vector2 offset = vertical
+                            ? new Num.Vector2(side * lane * ParallelLaneSpacing, 0f)
+                            : new Num.Vector2(0f, side * lane * ParallelLaneSpacing);
+                        if (SharesCorridor(a + offset, b + offset, routes, routeIndex)) continue;
+
+                        Num.Vector2[] candidate = (Num.Vector2[])points.Clone();
+                        for (int p = first; p <= last; p++) candidate[p] += offset;
+                        Request request = requests[routeIndex];
+                        if (!RouteClear(candidate, request.StartRoom, request.EndRoom, obstacles)) continue;
+                        if (Num.Vector2.Dot(candidate[1] - candidate[0], original.StartDirection) <= 0f ||
+                            Num.Vector2.Dot(candidate[candidate.Length - 2] - candidate[candidate.Length - 1], original.EndDirection) <= 0f)
+                            continue;
+
+                        points = candidate;
+                        changed = true;
+                        placed = true;
+                        break;
+                    }
+                    if (placed) break;
+                }
+            }
+
+            if (!changed) continue;
+            Route separated = Clone(original);
+            separated.Points = Simplify(points);
+            routes[routeIndex] = separated;
+        }
+    }
+
+    private static bool OnAxis(Num.Vector2 point, bool vertical, float coordinate) =>
+        Math.Abs((vertical ? point.X : point.Y) - coordinate) < 0.01f;
+
+    private static bool SharesCorridor(Num.Vector2 a, Num.Vector2 b, Route[] routes, int count)
+    {
+        bool vertical = Math.Abs(a.X - b.X) < 0.01f;
+        float min = vertical ? Math.Min(a.Y, b.Y) : Math.Min(a.X, b.X);
+        float max = vertical ? Math.Max(a.Y, b.Y) : Math.Max(a.X, b.X);
+        if (max - min < MinimumSharedRun) return false;
+        float coordinate = vertical ? a.X : a.Y;
+        for (int i = 0; i < count; i++)
+        {
+            Num.Vector2[] other = routes[i]?.Points;
+            if (other == null) continue;
+            for (int p = 0; p < other.Length - 1; p++)
+            {
+                Num.Vector2 c = other[p];
+                Num.Vector2 d = other[p + 1];
+                if (!OnAxis(d, vertical, vertical ? c.X : c.Y)) continue;
+                if (Math.Abs((vertical ? c.X : c.Y) - coordinate) >= ParallelLaneSpacing - 0.01f) continue;
+                float otherMin = vertical ? Math.Min(c.Y, d.Y) : Math.Min(c.X, d.X);
+                float otherMax = vertical ? Math.Max(c.Y, d.Y) : Math.Max(c.X, d.X);
+                if (Math.Min(max, otherMax) - Math.Max(min, otherMin) >= MinimumSharedRun) return true;
+            }
+        }
+        return false;
     }
 
     internal static void Clear()

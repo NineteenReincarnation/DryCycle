@@ -10,8 +10,8 @@ namespace DryCycle.DevUI.DevTool.Sound;
 ///
 /// Rain World owns asset resolution. In particular, AssetManager.ListDirectory contains the real
 /// mergedmods / active-mod / targeted-version / newest-version / console / vanilla precedence and
-/// duplicate masking rules. Do not reproduce those rules here. We capture the same two source sets
-/// used by vanilla SoundPage, then consume their returned paths incrementally and publish one
+/// duplicate masking rules. Do not reproduce those rules here. We merge both ambient source sets
+/// through AssetManager, then consume their returned paths incrementally and publish one
 /// immutable snapshot when the pass is complete.
 ///
 /// A small secondary scan of active mod folders is retained only for provenance labels. It never
@@ -232,16 +232,13 @@ internal static class SoundFileNameCatalog
 
     private static void CaptureVanillaSources()
     {
-        // This is intentionally the same source contract as vanilla DevInterface.SoundPage:
-        //  1) physical LoadedSoundEffects/Ambient files;
-        //  2) AssetManager-resolved soundeffects/ambient files.
-        // AssetManager.ListDirectory is the authority for mod precedence and duplicate masking.
+        // ResolveDirectory selects only one winning directory, so even an empty mod ambient folder
+        // hides the entire vanilla library. Resolve individual files from both source sets through
+        // AssetManager, as the external audio loader does, preserving its override precedence.
         const string localLoadedDirectory = "./Assets/LoadedSoundEffects/Ambient/";
-        string loadedDirectory = Directory.Exists(localLoadedDirectory)
-            ? localLoadedDirectory
-            : AssetManager.ResolveDirectory("LoadedSoundEffects" + Path.DirectorySeparatorChar + "Ambient");
-
-        loadedSourceFiles = SafeGetFiles(loadedDirectory);
+        loadedSourceFiles = Directory.Exists(localLoadedDirectory)
+            ? Directory.GetFiles(localLoadedDirectory)
+            : AssetManager.ListDirectory("loadedsoundeffects/ambient") ?? EmptyNames;
         resolvedSourceFiles = AssetManager.ListDirectory("soundeffects/ambient") ?? EmptyNames;
         loadedSourceIndex = 0;
         resolvedSourceIndex = 0;
@@ -263,6 +260,7 @@ internal static class SoundFileNameCatalog
         buildingNameSet.Add(name);
         if (!buildingLoadedAmbientFiles.ContainsKey(name))
             buildingLoadedAmbientFiles[name] = path;
+        TryRecordOwnerFromResolvedPath(name, path);
         processedEntries++;
         return true;
     }
@@ -461,18 +459,6 @@ internal static class SoundFileNameCatalog
         finally
         {
             RecordUnit("enumerate sound provenance file", ElapsedMilliseconds(started));
-        }
-    }
-
-    private static string[] SafeGetFiles(string directory)
-    {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-            return EmptyNames;
-        try { return Directory.GetFiles(directory); }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool Sound loaded ambient enumeration failed for " + directory + ": " + error.Message);
-            return EmptyNames;
         }
     }
 

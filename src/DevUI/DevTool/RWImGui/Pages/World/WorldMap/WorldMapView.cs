@@ -504,14 +504,8 @@ internal static class WorldMapView
                 connection.Direction,
                 connection.Ambiguous);
 
-            if (!selected && !hovered && !connection.Ambiguous) continue;
-            string glyph = DirectionLabel(connection.Direction) + (connection.Ambiguous ? " ?" : string.Empty);
-            Num.Vector2 size = ImGui.CalcTextSize(glyph);
-            Num.Vector2 mid = (a + b) * 0.5f;
-            Num.Vector2 pad = new(6f, 3f);
-            draw.AddRectFilled(mid - size * 0.5f - pad, mid + size * 0.5f + pad, shadow, 5f);
-            draw.AddRect(mid - size * 0.5f - pad, mid + size * 0.5f + pad, core, 5f, ImDrawFlags.None, 1.4f);
-            draw.AddText(mid - size * 0.5f, core, glyph);
+            if (connection.Ambiguous)
+                draw.AddText((a + b) * 0.5f + new Num.Vector2(8f, -20f), core, "?");
         }
     }
 
@@ -1142,7 +1136,7 @@ internal static class WorldMapView
         float coreThickness)
     {
         Num.Vector2 forward = b - a;
-        float size = Math.Max(6.2f, Math.Min(9.4f, 6.2f + coreThickness * 0.55f));
+        float size = Math.Min(forward.Length() * 0.28f, Math.Max(12f, Math.Min(14f, 10f + coreThickness * 0.55f)));
         switch (direction)
         {
             case WorldConnectionDirection.AToB:
@@ -1152,8 +1146,8 @@ internal static class WorldMapView
                 DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.42f), -forward, shadow, core, size);
                 break;
             default:
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.40f), forward, shadow, core, size * 0.92f);
-                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.60f), -forward, shadow, core, size * 0.92f);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.35f), -forward, shadow, core, size);
+                DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.65f), forward, shadow, core, size);
                 break;
         }
     }
@@ -1316,13 +1310,6 @@ internal static class WorldMapView
         WorldConnectionDirection.AToB => "->",
         WorldConnectionDirection.BToA => "<-",
         _ => "<->"
-    };
-
-    private static string DirectionLabel(WorldConnectionDirection direction) => direction switch
-    {
-        WorldConnectionDirection.AToB => "A > B",
-        WorldConnectionDirection.BToA => "A < B",
-        _ => "BOTH"
     };
 
     private static string ExplicitEdgeId(string connectionId)
@@ -1662,7 +1649,7 @@ internal static class WorldMapPresentationCorrectness
         draw.AddLine(bPlus, b, core, railThickness);
         draw.AddLine(bMinus, b, core, railThickness);
 
-        float arrowSize = Math.Max(6.2f, Math.Min(9.2f, 6.2f + coreThickness * 0.55f));
+        float arrowSize = Math.Min((length - lead * 2f) * 0.40f, Math.Max(12f, Math.Min(14f, 10f + coreThickness * 0.55f)));
         DrawArrowHead(draw, Num.Vector2.Lerp(aPlus, bPlus, 0.64f), forward, shadow, core, arrowSize);
         DrawArrowHead(draw, Num.Vector2.Lerp(aMinus, bMinus, 0.36f), -forward, shadow, core, arrowSize);
         return true;

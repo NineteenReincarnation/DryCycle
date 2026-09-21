@@ -1,7 +1,10 @@
+using System;
 using DryCycle.DevUI.Controls;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.Misc;
+using Mono.Cecil.Cil;
+using MonoMod.Cil;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Input;
@@ -19,6 +22,7 @@ public static class EditorInputRouter
     private static volatile bool wantsKeyboard;
     private static volatile bool wantsTextInput;
     private static bool enabled;
+    private static RainWorldGame vanillaHotkeysSuppressedGame;
     private static RainWorldGame capturedGame;
     private static int capturedUnityFrame = -1;
 
@@ -44,6 +48,7 @@ public static class EditorInputRouter
     internal static void Enable()
     {
         if (enabled) return;
+        IL.RainWorldGame.RawUpdate += RainWorldGame_RawUpdateIL;
         On.Player.checkInput += Player_checkInput;
         On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
         On.RainWorldGame.Update += RainWorldGame_Update;
@@ -55,12 +60,14 @@ public static class EditorInputRouter
     internal static void Disable()
     {
         if (!enabled) return;
+        IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL;
         On.Player.checkInput -= Player_checkInput;
         On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate;
         On.RainWorldGame.Update -= RainWorldGame_Update;
         On.DevInterface.Handle.Update -= Handle_Update;
         On.DevInterface.MapPage.Update -= MapPage_Update;
         SetFrontendAttached(false);
+        vanillaHotkeysSuppressedGame = null;
         capturedGame = null;
         capturedUnityFrame = -1;
         enabled = false;
@@ -149,6 +156,25 @@ public static class EditorInputRouter
             session.ToggleFocusMode();
     }
 
+    private static void RainWorldGame_RawUpdateIL(ILContext il)
+    {
+        // Gate only vanilla's DevTools hotkey block. Changing game.devToolsActive while RawUpdate
+        // calls the simulation Update makes the editor lifetime monitor retire the live session.
+        // The branch exits at the O-key toggle, whose edge latch is handled by the wrapper below.
+        ILCursor cursor = new(il);
+        if (!cursor.TryGotoNext(MoveType.After,
+                instruction => instruction.MatchLdfld<RainWorldGame>(nameof(RainWorldGame.devToolsActive)),
+                instruction => instruction.MatchBrfalse(out ILLabel target) && target.Target.MatchLdstr("o")))
+            throw new InvalidOperationException("DevTool input routing could not locate RainWorldGame.RawUpdate's DevTools hotkey block.");
+
+        cursor.Index--;
+        cursor.Emit(OpCodes.Ldarg_0);
+        cursor.EmitDelegate<Func<bool, RainWorldGame, bool>>(AllowVanillaDevToolsHotkeys);
+    }
+
+    private static bool AllowVanillaDevToolsHotkeys(bool active, RainWorldGame game) =>
+        active && !ReferenceEquals(vanillaHotkeysSuppressedGame, game);
+
     private static void RainWorldGame_RawUpdate(
         On.RainWorldGame.orig_RawUpdate orig,
         RainWorldGame self,
@@ -169,7 +195,6 @@ public static class EditorInputRouter
         if (textKeyboardOwner)
             MarkKeyboardCaptured(self);
 
-        bool devToolsWasActive = self.devToolsActive;
         DevInterface.DevUI focusedDevUi = self.devUI;
 
         self.mDown = global::UnityEngine.Input.GetKey(KeyCode.M);
@@ -181,17 +206,20 @@ public static class EditorInputRouter
         if (suppressVanillaFastForward)
             self.framesPerSecond = 40;
 
-        self.devToolsActive = false;
+        // Keep the wrapper and IL gate on the same capture decision even if the render thread
+        // publishes new focus flags during the simulation update. This scope owns input only.
+        RainWorldGame previousSuppressedGame = vanillaHotkeysSuppressedGame;
+        vanillaHotkeysSuppressedGame = self;
         try
         {
             orig(self, dt);
         }
         finally
         {
-            self.devToolsActive = devToolsWasActive;
+            vanillaHotkeysSuppressedGame = previousSuppressedGame;
         }
 
-        if (devToolsWasActive && focusedDevUi != null && ReferenceEquals(self.devUI, focusedDevUi))
+        if (self.devToolsActive && focusedDevUi != null && ReferenceEquals(self.devUI, focusedDevUi))
             focusedDevUi.Update();
     }
 

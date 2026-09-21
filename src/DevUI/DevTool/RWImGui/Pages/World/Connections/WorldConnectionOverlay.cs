@@ -465,10 +465,7 @@ internal static class WorldConnectionOverlay
             DrawPolyline(draw, path, core, coreThickness);
         }
 
-        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 8.8f : 7.4f);
-
-        if (entry.Route?.Kind == WorldConnectionRouter.RouteKind.Bridge)
-            DrawBridgeBadge(draw, path, entry.Connection.Direction, shadow, core, focused);
+        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 14f : 12f);
 
         if (!dimmed)
         {
@@ -512,28 +509,6 @@ internal static class WorldConnectionOverlay
         Num.Vector2 half = new(12.5f, 12.5f);
         draw.AddRect(entry.Start - half, entry.Start + half, color, 5f, ImDrawFlags.None, 2.2f);
         draw.AddRect(entry.End - half, entry.End + half, color, 5f, ImDrawFlags.None, 2.2f);
-    }
-
-    private static void DrawBridgeBadge(
-        ImDrawListPtr draw,
-        Num.Vector2[] path,
-        WorldConnectionDirection direction,
-        uint shadow,
-        uint core,
-        bool focused)
-    {
-        if (!TryPointAtFraction(path, 0.5f, out Num.Vector2 point, out _)) return;
-        string text = direction switch
-        {
-            WorldConnectionDirection.AToB => "->",
-            WorldConnectionDirection.BToA => "<-",
-            _ => "<->"
-        };
-        Num.Vector2 size = ImGui.CalcTextSize(text);
-        Num.Vector2 pad = new(focused ? 6f : 5f, 3f);
-        draw.AddRectFilled(point - size * 0.5f - pad, point + size * 0.5f + pad, shadow, 5f);
-        draw.AddRect(point - size * 0.5f - pad, point + size * 0.5f + pad, core, 5f, ImDrawFlags.None, focused ? 1.8f : 1.3f);
-        draw.AddText(point - size * 0.5f, core, text);
     }
 
     private static void DrawCrossingBridge(
@@ -596,7 +571,10 @@ internal static class WorldConnectionOverlay
         uint core,
         float size)
     {
-        if (path.Length < 2 || WorldConnectionRouter.PathLength(path) < 28f) return;
+        float length = WorldConnectionRouter.PathLength(path);
+        if (path.Length < 2 || length < 24f) return;
+        // Keep the larger arrowheads inside short links and away from the endpoint sockets.
+        size = Math.Min(size, length * (direction == WorldConnectionDirection.Bidirectional ? 0.28f : 0.42f));
 
         switch (direction)
         {
@@ -607,9 +585,9 @@ internal static class WorldConnectionOverlay
                 DrawArrowAt(draw, path, 0.42f, true, shadow, core, size);
                 break;
             default:
-                // Yellow bidirectional links carry exactly one arrow for each travel direction.
-                DrawArrowAt(draw, path, 0.40f, false, shadow, core, size * 0.94f);
-                DrawArrowAt(draw, path, 0.60f, true, shadow, core, size * 0.94f);
+                // Opposing arrows belong to the stroke itself, including short room-to-room links.
+                DrawArrowAt(draw, path, 0.35f, true, shadow, core, size);
+                DrawArrowAt(draw, path, 0.65f, false, shadow, core, size);
                 break;
         }
     }
