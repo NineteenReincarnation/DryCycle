@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
+using DryCycle.DevUI.DevTool.World;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -362,9 +363,15 @@ internal static class PlayerMapWorkspaceRuntime
     private static void MapPage_SaveMapConfig(On.DevInterface.MapPage.orig_SaveMapConfig orig, MapPage self)
     {
         EditorSession session = DevToolSessionHub.Current;
-        if (self == null || session == null || !ReferenceEquals(session.Owner?.activePage, self) || EditorUiModeState.UseVanilla)
+        bool rebuiltOwner =
+            self != null &&
+            session != null &&
+            ReferenceEquals(session.Owner?.activePage, self) &&
+            !EditorUiModeState.UseVanilla;
+
+        if (!rebuiltOwner)
         {
-            orig(self);
+            SaveVanillaMapConfigToAuthoringSource(orig, self);
             return;
         }
 
@@ -381,6 +388,45 @@ internal static class PlayerMapWorkspaceRuntime
         state.Dirty = false;
         PlayerMapMigrationDirtyBridge.OnSaveSucceeded(self);
         Touch(state, dirty: false);
+    }
+
+    private static void SaveVanillaMapConfigToAuthoringSource(
+        On.DevInterface.MapPage.orig_SaveMapConfig orig,
+        MapPage page)
+    {
+        if (page?.world == null || string.IsNullOrWhiteSpace(page.filePath))
+        {
+            orig(page);
+            return;
+        }
+
+        if (!WorldAuthoringPathResolver.TryResolveMapConfigSource(
+                page.world.name,
+                page.filePath,
+                out string authoringPath,
+                out string error))
+        {
+            Plugin.Logger?.LogWarning(
+                "Vanilla MapPage save was blocked to protect generated mergedmods data: " + error);
+            return;
+        }
+
+        string readPath = page.filePath;
+        try
+        {
+            page.filePath = authoringPath;
+            orig(page);
+        }
+        catch (Exception saveError)
+        {
+            Plugin.Logger?.LogWarning(
+                "Vanilla MapPage save failed against authoring source: " + saveError);
+            throw;
+        }
+        finally
+        {
+            page.filePath = readPath;
+        }
     }
 
     private static void InitializeState(MapPage page, PlayerMapSessionState state)
@@ -882,12 +928,18 @@ internal static class PlayerMapConfigSerializer
             error = "MapPage.filePath is empty.";
             return false;
         }
+        if (!WorldAuthoringPathResolver.TryResolveMapConfigSource(
+                page.world.name,
+                page.filePath,
+                out string authoringPath,
+                out error))
+            return false;
 
         try
         {
             Dictionary<string, string> roomLines = BuildRoomLines(page, state);
-            List<string> source = File.Exists(page.filePath)
-                ? new List<string>(File.ReadAllLines(page.filePath))
+            List<string> source = File.Exists(authoringPath)
+                ? new List<string>(File.ReadAllLines(authoringPath))
                 : new List<string>();
             List<string> output = new(source.Count + roomLines.Count + state.DefaultMaterials.Count);
             HashSet<string> writtenRooms = new(StringComparer.OrdinalIgnoreCase);
@@ -935,7 +987,7 @@ internal static class PlayerMapConfigSerializer
                 output.InsertRange(insertion, defs);
             }
 
-            AtomicWriteAllLines(page.filePath, output);
+            AtomicWriteAllLines(authoringPath, output);
             return true;
         }
         catch (Exception exception)
