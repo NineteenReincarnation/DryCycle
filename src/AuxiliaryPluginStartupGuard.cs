@@ -15,11 +15,23 @@ internal static class AuxiliaryPluginStartupGuard
     internal static bool Enable(string source, Action enable, Action rollback)
     {
         source = string.IsNullOrWhiteSpace(source) ? "AuxiliaryPlugin.OnEnable" : source;
+
+        if (Plugin.BootstrapFailed)
+        {
+            StartupDiagnostics.Marker(
+                source,
+                "SKIP-PRIMARY-FAILED",
+                "primary DryCycle OnEnable rolled back; auxiliary startup suppressed");
+            Plugin.Logger?.LogWarning(
+                source + " was not started because the primary DryCycle bootstrap failed.");
+            return false;
+        }
+
         bool succeeded = StartupDiagnostics.Optional(source, enable);
         if (succeeded)
             return true;
 
-        StartupDiagnostics.Optional(source + "/rollback", rollback);
+        StartupDiagnostics.RollbackStep(source + "/rollback", rollback);
         Plugin.Logger?.LogWarning(
             source + " failed and was isolated; Rain World startup will continue.");
         return false;
@@ -28,6 +40,6 @@ internal static class AuxiliaryPluginStartupGuard
     internal static void Disable(string source, Action disable)
     {
         source = string.IsNullOrWhiteSpace(source) ? "AuxiliaryPlugin.OnDisable" : source;
-        StartupDiagnostics.Optional(source, disable);
+        StartupDiagnostics.RollbackStep(source, disable);
     }
 }
