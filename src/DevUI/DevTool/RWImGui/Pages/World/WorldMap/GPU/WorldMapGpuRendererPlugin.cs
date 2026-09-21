@@ -76,6 +76,10 @@ internal static class WorldMapGpuRuntime
         requestRebuild = 0;
         WorldMapGpuCache.FlushNow();
         WorldMapGpuScene.Disable();
+        // WorldMapGpuScene is the only consumer of the legacy RoomPanel/MapTex source adapter.
+        // Reset it at renderer shutdown as well as at DevTools-session retirement so plugin unload
+        // order cannot leave stale MapPage/RoomPanel identities retained across a frontend reload.
+        WorldMapLegacyRoomSourceService.Reset();
         enabled = false;
         log = null;
     }
