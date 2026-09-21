@@ -102,8 +102,10 @@ internal static class MiscRuntime
         catch (Exception error)
         {
             StartupDiagnostics.Failure("MiscRuntime/DevToolBackend", error);
-            Plugin.Logger?.LogError(
-                "DryCycle DevTool backend failed to initialize and has been disabled; gameplay startup will continue.");
+            StartupDiagnostics.Marker(
+                "MiscRuntime/DevToolBackend",
+                "ROLLBACK-REQUESTED",
+                "DevTool backend failed; gameplay startup will continue after cleanup");
             DisableDevToolBackendSafely();
         }
     }
@@ -139,9 +141,10 @@ internal static class MiscRuntime
 
         if (!StartupDiagnostics.RollbackStep("MiscRuntime.Cleanup/" + name, disable))
         {
-            Plugin.Logger?.LogWarning(
-                "DryCycle cleanup failed for '" + name +
-                "'. See the preceding [ROLLBACK-FAIL] entry for the full exception.");
+            StartupDiagnostics.Marker(
+                "MiscRuntime.Cleanup/" + name,
+                "ROLLBACK-INCOMPLETE",
+                "see preceding ROLLBACK-FAIL entry for the full exception");
         }
     }
 }
