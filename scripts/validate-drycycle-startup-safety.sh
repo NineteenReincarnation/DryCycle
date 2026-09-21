@@ -16,7 +16,7 @@ done
 
 # Rain World lifecycle hooks belong to the core plugin. Optional frontends subscribe to the shared
 # DryCycle event surface instead of stacking their own hooks on the same startup phases.
-for hook in   'On.RainWorld.PreModsInit += RainWorld_PreModsInit;'   'On.RainWorld.OnModsInit += RainWorld_OnModsInit;'   'On.RainWorld.PostModsInit += RainWorld_PostModsInit;'; do
+for hook in   'On.RainWorld.PreModsInit += RainWorld_PreModsInit'   'On.RainWorld.OnModsInit += RainWorld_OnModsInit'   'On.RainWorld.PostModsInit += RainWorld_PostModsInit'; do
   if ! grep -Fq "$hook" "$plugin"; then
     echo "Core Rain World lifecycle ownership is missing: $hook" >&2
     exit 1
@@ -45,7 +45,9 @@ done
 # affected subsystem/plugin, but must not propagate an exception that prevents Rain World startup.
 if ! grep -Fq 'DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.' "$plugin" ||
    ! grep -Fq 'RollbackBootstrap();' "$plugin" ||
-   ! grep -Fq 'SafeBootstrapCleanup' "$plugin"; then
+   ! grep -Fq 'SafeBootstrapCleanup' "$plugin" ||
+   ! grep -Fq 'StartupDiagnostics.Begin(Logger);' "$plugin" ||
+   ! grep -Fq 'StartupDiagnostics.Failure("Plugin.OnEnable", error);' "$plugin"; then
   echo "Core Plugin.OnEnable no longer has transactional fail-open rollback." >&2
   exit 1
 fi
@@ -57,7 +59,9 @@ fi
 
 # Optional compatibility must fail open. SlugBase discovery and DevTool/audio initialization are not
 # allowed to make Rain World's OnModsInit fail solely because an optional integration is broken.
-if ! grep -Fq 'TryInitializeSlugBaseHydrationFeatures();' "$plugin"; then
+if ! grep -Fq 'TryInitializeSlugBaseHydrationFeatures();' "$plugin" ||
+   ! grep -Fq 'StartupDiagnostics.Step("RainWorld.OnModsInit/' "$plugin" ||
+   ! grep -Fq 'StartupDiagnostics.Failure("RainWorld.OnModsInit/PostModTransaction", ex);' "$plugin"; then
   echo "SlugBase hydration compatibility is no longer guarded during startup." >&2
   exit 1
 fi
