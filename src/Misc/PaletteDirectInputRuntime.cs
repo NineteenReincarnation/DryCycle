@@ -40,7 +40,26 @@ internal static class PaletteDirectInputRuntime
         }
 
         _enabled = true;
-        On.DevInterface.RoomSettingsPage.ctor += RoomSettingsPage_ctor;
+        try
+        {
+            On.DevInterface.RoomSettingsPage.ctor += RoomSettingsPage_ctor;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "PaletteDirectInputRuntime.Enable",
+                error,
+                () =>
+                {
+                    global::DryCycle.StartupDiagnostics.RollbackStep(
+                        "PaletteDirectInputRuntime.Enable/RoomSettingsPage.ctor",
+                        () => On.DevInterface.RoomSettingsPage.ctor -= RoomSettingsPage_ctor);
+                    _activeInput = null;
+                    DryCycleInputFocus.Reset(commit: true);
+                    _enabled = false;
+                });
+            throw;
+        }
     }
 
     internal static void Disable()
