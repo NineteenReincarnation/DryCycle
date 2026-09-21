@@ -26,9 +26,17 @@ internal static class DryCycleContent
             return;
         }
 
-        ItemRegistry.Enable();
-        WalkableDynamicSurfaceRuntime.Enable();
         _enabled = true;
+        try
+        {
+            ItemRegistry.Enable();
+            WalkableDynamicSurfaceRuntime.Enable();
+        }
+        catch
+        {
+            Disable();
+            throw;
+        }
     }
 
     internal static void Disable()
