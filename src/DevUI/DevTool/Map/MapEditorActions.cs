@@ -2,6 +2,7 @@ using System;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
+using DryCycle.DevUI.DevTool.World;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -47,6 +48,80 @@ internal static class MapEditorActions
             "Change room subregion",
             roomIndex,
             () => NativeMapAuthoringStateHub.SetSubregion(session, roomIndex, subregion));
+    }
+
+    internal static bool SetRoomAttraction(
+        EditorSession session,
+        int roomIndex,
+        string creatureId,
+        string attraction)
+    {
+        global::World world = session?.World;
+        if (world == null || string.IsNullOrWhiteSpace(creatureId))
+            return false;
+
+        WorldRoomAttractionRegistry.TryGetExplicit(
+            session,
+            roomIndex,
+            creatureId,
+            out string before);
+
+        if (!WorldRoomAttractionRegistry.SetRoomOverride(
+                session,
+                roomIndex,
+                creatureId,
+                attraction))
+            return false;
+
+        WorldRoomAttractionRegistry.TryGetExplicit(
+            session,
+            roomIndex,
+            creatureId,
+            out string after);
+
+        string label = "Change room attraction: " + creatureId;
+        session.History.Push(new DelegateHistoryEntry(
+            label,
+            undo: current => RestoreRoomAttraction(
+                current,
+                world,
+                roomIndex,
+                creatureId,
+                before),
+            redo: current => RestoreRoomAttraction(
+                current,
+                world,
+                roomIndex,
+                creatureId,
+                after)));
+        return true;
+    }
+
+    private static bool RestoreRoomAttraction(
+        EditorSession session,
+        global::World expectedWorld,
+        int roomIndex,
+        string creatureId,
+        string value)
+    {
+        if (session?.World == null || !ReferenceEquals(session.World, expectedWorld))
+            return false;
+
+        if (WorldRoomAttractionRegistry.SetRoomOverride(
+                session,
+                roomIndex,
+                creatureId,
+                value))
+            return true;
+
+        bool hasCurrent = WorldRoomAttractionRegistry.TryGetExplicit(
+            session,
+            roomIndex,
+            creatureId,
+            out string current);
+        if (value == null)
+            return !hasCurrent;
+        return hasCurrent && string.Equals(current, value, StringComparison.Ordinal);
     }
 
     private static bool Mutate(EditorSession session, string label, int roomIndex, Func<bool> mutation)
