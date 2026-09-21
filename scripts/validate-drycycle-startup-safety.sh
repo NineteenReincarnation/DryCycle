@@ -97,23 +97,27 @@ if grep -Fq 'SoundFormatSupportRuntime.HydrateExisting' "$plugin"; then
   exit 1
 fi
 
-# DevTool and loose-format audio are optional surfaces. Their initialization/cleanup must stay
-# isolated from the core Misc runtime and partial hook installation must be reversible.
+# DevTool remains an optional development surface, but extended audio decoding is a required
+# DryCycle feature. DevTool failures stay isolated; sound-format hook failures must propagate into
+# Plugin's guarded post-mod transaction instead of silently disabling the feature.
 if ! grep -Fq 'TryEnableDevToolBackend();' "$misc" ||
    ! grep -Fq 'DryCycle DevTool backend failed to initialize and has been disabled; gameplay startup will continue.' "$misc" ||
    ! grep -Fq 'DisableDevToolBackendSafely();' "$misc"; then
   echo "DevTool backend is no longer isolated from gameplay startup." >&2
   exit 1
 fi
-if ! grep -Fq 'TryEnableSoundFormatSupport();' "$misc" ||
-   ! grep -Fq 'Optional sound-format support failed to initialize and has been disabled; Rain World startup will continue.' "$misc"; then
-  echo "Optional sound-format support is no longer isolated from gameplay startup." >&2
+if grep -Fq 'TryEnableSoundFormatSupport' "$misc" ||
+   grep -Fq 'Optional sound-format support failed to initialize' "$misc" ||
+   ! grep -Fq 'MiscRuntime/SoundFormatSupportRuntime.Enable' "$misc" ||
+   ! grep -Fq 'SoundFormatSupportRuntime.Enable);' "$misc"; then
+  echo "Required sound-format support was downgraded to a silent optional feature." >&2
   exit 1
 fi
-if ! grep -Fq 'catch' "$audio" ||
-   ! grep -Fq 'RemoveOnHooks();' "$audio" ||
+if ! grep -Fq 'RollbackAfterFailure(' "$audio" ||
+   ! grep -Fq 'RemoveOnHooks("enable rollback")' "$audio" ||
+   ! grep -Fq 'SoundFormatSupportRuntime/' "$audio" ||
    ! grep -Fq 'enabled = false;' "$audio"; then
-  echo "Sound-format hook installation is no longer transactional." >&2
+  echo "Sound-format hook installation/rollback is no longer fully diagnostic." >&2
   exit 1
 fi
 
