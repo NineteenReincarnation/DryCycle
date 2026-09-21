@@ -82,6 +82,16 @@ if ! grep -Fq 'SaveMapWorkspace(session, map)' "$editor_actions" ||
   exit 1
 fi
 
+world_data_view="src/DevUI/DevTool/RWImGui/WorldWorkspaceDataView.cs"
+if ! grep -Fq 'EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.Save))' "$world_data_view"; then
+  echo "World Data save button bypasses the canonical Core save transaction." >&2
+  exit 1
+fi
+if grep -Fq '            SaveDirty();' "$world_data_view"; then
+  echo "World Data UI still persists files directly instead of queuing Core Save." >&2
+  exit 1
+fi
+
 if grep -Eq 'World(RoomAttractionRegistry|TextRegistry|TopologyRegistry)\.Save\(|WorldWorkspaceDataView\.SaveDirty\(' "$world_view"; then
   echo "World Workspace UI writes files directly instead of routing through the Core save command." >&2
   exit 1
