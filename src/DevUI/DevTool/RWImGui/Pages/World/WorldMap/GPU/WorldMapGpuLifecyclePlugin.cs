@@ -81,6 +81,13 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // and closes the edge even if DevUI disappears before that observer sees the retired page.
         MapRoomGeometryPresentationHub.Clear();
 
+        // These two caches used to be retired indirectly by the deleted
+        // WorldMapGpuRetainedOptimizer / WorldMapGpuInteractionIndex plugin shells. They retain
+        // MapPage/RoomPanel identities and once-per-frame view state respectively, so keep their
+        // invalidation at the DevTools-session lifetime boundary without reviving the old plugins.
+        WorldMapLegacyRoomSourceService.Reset();
+        WorldMapHotState.Invalidate();
+
         // The renderer and its owning BepInEx component stay enabled. Retire only the cache working
         // set that is safe to rebuild from the durable bake when DevTools opens again.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
@@ -99,6 +106,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // Shared runtimes remain under their own BepInEx plugin owners; this observer only retires
         // transient session state and therefore has nothing to re-enable on shutdown.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
+        WorldMapLegacyRoomSourceService.Reset();
+        WorldMapHotState.Invalidate();
         observedLiveSession = false;
     }
 }
