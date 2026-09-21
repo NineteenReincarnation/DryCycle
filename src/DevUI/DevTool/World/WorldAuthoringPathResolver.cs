@@ -19,8 +19,7 @@ internal static class WorldAuthoringPathResolver
 
         string normalized = relativePath
             .Replace('/', Path.DirectorySeparatorChar)
-            .Replace('\\', Path.DirectorySeparatorChar)
-            .ToLowerInvariant();
+            .Replace('\\', Path.DirectorySeparatorChar);
 
         try
         {
