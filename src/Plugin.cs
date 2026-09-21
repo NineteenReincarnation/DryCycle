@@ -196,7 +196,7 @@ internal sealed class Plugin : BaseUnityPlugin
         RopeSpearDevConsoleSupport.ResetRegistration();
         KarmaSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
-        SlugBaseHydrationFeatures.Initialize();
+        TryInitializeSlugBaseHydrationFeatures();
         orig(self);
         DryCycleLifecycleEvents.RaiseAfterPreModsInit(self);
     }
@@ -204,12 +204,8 @@ internal sealed class Plugin : BaseUnityPlugin
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
         DryCycleLifecycleEvents.RaiseBeforeModsInit(self);
-        SlugBaseHydrationFeatures.Initialize();
+        TryInitializeSlugBaseHydrationFeatures();
         orig(self);
-
-        DryCycleShaderAssets.EnsureLoaded(self);
-        LanceScavengerAssets.EnsureLoaded();
-        RegionDayNightOptions.Register();
 
         if (_initialized)
         {
@@ -220,6 +216,10 @@ internal sealed class Plugin : BaseUnityPlugin
 
         try
         {
+            DryCycleShaderAssets.EnsureLoaded(self);
+            LanceScavengerAssets.EnsureLoaded();
+            RegionDayNightOptions.Register();
+
             DryCycleContent.LoadResources(self);
             MantleCrabDefinition.LoadResources(self);
             KingVultureSpearHooks.Enable();
@@ -289,8 +289,6 @@ internal sealed class Plugin : BaseUnityPlugin
 
             InternalGateRuntime.Enable();
             MiscRuntime.Enable();
-            DryCycle.Misc.SoundFormatSupport.SoundFormatSupportRuntime.HydrateExisting(
-                self?.processManager?.soundLoader);
             _initialized = true;
             AIDebuggerRuntime.Install(self, Logger);
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
@@ -358,8 +356,22 @@ internal sealed class Plugin : BaseUnityPlugin
             KingVultureSpearPlayerEffects.Disable();
             KingVultureSpearHooks.Disable();
             SpinebackLizardHooks.Disable();
+            Logger.LogError("DryCycle post-mod initialization failed; the failing runtime transaction was rolled back so Rain World can continue loading.");
             Logger.LogError(ex);
-            throw;
+            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
+            return;
+        }
+    }
+
+    private static void TryInitializeSlugBaseHydrationFeatures()
+    {
+        try
+        {
+            SlugBaseHydrationFeatures.Initialize();
+        }
+        catch (Exception ex)
+        {
+            Logger?.LogWarning("Optional SlugBase hydration integration failed and was skipped: " + ex);
         }
     }
 
