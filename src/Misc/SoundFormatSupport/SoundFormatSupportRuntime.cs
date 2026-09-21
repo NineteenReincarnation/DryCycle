@@ -74,6 +74,8 @@ internal static class SoundFormatSupportRuntime
     internal static void HydrateExisting(SoundLoader loader)
     {
         if (!enabled || loader == null) return;
+        ExternalAudioLoader.ResetDeferredLoads();
+        DeferredAmbientFailuresLogged.Clear();
         ExternalAudioAssetIndex.Refresh("HydrateExisting");
         HydrateLoadedSoundEffectOverrides(loader);
     }
@@ -189,6 +191,8 @@ internal static class SoundFormatSupportRuntime
         // Reload is the explicit invalidation boundary. Re-index before vanilla parses Sounds.txt so
         // CheckIfFileExistsAsExternal/VariationsForSound are O(1) dictionary queries throughout the
         // load, then inject custom LoadedSoundEffects before gameplay can request them.
+        ExternalAudioLoader.ResetDeferredLoads();
+        DeferredAmbientFailuresLogged.Clear();
         ExternalAudioAssetIndex.Refresh("SoundLoader.LoadSounds");
         orig(self);
         HydrateLoadedSoundEffectOverrides(self);
