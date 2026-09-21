@@ -247,7 +247,7 @@ internal static class WorldMapGpuCache
     }
 
     internal static object LoadResidentSnapshot(string region, string path) =>
-        Load(NormalizeRegion(region), path);
+        Load(NormalizeRegion(region), path, reportError: false);
 
     internal static string GetCachePath(string region) =>
         CachePath(NormalizeRegion(region));
@@ -286,12 +286,12 @@ internal static class WorldMapGpuCache
         lastError = string.Empty;
         cacheHits = 0;
         cacheMisses = 0;
-        Snapshot loaded = Load(region, activePath);
+        Snapshot loaded = Load(region, activePath, reportError: true);
         current = loaded;
         unchecked { generation++; }
     }
 
-    private static Snapshot Load(string region, string path)
+    private static Snapshot Load(string region, string path, bool reportError)
     {
         Dictionary<int, RoomBake> rooms = new();
         if (region.Length == 0 || string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -316,7 +316,12 @@ internal static class WorldMapGpuCache
         }
         catch (Exception error)
         {
-            lastError = error.Message;
+            // Background region preloading also calls Load(). It must not write main-cache status:
+            // a failed speculative preload could otherwise overwrite LastError while the active
+            // region is healthy. The preload owner logs its own failure; only the active-region
+            // load publishes an error into WorldMapGpuCache state.
+            if (reportError)
+                lastError = error.Message;
             return new Snapshot(region, new Dictionary<int, RoomBake>());
         }
     }
