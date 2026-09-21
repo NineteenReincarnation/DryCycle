@@ -26,12 +26,47 @@ internal static class LanceScavengerHooks
             On.ScavengerAI.CheckThrow += CheckThrow;
             On.ScavengerAbstractAI.InitGearUp += InitGear;
         }
-        catch
+        catch (Exception error)
         {
-            Disable();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "LanceScavengerHooks.Enable",
+                error,
+                RollbackPartialEnable);
             throw;
         }
     }
+    private static void RollbackPartialEnable()
+    {
+        _enabled = false;
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/ScavengerAbstractAI.InitGearUp",
+            () => On.ScavengerAbstractAI.InitGearUp -= InitGear);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/ScavengerAI.CheckThrow",
+            () => On.ScavengerAI.CheckThrow -= CheckThrow);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/ScavengerAI.RealWeapon",
+            () => On.ScavengerAI.RealWeapon -= RealWeapon);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/ScavengerAI.CollectScore",
+            () => On.ScavengerAI.CollectScore_PhysicalObject_bool -= CollectScore);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/ScavengerAI.WeaponScore",
+            () => On.ScavengerAI.WeaponScore -= WeaponScore);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/Scavenger.Throw",
+            () => On.Scavenger.Throw -= Throw);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/Scavenger.CombatUpdate",
+            () => On.Scavenger.CombatUpdate -= CombatUpdate);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/Scavenger.Act",
+            () => On.Scavenger.Act -= Act);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "LanceScavengerHooks.Enable/StaticWorld.InitStaticWorld",
+            () => On.StaticWorld.InitStaticWorld -= Relationships);
+    }
+
     internal static void Disable()
     {
         if (!_enabled) return;
