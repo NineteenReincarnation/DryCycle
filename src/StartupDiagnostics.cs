@@ -146,9 +146,9 @@ internal static class StartupDiagnostics
     private static void Failure(int id, string source, Exception error, bool optional = false)
     {
         string prefix = FormatPrefix(id, source, optional ? "FAIL-OPTIONAL" : "FAIL");
-        logger?.LogError(prefix + " " + Describe(error));
+        SafeLogError(prefix + " " + Describe(error));
         if (error != null)
-            logger?.LogError(error);
+            SafeLogError(error);
     }
 
     private static void WriteInfo(int id, string source, string state, string detail)
@@ -156,7 +156,32 @@ internal static class StartupDiagnostics
         string message = FormatPrefix(id, source, state);
         if (!string.IsNullOrWhiteSpace(detail))
             message += " " + detail;
-        logger?.LogInfo(message);
+        SafeLogInfo(message);
+    }
+
+    private static void SafeLogInfo(string message)
+    {
+        try
+        {
+            logger?.LogInfo(message);
+        }
+        catch
+        {
+            // Diagnostics must never become a startup failure source. If a third-party BepInEx
+            // log listener is broken, preserve game/bootstrap control flow even if this line is lost.
+        }
+    }
+
+    private static void SafeLogError(object payload)
+    {
+        try
+        {
+            logger?.LogError(payload);
+        }
+        catch
+        {
+            // Same rule as info logging: cleanup/startup must proceed even when the log sink fails.
+        }
     }
 
     private static string FormatPrefix(int id, string source, string state) =>
