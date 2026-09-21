@@ -50,9 +50,9 @@ fi
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
 world_view="src/DevUI/DevTool/RWImGui/WorldWorkspaceView.cs"
 if ! grep -Fq 'SaveMapWorkspace(session, map)' "$editor_actions" ||
-   ! grep -Fq 'WorldRoomAttractionRegistry.EnsureLoaded(session)' "$editor_actions" ||
-   ! grep -Fq 'WorldRoomAttractionRegistry.Save()' "$editor_actions"; then
-  echo "Canonical map save path does not persist Room_Attr against its explicit session." >&2
+   ! grep -Fq 'WorldRoomAttractionRegistry.Save()' "$editor_actions" ||
+   ! grep -Fq 'WorldTextRegistry.Save()' "$editor_actions"; then
+  echo "Canonical map save path does not persist dirty world documents through Core." >&2
   exit 1
 fi
 
