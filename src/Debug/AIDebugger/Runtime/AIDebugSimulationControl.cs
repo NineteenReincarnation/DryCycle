@@ -1,16 +1,11 @@
 using System;
-using System.Reflection;
 using BepInEx.Logging;
-using MonoMod.RuntimeDetour;
 
 namespace DryCycle.Debugging.AI;
 
 internal static class AIDebugSimulationControl
 {
-    private delegate void GameUpdateOrig(RainWorldGame self);
-    private delegate void GameUpdateDetour(GameUpdateOrig orig, RainWorldGame self);
-
-    private static Hook updateHook;
+    private static bool installed;
     private static ManualLogSource logger;
     private static bool debuggerPaused;
     private static bool previousPaused;
@@ -24,25 +19,11 @@ internal static class AIDebugSimulationControl
     {
         logger = log;
         AIDebugSessionBlockWriter.Initialize(log);
-        if (updateHook != null) return;
-        try
-        {
-            MethodInfo method = typeof(RainWorldGame).GetMethod(
-                nameof(RainWorldGame.Update),
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                Type.EmptyTypes,
-                null);
-            if (method == null) throw new MissingMethodException(typeof(RainWorldGame).FullName, "Update()");
-            updateHook = new Hook(method, (GameUpdateDetour)GameUpdateHook);
-            logger?.LogInfo("DryCycle AI Observatory world-step/recorder tick hook installed.");
-        }
-        catch (Exception error)
-        {
-            logger?.LogWarning("DryCycle AI Observatory world-step hook unavailable: " + error);
-            updateHook?.Dispose();
-            updateHook = null;
-        }
+        if (installed) return;
+
+        On.RainWorldGame.Update += RainWorldGame_Update;
+        installed = true;
+        logger?.LogInfo("DryCycle AI Observatory world-step/recorder tick hook installed through HookGen.");
     }
 
     internal static void Bind(RainWorldGame game)
@@ -94,28 +75,30 @@ internal static class AIDebugSimulationControl
     {
         try
         {
-            if (debuggerPaused && currentGame != null) currentGame.paused = previousPaused;
-            updateHook?.Dispose();
+            if (debuggerPaused && currentGame != null)
+                currentGame.paused = previousPaused;
+
+            if (installed)
+                On.RainWorldGame.Update -= RainWorldGame_Update;
         }
         catch (Exception error)
         {
-            logger?.LogWarning("AI Observatory world-step hook dispose failed: " + error.Message);
+            StartupDiagnostics.Failure("AIDebugSimulationControl.Uninstall", error);
+            logger?.LogWarning("AI Observatory world-step hook cleanup failed: " + error.Message);
         }
 
-        // These subsystems do not own Rain World objects after reset. Shut them down after
-        // the update hook is removed so no new simulation samples can race teardown.
         AIDebugBreakpointManager.Reset();
         AIDebugDeepProfiler.Reset();
         AIDebugOfflineSessionStore.Reset();
         AIDebugSessionBlockWriter.Shutdown();
 
-        updateHook = null;
+        installed = false;
         debuggerPaused = false;
         stepRequested = false;
         currentGame = null;
     }
 
-    private static void GameUpdateHook(GameUpdateOrig orig, RainWorldGame self)
+    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, RainWorldGame self)
     {
         currentGame = self;
         if (!debuggerPaused)
@@ -124,8 +107,8 @@ internal static class AIDebugSimulationControl
             return;
         }
 
-        // Native pause menus own their own paused update loop. Do not try to advance
-        // gameplay underneath one; a requested step remains pending until it closes.
+        // Native pause menus own their own paused update loop. Do not try to advance gameplay
+        // underneath one; a requested step remains pending until it closes.
         if (self.pauseMenu != null)
         {
             self.paused = true;
@@ -136,7 +119,7 @@ internal static class AIDebugSimulationControl
         if (!stepRequested)
         {
             self.paused = true;
-            RunOriginalAndRecord(orig, self); // PausedUpdate/HUD path; clock does not advance.
+            RunOriginalAndRecord(orig, self);
             return;
         }
 
@@ -144,7 +127,7 @@ internal static class AIDebugSimulationControl
         self.paused = false;
         try
         {
-            RunOriginalAndRecord(orig, self); // Exactly one complete simulation tick.
+            RunOriginalAndRecord(orig, self);
         }
         finally
         {
@@ -152,26 +135,23 @@ internal static class AIDebugSimulationControl
         }
     }
 
-    private static void RunOriginalAndRecord(GameUpdateOrig orig, RainWorldGame self)
+    private static void RunOriginalAndRecord(On.RainWorldGame.orig_Update orig, RainWorldGame self)
     {
         int beforeClock = self.clock;
         orig(self);
 
-        // RainWorldGame.clock increments exactly when the normal simulation branch runs.
-        // Fast/Motion and Rich/Heavy recorders therefore share one simulation-tick
-        // coordinator. Presentation never owns capture timing and Pause fabricates no data.
-        if (self.clock != beforeClock)
+        if (self.clock == beforeClock)
+            return;
+
+        long profile = AIDebugDeepProfiler.BeginTick();
+        try
         {
-            long profile = AIDebugDeepProfiler.BeginTick();
-            try
-            {
-                AIDebugRecorder.OnSimulationTick(self);
-                AIDebugRichRecorder.OnSimulationTick(self);
-            }
-            finally
-            {
-                AIDebugDeepProfiler.EndTick(profile);
-            }
+            AIDebugRecorder.OnSimulationTick(self);
+            AIDebugRichRecorder.OnSimulationTick(self);
+        }
+        finally
+        {
+            AIDebugDeepProfiler.EndTick(profile);
         }
     }
 }
