@@ -48,7 +48,6 @@ internal static class DB_RainWorldHooks
         On.FlyAI.UpdateFollowDijsktra += Follow;
         On.Room.Update += UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
-        On.RainWorld.OnModsInit += RainWorld_OnModsInit;
     }
 
     internal static void Disable()
@@ -66,7 +65,6 @@ internal static class DB_RainWorldHooks
         On.FlyAI.UpdateFollowDijsktra -= Follow;
         On.Room.Update -= UpdateRoom;
         On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
-        On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
         DB_DehydrationGripRuntime.Disable();
         DB_EventConsumers.Disable();
         DB_EventHub.Disable();
@@ -89,13 +87,6 @@ internal static class DB_RainWorldHooks
         DB_WarpCompatibility.Disable();
         DB_Sandbox.Disable();
         DB_SwarmRoom.Reset();
-    }
-
-    private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
-    {
-        orig(self);
-        DB_Sandbox.Enable();
-        DB_WarpCompatibility.Enable();
     }
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)
