@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Persistence / Authoring Safety
+# Consolidated Guard category. Keep checks invariant-focused; implementation-specific checks should be removed or rewritten.
+
+
+# ============================================================================
+# Migrated from Guard/scripts/validate-world-authoring-safety.sh
+# ============================================================================
+set -euo pipefail
+
 resolver="src/DevUI/DevTool/World/WorldAuthoringPathResolver.cs"
 world_text="src/DevUI/DevTool/World/WorldTextRegistry.cs"
 room_attr="src/DevUI/DevTool/World/WorldRoomAttractionRegistry.cs"

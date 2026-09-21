@@ -10,7 +10,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptRoot))
+$GuardRoot = Split-Path -Parent $ScriptRoot
+$RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $GuardRoot))
 $DefaultBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".phase6-validation"))
 
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {

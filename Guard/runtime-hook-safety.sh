@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Runtime Hook Safety
+# Project-wide invariant: DryCycle source must not install MonoMod.RuntimeDetour.Hook directly.
+python3 - <<'PY'
+from pathlib import Path
+import sys
+root = Path("src")
+markers = ("MonoMod.RuntimeDetour.Hook", "using MonoMod.RuntimeDetour;", "new Hook(", "new MonoMod.RuntimeDetour.Hook(")
+hits = []
+for path in root.rglob("*.cs"):
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if any(marker in text for marker in markers):
+        hits.append(path.as_posix())
+if hits:
+    print("Direct RuntimeDetour Hook sites are forbidden. Prefer On.xxx / IL.xxx or a reviewed project abstraction:", file=sys.stderr)
+    for path in sorted(hits):
+        print("  + " + path, file=sys.stderr)
+    sys.exit(1)
+print("RuntimeDetour invariant passed: no direct Hook installation/import sites.")
+PY
+
+# DesertBatfly hook cleanup invariants retained from the previous feature guard.
+set -euo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
