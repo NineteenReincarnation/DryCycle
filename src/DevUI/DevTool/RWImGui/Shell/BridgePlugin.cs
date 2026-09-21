@@ -121,14 +121,26 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
-        // The rebuilt World Map intentionally keeps vanilla MapPage drawing/updating quiescent.
-        // Pump the bounded source-recovery backend here so missing RoomRepresentation MapTex
-        // thumbnails are still generated incrementally without invoking vanilla MapObject.Update().
-        if (WorldMapBackgroundBudget.AllowSourceRecovery())
-            MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
+        // The retained World Map keeps live MapPage/RoomPanel/texture/file work on Unity's main
+        // thread. RWImGUI Draw consumes only detached/published snapshots.
+        EditorSession mapSession = DevToolRuntime.ActiveSession;
+        if (mapSession?.ToolMode == EditorToolMode.Map)
+        {
+            if (WorldMapBackgroundBudget.AllowSourceRecovery())
+                MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
 
-        // V2 room resources capture only from the main thread after legacy MapTex/source recovery.
-        // Draw never scans RoomPanel/MapPage.
+            MapRoomGeometryPresentationHub.Prime(mapSession);
+            int selectedRoomIndex =
+                MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
+            WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
+            WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
+        }
+        else
+        {
+            WorldMapExactShortcuts.UpdateMainThread(mapSession, -1);
+        }
+
+        // V2 resources capture only after the live-source pumps above have published detached data.
         WorldMapRetainedV2Runtime.UpdateMainThread();
 
         EnsureCreatureCatalogRuntime();

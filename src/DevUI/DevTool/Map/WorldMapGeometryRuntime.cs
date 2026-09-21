@@ -166,6 +166,8 @@ internal static partial class MapRoomGeometryPresentationHub
     }
 
     private static readonly Dictionary<int, CacheEntry> cache = new();
+    private static readonly object publishedGate = new();
+    private static readonly Dictionary<int, EditorMapRoomVisualSnapshot> published = new();
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
@@ -177,11 +179,12 @@ internal static partial class MapRoomGeometryPresentationHub
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
     {
-        EditorMapRoomVisualSnapshot original =
-            cache.TryGetValue(roomIndex, out CacheEntry entry)
-                ? entry.Snapshot
+        lock (publishedGate)
+        {
+            return published.TryGetValue(roomIndex, out EditorMapRoomVisualSnapshot snapshot)
+                ? snapshot
                 : EditorMapRoomVisualSnapshot.Empty;
-        return WorldMapFrontendBridge.EnhanceRaster(roomIndex, original);
+        }
     }
 
     internal static void Prime(EditorSession session)
@@ -247,6 +250,7 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         PersistentBeforeClear();
         cache.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = string.Empty;
         lastPrimeFrame = -1;
@@ -260,6 +264,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private static void ResetRegion(string nextRegion)
     {
         cache.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = nextRegion ?? string.Empty;
         lastPrimeFrame = -1;
@@ -308,6 +313,7 @@ internal static partial class MapRoomGeometryPresentationHub
             for (int i = 0; i < stale.Count; i++)
             {
                 cache.Remove(stale[i]);
+                lock (publishedGate) published.Remove(stale[i]);
                 PersistentOnRoomRemoved(stale[i]);
             }
         }
@@ -1273,17 +1279,28 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void Publish(CacheEntry entry)
     {
-        if (entry.PublishedRevision == entry.Revision) return;
-        entry.Snapshot = new EditorMapRoomVisualSnapshot
+        if (entry.PublishedRevision != entry.Revision)
         {
-            Available = entry.WidthTiles > 0f && entry.HeightTiles > 0f,
-            DetailedRasterAvailable = entry.RasterInitialized || entry.TerrainFillRuns.Length > 0,
-            WidthTiles = Math.Max(1f, entry.WidthTiles),
-            HeightTiles = Math.Max(1f, entry.HeightTiles),
-            RasterRuns = MergeRuns(entry.BaseRasterRuns, entry.TerrainFillRuns),
-            Curves = entry.Curves,
-            Nodes = entry.Nodes
-        };
-        entry.PublishedRevision = entry.Revision;
+            entry.Snapshot = new EditorMapRoomVisualSnapshot
+            {
+                Available = entry.WidthTiles > 0f && entry.HeightTiles > 0f,
+                DetailedRasterAvailable = entry.RasterInitialized || entry.TerrainFillRuns.Length > 0,
+                WidthTiles = Math.Max(1f, entry.WidthTiles),
+                HeightTiles = Math.Max(1f, entry.HeightTiles),
+                RasterRuns = MergeRuns(entry.BaseRasterRuns, entry.TerrainFillRuns),
+                Curves = entry.Curves,
+                Nodes = entry.Nodes
+            };
+            entry.PublishedRevision = entry.Revision;
+        }
+
+        // Raster fallback may touch Unity textures/RenderTexture. Keep that work on the main-thread
+        // prime path, then publish a detached snapshot for RWImGUI Draw to consume.
+        EditorMapRoomVisualSnapshot snapshot =
+            WorldMapFrontendBridge.EnhanceRaster(entry.RoomIndex, entry.Snapshot) ??
+            EditorMapRoomVisualSnapshot.Empty;
+
+        lock (publishedGate)
+            published[entry.RoomIndex] = snapshot;
     }
 }

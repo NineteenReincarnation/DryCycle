@@ -116,8 +116,6 @@ internal static class WorldMapView
             return;
         }
 
-        MapRoomGeometryPresentationHub.Prime(DevToolRuntime.ActiveSession);
-        WorldMapShortcutPresentation.Prime(DevToolRuntime.ActiveSession, snapshot.SelectedRoomIndex);
         SynchronizeRegion(snapshot);
         SynchronizePositions(snapshot);
         SynchronizeLinkState(snapshot);
@@ -247,8 +245,6 @@ internal static class WorldMapView
             CurrentLayerMask(),
             showConnections,
             new WorldMapViewTransform(canvasMin, canvasSize, pan, zoom));
-
-        WorldMapExactShortcuts.BeforeCanvas(snapshot);
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         bool renderChannels = WorldMapRenderOrder.BeginCanvas(draw, snapshot);

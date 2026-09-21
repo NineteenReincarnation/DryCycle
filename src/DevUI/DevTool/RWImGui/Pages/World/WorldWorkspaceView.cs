@@ -218,7 +218,6 @@ internal static class WorldWorkspaceView
         }
 
         WorldTopologyRegistry.EnsureLoaded();
-        MapRoomGeometryPresentationHub.Prime(DevToolRuntime.ActiveSession);
         EnsureRoomIndex(snapshot);
         EnsureConnectionIndex(snapshot);
         SynchronizeSelection(snapshot);

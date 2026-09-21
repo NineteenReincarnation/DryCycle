@@ -64,6 +64,13 @@ internal static class WorldMapExactShortcuts
             Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
     }
 
+    private sealed class PublishedEntry
+    {
+        internal readonly Dictionary<int, WorldMapShortcutPresentation.ShortcutMarker> ExitMouths = new();
+        internal WorldMapShortcutPresentation.ShortcutMarker[] CreatureHoles =
+            Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
+    }
+
     private readonly struct TileInfo
     {
         internal TileInfo(bool shortcutEntrance, int shortcut)
@@ -79,6 +86,8 @@ internal static class WorldMapExactShortcuts
     private static ManualLogSource log;
 
     private static readonly Dictionary<int, Entry> entries = new();
+    private static readonly object publishedGate = new();
+    private static readonly Dictionary<int, PublishedEntry> published = new();
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
     private static int lastSubNodeCount = -1;
@@ -92,12 +101,13 @@ internal static class WorldMapExactShortcuts
         if (enabled) return;
         enabled = true;
         log = logger;
-        logger?.LogInfo("World Map exact shortcut resolver enabled through direct view/presentation calls; no self-detour attached.");
+        logger?.LogInfo("World Map exact shortcut resolver enabled; source updates run on the bridge main-thread pump and Draw reads published snapshots only.");
     }
 
     internal static void Disable()
     {
         entries.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = string.Empty;
         lastSubNodeCount = -1;
@@ -108,10 +118,19 @@ internal static class WorldMapExactShortcuts
         log = null;
     }
 
-    internal static void BeforeCanvas(EditorMapPresentationSnapshot snapshot)
+    internal static void UpdateMainThread(
+        EditorSession session,
+        int selectedRoomIndex)
     {
-        if (enabled && snapshot?.Available == true)
-            UpdateExactCache(DevToolRuntime.ActiveSession, snapshot.SelectedRoomIndex);
+        if (!enabled) return;
+
+        if (session?.ToolMode != EditorToolMode.Map)
+        {
+            ClearForNoMap();
+            return;
+        }
+
+        UpdateExactCache(session, selectedRoomIndex);
     }
 
     internal static bool TryGetExitMouth(
@@ -119,11 +138,18 @@ internal static class WorldMapExactShortcuts
         int nodeIndex,
         out WorldMapShortcutPresentation.ShortcutMarker marker)
     {
-        marker = default;
-        return enabled &&
-               entries.TryGetValue(roomIndex, out Entry entry) &&
-               entry.Ready &&
-               entry.ExitMouths.TryGetValue(nodeIndex, out marker);
+        if (!enabled)
+        {
+            marker = default;
+            return false;
+        }
+
+        lock (publishedGate)
+        {
+            marker = default;
+            return published.TryGetValue(roomIndex, out PublishedEntry entry) &&
+                   entry.ExitMouths.TryGetValue(nodeIndex, out marker);
+        }
     }
 
     internal static bool TryGetCreatureHoles(
@@ -131,11 +157,16 @@ internal static class WorldMapExactShortcuts
         out WorldMapShortcutPresentation.ShortcutMarker[] holes)
     {
         holes = null;
-        if (!enabled || !entries.TryGetValue(roomIndex, out Entry entry) || !entry.Ready)
-            return false;
+        if (!enabled) return false;
 
-        holes = entry.CreatureHoles ?? Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
-        return true;
+        lock (publishedGate)
+        {
+            if (!published.TryGetValue(roomIndex, out PublishedEntry entry))
+                return false;
+
+            holes = entry.CreatureHoles;
+            return true;
+        }
     }
 
     internal static bool AfterCanvas(EditorMapPresentationSnapshot snapshot, string selectedConnectionId)
@@ -160,6 +191,7 @@ internal static class WorldMapExactShortcuts
         if (regionChanged)
         {
             entries.Clear();
+            lock (publishedGate) published.Clear();
             roomOrder.Clear();
             region = nextRegion;
             lastSubNodeCount = -1;
@@ -222,7 +254,11 @@ internal static class WorldMapExactShortcuts
             List<int> stale = new();
             foreach (int roomIndex in entries.Keys)
                 if (!alive.Contains(roomIndex)) stale.Add(roomIndex);
-            for (int i = 0; i < stale.Count; i++) entries.Remove(stale[i]);
+            for (int i = 0; i < stale.Count; i++)
+            {
+                entries.Remove(stale[i]);
+                lock (publishedGate) published.Remove(stale[i]);
+            }
         }
 
         if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
@@ -296,6 +332,7 @@ internal static class WorldMapExactShortcuts
             entry.Ready = true;
             entry.FromRealizedRoom = false;
             entry.NextPollFrame = Time.frameCount + FilePollFrames + Math.Abs(roomIndex % 37);
+            Publish(entry);
             return true;
         }
         catch (Exception error)
@@ -328,6 +365,7 @@ internal static class WorldMapExactShortcuts
         entry.Ready = true;
         entry.FromRealizedRoom = true;
         entry.NextPollFrame = Time.frameCount + 30;
+        Publish(entry);
     }
 
     private static bool TryParseRoomShortcuts(
@@ -561,9 +599,28 @@ internal static class WorldMapExactShortcuts
 
     private static long TileKey(IntVector2 tile) => ((long)(uint)tile.x << 32) | (uint)tile.y;
 
+    private static void Publish(Entry entry)
+    {
+        if (entry == null || !entry.Ready)
+            return;
+
+        PublishedEntry snapshot = new()
+        {
+            CreatureHoles = entry.CreatureHoles == null
+                ? Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>()
+                : (WorldMapShortcutPresentation.ShortcutMarker[])entry.CreatureHoles.Clone()
+        };
+        foreach (KeyValuePair<int, WorldMapShortcutPresentation.ShortcutMarker> pair in entry.ExitMouths)
+            snapshot.ExitMouths[pair.Key] = pair.Value;
+
+        lock (publishedGate)
+            published[entry.RoomIndex] = snapshot;
+    }
+
     private static void ClearForNoMap()
     {
         entries.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = string.Empty;
         lastSubNodeCount = -1;

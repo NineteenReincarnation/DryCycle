@@ -78,6 +78,7 @@ internal sealed class WorldMapTextureBridge
                 max);
             object boxedDraw = draw;
             addImageMethod.Invoke(boxedDraw, args);
+            error = string.Empty;
             return true;
         }
         catch (TargetInvocationException errorWrapper)

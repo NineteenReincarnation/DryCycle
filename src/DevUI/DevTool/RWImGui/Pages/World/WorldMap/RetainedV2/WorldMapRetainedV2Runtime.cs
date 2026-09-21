@@ -9,8 +9,9 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Frontend lifetime owner for the retained V2 scene projection.
-/// Phase 1 owns scene synchronization only; rendering remains on the legacy path until later phases.
+/// Frontend lifetime owner for the retained V2 World Map.
+/// Render-thread scene projection, main-thread retained resources and off-screen presentation meet
+/// here without making authoring data or the legacy MapPage presentation authoritative.
 /// </summary>
 internal static class WorldMapRetainedV2Runtime
 {
@@ -37,6 +38,12 @@ internal static class WorldMapRetainedV2Runtime
     private static int activeLayerMask = 7;
     private static int activeShowConnections = 1;
     private static int retainedConnectionsReady;
+    private static long lastRenderedViewRevision = long.MinValue;
+    private static long lastRenderedSceneRevision = long.MinValue;
+    private static long lastRenderedRoomResourceRevision = long.MinValue;
+    private static long lastRenderedRouteRevision = long.MinValue;
+    private static int lastRenderedLayerMask = int.MinValue;
+    private static int lastRenderedShowConnections = int.MinValue;
 
     internal static WorldMapScene Scene => RenderSceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
@@ -156,34 +163,60 @@ internal static class WorldMapRetainedV2Runtime
 
             int layerMask = Volatile.Read(ref activeLayerMask);
             bool showConnections = Volatile.Read(ref activeShowConnections) != 0;
-            SpatialIndex.Query(
-                visibleMin,
-                visibleMax,
-                layerMask,
-                visibleRooms);
+            int showConnectionsValue = showConnections ? 1 : 0;
 
-            if (showConnections)
-                RouteSpatialIndex.Query(
+            long viewRevision = MainSceneState.ViewRevision;
+            long sceneRevision = MainSceneState.SceneRevision;
+            long roomResourceRevision = RoomResources.Revision;
+            long routeRevision = ConnectionResources.Revision;
+            bool needsRender =
+                Surface.NeedsRender ||
+                viewRevision != lastRenderedViewRevision ||
+                sceneRevision != lastRenderedSceneRevision ||
+                roomResourceRevision != lastRenderedRoomResourceRevision ||
+                routeRevision != lastRenderedRouteRevision ||
+                layerMask != lastRenderedLayerMask ||
+                showConnectionsValue != lastRenderedShowConnections;
+
+            if (needsRender)
+            {
+                SpatialIndex.Query(
                     visibleMin,
                     visibleMax,
-                    visibleRoutes);
-            else
-                visibleRoutes.Clear();
+                    layerMask,
+                    visibleRooms);
 
-            Surface.Initialize(log);
-            Surface.Render(
-                view,
-                _ =>
+                if (showConnections)
+                    RouteSpatialIndex.Query(
+                        visibleMin,
+                        visibleMax,
+                        visibleRoutes);
+                else
+                    visibleRoutes.Clear();
+
+                Surface.Initialize(log);
+                if (Surface.Render(
+                        view,
+                        _ =>
+                        {
+                            RoomRenderer.SynchronizeVisible(
+                                MainSceneState,
+                                RoomResources,
+                                visibleRooms);
+                            ConnectionRenderer.SynchronizeVisible(
+                                ConnectionResources,
+                                visibleRoutes,
+                                showConnections);
+                        }))
                 {
-                    RoomRenderer.SynchronizeVisible(
-                        MainSceneState,
-                        RoomResources,
-                        visibleRooms);
-                    ConnectionRenderer.SynchronizeVisible(
-                        ConnectionResources,
-                        visibleRoutes,
-                        showConnections);
-                });
+                    lastRenderedViewRevision = viewRevision;
+                    lastRenderedSceneRevision = sceneRevision;
+                    lastRenderedRoomResourceRevision = roomResourceRevision;
+                    lastRenderedRouteRevision = routeRevision;
+                    lastRenderedLayerMask = layerMask;
+                    lastRenderedShowConnections = showConnectionsValue;
+                }
+            }
         }
     }
 
@@ -229,7 +262,7 @@ internal static class WorldMapRetainedV2Runtime
     internal static bool QueryVisibleRooms(int layerMask, List<int> output)
     {
         if (!enabled || output == null) return false;
-        SceneState.ViewTransform.GetVisibleWorldBounds(
+        RenderSceneState.ViewTransform.GetVisibleWorldBounds(
             out Num.Vector2 min,
             out Num.Vector2 max);
         return SpatialIndex.Query(min, max, layerMask, output);
@@ -255,6 +288,12 @@ internal static class WorldMapRetainedV2Runtime
         visibleRooms.Clear();
         visibleRoutes.Clear();
         Volatile.Write(ref retainedConnectionsReady, 0);
+        lastRenderedViewRevision = long.MinValue;
+        lastRenderedSceneRevision = long.MinValue;
+        lastRenderedRoomResourceRevision = long.MinValue;
+        lastRenderedRouteRevision = long.MinValue;
+        lastRenderedLayerMask = int.MinValue;
+        lastRenderedShowConnections = int.MinValue;
         lastDirty = new WorldMapDirtySet();
     }
 
@@ -262,14 +301,14 @@ internal static class WorldMapRetainedV2Runtime
     {
         ImGui.SameLine(0f, 12f);
         ImGui.TextDisabled(
-            "· V2 P6 scene " +
+            "· V2 P7 scene " +
             RenderSceneState.Rooms.Count + "/" +
             RenderSceneState.Connections.Count);
 
         if (!ImGui.IsItemHovered()) return;
 
         ImGui.BeginTooltip();
-        ImGui.TextUnformatted("World Map Retained V2 · Phase 5");
+        ImGui.TextUnformatted("World Map Retained V2 · Phase 7");
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(

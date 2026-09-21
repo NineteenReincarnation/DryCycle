@@ -24,10 +24,21 @@ internal sealed class WorldMapRenderTextureSurface
     private RenderTexture retired;
     private int width;
     private int height;
+    private int rejectedWidth;
+    private int rejectedHeight;
+    private int resizeRetryAfterFrame;
+    private bool renderInvalidated = true;
     private string error = string.Empty;
     private ManualLogSource log;
 
     internal bool Ready => presented != null && presented.IsCreated();
+    internal bool NeedsRender =>
+        !Ready ||
+        renderInvalidated ||
+        (rejectedWidth > 0 &&
+         rejectedHeight > 0 &&
+         Time.frameCount >= resizeRetryAfterFrame &&
+         (width != rejectedWidth || height != rejectedHeight));
     internal string Error => string.IsNullOrEmpty(error) ? bridge.Error : error;
     internal Camera Camera => camera;
 
@@ -49,10 +60,19 @@ internal sealed class WorldMapRenderTextureSurface
 
         int targetWidth = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.X));
         int targetHeight = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.Y));
-        bool resize = presented == null ||
-                      !presented.IsCreated() ||
-                      width != targetWidth ||
-                      height != targetHeight;
+        bool invalidPresented =
+            presented == null || !presented.IsCreated();
+        bool sizeMismatch =
+            !invalidPresented &&
+            (width != targetWidth || height != targetHeight);
+        bool rejectedResizeCoolingDown =
+            sizeMismatch &&
+            targetWidth == rejectedWidth &&
+            targetHeight == rejectedHeight &&
+            Time.frameCount < resizeRetryAfterFrame;
+        bool resize =
+            invalidPresented ||
+            (sizeMismatch && !rejectedResizeCoolingDown);
 
         RenderTexture target = presented;
         bool ownsCandidate = false;
@@ -84,11 +104,13 @@ internal sealed class WorldMapRenderTextureSurface
                 retired = previous;
             }
 
+            renderInvalidated = false;
             error = string.Empty;
             return true;
         }
         catch (Exception renderError)
         {
+            renderInvalidated = true;
             error = "V2 RenderTexture render failed: " + renderError.Message;
             log?.LogError("World Map V2 RenderTexture render failed: " + renderError);
             return false;
@@ -107,13 +129,47 @@ internal sealed class WorldMapRenderTextureSurface
         Num.Vector2 max)
     {
         if (!Ready) return false;
+
         bool success = bridge.TryPresent(draw, presented, min, max);
-        if (success && retired != null)
+        if (success)
         {
-            ReleaseTarget(retired);
-            retired = null;
+            if (retired != null)
+            {
+                ReleaseTarget(retired);
+                retired = null;
+                rejectedWidth = 0;
+                rejectedHeight = 0;
+                resizeRetryAfterFrame = 0;
+            }
+            return true;
         }
-        return success;
+
+        // A resized/recreated target is not authoritative until the texture bridge has actually
+        // presented it. If presentation of the candidate fails, atomically restore the previous
+        // last-known-good surface instead of exposing a black/missing frame.
+        if (retired == null || !retired.IsCreated())
+            return false;
+
+        RenderTexture rejected = presented;
+        int failedWidth = width;
+        int failedHeight = height;
+        if (!bridge.TryPresent(draw, retired, min, max))
+            return false;
+
+        presented = retired;
+        retired = null;
+        width = presented.width;
+        height = presented.height;
+        rejectedWidth = failedWidth;
+        rejectedHeight = failedHeight;
+        resizeRetryAfterFrame = Time.frameCount + 30;
+        ReleaseTarget(rejected);
+        renderInvalidated = true;
+        error = string.Empty;
+        log?.LogWarning(
+            "World Map V2 rejected a replacement RenderTexture presentation; " +
+            "restored the last-known-good surface and will retry the resize later.");
+        return true;
     }
 
     internal void Reset()
@@ -125,6 +181,10 @@ internal sealed class WorldMapRenderTextureSurface
         retired = null;
         width = 0;
         height = 0;
+        rejectedWidth = 0;
+        rejectedHeight = 0;
+        resizeRetryAfterFrame = 0;
+        renderInvalidated = true;
 
         if (cameraObject != null)
             UnityEngine.Object.Destroy(cameraObject);

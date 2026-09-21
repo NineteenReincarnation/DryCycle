@@ -89,7 +89,7 @@ internal static class WorldMapRasterReadbackFallback
         enabled = true;
         log = logger;
         WorldMapFrontendBridge.RegisterRasterEnhancer(Enhance);
-        logger?.LogInfo("World Map GPU raster readback fallback enabled through direct geometry fallback; no self-detour attached.");
+        logger?.LogInfo("World Map raster readback fallback enabled on the main-thread geometry publication path; no self-detour attached.");
     }
 
     internal static void Disable()

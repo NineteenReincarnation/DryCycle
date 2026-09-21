@@ -45,6 +45,12 @@ internal static class WorldMapShortcutPresentation
         internal int NextPollFrame;
     }
 
+    private sealed class PublishedEntry
+    {
+        internal readonly Dictionary<int, ShortcutMarker> ExitMouths = new();
+        internal ShortcutMarker[] CreatureHoles = Array.Empty<ShortcutMarker>();
+    }
+
     private readonly struct RasterSource
     {
         internal RasterSource(Texture2D texture, int x, int y, int width, int height, int sourceKey)
@@ -71,6 +77,8 @@ internal static class WorldMapShortcutPresentation
     private const int SourcePollIntervalFrames = 180;
 
     private static readonly Dictionary<int, CacheEntry> cache = new();
+    private static readonly object publishedGate = new();
+    private static readonly Dictionary<int, PublishedEntry> published = new();
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
@@ -122,9 +130,12 @@ internal static class WorldMapShortcutPresentation
         if (WorldMapExactShortcuts.TryGetExitMouth(roomIndex, nodeIndex, out marker))
             return true;
 
-        marker = default;
-        return cache.TryGetValue(roomIndex, out CacheEntry entry) &&
-               entry.ExitMouths.TryGetValue(nodeIndex, out marker);
+        lock (publishedGate)
+        {
+            marker = default;
+            return published.TryGetValue(roomIndex, out PublishedEntry entry) &&
+                   entry.ExitMouths.TryGetValue(nodeIndex, out marker);
+        }
     }
 
     internal static ShortcutMarker[] GetCreatureHoles(int roomIndex)
@@ -132,9 +143,12 @@ internal static class WorldMapShortcutPresentation
         if (WorldMapExactShortcuts.TryGetCreatureHoles(roomIndex, out ShortcutMarker[] exact))
             return exact;
 
-        return cache.TryGetValue(roomIndex, out CacheEntry entry)
-            ? entry.CreatureHoles
-            : Array.Empty<ShortcutMarker>();
+        lock (publishedGate)
+        {
+            return published.TryGetValue(roomIndex, out PublishedEntry entry)
+                ? entry.CreatureHoles
+                : Array.Empty<ShortcutMarker>();
+        }
     }
 
     private static void RefreshPriority(int roomIndex)
@@ -193,7 +207,11 @@ internal static class WorldMapShortcutPresentation
             List<int> stale = new();
             foreach (int key in cache.Keys)
                 if (!alive.Contains(key)) stale.Add(key);
-            for (int i = 0; i < stale.Count; i++) cache.Remove(stale[i]);
+            for (int i = 0; i < stale.Count; i++)
+            {
+                cache.Remove(stale[i]);
+                lock (publishedGate) published.Remove(stale[i]);
+            }
         }
 
         if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
@@ -275,6 +293,7 @@ internal static class WorldMapShortcutPresentation
         entry.Initialized = true;
         entry.BuiltFromRealizedRoom = true;
         entry.NextPollFrame = Time.frameCount + 30;
+        Publish(entry);
     }
 
     private static void BuildFromMapPixels(CacheEntry entry, Color[] pixels, int width, int height)
@@ -322,6 +341,7 @@ internal static class WorldMapShortcutPresentation
             creatureHoles[i] = new ShortcutMarker(marker.X, marker.Y, denNodes[i]);
         }
         entry.CreatureHoles = creatureHoles.ToArray();
+        Publish(entry);
     }
 
     private static int CompareShortcutScanOrder(ShortcutMarker a, ShortcutMarker b)
@@ -408,9 +428,28 @@ internal static class WorldMapShortcutPresentation
         }
     }
 
+    private static void Publish(CacheEntry entry)
+    {
+        if (entry == null || !entry.Initialized)
+            return;
+
+        PublishedEntry snapshot = new()
+        {
+            CreatureHoles = entry.CreatureHoles == null
+                ? Array.Empty<ShortcutMarker>()
+                : (ShortcutMarker[])entry.CreatureHoles.Clone()
+        };
+        foreach (KeyValuePair<int, ShortcutMarker> pair in entry.ExitMouths)
+            snapshot.ExitMouths[pair.Key] = pair.Value;
+
+        lock (publishedGate)
+            published[entry.RoomIndex] = snapshot;
+    }
+
     private static void ResetRegion(string nextRegion)
     {
         cache.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = nextRegion ?? string.Empty;
         lastPrimeFrame = -1;
@@ -423,6 +462,7 @@ internal static class WorldMapShortcutPresentation
     internal static void Clear()
     {
         cache.Clear();
+        lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = string.Empty;
         lastPrimeFrame = -1;

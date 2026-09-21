@@ -16,7 +16,7 @@ phase percentage below 100%.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
-- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired from the normal Map hot path after V2 assumed ownership; exit/creature overlay drawing and exit hover now reuse the retained room spatial index instead of rescanning the whole region.
+- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
 
@@ -465,6 +465,32 @@ readback, room mesh rebuild or route mesh rebuild.
 
 Base room thumbnails remain committed independently from zoom and are never replaced by a black LOD
 placeholder.
+
+### Final source-thread boundary
+
+The final cleanup removes all live source advancement from `WorldMapView.Draw`.
+
+Unity main thread now owns:
+
+- `MapRoomGeometryPresentationHub.Prime`;
+- shortcut texture scanning;
+- exact shortcut room-file parsing;
+- raster readback fallback;
+- MapPage / RoomPanel inspection.
+
+Those services publish detached room/shortcut snapshots. RWImGUI Draw performs lookup only; it no
+longer calls `Texture.GetPixels`, `ReadPixels`, `File.ReadAllLines` or walks `MapPage.subNodes`.
+
+### Stable-frame surface reuse
+
+The retained surface now renders only when its view, scene, room resources, route resources, layer
+mask or link visibility revision changes. A fully stable Map frame reuses the existing RenderTexture
+instead of calling `Camera.Render()` again.
+
+RenderTexture resize is a two-stage commit. A newly rendered candidate is not authoritative until
+the RWImGUI texture bridge presents it successfully. If that presentation fails, the previous
+last-known-good surface is restored and the resize is retried after a short cooldown, preventing
+black frames and per-frame allocation thrash.
 
 ### Post-refactor overlay locality
 

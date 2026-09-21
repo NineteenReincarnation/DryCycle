@@ -40,9 +40,11 @@ internal sealed class WorldMapRoomResourceStore
     private EditorMapRoomSnapshot[] auditRooms = Array.Empty<EditorMapRoomSnapshot>();
     private int auditCursor;
     private int nextAuditFrame;
+    private long revision;
 
     internal IReadOnlyDictionary<int, RoomResource> Rooms => rooms;
     internal int Count => rooms.Count;
+    internal long Revision => revision;
 
     internal int CommittedThumbnailCount
     {
@@ -76,7 +78,8 @@ internal sealed class WorldMapRoomResourceStore
 
         foreach (int roomIndex in dirty.RemovedRooms)
         {
-            rooms.Remove(roomIndex);
+            if (rooms.Remove(roomIndex))
+                AdvanceRevision();
             queued.Remove(roomIndex);
         }
 
@@ -166,13 +169,15 @@ internal sealed class WorldMapRoomResourceStore
         auditRooms = Array.Empty<EditorMapRoomSnapshot>();
         auditCursor = 0;
         nextAuditFrame = 0;
+        AdvanceRevision();
     }
 
     private void ProcessRoom(MapPage page, WorldMapScene scene, int roomIndex)
     {
         if (!scene.TryGetRoom(roomIndex, out WorldMapScene.RoomNode sceneRoom))
         {
-            rooms.Remove(roomIndex);
+            if (rooms.Remove(roomIndex))
+                AdvanceRevision();
             return;
         }
 
@@ -185,6 +190,7 @@ internal sealed class WorldMapRoomResourceStore
             };
             rooms.Add(roomIndex, resource);
             geometryChanged.Add(roomIndex);
+            AdvanceRevision();
         }
 
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(roomIndex);
@@ -203,8 +209,9 @@ internal sealed class WorldMapRoomResourceStore
                 roomIndex,
                 out WorldMapLegacyRoomSourceService.RoomTextureSource source))
         {
-            if (resource.Thumbnail.Stage(source))
-                resource.Thumbnail.CommitPending();
+            if (resource.Thumbnail.Stage(source) &&
+                resource.Thumbnail.CommitPending())
+                AdvanceRevision();
         }
         else
         {
@@ -235,6 +242,7 @@ internal sealed class WorldMapRoomResourceStore
             resource.RequestedVisualStamp = int.MinValue;
             geometryChanged.Add(result.RoomIndex);
             unchecked { resource.GeometryGeneration++; }
+            AdvanceRevision();
         });
     }
 
@@ -242,6 +250,11 @@ internal sealed class WorldMapRoomResourceStore
     {
         if (roomIndex < 0 || !queued.Add(roomIndex)) return;
         priorityQueue.Enqueue(roomIndex);
+    }
+
+    private void AdvanceRevision()
+    {
+        unchecked { revision++; }
     }
 
     private static int ComputeVisualStamp(EditorMapRoomVisualSnapshot visual)
