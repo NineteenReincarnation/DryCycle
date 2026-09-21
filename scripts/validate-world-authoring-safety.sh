@@ -45,4 +45,20 @@ if ! grep -Fq 'DryCycle will not author generated mergedmods data.' "$room_attr"
   exit 1
 fi
 
+# Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
+# enqueue Save; it must not race the Core command by writing individual files itself.
+editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
+world_view="src/DevUI/DevTool/RWImGui/WorldWorkspaceView.cs"
+if ! grep -Fq 'SaveMapWorkspace(session, map)' "$editor_actions" ||
+   ! grep -Fq 'WorldRoomAttractionRegistry.EnsureLoaded(session)' "$editor_actions" ||
+   ! grep -Fq 'WorldRoomAttractionRegistry.Save()' "$editor_actions"; then
+  echo "Canonical map save path does not persist Room_Attr against its explicit session." >&2
+  exit 1
+fi
+
+if grep -Eq 'World(RoomAttractionRegistry|TextRegistry|TopologyRegistry)\.Save\(|WorldWorkspaceDataView\.SaveDirty\(' "$world_view"; then
+  echo "World Workspace UI writes files directly instead of routing through the Core save command." >&2
+  exit 1
+fi
+
 echo "World authoring source safety guard passed."
