@@ -31,6 +31,7 @@ internal static class NativeSpatialGizmoView
     private static bool claimedMouseThisFrame;
 
     internal static bool OwnsMouse => drag.Active || claimedMouseThisFrame;
+    internal static bool IsDragging => drag.Active;
 
     internal static void DrawObjects(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -68,6 +69,7 @@ internal static class NativeSpatialGizmoView
 
     internal static void DrawSound(EditorSoundPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        claimedMouseThisFrame = false;
         EditorViewportSnapshot viewport = EditorViewportPresentationHub.Current;
         if (!Ready(viewport, display) || snapshot?.Sounds == null) return;
 
@@ -135,6 +137,7 @@ internal static class NativeSpatialGizmoView
 
     internal static void DrawTriggers(EditorTriggerPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        claimedMouseThisFrame = false;
         EditorViewportSnapshot viewport = EditorViewportPresentationHub.Current;
         if (!Ready(viewport, display) || snapshot?.Triggers == null) return;
 
