@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -120,24 +119,11 @@ internal static class EffectPreviewRuntimeVisualOwnership
         return false;
     }
 
-    private static bool ContainsReference(List<UpdatableAndDeletable> values, UpdatableAndDeletable target)
-    {
-        if (values == null || target == null) return false;
-        for (int i = 0; i < values.Count; i++)
-            if (ReferenceEquals(values[i], target)) return true;
-        return false;
-    }
-
     private sealed class RuntimeSession
     {
         private readonly global::Room room;
         private readonly HashSet<UpdatableAndDeletable> ownedRuntimeObjects;
         private readonly RuntimeCameraFieldJournal cameraJournal;
-        private readonly HashSet<FNode> ownedNodes = new(ReferenceEqualityComparer<FNode>.Instance);
-        private readonly List<FNode> ownedNodeOrder = new();
-        private readonly Dictionary<FNode, NodeMoveMutation> nodeMoves =
-            new(ReferenceEqualityComparer<FNode>.Instance);
-        private readonly List<FNode> movedNodeOrder = new();
         private string abortReason = string.Empty;
 
         internal RuntimeSession(
@@ -177,154 +163,14 @@ internal static class EffectPreviewRuntimeVisualOwnership
             cameraJournal?.Observe();
         }
 
-        internal bool IsOwnedExecution(global::Room candidateRoom)
-        {
-            if (room == null || candidateRoom == null || !ReferenceEquals(room, candidateRoom) ||
-                ownedRuntimeObjects.Count == 0)
-                return false;
-
-            int index = room.updateIndex;
-            List<UpdatableAndDeletable> live = room.updateList;
-            if (live != null && index >= 0 && index < live.Count)
-            {
-                UpdatableAndDeletable current = live[index];
-                if (current != null && ownedRuntimeObjects.Contains(current))
-                    return true;
-            }
-
-            StackFrame[] frames;
-            try { frames = new StackTrace(2, false).GetFrames(); }
-            catch { return false; }
-            if (frames == null || frames.Length == 0 || live == null)
-                return false;
-
-            for (int i = 0; i < frames.Length; i++)
-            {
-                MethodBase method;
-                try { method = frames[i].GetMethod(); }
-                catch { continue; }
-
-                Type declaring = method?.DeclaringType;
-                if (declaring == null || declaring == typeof(UpdatableAndDeletable) ||
-                    !typeof(UpdatableAndDeletable).IsAssignableFrom(declaring))
-                    continue;
-
-                bool found = false;
-                bool allOwned = true;
-                for (int n = 0; n < live.Count; n++)
-                {
-                    UpdatableAndDeletable candidate = live[n];
-                    if (candidate == null || !declaring.IsAssignableFrom(candidate.GetType()))
-                        continue;
-                    found = true;
-                    if (!ownedRuntimeObjects.Contains(candidate))
-                    {
-                        allOwned = false;
-                        break;
-                    }
-                }
-
-                if (found && allOwned)
-                    return true;
-            }
-
-            return false;
-        }
-
-        internal void ObserveNodeMutation(FNode node, NodePlacement before, NodePlacement after)
-        {
-            if (node == null || before.Equals(after)) return;
-            if (ownedNodes.Contains(node)) return;
-
-            if (before.Container == null && after.Container != null)
-            {
-                if (ownedNodes.Add(node)) ownedNodeOrder.Add(node);
-                return;
-            }
-            if (before.Container == null) return;
-
-            if (!nodeMoves.TryGetValue(node, out NodeMoveMutation mutation))
-            {
-                nodeMoves[node] = new NodeMoveMutation(before, after);
-                movedNodeOrder.Add(node);
-            }
-            else
-            {
-                mutation.PreviewPlacement = after;
-                nodeMoves[node] = mutation;
-            }
-        }
-
         internal EffectPreviewRuntimeVisualRollbackReport Rollback(string reason)
         {
-            int nodeLeaks = 0;
-            int moveLeaks = 0;
-            int ambiguousMoves = 0;
-
-            for (int i = ownedNodeOrder.Count - 1; i >= 0; i--)
-            {
-                FNode node = ownedNodeOrder[i];
-                if (node == null) continue;
-                try { node.RemoveFromContainer(); }
-                catch { nodeLeaks++; }
-                try { if (node.container != null) nodeLeaks++; }
-                catch { nodeLeaks++; }
-            }
-
-            for (int i = movedNodeOrder.Count - 1; i >= 0; i--)
-            {
-                FNode node = movedNodeOrder[i];
-                if (node == null || !nodeMoves.TryGetValue(node, out NodeMoveMutation mutation))
-                    continue;
-
-                NodePlacement current = NodePlacement.Capture(node);
-                if (current.Equals(mutation.OriginalPlacement)) continue;
-                if (!current.Equals(mutation.PreviewPlacement))
-                {
-                    ambiguousMoves++;
-                    continue;
-                }
-
-                try
-                {
-                    FContainer original = mutation.OriginalPlacement.Container;
-                    if (original == null)
-                    {
-                        node.RemoveFromContainer();
-                    }
-                    else
-                    {
-                        int count = original._childNodes?.Count ?? 0;
-                        int index = mutation.OriginalPlacement.Index;
-                        if (index < 0 || index > count) index = count;
-                        original.AddChildAtIndex(node, index);
-                    }
-
-                    if (!NodePlacement.Capture(node).Equals(mutation.OriginalPlacement))
-                        moveLeaks++;
-                }
-                catch
-                {
-                    moveLeaks++;
-                }
-            }
-
-            RuntimeCameraRollbackReport camera = cameraJournal?.Rollback(reason) ?? RuntimeCameraRollbackReport.Clean;
-            bool leak = nodeLeaks > 0 || moveLeaks > 0 || ambiguousMoves > 0 || camera.HasLeak;
-            string summary = leak
-                ? "runtime visual rollback: nodeLeaks=" + nodeLeaks +
-                  ", moveLeaks=" + moveLeaks +
-                  ", ambiguousMoves=" + ambiguousMoves +
-                  (camera.HasLeak ? ", " + camera.Summary : string.Empty) +
-                  (string.IsNullOrWhiteSpace(reason) ? string.Empty : " during " + reason)
-                : string.Empty;
-
-            ownedNodes.Clear();
-            ownedNodeOrder.Clear();
-            nodeMoves.Clear();
-            movedNodeOrder.Clear();
+            RuntimeCameraRollbackReport camera =
+                cameraJournal?.Rollback(reason) ?? RuntimeCameraRollbackReport.Clean;
             ownedRuntimeObjects.Clear();
-            return new EffectPreviewRuntimeVisualRollbackReport(leak, summary);
+            return new EffectPreviewRuntimeVisualRollbackReport(
+                camera.HasLeak,
+                camera.HasLeak ? "runtime visual rollback: " + camera.Summary : string.Empty);
         }
 
         private void MarkAbort(string reason)
@@ -332,59 +178,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
             if (string.IsNullOrEmpty(abortReason))
                 abortReason = string.IsNullOrWhiteSpace(reason) ? "unsafe runtime visual descendant" : reason;
         }
-    }
-
-    private readonly struct NodeMutationProbe
-    {
-        internal NodeMutationProbe(FNode node, NodePlacement before)
-        {
-            Node = node;
-            Before = before;
-        }
-        internal FNode Node { get; }
-        internal NodePlacement Before { get; }
-    }
-
-    private readonly struct NodePlacement : IEquatable<NodePlacement>
-    {
-        internal NodePlacement(FContainer container, int index)
-        {
-            Container = container;
-            Index = index;
-        }
-        internal FContainer Container { get; }
-        internal int Index { get; }
-
-        internal static NodePlacement Capture(FNode node)
-        {
-            if (node == null) return new NodePlacement(null, -1);
-            FContainer container;
-            try { container = node.container; }
-            catch { return new NodePlacement(null, -1); }
-            if (container == null) return new NodePlacement(null, -1);
-
-            int index = -1;
-            try { index = container._childNodes?.IndexOf(node) ?? -1; }
-            catch { }
-            return new NodePlacement(container, index);
-        }
-
-        public bool Equals(NodePlacement other) =>
-            ReferenceEquals(Container, other.Container) && Index == other.Index;
-        public override bool Equals(object obj) => obj is NodePlacement other && Equals(other);
-        public override int GetHashCode() =>
-            ((Container == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Container)) * 397) ^ Index;
-    }
-
-    private struct NodeMoveMutation
-    {
-        internal NodeMoveMutation(NodePlacement originalPlacement, NodePlacement previewPlacement)
-        {
-            OriginalPlacement = originalPlacement;
-            PreviewPlacement = previewPlacement;
-        }
-        internal NodePlacement OriginalPlacement;
-        internal NodePlacement PreviewPlacement;
     }
 
     private sealed class RuntimeCameraFieldJournal
