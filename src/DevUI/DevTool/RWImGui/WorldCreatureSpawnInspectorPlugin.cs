@@ -21,8 +21,15 @@ public sealed class WorldCreatureSpawnInspectorPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Creature Spawns";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldCreatureSpawnInspector.Enable(Logger);
-    private void OnDisable() => WorldCreatureSpawnInspector.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldCreatureSpawnInspector.Enable(Logger),
+            WorldCreatureSpawnInspector.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldCreatureSpawnInspector.Disable);
 }
 
 internal static class WorldCreatureSpawnInspector
