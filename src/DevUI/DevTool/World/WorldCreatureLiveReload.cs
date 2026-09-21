@@ -356,8 +356,15 @@ public sealed class WorldCreatureAuthoringRuntimePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle World Creature Authoring Runtime";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => WorldCreatureAuthoringHooks.Enable(Logger);
-    private void OnDisable() => WorldCreatureAuthoringHooks.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldCreatureAuthoringHooks.Enable(Logger),
+            WorldCreatureAuthoringHooks.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldCreatureAuthoringHooks.Disable);
 }
 
 /// <summary>
