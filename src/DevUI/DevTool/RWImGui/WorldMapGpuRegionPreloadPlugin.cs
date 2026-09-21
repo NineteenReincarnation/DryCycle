@@ -26,8 +26,15 @@ public sealed class WorldMapGpuRegionPreloadPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Region Preload";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuRegionPreload.Enable(Logger);
-    private void OnDisable() => WorldMapGpuRegionPreload.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuRegionPreload.Enable(Logger),
+            WorldMapGpuRegionPreload.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuRegionPreload.Disable);
 }
 
 internal static class WorldMapGpuRegionPreload
