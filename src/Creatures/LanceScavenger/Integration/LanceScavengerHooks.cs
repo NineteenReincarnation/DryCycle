@@ -1,3 +1,5 @@
+using System;
+using DryCycle.Framework.Creature.Core;
 using DryCycle.Items.ScavengerLance;
 using UnityEngine;
 
@@ -10,16 +12,25 @@ internal static class LanceScavengerHooks
     internal static void Enable()
     {
         if (_enabled) return;
-        On.StaticWorld.InitStaticWorld += Relationships;
-        On.Scavenger.Act += Act;
-        On.Scavenger.CombatUpdate += CombatUpdate;
-        On.Scavenger.Throw += Throw;
-        On.ScavengerAI.WeaponScore += WeaponScore;
-        On.ScavengerAI.CollectScore_PhysicalObject_bool += CollectScore;
-        On.ScavengerAI.RealWeapon += RealWeapon;
-        On.ScavengerAI.CheckThrow += CheckThrow;
-        On.ScavengerAbstractAI.InitGearUp += InitGear;
+
         _enabled = true;
+        try
+        {
+            On.StaticWorld.InitStaticWorld += Relationships;
+            On.Scavenger.Act += Act;
+            On.Scavenger.CombatUpdate += CombatUpdate;
+            On.Scavenger.Throw += Throw;
+            On.ScavengerAI.WeaponScore += WeaponScore;
+            On.ScavengerAI.CollectScore_PhysicalObject_bool += CollectScore;
+            On.ScavengerAI.RealWeapon += RealWeapon;
+            On.ScavengerAI.CheckThrow += CheckThrow;
+            On.ScavengerAbstractAI.InitGearUp += InitGear;
+        }
+        catch
+        {
+            Disable();
+            throw;
+        }
     }
     internal static void Disable()
     {
@@ -139,21 +150,56 @@ internal static class LanceScavengerHooks
     private static void Relationships(On.StaticWorld.orig_InitStaticWorld orig)
     {
         orig();
-        CreatureTemplate lance = StaticWorld.GetCreatureTemplate(LanceScavengerDefinition.Type);
-        CreatureTemplate ordinary = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Scavenger);
-        if (lance == null || ordinary == null) return;
-        foreach (CreatureTemplate other in StaticWorld.creatureTemplates)
+
+        if (CreatureRegistry.IsQuarantined(LanceScavengerDefinition.Type))
         {
-            if (other == null) continue;
-            lance.relationships[other.type.Index] = ordinary.CreatureRelationship(other).Duplicate();
-            other.relationships[lance.type.Index] = other.CreatureRelationship(ordinary).Duplicate();
-            if (other.TopAncestor().type == CreatureTemplate.Type.Scavenger)
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "LanceScavenger relationships were skipped because its creature template is quarantined.");
+            return;
+        }
+
+        try
+        {
+            CreatureTemplate lance = StaticWorld.GetCreatureTemplate(LanceScavengerDefinition.Type);
+            CreatureTemplate ordinary = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Scavenger);
+            if (lance?.relationships == null || ordinary?.relationships == null) return;
+
+            foreach (CreatureTemplate other in StaticWorld.creatureTemplates)
             {
-                lance.relationships[other.type.Index] = new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Pack, 1f);
-                other.relationships[lance.type.Index] = new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Pack, 1f);
+                if (other?.type == null ||
+                    other.relationships == null ||
+                    other.type.Index < 0 ||
+                    other.type.Index >= lance.relationships.Length ||
+                    lance.type == null ||
+                    lance.type.Index < 0 ||
+                    lance.type.Index >= other.relationships.Length)
+                {
+                    continue;
+                }
+
+                lance.relationships[other.type.Index] = ordinary.CreatureRelationship(other).Duplicate();
+                other.relationships[lance.type.Index] = other.CreatureRelationship(ordinary).Duplicate();
+                if (other.TopAncestor().type == CreatureTemplate.Type.Scavenger)
+                {
+                    lance.relationships[other.type.Index] =
+                        new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Pack, 1f);
+                    other.relationships[lance.type.Index] =
+                        new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Pack, 1f);
+                }
+                else if (other.smallCreature)
+                {
+                    lance.relationships[other.type.Index] =
+                        new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Ignores, 0f);
+                }
             }
-            else if (other.smallCreature)
-                lance.relationships[other.type.Index] = new CreatureTemplate.Relationship(CreatureTemplate.Relationship.Type.Ignores, 0f);
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "LanceScavenger/StaticWorld.InitStaticWorld",
+                error);
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "LanceScavenger relationship setup failed and was isolated so StaticWorld startup can continue.");
         }
     }
 }
