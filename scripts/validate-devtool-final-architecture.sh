@@ -251,6 +251,18 @@ if ! grep -Fq 'DevToolSubsystemCoordinator.ResetRuntimeState()' "$legacy_control
   exit 1
 fi
 
+# History document identity must include its owning World, and a same-name document backed by a
+# replacement runtime object graph must drop stale direct-reference history before edits continue.
+if ! grep -Fq 'worldName + "/" + roomName' "$runtime"; then
+  echo "Room history identity is not scoped by World." >&2
+  exit 1
+fi
+if ! grep -Fq 'bool documentInstanceReplaced' "$runtime" ||
+   ! grep -Fq 'History.ClearActive();' "$runtime"; then
+  echo "DevTool can retain stale history across a same-name runtime document replacement." >&2
+  exit 1
+fi
+
 # Compatibility diagnostics are session/lifetime state and must be reset together. The loaded-type
 # inventory is intentionally process-level and is therefore not required here.
 required_diagnostic_resets=(
