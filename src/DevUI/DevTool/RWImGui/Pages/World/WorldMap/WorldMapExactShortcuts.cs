@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
@@ -12,7 +11,9 @@ using ImGuiNET;
 using RWCustom;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+/// <summary>
 /// Exact shortcut-mouth resolver for the World Map.
 ///
 /// Live MapPage/room-file work is pumped by BridgePlugin on Unity's main thread. RWImGUI Draw reads

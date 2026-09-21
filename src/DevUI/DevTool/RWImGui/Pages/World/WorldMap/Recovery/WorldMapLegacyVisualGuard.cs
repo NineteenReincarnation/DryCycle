@@ -1,13 +1,14 @@
 using System;
 using System.Collections.Generic;
-using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+/// <summary>
 /// Keeps the vanilla MapPage alive as a data source while suppressing its Futile presentation after
 /// refreshes. BridgePlugin owns enable/disable and LateUpdate scheduling.
 /// </summary>

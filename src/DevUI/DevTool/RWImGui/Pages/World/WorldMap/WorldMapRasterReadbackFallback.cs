@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
-using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
 
-namespace DryCycle.DevUI.DevTool.RWImGui;\n\n/// <summary>
+namespace DryCycle.DevUI.DevTool.RWImGui;
+
+/// <summary>
 /// Main-thread compatibility service that supplies semantic minimap raster data when Futile's atlas
 /// is renderable but not CPU-readable. Results are cached and published through the geometry hub.
 /// </summary>
