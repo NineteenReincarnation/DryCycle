@@ -19,8 +19,15 @@ public sealed class PlayerMapRenderRevisionGuardPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Render Revision Guard";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapRenderRevisionGuard.Enable(Logger);
-    private void OnDisable() => PlayerMapRenderRevisionGuard.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapRenderRevisionGuard.Enable(Logger),
+            PlayerMapRenderRevisionGuard.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapRenderRevisionGuard.Disable);
 }
 
 internal static class PlayerMapRenderRevisionGuard
