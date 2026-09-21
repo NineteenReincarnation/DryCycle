@@ -121,6 +121,16 @@ if ! grep -Fq 'PlayerMapWorkspaceRuntime.MarkDirty(session)' "src/DevUI/DevTool/
   exit 1
 fi
 
+# LINEAGE must validate the exact final world.txt text before committing. A destructive post-save
+# reload can otherwise leave persistence and in-memory authoring state disagreeing.
+lineage="src/DevUI/DevTool/World/WorldLineageRegistry.cs"
+if ! grep -Fq 'TryParseText(' "$lineage" ||
+   ! grep -Fq 'out List<WorldLineageRecord> parsedRecords' "$lineage" ||
+   ! grep -Fq 'ReplaceLoadedRecords(parsedRecords, parsedNextId)' "$lineage"; then
+  echo "LINEAGE save no longer validates/rebuilds state before commit." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
