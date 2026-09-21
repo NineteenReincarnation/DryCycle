@@ -1,3 +1,4 @@
+using System;
 using DryCycle.Creatures.Platforming;
 
 namespace DryCycle.Registration;
@@ -32,11 +33,26 @@ internal static class DryCycleContent
             ItemRegistry.Enable();
             WalkableDynamicSurfaceRuntime.Enable();
         }
-        catch
+        catch (Exception error)
         {
-            Disable();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "DryCycleContent.Enable",
+                error,
+                RollbackPartialEnable);
             throw;
         }
+    }
+
+    private static void RollbackPartialEnable()
+    {
+        _enabled = false;
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "DryCycleContent.Enable/WalkableDynamicSurfaceRuntime.Disable",
+            WalkableDynamicSurfaceRuntime.Disable);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "DryCycleContent.Enable/ItemRegistry.Disable",
+            ItemRegistry.Disable);
+        _resourcesLoaded = false;
     }
 
     internal static void Disable()
