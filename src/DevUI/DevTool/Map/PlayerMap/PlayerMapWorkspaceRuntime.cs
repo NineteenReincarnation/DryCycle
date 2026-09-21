@@ -288,7 +288,8 @@ internal static class PlayerMapWorkspaceRuntime
             return;
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        EnsureStateForPage(page, state);
+        if (!EnsureStateForPage(page, state))
+            return;
 
         RoomMapBakeCache.ProcessPending(4);
 
@@ -314,7 +315,8 @@ internal static class PlayerMapWorkspaceRuntime
         if (PlayerMapIncrementalRenderHooks.TryHandleExecute(session, command)) return;
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        EnsureStateForPage(page, state);
+        if (!EnsureStateForPage(page, state))
+            return;
 
         switch (command.Kind)
         {
@@ -373,7 +375,13 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        EnsureStateForPage(self, state);
+        if (!EnsureStateForPage(self, state))
+        {
+            Plugin.Logger?.LogWarning(
+                "Player Map save was blocked because unsaved authoring state belongs to region " +
+                state.Region + ".");
+            return;
+        }
         if (!PlayerMapConfigBuildPipeline.Save(self, state, out string error))
         {
             state.RenderReport = PlayerMapRenderReport.Failure("Map config save failed", error);
@@ -426,26 +434,41 @@ internal static class PlayerMapWorkspaceRuntime
         }
     }
 
-    private static void EnsureStateForPage(MapPage page, PlayerMapSessionState state)
+    private static bool EnsureStateForPage(MapPage page, PlayerMapSessionState state)
     {
         if (page?.world == null || state == null)
-            return;
+            return false;
 
         string region = page.world.name ?? string.Empty;
-        if (!state.Initialized ||
-            !string.Equals(state.Region, region, StringComparison.OrdinalIgnoreCase))
+        if (!state.Initialized)
         {
             InitializeState(page, state);
-            return;
+            return true;
+        }
+
+        if (!string.Equals(state.Region, region, StringComparison.OrdinalIgnoreCase))
+        {
+            if (state.Dirty)
+            {
+                state.RenderReport = PlayerMapRenderReport.Failure(
+                    "Unsaved Player Map belongs to another region",
+                    "Unsaved authoring state for " + state.Region +
+                    " is being retained. Return to that region and save or undo it before editing " +
+                    region + ".");
+                return false;
+            }
+
+            InitializeState(page, state);
+            return true;
         }
 
         if (ReferenceEquals(state.Page, page))
-            return;
+            return true;
 
         if (!state.Dirty)
         {
             InitializeState(page, state);
-            return;
+            return true;
         }
 
         // The DevUI/MapPage instance can be rebuilt while the logical region remains the same.
@@ -464,6 +487,7 @@ internal static class PlayerMapWorkspaceRuntime
         Plugin.Logger?.LogInfo(
             "Player Map rebound unsaved authoring state to a replacement MapPage for region " +
             region + ".");
+        return true;
     }
 
     private static void InitializeState(MapPage page, PlayerMapSessionState state)
@@ -715,7 +739,8 @@ internal static class PlayerMapWorkspaceRuntime
     {
         if (session?.Owner?.activePage is not MapPage page) return false;
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        if (!ReferenceEquals(state.Page, page)) InitializeState(page, state);
+        if (!EnsureStateForPage(page, state))
+            return false;
         RoomPanel panel = FindRoomPanel(page, roomIndex);
         if (panel == null || !state.Rooms.TryGetValue(roomIndex, out PlayerMapRoomState roomState)) return false;
         roomState.Mode = value.Mode;
@@ -869,8 +894,7 @@ internal static class PlayerMapWorkspaceRuntime
     {
         if (session?.Owner?.activePage is not MapPage page) return null;
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        EnsureStateForPage(page, state);
-        return state;
+        return EnsureStateForPage(page, state) ? state : null;
     }
 
     private static PlayerMapDefMaterialState FindDef(PlayerMapSessionState state, int id) =>
