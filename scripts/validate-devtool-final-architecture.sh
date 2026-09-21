@@ -263,6 +263,16 @@ if ! grep -Fq 'bool documentInstanceReplaced' "$runtime" ||
   exit 1
 fi
 
+# Undo/Redo failures must never move history stacks or escape the editor frame. Composite history
+# must also attempt compensating rollback for children already applied in the failed operation.
+history="src/DevUI/DevTool/History/EditorHistoryService.cs"
+if ! grep -Fq "history stack was left unchanged" "$history" ||
+   ! grep -Fq "Composite history undo rollback failed" "$history" ||
+   ! grep -Fq "Composite history redo rollback failed" "$history"; then
+  echo "Editor history lost failure-independent Undo/Redo semantics." >&2
+  exit 1
+fi
+
 # Compatibility diagnostics are session/lifetime state and must be reset together. The loaded-type
 # inventory is intentionally process-level and is therefore not required here.
 required_diagnostic_resets=(
