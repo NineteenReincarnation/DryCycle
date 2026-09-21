@@ -19,8 +19,15 @@ public sealed class WorldMapRenderOrderPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Render Order";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapRenderOrder.Enable(Logger);
-    private void OnDisable() => WorldMapRenderOrder.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapRenderOrder.Enable(Logger),
+            WorldMapRenderOrder.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapRenderOrder.Disable);
 }
 
 internal static class WorldMapRenderOrder
