@@ -80,6 +80,16 @@ if ! grep -Fq 'PlayerMapWorkspaceRuntime.RetainDirtyState(DevToolSessionHub.Curr
   exit 1
 fi
 
+# Core World authoring files must commit through the rollback-safe writer. A failed final move
+# may never leave world.txt, Properties.txt or WorldTopology.json deleted with only a backup left.
+if ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "$world_text" ||
+   ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllLines' "$room_attr" ||
+   ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "src/DevUI/DevTool/World/WorldTopologyRegistry.cs" ||
+   ! grep -Fq 'World authoring rollback could not restore' "$resolver"; then
+  echo "World authoring files lost rollback-safe save semantics." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
