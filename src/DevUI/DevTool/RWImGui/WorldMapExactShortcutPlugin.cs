@@ -33,8 +33,15 @@ public sealed class WorldMapExactShortcutPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Exact Shortcuts";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapExactShortcuts.Enable(Logger);
-    private void OnDisable() => WorldMapExactShortcuts.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapExactShortcuts.Enable(Logger),
+            WorldMapExactShortcuts.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapExactShortcuts.Disable);
 }
 
 internal static class WorldMapExactShortcuts
