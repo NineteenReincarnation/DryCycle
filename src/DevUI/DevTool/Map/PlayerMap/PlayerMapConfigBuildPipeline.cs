@@ -6,6 +6,7 @@ using BepInEx;
 using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.World;
 using RWCustom;
 using UnityEngine;
 
@@ -95,6 +96,12 @@ internal static class PlayerMapConfigBuildPipeline
             error = "MapPage.filePath is empty.";
             return false;
         }
+        if (!WorldAuthoringPathResolver.TryResolveMapConfigSource(
+                page.world.name,
+                page.filePath,
+                out string authoringPath,
+                out error))
+            return false;
 
         try
         {
@@ -123,8 +130,8 @@ internal static class PlayerMapConfigBuildPipeline
                 ? BuildStreamLines(page.world.voidSpawnWorldAI.worldMigrationStreams, canonAverage)
                 : new List<string>();
 
-            List<string> source = File.Exists(page.filePath)
-                ? new List<string>(File.ReadAllLines(page.filePath))
+            List<string> source = File.Exists(authoringPath)
+                ? new List<string>(File.ReadAllLines(authoringPath))
                 : new List<string>();
             List<string> output = new(
                 source.Count + roomLines.Count + defLines.Count + connectionLines.Count + streamLines.Count + 2);
@@ -171,8 +178,8 @@ internal static class PlayerMapConfigBuildPipeline
                 InsertBlock(output, ref insertion, streamLines);
             }
 
-            IReadOnlyList<string> filtered = PlayerMapDisabledConfigFilter.Filter(page.filePath, output);
-            AtomicWriteAllLines(page.filePath, filtered);
+            IReadOnlyList<string> filtered = PlayerMapDisabledConfigFilter.Filter(authoringPath, output);
+            AtomicWriteAllLines(authoringPath, filtered);
             PlayerMapMigrationDirtyBridge.OnSaveSuccess(page);
             return true;
         }
