@@ -28,9 +28,16 @@ public sealed class WorldCreatureCatalogRuntimePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool Creature Catalog Runtime";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldCreatureCatalogPicker.Initialize(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldCreatureCatalogPicker.Initialize(Logger),
+            WorldCreatureCatalogPicker.Shutdown);
     private void Update() => WorldCreatureCatalogPicker.PumpMainThread();
-    private void OnDisable() => WorldCreatureCatalogPicker.Shutdown();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldCreatureCatalogPicker.Shutdown);
 }
 
 internal static class WorldCreatureCatalogPicker
