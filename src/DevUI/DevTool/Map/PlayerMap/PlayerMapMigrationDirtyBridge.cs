@@ -36,8 +36,15 @@ internal static class PlayerMapMigrationDirtyBridge
 
     internal static void MarkDirty(EditorSession session)
     {
-        if (enabled && session != null)
-            states.GetValue(session, _ => new State()).Dirty = true;
+        if (!enabled || session == null)
+            return;
+
+        states.GetValue(session, _ => new State()).Dirty = true;
+
+        // Migration-stream edits are part of the same persisted map document as room positions and
+        // Def_Mat. Mirror the dirty bit into the canonical workspace state so Core Save failure
+        // propagation and cross-DevTool-session retention cannot lose this edit class.
+        PlayerMapWorkspaceRuntime.MarkDirty(session);
     }
 
     internal static void OnSaveSucceeded(MapPage page)
