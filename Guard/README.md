@@ -1,30 +1,29 @@
 # Guard
 
-DryCycle 的 Guard 统一放在这里。Guard 只保护已经确认的重要不变量，不再按开发阶段、任务编号或历史实现细节无限增殖。
+DryCycle 的 Guard 统一放在这里。Guard 只保护能够长期、客观、低误报地静态验证的硬不变量，不按开发阶段、任务编号、具体功能或历史实现细节增殖。
 
-## 分类
+## 当前结构
 
-- `build-compile.sh`：构建契约、C# 语法、前后端程序集边界。
-- `devtool-architecture.sh`：DevTool 公共 API、页面/视图、Factory、Gizmo、Sound/Trigger、Objects 等架构边界。
-- `feature-specific.sh`：确实需要独立保留的功能级回归约束，目前主要是 DesertBatfly。
-- `tools/devtool-local.ps1`：本地 DevTool 构建验证工具，不作为一个独立 Guard 类别。
+- `build-compile.sh`：构建契约、C# 语法、部署隔离和可选前端依赖方向。
+- `tools/devtool-local.ps1`：需要本地 Rain World 环境的 DevTool 验证工具，不是独立 Guard 类别。
 - `run-all.sh`：本地统一入口。
+
+功能行为、存档兼容、作者格式兼容、启动/回滚语义和性能预算应通过对应测试、真实构建、游戏运行或性能分析验证，不放进按功能增长的字符串 Guard。
 
 ## CI
 
-GitHub Actions 只能从仓库根目录的 `.github/workflows/` 自动发现工作流，因此仓库只保留一个很薄的 CI 入口：
+GitHub Actions 入口位于：
 
 `.github/workflows/guard.yml`
 
-它不保存具体 Guard 规则，只负责调用本目录的分类 Guard。以后新增规则应优先加入现有分类；只有出现新的长期不变量类别时才新增分类。
+CI 只调用当前有效的 Guard 和可在托管环境执行的验证。需要真实 Rain World 程序集、游戏启动或运行时环境的检查，应保留为本地或专门的高保真验证步骤，不用伪造环境换取表面通过。
 
 ## 原则
 
-Hook/Detour 的使用取舍属于工程设计规范，见仓库根目录 `AGENTS.md`；需要理解上下文的设计判断不做成字符串 Guard。
-
+Hook/Detour 等设计取舍以及更广泛的工程约束见仓库根目录 `AGENTS.md`；需要理解上下文的设计判断不做成字符串 Guard。
 
 1. 编译和真实运行验证的优先级高于静态字符串检查。
-2. Guard 保护行为/架构不变量，不保护某次重构时的私有方法名、调用顺序或文件布局。
-3. 同一不变量只能有一个权威 Guard，避免重复检查。
-4. 功能被重构后，先判断不变量是否仍成立，再修改 Guard；不要为了让旧 Guard 通过而恢复旧实现。
-5. 失败信息必须指出违反了什么不变量，尽量给出具体文件或路径。
+2. Guard 只保护硬不变量，不保护私有方法名、调用顺序、文件布局或某次重构的实现快照。
+3. 同一不变量只能有一个权威检查，避免重复验证。
+4. 功能重构后先判断不变量是否仍成立，不为了让旧 Guard 通过而恢复旧实现。
+5. 无法可靠静态证明的行为，不应包装成 Guard 制造假安全。
