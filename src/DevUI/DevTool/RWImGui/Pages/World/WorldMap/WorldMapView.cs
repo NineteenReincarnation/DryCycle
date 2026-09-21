@@ -181,7 +181,6 @@ internal static class WorldMapView
         }
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
-        WorldMapRetainedV2Phase0.DrawToolbar();
         WorldMapRetainedV2Runtime.DrawToolbarDiagnostics();
     }
 
@@ -204,8 +203,6 @@ internal static class WorldMapView
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
         if (canvasSize.X < 80f || canvasSize.Y < 80f) return;
 
-        long phase0StartedAt = WorldMapRetainedV2Phase0.BeginMapFrame();
-
         ImGui.InvisibleButton("##WorldMapCanvasInput", canvasSize);
         bool canvasHovered = ImGui.IsItemHovered();
         ImGuiIOPtr io = ImGui.GetIO();
@@ -217,8 +214,6 @@ internal static class WorldMapView
         }
 
         bool viewportInteraction = false;
-        bool panInteraction = false;
-        bool zoomInteraction = false;
         if (canvasHovered && Math.Abs(io.MouseWheel) > 0.0001f && linkingRoom < 0)
         {
             float oldZoom = zoom;
@@ -227,7 +222,6 @@ internal static class WorldMapView
             Num.Vector2 worldAtMouse = (mouseInCanvas - pan) / oldZoom;
             zoom = next;
             pan = mouseInCanvas - worldAtMouse * zoom;
-            zoomInteraction = true;
             viewportInteraction = true;
         }
 
@@ -235,7 +229,6 @@ internal static class WorldMapView
             (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || ImGui.IsMouseDragging(ImGuiMouseButton.Right)))
         {
             pan += io.MouseDelta;
-            panInteraction = true;
             viewportInteraction = true;
         }
 
@@ -352,11 +345,6 @@ internal static class WorldMapView
             layerVisible);
         WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
-        WorldMapRetainedV2Phase0.EndMapFrame(
-            phase0StartedAt,
-            panInteraction,
-            zoomInteraction,
-            draggingRoom >= 0);
     }
 
     private static void UpdateActiveDragBeforeDraw()

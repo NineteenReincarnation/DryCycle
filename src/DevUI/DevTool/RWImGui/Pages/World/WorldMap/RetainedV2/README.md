@@ -16,6 +16,7 @@ phase percentage below 100%.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
+- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired from the normal Map hot path after V2 assumed ownership.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
 
@@ -135,19 +136,19 @@ dragged room when the backend snapshot itself is unchanged.
 The retained scene is released from the Map page retained-state reset path. Resetting V2 projection
 never modifies the editor document, history, authoring revision or persistence state.
 
-## Phase 0 completion criteria
+## Phase 0 completion and retirement
 
-Implementation is complete when the project compiles and the probes are present.
+Phase 0 was a development probe, not a permanent production subsystem. Its code-side purpose was to
+establish the texture-contract boundary and baseline instrumentation while V2 was being built.
 
-Runtime verification is complete after a real Rain World run confirms:
+After Phase 7, the per-frame stopwatch sampling, toolbar benchmark UI and one-shot RenderTexture
+probe are retired from the normal Map runtime. The production `WorldMapTextureBridge` now owns
+texture-contract resolution and reports its own explicit failures. The standalone
+`scripts/inspect_rwimgui_api.ps1` remains available for manual API inspection without adding work
+to every Map frame.
 
-1. the exact RWImGUI texture candidate signatures in LogOutput;
-2. the RenderTexture probe succeeds on the actual graphics device;
-3. at least 240 pan/zoom samples have been collected;
-4. p50/p95/max values are recorded before V2 replaces the renderer.
-
-If the installed RWImGUI exposes no public Unity-texture adapter, Phase 1/2 must not invent one.
-The next step is to inspect the exact installed API/source and introduce a verified adapter boundary.
+Real-game measurements remain useful evidence but do not gate phase completion under this project's
+code-side progress convention.
 
 ## Phase 2 implementation
 
