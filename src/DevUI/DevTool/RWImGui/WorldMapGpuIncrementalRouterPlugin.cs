@@ -19,8 +19,15 @@ public sealed class WorldMapGpuIncrementalRouterPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Incremental Router";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuIncrementalRouter.Enable(Logger);
-    private void OnDisable() => WorldMapGpuIncrementalRouter.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuIncrementalRouter.Enable(Logger),
+            WorldMapGpuIncrementalRouter.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuIncrementalRouter.Disable);
 }
 
 internal static class WorldMapGpuIncrementalRouter
