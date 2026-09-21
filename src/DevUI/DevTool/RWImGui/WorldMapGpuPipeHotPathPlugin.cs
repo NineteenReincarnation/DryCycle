@@ -17,8 +17,9 @@ public sealed class WorldMapGpuPipeHotPathPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Pipe Hot Path";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo("GPU World Map pipe hot path is running in baseline mode; no self-detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("GPU World Map pipe hot path is running in baseline mode; no self-detour attached."),
+            null);
 }
