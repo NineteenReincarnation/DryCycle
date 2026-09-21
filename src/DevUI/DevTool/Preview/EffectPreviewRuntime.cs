@@ -141,6 +141,11 @@ internal static class EffectPreviewRuntime
     private const double HoverDelaySeconds = 0.18;
     private const float PreviewAmount = 0.50f;
 
+    // Stage 1 (temporary RoomEffect) is safe enough to run as normal editor behavior. Stage 2 owns
+    // arbitrary runtime/Futile/camera state and still contains RuntimeDetour-based interception.
+    // Keep that layer explicitly disabled until those detours are replaced by owned lifecycle APIs.
+    private static readonly bool AdvancedPreviewEnabled = false;
+
     private static bool enabled;
     private static global::Room activeRoom;
     private static RoomSettings activeSettings;
@@ -162,8 +167,16 @@ internal static class EffectPreviewRuntime
     internal static void Enable()
     {
         if (enabled) return;
-        EffectPreviewObjectCapture.Enable();
-        EffectPreviewRuntimeVisualOwnership.Enable();
+
+        // Stage-one preview needs no runtime hooks: it only inserts/removes an ordinary non-saving
+        // RoomEffect on the game thread. Advanced capture hooks are installed only when that layer
+        // is deliberately enabled.
+        if (AdvancedPreviewEnabled)
+        {
+            EffectPreviewObjectCapture.Enable();
+            EffectPreviewRuntimeVisualOwnership.Enable();
+        }
+
         enabled = true;
     }
 
@@ -173,8 +186,11 @@ internal static class EffectPreviewRuntime
         Reset();
         EffectPreviewSafetyRegistry.Clear();
         EffectPreviewKnowledgeCache.Clear();
-        EffectPreviewRuntimeVisualOwnership.Disable();
-        EffectPreviewObjectCapture.Disable();
+        if (AdvancedPreviewEnabled)
+        {
+            EffectPreviewRuntimeVisualOwnership.Disable();
+            EffectPreviewObjectCapture.Disable();
+        }
         enabled = false;
     }
 
@@ -337,10 +353,12 @@ internal static class EffectPreviewRuntime
             activeType = typeName;
             ownership = new EffectPreviewOwnershipTransaction(room);
 
-            HashSet<UpdatableAndDeletable> runtimeVisualBaseline =
-                EffectPreviewRuntimeVisualOwnership.CaptureBaseline(room);
+            HashSet<UpdatableAndDeletable> runtimeVisualBaseline = AdvancedPreviewEnabled
+                ? EffectPreviewRuntimeVisualOwnership.CaptureBaseline(room)
+                : null;
 
-            bool blocked = EffectPreviewSafetyRegistry.IsAdvancedPreviewBlocked(typeName, out _);
+            bool blocked = !AdvancedPreviewEnabled ||
+                           EffectPreviewSafetyRegistry.IsAdvancedPreviewBlocked(typeName, out _);
             bool stageOneCached = EffectPreviewKnowledgeCache.ShouldUseStageOneOnly(room, typeName);
             if (stageOneCached)
                 blocked = true;
