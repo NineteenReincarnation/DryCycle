@@ -17,8 +17,9 @@ public sealed class WorldMapGpuVisibilityGatePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Visibility Gate";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo("GPU World Map visibility gate is running in baseline mode; no self-detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("GPU World Map visibility gate is running in baseline mode; no self-detour attached."),
+            null);
 }
