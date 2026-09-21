@@ -288,10 +288,7 @@ internal static class PlayerMapWorkspaceRuntime
             return;
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        bool identityChanged = !ReferenceEquals(state.Page, page) ||
-                               !string.Equals(state.Region, page.world.name ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        if (identityChanged)
-            InitializeState(page, state);
+        EnsureStateForPage(page, state);
 
         RoomMapBakeCache.ProcessPending(4);
 
@@ -317,7 +314,7 @@ internal static class PlayerMapWorkspaceRuntime
         if (PlayerMapIncrementalRenderHooks.TryHandleExecute(session, command)) return;
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        if (!ReferenceEquals(state.Page, page)) InitializeState(page, state);
+        EnsureStateForPage(page, state);
 
         switch (command.Kind)
         {
@@ -376,7 +373,7 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        if (!ReferenceEquals(state.Page, self)) InitializeState(self, state);
+        EnsureStateForPage(self, state);
         if (!PlayerMapConfigBuildPipeline.Save(self, state, out string error))
         {
             state.RenderReport = PlayerMapRenderReport.Failure("Map config save failed", error);
@@ -427,6 +424,46 @@ internal static class PlayerMapWorkspaceRuntime
         {
             page.filePath = readPath;
         }
+    }
+
+    private static void EnsureStateForPage(MapPage page, PlayerMapSessionState state)
+    {
+        if (page?.world == null || state == null)
+            return;
+
+        string region = page.world.name ?? string.Empty;
+        if (!state.Initialized ||
+            !string.Equals(state.Region, region, StringComparison.OrdinalIgnoreCase))
+        {
+            InitializeState(page, state);
+            return;
+        }
+
+        if (ReferenceEquals(state.Page, page))
+            return;
+
+        if (!state.Dirty)
+        {
+            InitializeState(page, state);
+            return;
+        }
+
+        // The DevUI/MapPage instance can be rebuilt while the logical region remains the same.
+        // Preserve unsaved authoring state and rebind it to the new visual page. Mark mirrors as
+        // unknown so SynchronizeRooms pushes our retained values into the replacement panels rather
+        // than adopting their freshly loaded disk positions as an external edit.
+        state.Page = page;
+        state.Region = region;
+        state.ObservedBakeRevision = -1;
+        state.ObservedSelectedRoom = int.MinValue;
+        foreach (PlayerMapRoomState roomState in state.Rooms.Values)
+            roomState.HasMirror = false;
+
+        SynchronizeRooms(page, state);
+        Publish(page, state, MapEditorPresentationHub.Current?.SelectedRoomIndex ?? -1);
+        Plugin.Logger?.LogInfo(
+            "Player Map rebound unsaved authoring state to a replacement MapPage for region " +
+            region + ".");
     }
 
     private static void InitializeState(MapPage page, PlayerMapSessionState state)
@@ -832,7 +869,7 @@ internal static class PlayerMapWorkspaceRuntime
     {
         if (session?.Owner?.activePage is not MapPage page) return null;
         PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
-        if (!ReferenceEquals(state.Page, page)) InitializeState(page, state);
+        EnsureStateForPage(page, state);
         return state;
     }
 
