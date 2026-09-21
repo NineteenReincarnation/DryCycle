@@ -48,6 +48,7 @@ internal sealed class WorldMapRenderTextureSurface
     private bool rollbackRequested;
     private bool releaseRetiredRequested;
     private bool initialized;
+    private int presentReaders;
 
     private string error = string.Empty;
     private ManualLogSource log;
@@ -124,6 +125,7 @@ internal sealed class WorldMapRenderTextureSurface
         RenderTexture current;
         bool currentValid;
         bool hasUnconfirmedCandidate;
+        bool frontInUse;
         int currentWidth;
         int currentHeight;
         int localRejectedWidth;
@@ -135,6 +137,7 @@ internal sealed class WorldMapRenderTextureSurface
             current = presented;
             currentValid = presentedValid;
             hasUnconfirmedCandidate = retired != null;
+            frontInUse = presentReaders > 0;
             currentWidth = width;
             currentHeight = height;
             localRejectedWidth = rejectedWidth;
@@ -167,6 +170,13 @@ internal sealed class WorldMapRenderTextureSurface
             if (target == null)
                 return false;
             ownsCandidate = true;
+        }
+        else if (frontInUse)
+        {
+            // Do not block Unity Update behind RWImGUI Present and do not render into a texture that
+            // the Present thread is currently consuming. The revision remains dirty, so the next
+            // main-thread frame retries automatically.
+            return false;
         }
 
         if (target == null)
@@ -244,59 +254,64 @@ internal sealed class WorldMapRenderTextureSurface
             current = presented;
             fallback = retired;
             valid = presentedValid && current != null;
+            if (valid)
+                presentReaders++;
         }
 
         if (!valid)
             return false;
 
-        if (bridge.TryPresent(draw, current, min, max))
+        try
         {
-            if (fallback != null)
+            if (bridge.TryPresent(draw, current, min, max))
             {
-                lock (gate)
+                if (fallback != null)
                 {
-                    if (ReferenceEquals(presented, current) &&
-                        ReferenceEquals(retired, fallback))
-                        releaseRetiredRequested = true;
+                    lock (gate)
+                    {
+                        if (ReferenceEquals(presented, current) &&
+                            ReferenceEquals(retired, fallback))
+                            releaseRetiredRequested = true;
+                    }
+                }
+                return true;
+            }
+
+            if (fallback == null)
+                return false;
+
+            // The candidate failed to bind/present. Draw the old committed surface for this frame,
+            // then let Unity's main thread atomically restore it and dispose the rejected candidate.
+            if (!bridge.TryPresent(draw, fallback, min, max))
+                return false;
+
+            lock (gate)
+            {
+                if (ReferenceEquals(presented, current) &&
+                    ReferenceEquals(retired, fallback))
+                {
+                    rollbackRequested = true;
+                    releaseRetiredRequested = false;
                 }
             }
+
             return true;
         }
-
-        if (fallback == null)
-            return false;
-
-        // The candidate failed to bind/present. Draw the old committed surface for this frame, then
-        // let Unity's main thread atomically restore it and dispose the rejected candidate.
-        if (!bridge.TryPresent(draw, fallback, min, max))
-            return false;
-
-        lock (gate)
+        finally
         {
-            if (ReferenceEquals(presented, current) &&
-                ReferenceEquals(retired, fallback))
-            {
-                rollbackRequested = true;
-                releaseRetiredRequested = false;
-            }
+            lock (gate)
+                presentReaders = Math.Max(0, presentReaders - 1);
         }
-
-        return true;
     }
 
     internal void Reset()
     {
-        RenderTexture front;
-        RenderTexture old;
-        RenderTexture[] queued;
         GameObject oldCamera;
 
         lock (gate)
         {
-            front = presented;
-            old = retired;
-            queued = pendingRelease.ToArray();
-            pendingRelease.Clear();
+            QueueReleaseLocked(presented);
+            QueueReleaseLocked(retired);
             oldCamera = cameraObject;
 
             presented = null;
@@ -319,20 +334,11 @@ internal sealed class WorldMapRenderTextureSurface
             initialized = false;
         }
 
+        // Bridge.Reset serializes with an in-flight bridge presentation. Texture destruction itself
+        // remains main-thread-only and is delayed if the outer surface Present call still holds a
+        // reader reference after returning from the bridge.
         bridge.Reset();
-
-        // Reset is owned by the frontend/main-thread lifecycle. Do not destroy Unity resources from
-        // TryPresent; all releases happen here or in the main-thread pump.
-        ReleaseTarget(front);
-        if (!ReferenceEquals(old, front))
-            ReleaseTarget(old);
-        for (int i = 0; i < queued.Length; i++)
-        {
-            RenderTexture target = queued[i];
-            if (ReferenceEquals(target, front) || ReferenceEquals(target, old))
-                continue;
-            ReleaseTarget(target);
-        }
+        DrainPendingReleasesMainThread();
 
         if (oldCamera != null)
             UnityEngine.Object.Destroy(oldCamera);
@@ -478,7 +484,7 @@ internal sealed class WorldMapRenderTextureSurface
         RenderTexture[] release;
         lock (gate)
         {
-            if (pendingRelease.Count == 0)
+            if (pendingRelease.Count == 0 || presentReaders > 0)
                 return;
 
             release = pendingRelease.ToArray();

@@ -509,6 +509,12 @@ never executed while holding the same lock, so navigation cannot stall because t
 on an entire render/present operation. RenderTexture release/destruction is deferred back to the
 Unity main-thread pump; Present only reports accept/reject feedback.
 
+Present holds a lightweight reader reference after it snapshots the current front/fallback handles.
+The Unity pump never waits for that reader: it postpones destruction while a reader exists, and if
+the front texture itself is being presented it skips that render attempt and retries on the next
+dirty frame. This prevents use-after-release and render/present resource races without putting a
+blocking lock back on navigation.
+
 A failed candidate binding does not mutate/destroy Unity resources from Present. Present draws the
 retained last-known-good surface and posts rollback feedback; the next main-thread pump restores the
 old front target, disposes the rejected target, refreshes it for the current view, and retries the

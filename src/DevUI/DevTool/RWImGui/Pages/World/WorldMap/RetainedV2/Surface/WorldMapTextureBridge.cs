@@ -18,6 +18,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal sealed class WorldMapTextureBridge
 {
+    private readonly object gate = new();
     private MethodInfo acquireMethod;
     private MethodInfo releaseMethod;
     private MethodInfo addImageMethod;
@@ -28,14 +29,32 @@ internal sealed class WorldMapTextureBridge
     private string error = string.Empty;
     private ManualLogSource log;
 
-    internal bool Available => resolved && acquireMethod != null && addImageMethod != null;
-    internal string Error => error;
+    internal bool Available
+    {
+        get
+        {
+            lock (gate)
+                return resolved && acquireMethod != null && addImageMethod != null;
+        }
+    }
+
+    internal string Error
+    {
+        get
+        {
+            lock (gate)
+                return error;
+        }
+    }
 
     internal void Initialize(ManualLogSource logger)
     {
-        if (resolved) return;
-        log = logger;
-        Resolve();
+        lock (gate)
+        {
+            if (resolved) return;
+            log = logger;
+            Resolve();
+        }
     }
 
     internal bool TryPresent(
@@ -44,8 +63,19 @@ internal sealed class WorldMapTextureBridge
         Num.Vector2 min,
         Num.Vector2 max)
     {
+        lock (gate)
+            return TryPresentCore(draw, texture, min, max);
+    }
+
+    private bool TryPresentCore(
+        ImDrawListPtr draw,
+        Texture texture,
+        Num.Vector2 min,
+        Num.Vector2 max)
+    {
         if (!resolved) Resolve();
-        if (!Available || texture == null) return false;
+        if (acquireMethod == null || addImageMethod == null || texture == null)
+            return false;
 
         try
         {
@@ -97,6 +127,12 @@ internal sealed class WorldMapTextureBridge
     }
 
     internal void Reset()
+    {
+        lock (gate)
+            ResetCore();
+    }
+
+    private void ResetCore()
     {
         ReleaseRegistered();
         acquireMethod = null;
