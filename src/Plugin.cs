@@ -55,44 +55,63 @@ internal sealed class Plugin : BaseUnityPlugin
     public void OnEnable()
     {
         Logger = base.Logger;
-        Iterators.IteratorLogBridge.Enable(Logger);
-        Iterators.IteratorHooks.Install();
-        Iterators.PwnIteratorExample.Enable();
 
-        if (!_contentRegistered)
+        try
         {
-            MossySpiderDefinition.Register();
-            MantleCrabDefinition.Register();
-            DB_Definition.Register();
-            LanceScavengerDefinition.Register();
-            _contentRegistered = true;
+            Iterators.IteratorLogBridge.Enable(Logger);
+            Iterators.IteratorHooks.Install();
+            Iterators.PwnIteratorExample.Enable();
+
+            if (!_contentRegistered)
+            {
+                MossySpiderDefinition.Register();
+                MantleCrabDefinition.Register();
+                DB_Definition.Register();
+                LanceScavengerDefinition.Register();
+                _contentRegistered = true;
+            }
+
+            DryCycleShaderAssets.Enable();
+
+            // Direct-number editing is a DevTools input facility, not a gameplay system.
+            // Install it as soon as the plugin is enabled so palette/day-night numeric fields
+            // are available even if a later OnModsInit subsystem fails before MiscRuntime.
+            // MiscRuntime.Enable keeps the same idempotent call for normal initialization.
+            PaletteDirectInputRuntime.Enable();
+
+            // Explicit endpoint routing is gameplay support for topology authored by the rebuilt WE.
+            // It must be active even when DevTools are closed so repeated room links and one-way links
+            // resolve correctly during normal play.
+            WorldTopologyRuntime.Enable();
+
+            CreatureCoreRegistry.Enable();
+            DryCycleContent.Enable();
+            ScavengerLanceHooks.Enable();
+            LanceScavengerHooks.Enable();
+            DB_Relationships.Enable();
+            DB_RainWorldHooks.Enable();
+            SpinebackLizardHooks.Enable();
+            DewPodAudioHooks.InitializeSoundIds();
+
+            On.RainWorld.PreModsInit += RainWorld_PreModsInit;
+            On.RainWorld.OnModsInit += RainWorld_OnModsInit;
+            On.RainWorld.PostModsInit += RainWorld_PostModsInit;
         }
+        catch (Exception error)
+        {
+            Logger?.LogError(
+                "DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.");
+            Logger?.LogError(error);
 
-        DryCycleShaderAssets.Enable();
-
-        // Direct-number editing is a DevTools input facility, not a gameplay system.
-        // Install it as soon as the plugin is enabled so palette/day-night numeric fields
-        // are available even if a later OnModsInit subsystem fails before MiscRuntime.
-        // MiscRuntime.Enable keeps the same idempotent call for normal initialization.
-        PaletteDirectInputRuntime.Enable();
-
-        // Explicit endpoint routing is gameplay support for topology authored by the rebuilt WE.
-        // It must be active even when DevTools are closed so repeated room links and one-way links
-        // resolve correctly during normal play.
-        WorldTopologyRuntime.Enable();
-
-        CreatureCoreRegistry.Enable();
-        DryCycleContent.Enable();
-        ScavengerLanceHooks.Enable();
-        LanceScavengerHooks.Enable();
-        DB_Relationships.Enable();
-        DB_RainWorldHooks.Enable();
-        SpinebackLizardHooks.Enable();
-        DewPodAudioHooks.InitializeSoundIds();
-
-        On.RainWorld.PreModsInit += RainWorld_PreModsInit;
-        On.RainWorld.OnModsInit += RainWorld_OnModsInit;
-        On.RainWorld.PostModsInit += RainWorld_PostModsInit;
+            try
+            {
+                OnDisable();
+            }
+            catch (Exception cleanupError)
+            {
+                Logger?.LogWarning("DryCycle bootstrap rollback encountered an additional error: " + cleanupError);
+            }
+        }
     }
 
     public void OnDisable()
