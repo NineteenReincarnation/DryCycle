@@ -44,6 +44,15 @@ if grep -Eq 'On\.Room\.AddObject[[:space:]]*[+\-]=' "$visual"; then
   exit 1
 fi
 
+# Rollback layers must remain failure-independent. An exception in ownership rollback may never
+# skip scene/shader cleanup or leave the temporary RoomEffect attached after active state is cleared.
+if ! grep -Fq 'RollbackAllOwnedState(typeName, reason);' "$runtime" ||
+   ! grep -Fq 'private static void RollbackAllOwnedState' "$runtime" ||
+   ! grep -Fq 'LoadedHookReplayProbe.RemoveExact(settings.effects, target);' "$runtime"; then
+  echo "Effect preview lost failure-independent rollback or exact temporary-effect cleanup." >&2
+  exit 1
+fi
+
 # RuntimeDetour is never allowed back into preview safety.
 if grep -R -n -E --include='*.cs'   'using[[:space:]]+MonoMod\.RuntimeDetour|MonoMod\.RuntimeDetour\.Hook|new[[:space:]]+Hook\('   "$preview_root" >/tmp/effect_preview_detours.txt 2>/dev/null; then
   echo "Effect preview regained RuntimeDetour usage:" >&2
