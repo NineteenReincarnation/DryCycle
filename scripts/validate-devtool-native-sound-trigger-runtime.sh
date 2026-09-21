@@ -194,9 +194,9 @@ fi
 
 # Hook order is semantic: quiescence installs generic compatibility hooks first, scheduler becomes the
 # inner DevUI layer second, and DevToolRuntime becomes the outer authoritative editor lifecycle last.
-q_line="$(grep -n 'LegacyDevUiQuiescenceController.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
-s_line="$(grep -n 'NativeSoundTriggerDevUiScheduler.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
-r_line="$(grep -n 'DevToolRuntime.Enable();' "$misc_runtime" | head -1 | cut -d: -f1)"
+q_line="$(grep -n 'LegacyDevUiQuiescenceController.Enable' "$misc_runtime" | head -1 | cut -d: -f1)"
+s_line="$(grep -n 'NativeSoundTriggerDevUiScheduler.Enable' "$misc_runtime" | head -1 | cut -d: -f1)"
+r_line="$(grep -n 'DevToolRuntime.Enable' "$misc_runtime" | head -1 | cut -d: -f1)"
 if [[ -z "$q_line" || -z "$s_line" || -z "$r_line" || "$q_line" -ge "$s_line" || "$s_line" -ge "$r_line" ]]; then
   echo "Sound/Trigger scheduler hook ordering changed; expected quiescence -> scheduler -> DevToolRuntime." >&2
   exit 1
