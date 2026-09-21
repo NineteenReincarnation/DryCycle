@@ -28,6 +28,15 @@ while IFS= read -r file; do
       fi
       continue
       ;;
+    src/DryCycle.AIObservatory.RWImGui/BridgePlugin.cs)
+      if ! grep -Fq '[DryCycle.Startup][AIObservatoryBridge][BEGIN] OnEnable' "$file" ||
+         ! grep -Fq '[DryCycle.Startup][AIObservatoryBridge][FAIL-OPTIONAL] OnEnable' "$file" ||
+         ! grep -Fq 'ShutdownBridgeState("RWImGUI bridge startup failed")' "$file"; then
+        echo "AI Observatory RWImGui bridge lost fail-open traced startup: $file" >&2
+        fail=1
+      fi
+      continue
+      ;;
   esac
 
   if ! grep -Fq 'AuxiliaryPluginStartupGuard.Enable' "$file"; then
