@@ -214,6 +214,18 @@ internal static class WorldRoomAttractionRegistry
         BumpRevision();
     }
 
+    internal static void ResetIfClean()
+    {
+        if (dirty)
+        {
+            Plugin.Logger?.LogWarning(
+                "World Room_Attr runtime state remains retained because unsaved Properties changes exist.");
+            return;
+        }
+
+        Reset();
+    }
+
     private static Dictionary<string, string> ParseRoom(string roomName)
     {
         Dictionary<string, string> result = new(StringComparer.Ordinal);
