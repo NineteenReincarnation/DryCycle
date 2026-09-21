@@ -31,8 +31,15 @@ public sealed class PlayerMapConfigBuildPipelinePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Config Build Pipeline";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapConfigBuildPipeline.Enable(Logger);
-    private void OnDisable() => PlayerMapConfigBuildPipeline.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapConfigBuildPipeline.Enable(Logger),
+            PlayerMapConfigBuildPipeline.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapConfigBuildPipeline.Disable);
 }
 
 internal static class PlayerMapConfigBuildPipeline
