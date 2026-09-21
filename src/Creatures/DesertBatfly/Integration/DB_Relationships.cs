@@ -60,8 +60,10 @@ internal static class DB_Relationships
 
         if (CreatureRegistry.IsQuarantined(DB_Definition.CreatureType))
         {
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "DesertBatfly relationships were skipped because its creature template is quarantined.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "DB_Relationships/StaticWorld.InitStaticWorld",
+                "SKIP-QUARANTINED",
+                "DesertBatfly template is quarantined");
             return;
         }
 
@@ -74,8 +76,10 @@ internal static class DB_Relationships
             global::DryCycle.StartupDiagnostics.Failure(
                 "DB_Relationships/StaticWorld.InitStaticWorld",
                 error);
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "DesertBatfly relationship setup failed and was isolated so StaticWorld startup can continue.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "DB_Relationships/StaticWorld.InitStaticWorld",
+                "ISOLATED",
+                "relationship setup failed; StaticWorld startup will continue");
         }
     }
 
