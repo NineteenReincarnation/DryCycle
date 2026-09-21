@@ -17,8 +17,9 @@ public sealed class WorldMapGpuPipeHashCachePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Pipe Hash Cache";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo("GPU World Map pipe hash cache is running in baseline mode; no self-detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("GPU World Map pipe hash cache is running in baseline mode; no self-detour attached."),
+            null);
 }
