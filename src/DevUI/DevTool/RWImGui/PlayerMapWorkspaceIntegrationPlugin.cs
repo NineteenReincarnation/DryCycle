@@ -18,8 +18,15 @@ public sealed class PlayerMapWorkspaceIntegrationPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Workspace Integration";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapFrontendLifecycle.Enable(Logger);
-    private void OnDisable() => PlayerMapFrontendLifecycle.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapFrontendLifecycle.Enable(Logger),
+            PlayerMapFrontendLifecycle.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapFrontendLifecycle.Disable);
 }
 
 internal static class PlayerMapWorkspaceIntegration
