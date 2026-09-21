@@ -14,7 +14,8 @@ phase percentage below 100%.
 - **Phase 3 — 100%**: world-space connection routing and retained route resources.
 - **Phase 4 — 100%**: off-screen RenderTexture surface, runtime texture bridge and retained room GPU presentation.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
-- **Phase 6 — next**: retained connection GPU presentation, interaction migration and legacy responsibility retirement.
+- **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
+- **Phase 7 — next**: final legacy retirement, responsibility audit and removal of obsolete Map performance compatibility paths.
 
 The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
 subsystem.
@@ -311,6 +312,54 @@ neutral visible fallback mesh, preserving the no-black/no-missing-room invariant
 
 `WorldMapView.SynchronizePositions` now keys off the detached room-array identity. Stable pan/zoom
 frames no longer rescan every room merely to rewrite unchanged local positions.
+
+## Phase 6 implementation
+
+### Retained connection GPU presentation
+
+`WorldMapRetainedConnectionRenderer` turns Phase 3 world-space route resources into persistent
+Unity meshes on the same off-screen surface as room thumbnails.
+
+Each route owns a retained mesh keyed by route revision. Route changes rebuild only that route;
+pan/zoom only changes the camera. Direction arrows are baked into the retained route mesh and
+bidirectional links retain two opposite in-line arrows. Ambiguous routes retain dashed presentation.
+
+Crossing bridges live in a separate retained mesh keyed by the connection-resource revision. They
+are rebuilt only after route data changes, never because the viewport moved.
+
+### Route spatial interaction
+
+`WorldMapRouteSpatialIndex` stores retained route bounds/segments in world-space cells.
+
+Connection hover now converts the mouse position to map-world coordinates and queries only nearby
+route cells. Once the complete V2 route set is committed, legacy screen-space route hit-testing and
+`WorldConnectionOverlay` drawing are removed from the active frame path.
+
+Selection, delete semantics and endpoint authoring commands remain the existing backend command
+paths. V2 replaces presentation/hit-testing only.
+
+### Render/main-thread scene ownership
+
+RWImGUI Draw and Unity Update no longer share one mutable `WorldMapScene`.
+
+The render thread owns its scene projection. On actual scene dirtiness it captures an immutable
+`WorldMapSceneDelta` and publishes that delta through `WorldMapSceneTransfer`. Unity main thread
+applies deltas to its own retained scene mirror before touching textures, meshes, spatial indexes or
+route resources.
+
+Pan/zoom uses `WorldMapViewTransformMailbox`, a tiny lock-free tuple handoff. It does not copy room
+or connection dictionaries and cannot dirty retained geometry.
+
+### Explicit migration fallback
+
+V2 connection presentation becomes authoritative only after every connection in the main-thread
+scene has a committed world-space route. Until then, the existing connection presentation remains
+visible. This avoids partial maps during incremental route construction without treating an
+incomplete V2 route set as success.
+
+Once V2 reports a complete route set, the legacy connection renderer/router is no longer called for
+that frame. This is the first runtime retirement of that legacy hot path; physical file removal is
+reserved for Phase 7 after all remaining consumers are audited.
 
 ## Legacy retirement policy
 

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
@@ -13,22 +14,31 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class WorldMapRetainedV2Runtime
 {
-    private static readonly WorldMapScene SceneState = new();
+    private static readonly WorldMapScene RenderSceneState = new();
+    private static readonly WorldMapScene MainSceneState = new();
     private static readonly WorldMapSceneSynchronizer Synchronizer = new();
+    private static readonly WorldMapSceneTransfer SceneTransfer = new();
+    private static readonly WorldMapViewTransformMailbox ViewMailbox = new();
     private static readonly WorldMapRoomResourceStore RoomResources = new();
     private static readonly WorldMapConnectionResourceStore ConnectionResources = new();
     private static readonly WorldMapRenderTextureSurface Surface = new();
     private static readonly WorldMapRetainedRoomRenderer RoomRenderer = new();
+    private static readonly WorldMapRetainedConnectionRenderer ConnectionRenderer = new();
     private static readonly WorldMapSpatialIndex SpatialIndex = new();
-    private static readonly WorldMapDirtySet pendingResourceDirty = new();
+    private static readonly WorldMapRouteSpatialIndex RouteSpatialIndex = new();
+    private static readonly WorldMapDirtySet mainThreadDirty = new();
     private static readonly List<int> geometryChangedRooms = new();
+    private static readonly List<string> routeChanged = new();
     private static readonly List<int> visibleRooms = new();
+    private static readonly List<string> visibleRoutes = new();
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
     private static bool enabled;
     private static int activeLayerMask = 7;
+    private static int activeShowConnections = 1;
+    private static int retainedConnectionsReady;
 
-    internal static WorldMapScene Scene => SceneState;
+    internal static WorldMapScene Scene => RenderSceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
     internal static WorldMapRoomResourceStore Resources => RoomResources;
     internal static WorldMapConnectionResourceStore Routes => ConnectionResources;
@@ -53,19 +63,24 @@ internal static class WorldMapRetainedV2Runtime
         long layoutRevision,
         int interactiveRoom,
         int layerMask,
+        bool showConnections,
         WorldMapViewTransform viewTransform)
     {
         if (!enabled) return;
-        activeLayerMask = layerMask;
+        Volatile.Write(ref activeLayerMask, layerMask);
+        Volatile.Write(ref activeShowConnections, showConnections ? 1 : 0);
+
         lastDirty = Synchronizer.Synchronize(
-            SceneState,
+            RenderSceneState,
             snapshot,
             localPositions,
             layoutRevision,
             interactiveRoom,
             viewTransform);
 
-        pendingResourceDirty.MergeFrom(lastDirty);
+        ViewMailbox.Publish(viewTransform, RenderSceneState.ViewRevision);
+        SceneTransfer.Publish(
+            WorldMapSceneDelta.Capture(RenderSceneState, lastDirty));
     }
 
     internal static void UpdateMainThread()
@@ -75,48 +90,100 @@ internal static class WorldMapRetainedV2Runtime
         EditorSession session = DevToolRuntime.ActiveSession;
         EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
 
-        if (!pendingResourceDirty.IsEmpty)
+        if (ViewMailbox.TryRead(
+                out WorldMapViewTransform latestView,
+                out long _))
+            MainSceneState.SetViewTransform(latestView);
+
+        mainThreadDirty.Clear();
+        SceneTransfer.Drain(MainSceneState, mainThreadDirty);
+
+        if (!mainThreadDirty.IsEmpty)
         {
-            RoomResources.ApplyDirty(SceneState, pendingResourceDirty);
-            ConnectionResources.ApplyDirty(SceneState, pendingResourceDirty);
-            SpatialIndex.ApplyDirty(SceneState, RoomResources, pendingResourceDirty);
-            RoomRenderer.ApplyDirty(pendingResourceDirty);
-            pendingResourceDirty.Clear();
+            RoomResources.ApplyDirty(MainSceneState, mainThreadDirty);
+            ConnectionResources.ApplyDirty(MainSceneState, mainThreadDirty);
+            SpatialIndex.ApplyDirty(MainSceneState, RoomResources, mainThreadDirty);
+            RoomRenderer.ApplyDirty(mainThreadDirty);
+            ConnectionRenderer.ApplyDirty(mainThreadDirty);
+
+            foreach (string id in mainThreadDirty.RemovedConnections)
+                RouteSpatialIndex.Remove(id);
+
+            if (mainThreadDirty.TopologyChanged || mainThreadDirty.FullRebuild)
+                Volatile.Write(ref retainedConnectionsReady, 0);
         }
 
-        RoomResources.UpdateMainThread(session, snapshot, SceneState);
+        RoomResources.UpdateMainThread(session, snapshot, MainSceneState);
         RoomResources.DrainGeometryChanges(geometryChangedRooms);
         if (geometryChangedRooms.Count > 0)
         {
             ConnectionResources.InvalidateRooms(geometryChangedRooms);
             SpatialIndex.InvalidateRooms(
-                SceneState,
+                MainSceneState,
                 RoomResources,
                 geometryChangedRooms);
         }
-        ConnectionResources.Update(SceneState, RoomResources);
+        ConnectionResources.Update(MainSceneState, RoomResources);
+        ConnectionResources.DrainRouteChanges(routeChanged);
+        if (routeChanged.Count > 0)
+        {
+            for (int i = 0; i < routeChanged.Count; i++)
+            {
+                string id = routeChanged[i];
+                if (ConnectionResources.TryGet(id, out ConnectionRouteResource route))
+                    RouteSpatialIndex.Upsert(route);
+                else
+                    RouteSpatialIndex.Remove(id);
+            }
+        }
+
+        if (ConnectionResources.PendingCount == 0)
+        {
+            Volatile.Write(
+                ref retainedConnectionsReady,
+                ConnectionResources.HasCompleteRoutes(MainSceneState) ? 1 : 0);
+        }
 
         if (session?.ToolMode == EditorToolMode.Map &&
             snapshot?.Available == true &&
-            SceneState.ViewTransform.CanvasSize.X >= 2f &&
-            SceneState.ViewTransform.CanvasSize.Y >= 2f)
+            MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
+            MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
         {
-            SceneState.ViewTransform.GetVisibleWorldBounds(
+            WorldMapViewTransform view = MainSceneState.ViewTransform;
+            view.GetVisibleWorldBounds(
                 out Num.Vector2 visibleMin,
                 out Num.Vector2 visibleMax);
+
+            int layerMask = Volatile.Read(ref activeLayerMask);
+            bool showConnections = Volatile.Read(ref activeShowConnections) != 0;
             SpatialIndex.Query(
                 visibleMin,
                 visibleMax,
-                activeLayerMask,
+                layerMask,
                 visibleRooms);
+
+            if (showConnections)
+                RouteSpatialIndex.Query(
+                    visibleMin,
+                    visibleMax,
+                    visibleRoutes);
+            else
+                visibleRoutes.Clear();
 
             Surface.Initialize(log);
             Surface.Render(
-                SceneState.ViewTransform,
-                _ => RoomRenderer.SynchronizeVisible(
-                    SceneState,
-                    RoomResources,
-                    visibleRooms));
+                view,
+                _ =>
+                {
+                    RoomRenderer.SynchronizeVisible(
+                        MainSceneState,
+                        RoomResources,
+                        visibleRooms);
+                    ConnectionRenderer.SynchronizeVisible(
+                        ConnectionResources,
+                        visibleRoutes,
+                        showConnections);
+                });
         }
     }
 
@@ -131,6 +198,26 @@ internal static class WorldMapRetainedV2Runtime
         int layerMask,
         out int roomIndex) =>
         enabled && SpatialIndex.TryHitRoom(worldPoint, layerMask, out roomIndex);
+
+    internal static bool RetainedConnectionsReady =>
+        enabled && Volatile.Read(ref retainedConnectionsReady) != 0;
+
+    internal static bool TryHitConnection(
+        Num.Vector2 worldPoint,
+        float worldRadius,
+        out string connectionId,
+        out float distanceSquared)
+    {
+        connectionId = string.Empty;
+        distanceSquared = worldRadius * worldRadius;
+        return enabled &&
+               RetainedConnectionsReady &&
+               RouteSpatialIndex.TryHit(
+                   worldPoint,
+                   worldRadius,
+                   out connectionId,
+                   out distanceSquared);
+    }
 
     internal static bool QueryRooms(
         Num.Vector2 worldMin,
@@ -151,15 +238,22 @@ internal static class WorldMapRetainedV2Runtime
     internal static void ResetRetainedState()
     {
         Synchronizer.Reset();
-        SceneState.Reset();
+        RenderSceneState.Reset();
+        MainSceneState.Reset();
+        SceneTransfer.Clear();
         RoomResources.Reset();
         ConnectionResources.Reset();
         SpatialIndex.Reset();
+        RouteSpatialIndex.Reset();
         RoomRenderer.Reset();
+        ConnectionRenderer.Reset();
         Surface.Reset();
-        pendingResourceDirty.Clear();
+        mainThreadDirty.Clear();
         geometryChangedRooms.Clear();
+        routeChanged.Clear();
         visibleRooms.Clear();
+        visibleRoutes.Clear();
+        Volatile.Write(ref retainedConnectionsReady, 0);
         lastDirty = new WorldMapDirtySet();
     }
 
@@ -167,16 +261,16 @@ internal static class WorldMapRetainedV2Runtime
     {
         ImGui.SameLine(0f, 12f);
         ImGui.TextDisabled(
-            "· V2 P1 scene " +
-            SceneState.Rooms.Count + "/" +
-            SceneState.Connections.Count);
+            "· V2 P6 scene " +
+            RenderSceneState.Rooms.Count + "/" +
+            RenderSceneState.Connections.Count);
 
         if (!ImGui.IsItemHovered()) return;
 
         ImGui.BeginTooltip();
         ImGui.TextUnformatted("World Map Retained V2 · Phase 5");
-        ImGui.TextUnformatted("rooms: " + SceneState.Rooms.Count);
-        ImGui.TextUnformatted("connections: " + SceneState.Connections.Count);
+        ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
+        ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
             " · thumbnails " + RoomResources.CommittedThumbnailCount);
@@ -186,10 +280,17 @@ internal static class WorldMapRetainedV2Runtime
             (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " · " + Surface.Error));
         ImGui.TextUnformatted("retained room objects: " + RoomRenderer.RetainedRoomCount);
         ImGui.TextUnformatted(
+            "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
+            " · ready " + RetainedConnectionsReady);
+        ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
             " · visible " + visibleRooms.Count);
-        ImGui.TextUnformatted("scene revision: " + SceneState.SceneRevision);
-        ImGui.TextUnformatted("view revision: " + SceneState.ViewRevision);
+        ImGui.TextUnformatted(
+            "spatial routes: " + RouteSpatialIndex.Count +
+            " · visible " + visibleRoutes.Count);
+        ImGui.TextUnformatted("scene revision: " + RenderSceneState.SceneRevision);
+        ImGui.TextUnformatted("view revision: " + RenderSceneState.ViewRevision);
+        ImGui.TextUnformatted("scene delta backlog: " + SceneTransfer.PendingCount);
         ImGui.TextUnformatted("last scene dirty count: " + lastDirty.ChangeCount);
         ImGui.TextDisabled("pan/zoom changes only the view revision");
         ImGui.EndTooltip();

@@ -251,6 +251,7 @@ internal static class WorldMapView
             localPositionRevision,
             draggingRoom,
             CurrentLayerMask(),
+            showConnections,
             new WorldMapViewTransform(canvasMin, canvasSize, pan, zoom));
 
         WorldMapExactShortcuts.BeforeCanvas(snapshot);
@@ -273,11 +274,46 @@ internal static class WorldMapView
             ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
             : null;
 
-        bool routedConnections = showConnections && WorldConnectionOverlay.Ready;
-        EdgeHit hoveredEdge = !viewportInteraction && canvasHovered && hoveredPort == null && !routedConnections
-            ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
-            : null;
-        if (!routedConnections)
+        bool retainedConnectionsPresented =
+            retainedRoomsPresented &&
+            showConnections &&
+            WorldMapRetainedV2Runtime.RetainedConnectionsReady;
+
+        if (retainedConnectionsPresented &&
+            !viewportInteraction &&
+            canvasHovered &&
+            hoveredPort == null)
+        {
+            float safeZoom = Math.Max(0.0001f, zoom);
+            Num.Vector2 worldPoint = (io.MousePos - canvasMin - pan) / safeZoom;
+            float worldRadius = 12f / safeZoom;
+            hoveredConnectionId =
+                WorldMapRetainedV2Runtime.TryHitConnection(
+                    worldPoint,
+                    worldRadius,
+                    out string retainedConnectionId,
+                    out float _)
+                    ? retainedConnectionId
+                    : string.Empty;
+        }
+        else if (retainedConnectionsPresented)
+        {
+            hoveredConnectionId = string.Empty;
+        }
+
+        bool routedConnections =
+            !retainedConnectionsPresented &&
+            showConnections &&
+            WorldConnectionOverlay.Ready;
+        EdgeHit hoveredEdge =
+            !retainedConnectionsPresented &&
+            !viewportInteraction &&
+            canvasHovered &&
+            hoveredPort == null &&
+            !routedConnections
+                ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
+                : null;
+        if (!retainedConnectionsPresented && !routedConnections)
             hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
         DrawRooms(
@@ -289,23 +325,40 @@ internal static class WorldMapView
             hoveredPort,
             viewportInteraction,
             retainedRoomsPresented);
-        if (viewportInteraction && showConnections)
+        if (!retainedConnectionsPresented)
         {
-            DrawConnections(draw, snapshot, canvasMin, canvasSize);
-        }
-        else if (routedConnections)
-        {
-            WorldMapRenderOrder.UseConnections(draw);
-            WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
-        }
-        else if (showConnections)
-        {
-            DrawConnections(draw, snapshot, canvasMin, canvasSize);
+            if (viewportInteraction && showConnections)
+            {
+                DrawConnections(draw, snapshot, canvasMin, canvasSize);
+            }
+            else if (routedConnections)
+            {
+                WorldMapRenderOrder.UseConnections(draw);
+                WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
+            }
+            else if (showConnections)
+            {
+                DrawConnections(draw, snapshot, canvasMin, canvasSize);
+            }
         }
         WorldMapRenderOrder.UseOverlay(draw);
 
+        if (retainedConnectionsPresented &&
+            !viewportInteraction &&
+            canvasHovered &&
+            hoveredPort == null &&
+            !string.IsNullOrEmpty(hoveredConnectionId))
+            DrawRetainedConnectionTooltip(snapshot, hoveredConnectionId);
+
         if (!viewportInteraction)
-            HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
+            HandleInteraction(
+                snapshot,
+                canvasHovered,
+                io,
+                hoveredRoom,
+                hoveredPort,
+                hoveredEdge,
+                retainedConnectionsPresented);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
         if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
@@ -840,7 +893,8 @@ internal static class WorldMapView
         ImGuiIOPtr io,
         EditorMapRoomSnapshot hoveredRoom,
         ExitPortHit hoveredPort,
-        EdgeHit hoveredEdge)
+        EdgeHit hoveredEdge,
+        bool retainedConnectionsPresented)
     {
         if (canvasHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
@@ -859,10 +913,19 @@ internal static class WorldMapView
                     selectedConnectionId = hoveredPort.Connection.ConnectionId;
                 }
             }
+            else if (retainedConnectionsPresented && !string.IsNullOrEmpty(hoveredConnectionId))
+            {
+                selectedConnectionId = hoveredConnectionId;
+                EditorMapConnectionSnapshot connection =
+                    FindConnection(snapshot, hoveredConnectionId);
+                if (connection != null)
+                    SelectRoom(connection.FromRoomIndex);
+                draggingRoom = -1;
+            }
             else if (showConnections && WorldConnectionOverlay.Ready && !string.IsNullOrEmpty(hoveredConnectionId))
             {
-                // Routed connection input is owned by WorldConnectionOverlay. Do not let the same
-                // click fall through and start dragging a room behind the routed line.
+                // Legacy routed connection input remains active only while V2 has not committed a
+                // complete retained route set.
                 draggingRoom = -1;
             }
             else if (hoveredEdge?.Connection != null && showConnections)
@@ -909,6 +972,72 @@ internal static class WorldMapView
                 draggingRoom = -1;
             }
         }
+    }
+
+    private static void DrawRetainedConnectionTooltip(
+        EditorMapPresentationSnapshot snapshot,
+        string connectionId)
+    {
+        EditorMapConnectionSnapshot connection =
+            FindConnection(snapshot, connectionId);
+        if (connection == null) return;
+
+        EditorMapRoomSnapshot a = FindRoom(snapshot, connection.FromRoomIndex);
+        EditorMapRoomSnapshot b = FindRoom(snapshot, connection.ToRoomIndex);
+        if (a == null || b == null) return;
+
+        string direction = connection.Direction switch
+        {
+            WorldConnectionDirection.AToB => "A > B",
+            WorldConnectionDirection.BToA => "A < B",
+            _ => "Both"
+        };
+
+        ImGui.BeginTooltip();
+        ImGui.TextUnformatted(
+            a.Name + ":" + connection.FromNodeIndex +
+            "  " + direction + "  " +
+            b.Name + ":" +
+            (connection.ToNodeIndex >= 0
+                ? connection.ToNodeIndex.ToString()
+                : "?"));
+
+        DrawRetainedWorldToken(
+            snapshot.RegionName,
+            a.Name,
+            connection.FromNodeIndex);
+        if (connection.ToNodeIndex >= 0)
+            DrawRetainedWorldToken(
+                snapshot.RegionName,
+                b.Name,
+                connection.ToNodeIndex);
+
+        if (connection.Ambiguous)
+            ImGui.TextDisabled(
+                DevToolUiSettings.T(
+                    "目标出口不明确",
+                    "Ambiguous target exit"));
+        ImGui.EndTooltip();
+    }
+
+    private static void DrawRetainedWorldToken(
+        string regionName,
+        string roomName,
+        int nodeIndex)
+    {
+        if (!WorldTextRegistry.TryGetConnectionEndpoint(
+                regionName,
+                roomName,
+                nodeIndex,
+                out string destinationRoom,
+                out int destinationNode))
+            return;
+
+        string token = destinationNode >= 0
+            ? "<" + destinationNode + ">" + destinationRoom
+            : destinationRoom;
+        ImGui.TextDisabled(
+            roomName + ":" + nodeIndex + " -> " + token);
     }
 
     private static void DrawLinkPreview(

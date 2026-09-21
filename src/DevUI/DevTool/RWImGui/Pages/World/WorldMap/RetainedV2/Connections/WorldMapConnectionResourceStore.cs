@@ -22,13 +22,44 @@ internal sealed class WorldMapConnectionResourceStore
         new(StringComparer.Ordinal);
     private readonly Queue<string> queue = new();
     private readonly HashSet<string> queued = new(StringComparer.Ordinal);
+    private readonly HashSet<string> routeChanged = new(StringComparer.Ordinal);
     private readonly List<WorldMapScene.ConnectionNode> buildBatch = new();
+    private long revision;
 
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
     internal int Count => routes.Count;
+    internal int PendingCount => queue.Count;
+    internal long Revision => revision;
+
 
     internal bool TryGet(string id, out ConnectionRouteResource route) =>
         !string.IsNullOrEmpty(id) && routes.TryGetValue(id, out route);
+
+    internal bool HasCompleteRoutes(WorldMapScene scene)
+    {
+        if (scene == null) return false;
+        if (scene.Connections.Count == 0) return true;
+        if (routes.Count < scene.Connections.Count) return false;
+
+        foreach (string id in scene.Connections.Keys)
+        {
+            if (!routes.TryGetValue(id, out ConnectionRouteResource route) ||
+                route?.Points == null ||
+                route.Points.Length < 2)
+                return false;
+        }
+
+        return true;
+    }
+
+    internal void DrainRouteChanges(List<string> output)
+    {
+        if (output == null) return;
+        output.Clear();
+        if (routeChanged.Count == 0) return;
+        output.AddRange(routeChanged);
+        routeChanged.Clear();
+    }
 
     internal void ApplyDirty(WorldMapScene scene, WorldMapDirtySet dirty)
     {
@@ -36,7 +67,11 @@ internal sealed class WorldMapConnectionResourceStore
 
         foreach (string id in dirty.RemovedConnections)
         {
-            routes.Remove(id);
+            if (routes.Remove(id))
+            {
+                routeChanged.Add(id);
+                unchecked { revision++; }
+            }
             queued.Remove(id);
         }
 
@@ -112,6 +147,8 @@ internal sealed class WorldMapConnectionResourceStore
                 route.Revision = 1L;
 
             routes[connection.Id] = route;
+            routeChanged.Add(connection.Id);
+            unchecked { revision++; }
         }
     }
 
@@ -122,7 +159,9 @@ internal sealed class WorldMapConnectionResourceStore
         laneOffsets.Clear();
         queue.Clear();
         queued.Clear();
+        routeChanged.Clear();
         buildBatch.Clear();
+        revision = 0L;
     }
 
     private void EnqueueAll(WorldMapScene scene)
@@ -140,7 +179,13 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (stale == null) return;
         for (int i = 0; i < stale.Count; i++)
-            routes.Remove(stale[i]);
+        {
+            if (routes.Remove(stale[i]))
+            {
+                routeChanged.Add(stale[i]);
+                unchecked { revision++; }
+            }
+        }
     }
 
     private void Enqueue(string id)
