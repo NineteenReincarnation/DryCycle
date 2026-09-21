@@ -35,7 +35,9 @@ internal static class WorldMapView
     }
 
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
+    private static readonly List<int> retainedVisibleRoomIds = new();
     private static long localPositionRevision;
+    private static EditorMapRoomSnapshot[] synchronizedPositionRooms;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
     private static readonly bool[] layerVisible = { true, true, true };
     private static readonly uint[] geometryColorCache = new uint[16];
@@ -70,6 +72,38 @@ internal static class WorldMapView
     {
         selectedConnectionId = string.Empty;
         hoveredConnectionId = string.Empty;
+    }
+
+    internal static void ResetRetainedState()
+    {
+        localPositions.Clear();
+        retainedVisibleRoomIds.Clear();
+        localPositionRevision = 0L;
+        synchronizedPositionRooms = null;
+        hoverRoomLookup.Clear();
+        hoverIndexedSnapshot = null;
+        geometryColorFrame = int.MinValue;
+        Array.Clear(geometryColorCacheValid, 0, geometryColorCacheValid.Length);
+
+        region = string.Empty;
+        pan = Num.Vector2.Zero;
+        zoom = 1f;
+        fitRequested = true;
+        showConnections = true;
+        showPortLabels = true;
+        showSubregionLabels = true;
+        for (int i = 0; i < layerVisible.Length; i++) layerVisible[i] = true;
+
+        draggingRoom = -1;
+        dragStartMouse = Num.Vector2.Zero;
+        dragStartWorld = Num.Vector2.Zero;
+        linkingRoom = -1;
+        linkingNode = -1;
+        linkDirection = WorldConnectionDirection.Bidirectional;
+        selectedConnectionId = string.Empty;
+        hoveredConnectionId = string.Empty;
+
+        WorldMapRetainedV2Runtime.ResetRetainedState();
     }
 
     internal static void Draw(EditorMapPresentationSnapshot snapshot)
@@ -339,28 +373,47 @@ internal static class WorldMapView
         bool fastNavigation,
         bool retainedRoomsPresented)
     {
-        EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
-        for (int i = 0; i < rooms.Length; i++)
+        bool useSpatial =
+            retainedRoomsPresented &&
+            WorldMapRetainedV2Runtime.QueryVisibleRooms(
+                CurrentLayerMask(),
+                retainedVisibleRoomIds);
+
+        if (useSpatial)
         {
-            EditorMapRoomSnapshot room = rooms[i];
-            if (!IsLayerVisible(room.Layer)) continue;
-
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
-            GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
-            if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 48f)) continue;
-
-            bool selected = room.RoomIndex == snapshot.SelectedRoomIndex;
-            bool hovered = ReferenceEquals(room, hoveredRoom);
-            if (!retainedRoomsPresented)
+            for (int i = 0; i < retainedVisibleRoomIds.Count; i++)
             {
-                if (fastNavigation)
-                    DrawRoomNavigationLod(draw, room, min, max, selected);
-                else
-                    DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+                EditorMapRoomSnapshot room = FindRoom(snapshot, retainedVisibleRoomIds[i]);
+                if (room == null) continue;
+                DrawRoomEntry(
+                    draw,
+                    snapshot,
+                    canvasMin,
+                    canvasSize,
+                    hoveredRoom,
+                    fastNavigation,
+                    retainedRoomsPresented,
+                    room);
             }
-
-            if (!fastNavigation || selected || room.CurrentRoom)
-                DrawRoomLabel(draw, room, min, max, selected, hovered);
+        }
+        else
+        {
+            retainedVisibleRoomIds.Clear();
+            EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+            for (int i = 0; i < rooms.Length; i++)
+            {
+                EditorMapRoomSnapshot room = rooms[i];
+                if (room == null || !IsLayerVisible(room.Layer)) continue;
+                DrawRoomEntry(
+                    draw,
+                    snapshot,
+                    canvasMin,
+                    canvasSize,
+                    hoveredRoom,
+                    fastNavigation,
+                    retainedRoomsPresented,
+                    room);
+            }
         }
 
         // Pipe sockets, creature holes and their labels are interaction affordances, not navigation
@@ -371,6 +424,36 @@ internal static class WorldMapView
             DrawExitPorts(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
             DrawCreatureShortcuts(draw, snapshot, canvasMin, canvasSize);
         }
+    }
+
+    private static void DrawRoomEntry(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize,
+        EditorMapRoomSnapshot hoveredRoom,
+        bool fastNavigation,
+        bool retainedRoomsPresented,
+        EditorMapRoomSnapshot room)
+    {
+        if (!IsLayerVisible(room.Layer)) return;
+
+        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+        GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
+        if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 48f)) return;
+
+        bool selected = room.RoomIndex == snapshot.SelectedRoomIndex;
+        bool hovered = ReferenceEquals(room, hoveredRoom);
+        if (!retainedRoomsPresented)
+        {
+            if (fastNavigation)
+                DrawRoomNavigationLod(draw, room, min, max, selected);
+            else
+                DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+        }
+
+        if (!fastNavigation || selected || room.CurrentRoom)
+            DrawRoomLabel(draw, room, min, max, selected, hovered);
     }
 
     private static void DrawRoomNavigationLod(
@@ -855,20 +938,31 @@ internal static class WorldMapView
         Num.Vector2 canvasSize,
         Num.Vector2 mouse)
     {
-        // This is our own view method, so use the retained GPU room index directly instead of
-        // installing a RuntimeDetour hook back into WorldMapView. Besides removing trampoline/JIT
-        // risk during BepInEx startup, this keeps the optimized path explicit and debuggable.
+        float safeZoom = Math.Max(0.0001f, zoom);
+        Num.Vector2 mapPoint = (mouse - canvasMin - pan) / safeZoom;
+        int currentLayerMask = CurrentLayerMask();
+        if (WorldMapRetainedV2Runtime.TryHitRoom(
+                mapPoint,
+                currentLayerMask,
+                out int retainedRoomIndex))
+        {
+            EnsureHoverRoomLookup(snapshot);
+            return hoverRoomLookup.TryGetValue(
+                retainedRoomIndex,
+                out EditorMapRoomSnapshot retainedRoom)
+                ? retainedRoom
+                : null;
+        }
+
+        // Legacy GPU index remains available until its remaining responsibilities retire.
         if (WorldMapGpuScene.Ready)
         {
             try
             {
-                int layerMask = 0;
-                for (int i = 0; i < layerVisible.Length && i < 31; i++)
-                    if (layerVisible[i]) layerMask |= 1 << i;
-
-                float safeZoom = Math.Max(0.0001f, zoom);
-                Num.Vector2 mapPoint = (mouse - canvasMin - pan) / safeZoom;
-                if (!WorldMapGpuScene.TryHitRoom(mapPoint, layerMask, out int roomIndex))
+                if (!WorldMapGpuScene.TryHitRoom(
+                        mapPoint,
+                        currentLayerMask,
+                        out int roomIndex))
                     return null;
 
                 EnsureHoverRoomLookup(snapshot);
@@ -1321,6 +1415,8 @@ internal static class WorldMapView
         string next = snapshot.RegionName ?? string.Empty;
         if (string.Equals(region, next, StringComparison.OrdinalIgnoreCase)) return;
         region = next;
+        synchronizedPositionRooms = null;
+        retainedVisibleRoomIds.Clear();
         if (localPositions.Count > 0)
         {
             localPositions.Clear();
@@ -1339,6 +1435,10 @@ internal static class WorldMapView
     private static void SynchronizePositions(EditorMapPresentationSnapshot snapshot)
     {
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
+        if (ReferenceEquals(synchronizedPositionRooms, rooms))
+            return;
+
+        synchronizedPositionRooms = rooms;
         HashSet<int> alive = new();
         for (int i = 0; i < rooms.Length; i++)
         {

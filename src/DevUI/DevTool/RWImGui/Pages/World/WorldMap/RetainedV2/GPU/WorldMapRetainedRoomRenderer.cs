@@ -30,46 +30,67 @@ internal sealed class WorldMapRetainedRoomRenderer
 
     private readonly Dictionary<int, RoomObject> roomObjects = new();
     private readonly Dictionary<int, Material> textureMaterials = new();
-    private readonly List<int> staleRooms = new();
+    private readonly HashSet<int> visibleNow = new();
+    private readonly HashSet<int> visiblePrevious = new();
 
     private GameObject root;
     private Material colorMaterial;
     private Shader spriteShader;
-    private int observedLayerMask = -1;
 
     internal int RetainedRoomCount => roomObjects.Count;
 
-    internal bool Synchronize(
+    internal void ApplyDirty(WorldMapDirtySet dirty)
+    {
+        if (dirty == null) return;
+        foreach (int roomIndex in dirty.RemovedRooms)
+        {
+            visibleNow.Remove(roomIndex);
+            visiblePrevious.Remove(roomIndex);
+            RemoveRoom(roomIndex);
+        }
+    }
+
+    internal bool SynchronizeVisible(
         WorldMapScene scene,
         WorldMapRoomResourceStore resources,
-        int layerMask)
+        IReadOnlyList<int> visibleRoomIds)
     {
-        if (scene == null || resources == null) return false;
+        if (scene == null || resources == null || visibleRoomIds == null)
+            return false;
         if (!EnsureResources()) return false;
 
-        staleRooms.Clear();
-        foreach (int roomIndex in roomObjects.Keys)
-            if (!scene.Rooms.ContainsKey(roomIndex))
-                staleRooms.Add(roomIndex);
-        for (int i = 0; i < staleRooms.Count; i++)
-            RemoveRoom(staleRooms[i]);
+        visibleNow.Clear();
 
-        bool layerMaskChanged = observedLayerMask != layerMask;
-        observedLayerMask = layerMask;
-
-        foreach (WorldMapScene.RoomNode room in scene.Rooms.Values)
+        for (int i = 0; i < visibleRoomIds.Count; i++)
         {
-            if (!resources.TryGet(room.RoomIndex, out WorldMapRoomResourceStore.RoomResource resource))
+            int roomIndex = visibleRoomIds[i];
+            if (!scene.TryGetRoom(roomIndex, out WorldMapScene.RoomNode room))
                 continue;
 
-            RoomObject obj = GetOrCreate(room.RoomIndex);
-            bool geometryChanged = obj.GeometryGeneration != resource.GeometryGeneration;
-            bool thumbnailChanged = obj.ThumbnailGeneration != resource.Thumbnail.Generation;
-            if (geometryChanged || thumbnailChanged)
+            visibleNow.Add(roomIndex);
+            RoomObject obj = GetOrCreate(roomIndex);
+
+            if (resources.TryGet(roomIndex, out WorldMapRoomResourceStore.RoomResource resource))
             {
-                RebuildRoom(obj, resource);
-                obj.GeometryGeneration = resource.GeometryGeneration;
-                obj.ThumbnailGeneration = resource.Thumbnail.Generation;
+                bool geometryChanged = obj.GeometryGeneration != resource.GeometryGeneration;
+                bool thumbnailChanged = obj.ThumbnailGeneration != resource.Thumbnail.Generation;
+                if (geometryChanged || thumbnailChanged)
+                {
+                    RebuildRoom(obj, resource);
+                    obj.GeometryGeneration = resource.GeometryGeneration;
+                    obj.ThumbnailGeneration = resource.Thumbnail.Generation;
+                }
+            }
+            else if (obj.GeometryGeneration != -1L)
+            {
+                // Resource capture may lag the first visible frame. Render a visible neutral room
+                // rather than omitting it or showing an uninitialised/black surface.
+                RoomGeometryBlob neutral = RoomGeometryBuilder.BuildNeutral(roomIndex);
+                ReplaceMesh(obj.BaseFilter, BuildColorMesh(neutral, customOnly: false));
+                obj.BaseRenderer.sharedMaterial = colorMaterial;
+                ReplaceMesh(obj.OverlayFilter, null);
+                obj.GeometryGeneration = -1L;
+                obj.ThumbnailGeneration = -1L;
             }
 
             if (obj.TransformRevision != room.TransformRevision || obj.Layer != room.Layer)
@@ -82,10 +103,19 @@ internal sealed class WorldMapRetainedRoomRenderer
                 obj.Layer = room.Layer;
             }
 
-            if (layerMaskChanged || obj.Root.activeSelf != IsLayerVisible(room.Layer, layerMask))
-                obj.Root.SetActive(IsLayerVisible(room.Layer, layerMask));
+            if (!obj.Root.activeSelf)
+                obj.Root.SetActive(true);
         }
 
+        foreach (int roomIndex in visiblePrevious)
+        {
+            if (visibleNow.Contains(roomIndex)) continue;
+            if (roomObjects.TryGetValue(roomIndex, out RoomObject obj) && obj.Root.activeSelf)
+                obj.Root.SetActive(false);
+        }
+
+        visiblePrevious.Clear();
+        visiblePrevious.UnionWith(visibleNow);
         return true;
     }
 
@@ -105,7 +135,8 @@ internal sealed class WorldMapRetainedRoomRenderer
 
         if (root != null) UnityEngine.Object.Destroy(root);
         root = null;
-        observedLayerMask = -1;
+        visibleNow.Clear();
+        visiblePrevious.Clear();
     }
 
     private bool EnsureResources()
@@ -330,9 +361,6 @@ internal sealed class WorldMapRetainedRoomRenderer
         kind == EditorMapGeometryKind.CurvedSlope ||
         kind == EditorMapGeometryKind.QuicksandBody ||
         kind == EditorMapGeometryKind.QuicksandMaterial;
-
-    private static bool IsLayerVisible(int layer, int mask) =>
-        layer >= 0 && layer < 31 && (mask & (1 << layer)) != 0;
 
     private static Mesh NewMesh(string name) =>
         new()

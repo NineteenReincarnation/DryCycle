@@ -13,7 +13,8 @@ phase percentage below 100%.
 - **Phase 2 — 100%**: retained room thumbnail/geometry resources with last-known-good continuity.
 - **Phase 3 — 100%**: world-space connection routing and retained route resources.
 - **Phase 4 — 100%**: off-screen RenderTexture surface, runtime texture bridge and retained room GPU presentation.
-- **Phase 5 — next**: spatial index, background build scheduler and local scene upload scheduling.
+- **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
+- **Phase 6 — next**: retained connection GPU presentation, interaction migration and legacy responsibility retirement.
 
 The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
 subsystem.
@@ -260,6 +261,56 @@ surface.
 
 If the runtime texture bridge is unavailable, the existing room renderer remains the explicit
 fallback; no silent partial surface is treated as success.
+
+## Phase 5 implementation
+
+### Incremental world-space spatial index
+
+`WorldMapSpatialIndex` maintains room AABBs in a fixed world-space spatial hash. Room transforms,
+layer changes, removals and geometry-dimension changes update only affected entries. Pan/zoom never
+rebuilds the index.
+
+Viewport and point queries visit only intersecting cells. The retained room renderer therefore
+receives a visible-room list rather than scanning every room on each frame.
+
+The V2 point query is also used by `WorldMapView` for room hover before the legacy GPU/linear
+fallback path.
+
+### Background room geometry build scheduler
+
+`WorldMapBuildScheduler` moves `RoomGeometryBuilder` work off the Unity main thread.
+
+Jobs consume detached `EditorMapRoomVisualSnapshot` data only. They never touch:
+
+- Unity textures;
+- Mesh/Material/GameObject;
+- MapPage/RoomPanel;
+- authoring/persistence state.
+
+Results return through a concurrent completion queue. Each request carries a scheduler generation
+and visual-source stamp; stale results from an old region/session or superseded room revision are
+discarded before commit. Original worker exceptions are logged.
+
+### Main-thread capture and bounded commit
+
+`WorldMapRoomResourceStore` still captures live MapTex descriptors on the main thread through the
+legacy compatibility boundary, but expensive pure geometry construction is scheduled to workers.
+The main thread commits only a bounded number of completed immutable blobs per frame.
+
+### Visible/local GPU synchronization
+
+`WorldMapRetainedRoomRenderer` no longer scans every retained scene room. The spatial index supplies
+only currently visible room IDs. Meshes rebuild only when a room geometry/thumbnail generation
+changes; room movement updates only its transform. Rooms leaving the viewport are disabled without
+destroying their retained meshes.
+
+If a visible room resource has not completed its first background build, the renderer creates a
+neutral visible fallback mesh, preserving the no-black/no-missing-room invariant.
+
+### Stable frontend position projection
+
+`WorldMapView.SynchronizePositions` now keys off the detached room-array identity. Stable pan/zoom
+frames no longer rescan every room merely to rewrite unchanged local positions.
 
 ## Legacy retirement policy
 

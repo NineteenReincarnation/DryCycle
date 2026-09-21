@@ -19,8 +19,10 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly WorldMapConnectionResourceStore ConnectionResources = new();
     private static readonly WorldMapRenderTextureSurface Surface = new();
     private static readonly WorldMapRetainedRoomRenderer RoomRenderer = new();
+    private static readonly WorldMapSpatialIndex SpatialIndex = new();
     private static readonly WorldMapDirtySet pendingResourceDirty = new();
     private static readonly List<int> geometryChangedRooms = new();
+    private static readonly List<int> visibleRooms = new();
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
     private static bool enabled;
@@ -35,6 +37,7 @@ internal static class WorldMapRetainedV2Runtime
     {
         enabled = true;
         log = logger;
+        RoomResources.Initialize(logger);
     }
 
     internal static void Disable()
@@ -76,13 +79,21 @@ internal static class WorldMapRetainedV2Runtime
         {
             RoomResources.ApplyDirty(SceneState, pendingResourceDirty);
             ConnectionResources.ApplyDirty(SceneState, pendingResourceDirty);
+            SpatialIndex.ApplyDirty(SceneState, RoomResources, pendingResourceDirty);
+            RoomRenderer.ApplyDirty(pendingResourceDirty);
             pendingResourceDirty.Clear();
         }
 
         RoomResources.UpdateMainThread(session, snapshot, SceneState);
         RoomResources.DrainGeometryChanges(geometryChangedRooms);
         if (geometryChangedRooms.Count > 0)
+        {
             ConnectionResources.InvalidateRooms(geometryChangedRooms);
+            SpatialIndex.InvalidateRooms(
+                SceneState,
+                RoomResources,
+                geometryChangedRooms);
+        }
         ConnectionResources.Update(SceneState, RoomResources);
 
         if (session?.ToolMode == EditorToolMode.Map &&
@@ -90,13 +101,22 @@ internal static class WorldMapRetainedV2Runtime
             SceneState.ViewTransform.CanvasSize.X >= 2f &&
             SceneState.ViewTransform.CanvasSize.Y >= 2f)
         {
+            SceneState.ViewTransform.GetVisibleWorldBounds(
+                out Num.Vector2 visibleMin,
+                out Num.Vector2 visibleMax);
+            SpatialIndex.Query(
+                visibleMin,
+                visibleMax,
+                activeLayerMask,
+                visibleRooms);
+
             Surface.Initialize(log);
             Surface.Render(
                 SceneState.ViewTransform,
-                _ => RoomRenderer.Synchronize(
+                _ => RoomRenderer.SynchronizeVisible(
                     SceneState,
                     RoomResources,
-                    activeLayerMask));
+                    visibleRooms));
         }
     }
 
@@ -106,16 +126,40 @@ internal static class WorldMapRetainedV2Runtime
         Num.Vector2 max) =>
         enabled && Surface.TryPresent(draw, min, max);
 
+    internal static bool TryHitRoom(
+        Num.Vector2 worldPoint,
+        int layerMask,
+        out int roomIndex) =>
+        enabled && SpatialIndex.TryHitRoom(worldPoint, layerMask, out roomIndex);
+
+    internal static bool QueryRooms(
+        Num.Vector2 worldMin,
+        Num.Vector2 worldMax,
+        int layerMask,
+        List<int> output) =>
+        enabled && SpatialIndex.Query(worldMin, worldMax, layerMask, output);
+
+    internal static bool QueryVisibleRooms(int layerMask, List<int> output)
+    {
+        if (!enabled || output == null) return false;
+        SceneState.ViewTransform.GetVisibleWorldBounds(
+            out Num.Vector2 min,
+            out Num.Vector2 max);
+        return SpatialIndex.Query(min, max, layerMask, output);
+    }
+
     internal static void ResetRetainedState()
     {
         Synchronizer.Reset();
         SceneState.Reset();
         RoomResources.Reset();
         ConnectionResources.Reset();
+        SpatialIndex.Reset();
         RoomRenderer.Reset();
         Surface.Reset();
         pendingResourceDirty.Clear();
         geometryChangedRooms.Clear();
+        visibleRooms.Clear();
         lastDirty = new WorldMapDirtySet();
     }
 
@@ -130,7 +174,7 @@ internal static class WorldMapRetainedV2Runtime
         if (!ImGui.IsItemHovered()) return;
 
         ImGui.BeginTooltip();
-        ImGui.TextUnformatted("World Map Retained V2 · Phase 4");
+        ImGui.TextUnformatted("World Map Retained V2 · Phase 5");
         ImGui.TextUnformatted("rooms: " + SceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + SceneState.Connections.Count);
         ImGui.TextUnformatted(
@@ -141,6 +185,9 @@ internal static class WorldMapRetainedV2Runtime
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
             (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " · " + Surface.Error));
         ImGui.TextUnformatted("retained room objects: " + RoomRenderer.RetainedRoomCount);
+        ImGui.TextUnformatted(
+            "spatial rooms: " + SpatialIndex.Count +
+            " · visible " + visibleRooms.Count);
         ImGui.TextUnformatted("scene revision: " + SceneState.SceneRevision);
         ImGui.TextUnformatted("view revision: " + SceneState.ViewRevision);
         ImGui.TextUnformatted("last scene dirty count: " + lastDirty.ChangeCount);

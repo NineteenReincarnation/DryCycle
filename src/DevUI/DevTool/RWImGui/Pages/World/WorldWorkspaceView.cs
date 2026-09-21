@@ -300,8 +300,7 @@ internal static class WorldWorkspaceView
         mappingDirection = WorldConnectionDirection.Bidirectional;
         draggingExplorerSplitter = false;
         draggingInspectorSplitter = false;
-        WorldMapView.ClearConnectionSelection();
-        WorldMapRetainedV2Runtime.ResetRetainedState();
+        WorldMapView.ResetRetainedState();
     }
 
     private static void DrawToolbar(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)

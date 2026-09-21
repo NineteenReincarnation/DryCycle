@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using BepInEx.Logging;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
@@ -22,6 +23,7 @@ internal sealed class WorldMapRoomResourceStore
         internal RoomGeometryBlob Geometry = RoomGeometryBlob.Empty;
         internal readonly RoomThumbnailResource Thumbnail = new();
         internal int VisualStamp;
+        internal int RequestedVisualStamp = int.MinValue;
         internal long GeometryGeneration;
     }
 
@@ -33,6 +35,7 @@ internal sealed class WorldMapRoomResourceStore
     private readonly Queue<int> priorityQueue = new();
     private readonly HashSet<int> queued = new();
     private readonly HashSet<int> geometryChanged = new();
+    private readonly WorldMapBuildScheduler buildScheduler = new();
     private string region = string.Empty;
     private EditorMapRoomSnapshot[] auditRooms = Array.Empty<EditorMapRoomSnapshot>();
     private int auditCursor;
@@ -54,6 +57,9 @@ internal sealed class WorldMapRoomResourceStore
 
     internal bool TryGet(int roomIndex, out RoomResource resource) =>
         rooms.TryGetValue(roomIndex, out resource);
+
+    internal void Initialize(ManualLogSource logger) =>
+        buildScheduler.Initialize(logger);
 
     internal void DrainGeometryChanges(List<int> output)
     {
@@ -122,6 +128,8 @@ internal sealed class WorldMapRoomResourceStore
             ? InteractiveRoomsPerFrame
             : IdleRoomsPerFrame;
 
+        DrainBuildResults(budget);
+
         while (budget > 0 && priorityQueue.Count > 0)
         {
             int roomIndex = priorityQueue.Dequeue();
@@ -153,6 +161,7 @@ internal sealed class WorldMapRoomResourceStore
         priorityQueue.Clear();
         queued.Clear();
         geometryChanged.Clear();
+        buildScheduler.Reset();
         region = string.Empty;
         auditRooms = Array.Empty<EditorMapRoomSnapshot>();
         auditCursor = 0;
@@ -180,12 +189,13 @@ internal sealed class WorldMapRoomResourceStore
 
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(roomIndex);
         int visualStamp = ComputeVisualStamp(visual);
-        if (visual?.Available == true && visualStamp != resource.VisualStamp)
+        if (visual?.Available == true &&
+            visualStamp != resource.VisualStamp &&
+            visualStamp != resource.RequestedVisualStamp)
         {
-            resource.Geometry = RoomGeometryBuilder.Build(roomIndex, visual, visualStamp);
-            resource.VisualStamp = visualStamp;
-            geometryChanged.Add(roomIndex);
-            unchecked { resource.GeometryGeneration++; }
+            resource.RequestedVisualStamp = visualStamp;
+            if (!buildScheduler.ScheduleRoom(roomIndex, visual, visualStamp))
+                resource.RequestedVisualStamp = int.MinValue;
         }
 
         if (WorldMapLegacyRoomSourceService.TryGetRoomTexture(
@@ -201,6 +211,31 @@ internal sealed class WorldMapRoomResourceStore
             // Missing source is not a command to clear the thumbnail. Keep last-known-good.
             resource.Thumbnail.RejectPending();
         }
+    }
+
+    private void DrainBuildResults(int budget)
+    {
+        int maxResults = Math.Max(1, budget);
+        buildScheduler.Drain(maxResults, result =>
+        {
+            if (!rooms.TryGetValue(result.RoomIndex, out RoomResource resource))
+                return;
+
+            if (resource.RequestedVisualStamp != result.SourceStamp)
+                return;
+
+            if (result.Error != null || result.Geometry == null)
+            {
+                resource.RequestedVisualStamp = int.MinValue;
+                return;
+            }
+
+            resource.Geometry = result.Geometry;
+            resource.VisualStamp = result.SourceStamp;
+            resource.RequestedVisualStamp = int.MinValue;
+            geometryChanged.Add(result.RoomIndex);
+            unchecked { resource.GeometryGeneration++; }
+        });
     }
 
     private void Enqueue(int roomIndex)
