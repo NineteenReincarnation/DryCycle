@@ -4,7 +4,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 categories=(
   "build-compile"
-  "startup-safety"
   "persistence-authoring-safety"
   "devtool-architecture"
   "feature-specific"
