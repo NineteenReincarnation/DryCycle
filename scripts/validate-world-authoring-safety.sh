@@ -103,6 +103,16 @@ if ! grep -Fq '.drycycle.rollback' "$temperature" ||
   exit 1
 fi
 
+# Temperature/Weather may read AssetManager's merged result, but authoring must never target the
+# generated mergedmods cache when no real DryCycle source path can be resolved.
+if ! grep -Fq 'WorldAuthoringPathResolver.IsMergedCachePath(resolved)' "$temperature" ||
+   ! grep -Fq 'TemperatureSets authoring refused generated mergedmods target' "$temperature" ||
+   ! grep -Fq 'WorldAuthoringPathResolver.IsMergedCachePath(resolved)' "src/Weather/Spatial/WeatherSpatialRegistry.Persistence.cs" ||
+   ! grep -Fq 'WeatherSpatial authoring refused generated mergedmods target' "src/Weather/Spatial/WeatherSpatialRegistry.Persistence.cs"; then
+  echo "Temperature/Weather authoring can write generated mergedmods data." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
