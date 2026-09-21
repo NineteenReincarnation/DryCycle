@@ -106,6 +106,13 @@ internal static class ObjectMarqueeSelectionView
         current = default;
     }
 
+    internal static void ResetRetainedState()
+    {
+        Reset();
+        gridVisible = true;
+        gridStep = 20f;
+    }
+
     private static void Commit(
         EditorObjectSnapshot[] objects,
         EditorViewportSnapshot viewport,
