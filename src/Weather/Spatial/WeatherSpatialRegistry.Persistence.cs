@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using DryCycle.DevUI.DevTool.World;
 using DryCycle.Weather.Scheduling;
 
 namespace DryCycle.Weather.Spatial;
@@ -684,6 +685,12 @@ internal static partial class WeatherSpatialRegistry
                 string resolved = AssetManager.ResolveFilePath(assets[i]);
                 if (!string.IsNullOrEmpty(resolved) && (forSave || File.Exists(resolved)))
                 {
+                    if (forSave && WorldAuthoringPathResolver.IsMergedCachePath(resolved))
+                    {
+                        Plugin.Logger?.LogWarning(
+                            "WeatherSpatial authoring refused generated mergedmods target: " + resolved);
+                        continue;
+                    }
                     return resolved;
                 }
             }
