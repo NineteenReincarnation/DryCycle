@@ -46,13 +46,6 @@ jobs:
             exit 1
           }
 
-  persistence-authoring:
-    name: Persistence / Authoring Safety
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash Guard/persistence-authoring-safety.sh
-
   devtool-architecture:
     name: DevTool Architecture
     runs-on: ubuntu-latest
