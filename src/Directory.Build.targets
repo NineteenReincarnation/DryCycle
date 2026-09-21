@@ -52,7 +52,7 @@
        build if the expected DLL was not produced. -->
   <Target Name="BuildOptionalRWImGuiBridge"
           AfterTargets="Build"
-          DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime"
+          DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime;ILRepacker"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
     <ItemGroup>
       <PreviousRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
@@ -98,7 +98,7 @@
 
   <Target Name="ReportMissingOptionalRWImGuiBridge"
           AfterTargets="Build"
-          DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime"
+          DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime;ILRepacker"
           Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' == ''">
     <ItemGroup>
       <StaleRWImGuiBridge Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
