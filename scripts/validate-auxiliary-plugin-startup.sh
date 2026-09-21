@@ -39,8 +39,10 @@ while IFS= read -r file; do
       ;;
   esac
 
-  if ! grep -Fq 'AuxiliaryPluginStartupGuard.Enable' "$file"; then
-    echo "Auxiliary BepInEx OnEnable is not fail-open/traced: $file" >&2
+  enable_count="$(grep -Ec 'OnEnable[[:space:]]*\(' "$file" || true)"
+  guard_count="$(grep -Fc 'AuxiliaryPluginStartupGuard.Enable' "$file" || true)"
+  if [[ "$guard_count" -lt "$enable_count" ]]; then
+    echo "Auxiliary BepInEx OnEnable coverage is incomplete: $file (OnEnable=$enable_count, guarded=$guard_count)" >&2
     fail=1
   fi
 done < <(find src -type f -name '*.cs' -print | sort)
