@@ -18,8 +18,15 @@ public sealed class WorldMapGpuRetainedOptimizerPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Retained Optimizer";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuRetainedOptimizer.Enable(Logger);
-    private void OnDisable() => WorldMapGpuRetainedOptimizer.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuRetainedOptimizer.Enable(Logger),
+            WorldMapGpuRetainedOptimizer.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuRetainedOptimizer.Disable);
 }
 
 internal static class WorldMapGpuRetainedOptimizer
