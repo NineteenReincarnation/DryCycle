@@ -55,54 +55,55 @@ internal sealed class Plugin : BaseUnityPlugin
     public void OnEnable()
     {
         Logger = base.Logger;
+        StartupDiagnostics.Begin(Logger);
+        StartupDiagnostics.Marker("Plugin.OnEnable", "ENTER");
 
         try
         {
-            Iterators.IteratorLogBridge.Enable(Logger);
-            Iterators.IteratorHooks.Install();
-            Iterators.PwnIteratorExample.Enable();
+            StartupDiagnostics.Step("Plugin.OnEnable/IteratorLogBridge.Enable", () => Iterators.IteratorLogBridge.Enable(Logger));
+            StartupDiagnostics.Step("Plugin.OnEnable/IteratorHooks.Install", Iterators.IteratorHooks.Install);
+            StartupDiagnostics.Step("Plugin.OnEnable/PwnIteratorExample.Enable", Iterators.PwnIteratorExample.Enable);
 
             if (!_contentRegistered)
             {
-                MossySpiderDefinition.Register();
-                MantleCrabDefinition.Register();
-                DB_Definition.Register();
-                LanceScavengerDefinition.Register();
+                StartupDiagnostics.Step("Plugin.OnEnable/MossySpiderDefinition.Register", MossySpiderDefinition.Register);
+                StartupDiagnostics.Step("Plugin.OnEnable/MantleCrabDefinition.Register", MantleCrabDefinition.Register);
+                StartupDiagnostics.Step("Plugin.OnEnable/DesertBatflyDefinition.Register", DB_Definition.Register);
+                StartupDiagnostics.Step("Plugin.OnEnable/LanceScavengerDefinition.Register", LanceScavengerDefinition.Register);
                 _contentRegistered = true;
             }
 
-            DryCycleShaderAssets.Enable();
+            StartupDiagnostics.Step("Plugin.OnEnable/DryCycleShaderAssets.Enable", DryCycleShaderAssets.Enable);
 
             // Direct-number editing is a DevTools input facility, not a gameplay system.
             // Install it as soon as the plugin is enabled so palette/day-night numeric fields
             // are available even if a later OnModsInit subsystem fails before MiscRuntime.
             // MiscRuntime.Enable keeps the same idempotent call for normal initialization.
-            PaletteDirectInputRuntime.Enable();
+            StartupDiagnostics.Step("Plugin.OnEnable/PaletteDirectInputRuntime.Enable", PaletteDirectInputRuntime.Enable);
 
             // Explicit endpoint routing is gameplay support for topology authored by the rebuilt WE.
             // It must be active even when DevTools are closed so repeated room links and one-way links
             // resolve correctly during normal play.
-            WorldTopologyRuntime.Enable();
+            StartupDiagnostics.Step("Plugin.OnEnable/WorldTopologyRuntime.Enable", WorldTopologyRuntime.Enable);
 
-            CreatureCoreRegistry.Enable();
-            DryCycleContent.Enable();
-            ScavengerLanceHooks.Enable();
-            LanceScavengerHooks.Enable();
-            DB_Relationships.Enable();
-            DB_RainWorldHooks.Enable();
-            SpinebackLizardHooks.Enable();
-            DewPodAudioHooks.InitializeSoundIds();
+            StartupDiagnostics.Step("Plugin.OnEnable/CreatureCoreRegistry.Enable", CreatureCoreRegistry.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/DryCycleContent.Enable", DryCycleContent.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/ScavengerLanceHooks.Enable", ScavengerLanceHooks.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/LanceScavengerHooks.Enable", LanceScavengerHooks.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/DB_Relationships.Enable", DB_Relationships.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/DB_RainWorldHooks.Enable", DB_RainWorldHooks.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/SpinebackLizardHooks.Enable", SpinebackLizardHooks.Enable);
+            StartupDiagnostics.Step("Plugin.OnEnable/DewPodAudioHooks.InitializeSoundIds", DewPodAudioHooks.InitializeSoundIds);
 
-            On.RainWorld.PreModsInit += RainWorld_PreModsInit;
-            On.RainWorld.OnModsInit += RainWorld_OnModsInit;
-            On.RainWorld.PostModsInit += RainWorld_PostModsInit;
+            StartupDiagnostics.Step("Plugin.OnEnable/Hook RainWorld.PreModsInit", () => On.RainWorld.PreModsInit += RainWorld_PreModsInit);
+            StartupDiagnostics.Step("Plugin.OnEnable/Hook RainWorld.OnModsInit", () => On.RainWorld.OnModsInit += RainWorld_OnModsInit);
+            StartupDiagnostics.Step("Plugin.OnEnable/Hook RainWorld.PostModsInit", () => On.RainWorld.PostModsInit += RainWorld_PostModsInit);
         }
         catch (Exception error)
         {
+            StartupDiagnostics.Failure("Plugin.OnEnable", error);
             Logger?.LogError(
                 "DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.");
-            Logger?.LogError(error);
-
             RollbackBootstrap();
         }
     }
@@ -123,11 +124,11 @@ internal sealed class Plugin : BaseUnityPlugin
         LanceScavengerAssets.Unload();
         CreatureCoreRegistry.Disable();
         DryCycleContent.Disable();
-        CreatureDevConsoleSupport.ResetRegistration();
-        RopeSpearDevConsoleSupport.ResetRegistration();
-        KarmaSpearDevConsoleSupport.ResetRegistration();
+        StartupDiagnostics.Step("RainWorld.PreModsInit/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
         SpinebackLizardHooks.Disable();
-        SpinebackLizardDevConsoleSupport.ResetRegistration();
+        StartupDiagnostics.Step("RainWorld.PreModsInit/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
 
         // PaletteDirectInputRuntime is installed from OnEnable, so always remove it even when
         // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
@@ -234,206 +235,217 @@ internal sealed class Plugin : BaseUnityPlugin
         }
         catch (Exception cleanupError)
         {
+            StartupDiagnostics.Failure("Rollback/" + name, cleanupError);
             Logger?.LogWarning("DryCycle bootstrap rollback failed for " + name + ": " + cleanupError);
         }
     }
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
-        DryCycleLifecycleEvents.RaiseBeforePreModsInit(self);
-        ScavengerLanceDevConsoleSupport.ResetRegistration();
+        StartupDiagnostics.Marker("RainWorld.PreModsInit", "ENTER");
+        StartupDiagnostics.Step("RainWorld.PreModsInit/BeforePreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseBeforePreModsInit(self));
+        StartupDiagnostics.Step("RainWorld.PreModsInit/ScavengerLanceDevConsoleSupport.ResetRegistration", ScavengerLanceDevConsoleSupport.ResetRegistration);
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
         KarmaSpearDevConsoleSupport.ResetRegistration();
         SpinebackLizardDevConsoleSupport.ResetRegistration();
         TryInitializeSlugBaseHydrationFeatures();
-        orig(self);
-        DryCycleLifecycleEvents.RaiseAfterPreModsInit(self);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/orig", () => orig(self));
+        StartupDiagnostics.Step("RainWorld.PreModsInit/AfterPreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterPreModsInit(self));
+        StartupDiagnostics.Marker("RainWorld.PreModsInit", "EXIT");
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
-        DryCycleLifecycleEvents.RaiseBeforeModsInit(self);
+        StartupDiagnostics.Marker("RainWorld.OnModsInit", "ENTER");
+        StartupDiagnostics.Step("RainWorld.OnModsInit/BeforeModsInit subscribers", () => DryCycleLifecycleEvents.RaiseBeforeModsInit(self));
         TryInitializeSlugBaseHydrationFeatures();
-        orig(self);
+        StartupDiagnostics.Step("RainWorld.OnModsInit/orig", () => orig(self));
 
         if (_initialized)
         {
-            AIDebuggerRuntime.Install(self, Logger);
-            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
+            StartupDiagnostics.Optional("RainWorld.OnModsInit/AIDebuggerRuntime.Install(rebind)", () => AIDebuggerRuntime.Install(self, Logger));
+            StartupDiagnostics.Step("RainWorld.OnModsInit/AfterModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterModsInit(self));
+            StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ALREADY-INITIALIZED");
             return;
         }
 
         try
         {
-            DryCycleShaderAssets.EnsureLoaded(self);
-            LanceScavengerAssets.EnsureLoaded();
-            RegionDayNightOptions.Register();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DryCycleShaderAssets.EnsureLoaded", () => DryCycleShaderAssets.EnsureLoaded(self));
+            StartupDiagnostics.Step("RainWorld.OnModsInit/LanceScavengerAssets.EnsureLoaded", LanceScavengerAssets.EnsureLoaded);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RegionDayNightOptions.Register", RegionDayNightOptions.Register);
 
-            DryCycleContent.LoadResources(self);
-            MantleCrabDefinition.LoadResources(self);
-            KingVultureSpearHooks.Enable();
-            RopeSpearHooks.Enable();
-            DryCycleTokenRuntime.Enable();
-            RopeSpearSandboxRuntime.Enable();
-            RopeSpearDiagonalClimbRuntime.Enable();
-            RopeSpearMountVinePoseRuntime.Enable();
-            RopeSpearWallStickRuntime.Enable();
-            RopeSpearAimController.Enable();
-            KingVultureSpearPlayerEffects.Enable();
-            KingVultureSpearFeedback.Enable();
-            ThirstHooks.Enable();
-            DevFoodWaterRefillRuntime.Enable();
-            KarmaSpearHooks.Enable();
-            SlugCatKarmicArmorRuntime.Enable();
-            TemperatureSystemRuntime.Enable();
-            DewPodHooks.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DryCycleContent.LoadResources", () => DryCycleContent.LoadResources(self));
+            StartupDiagnostics.Step("RainWorld.OnModsInit/MantleCrabDefinition.LoadResources", () => MantleCrabDefinition.LoadResources(self));
+            StartupDiagnostics.Step("RainWorld.OnModsInit/KingVultureSpearHooks.Enable", KingVultureSpearHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearHooks.Enable", RopeSpearHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DryCycleTokenRuntime.Enable", DryCycleTokenRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearSandboxRuntime.Enable", RopeSpearSandboxRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearDiagonalClimbRuntime.Enable", RopeSpearDiagonalClimbRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearMountVinePoseRuntime.Enable", RopeSpearMountVinePoseRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearWallStickRuntime.Enable", RopeSpearWallStickRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearAimController.Enable", RopeSpearAimController.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/KingVultureSpearPlayerEffects.Enable", KingVultureSpearPlayerEffects.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/KingVultureSpearFeedback.Enable", KingVultureSpearFeedback.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/ThirstHooks.Enable", ThirstHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DevFoodWaterRefillRuntime.Enable", DevFoodWaterRefillRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/KarmaSpearHooks.Enable", KarmaSpearHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/SlugCatKarmicArmorRuntime.Enable", SlugCatKarmicArmorRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/TemperatureSystemRuntime.Enable", TemperatureSystemRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodHooks.Enable", DewPodHooks.Enable);
 
-            QuicksandZoneHooks.Enable();
-            QuicksandDrillCrabCompatibility.EnsureEnabled();
-            QuicksandAIHazard.Enable();
-            QuicksandCreatureEscape.Enable();
-            QuicksandPlayerStruggleControl.EnableNativeCapture();
-            QuicksandPlayerHorizontalStability.Enable();
-            QuicksandSinkRateLimiter.Enable();
-            QuicksandLooseObjectSinkEase.Enable();
-            QuicksandPlayerLocomotionSupport.Enable();
-            QuicksandPlayerStruggleControl.Enable();
-            QuicksandPlayerShoreConstraint.Enable();
-            QuicksandWeaponSettling.Enable();
-            QuicksandSubmersionCleanup.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandZoneHooks.Enable", QuicksandZoneHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandDrillCrabCompatibility.EnsureEnabled", QuicksandDrillCrabCompatibility.EnsureEnabled);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandAIHazard.Enable", QuicksandAIHazard.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandCreatureEscape.Enable", QuicksandCreatureEscape.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandPlayerStruggleControl.EnableNativeCapture", QuicksandPlayerStruggleControl.EnableNativeCapture);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandPlayerHorizontalStability.Enable", QuicksandPlayerHorizontalStability.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandSinkRateLimiter.Enable", QuicksandSinkRateLimiter.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandLooseObjectSinkEase.Enable", QuicksandLooseObjectSinkEase.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandPlayerLocomotionSupport.Enable", QuicksandPlayerLocomotionSupport.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandPlayerStruggleControl.Enable", QuicksandPlayerStruggleControl.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandPlayerShoreConstraint.Enable", QuicksandPlayerShoreConstraint.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandWeaponSettling.Enable", QuicksandWeaponSettling.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/QuicksandSubmersionCleanup.Enable", QuicksandSubmersionCleanup.Enable);
 
-            DewPodPlantHooks.Enable();
-            DewPodPlantCollisionHooks.Enable();
-            DewPodClassicVisualHooks.Enable();
-            DewPodRuntimeTuningHooks.Enable();
-            DewPodAudioHooks.Enable();
-            KingVultureSpearCombat.Enable();
-            HydrationWeakness.Enable();
-            DehydrationVisualRuntime.Enable();
-            HydrationDivider.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodPlantHooks.Enable", DewPodPlantHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodPlantCollisionHooks.Enable", DewPodPlantCollisionHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodClassicVisualHooks.Enable", DewPodClassicVisualHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodRuntimeTuningHooks.Enable", DewPodRuntimeTuningHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DewPodAudioHooks.Enable", DewPodAudioHooks.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/KingVultureSpearCombat.Enable", KingVultureSpearCombat.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/HydrationWeakness.Enable", HydrationWeakness.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DehydrationVisualRuntime.Enable", DehydrationVisualRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/HydrationDivider.Enable", HydrationDivider.Enable);
 
             WorldClockHooks.TestScheduleEnabled = false;
-            WeatherTypeRegistry.ResetWarnings();
-            RegionClimateRegistry.Reload();
-            DayNightRuntime.Enable();
-            WorldClockRegionContinuityRuntime.Enable();
-            ShelterCycleResetRuntime.Enable();
-            OpenShelterSleepRuntime.Enable();
-            WeatherScheduleRuntime.Enable();
-            FogWeatherRuntime.Enable();
-            HeatWaveWeatherRuntime.Enable();
-            IntenseHeatWeatherRuntime.Enable();
-            SandstormWeatherRuntime.Enable();
-            RainWeatherRuntime.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/WeatherTypeRegistry.ResetWarnings", WeatherTypeRegistry.ResetWarnings);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RegionClimateRegistry.Reload", RegionClimateRegistry.Reload);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DayNightRuntime.Enable", DayNightRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/WorldClockRegionContinuityRuntime.Enable", WorldClockRegionContinuityRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/ShelterCycleResetRuntime.Enable", ShelterCycleResetRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/OpenShelterSleepRuntime.Enable", OpenShelterSleepRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/WeatherScheduleRuntime.Enable", WeatherScheduleRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/FogWeatherRuntime.Enable", FogWeatherRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/HeatWaveWeatherRuntime.Enable", HeatWaveWeatherRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/IntenseHeatWeatherRuntime.Enable", IntenseHeatWeatherRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/SandstormWeatherRuntime.Enable", SandstormWeatherRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RainWeatherRuntime.Enable", RainWeatherRuntime.Enable);
 
-            ScheduledHeavyRainTraversalRuntime.Enable();
-            ScheduledHeavyRainImpactGuardRuntime.Enable();
-            SyntheticRoomRainTakeoverRuntime.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/ScheduledHeavyRainTraversalRuntime.Enable", ScheduledHeavyRainTraversalRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/ScheduledHeavyRainImpactGuardRuntime.Enable", ScheduledHeavyRainImpactGuardRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/SyntheticRoomRainTakeoverRuntime.Enable", SyntheticRoomRainTakeoverRuntime.Enable);
 
-            RainDrinkingRuntime.Enable();
-            WeatherCameraEffectsRuntime.Enable();
-            RainMeterRoundPipRuntime.Enable();
-            FogForecastFlowRuntime.Enable();
-            RainMeterFastForwardForecastFix.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RainDrinkingRuntime.Enable", RainDrinkingRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/WeatherCameraEffectsRuntime.Enable", WeatherCameraEffectsRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RainMeterRoundPipRuntime.Enable", RainMeterRoundPipRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/FogForecastFlowRuntime.Enable", FogForecastFlowRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/RainMeterFastForwardForecastFix.Enable", RainMeterFastForwardForecastFix.Enable);
 
-            InternalGateRuntime.Enable();
-            MiscRuntime.Enable();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/InternalGateRuntime.Enable", InternalGateRuntime.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/MiscRuntime.Enable", MiscRuntime.Enable);
             _initialized = true;
-            AIDebuggerRuntime.Install(self, Logger);
+            StartupDiagnostics.Optional("RainWorld.OnModsInit/AIDebuggerRuntime.Install", () => AIDebuggerRuntime.Install(self, Logger));
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
-            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/AfterModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterModsInit(self));
+            StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT");
         }
         catch (Exception ex)
         {
-            AIDebuggerRuntime.Uninstall();
-            InternalGateRuntime.Disable();
-            MiscRuntime.Disable();
-            OpenShelterSleepRuntime.Disable();
-            RainDrinkingRuntime.Disable();
-            RainMeterFastForwardForecastFix.Disable();
-            FogForecastFlowRuntime.Disable();
-            RainMeterRoundPipRuntime.Disable();
-            WeatherForecastHudRuntime.Disable();
-            WeatherCameraEffectsRuntime.Disable();
-            SyntheticRoomRainTakeoverRuntime.Disable();
-            ScheduledHeavyRainImpactGuardRuntime.Disable();
-            ScheduledHeavyRainTraversalRuntime.Disable();
-            RainWeatherRuntime.Disable();
-            SandstormWeatherRuntime.Disable();
-            IntenseHeatWeatherRuntime.Disable();
-            HeatWaveWeatherRuntime.Disable();
-            FogWeatherRuntime.Disable();
-            WeatherScheduleRuntime.Disable();
-            ShelterCycleResetRuntime.Disable();
-            WorldClockRegionContinuityRuntime.Disable();
-            DayNightRuntime.Disable();
-            HydrationDivider.Disable();
-            DehydrationVisualRuntime.Disable();
-            HydrationWeakness.Disable();
-            KingVultureSpearCombat.Disable();
-            RopeSpearWallStickRuntime.Disable();
-            RopeSpearMountVinePoseRuntime.Disable();
-            RopeSpearDiagonalClimbRuntime.Disable();
-            RopeSpearAimController.Disable();
-            RopeSpearSandboxRuntime.Disable();
-            DryCycleTokenRuntime.Disable();
-            RopeSpearHooks.Disable();
-            QuicksandSubmersionCleanup.Disable();
-            QuicksandCreatureEscape.Disable();
-            QuicksandAIHazard.Disable();
-            QuicksandWeaponSettling.Disable();
-            QuicksandPlayerShoreConstraint.Disable();
-            QuicksandPlayerStruggleControl.Disable();
-            QuicksandPlayerLocomotionSupport.Disable();
-            QuicksandLooseObjectSinkEase.Disable();
-            QuicksandSinkRateLimiter.Disable();
-            QuicksandPlayerHorizontalStability.Disable();
-            QuicksandDrillCrabCompatibility.Disable();
-            QuicksandZoneHooks.Disable();
-            DewPodAudioHooks.Disable();
-            DewPodRuntimeTuningHooks.Disable();
-            DewPodClassicVisualHooks.Disable();
-            DewPodPlantCollisionHooks.Disable();
-            DewPodPlantHooks.Disable();
-            DewPodHooks.Disable();
-            TemperatureSystemRuntime.Disable();
-            SlugCatKarmicArmorRuntime.Disable();
-            KarmaSpearHooks.Disable();
-            DevFoodWaterRefillRuntime.Disable();
-            ThirstHooks.Disable();
-            KingVultureSpearFeedback.Disable();
-            KingVultureSpearPlayerEffects.Disable();
-            KingVultureSpearHooks.Disable();
-            SpinebackLizardHooks.Disable();
+            // Log the primary failure before any rollback work. If cleanup itself encounters a
+            // secondary problem, the original startup source and full stack are already durable.
+            StartupDiagnostics.Failure("RainWorld.OnModsInit/PostModTransaction", ex);
             Logger.LogError("DryCycle post-mod initialization failed; the failing runtime transaction was rolled back so Rain World can continue loading.");
-            Logger.LogError(ex);
-            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
+            RollbackRuntimeInitialization();
+            StartupDiagnostics.Step("RainWorld.OnModsInit/AfterModsInit subscribers after rollback", () => DryCycleLifecycleEvents.RaiseAfterModsInit(self));
+            StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ROLLED-BACK");
             return;
         }
-    }
 
     private static void TryInitializeSlugBaseHydrationFeatures()
     {
-        try
-        {
-            SlugBaseHydrationFeatures.Initialize();
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogWarning("Optional SlugBase hydration integration failed and was skipped: " + ex);
-        }
+        StartupDiagnostics.Optional(
+            "SlugBaseHydrationFeatures.Initialize",
+            SlugBaseHydrationFeatures.Initialize);
+    }
+
+    private static void RollbackRuntimeInitialization()
+    {
+        SafeBootstrapCleanup("AIDebuggerRuntime.Uninstall", AIDebuggerRuntime.Uninstall);
+        SafeBootstrapCleanup("InternalGateRuntime.Disable", InternalGateRuntime.Disable);
+        SafeBootstrapCleanup("MiscRuntime.Disable", MiscRuntime.Disable);
+        SafeBootstrapCleanup("OpenShelterSleepRuntime.Disable", OpenShelterSleepRuntime.Disable);
+        SafeBootstrapCleanup("RainDrinkingRuntime.Disable", RainDrinkingRuntime.Disable);
+        SafeBootstrapCleanup("RainMeterFastForwardForecastFix.Disable", RainMeterFastForwardForecastFix.Disable);
+        SafeBootstrapCleanup("FogForecastFlowRuntime.Disable", FogForecastFlowRuntime.Disable);
+        SafeBootstrapCleanup("RainMeterRoundPipRuntime.Disable", RainMeterRoundPipRuntime.Disable);
+        SafeBootstrapCleanup("WeatherForecastHudRuntime.Disable", WeatherForecastHudRuntime.Disable);
+        SafeBootstrapCleanup("WeatherCameraEffectsRuntime.Disable", WeatherCameraEffectsRuntime.Disable);
+        SafeBootstrapCleanup("SyntheticRoomRainTakeoverRuntime.Disable", SyntheticRoomRainTakeoverRuntime.Disable);
+        SafeBootstrapCleanup("ScheduledHeavyRainImpactGuardRuntime.Disable", ScheduledHeavyRainImpactGuardRuntime.Disable);
+        SafeBootstrapCleanup("ScheduledHeavyRainTraversalRuntime.Disable", ScheduledHeavyRainTraversalRuntime.Disable);
+        SafeBootstrapCleanup("RainWeatherRuntime.Disable", RainWeatherRuntime.Disable);
+        SafeBootstrapCleanup("SandstormWeatherRuntime.Disable", SandstormWeatherRuntime.Disable);
+        SafeBootstrapCleanup("IntenseHeatWeatherRuntime.Disable", IntenseHeatWeatherRuntime.Disable);
+        SafeBootstrapCleanup("HeatWaveWeatherRuntime.Disable", HeatWaveWeatherRuntime.Disable);
+        SafeBootstrapCleanup("FogWeatherRuntime.Disable", FogWeatherRuntime.Disable);
+        SafeBootstrapCleanup("WeatherScheduleRuntime.Disable", WeatherScheduleRuntime.Disable);
+        SafeBootstrapCleanup("ShelterCycleResetRuntime.Disable", ShelterCycleResetRuntime.Disable);
+        SafeBootstrapCleanup("WorldClockRegionContinuityRuntime.Disable", WorldClockRegionContinuityRuntime.Disable);
+        SafeBootstrapCleanup("DayNightRuntime.Disable", DayNightRuntime.Disable);
+        SafeBootstrapCleanup("HydrationDivider.Disable", HydrationDivider.Disable);
+        SafeBootstrapCleanup("DehydrationVisualRuntime.Disable", DehydrationVisualRuntime.Disable);
+        SafeBootstrapCleanup("HydrationWeakness.Disable", HydrationWeakness.Disable);
+        SafeBootstrapCleanup("KingVultureSpearCombat.Disable", KingVultureSpearCombat.Disable);
+        SafeBootstrapCleanup("RopeSpearWallStickRuntime.Disable", RopeSpearWallStickRuntime.Disable);
+        SafeBootstrapCleanup("RopeSpearMountVinePoseRuntime.Disable", RopeSpearMountVinePoseRuntime.Disable);
+        SafeBootstrapCleanup("RopeSpearDiagonalClimbRuntime.Disable", RopeSpearDiagonalClimbRuntime.Disable);
+        SafeBootstrapCleanup("RopeSpearAimController.Disable", RopeSpearAimController.Disable);
+        SafeBootstrapCleanup("RopeSpearSandboxRuntime.Disable", RopeSpearSandboxRuntime.Disable);
+        SafeBootstrapCleanup("DryCycleTokenRuntime.Disable", DryCycleTokenRuntime.Disable);
+        SafeBootstrapCleanup("RopeSpearHooks.Disable", RopeSpearHooks.Disable);
+        SafeBootstrapCleanup("QuicksandSubmersionCleanup.Disable", QuicksandSubmersionCleanup.Disable);
+        SafeBootstrapCleanup("QuicksandCreatureEscape.Disable", QuicksandCreatureEscape.Disable);
+        SafeBootstrapCleanup("QuicksandAIHazard.Disable", QuicksandAIHazard.Disable);
+        SafeBootstrapCleanup("QuicksandWeaponSettling.Disable", QuicksandWeaponSettling.Disable);
+        SafeBootstrapCleanup("QuicksandPlayerShoreConstraint.Disable", QuicksandPlayerShoreConstraint.Disable);
+        SafeBootstrapCleanup("QuicksandPlayerStruggleControl.Disable", QuicksandPlayerStruggleControl.Disable);
+        SafeBootstrapCleanup("QuicksandPlayerLocomotionSupport.Disable", QuicksandPlayerLocomotionSupport.Disable);
+        SafeBootstrapCleanup("QuicksandLooseObjectSinkEase.Disable", QuicksandLooseObjectSinkEase.Disable);
+        SafeBootstrapCleanup("QuicksandSinkRateLimiter.Disable", QuicksandSinkRateLimiter.Disable);
+        SafeBootstrapCleanup("QuicksandPlayerHorizontalStability.Disable", QuicksandPlayerHorizontalStability.Disable);
+        SafeBootstrapCleanup("QuicksandDrillCrabCompatibility.Disable", QuicksandDrillCrabCompatibility.Disable);
+        SafeBootstrapCleanup("QuicksandZoneHooks.Disable", QuicksandZoneHooks.Disable);
+        SafeBootstrapCleanup("DewPodAudioHooks.Disable", DewPodAudioHooks.Disable);
+        SafeBootstrapCleanup("DewPodRuntimeTuningHooks.Disable", DewPodRuntimeTuningHooks.Disable);
+        SafeBootstrapCleanup("DewPodClassicVisualHooks.Disable", DewPodClassicVisualHooks.Disable);
+        SafeBootstrapCleanup("DewPodPlantCollisionHooks.Disable", DewPodPlantCollisionHooks.Disable);
+        SafeBootstrapCleanup("DewPodPlantHooks.Disable", DewPodPlantHooks.Disable);
+        SafeBootstrapCleanup("DewPodHooks.Disable", DewPodHooks.Disable);
+        SafeBootstrapCleanup("TemperatureSystemRuntime.Disable", TemperatureSystemRuntime.Disable);
+        SafeBootstrapCleanup("SlugCatKarmicArmorRuntime.Disable", SlugCatKarmicArmorRuntime.Disable);
+        SafeBootstrapCleanup("KarmaSpearHooks.Disable", KarmaSpearHooks.Disable);
+        SafeBootstrapCleanup("DevFoodWaterRefillRuntime.Disable", DevFoodWaterRefillRuntime.Disable);
+        SafeBootstrapCleanup("ThirstHooks.Disable", ThirstHooks.Disable);
+        SafeBootstrapCleanup("KingVultureSpearFeedback.Disable", KingVultureSpearFeedback.Disable);
+        SafeBootstrapCleanup("KingVultureSpearPlayerEffects.Disable", KingVultureSpearPlayerEffects.Disable);
+        SafeBootstrapCleanup("KingVultureSpearHooks.Disable", KingVultureSpearHooks.Disable);
+        SafeBootstrapCleanup("SpinebackLizardHooks.Disable", SpinebackLizardHooks.Disable);
+        _initialized = false;
     }
 
     private static void RainWorld_PostModsInit(
         On.RainWorld.orig_PostModsInit orig,
         RainWorld self)
     {
-        orig(self);
-        CreatureDevConsoleSupport.TryRegisterAll();
-        ScavengerLanceDevConsoleSupport.TryRegister();
-        RopeSpearDevConsoleSupport.TryRegister();
-        KarmaSpearDevConsoleSupport.TryRegister();
-        SpinebackLizardDevConsoleSupport.TryRegister();
+        StartupDiagnostics.Marker("RainWorld.PostModsInit", "ENTER");
+        StartupDiagnostics.Step("RainWorld.PostModsInit/orig", () => orig(self));
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/CreatureDevConsoleSupport.TryRegisterAll", CreatureDevConsoleSupport.TryRegisterAll);
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/ScavengerLanceDevConsoleSupport.TryRegister", ScavengerLanceDevConsoleSupport.TryRegister);
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/RopeSpearDevConsoleSupport.TryRegister", RopeSpearDevConsoleSupport.TryRegister);
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/KarmaSpearDevConsoleSupport.TryRegister", KarmaSpearDevConsoleSupport.TryRegister);
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/SpinebackLizardDevConsoleSupport.TryRegister", SpinebackLizardDevConsoleSupport.TryRegister);
+        StartupDiagnostics.Marker("RainWorld.PostModsInit", "EXIT");
     }
 }
