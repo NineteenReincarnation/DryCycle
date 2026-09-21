@@ -300,10 +300,7 @@ internal static class WorldLineageRegistry
 
             string result = string.Join(newline, output);
             if (terminalNewline) result += newline;
-            string temp = loadedPath + ".lineage.tmp";
-            File.WriteAllText(temp, result);
-            File.Copy(temp, loadedPath, overwrite: true);
-            File.Delete(temp);
+            WorldAuthoringPathResolver.AtomicWriteAllText(loadedPath, result);
             Dirty = false;
             return LoadFromPath(loadedRegion, loadedPath);
         }
