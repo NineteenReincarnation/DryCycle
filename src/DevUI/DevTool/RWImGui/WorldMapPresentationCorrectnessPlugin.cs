@@ -24,9 +24,16 @@ public sealed class WorldMapPresentationCorrectnessPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Presentation Correctness";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapPresentationCorrectness.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapPresentationCorrectness.Enable(Logger),
+            WorldMapPresentationCorrectness.Disable);
     private void LateUpdate() => WorldMapPresentationCorrectness.LateUpdate();
-    private void OnDisable() => WorldMapPresentationCorrectness.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapPresentationCorrectness.Disable);
 }
 
 internal static class WorldMapPresentationCorrectness
