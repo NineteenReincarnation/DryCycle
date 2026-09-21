@@ -37,7 +37,6 @@ internal static class DevToolRuntime
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.Enable();
         On.DevInterface.DevUI.Update += DevUI_Update;
-        On.RainWorldGame.Update += RainWorldGame_Update;
         enabled = true;
     }
 
@@ -45,7 +44,6 @@ internal static class DevToolRuntime
     {
         if (!enabled) return;
         On.DevInterface.DevUI.Update -= DevUI_Update;
-        On.RainWorldGame.Update -= RainWorldGame_Update;
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.Disable();
         LegacyUiPresentationController.Reset();
@@ -285,9 +283,8 @@ internal static class DevToolRuntime
                 : DevToolPresentationOutcome.FullRebuild);
     }
 
-    private static void RainWorldGame_Update(On.RainWorldGame.orig_Update orig, global::RainWorldGame self)
+    internal static void AfterRainWorldGameUpdate(global::RainWorldGame self)
     {
-        orig(self);
         if (EffectLivePreviewEnabled)
             EffectPreviewRuntime.OnGameUpdate(self);
     }
