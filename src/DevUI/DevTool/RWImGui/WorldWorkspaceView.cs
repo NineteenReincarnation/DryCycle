@@ -324,11 +324,9 @@ internal static class WorldWorkspaceView
                 "WorldWorkspaceSave",
                 anyDirty ? DevToolButtonTone.Primary : DevToolButtonTone.Normal))
         {
+            // Save is a queued Core command. Do not persist individual files here: doing so races the
+            // game-thread command and makes the toolbar behave differently from Ctrl/Cmd+S.
             Send(EditorUiCommandKind.Save);
-            if (WorldWorkspaceDataView.HasDirtyData) WorldWorkspaceDataView.SaveDirty();
-            if (WorldRoomAttractionRegistry.Dirty) WorldRoomAttractionRegistry.Save();
-            if (WorldTextRegistry.Dirty) WorldTextRegistry.Save();
-            if (WorldTopologyRegistry.Dirty) WorldTopologyRegistry.Save();
         }
 
         ImGui.SameLine();
