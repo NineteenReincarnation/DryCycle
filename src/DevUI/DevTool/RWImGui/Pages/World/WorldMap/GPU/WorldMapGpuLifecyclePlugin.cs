@@ -23,7 +23,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
     private bool observedLiveSession;
-    private bool runtimeSuspendedForDormantSession;
 
     private void OnEnable() =>
         global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
@@ -34,7 +33,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     private void InitializeState()
     {
         observedLiveSession = false;
-        runtimeSuspendedForDormantSession = false;
     }
 
     private void LateUpdate()
@@ -42,20 +40,15 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         bool live = DevToolSessionHub.IsCurrentSessionLive;
         if (!live)
         {
-            if (observedLiveSession && !runtimeSuspendedForDormantSession)
+            if (observedLiveSession)
             {
                 SuspendDormantMapRuntime();
-                runtimeSuspendedForDormantSession = true;
+                observedLiveSession = false;
             }
             return;
         }
 
         observedLiveSession = true;
-        if (runtimeSuspendedForDormantSession)
-        {
-            ResumeDormantMapRuntime();
-            runtimeSuspendedForDormantSession = false;
-        }
 
         EditorSession session = DevToolRuntime.ActiveSession;
         bool rebuiltMapVisible =
@@ -77,11 +70,8 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void SuspendDormantMapRuntime()
     {
-        // The region preload layer can otherwise retain immutable snapshots and several regions of
-        // managed bake data for the entire gameplay session. Retire it before releasing the active
-        // GPU working set; renderer shutdown below still flushes the durable active-region bake.
-        WorldMapGpuRegionPreload.Disable();
-
+        // Keep independently owned plugin runtimes enabled. Retire only data tied to the closed
+        // DevTools session; the next Map cache update can rebuild it from the durable bake.
         // The basic shortcut presentation owns AbstractRoom/RoomRepresentation references but is
         // intentionally an internal presentation cache rather than a BepInEx runtime. Clear its
         // cache once at the lifetime boundary through its explicit lifecycle API.
@@ -98,17 +88,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         WorldMapGpuCache.ReleaseWorkingSet();
     }
 
-    private void ResumeDormantMapRuntime()
-    {
-        // Rebuild the active World Map runtime in dependency order. The first reopened Map frame
-        // reloads the durable active-region bake from disk before the preload layer warms neighbors.
-        // Only restore state actually owned by this dormant-session observer. The individual
-        // BepInEx plugins remain authoritative for player location, performance, exact shortcuts,
-        // renderer and pipe batching; disabling/re-enabling those shared runtimes here can desync
-        // their component state and their Update loops.
-        WorldMapGpuRegionPreload.Enable(Logger);
-    }
-
     private void OnDisable() =>
         global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
             PluginName + ".OnDisable",
@@ -117,12 +96,9 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     private void Shutdown()
     {
         // Plugin shutdown can arrive in any component order. Hide presentation immediately.
-        // If this lifecycle parked the shared runtimes while DevTools was dormant, restore them
-        // before this component disappears: their owning BepInEx plugins may remain enabled and
-        // must not be left permanently disabled just because this observer shut down first.
+        // Shared runtimes remain under their own BepInEx plugin owners; this observer only retires
+        // transient session state and therefore has nothing to re-enable on shutdown.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
-        if (runtimeSuspendedForDormantSession)
-            ResumeDormantMapRuntime();
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
     }
