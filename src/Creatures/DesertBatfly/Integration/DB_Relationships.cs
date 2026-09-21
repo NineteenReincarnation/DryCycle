@@ -22,8 +22,25 @@ internal static class DB_Relationships
             return;
         }
 
-        On.StaticWorld.InitStaticWorld += StaticWorld_InitStaticWorld;
         _enabled = true;
+        try
+        {
+            On.StaticWorld.InitStaticWorld += StaticWorld_InitStaticWorld;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "DB_Relationships.Enable",
+                error,
+                () =>
+                {
+                    global::DryCycle.StartupDiagnostics.RollbackStep(
+                        "DB_Relationships.Enable/StaticWorld.InitStaticWorld",
+                        () => On.StaticWorld.InitStaticWorld -= StaticWorld_InitStaticWorld);
+                    _enabled = false;
+                });
+            throw;
+        }
     }
 
     internal static void Disable()
