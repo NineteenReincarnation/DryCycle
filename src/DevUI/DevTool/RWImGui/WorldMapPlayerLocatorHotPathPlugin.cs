@@ -17,8 +17,9 @@ public sealed class WorldMapPlayerLocatorHotPathPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Player Locator Hot Path";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo("World Map player-locator hot path is running in baseline mode; no self-detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("World Map player-locator hot path is running in baseline mode; no self-detour attached."),
+            null);
 }
