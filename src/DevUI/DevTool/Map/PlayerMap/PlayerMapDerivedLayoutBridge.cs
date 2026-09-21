@@ -23,8 +23,15 @@ public sealed class PlayerMapDerivedLayoutBridgePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Derived Layout Bridge";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapDerivedLayoutBridge.Enable(Logger);
-    private void OnDisable() => PlayerMapDerivedLayoutBridge.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapDerivedLayoutBridge.Enable(Logger),
+            PlayerMapDerivedLayoutBridge.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapDerivedLayoutBridge.Disable);
 }
 
 internal static class PlayerMapDerivedLayoutBridge
