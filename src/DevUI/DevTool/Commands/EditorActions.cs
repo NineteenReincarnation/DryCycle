@@ -39,7 +39,7 @@ public static class EditorActions
         try
         {
             if (session.Owner.activePage is MapPage map)
-                return SaveMapWorkspace(map);
+                return SaveMapWorkspace(session, map);
 
             if (session.Owner.activePage is RelationshipPage)
             {
@@ -64,9 +64,9 @@ public static class EditorActions
     /// save entry point (toolbar button, Ctrl/Cmd+S, future automation) on this same core path so a
     /// successful map-config save can never leave world.txt or DryCycle-owned world data dirty.
     /// </summary>
-    private static bool SaveMapWorkspace(MapPage map)
+    private static bool SaveMapWorkspace(EditorSession session, MapPage map)
     {
-        if (map == null) return false;
+        if (session == null || map == null) return false;
 
         bool ok = true;
         map.SaveMapConfig();
@@ -88,7 +88,7 @@ public static class EditorActions
 
         if (WorldRoomAttractionRegistry.Dirty)
         {
-            if (WorldRoomAttractionRegistry.EnsureLoaded(DevToolSessionHub.Current))
+            if (WorldRoomAttractionRegistry.EnsureLoaded(session))
                 ok &= WorldRoomAttractionRegistry.Save();
             else
             {
