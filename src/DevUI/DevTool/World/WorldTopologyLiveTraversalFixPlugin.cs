@@ -26,8 +26,15 @@ public sealed class WorldTopologyLiveTraversalFixPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle World Topology Live Traversal Fix";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => WorldTopologyLiveTraversalFix.Enable(Logger);
-    private void OnDisable() => WorldTopologyLiveTraversalFix.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldTopologyLiveTraversalFix.Enable(Logger),
+            WorldTopologyLiveTraversalFix.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldTopologyLiveTraversalFix.Disable);
 }
 
 internal static class WorldTopologyLiveTraversalFix
