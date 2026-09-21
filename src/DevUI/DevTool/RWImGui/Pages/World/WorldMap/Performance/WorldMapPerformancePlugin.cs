@@ -30,7 +30,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency(WorldConnectionRoutingPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldMapPerformancePlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapPerformance";

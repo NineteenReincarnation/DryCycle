@@ -25,8 +25,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// room .txt data, without realizing every room.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(WorldMapPresentationCorrectnessPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency(WorldMapPipeLayerPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldMapExactShortcutPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMap.ExactShortcuts";

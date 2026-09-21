@@ -18,7 +18,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// snapshot. Results are cached by texture/UV identity, so the readback is a one-shot room bake.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(WorldMapImGuiPresentationFallbackPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldMapRasterReadbackFallbackPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapGPU.RasterReadbackFallback";
