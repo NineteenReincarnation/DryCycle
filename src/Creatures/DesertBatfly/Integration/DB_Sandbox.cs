@@ -51,10 +51,43 @@ internal static class DB_Sandbox
 
             enabled = true;
         }
-        catch
+        catch (Exception error)
         {
-            Disable();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "DB_Sandbox.Enable",
+                error,
+                RollbackPartialEnable);
             throw;
+        }
+    }
+
+    private static void RollbackPartialEnable()
+    {
+        enabled = false;
+
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "DB_Sandbox.Enable/Harmony.UnpatchSelf",
+            () => DB_RuntimePatch.UnpatchSelf(harmony));
+        harmony = null;
+
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "DB_Sandbox.Enable/CreatureUnlockList.Remove",
+            () =>
+            {
+                if (MultiplayerUnlocks.CreatureUnlockList != null)
+                    MultiplayerUnlocks.CreatureUnlockList.RemoveAll(
+                        id => id != null && id.value == UnlockValue);
+            });
+
+        if (UnlockID != null)
+        {
+            MultiplayerUnlocks.SandboxUnlockID rollbackId = UnlockID;
+            if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                    "DB_Sandbox.Enable/UnlockID.Unregister",
+                    rollbackId.Unregister))
+            {
+                UnlockID = null;
+            }
         }
     }
 
