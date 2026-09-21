@@ -458,16 +458,7 @@ internal static class EffectPreviewRuntime
         }
         catch (Exception error)
         {
-            try
-            {
-                EffectPreviewRollbackReport report = ownership?.Rollback("begin failure") ??
-                                                     EffectPreviewRollbackReport.Clean;
-                EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
-                RollbackRuntimeVisualState(typeName, "begin failure");
-                RollbackSceneState(typeName, "begin failure");
-                RollbackVisualState(typeName, "begin failure");
-            }
-            catch { }
+            RollbackAllOwnedState(typeName, "begin failure");
 
             if (settings?.effects != null && previewEffect != null)
                 LoadedHookReplayProbe.RemoveExact(settings.effects, previewEffect);
@@ -484,81 +475,132 @@ internal static class EffectPreviewRuntime
         string typeName = activeType;
         RoomSettings.RoomEffect target = previewEffect;
 
-        if (target == null)
+        // Every cleanup layer is independent. A failure in one journal must never prevent the exact
+        // temporary RoomEffect from being detached, nor prevent the remaining reversible journals
+        // from getting their own rollback attempt.
+        RollbackAllOwnedState(typeName, reason);
+
+        if (target != null)
         {
             try
             {
-                EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
-                                                     EffectPreviewRollbackReport.Clean;
-                EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
-                RollbackRuntimeVisualState(typeName, reason);
-                RollbackSceneState(typeName, reason);
-                RollbackVisualState(typeName, reason);
+                List<RoomSettings.RoomEffect> effects = settings?.effects;
+                bool removed = false;
+                if (effects != null)
+                {
+                    for (int i = effects.Count - 1; i >= 0; i--)
+                    {
+                        if (!ReferenceEquals(effects[i], target)) continue;
+                        effects.RemoveAt(i);
+                        removed = true;
+                    }
+
+                    if (removed && effects.Count != baselineEffectCount)
+                    {
+                        Plugin.Logger?.LogDebug(
+                            "DevTool effect preview list changed while active: " + typeName +
+                            " (baseline=" + baselineEffectCount + ", now=" + effects.Count +
+                            ", reason=" + reason + ")");
+                    }
+
+                    for (int i = 0; i < effects.Count; i++)
+                    {
+                        if (!ReferenceEquals(effects[i], target)) continue;
+                        EffectPreviewSafetyRegistry.MarkUnsafe(
+                            typeName,
+                            "temporary RoomEffect survived rollback");
+                        break;
+                    }
+                }
+
+                if (!removed)
+                {
+                    Plugin.Logger?.LogDebug(
+                        "DevTool effect preview was already detached before rollback: " + typeName +
+                        " (reason=" + reason + ")");
+                }
             }
-            catch { }
-            ClearActiveState();
-            return;
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool effect preview temporary-effect detach failed for '" + typeName +
+                    "': " + error.Message);
+                EffectPreviewSafetyRegistry.MarkUnsafe(
+                    typeName,
+                    "temporary RoomEffect detach exception: " + error.Message);
+
+                // Final exact-identity attempt uses the small helper that is already shared with the
+                // commit path. This remains separate from all runtime journals.
+                try
+                {
+                    if (settings?.effects != null)
+                        LoadedHookReplayProbe.RemoveExact(settings.effects, target);
+                }
+                catch { }
+            }
         }
 
-        bool removed = false;
+        ClearActiveState();
+    }
+
+    private static void RollbackAllOwnedState(string typeName, string reason)
+    {
         try
         {
             EffectPreviewRollbackReport report = ownership?.Rollback(reason) ??
                                                  EffectPreviewRollbackReport.Clean;
-            RollbackRuntimeVisualState(typeName, reason);
-            RollbackSceneState(typeName, reason);
-            RollbackVisualState(typeName, reason);
-
-            List<RoomSettings.RoomEffect> effects = settings?.effects;
-            if (effects != null)
-            {
-                for (int i = effects.Count - 1; i >= 0; i--)
-                {
-                    if (!ReferenceEquals(effects[i], target)) continue;
-                    effects.RemoveAt(i);
-                    removed = true;
-                }
-
-                if (removed && effects.Count != baselineEffectCount)
-                {
-                    Plugin.Logger?.LogDebug(
-                        "DevTool effect preview list changed while active: " + typeName +
-                        " (baseline=" + baselineEffectCount + ", now=" + effects.Count +
-                        ", reason=" + reason + ")");
-                }
-
-                bool exactPreviewStillPresent = false;
-                for (int i = 0; i < effects.Count; i++)
-                {
-                    if (!ReferenceEquals(effects[i], target)) continue;
-                    exactPreviewStillPresent = true;
-                    break;
-                }
-                if (exactPreviewStillPresent)
-                    EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "temporary RoomEffect survived rollback");
-            }
-
-            if (!removed)
-            {
-                Plugin.Logger?.LogDebug(
-                    "DevTool effect preview was already detached before rollback: " + typeName +
-                    " (reason=" + reason + ")");
-            }
-
             EffectPreviewSafetyRegistry.ObserveRollback(typeName, report);
         }
         catch (Exception error)
         {
-            try { RollbackRuntimeVisualState(typeName, reason + " after rollback exception"); } catch { }
-            try { RollbackSceneState(typeName, reason + " after rollback exception"); } catch { }
-            try { RollbackVisualState(typeName, reason + " after rollback exception"); } catch { }
-
-            Plugin.Logger?.LogWarning("DevTool effect preview rollback failed for '" + typeName + "': " + error.Message);
-            EffectPreviewSafetyRegistry.MarkUnsafe(typeName, "rollback exception: " + error.Message);
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview ownership rollback failed for '" + typeName +
+                "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(
+                typeName,
+                "ownership rollback exception: " + error.Message);
         }
-        finally
+
+        try
         {
-            ClearActiveState();
+            RollbackRuntimeVisualState(typeName, reason);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview runtime visual rollback threw for '" + typeName +
+                "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(
+                typeName,
+                "runtime visual rollback exception: " + error.Message);
+        }
+
+        try
+        {
+            RollbackSceneState(typeName, reason);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview scene rollback threw for '" + typeName +
+                "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(
+                typeName,
+                "scene rollback exception: " + error.Message);
+        }
+
+        try
+        {
+            RollbackVisualState(typeName, reason);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview visual rollback threw for '" + typeName +
+                "': " + error.Message);
+            EffectPreviewSafetyRegistry.MarkUnsafe(
+                typeName,
+                "visual rollback exception: " + error.Message);
         }
     }
 
@@ -626,9 +668,26 @@ internal static class EffectPreviewRuntime
 
     private static void ClearActiveState()
     {
-        try { ownership?.DeactivateRuntimePropagation(); }
-        catch { }
-        EffectPreviewRuntimeVisualOwnership.DetachWithoutRollback();
+        try
+        {
+            ownership?.DeactivateRuntimePropagation();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview runtime propagation detach failed: " + error.Message);
+        }
+
+        try
+        {
+            EffectPreviewRuntimeVisualOwnership.DetachWithoutRollback();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool effect preview visual ownership detach failed: " + error.Message);
+        }
+
         activeRoom = null;
         activeSettings = null;
         previewEffect = null;
