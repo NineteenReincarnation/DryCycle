@@ -63,14 +63,18 @@ internal static class WorldTextRegistry
 
         try
         {
-            string path = AssetManager.ResolveFilePath(
+            string relativePath =
                 "World" + Path.DirectorySeparatorChar +
                 normalized + Path.DirectorySeparatorChar +
-                "world_" + normalized + ".txt");
+                "world_" + normalized + ".txt";
+            string path = WorldAuthoringPathResolver.ResolveExistingSource(relativePath);
 
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
-                LoadError = "world_" + normalized + ".txt could not be resolved.";
+                string readPath = WorldAuthoringPathResolver.ResolveReadPath(relativePath);
+                LoadError = WorldAuthoringPathResolver.IsMergedCachePath(readPath)
+                    ? "world_" + normalized + ".txt resolves only to generated mergedmods data; no lossless writable mod source was found."
+                    : "world_" + normalized + ".txt could not be resolved to a writable source file.";
                 return false;
             }
 
