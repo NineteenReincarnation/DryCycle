@@ -33,25 +33,55 @@ internal static class WorldTopologyRuntime
     internal static void Enable()
     {
         if (enabled) return;
+
         enabled = true;
         topologyRevision = 0;
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
-        WorldConnectionSyntax.Enable();
-        On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
-        On.ShortcutHandler.VesselAllowedInRoom += ShortcutHandler_VesselAllowedInRoom;
-        On.AbstractCreature.Abstractize += AbstractCreature_Abstractize;
-        On.Creature.SuckedIntoShortCut += Creature_SuckedIntoShortCut;
+
+        try
+        {
+            WorldConnectionSyntax.Enable();
+            On.ShortcutHandler.SuckInCreature += ShortcutHandler_SuckInCreature;
+            On.ShortcutHandler.VesselAllowedInRoom += ShortcutHandler_VesselAllowedInRoom;
+            On.AbstractCreature.Abstractize += AbstractCreature_Abstractize;
+            On.Creature.SuckedIntoShortCut += Creature_SuckedIntoShortCut;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "WorldTopologyRuntime.Enable",
+                error,
+                () => CleanupInstalledState("enable rollback"));
+            throw;
+        }
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
+        CleanupInstalledState("disable");
+    }
+
+    private static void CleanupInstalledState(string phase)
+    {
         enabled = false;
-        On.ShortcutHandler.SuckInCreature -= ShortcutHandler_SuckInCreature;
-        On.ShortcutHandler.VesselAllowedInRoom -= ShortcutHandler_VesselAllowedInRoom;
-        On.AbstractCreature.Abstractize -= AbstractCreature_Abstractize;
-        On.Creature.SuckedIntoShortCut -= Creature_SuckedIntoShortCut;
-        WorldConnectionSyntax.Disable();
+
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WorldTopologyRuntime/" + phase + "/Creature.SuckedIntoShortCut",
+            () => On.Creature.SuckedIntoShortCut -= Creature_SuckedIntoShortCut);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WorldTopologyRuntime/" + phase + "/AbstractCreature.Abstractize",
+            () => On.AbstractCreature.Abstractize -= AbstractCreature_Abstractize);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WorldTopologyRuntime/" + phase + "/ShortcutHandler.VesselAllowedInRoom",
+            () => On.ShortcutHandler.VesselAllowedInRoom -= ShortcutHandler_VesselAllowedInRoom);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WorldTopologyRuntime/" + phase + "/ShortcutHandler.SuckInCreature",
+            () => On.ShortcutHandler.SuckInCreature -= ShortcutHandler_SuckInCreature);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WorldTopologyRuntime/" + phase + "/WorldConnectionSyntax.Disable",
+            WorldConnectionSyntax.Disable);
+
         pendingRoutes = new ConditionalWeakTable<AbstractCreature, PendingRoute>();
         topologyRevision = 0;
     }
