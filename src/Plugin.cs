@@ -244,11 +244,11 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         StartupDiagnostics.Marker("RainWorld.PreModsInit", "ENTER");
         StartupDiagnostics.Step("RainWorld.PreModsInit/BeforePreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseBeforePreModsInit(self));
-        StartupDiagnostics.Step("RainWorld.PreModsInit/ScavengerLanceDevConsoleSupport.ResetRegistration", ScavengerLanceDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Optional("RainWorld.PreModsInit/ScavengerLanceDevConsoleSupport.ResetRegistration", ScavengerLanceDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Optional("RainWorld.PreModsInit/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Optional("RainWorld.PreModsInit/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Optional("RainWorld.PreModsInit/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Optional("RainWorld.PreModsInit/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
         TryInitializeSlugBaseHydrationFeatures();
         StartupDiagnostics.Step("RainWorld.PreModsInit/orig", () => orig(self));
         StartupDiagnostics.Step("RainWorld.PreModsInit/AfterPreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterPreModsInit(self));
