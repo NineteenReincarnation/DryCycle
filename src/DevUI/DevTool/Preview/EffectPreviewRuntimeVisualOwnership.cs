@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
-using MonoMod.RuntimeDetour;
 
 namespace DryCycle.DevUI.DevTool.Preview;
 
@@ -14,20 +13,7 @@ namespace DryCycle.DevUI.DevTool.Preview;
 internal static class EffectPreviewRuntimeVisualOwnership
 {
     private static bool enabled;
-    private static Hook addChildHook;
-    private static Hook addChildAtIndexHook;
-    private static Hook removeChildHook;
-    private static Hook removeAllChildrenHook;
     private static RuntimeSession active;
-
-    private delegate void OrigAddChild(FContainer self, FNode node);
-    private delegate void HookAddChild(OrigAddChild orig, FContainer self, FNode node);
-    private delegate void OrigAddChildAtIndex(FContainer self, FNode node, int index);
-    private delegate void HookAddChildAtIndex(OrigAddChildAtIndex orig, FContainer self, FNode node, int index);
-    private delegate void OrigRemoveChild(FContainer self, FNode node);
-    private delegate void HookRemoveChild(OrigRemoveChild orig, FContainer self, FNode node);
-    private delegate void OrigRemoveAllChildren(FContainer self);
-    private delegate void HookRemoveAllChildren(OrigRemoveAllChildren orig, FContainer self);
 
     internal static bool RequiresAbort => active?.RequiresAbort == true;
     internal static string AbortReason => active?.AbortReason ?? string.Empty;
@@ -36,51 +22,11 @@ internal static class EffectPreviewRuntimeVisualOwnership
     {
         if (enabled) return;
 
-        try
-        {
-            MethodInfo addChild = typeof(FContainer).GetMethod(
-                nameof(FContainer.AddChild),
-                BindingFlags.Instance | BindingFlags.Public,
-                null,
-                new[] { typeof(FNode) },
-                null);
-            MethodInfo addChildAtIndex = typeof(FContainer).GetMethod(
-                nameof(FContainer.AddChildAtIndex),
-                BindingFlags.Instance | BindingFlags.Public,
-                null,
-                new[] { typeof(FNode), typeof(int) },
-                null);
-            MethodInfo removeChild = typeof(FContainer).GetMethod(
-                nameof(FContainer.RemoveChild),
-                BindingFlags.Instance | BindingFlags.Public,
-                null,
-                new[] { typeof(FNode) },
-                null);
-            MethodInfo removeAllChildren = typeof(FContainer).GetMethod(
-                nameof(FContainer.RemoveAllChildren),
-                BindingFlags.Instance | BindingFlags.Public,
-                null,
-                Type.EmptyTypes,
-                null);
-
-            if (addChild != null)
-                addChildHook = new Hook(addChild, (HookAddChild)FContainer_AddChild);
-            if (addChildAtIndex != null)
-                addChildAtIndexHook = new Hook(addChildAtIndex, (HookAddChildAtIndex)FContainer_AddChildAtIndex);
-            if (removeChild != null)
-                removeChildHook = new Hook(removeChild, (HookRemoveChild)FContainer_RemoveChild);
-            if (removeAllChildren != null)
-                removeAllChildrenHook = new Hook(removeAllChildren, (HookRemoveAllChildren)FContainer_RemoveAllChildren);
-
-            On.Room.AddObject += Room_AddObject;
-            enabled = true;
-        }
-        catch (Exception error)
-        {
-            DisposeHooks();
-            Plugin.Logger?.LogWarning(
-                "DevTool effect preview could not install runtime visual ownership hooks: " + error.Message);
-        }
+        // RuntimeDetour-based FContainer interception was removed. Advanced preview is currently
+        // gated off by EffectPreviewRuntime; keep only the HookGen Room.AddObject boundary here so
+        // a future advanced implementation cannot silently reinstall process-level detours.
+        On.Room.AddObject += Room_AddObject;
+        enabled = true;
     }
 
     internal static void Disable()
@@ -93,7 +39,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
         active = null;
         On.Room.AddObject -= Room_AddObject;
-        DisposeHooks();
         RuntimeCameraUsageScanner.Clear();
         enabled = false;
     }
@@ -180,94 +125,6 @@ internal static class EffectPreviewRuntimeVisualOwnership
         bool attached = ReferenceEquals(obj.room, self) || ContainsReference(self.updateList, obj);
         if (attached)
             session.AdoptRuntimeObject(obj);
-    }
-
-    private static void FContainer_AddChild(OrigAddChild orig, FContainer self, FNode node)
-    {
-        RuntimeSession session = active;
-        if (session == null || self == null || node == null || !session.IsOwnedExecution(session.Room))
-        {
-            orig(self, node);
-            return;
-        }
-
-        NodePlacement before = NodePlacement.Capture(node);
-        orig(self, node);
-        session.ObserveNodeMutation(node, before, NodePlacement.Capture(node));
-    }
-
-    private static void FContainer_AddChildAtIndex(
-        OrigAddChildAtIndex orig,
-        FContainer self,
-        FNode node,
-        int index)
-    {
-        RuntimeSession session = active;
-        if (session == null || self == null || node == null || !session.IsOwnedExecution(session.Room))
-        {
-            orig(self, node, index);
-            return;
-        }
-
-        NodePlacement before = NodePlacement.Capture(node);
-        orig(self, node, index);
-        session.ObserveNodeMutation(node, before, NodePlacement.Capture(node));
-    }
-
-    private static void FContainer_RemoveChild(OrigRemoveChild orig, FContainer self, FNode node)
-    {
-        RuntimeSession session = active;
-        if (session == null || self == null || node == null || !session.IsOwnedExecution(session.Room))
-        {
-            orig(self, node);
-            return;
-        }
-
-        NodePlacement before = NodePlacement.Capture(node);
-        orig(self, node);
-        session.ObserveNodeMutation(node, before, NodePlacement.Capture(node));
-    }
-
-    private static void FContainer_RemoveAllChildren(OrigRemoveAllChildren orig, FContainer self)
-    {
-        RuntimeSession session = active;
-        if (session == null || self == null || !session.IsOwnedExecution(session.Room))
-        {
-            orig(self);
-            return;
-        }
-
-        List<NodeMutationProbe> probes = new();
-        List<FNode> children = self._childNodes;
-        if (children != null)
-        {
-            for (int i = 0; i < children.Count; i++)
-            {
-                FNode node = children[i];
-                if (node != null)
-                    probes.Add(new NodeMutationProbe(node, NodePlacement.Capture(node)));
-            }
-        }
-
-        orig(self);
-
-        for (int i = 0; i < probes.Count; i++)
-        {
-            NodeMutationProbe probe = probes[i];
-            session.ObserveNodeMutation(probe.Node, probe.Before, NodePlacement.Capture(probe.Node));
-        }
-    }
-
-    private static void DisposeHooks()
-    {
-        try { addChildHook?.Dispose(); } catch { }
-        try { addChildAtIndexHook?.Dispose(); } catch { }
-        try { removeChildHook?.Dispose(); } catch { }
-        try { removeAllChildrenHook?.Dispose(); } catch { }
-        addChildHook = null;
-        addChildAtIndexHook = null;
-        removeChildHook = null;
-        removeAllChildrenHook = null;
     }
 
     private static bool ContainsReference(List<UpdatableAndDeletable> values, UpdatableAndDeletable target)
