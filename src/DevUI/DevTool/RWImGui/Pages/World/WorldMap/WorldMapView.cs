@@ -163,7 +163,6 @@ internal static class WorldMapView
 
     private static void DrawCanvas(EditorMapPresentationSnapshot snapshot)
     {
-        WorldMapExactShortcuts.BeforeCanvas(snapshot);
         UpdateActiveDragBeforeDraw();
         Num.Vector2 canvasMin = ImGui.GetCursorScreenPos();
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
@@ -198,6 +197,13 @@ internal static class WorldMapView
             viewportInteraction = true;
         }
 
+        // Navigation is latency-sensitive. Enter the interaction budget before any room/shortcut
+        // presentation work so the current frame, not only the next one, receives the cheap path.
+        if (viewportInteraction || draggingRoom >= 0 || linkingRoom >= 0)
+            WorldMapBackgroundBudget.NoteInteraction();
+
+        WorldMapExactShortcuts.BeforeCanvas(snapshot);
+
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         bool renderChannels = WorldMapRenderOrder.BeginCanvas(draw, snapshot);
         bool canvasClip = WorldMapPresentationCorrectness.BeginCanvasClip(draw, snapshot, canvasMin, canvasSize);
@@ -206,23 +212,27 @@ internal static class WorldMapView
         draw.AddRect(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.Border));
         DrawGrid(draw, canvasMin, canvasSize);
 
-        EditorMapRoomSnapshot hoveredRoom = canvasHovered
+        EditorMapRoomSnapshot hoveredRoom = !viewportInteraction && canvasHovered
             ? FindHoveredRoom(snapshot, canvasMin, canvasSize, io.MousePos)
             : null;
         WorldMapGpuRuntime.SetHoveredRoom(hoveredRoom?.RoomIndex ?? -1);
-        ExitPortHit hoveredPort = canvasHovered
+        ExitPortHit hoveredPort = !viewportInteraction && canvasHovered
             ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
             : null;
 
         bool routedConnections = showConnections && WorldConnectionOverlay.Ready;
-        EdgeHit hoveredEdge = canvasHovered && hoveredPort == null && !routedConnections
+        EdgeHit hoveredEdge = !viewportInteraction && canvasHovered && hoveredPort == null && !routedConnections
             ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
             : null;
         if (!routedConnections)
             hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
-        DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
-        if (routedConnections)
+        DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort, viewportInteraction);
+        if (viewportInteraction && showConnections)
+        {
+            DrawConnections(draw, snapshot, canvasMin, canvasSize);
+        }
+        else if (routedConnections)
         {
             WorldMapRenderOrder.UseConnections(draw);
             WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
@@ -233,9 +243,8 @@ internal static class WorldMapView
         }
         WorldMapRenderOrder.UseOverlay(draw);
 
-        HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
-        if (viewportInteraction || draggingRoom >= 0 || linkingRoom >= 0)
-            WorldMapBackgroundBudget.NoteInteraction();
+        if (!viewportInteraction)
+            HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
         if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
@@ -292,7 +301,8 @@ internal static class WorldMapView
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize,
         EditorMapRoomSnapshot hoveredRoom,
-        ExitPortHit hoveredPort)
+        ExitPortHit hoveredPort,
+        bool fastNavigation)
     {
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = 0; i < rooms.Length; i++)
@@ -306,12 +316,51 @@ internal static class WorldMapView
 
             bool selected = room.RoomIndex == snapshot.SelectedRoomIndex;
             bool hovered = ReferenceEquals(room, hoveredRoom);
-            DrawRoomGeometry(draw, room, visual, min, selected, hovered);
-            DrawRoomLabel(draw, room, min, max, selected, hovered);
+            if (fastNavigation)
+                DrawRoomNavigationLod(draw, room, min, max, selected);
+            else
+                DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+
+            if (!fastNavigation || selected || room.CurrentRoom)
+                DrawRoomLabel(draw, room, min, max, selected, hovered);
         }
 
-        DrawExitPorts(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
-        DrawCreatureShortcuts(draw, snapshot, canvasMin, canvasSize);
+        // Pipe sockets, creature holes and their labels are interaction affordances, not navigation
+        // content. Omitting them only while the camera is moving removes thousands of draw/hit-test
+        // operations from large regions and they return on the first idle frame.
+        if (!fastNavigation)
+        {
+            DrawExitPorts(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort);
+            DrawCreatureShortcuts(draw, snapshot, canvasMin, canvasSize);
+        }
+    }
+
+    private static void DrawRoomNavigationLod(
+        ImDrawListPtr draw,
+        EditorMapRoomSnapshot room,
+        Num.Vector2 roomMin,
+        Num.Vector2 roomMax,
+        bool selected)
+    {
+        WorldMapRenderOrder.UseBase(draw);
+        uint fill = ImGui.GetColorU32(
+            selected ? ImGuiCol.Button :
+            room.CurrentRoom ? ImGuiCol.Header :
+            room.Disabled ? ImGuiCol.FrameBg : ImGuiCol.FrameBg);
+        uint outline = ImGui.GetColorU32(
+            selected ? ImGuiCol.ButtonActive :
+            room.CurrentRoom ? ImGuiCol.Header :
+            room.Disabled ? ImGuiCol.TextDisabled : ImGuiCol.Border);
+
+        float rounding = Math.Max(1f, 2.2f * zoom);
+        draw.AddRectFilled(roomMin, roomMax, fill, rounding);
+        draw.AddRect(
+            roomMin,
+            roomMax,
+            outline,
+            rounding,
+            ImDrawFlags.None,
+            selected || room.CurrentRoom ? 2f : 1f);
     }
 
     private static void DrawRoomGeometry(
