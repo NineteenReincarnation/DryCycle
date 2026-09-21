@@ -1,4 +1,3 @@
-using System.Threading;
 using BepInEx;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
@@ -83,13 +82,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // GPU working set; renderer shutdown below still flushes the durable active-region bake.
         WorldMapGpuRegionPreload.Disable();
 
-        // Retire active helpers which keep live Page/snapshot/route state. Their runtimes are
-        // idempotent and can be resumed when a new DevTools session opens.
-        WorldMapPlayerLocator.Disable();
-        WorldMapExactShortcuts.Disable();
-        WorldMapGpuPipeBatch.Disable();
-        WorldMapPerformance.Disable();
-
         // The basic shortcut presentation owns AbstractRoom/RoomRepresentation references but is
         // intentionally an internal presentation cache rather than a BepInEx runtime. Clear its
         // cache once at the lifetime boundary through its explicit lifecycle API.
@@ -99,10 +91,10 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // and closes the edge even if DevUI disappears before that observer sees the retired page.
         MapRoomGeometryPresentationHub.Clear();
 
-        // Disable the renderer first so the active cache is flushed durably. Then release the cache's
-        // in-memory active-region snapshot as well; otherwise one full region bake remains rooted for
-        // the whole gameplay session even after the multi-region preload cache has been cleared.
-        WorldMapGpuRuntime.Disable();
+        // The renderer and its owning BepInEx component stay enabled. Retire only the cache working
+        // set that is safe to rebuild from the durable bake when DevTools opens again.
+        WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
+        WorldMapGpuCache.FlushNow();
         WorldMapGpuCache.ReleaseWorkingSet();
     }
 
@@ -110,11 +102,10 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     {
         // Rebuild the active World Map runtime in dependency order. The first reopened Map frame
         // reloads the durable active-region bake from disk before the preload layer warms neighbors.
-        WorldMapPlayerLocator.Enable(Logger);
-        WorldMapPerformance.Enable(Logger);
-        WorldMapExactShortcuts.Enable(Logger);
-        WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId);
-        WorldMapGpuPipeBatch.Enable(Logger);
+        // Only restore state actually owned by this dormant-session observer. The individual
+        // BepInEx plugins remain authoritative for player location, performance, exact shortcuts,
+        // renderer and pipe batching; disabling/re-enabling those shared runtimes here can desync
+        // their component state and their Update loops.
         WorldMapGpuRegionPreload.Enable(Logger);
     }
 
