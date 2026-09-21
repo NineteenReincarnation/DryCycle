@@ -141,10 +141,11 @@ internal static class EffectPreviewRuntime
     private const double HoverDelaySeconds = 0.18;
     private const float PreviewAmount = 0.50f;
 
-    // Stage 1 (temporary RoomEffect) is safe enough to run as normal editor behavior. Stage 2 owns
-    // arbitrary runtime/Futile/camera state and still contains RuntimeDetour-based interception.
-    // Keep that layer explicitly disabled until those detours are replaced by owned lifecycle APIs.
-    private static readonly bool AdvancedPreviewEnabled = false;
+    // Stage 1 always remains the fallback. Stage 2 is allowed only behind the conservative
+    // mutation/camera/shader journals: runtime objects that write static/external state, mutate
+    // Futile containers directly, spawn physical objects, or use unprovable camera APIs are rejected
+    // and fall back to Stage 1 for the rest of the session.
+    private static readonly bool AdvancedPreviewEnabled = true;
 
     private static bool enabled;
     private static global::Room activeRoom;
