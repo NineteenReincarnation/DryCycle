@@ -19,9 +19,16 @@ public sealed class WorldMapImGuiPresentationFallbackPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map ImGui Presentation Fallback";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapImGuiPresentationFallback.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapImGuiPresentationFallback.Enable(Logger),
+            WorldMapImGuiPresentationFallback.Disable);
     private void LateUpdate() => WorldMapImGuiPresentationFallback.LateUpdate();
-    private void OnDisable() => WorldMapImGuiPresentationFallback.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapImGuiPresentationFallback.Disable);
 }
 
 internal static class WorldMapImGuiPresentationFallback
