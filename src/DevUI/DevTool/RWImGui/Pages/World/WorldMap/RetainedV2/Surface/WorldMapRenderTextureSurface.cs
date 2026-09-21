@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using ImGuiNET;
 using UnityEngine;
@@ -7,28 +8,47 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Off-screen map surface. Zoom changes camera transform only; RenderTexture allocation depends on
-/// canvas pixel size, never zoom.
+/// Off-screen map surface.
 ///
-/// A replacement target is rendered successfully before it replaces the last-known-good presented
-/// surface, preventing black frames during resize/recreation.
+/// The RWImGUI Present callback and Unity's main-thread map renderer may run concurrently. The state
+/// gate therefore protects only pointer/state exchange; Camera.Render and ImGui AddImage never run
+/// while holding the same lock. Unity resource destruction is deferred to the main-thread pump.
+///
+/// Zoom changes the camera transform only. RenderTexture allocation depends on canvas pixel size,
+/// never zoom. A replacement target is not considered committed until RWImGUI successfully presents
+/// it; presentation failure keeps the previous last-known-good surface visible.
 /// </summary>
 internal sealed class WorldMapRenderTextureSurface
 {
     internal const int RenderLayer = 31;
+    private const int RejectedResizeRetryFrames = 30;
 
     private readonly object gate = new();
     private readonly WorldMapTextureBridge bridge = new();
+    private readonly List<RenderTexture> pendingRelease = new();
+
     private Camera camera;
     private GameObject cameraObject;
+
+    // Front texture visible to RWImGUI. "retired" is the previous front retained until the new
+    // candidate has actually been accepted by the texture bridge.
     private RenderTexture presented;
     private RenderTexture retired;
     private int width;
     private int height;
+    private int retiredWidth;
+    private int retiredHeight;
+
     private int rejectedWidth;
     private int rejectedHeight;
     private int resizeRetryAfterFrame;
+
+    private bool presentedValid;
     private bool renderInvalidated = true;
+    private bool rollbackRequested;
+    private bool releaseRetiredRequested;
+    private bool initialized;
+
     private string error = string.Empty;
     private ManualLogSource log;
 
@@ -37,7 +57,7 @@ internal sealed class WorldMapRenderTextureSurface
         get
         {
             lock (gate)
-                return presented != null && presented.IsCreated();
+                return presentedValid && presented != null;
         }
     }
 
@@ -47,9 +67,9 @@ internal sealed class WorldMapRenderTextureSurface
         {
             lock (gate)
             {
-                bool ready = presented != null && presented.IsCreated();
-                return !ready ||
+                return !presentedValid ||
                        renderInvalidated ||
+                       rollbackRequested ||
                        (rejectedWidth > 0 &&
                         rejectedHeight > 0 &&
                         Time.frameCount >= resizeRetryAfterFrame &&
@@ -67,59 +87,90 @@ internal sealed class WorldMapRenderTextureSurface
         }
     }
 
-    internal Camera Camera
-    {
-        get
-        {
-            lock (gate) return camera;
-        }
-    }
+    internal Camera Camera => camera;
 
+    /// <summary>
+    /// Main-thread surface pump. It is intentionally cheap on stable frames.
+    /// </summary>
     internal void Initialize(ManualLogSource logger)
     {
-        lock (gate)
+        log = logger;
+
+        if (!initialized)
         {
-            log = logger;
             bridge.Initialize(logger);
             EnsureCamera();
+            initialized = true;
         }
+
+        ApplyPresentationFeedbackMainThread();
+        ValidatePresentedMainThread();
+        DrainPendingReleasesMainThread();
     }
 
     internal bool Render(
         WorldMapViewTransform transform,
         Action<Camera> prepareScene)
     {
-        lock (gate)
-        {
-            if (transform.CanvasSize.X < 2f || transform.CanvasSize.Y < 2f)
-                return false;
+        if (transform.CanvasSize.X < 2f || transform.CanvasSize.Y < 2f)
+            return false;
 
-            EnsureCamera();
+        Initialize(log);
+        EnsureCamera();
 
         int targetWidth = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.X));
         int targetHeight = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.Y));
-        bool invalidPresented =
-            presented == null || !presented.IsCreated();
+
+        RenderTexture current;
+        bool currentValid;
+        bool hasUnconfirmedCandidate;
+        int currentWidth;
+        int currentHeight;
+        int localRejectedWidth;
+        int localRejectedHeight;
+        int localRetryAfter;
+
+        lock (gate)
+        {
+            current = presented;
+            currentValid = presentedValid;
+            hasUnconfirmedCandidate = retired != null;
+            currentWidth = width;
+            currentHeight = height;
+            localRejectedWidth = rejectedWidth;
+            localRejectedHeight = rejectedHeight;
+            localRetryAfter = resizeRetryAfterFrame;
+        }
+
         bool sizeMismatch =
-            !invalidPresented &&
-            (width != targetWidth || height != targetHeight);
+            currentValid &&
+            (currentWidth != targetWidth || currentHeight != targetHeight);
         bool rejectedResizeCoolingDown =
             sizeMismatch &&
-            targetWidth == rejectedWidth &&
-            targetHeight == rejectedHeight &&
-            Time.frameCount < resizeRetryAfterFrame;
-        bool resize =
-            invalidPresented ||
-            (sizeMismatch && !rejectedResizeCoolingDown);
+            targetWidth == localRejectedWidth &&
+            targetHeight == localRejectedHeight &&
+            Time.frameCount < localRetryAfter;
 
-        RenderTexture target = presented;
+        // Never stack replacement surfaces. Until a candidate is either accepted or rejected by
+        // RWImGUI, keep rendering that candidate and retain exactly one last-known-good fallback.
+        bool resize =
+            !currentValid ||
+            (!hasUnconfirmedCandidate &&
+             sizeMismatch &&
+             !rejectedResizeCoolingDown);
+
+        RenderTexture target = current;
         bool ownsCandidate = false;
         if (resize)
         {
             target = CreateTarget(targetWidth, targetHeight);
-            if (target == null) return false;
+            if (target == null)
+                return false;
             ownsCandidate = true;
         }
+
+        if (target == null)
+            return false;
 
         try
         {
@@ -128,28 +179,42 @@ internal sealed class WorldMapRenderTextureSurface
             camera.targetTexture = target;
             camera.Render();
 
-            if (ownsCandidate)
+            lock (gate)
             {
-                RenderTexture previous = presented;
-                presented = target;
-                width = targetWidth;
-                height = targetHeight;
-                ownsCandidate = false;
+                if (ownsCandidate)
+                {
+                    // A render-thread rollback can only target a previously published candidate.
+                    // This freshly rendered target is not visible yet, so swapping it in is safe.
+                    if (retired != null && !ReferenceEquals(retired, presented))
+                        QueueReleaseLocked(retired);
 
-                // The texture bridge may still own a registration for the previously presented
-                // target. Keep one retired target alive until the new surface is actually presented.
-                ReleaseTarget(retired);
-                retired = previous;
+                    retired = presented;
+                    retiredWidth = width;
+                    retiredHeight = height;
+
+                    presented = target;
+                    presentedValid = true;
+                    width = targetWidth;
+                    height = targetHeight;
+                    rollbackRequested = false;
+                    releaseRetiredRequested = false;
+                    ownsCandidate = false;
+                }
+
+                renderInvalidated = false;
+                error = string.Empty;
             }
 
-            renderInvalidated = false;
-            error = string.Empty;
             return true;
         }
         catch (Exception renderError)
         {
-            renderInvalidated = true;
-            error = "V2 RenderTexture render failed: " + renderError.Message;
+            lock (gate)
+            {
+                renderInvalidated = true;
+                error = "V2 RenderTexture render failed: " + renderError.Message;
+            }
+
             log?.LogError("World Map V2 RenderTexture render failed: " + renderError);
             return false;
         }
@@ -159,89 +224,275 @@ internal sealed class WorldMapRenderTextureSurface
             if (ownsCandidate)
                 ReleaseTarget(target);
         }
-        }
     }
 
+    /// <summary>
+    /// Render-thread presentation. No Unity object is destroyed here and the shared state gate is
+    /// never held while invoking RWImGUI.
+    /// </summary>
     internal bool TryPresent(
         ImDrawListPtr draw,
         Num.Vector2 min,
         Num.Vector2 max)
     {
+        RenderTexture current;
+        RenderTexture fallback;
+        bool valid;
+
         lock (gate)
         {
-        if (presented == null || !presented.IsCreated()) return false;
+            current = presented;
+            fallback = retired;
+            valid = presentedValid && current != null;
+        }
 
-        bool success = bridge.TryPresent(draw, presented, min, max);
-        if (success)
+        if (!valid)
+            return false;
+
+        if (bridge.TryPresent(draw, current, min, max))
         {
-            if (retired != null)
+            if (fallback != null)
             {
-                ReleaseTarget(retired);
-                retired = null;
-                rejectedWidth = 0;
-                rejectedHeight = 0;
-                resizeRetryAfterFrame = 0;
+                lock (gate)
+                {
+                    if (ReferenceEquals(presented, current) &&
+                        ReferenceEquals(retired, fallback))
+                        releaseRetiredRequested = true;
+                }
             }
             return true;
         }
 
-        // A resized/recreated target is not authoritative until the texture bridge has actually
-        // presented it. If presentation of the candidate fails, atomically restore the previous
-        // last-known-good surface instead of exposing a black/missing frame.
-        if (retired == null || !retired.IsCreated())
+        if (fallback == null)
             return false;
 
-        RenderTexture rejected = presented;
-        int failedWidth = width;
-        int failedHeight = height;
-        if (!bridge.TryPresent(draw, retired, min, max))
+        // The candidate failed to bind/present. Draw the old committed surface for this frame, then
+        // let Unity's main thread atomically restore it and dispose the rejected candidate.
+        if (!bridge.TryPresent(draw, fallback, min, max))
             return false;
 
-        presented = retired;
-        retired = null;
-        width = presented.width;
-        height = presented.height;
-        rejectedWidth = failedWidth;
-        rejectedHeight = failedHeight;
-        resizeRetryAfterFrame = Time.frameCount + 30;
-        ReleaseTarget(rejected);
-        renderInvalidated = true;
-        error = string.Empty;
-        log?.LogWarning(
-            "World Map V2 rejected a replacement RenderTexture presentation; " +
-            "restored the last-known-good surface and will retry the resize later.");
-        return true;
+        lock (gate)
+        {
+            if (ReferenceEquals(presented, current) &&
+                ReferenceEquals(retired, fallback))
+            {
+                rollbackRequested = true;
+                releaseRetiredRequested = false;
+            }
         }
+
+        return true;
     }
 
     internal void Reset()
     {
+        RenderTexture front;
+        RenderTexture old;
+        RenderTexture[] queued;
+        GameObject oldCamera;
+
         lock (gate)
         {
-        bridge.Reset();
-        ReleaseTarget(presented);
-        ReleaseTarget(retired);
-        presented = null;
-        retired = null;
-        width = 0;
-        height = 0;
-        rejectedWidth = 0;
-        rejectedHeight = 0;
-        resizeRetryAfterFrame = 0;
-        renderInvalidated = true;
+            front = presented;
+            old = retired;
+            queued = pendingRelease.ToArray();
+            pendingRelease.Clear();
+            oldCamera = cameraObject;
 
-        if (cameraObject != null)
-            UnityEngine.Object.Destroy(cameraObject);
-        camera = null;
-        cameraObject = null;
-        error = string.Empty;
-        log = null;
+            presented = null;
+            retired = null;
+            presentedValid = false;
+            width = 0;
+            height = 0;
+            retiredWidth = 0;
+            retiredHeight = 0;
+            rejectedWidth = 0;
+            rejectedHeight = 0;
+            resizeRetryAfterFrame = 0;
+            renderInvalidated = true;
+            rollbackRequested = false;
+            releaseRetiredRequested = false;
+
+            camera = null;
+            cameraObject = null;
+            error = string.Empty;
+            initialized = false;
         }
+
+        bridge.Reset();
+
+        // Reset is owned by the frontend/main-thread lifecycle. Do not destroy Unity resources from
+        // TryPresent; all releases happen here or in the main-thread pump.
+        ReleaseTarget(front);
+        if (!ReferenceEquals(old, front))
+            ReleaseTarget(old);
+        for (int i = 0; i < queued.Length; i++)
+        {
+            RenderTexture target = queued[i];
+            if (ReferenceEquals(target, front) || ReferenceEquals(target, old))
+                continue;
+            ReleaseTarget(target);
+        }
+
+        if (oldCamera != null)
+            UnityEngine.Object.Destroy(oldCamera);
+
+        log = null;
+    }
+
+    private void ApplyPresentationFeedbackMainThread()
+    {
+        RenderTexture release = null;
+        bool restored = false;
+
+        lock (gate)
+        {
+            if (rollbackRequested)
+            {
+                rollbackRequested = false;
+
+                if (retired != null)
+                {
+                    RenderTexture rejected = presented;
+                    int failedWidth = width;
+                    int failedHeight = height;
+
+                    presented = retired;
+                    presentedValid = presented != null;
+                    width = retiredWidth;
+                    height = retiredHeight;
+
+                    retired = null;
+                    retiredWidth = 0;
+                    retiredHeight = 0;
+
+                    rejectedWidth = failedWidth;
+                    rejectedHeight = failedHeight;
+                    resizeRetryAfterFrame =
+                        Time.frameCount + RejectedResizeRetryFrames;
+                    renderInvalidated = true;
+                    releaseRetiredRequested = false;
+
+                    release = rejected;
+                    restored = true;
+                }
+            }
+            else if (releaseRetiredRequested)
+            {
+                releaseRetiredRequested = false;
+                release = retired;
+                retired = null;
+                retiredWidth = 0;
+                retiredHeight = 0;
+                rejectedWidth = 0;
+                rejectedHeight = 0;
+                resizeRetryAfterFrame = 0;
+            }
+
+            if (release != null)
+                QueueReleaseLocked(release);
+        }
+
+        if (restored)
+        {
+            log?.LogWarning(
+                "World Map V2 rejected a replacement RenderTexture presentation; " +
+                "restored the last-known-good surface and will retry the resize later.");
+        }
+    }
+
+    private void ValidatePresentedMainThread()
+    {
+        lock (gate)
+        {
+            if (presented == null)
+            {
+                presentedValid = false;
+                return;
+            }
+
+            bool valid;
+            try
+            {
+                valid = presented.IsCreated();
+            }
+            catch
+            {
+                valid = false;
+            }
+
+            if (valid)
+            {
+                presentedValid = true;
+                return;
+            }
+
+            // Device loss / invalid candidate: if a last-known-good target is still retained,
+            // restore it immediately on the Unity thread instead of allocating over the fallback.
+            if (retired != null)
+            {
+                QueueReleaseLocked(presented);
+                presented = retired;
+                width = retiredWidth;
+                height = retiredHeight;
+                retired = null;
+                retiredWidth = 0;
+                retiredHeight = 0;
+                rollbackRequested = false;
+                releaseRetiredRequested = false;
+
+                bool fallbackValid;
+                try
+                {
+                    fallbackValid = presented.IsCreated();
+                }
+                catch
+                {
+                    fallbackValid = false;
+                }
+
+                presentedValid = fallbackValid;
+                renderInvalidated = true;
+                return;
+            }
+
+            presentedValid = false;
+            renderInvalidated = true;
+        }
+    }
+
+    private void QueueReleaseLocked(RenderTexture target)
+    {
+        if (target == null)
+            return;
+
+        for (int i = 0; i < pendingRelease.Count; i++)
+            if (ReferenceEquals(pendingRelease[i], target))
+                return;
+
+        pendingRelease.Add(target);
+    }
+
+    private void DrainPendingReleasesMainThread()
+    {
+        RenderTexture[] release;
+        lock (gate)
+        {
+            if (pendingRelease.Count == 0)
+                return;
+
+            release = pendingRelease.ToArray();
+            pendingRelease.Clear();
+        }
+
+        for (int i = 0; i < release.Length; i++)
+            ReleaseTarget(release[i]);
     }
 
     private void EnsureCamera()
     {
-        if (camera != null) return;
+        if (camera != null)
+            return;
 
         cameraObject = new GameObject("DryCycle.WorldMapV2.Camera")
         {
@@ -283,6 +534,7 @@ internal sealed class WorldMapRenderTextureSurface
     {
         RenderTexture target = null;
         RenderTexture previous = RenderTexture.active;
+
         try
         {
             target = new RenderTexture(
@@ -301,7 +553,8 @@ internal sealed class WorldMapRenderTextureSurface
             };
 
             if (!target.Create() || !target.IsCreated())
-                throw new InvalidOperationException("RenderTexture.Create returned an invalid target.");
+                throw new InvalidOperationException(
+                    "RenderTexture.Create returned an invalid target.");
 
             RenderTexture.active = target;
             GL.Clear(true, true, new Color(0f, 0f, 0f, 0f));
@@ -309,8 +562,14 @@ internal sealed class WorldMapRenderTextureSurface
         }
         catch (Exception createError)
         {
-            error = "V2 RenderTexture creation failed: " + createError.Message;
-            log?.LogError("World Map V2 RenderTexture creation failed: " + createError);
+            lock (gate)
+            {
+                error = "V2 RenderTexture creation failed: " + createError.Message;
+                renderInvalidated = true;
+            }
+
+            log?.LogError(
+                "World Map V2 RenderTexture creation failed: " + createError);
             ReleaseTarget(target);
             return null;
         }
@@ -322,10 +581,13 @@ internal sealed class WorldMapRenderTextureSurface
 
     private static void ReleaseTarget(RenderTexture target)
     {
-        if (target == null) return;
+        if (target == null)
+            return;
+
         try
         {
-            if (target.IsCreated()) target.Release();
+            if (target.IsCreated())
+                target.Release();
         }
         finally
         {

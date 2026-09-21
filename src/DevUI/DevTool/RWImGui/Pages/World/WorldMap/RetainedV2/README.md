@@ -498,6 +498,12 @@ the RWImGUI texture bridge presents it successfully. If that presentation fails,
 last-known-good surface is restored and the resize is retried after a short cooldown, preventing
 black frames and per-frame allocation thrash.
 
+The surface handoff is also non-blocking across the Unity update thread and RWImGUI Present thread.
+Only texture-handle/state exchange uses a short lock. `Camera.Render()` and ImGui `AddImage` are
+never executed while holding the same lock, so navigation cannot stall because the two threads wait
+on an entire render/present operation. RenderTexture release/destruction is deferred back to the
+Unity main-thread pump; Present only reports accept/reject feedback.
+
 ### Interaction freeze
 
 While pan/zoom/room-drag interaction is active, non-urgent snapshot publication, geometry priming,

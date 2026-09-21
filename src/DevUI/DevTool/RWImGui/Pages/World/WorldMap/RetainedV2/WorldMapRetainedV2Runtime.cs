@@ -175,6 +175,10 @@ internal static class WorldMapRetainedV2Runtime
             bool showConnections = Volatile.Read(ref activeShowConnections) != 0;
             int showConnectionsValue = showConnections ? 1 : 0;
 
+            // Pump surface feedback/cleanup every Map main-thread frame. Stable frames do not
+            // Camera.Render; they only process short handle swaps and deferred Unity releases.
+            Surface.Initialize(log);
+
             long viewRevision = MainSceneState.ViewRevision;
             long sceneRevision = MainSceneState.SceneRevision;
             long roomResourceRevision = RoomResources.Revision;
@@ -204,7 +208,6 @@ internal static class WorldMapRetainedV2Runtime
                 else
                     visibleRoutes.Clear();
 
-                Surface.Initialize(log);
                 if (Surface.Render(
                         view,
                         _ =>
