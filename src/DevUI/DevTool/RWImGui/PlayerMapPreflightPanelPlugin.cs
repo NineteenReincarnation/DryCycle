@@ -20,8 +20,15 @@ public sealed class PlayerMapPreflightPanelPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Preflight Panel";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapPreflightPanel.Enable(Logger);
-    private void OnDisable() => PlayerMapPreflightPanel.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapPreflightPanel.Enable(Logger),
+            PlayerMapPreflightPanel.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapPreflightPanel.Disable);
 }
 
 internal static class PlayerMapPreflightPanel
