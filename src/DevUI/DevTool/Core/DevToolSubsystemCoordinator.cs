@@ -106,6 +106,12 @@ internal static class DevToolSubsystemCoordinator
         ResetWorkspaceState();
         ResetPresentationHints();
         WorldRoomAttractionRegistry.ResetIfClean();
+
+        // Player Map authoring state is session-backed while the editor is open. Preserve dirty
+        // documents before dropping the transient EditorSession so closing/reopening DevTools cannot
+        // silently revert unsaved room positions or Def_Mat edits.
+        PlayerMapWorkspaceRuntime.RetainDirtyState(DevToolSessionHub.Current);
+
         EditorRevisionHub.Reset();
         DevToolSessionHub.Reset();
         DevToolPerformanceMonitor.SetEnabled(false);
