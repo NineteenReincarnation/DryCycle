@@ -17,6 +17,7 @@ internal sealed class WorldMapRenderTextureSurface
 {
     internal const int RenderLayer = 31;
 
+    private readonly object gate = new();
     private readonly WorldMapTextureBridge bridge = new();
     private Camera camera;
     private GameObject cameraObject;
@@ -31,32 +32,69 @@ internal sealed class WorldMapRenderTextureSurface
     private string error = string.Empty;
     private ManualLogSource log;
 
-    internal bool Ready => presented != null && presented.IsCreated();
-    internal bool NeedsRender =>
-        !Ready ||
-        renderInvalidated ||
-        (rejectedWidth > 0 &&
-         rejectedHeight > 0 &&
-         Time.frameCount >= resizeRetryAfterFrame &&
-         (width != rejectedWidth || height != rejectedHeight));
-    internal string Error => string.IsNullOrEmpty(error) ? bridge.Error : error;
-    internal Camera Camera => camera;
+    internal bool Ready
+    {
+        get
+        {
+            lock (gate)
+                return presented != null && presented.IsCreated();
+        }
+    }
+
+    internal bool NeedsRender
+    {
+        get
+        {
+            lock (gate)
+            {
+                bool ready = presented != null && presented.IsCreated();
+                return !ready ||
+                       renderInvalidated ||
+                       (rejectedWidth > 0 &&
+                        rejectedHeight > 0 &&
+                        Time.frameCount >= resizeRetryAfterFrame &&
+                        (width != rejectedWidth || height != rejectedHeight));
+            }
+        }
+    }
+
+    internal string Error
+    {
+        get
+        {
+            lock (gate)
+                return string.IsNullOrEmpty(error) ? bridge.Error : error;
+        }
+    }
+
+    internal Camera Camera
+    {
+        get
+        {
+            lock (gate) return camera;
+        }
+    }
 
     internal void Initialize(ManualLogSource logger)
     {
-        log = logger;
-        bridge.Initialize(logger);
-        EnsureCamera();
+        lock (gate)
+        {
+            log = logger;
+            bridge.Initialize(logger);
+            EnsureCamera();
+        }
     }
 
     internal bool Render(
         WorldMapViewTransform transform,
         Action<Camera> prepareScene)
     {
-        if (transform.CanvasSize.X < 2f || transform.CanvasSize.Y < 2f)
-            return false;
+        lock (gate)
+        {
+            if (transform.CanvasSize.X < 2f || transform.CanvasSize.Y < 2f)
+                return false;
 
-        EnsureCamera();
+            EnsureCamera();
 
         int targetWidth = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.X));
         int targetHeight = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.Y));
@@ -121,6 +159,7 @@ internal sealed class WorldMapRenderTextureSurface
             if (ownsCandidate)
                 ReleaseTarget(target);
         }
+        }
     }
 
     internal bool TryPresent(
@@ -128,7 +167,9 @@ internal sealed class WorldMapRenderTextureSurface
         Num.Vector2 min,
         Num.Vector2 max)
     {
-        if (!Ready) return false;
+        lock (gate)
+        {
+        if (presented == null || !presented.IsCreated()) return false;
 
         bool success = bridge.TryPresent(draw, presented, min, max);
         if (success)
@@ -170,10 +211,13 @@ internal sealed class WorldMapRenderTextureSurface
             "World Map V2 rejected a replacement RenderTexture presentation; " +
             "restored the last-known-good surface and will retry the resize later.");
         return true;
+        }
     }
 
     internal void Reset()
     {
+        lock (gate)
+        {
         bridge.Reset();
         ReleaseTarget(presented);
         ReleaseTarget(retired);
@@ -192,6 +236,7 @@ internal sealed class WorldMapRenderTextureSurface
         cameraObject = null;
         error = string.Empty;
         log = null;
+        }
     }
 
     private void EnsureCamera()

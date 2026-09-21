@@ -34,9 +34,10 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly List<string> visibleRoutes = new();
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
-    private static bool enabled;
+    private static volatile bool enabled;
     private static int activeLayerMask = 7;
     private static int activeShowConnections = 1;
+    private static float activeZoom = 1f;
     private static int retainedConnectionsReady;
     private static long lastRenderedViewRevision = long.MinValue;
     private static long lastRenderedSceneRevision = long.MinValue;
@@ -49,6 +50,14 @@ internal static class WorldMapRetainedV2Runtime
     internal static WorldMapDirtySet LastDirty => lastDirty;
     internal static WorldMapRoomResourceStore Resources => RoomResources;
     internal static WorldMapConnectionResourceStore Routes => ConnectionResources;
+    internal static float LatestZoom
+    {
+        get
+        {
+            float value = Volatile.Read(ref activeZoom);
+            return enabled && value > 0.0001f ? value : 1f;
+        }
+    }
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -76,6 +85,7 @@ internal static class WorldMapRetainedV2Runtime
         if (!enabled) return;
         Volatile.Write(ref activeLayerMask, layerMask);
         Volatile.Write(ref activeShowConnections, showConnections ? 1 : 0);
+        Volatile.Write(ref activeZoom, viewTransform.Zoom > 0.0001f ? viewTransform.Zoom : 1f);
 
         lastDirty = Synchronizer.Synchronize(
             RenderSceneState,
@@ -288,6 +298,7 @@ internal static class WorldMapRetainedV2Runtime
         visibleRooms.Clear();
         visibleRoutes.Clear();
         Volatile.Write(ref retainedConnectionsReady, 0);
+        Volatile.Write(ref activeZoom, 1f);
         lastRenderedViewRevision = long.MinValue;
         lastRenderedSceneRevision = long.MinValue;
         lastRenderedRoomResourceRevision = long.MinValue;

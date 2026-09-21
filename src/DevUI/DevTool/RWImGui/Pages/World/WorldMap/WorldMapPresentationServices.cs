@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
@@ -13,30 +14,45 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class WorldMapPresentationIndex
 {
-    private static readonly Dictionary<int, EditorMapRoomSnapshot> RoomsByIndex = new();
-    private static readonly Dictionary<string, EditorMapConnectionSnapshot> ConnectionsById =
-        new(StringComparer.Ordinal);
-    private static readonly Dictionary<long, EditorMapConnectionSnapshot> ConnectionsByEndpoint = new();
-    private static readonly Dictionary<int, EditorMapRoomVisualSnapshot> RoomVisualsByIndex = new();
+    private sealed class SnapshotIndex
+    {
+        internal EditorMapPresentationSnapshot Snapshot;
+        internal readonly Dictionary<int, EditorMapRoomSnapshot> RoomsByIndex = new();
+        internal readonly Dictionary<string, EditorMapConnectionSnapshot> ConnectionsById =
+            new(StringComparer.Ordinal);
+        internal readonly Dictionary<long, EditorMapConnectionSnapshot> ConnectionsByEndpoint = new();
+    }
 
-    private static EditorMapPresentationSnapshot indexedSnapshot;
-    private static int roomVisualFrame = int.MinValue;
+    private static readonly object BuildGate = new();
+    private static SnapshotIndex indexed;
+    private static int visualResetGeneration;
+
+    [ThreadStatic] private static Dictionary<int, EditorMapRoomVisualSnapshot> threadRoomVisuals;
+    [ThreadStatic] private static int threadRoomVisualFrame;
+    [ThreadStatic] private static int threadVisualGeneration;
 
     internal static EditorMapRoomVisualSnapshot GetRoomVisual(int roomIndex)
     {
         int frame = Time.frameCount;
-        if (roomVisualFrame != frame)
+        int generation = Volatile.Read(ref visualResetGeneration);
+        Dictionary<int, EditorMapRoomVisualSnapshot> cache =
+            threadRoomVisuals ??= new Dictionary<int, EditorMapRoomVisualSnapshot>();
+
+        if (threadRoomVisualFrame != frame ||
+            threadVisualGeneration != generation)
         {
-            roomVisualFrame = frame;
-            RoomVisualsByIndex.Clear();
+            threadRoomVisualFrame = frame;
+            threadVisualGeneration = generation;
+            cache.Clear();
         }
 
-        if (RoomVisualsByIndex.TryGetValue(roomIndex, out EditorMapRoomVisualSnapshot cached))
+        if (cache.TryGetValue(roomIndex, out EditorMapRoomVisualSnapshot cached))
             return cached;
 
         EditorMapRoomVisualSnapshot visual =
-            MapRoomGeometryPresentationHub.Get(roomIndex) ?? EditorMapRoomVisualSnapshot.Empty;
-        RoomVisualsByIndex[roomIndex] = visual;
+            MapRoomGeometryPresentationHub.Get(roomIndex) ??
+            EditorMapRoomVisualSnapshot.Empty;
+        cache[roomIndex] = visual;
         return visual;
     }
 
@@ -44,10 +60,12 @@ internal static class WorldMapPresentationIndex
         EditorMapPresentationSnapshot snapshot,
         int roomIndex)
     {
-        Ensure(snapshot);
-        return RoomsByIndex.TryGetValue(roomIndex, out EditorMapRoomSnapshot room)
-            ? room
-            : null;
+        SnapshotIndex state = Ensure(snapshot);
+        return state.RoomsByIndex.TryGetValue(
+            roomIndex,
+            out EditorMapRoomSnapshot room)
+                ? room
+                : null;
     }
 
     internal static EditorMapConnectionSnapshot FindConnection(
@@ -55,10 +73,12 @@ internal static class WorldMapPresentationIndex
         string id)
     {
         if (string.IsNullOrEmpty(id)) return null;
-        Ensure(snapshot);
-        return ConnectionsById.TryGetValue(id, out EditorMapConnectionSnapshot connection)
-            ? connection
-            : null;
+        SnapshotIndex state = Ensure(snapshot);
+        return state.ConnectionsById.TryGetValue(
+            id,
+            out EditorMapConnectionSnapshot connection)
+                ? connection
+                : null;
     }
 
     internal static EditorMapConnectionSnapshot FindConnectionAtEndpoint(
@@ -66,12 +86,12 @@ internal static class WorldMapPresentationIndex
         int roomIndex,
         int nodeIndex)
     {
-        Ensure(snapshot);
-        return ConnectionsByEndpoint.TryGetValue(
+        SnapshotIndex state = Ensure(snapshot);
+        return state.ConnectionsByEndpoint.TryGetValue(
             EndpointKey(roomIndex, nodeIndex),
             out EditorMapConnectionSnapshot connection)
-            ? connection
-            : null;
+                ? connection
+                : null;
     }
 
     internal static bool IsEndpointFree(
@@ -82,30 +102,38 @@ internal static class WorldMapPresentationIndex
         if (node == null || !node.Exit || node.ConnectedRoomIndex >= 0)
             return false;
 
-        Ensure(snapshot);
-        return !ConnectionsByEndpoint.ContainsKey(
+        SnapshotIndex state = Ensure(snapshot);
+        return !state.ConnectionsByEndpoint.ContainsKey(
             EndpointKey(roomIndex, node.NodeIndex));
     }
 
     internal static void Reset()
     {
-        indexedSnapshot = null;
-        RoomsByIndex.Clear();
-        ConnectionsById.Clear();
-        ConnectionsByEndpoint.Clear();
-        RoomVisualsByIndex.Clear();
-        roomVisualFrame = int.MinValue;
+        Volatile.Write(ref indexed, null);
+        Interlocked.Increment(ref visualResetGeneration);
     }
 
-    private static void Ensure(EditorMapPresentationSnapshot snapshot)
+    private static SnapshotIndex Ensure(EditorMapPresentationSnapshot snapshot)
     {
-        if (ReferenceEquals(indexedSnapshot, snapshot))
-            return;
+        SnapshotIndex current = Volatile.Read(ref indexed);
+        if (current != null && ReferenceEquals(current.Snapshot, snapshot))
+            return current;
 
-        RoomsByIndex.Clear();
-        ConnectionsById.Clear();
-        ConnectionsByEndpoint.Clear();
-        indexedSnapshot = snapshot;
+        lock (BuildGate)
+        {
+            current = Volatile.Read(ref indexed);
+            if (current != null && ReferenceEquals(current.Snapshot, snapshot))
+                return current;
+
+            SnapshotIndex built = Build(snapshot);
+            Volatile.Write(ref indexed, built);
+            return built;
+        }
+    }
+
+    private static SnapshotIndex Build(EditorMapPresentationSnapshot snapshot)
+    {
+        SnapshotIndex built = new() { Snapshot = snapshot };
 
         EditorMapRoomSnapshot[] rooms =
             snapshot?.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
@@ -113,7 +141,7 @@ internal static class WorldMapPresentationIndex
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (room != null)
-                RoomsByIndex[room.RoomIndex] = room;
+                built.RoomsByIndex[room.RoomIndex] = room;
         }
 
         EditorMapConnectionSnapshot[] connections =
@@ -124,21 +152,23 @@ internal static class WorldMapPresentationIndex
             if (connection == null) continue;
 
             if (!string.IsNullOrEmpty(connection.ConnectionId))
-                ConnectionsById[connection.ConnectionId] = connection;
+                built.ConnectionsById[connection.ConnectionId] = connection;
 
             long from = EndpointKey(
                 connection.FromRoomIndex,
                 connection.FromNodeIndex);
-            if (!ConnectionsByEndpoint.ContainsKey(from))
-                ConnectionsByEndpoint[from] = connection;
+            if (!built.ConnectionsByEndpoint.ContainsKey(from))
+                built.ConnectionsByEndpoint[from] = connection;
 
             if (connection.ToNodeIndex < 0) continue;
             long to = EndpointKey(
                 connection.ToRoomIndex,
                 connection.ToNodeIndex);
-            if (!ConnectionsByEndpoint.ContainsKey(to))
-                ConnectionsByEndpoint[to] = connection;
+            if (!built.ConnectionsByEndpoint.ContainsKey(to))
+                built.ConnectionsByEndpoint[to] = connection;
         }
+
+        return built;
     }
 
     private static long EndpointKey(int roomIndex, int nodeIndex) =>
@@ -192,7 +222,6 @@ internal static class WorldMapUpdateThrottle
 
         enabled = false;
         WorldMapPresentationIndex.Reset();
-        WorldMapHotState.Invalidate();
         ResetState();
     }
 
@@ -305,7 +334,7 @@ internal static class WorldMapBackgroundBudget
     private const int ShortcutSweepIntervalFrames = 4;
     private const int InteractionCooldownFrames = 3;
 
-    private static bool enabled;
+    private static volatile bool enabled;
     private static int lastGeometrySweepFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
     private static string geometryRegion = string.Empty;
@@ -327,18 +356,27 @@ internal static class WorldMapBackgroundBudget
             WorldMapFrontendBridge.UnregisterGeometryBackgroundBudget(ShouldProcessGeometry);
         enabled = false;
         ResetState();
-        WorldMapHotState.Invalidate();
     }
 
     internal static bool InteractionActive =>
-        enabled && Time.frameCount <= interactionUntilFrame;
+        enabled &&
+        Time.frameCount <= Volatile.Read(ref interactionUntilFrame);
 
     internal static void NoteInteraction()
     {
         if (!enabled) return;
-        interactionUntilFrame = Math.Max(
-            interactionUntilFrame,
-            Time.frameCount + InteractionCooldownFrames);
+
+        int target = Time.frameCount + InteractionCooldownFrames;
+        while (true)
+        {
+            int current = Volatile.Read(ref interactionUntilFrame);
+            if (current >= target) return;
+            if (Interlocked.CompareExchange(
+                    ref interactionUntilFrame,
+                    target,
+                    current) == current)
+                return;
+        }
     }
 
     internal static bool AllowSourceRecovery() =>
@@ -357,7 +395,7 @@ internal static class WorldMapBackgroundBudget
             return false;
         }
 
-        if (WorldMapHotState.Zoom < DetailedBackgroundZoom)
+        if (WorldMapRetainedV2Runtime.LatestZoom < DetailedBackgroundZoom)
             return false;
 
         if (Time.frameCount - lastGeometrySweepFrame < GeometrySweepIntervalFrames)

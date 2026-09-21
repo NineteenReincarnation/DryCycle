@@ -430,7 +430,7 @@ internal static class WorldMapShortcutPresentation
 
     private static void Publish(CacheEntry entry)
     {
-        if (entry == null || !entry.Initialized)
+        if (entry == null)
             return;
 
         PublishedEntry snapshot = new()

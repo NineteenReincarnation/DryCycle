@@ -481,6 +481,12 @@ Unity main thread now owns:
 Those services publish detached room/shortcut snapshots. RWImGUI Draw performs lookup only; it no
 longer calls `Texture.GetPixels`, `ReadPixels`, `File.ReadAllLines` or walks `MapPage.subNodes`.
 
+The old `WorldMapHotState` DynamicMethod/reflection bridge is retired. Background budgeting reads
+the explicitly published V2 zoom value, and its interaction cooldown uses atomic cross-thread state.
+
+`WorldMapPresentationIndex` also publishes an immutable snapshot index atomically. Draw lookups no
+longer share mutable room/connection dictionaries with main-thread reset/publication paths.
+
 ### Stable-frame surface reuse
 
 The retained surface now renders only when its view, scene, room resources, route resources, layer
