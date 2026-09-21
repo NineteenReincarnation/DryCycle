@@ -59,9 +59,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         }
 
         EditorSession session = DevToolRuntime.ActiveSession;
-        if (session?.ToolMode != EditorToolMode.Map)
-            WorldMapGpuStableCacheGate.ReleaseRetainedKey();
-
         bool rebuiltMapVisible =
             EditorInputRouter.FrontendAttached &&
             session?.ToolMode == EditorToolMode.Map &&
@@ -81,23 +78,16 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void SuspendDormantMapRuntime()
     {
-        // The stable-cache gate and region preload layer can otherwise retain the retired MapPage,
-        // immutable snapshots and up to several regions of managed bake data for the entire gameplay
-        // session. Retire their services in dependency order; renderer shutdown below still flushes
-        // the active durable bake to disk.
-        WorldMapGpuStableCacheGate.Disable();
+        // The region preload layer can otherwise retain immutable snapshots and several regions of
+        // managed bake data for the entire gameplay session. Retire it before releasing the active
+        // GPU working set; renderer shutdown below still flushes the durable active-region bake.
         WorldMapGpuRegionPreload.Disable();
 
-        // Retire helpers which keep live Page/snapshot/route state. Their BepInEx components remain
-        // enabled, but the static runtimes are idempotent and therefore safe to park until the next
-        // real DevTools lifetime. This also makes their Update methods O(1) no-ops while gameplay is
-        // running without the editor.
+        // Retire active helpers which keep live Page/snapshot/route state. Their runtimes are
+        // idempotent and can be resumed when a new DevTools session opens.
         WorldMapPlayerLocator.Disable();
         WorldMapExactShortcuts.Disable();
-        WorldMapGpuInteractionIndex.Disable();
         WorldMapGpuPipeBatch.Disable();
-        WorldMapGpuIncrementalRouter.Disable();
-        WorldMapGpuRetainedOptimizer.Disable();
         WorldMapPerformance.Disable();
 
         // The basic shortcut presentation owns AbstractRoom/RoomRepresentation references but is
@@ -118,19 +108,14 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void ResumeDormantMapRuntime()
     {
-        // Rebuild the dependency order used during normal BepInEx startup. Region preload installs
-        // before the stable-cache gate so the latter remains the outer O(1) fast path once baking is
-        // complete. The first reopened Map frame reloads the durable active-region bake from disk.
+        // Rebuild the active World Map runtime in dependency order. The first reopened Map frame
+        // reloads the durable active-region bake from disk before the preload layer warms neighbors.
         WorldMapPlayerLocator.Enable(Logger);
         WorldMapPerformance.Enable(Logger);
         WorldMapExactShortcuts.Enable(Logger);
         WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId);
-        WorldMapGpuRetainedOptimizer.Enable(Logger);
-        WorldMapGpuIncrementalRouter.Enable(Logger);
         WorldMapGpuPipeBatch.Enable(Logger);
-        WorldMapGpuInteractionIndex.Enable(Logger);
         WorldMapGpuRegionPreload.Enable(Logger);
-        WorldMapGpuStableCacheGate.Enable(Logger);
     }
 
     private void OnDisable() =>
@@ -142,7 +127,6 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     {
         // Plugin shutdown can arrive in any component order. Hide presentation immediately; the
         // owning plugin runtimes perform their own idempotent final Disable calls afterwards.
-        WorldMapGpuStableCacheGate.ReleaseRetainedKey();
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
