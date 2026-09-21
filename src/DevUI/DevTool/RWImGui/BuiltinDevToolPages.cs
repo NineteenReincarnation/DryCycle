@@ -74,7 +74,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     {
         NativeSpatialGizmoView.ResetRetainedState();
         NativeObjectGizmoView.ResetRetainedState();
-        ObjectMarqueeSelectionView.Reset();
+        ObjectMarqueeSelectionView.ResetRetainedState();
         ObjectExplorerView.ResetRetainedState();
         ObjectSceneWorkspaceView.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
