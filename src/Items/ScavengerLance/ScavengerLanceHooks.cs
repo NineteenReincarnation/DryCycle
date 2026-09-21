@@ -1,3 +1,4 @@
+using System;
 using DryCycle.Creatures.LanceScavenger;
 using DryCycle.Registration;
 using UnityEngine;
@@ -30,12 +31,64 @@ internal static class ScavengerLanceHooks
             On.Player.ThrowObject += ThrowObject;
             On.Player.Update += PlayerUpdate;
         }
-        catch
+        catch (Exception error)
         {
-            Disable();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "ScavengerLanceHooks.Enable",
+                error,
+                RollbackPartialEnable);
             throw;
         }
     }
+    private static void RollbackPartialEnable()
+    {
+        _enabled = false;
+
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/DevConsole.ResetRegistration",
+            ScavengerLanceDevConsoleSupport.ResetRegistration);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.Update",
+            () => On.Player.Update -= PlayerUpdate);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.ThrowObject",
+            () => On.Player.ThrowObject -= ThrowObject);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.GraphicsModuleUpdated",
+            () => On.Player.GraphicsModuleUpdated -= GraphicsModuleUpdated);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.GetHeldItemDirection",
+            () => On.Player.GetHeldItemDirection -= GetHeldItemDirection);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.HeavyCarry",
+            () => On.Player.HeavyCarry -= HeavyCarry);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.CanIPickThisUp",
+            () => On.Player.CanIPickThisUp -= CanIPickThisUp);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "ScavengerLanceHooks.Enable/Player.Grabability",
+            () => On.Player.Grabability -= Grabability);
+
+        if (_definition != null &&
+            global::DryCycle.StartupDiagnostics.RollbackStep(
+                "ScavengerLanceHooks.Enable/ItemRegistry.Unregister",
+                () => ItemRegistry.Unregister(_definition)))
+        {
+            _definition = null;
+        }
+
+        if (ObjectType != null)
+        {
+            AbstractPhysicalObject.AbstractObjectType rollbackType = ObjectType;
+            if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                    "ScavengerLanceHooks.Enable/ObjectType.Unregister",
+                    rollbackType.Unregister))
+            {
+                ObjectType = null;
+            }
+        }
+    }
+
     internal static void Disable()
     {
         if (!_enabled && _definition == null && ObjectType == null) return;
