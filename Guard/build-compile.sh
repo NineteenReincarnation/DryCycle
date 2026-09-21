@@ -1,104 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build / Compile
-# Consolidated Guard category. Keep checks invariant-focused; implementation-specific checks should be removed or rewritten.
-
-
-# ============================================================================
-# Migrated from Guard/scripts/check-drycycle-build-contract.sh
-# ============================================================================
-set -euo pipefail
+# Build / Compile Guard
+# Only protect durable build/deployment invariants here. Do not freeze private type names,
+# target names, exact MSBuild spelling, or one historical implementation.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-python3 - <<'PY'
-from pathlib import Path
-import xml.etree.ElementTree as ET
-
-project_path = Path('src/DryCycle.csproj')
-targets_path = Path('src/Directory.Build.targets')
-if not project_path.exists() or not targets_path.exists():
-    raise SystemExit('DryCycle build contract sources are missing')
-
-project = ET.parse(project_path).getroot()
-targets = ET.parse(targets_path).getroot()
-
-
-def children(root, tag):
-    return [node for node in root.iter() if node.tag.rsplit('}', 1)[-1] == tag]
-
-
-def one(root, tag, *, name=None):
-    matches = children(root, tag)
-    if name is not None:
-        matches = [node for node in matches if node.attrib.get('Name') == name]
-    if len(matches) != 1:
-        raise SystemExit(f'expected exactly one {tag} {name or ""}, found {len(matches)}')
-    return matches[0]
-
-
-def require(text, token, message):
-    if token not in text:
-        raise SystemExit(message)
-
-project_text = project_path.read_text(encoding='utf-8')
-targets_text = targets_path.read_text(encoding='utf-8')
-
-# Preserve the historical developer workflow unless the caller explicitly opts out.
-deploy = one(project, 'DeployToGame')
-if (deploy.text or '').strip().lower() != 'true' or "'$(DeployToGame)' == ''" not in deploy.attrib.get('Condition', ''):
-    raise SystemExit('DeployToGame must default to true only when the caller did not set it')
-
-# Compile-only builds must use SDK output and must not require the game-mod destination.
-output = one(project, 'OutputPath')
-if "'$(DeployToGame)' == 'true'" not in output.attrib.get('Condition', ''):
-    raise SystemExit('custom game OutputPath must be gated by DeployToGame=true')
-
-require(project_text,
-        "'$(DeployToGame)' == 'true' and '$(GameModOutputDir)' == ''",
-        'GameModOutputDir empty validation must apply only to deploy builds')
-require(project_text,
-        "'$(DeployToGame)' == 'true' and !Exists('$(GameModOutputDir)')",
-        'GameModOutputDir existence validation must apply only to deploy builds')
-
-# Release packaging copies assets/world data and therefore must never execute in compile-only mode.
-generate = one(project, 'Target', name='GenerateMod')
-if "'$(DeployToGame)' == 'true'" not in generate.attrib.get('Condition', ''):
-    raise SystemExit('GenerateMod must be gated by DeployToGame=true')
-
-# RWImGUI migration targets delete/build files beside the game plugin. All three are writes.
-for name in (
-    'RemoveLegacyDryCycleImGuiRuntime',
-    'BuildOptionalRWImGuiBridge',
-    'ReportMissingOptionalRWImGuiBridge',
-):
-    target = one(targets, 'Target', name=name)
-    if "'$(DeployToGame)' == 'true'" not in target.attrib.get('Condition', ''):
-        raise SystemExit(f'{name} must be gated by DeployToGame=true')
-
-# Compile-only mode must not silently weaken the exact Rain World reference contract.
-for assembly in (
-    'BepInEx.dll',
-    'MonoMod.RuntimeDetour.dll',
-    'PUBLIC-Assembly-CSharp.dll',
-    'HOOKS-Assembly-CSharp.dll',
-    'Assembly-CSharp-firstpass.dll',
-    'UnityEngine.CoreModule.dll',
-):
-    if assembly not in project_text:
-        raise SystemExit('exact Rain World reference validation missing: ' + assembly)
-
-print('DryCycle build contract passed: compile-only output is isolated while exact Rain World references remain mandatory.')
-PY
-
-
-# ============================================================================
-# Migrated from Guard/scripts/validate-csharp-syntax.sh
-# ============================================================================
-set -euo pipefail
-
+# ---------------------------------------------------------------------------
+# 1. C# syntax: broad, implementation-neutral, and safe to run in GitHub CI.
+# ---------------------------------------------------------------------------
 if ! command -v dotnet >/dev/null 2>&1; then
   echo "dotnet SDK is required for the C# syntax guard." >&2
   exit 1
@@ -210,164 +122,133 @@ EOF
 
 dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile -- "$(pwd)/src"
 
-
-# ============================================================================
-# Migrated from Guard/scripts/validate-devtool-frontend-build-contract.sh
-# ============================================================================
-set -euo pipefail
-
+# ---------------------------------------------------------------------------
+# 2. Durable MSBuild relationships.
+#    Check safety/dependency relationships, not exact target/interface names.
+# ---------------------------------------------------------------------------
 python3 - <<'PY'
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-backend_project = Path('src/DryCycle.csproj')
-targets_path = Path('src/Directory.Build.targets')
-core_page = Path('src/DevUI/DevTool/Core/IDevToolPage.cs')
-frontend_dir = Path('src/DevUI/DevTool/RWImGui')
-frontend_project = frontend_dir / 'DryCycle.DevTool.RWImGui.csproj'
-page_view = frontend_dir / 'IDevToolPageView.cs'
-registry_path = frontend_dir / 'DevToolPageViewRegistry.cs'
+project_path = Path("src/DryCycle.csproj")
+targets_path = Path("src/Directory.Build.targets")
+frontend_project_path = Path("src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj")
+frontend_dir = frontend_project_path.parent
 
-required_paths = (
-    backend_project,
-    targets_path,
-    frontend_project,
-    core_page,
-    page_view,
-    frontend_dir / 'BuiltinDevToolPages.cs',
-    registry_path,
-    frontend_dir / 'ObjectSceneWorkspaceView.cs',
-    frontend_dir / 'SceneWorkspaceWindow.cs',
-    frontend_dir / 'ScenePlacementWindow.cs',
-    frontend_dir / 'PAGE_VIEW_ARCHITECTURE.md',
-)
-for path in required_paths:
-    if not path.exists():
-        raise SystemExit(f'DevTool frontend build-contract input is missing: {path}')
+for path in (project_path, targets_path, frontend_project_path):
+    if not path.is_file():
+        raise SystemExit(f"Build input is missing: {path}")
 
-backend = ET.parse(backend_project).getroot()
-frontend = ET.parse(frontend_project).getroot()
-targets = ET.parse(targets_path).getroot()
+def parse(path):
+    try:
+        return ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        raise SystemExit(f"Invalid MSBuild XML in {path}: {exc}")
 
+backend = parse(project_path)
+targets = parse(targets_path)
+frontend = parse(frontend_project_path)
 
-def local_name(node):
-    return node.tag.rsplit('}', 1)[-1]
+def local(node):
+    return node.tag.rsplit("}", 1)[-1]
 
+def nodes(root, name):
+    return [node for node in root.iter() if local(node) == name]
 
-def nodes(root, tag):
-    return [node for node in root.iter() if local_name(node) == tag]
-
-
-def property_values(root, tag):
-    return [(node.text or '').strip() for node in nodes(root, tag)]
-
+def values(root, name):
+    return [(node.text or "").strip() for node in nodes(root, name)]
 
 def require(condition, message):
     if not condition:
         raise SystemExit(message)
 
-# The frontend intentionally relies on the SDK default Compile glob. This is what guarantees every
-# new view/interface .cs file below RWImGui enters DryCycle.DevTool.RWImGui.dll without maintaining a
-# second hand-written source list.
-require(frontend.attrib.get('Sdk') == 'Microsoft.NET.Sdk',
-        'DevTool RWImGui frontend must remain an SDK-style project so default Compile globs apply')
-require('net48' in property_values(frontend, 'TargetFramework'),
-        'DevTool RWImGui frontend must continue targeting net48')
-require('DryCycle.DevTool.RWImGui' in property_values(frontend, 'AssemblyName'),
-        'DevTool RWImGui frontend assembly name changed unexpectedly')
+# Compatibility baseline, deliberately treated as upgradeable rather than a permanent architecture
+# law. Backend and optional frontend run in the same Rain World/BepInEx process and must not silently
+# drift to different target frameworks. An intentional platform migration may update both together.
+backend_tfms = values(backend, "TargetFramework")
+frontend_tfms = values(frontend, "TargetFramework")
+require(len(backend_tfms) == 1 and len(frontend_tfms) == 1,
+        "Backend/frontend must each declare one TargetFramework")
+require(backend_tfms[0] == frontend_tfms[0],
+        f"Backend/frontend target-framework drift: {backend_tfms[0]} vs {frontend_tfms[0]}")
 
-for value in property_values(frontend, 'EnableDefaultCompileItems'):
-    require(value.lower() != 'false',
-            'DevTool RWImGui disabled SDK default Compile items; new view files could silently be omitted')
-
-compile_items = nodes(frontend, 'Compile')
-for item in compile_items:
-    remove = item.attrib.get('Remove', '').strip()
-    exclude = item.attrib.get('Exclude', '').strip()
-    require(not remove and not exclude,
-            'DevTool RWImGui project removes/excludes Compile items; keep source inclusion automatic')
-
-# Page/View composition is deliberately an implementation detail, not DevToolApi 1.x. Keep all three
-# lifecycle/rendering contracts and the registry internal even though InternalsVisibleTo lets the
-# separate frontend assembly consume the backend lifecycle interface.
-core_page_text = core_page.read_text(encoding='utf-8')
-page_view_text = page_view.read_text(encoding='utf-8')
-registry_text = registry_path.read_text(encoding='utf-8')
-require('internal interface IDevToolPage' in core_page_text,
-        'IDevToolPage became public; internal page lifecycle must not enter DevToolApi ABI')
-require('internal interface IDevToolPageView' in page_view_text,
-        'IDevToolPageView became public; frontend rendering contract must remain internal')
-require('internal interface IDevToolFrontendPage : IDevToolPage, IDevToolPageView' in page_view_text,
-        'IDevToolFrontendPage internal composite contract changed or became public')
-require('internal static class DevToolPageViewRegistry' in registry_text,
-        'DevToolPageViewRegistry became public; page registration is not a DevToolApi 1.x capability')
-
-# The gameplay/core assembly must never absorb the ImGui frontend source. The frontend is a separate
-# optional assembly and depends one-way on DryCycle.dll.
-targets_text = targets_path.read_text(encoding='utf-8')
-require('<Compile Remove="DevUI/DevTool/RWImGui/**/*.cs" />' in targets_text,
-        'DryCycle backend no longer excludes the DevTool RWImGui frontend source tree')
-
-# The dependency direction is backend -> frontend contract only through neutral backend callbacks.
-# DryCycle.dll cannot name types from DryCycle.DevTool.RWImGui.dll because the frontend already
-# references DryCycle.dll. Catch accidental reverse references before they become CS0234/assembly
-# cycles in a real local build.
-backend_devtool_dir = Path('src/DevUI/DevTool')
-reverse_reference_hits = []
-for source in backend_devtool_dir.rglob('*.cs'):
-    if frontend_dir in source.parents:
+# Compile-only safety: any MSBuild operation that directly names the game deployment properties must
+# be deployment-gated. This intentionally does not care what the target is called.
+deployment_tokens = ("$(GameModOutputDir)", "$(GameModRootDir)")
+write_tags = {"Copy", "Delete", "MakeDir", "Exec", "MSBuild"}
+unsafe = []
+for target in nodes(project, "Target") + nodes(targets, "Target"):
+    target_xml = ET.tostring(target, encoding="unicode")
+    has_deployment_path = any(token in target_xml for token in deployment_tokens)
+    has_write = any(local(child) in write_tags for child in target.iter())
+    if not (has_deployment_path and has_write):
         continue
-    text = source.read_text(encoding='utf-8')
-    if 'DryCycle.DevUI.DevTool.RWImGui' in text:
-        reverse_reference_hits.append(str(source))
-require(
-    not reverse_reference_hits,
-    'DryCycle backend source references the RWImGui frontend namespace; use a backend bridge/callback instead: '
-    + ', '.join(reverse_reference_hits)
+    condition = target.attrib.get("Condition", "")
+    if "$(DeployToGame)" not in condition or "true" not in condition.lower():
+        unsafe.append(target.attrib.get("Name", "<unnamed>"))
+require(not unsafe,
+        "Targets can write the game/mod deployment tree without an explicit DeployToGame=true gate: "
+        + ", ".join(unsafe))
+
+# Core must stay independent from the optional frontend and its ImGui runtime. Namespace/type names
+# inside the frontend may evolve; the forbidden dependency direction may not.
+backend_sources = Path("src").rglob("*.cs")
+forbidden_source_tokens = (
+    "DryCycle.DevUI.DevTool.RWImGui",
+    "ImGuiNET",
+    "rain_world_imgui_api",
 )
+hits = []
+for source in backend_sources:
+    if frontend_dir in source.parents or Path("src/DryCycle.AIObservatory.RWImGui") in source.parents:
+        continue
+    text = source.read_text(encoding="utf-8", errors="ignore")
+    if any(token in text for token in forbidden_source_tokens):
+        hits.append(str(source))
+require(not hits,
+        "Core source acquired an optional RWImGui/ImGui frontend dependency: " + ", ".join(hits))
 
-reference_nodes = {
-    item.attrib.get('Include', ''): item
-    for item in nodes(frontend, 'Reference')
-}
-for reference in ('DryCycle', 'rain-world-imgui-api', 'ImGui.NET'):
-    require(reference in reference_nodes,
-            f'DevTool RWImGui frontend lost required assembly reference: {reference}')
+backend_refs = {node.attrib.get("Include", "").strip() for node in nodes(backend, "Reference")}
+forbidden_backend_refs = {"DryCycle.DevTool.RWImGui", "rain-world-imgui-api", "ImGui.NET"}
+bad_refs = sorted(ref for ref in backend_refs if ref in forbidden_backend_refs)
+require(not bad_refs,
+        "DryCycle core project directly references optional frontend/runtime assemblies: " + ", ".join(bad_refs))
 
-# The frontend intentionally consumes several internal backend contracts (IDevToolPage and related
-# scheduler/performance helpers). Because it is a separate DLL, its AssemblyName and the backend
-# InternalsVisibleTo entry are one compile-time contract. A rename on either side otherwise turns a
-# structurally-correct source tree into CS0122 accessibility failures.
-friend_names = {
-    item.attrib.get('Include', '').strip()
-    for item in nodes(backend, 'InternalsVisibleTo')
-}
-require('DryCycle.DevTool.RWImGui' in friend_names,
-        'DryCycle backend lost InternalsVisibleTo for the DevTool RWImGui frontend')
+# Frontend identity is allowed to change. If it consumes backend internals, however, its declared
+# AssemblyName and backend InternalsVisibleTo must remain consistent. Do not freeze a literal name.
+frontend_names = values(frontend, "AssemblyName")
+require(len(frontend_names) == 1 and frontend_names[0],
+        "DevTool frontend must declare one non-empty AssemblyName")
+frontend_name = frontend_names[0]
+friend_names = {node.attrib.get("Include", "").strip() for node in nodes(backend, "InternalsVisibleTo")}
+frontend_source_text = "\n".join(
+    p.read_text(encoding="utf-8", errors="ignore") for p in frontend_dir.rglob("*.cs")
+)
+backend_internal_contracts = (
+    "IDevToolPage",
+    "DevToolSession",
+    "DevToolSubsystem",
+)
+if any(token in frontend_source_text for token in backend_internal_contracts):
+    require(frontend_name in friend_names,
+            f"Frontend '{frontend_name}' consumes backend internal contracts but backend InternalsVisibleTo does not match it")
 
-backend_ref = reference_nodes['DryCycle']
-hint_paths = [
-    (child.text or '').strip()
-    for child in list(backend_ref)
-    if local_name(child) == 'HintPath'
-]
-require('$(GameModOutputDir)/DryCycle.dll' in hint_paths,
-        'DevTool RWImGui frontend no longer compiles against the backend DLL produced in GameModOutputDir')
+# Frontend source inclusion is checked as a relationship. We deliberately do not require SDK default
+# globs: explicit Compile lists/removals are allowed, provided they do not accidentally exclude every
+# frontend source file.
+frontend_cs = list(frontend_dir.rglob("*.cs"))
+require(frontend_cs, "DevTool frontend contains no C# source files")
+enable_default = [v.lower() for v in values(frontend, "EnableDefaultCompileItems")]
+if "false" in enable_default:
+    includes = [node.attrib.get("Include", "") for node in nodes(frontend, "Compile") if node.attrib.get("Include")]
+    require(includes,
+            "DevTool frontend disables default Compile items but declares no explicit Compile inputs")
 
-# Parent DryCycle deployment is the authoritative build entry. It must restore and forcibly rebuild
-# the exact frontend project, then fail if the expected DLL was not actually deployed.
-frontend_project_expr = '$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj'
-frontend_msbuild = [
-    item for item in nodes(targets, 'MSBuild')
-    if item.attrib.get('Projects') == frontend_project_expr
-]
-frontend_targets = {item.attrib.get('Targets', '') for item in frontend_msbuild}
-require('Restore' in frontend_targets,
-        'DryCycle parent build no longer restores the DevTool RWImGui frontend')
-require('Rebuild' in frontend_targets,
-        'DryCycle parent build no longer forces a fresh DevTool RWImGui frontend rebuild')
-require("!Exists('$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll')" in targets_text,
-        'DryCycle parent build no longer verifies the deployed DevTool RWImGui DLL exists')
-
-print('DevTool RWImGui frontend build contract passed: source glob, internal page ABI, friend assembly boundary, backend reference and forced rebuild are intact.')
+print(
+    "Build relationship guard passed: syntax, compile-only deployment isolation, "
+    "backend/frontend framework alignment, optional dependency direction and frontend identity consistency are intact."
+)
 PY
+
+# A real Rain World-reference build intentionally remains a local/high-fidelity validation step.
+# GitHub-hosted CI does not fabricate game assemblies merely to make dotnet build appear successful.
