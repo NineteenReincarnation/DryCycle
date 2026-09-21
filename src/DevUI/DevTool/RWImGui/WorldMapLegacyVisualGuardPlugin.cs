@@ -28,13 +28,20 @@ public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Map Legacy Visual Guard";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapLegacyVisualGuard.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapLegacyVisualGuard.Enable(Logger),
+            WorldMapLegacyVisualGuard.Disable);
 
     // LateUpdate is deliberate. A RoomPanel/MiniMap refresh can happen after the core suppression
     // pass; applying a dirty suppression immediately before rendering closes that same-frame leak.
     private void LateUpdate() => WorldMapLegacyVisualGuard.LateUpdate();
 
-    private void OnDisable() => WorldMapLegacyVisualGuard.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapLegacyVisualGuard.Disable);
 }
 
 internal static class WorldMapLegacyVisualGuard
