@@ -100,6 +100,5 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         // transient session state and therefore has nothing to re-enable on shutdown.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
         observedLiveSession = false;
-        runtimeSuspendedForDormantSession = false;
     }
 }

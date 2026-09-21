@@ -119,8 +119,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
-        MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
-
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)
             WorldCreatureCatalogPicker.PumpMainThread();
@@ -263,7 +261,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world inspector readability", WorldInspectorReadability.Disable);
         SafeFrontendCleanup("user-facing copy cleanup", DevToolUserFacingCopyCleanup.Disable);
         SafeFrontendCleanup("retained view lifecycle", retainedViewLifecycle.Disable);
-        SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }
 
