@@ -18,6 +18,7 @@ on:
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
       - 'scripts/validate-devtool-effect-preview-safety.sh'
+      - 'scripts/validate-csharp-syntax.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
@@ -37,6 +38,7 @@ on:
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
       - 'scripts/validate-devtool-effect-preview-safety.sh'
+      - 'scripts/validate-csharp-syntax.sh'
       - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
@@ -69,6 +71,9 @@ jobs:
       - name: Validate DevTool effect preview safety
         shell: bash
         run: bash scripts/validate-devtool-effect-preview-safety.sh
+      - name: Validate C# syntax with Roslyn
+        shell: bash
+        run: bash scripts/validate-csharp-syntax.sh
       - name: Validate DryCycle startup safety
         shell: bash
         run: bash scripts/validate-drycycle-startup-safety.sh
