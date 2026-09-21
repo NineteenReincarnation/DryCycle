@@ -24,7 +24,9 @@ namespace DryCycle.DevUI.DevTool.Core;
 internal static class DevToolRuntime
 {
     private static bool enabled;
-    private static readonly bool EffectLivePreviewEnabled = false;
+    // Safe stage-one RoomEffect hover preview is active. Advanced runtime/Futile/camera capture has
+    // its own gate inside EffectPreviewRuntime and remains disabled until its detours are removed.
+    private static readonly bool EffectLivePreviewEnabled = true;
 
     internal static EditorSession ActiveSession => DevToolSessionHub.Current;
 
