@@ -17,8 +17,9 @@ public sealed class WorldMapGpuPathScratchPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Path Scratch";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable()
-    {
-        Logger?.LogInfo("GPU World Map path-scratch optimization is running in baseline mode; no self-detour attached.");
-    }
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo("GPU World Map path-scratch optimization is running in baseline mode; no self-detour attached."),
+            null);
 }
