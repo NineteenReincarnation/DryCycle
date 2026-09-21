@@ -176,20 +176,9 @@ internal static class WorldRoomAttractionRegistry
             return false;
         }
 
-        string temp = loadedPath + ".tmp";
         try
         {
-            string directory = Path.GetDirectoryName(loadedPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllLines(temp, lines);
-            if (File.Exists(loadedPath))
-            {
-                File.Copy(loadedPath, loadedPath + ".bak", overwrite: true);
-                File.Delete(loadedPath);
-            }
-            File.Move(temp, loadedPath);
+            WorldAuthoringPathResolver.AtomicWriteAllLines(loadedPath, lines);
             dirty = false;
             loadError = null;
             BumpRevision();
@@ -199,7 +188,6 @@ internal static class WorldRoomAttractionRegistry
         {
             loadError = error.Message;
             Plugin.Logger?.LogError("World Room_Attr save failed: " + error);
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
             return false;
         }
     }
