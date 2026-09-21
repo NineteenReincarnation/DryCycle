@@ -61,11 +61,34 @@ internal static class WalkableDynamicSurfaceRuntime
             On.Player.MovementUpdate += Player_MovementUpdate;
             On.Room.Update += Room_Update;
         }
-        catch
+        catch (Exception error)
         {
-            Disable();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "WalkableDynamicSurfaceRuntime.Enable",
+                error,
+                RollbackPartialEnable);
             throw;
         }
+    }
+
+    private static void RollbackPartialEnable()
+    {
+        enabled = false;
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WalkableDynamicSurfaceRuntime.Enable/Room.Update",
+            () => On.Room.Update -= Room_Update);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WalkableDynamicSurfaceRuntime.Enable/Player.MovementUpdate",
+            () => On.Player.MovementUpdate -= Player_MovementUpdate);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WalkableDynamicSurfaceRuntime.Enable/Player.Jump",
+            () => On.Player.Jump -= Player_Jump);
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "WalkableDynamicSurfaceRuntime.Enable/WalkableSurfaceRoomRegistry.Reset",
+            WalkableSurfaceRoomRegistry.Reset);
+
+        states = new ConditionalWeakTable<Player, RiderState>();
+        activeRiders.Clear();
     }
 
     internal static void Disable()
