@@ -23,8 +23,15 @@ public sealed class PlayerMapMultiSelectionPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Multi Selection";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapMultiSelection.Enable(Logger);
-    private void OnDisable() => PlayerMapMultiSelection.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapMultiSelection.Enable(Logger),
+            PlayerMapMultiSelection.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapMultiSelection.Disable);
 }
 
 internal static class PlayerMapMultiSelection
