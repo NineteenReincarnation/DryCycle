@@ -284,6 +284,8 @@ internal sealed class Plugin : BaseUnityPlugin
 
             StartupDiagnostics.Step("RainWorld.OnModsInit/DryCycleContent.LoadResources", () => DryCycleContent.LoadResources(self));
             StartupDiagnostics.Step("RainWorld.OnModsInit/MantleCrabDefinition.LoadResources", () => MantleCrabDefinition.LoadResources(self));
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DB_Sandbox.Enable", DB_Sandbox.Enable);
+            StartupDiagnostics.Step("RainWorld.OnModsInit/DB_WarpCompatibility.Enable", DB_WarpCompatibility.Enable);
             StartupDiagnostics.Step("RainWorld.OnModsInit/KingVultureSpearHooks.Enable", KingVultureSpearHooks.Enable);
             StartupDiagnostics.Step("RainWorld.OnModsInit/RopeSpearHooks.Enable", RopeSpearHooks.Enable);
             StartupDiagnostics.Step("RainWorld.OnModsInit/DryCycleTokenRuntime.Enable", DryCycleTokenRuntime.Enable);
