@@ -24,10 +24,9 @@ internal static class MiscRuntime
         // the same enable/disable transaction as the rebuilt editor runtime.
         DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable();
 
-        // Install the Sound/Trigger native top-level pump after quiescence but before DevToolRuntime.
-        // DevToolRuntime is therefore the outer DevUI.Update hook; its orig delegate reaches this
-        // scheduler. Native Sound/Trigger uses a RoomSettingsPage anchor and never constructs its
-        // legacy page unless Vanilla/Legacy presentation is explicitly active.
+        // Enable the Sound/Trigger native top-level scheduler after quiescence. DevToolRuntime owns
+        // the single DevUI.Update hook and calls this scheduler directly at the vanilla-dispatch
+        // boundary; native Sound/Trigger therefore adds no second hook layer.
         DryCycle.DevUI.DevTool.Compatibility.NativeSoundTriggerDevUiScheduler.Enable();
         DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable();
 
