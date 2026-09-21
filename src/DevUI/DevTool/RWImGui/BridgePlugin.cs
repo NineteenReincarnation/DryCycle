@@ -248,11 +248,18 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static void RainWorld_Start(On.RainWorld.orig_Start orig, RainWorld self)
     {
+        global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "ENTER");
+
         // Let RWImGui's own Start hook run first. Its native function-pointer bootstrap is the
         // boundary after which calling ImGui.NET is valid. Only then probe the shared font atlas.
-        orig(self);
+        global::DryCycle.StartupDiagnostics.Step(
+            "BridgePlugin/RainWorld.Start/orig",
+            () => orig(self));
         nativeImGuiReady = true;
-        TryRegisterLocalFontsDuringSafeStartup();
+        global::DryCycle.StartupDiagnostics.Optional(
+            "BridgePlugin/RainWorld.Start/RegisterLocalFonts",
+            () => TryRegisterLocalFontsDuringSafeStartup());
+        global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
     private static void DryCycle_BeforePreModsInit(RainWorld self)
@@ -306,6 +313,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         {
             // A managed binding/context mismatch should not take the whole game down. Keep the
             // startup probe retryable and leave a concrete diagnostic in LogOutput.
+            global::DryCycle.StartupDiagnostics.Failure(
+                "BridgePlugin/TryRegisterLocalFontsDuringSafeStartup",
+                error);
             log?.LogWarning("DryCycle DevTool deferred local font registration: " + error.Message);
             return false;
         }
@@ -322,6 +332,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         }
         catch (Exception error)
         {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "BridgePlugin/TryRegisterCallback",
+                error);
             log?.LogError("DryCycle DevTool RWImGui registration failed: " + error);
         }
     }
@@ -336,6 +349,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         }
         catch (Exception error)
         {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "BridgePlugin/TryUnregisterCallback",
+                error);
             log?.LogWarning("DryCycle DevTool RWImGui callback removal failed: " + error.Message);
         }
     }
