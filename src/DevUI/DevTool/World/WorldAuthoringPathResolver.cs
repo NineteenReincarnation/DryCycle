@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace DryCycle.DevUI.DevTool.World;
@@ -108,6 +109,81 @@ internal static class WorldAuthoringPathResolver
         string.IsNullOrWhiteSpace(relativePath)
             ? string.Empty
             : AssetManager.ResolveFilePath(relativePath);
+
+    internal static void AtomicWriteAllText(string target, string content)
+    {
+        AtomicWrite(target, temp => File.WriteAllText(temp, content ?? string.Empty));
+    }
+
+    internal static void AtomicWriteAllLines(string target, IEnumerable<string> lines)
+    {
+        AtomicWrite(target, temp => File.WriteAllLines(temp, lines ?? Array.Empty<string>()));
+    }
+
+    private static void AtomicWrite(string target, Action<string> writeTemp)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            throw new ArgumentException("Authoring target path is empty.", nameof(target));
+        if (writeTemp == null)
+            throw new ArgumentNullException(nameof(writeTemp));
+
+        string directory = Path.GetDirectoryName(target);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        string temp = target + ".tmp";
+        string backup = target + ".bak";
+
+        try
+        {
+            if (File.Exists(temp))
+                File.Delete(temp);
+
+            writeTemp(temp);
+
+            bool hadOriginal = File.Exists(target);
+            if (hadOriginal)
+            {
+                File.Copy(target, backup, overwrite: true);
+                File.Delete(target);
+            }
+
+            try
+            {
+                File.Move(temp, target);
+            }
+            catch
+            {
+                // Restore the exact pre-save file if commit fails after the original was removed.
+                // Keep the .bak copy as an additional recovery artifact.
+                if (hadOriginal && File.Exists(backup))
+                {
+                    try
+                    {
+                        if (File.Exists(target))
+                            File.Delete(target);
+                        File.Copy(backup, target, overwrite: true);
+                    }
+                    catch (Exception restoreError)
+                    {
+                        Plugin.Logger?.LogError(
+                            "World authoring rollback could not restore '" + target +
+                            "' from backup: " + restoreError);
+                    }
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                    File.Delete(temp);
+            }
+            catch { }
+        }
+    }
 
     internal static bool IsMergedCachePath(string path)
     {
