@@ -1,0 +1,115 @@
+# World Map Retained Renderer V2
+
+## Current phase
+
+**Phase 0 — runtime contract verification and baseline measurement**
+
+This phase does not replace the current World Map renderer yet. It establishes the real runtime
+contract that later retained-renderer phases are allowed to depend on.
+
+## Engineering boundaries
+
+The V2 renderer follows the repository-level `AGENTS.md` rules:
+
+- backend `EditorSession / Revision / Presentation Snapshot / Command` remains authoritative;
+- RWImGui V2 owns presentation state only;
+- Draw consumes detached snapshots and enqueues commands; it does not mutate authoring data;
+- generated meshes, textures, routes and spatial indexes are derived runtime/cache data only;
+- failures are logged with the original exception and cleanup result;
+- no RWImGUI texture/native API is guessed when it can be verified from the installed assembly.
+
+## Hard visual invariant
+
+### Thumbnail continuity
+
+A room's committed base thumbnail must remain visible across the complete supported zoom range.
+
+Pan/zoom is never allowed to:
+
+- replace a valid thumbnail with a black rectangle;
+- release the committed thumbnail before a replacement is ready;
+- rebuild a RenderTexture merely because zoom changed;
+- show an uninitialised RenderTexture;
+- discard the last-known-good room presentation while an asynchronous replacement is pending.
+
+LOD may hide labels, pipes, node numbers and expensive semantic overlays. It may **not** remove the
+base room thumbnail.
+
+During Phase 0 the existing immediate renderer still owns the map. Its navigation placeholder is
+forced to the visible room Air tone instead of a near-black FrameBg so the migration itself does not
+introduce a black-flash regression. V2 will replace this placeholder with a retained thumbnail.
+
+## Phase 0 implementation
+
+### 1. RWImGUI texture-contract inventory
+
+`WorldMapRetainedV2Phase0` reflects the exact loaded:
+
+- `rain-world-imgui-api.dll`
+- RWImGUI-provided modified `ImGui.NET.dll`
+
+It records public candidates for:
+
+- methods accepting `UnityEngine.Texture / Texture2D / RenderTexture`;
+- native texture-ID image consumers;
+- register/unregister/remove/release texture lifetime methods.
+
+The probe never assumes that `Texture.GetNativeTexturePtr()` is an ImGui texture ID.
+
+The standalone helper `scripts/inspect_rwimgui_api.ps1` prints the same contract information against
+the user's installed Workshop build.
+
+### 2. Real RenderTexture device probe
+
+On the Unity main thread, after a live Map session exists, Phase 0 creates a small ARGB32
+`RenderTexture`, explicitly clears it, verifies `IsCreated()`, obtains the native pointer for
+diagnostics only, then releases and destroys it.
+
+This proves the actual Rain World graphics device can host the future off-screen map surface without
+yet binding that surface into ImGui.
+
+### 3. Baseline timing
+
+The current World Map canvas records CPU draw time into bounded rolling samples for:
+
+- steady frames;
+- pan frames;
+- zoom frames;
+- room-drag frames;
+- combined navigation frames.
+
+The toolbar exposes `p50 / p95 / max` timings. A concise baseline is also logged every 240
+navigation samples.
+
+These values are the regression baseline for V2. Later phases must demonstrate that pan/zoom cost
+moves toward transform-only work rather than simply hiding detail.
+
+## Phase 0 completion criteria
+
+Implementation is complete when the project compiles and the probes are present.
+
+Runtime verification is complete after a real Rain World run confirms:
+
+1. the exact RWImGUI texture candidate signatures in LogOutput;
+2. the RenderTexture probe succeeds on the actual graphics device;
+3. at least 240 pan/zoom samples have been collected;
+4. p50/p95/max values are recorded before V2 replaces the renderer.
+
+If the installed RWImGUI exposes no public Unity-texture adapter, Phase 1/2 must not invent one.
+The next step is to inspect the exact installed API/source and introduce a verified adapter boundary.
+
+## Legacy retirement policy
+
+Legacy code does **not** have to wait until the entire V2 project is finished.
+
+A legacy file/path may be retired as soon as all of the following are true:
+
+1. its responsibility has a single V2 owner;
+2. all consumers have migrated;
+3. no runtime fallback still depends on it;
+4. build verification passes;
+5. the relevant runtime behavior has been tested;
+6. deleting it cannot discard authoring data or hide a failure.
+
+Conversely, legacy code must remain while it still owns an unported responsibility. Retirement is
+therefore evidence-driven per subsystem rather than tied to one final all-or-nothing phase.

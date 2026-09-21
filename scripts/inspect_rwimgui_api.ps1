@@ -86,6 +86,18 @@ try {
         }
     }
 
+    $imguiTypes = @()
+    try {
+        $imguiTypes = $imgui.GetTypes()
+    }
+    catch [Reflection.ReflectionTypeLoadException] {
+        $imguiTypes = @($_.Exception.Types | Where-Object { $_ -ne $null })
+        Write-Warning "Some modified ImGui.NET types could not be loaded:"
+        foreach ($loaderError in $_.Exception.LoaderExceptions) {
+            Write-Warning ("  " + $loaderError.Message)
+        }
+    }
+
     Write-Host "[BepInPlugin attributes]"
     foreach ($type in $types) {
         foreach ($attribute in $type.CustomAttributes) {
@@ -128,6 +140,69 @@ try {
         foreach ($method in ($matches | Sort-Object Name)) {
             Write-Host ("    " + $method.ToString())
         }
+    }
+
+    Write-Host ""
+    Write-Host "[Texture bridge contract candidates]"
+    $directTextureCount = 0
+    $nativeImageCount = 0
+    $lifetimeCount = 0
+    $assemblies = @(
+        @{ Name = $api.GetName().Name; Types = $types },
+        @{ Name = $imgui.GetName().Name; Types = $imguiTypes }
+    )
+
+    foreach ($entry in $assemblies) {
+        foreach ($type in $entry.Types) {
+            $methods = @()
+            try {
+                $methods = @($type.GetMethods([Reflection.BindingFlags] "Public,Static,Instance"))
+            }
+            catch {
+                Write-Warning ("  Could not inspect {0}: {1}" -f $type.FullName, $_.Exception.Message)
+                continue
+            }
+
+            foreach ($method in $methods) {
+                $name = $method.Name
+                $textureNamed = $name -match "Texture|Image|ShaderResource|SRV|Native"
+                $lifetimeNamed = $name -match "Register|Unregister|Remove|Release|Destroy"
+                $acceptsUnityTexture = $false
+                $acceptsNativeId = $false
+
+                foreach ($parameter in $method.GetParameters()) {
+                    $parameterName = $parameter.ParameterType.FullName
+                    if ($parameterName -match "^UnityEngine\.(Texture|Texture2D|RenderTexture)$") {
+                        $acceptsUnityTexture = $true
+                    }
+                    if ($parameterName -in @("System.IntPtr", "System.UIntPtr", "System.Int64", "System.UInt64")) {
+                        $acceptsNativeId = $true
+                    }
+                }
+
+                if (-not $textureNamed -and -not $acceptsUnityTexture) { continue }
+
+                $signature = "{0}::{1}.{2}" -f $entry.Name, $type.FullName, $method.ToString()
+                if ($acceptsUnityTexture) {
+                    $directTextureCount++
+                    Write-Host ("  [DIRECT-UNITY] " + $signature)
+                }
+                elseif ($acceptsNativeId -and $name -match "Texture|Image") {
+                    $nativeImageCount++
+                    Write-Host ("  [NATIVE-ID]    " + $signature)
+                }
+
+                if ($lifetimeNamed -and $textureNamed) {
+                    $lifetimeCount++
+                    Write-Host ("  [LIFETIME]     " + $signature)
+                }
+            }
+        }
+    }
+
+    Write-Host ("  Summary: directUnity={0} nativeImage={1} lifetime={2}" -f $directTextureCount, $nativeImageCount, $lifetimeCount)
+    if ($directTextureCount -eq 0) {
+        Write-Warning "No public method accepting Unity Texture/Texture2D/RenderTexture was found. Do not assume Texture.GetNativeTexturePtr is a valid ImGui texture ID without a verified RWImGUI adapter."
     }
 
     Write-Host ""

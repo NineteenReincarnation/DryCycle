@@ -62,6 +62,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Phase0.Enable", () => WorldMapRetainedV2Phase0.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapImGuiPresentationFallback.Enable", () => WorldMapImGuiPresentationFallback.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPresentationCorrectness.Enable", () => WorldMapPresentationCorrectness.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRenderOrder.Enable", () => WorldMapRenderOrder.Enable(Logger));
@@ -119,6 +120,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void Update()
     {
         if (!bridgeEnabled) return;
+
+        WorldMapRetainedV2Phase0.UpdateMainThread();
 
         // The rebuilt World Map intentionally keeps vanilla MapPage drawing/updating quiescent.
         // Pump the bounded source-recovery backend here so missing RoomRepresentation MapTex
@@ -259,6 +262,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
+        SafeFrontendCleanup("world map retained v2 phase 0", WorldMapRetainedV2Phase0.Disable);
         SafeFrontendCleanup("world map presentation fallback", WorldMapImGuiPresentationFallback.Disable);
         SafeFrontendCleanup("world map presentation correctness", WorldMapPresentationCorrectness.Disable);
         SafeFrontendCleanup("world map render order", WorldMapRenderOrder.Disable);

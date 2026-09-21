@@ -147,6 +147,7 @@ internal static class WorldMapView
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
         WorldMapGpuRuntime.DrawToolbar(snapshot);
+        WorldMapRetainedV2Phase0.DrawToolbar();
     }
 
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
@@ -168,6 +169,8 @@ internal static class WorldMapView
         Num.Vector2 canvasSize = ImGui.GetContentRegionAvail();
         if (canvasSize.X < 80f || canvasSize.Y < 80f) return;
 
+        long phase0StartedAt = WorldMapRetainedV2Phase0.BeginMapFrame();
+
         ImGui.InvisibleButton("##WorldMapCanvasInput", canvasSize);
         bool canvasHovered = ImGui.IsItemHovered();
         ImGuiIOPtr io = ImGui.GetIO();
@@ -179,6 +182,8 @@ internal static class WorldMapView
         }
 
         bool viewportInteraction = false;
+        bool panInteraction = false;
+        bool zoomInteraction = false;
         if (canvasHovered && Math.Abs(io.MouseWheel) > 0.0001f && linkingRoom < 0)
         {
             float oldZoom = zoom;
@@ -187,6 +192,7 @@ internal static class WorldMapView
             Num.Vector2 worldAtMouse = (mouseInCanvas - pan) / oldZoom;
             zoom = next;
             pan = mouseInCanvas - worldAtMouse * zoom;
+            zoomInteraction = true;
             viewportInteraction = true;
         }
 
@@ -194,6 +200,7 @@ internal static class WorldMapView
             (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || ImGui.IsMouseDragging(ImGuiMouseButton.Right)))
         {
             pan += io.MouseDelta;
+            panInteraction = true;
             viewportInteraction = true;
         }
 
@@ -271,6 +278,11 @@ internal static class WorldMapView
             hoveredConnectionId);
         WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
+        WorldMapRetainedV2Phase0.EndMapFrame(
+            phase0StartedAt,
+            panInteraction,
+            zoomInteraction,
+            draggingRoom >= 0);
     }
 
     private static void UpdateActiveDragBeforeDraw()
@@ -343,10 +355,14 @@ internal static class WorldMapView
         bool selected)
     {
         WorldMapRenderOrder.UseBase(draw);
-        uint fill = ImGui.GetColorU32(
-            selected ? ImGuiCol.Button :
-            room.CurrentRoom ? ImGuiCol.Header :
-            room.Disabled ? ImGuiCol.FrameBg : ImGuiCol.FrameBg);
+        // Phase 0 visual continuity rule: navigation/zoom may simplify detail, but it must never
+        // replace the room with a near-black placeholder. The retained V2 renderer will preserve the
+        // committed thumbnail itself; until then use the same visible Air tone as the detailed map.
+        uint fill = selected
+            ? ImGui.GetColorU32(ImGuiCol.Button)
+            : room.CurrentRoom
+                ? ImGui.GetColorU32(ImGuiCol.Header)
+                : GeometryColor(EditorMapGeometryKind.Air);
         uint outline = ImGui.GetColorU32(
             selected ? ImGuiCol.ButtonActive :
             room.CurrentRoom ? ImGuiCol.Header :
