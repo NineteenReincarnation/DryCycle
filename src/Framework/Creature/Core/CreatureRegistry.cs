@@ -23,6 +23,11 @@ public static class CreatureRegistry
     private static readonly Dictionary<string, CreatureDescriptor> _byName = new(StringComparer.OrdinalIgnoreCase);
 
     private static bool _enabled;
+    private static bool _staticWorldTemplateHookInstalled;
+    private static bool _abstractCtorHookInstalled;
+    private static bool _realizeHookInstalled;
+    private static bool _initiateAiHookInstalled;
+    private static bool _worldLoaderTypeHookInstalled;
     private static bool _registrationClosed;
 
     /// <summary>
@@ -234,12 +239,45 @@ public static class CreatureRegistry
             return;
         }
 
-        On.StaticWorld.InitCustomTemplates += StaticWorld_InitCustomTemplates;
-        On.AbstractCreature.ctor += AbstractCreature_ctor;
-        On.AbstractCreature.Realize += AbstractCreature_Realize;
-        On.AbstractCreature.InitiateAI += AbstractCreature_InitiateAI;
-        On.WorldLoader.CreatureTypeFromString += WorldLoader_CreatureTypeFromString;
-        _enabled = true;
+        try
+        {
+            if (!_staticWorldTemplateHookInstalled)
+            {
+                On.StaticWorld.InitCustomTemplates += StaticWorld_InitCustomTemplates;
+                _staticWorldTemplateHookInstalled = true;
+            }
+            if (!_abstractCtorHookInstalled)
+            {
+                On.AbstractCreature.ctor += AbstractCreature_ctor;
+                _abstractCtorHookInstalled = true;
+            }
+            if (!_realizeHookInstalled)
+            {
+                On.AbstractCreature.Realize += AbstractCreature_Realize;
+                _realizeHookInstalled = true;
+            }
+            if (!_initiateAiHookInstalled)
+            {
+                On.AbstractCreature.InitiateAI += AbstractCreature_InitiateAI;
+                _initiateAiHookInstalled = true;
+            }
+            if (!_worldLoaderTypeHookInstalled)
+            {
+                On.WorldLoader.CreatureTypeFromString += WorldLoader_CreatureTypeFromString;
+                _worldLoaderTypeHookInstalled = true;
+            }
+
+            _enabled = true;
+        }
+        catch
+        {
+            // Hook installation is a transaction. If one HookGen endpoint is unavailable, detach
+            // every endpoint installed earlier in this attempt before propagating the original
+            // startup error to the owning plugin transaction.
+            RemoveInstalledHooksBestEffort("enable rollback");
+            _enabled = false;
+            throw;
+        }
     }
 
     /// <summary>
@@ -251,17 +289,70 @@ public static class CreatureRegistry
     /// </summary>
     public static void Disable()
     {
-        if (!_enabled)
+        if (!_enabled &&
+            !_staticWorldTemplateHookInstalled &&
+            !_abstractCtorHookInstalled &&
+            !_realizeHookInstalled &&
+            !_initiateAiHookInstalled &&
+            !_worldLoaderTypeHookInstalled)
         {
             return;
         }
 
-        On.StaticWorld.InitCustomTemplates -= StaticWorld_InitCustomTemplates;
-        On.AbstractCreature.ctor -= AbstractCreature_ctor;
-        On.AbstractCreature.Realize -= AbstractCreature_Realize;
-        On.AbstractCreature.InitiateAI -= AbstractCreature_InitiateAI;
-        On.WorldLoader.CreatureTypeFromString -= WorldLoader_CreatureTypeFromString;
+        RemoveInstalledHooksBestEffort("disable");
         _enabled = false;
+    }
+
+    private static void RemoveInstalledHooksBestEffort(string phase)
+    {
+        RemoveHookBestEffort(
+            ref _worldLoaderTypeHookInstalled,
+            () => On.WorldLoader.CreatureTypeFromString -= WorldLoader_CreatureTypeFromString,
+            "WorldLoader.CreatureTypeFromString",
+            phase);
+        RemoveHookBestEffort(
+            ref _initiateAiHookInstalled,
+            () => On.AbstractCreature.InitiateAI -= AbstractCreature_InitiateAI,
+            "AbstractCreature.InitiateAI",
+            phase);
+        RemoveHookBestEffort(
+            ref _realizeHookInstalled,
+            () => On.AbstractCreature.Realize -= AbstractCreature_Realize,
+            "AbstractCreature.Realize",
+            phase);
+        RemoveHookBestEffort(
+            ref _abstractCtorHookInstalled,
+            () => On.AbstractCreature.ctor -= AbstractCreature_ctor,
+            "AbstractCreature.ctor",
+            phase);
+        RemoveHookBestEffort(
+            ref _staticWorldTemplateHookInstalled,
+            () => On.StaticWorld.InitCustomTemplates -= StaticWorld_InitCustomTemplates,
+            "StaticWorld.InitCustomTemplates",
+            phase);
+    }
+
+    private static void RemoveHookBestEffort(
+        ref bool installed,
+        Action remove,
+        string hookName,
+        string phase)
+    {
+        if (!installed)
+        {
+            return;
+        }
+
+        try
+        {
+            remove();
+            installed = false;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "CreatureRegistry " + phase + " could not detach " + hookName + ": " + error);
+        }
     }
 
     /// <summary>
