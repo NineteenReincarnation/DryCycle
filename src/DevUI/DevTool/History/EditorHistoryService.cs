@@ -194,6 +194,13 @@ public sealed class EditorHistoryService
     public void ActivateDocument(EditorDocumentKey document)
     {
         bool changed = !hasActiveDocument || !activeDocument.Equals(document);
+
+        // Batch entries mutate the currently active model immediately. If the logical document key
+        // changes before the outer scope disposes, commit the already-applied edit to the old
+        // document now; otherwise the later Dispose would attach old-document history to the new key.
+        if (changed && batchDepth > 0 && hasActiveDocument)
+            CommitOpenBatchBeforeDocumentSwitch();
+
         activeDocument = document;
         hasActiveDocument = true;
         if (!documents.ContainsKey(document))
@@ -287,12 +294,40 @@ public sealed class EditorHistoryService
 
     public void ClearActive()
     {
-        if (batchDepth > 0) return;
+        // ClearActive is used when the runtime object graph backing the same logical document has
+        // been replaced. Any open batch can contain direct references into that retired graph, so it
+        // must be discarded together with the old stack rather than silently surviving the clear.
+        if (batchDepth > 0)
+            DiscardOpenBatch();
+
         if (Current == null) return;
         if (Current.Undo.Count == 0 && Current.Redo.Count == 0) return;
         Current.Undo.Clear();
         Current.Redo.Clear();
         BumpRevision(modelMayHaveChanged: false);
+    }
+
+    private void CommitOpenBatchBeforeDocumentSwitch()
+    {
+        List<IEditorHistoryEntry> entries = batchEntries;
+        string label = batchLabel;
+        batchDepth = 0;
+        batchEntries = null;
+        batchLabel = string.Empty;
+
+        if (entries == null || entries.Count == 0)
+            return;
+
+        CommitEntry(entries.Count == 1 && string.IsNullOrEmpty(label)
+            ? entries[0]
+            : new CompositeHistoryEntry(label, entries));
+    }
+
+    private void DiscardOpenBatch()
+    {
+        batchDepth = 0;
+        batchEntries = null;
+        batchLabel = string.Empty;
     }
 
     private void EndBatch()
