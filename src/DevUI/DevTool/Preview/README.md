@@ -34,6 +34,7 @@ Stage 2: 通用高级预览
 Ownership / Journal
     ├─ Runtime UAD
     ├─ Runtime descendant UAD
+    ├─ runtime mutation IL safety scan
     ├─ Drawable / Camera SpriteLeaser
     ├─ safe Room field delta
     ├─ Global Shader property / keyword
@@ -89,20 +90,22 @@ Preview-owned Controller 在 `Room.Update` 中继续 `Room.AddObject` 创建非�
 
 生成 `PhysicalObject` 视为污染，立即结束高级预览并把该 `RoomEffect.Type` 标记为 Unsafe。
 
-### 4. Runtime Futile ownership
+### 4. Runtime mutation fail-closed
 
-运行中的 Preview Controller 对：
+高级 Preview 不再通过 RuntimeDetour 拦截 Futile 容器。
+
+同步 bootstrap 窗口中直接加入 RoomCamera SpriteLayers 的 FNode 由 SceneStateJournal 做前后快照并按身份回滚；进入正常游戏帧后，Preview-owned runtime type 会先做 IL 安全扫描。
+
+以下行为直接拒绝高级 Preview，并降级回 Stage 1：
 
 ```text
-FContainer.AddChild
-FContainer.AddChildAtIndex
-FContainer.RemoveChild
-FContainer.RemoveAllChildren
+FContainer.AddChild / AddChildAtIndex / RemoveChild / RemoveAllChildren
+FNode.RemoveFromContainer / Move*
+任意 stsfld 静态字段写入
+对 Preview runtime 自身和可 journal RoomCamera 之外对象的 stfld
 ```
 
-造成的变化会在“当前执行者可证明属于 Preview”时被记录。
-
-新建 FNode 在回滚时按身份移除；已有节点被移动、重排或暂时移除时，记录原容器和原索引并恢复。如果节点随后又被其他系统修改，则不强行覆盖，而是判定 ambiguity / Unsafe。
+因此跨帧 Futile 修改不存在“猜测归属再回滚”的路径。无法证明安全时不执行高级 Preview。
 
 ### 5. Runtime RoomCamera ownership
 
