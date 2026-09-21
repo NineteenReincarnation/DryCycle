@@ -55,11 +55,20 @@ internal static class WorldRoomAttractionRegistry
         loadedWorld = world;
         loadedPath = path ?? string.Empty;
         loadError = null;
+
+        if (string.IsNullOrWhiteSpace(loadedPath) || !File.Exists(loadedPath))
+        {
+            lines = null;
+            loadError =
+                "The active Properties file has no lossless writable source. " +
+                "DryCycle will not author generated mergedmods data.";
+            BumpRevision();
+            return false;
+        }
+
         try
         {
-            lines = !string.IsNullOrWhiteSpace(loadedPath) && File.Exists(loadedPath)
-                ? new List<string>(File.ReadAllLines(loadedPath))
-                : new List<string>();
+            lines = new List<string>(File.ReadAllLines(loadedPath));
             BumpRevision();
             return true;
         }
@@ -357,7 +366,6 @@ internal static class WorldRoomAttractionRegistry
 
         string relativeBase = "World" + Path.DirectorySeparatorChar + world.name +
                               Path.DirectorySeparatorChar + "Properties.txt";
-        string basePath = AssetManager.ResolveFilePath(relativeBase);
 
         if (session.Owner?.game?.session is StoryGameSession story)
         {
@@ -366,13 +374,17 @@ internal static class WorldRoomAttractionRegistry
             {
                 string relativeTimeline = "World" + Path.DirectorySeparatorChar + world.name +
                                           Path.DirectorySeparatorChar + "Properties-" + timeline.value + ".txt";
-                string timelinePath = AssetManager.ResolveFilePath(relativeTimeline);
-                if (!string.IsNullOrWhiteSpace(timelinePath) && File.Exists(timelinePath))
-                    return timelinePath;
+
+                // Match Rain World's runtime precedence: a timeline-specific Properties file wins
+                // whenever it resolves for reading. Authoring must then target the real source of
+                // that exact file rather than silently falling back to base Properties.txt.
+                string runtimeTimeline = WorldAuthoringPathResolver.ResolveReadPath(relativeTimeline);
+                if (!string.IsNullOrWhiteSpace(runtimeTimeline) && File.Exists(runtimeTimeline))
+                    return WorldAuthoringPathResolver.ResolveExistingSource(relativeTimeline);
             }
         }
 
-        return basePath;
+        return WorldAuthoringPathResolver.ResolveExistingSource(relativeBase);
     }
 
     private static void BumpRevision()
