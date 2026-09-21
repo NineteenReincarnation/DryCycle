@@ -380,6 +380,9 @@ public enum EditorUiCommandKind
     CancelPlacement,
     SetObjectPosition,
     SetSelectionPosition,
+    SnapSelectionToGrid,
+    AlignSelection,
+    DistributeSelection,
     SetObjectProperty,
     SetSelectionProperty,
     InvokeLegacyButton,
@@ -519,6 +522,9 @@ public static class EditorUiCommandQueue
                 break;
 
             case EditorUiCommandKind.SetSelectionPosition:
+            case EditorUiCommandKind.SnapSelectionToGrid:
+            case EditorUiCommandKind.AlignSelection:
+            case EditorUiCommandKind.DistributeSelection:
             case EditorUiCommandKind.SetSelectionProperty:
                 if (selectionCountBefore == 1)
                     ObjectPresentationChangeHintHub.MarkMember(session, primaryBefore);
@@ -613,6 +619,14 @@ public static class EditorUiCommandQueue
                 return EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
             case EditorUiCommandKind.SetSelectionPosition:
                 return EditorActions.SetSelectionPrimaryPosition(session, new Vector2(command.X, command.Y));
+            case EditorUiCommandKind.SnapSelectionToGrid:
+                return EditorActions.SnapSelectionToGrid(session, command.X);
+            case EditorUiCommandKind.AlignSelection:
+                return Enum.IsDefined(typeof(ObjectSelectionAlignment), command.Index) &&
+                       EditorActions.AlignSelection(session, (ObjectSelectionAlignment)command.Index);
+            case EditorUiCommandKind.DistributeSelection:
+                return Enum.IsDefined(typeof(ObjectSelectionDistribution), command.Index) &&
+                       EditorActions.DistributeSelection(session, (ObjectSelectionDistribution)command.Index);
             case EditorUiCommandKind.SetObjectProperty:
                 return EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
             case EditorUiCommandKind.SetSelectionProperty:
@@ -649,6 +663,9 @@ public static class EditorUiCommandQueue
         EditorUiCommandKind.PlaceObjectAtCursor or
         EditorUiCommandKind.SetObjectPosition or
         EditorUiCommandKind.SetSelectionPosition or
+        EditorUiCommandKind.SnapSelectionToGrid or
+        EditorUiCommandKind.AlignSelection or
+        EditorUiCommandKind.DistributeSelection or
         EditorUiCommandKind.SetObjectProperty or
         EditorUiCommandKind.SetSelectionProperty or
         EditorUiCommandKind.InvokeLegacyButton or
