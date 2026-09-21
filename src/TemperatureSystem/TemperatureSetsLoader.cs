@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using DryCycle.DevUI.DevTool.World;
 
 namespace DryCycle.TemperatureSystem;
 
@@ -567,6 +568,12 @@ internal static class TemperatureSetsLoader
         }
 
         string resolved = AssetManager.ResolveFilePath("world/" + FileName);
+        if (forSave && WorldAuthoringPathResolver.IsMergedCachePath(resolved))
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "TemperatureSets authoring refused generated mergedmods target: " + resolved);
+            return null;
+        }
         return forSave || File.Exists(resolved) ? resolved : null;
     }
 
