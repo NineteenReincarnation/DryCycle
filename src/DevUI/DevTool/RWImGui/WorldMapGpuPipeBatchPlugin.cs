@@ -32,8 +32,15 @@ public sealed class WorldMapGpuPipeBatchPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Pipe Batch";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuPipeBatch.Enable(Logger);
-    private void OnDisable() => WorldMapGpuPipeBatch.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuPipeBatch.Enable(Logger),
+            WorldMapGpuPipeBatch.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuPipeBatch.Disable);
 }
 
 internal static class WorldMapGpuPipeBatch
