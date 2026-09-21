@@ -71,8 +71,6 @@ public static class EditorActions
         bool ok = true;
         map.SaveMapConfig();
 
-        string region = map.world?.name ?? string.Empty;
-
         if (WorldTextRegistry.Dirty)
         {
             // Dirty state already belongs to an authoritative loaded document. Save that exact
