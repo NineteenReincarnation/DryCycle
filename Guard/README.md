@@ -5,7 +5,6 @@ DryCycle 的 Guard 统一放在这里。Guard 只保护已经确认的重要不�
 ## 分类
 
 - `build-compile.sh`：构建契约、C# 语法、前后端程序集边界。
-- `persistence-authoring-safety.sh`：保存、原子写入、回滚与 `mergedmods` 写保护。
 - `devtool-architecture.sh`：DevTool 公共 API、页面/视图、Factory、Gizmo、Sound/Trigger、Objects 等架构边界。
 - `feature-specific.sh`：确实需要独立保留的功能级回归约束，目前主要是 DesertBatfly。
 - `tools/devtool-local.ps1`：本地 DevTool 构建验证工具，不作为一个独立 Guard 类别。
