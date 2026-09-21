@@ -23,8 +23,8 @@ internal static class AIDebuggerRuntime
 
     internal static void Install(RainWorld rainWorld, ManualLogSource logger)
     {
-        AIDebugSettings.Load(logger);
-        AIDebugSessionBlockWriter.Initialize(logger);
+        StartupDiagnostics.Step("AIDebuggerRuntime/AIDebugSettings.Load", () => AIDebugSettings.Load(logger));
+        StartupDiagnostics.Step("AIDebuggerRuntime/AIDebugSessionBlockWriter.Initialize", () => AIDebugSessionBlockWriter.Initialize(logger));
 
         bool bridgeAssemblyLoaded = IsAssemblyLoaded(BridgeAssemblyName);
         bool rwimguiAssemblyLoaded = IsAssemblyLoaded(RWImGuiAssemblyName);
@@ -44,28 +44,31 @@ internal static class AIDebuggerRuntime
                                "and verify that the bridge DLL is present in Ancient Site/newest/plugins.");
         }
 
-        AIDebugInputGate.Install(logger);
-        AIDebugSimulationControl.Install(logger);
+        StartupDiagnostics.Optional("AIDebuggerRuntime/AIDebugInputGate.Install", () => AIDebugInputGate.Install(logger));
+        StartupDiagnostics.Optional("AIDebuggerRuntime/AIDebugSimulationControl.Install", () => AIDebugSimulationControl.Install(logger));
 
         if (host != null)
         {
-            host.Bind(rainWorld, logger);
+            StartupDiagnostics.Step("AIDebuggerRuntime/RebindHost", () => host.Bind(rainWorld, logger));
             logger?.LogInfo("DryCycle AI Observatory rebound to the current RainWorld instance.");
             return;
         }
 
-        AIDebugRegistry.Initialize(logger);
-        AIDebugPresentationHub.Reset();
-        AIDebugOfflineSessionStore.RefreshAsync();
-        hostObject = new GameObject("DryCycle AI Observatory Controller")
+        StartupDiagnostics.Step("AIDebuggerRuntime/AIDebugRegistry.Initialize", () => AIDebugRegistry.Initialize(logger));
+        StartupDiagnostics.Step("AIDebuggerRuntime/AIDebugPresentationHub.Reset", AIDebugPresentationHub.Reset);
+        StartupDiagnostics.Step("AIDebuggerRuntime/AIDebugOfflineSessionStore.RefreshAsync", AIDebugOfflineSessionStore.RefreshAsync);
+        StartupDiagnostics.Step("AIDebuggerRuntime/CreateHostGameObject", () =>
         {
-            hideFlags = HideFlags.HideAndDontSave
-        };
-        UnityEngine.Object.DontDestroyOnLoad(hostObject);
+            hostObject = new GameObject("DryCycle AI Observatory Controller")
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            UnityEngine.Object.DontDestroyOnLoad(hostObject);
+        });
 
-        host = hostObject.AddComponent<AIDebuggerHost>();
-        host.Bind(rainWorld, logger);
-        host.SetStartupVisible(AIDebugSettings.AutoOpen);
+        StartupDiagnostics.Step("AIDebuggerRuntime/AddHostComponent", () => host = hostObject.AddComponent<AIDebuggerHost>());
+        StartupDiagnostics.Step("AIDebuggerRuntime/BindHost", () => host.Bind(rainWorld, logger));
+        StartupDiagnostics.Step("AIDebuggerRuntime/SetStartupVisible", () => host.SetStartupVisible(AIDebugSettings.AutoOpen));
         logger?.LogInfo($"DryCycle AI Observatory controller created. active={hostObject.activeInHierarchy}, startupVisible={AIDebugSettings.AutoOpen}, " +
                         $"legacyRenderer=disabled, overlayCamera=none, bridge={AIDebugPresentationBridgeStatus.Describe()}.");
     }
