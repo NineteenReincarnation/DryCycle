@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BepInEx.Logging;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -135,5 +136,28 @@ internal static class DevToolScrollChrome
         value = Math.Max(0f, Math.Min(1f, value));
         float inverse = 1f - value;
         return 1f - inverse * inverse * inverse;
+    }
+}
+
+internal static class ScopedScrollChrome
+{
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        logger?.LogInfo("DevTool scoped scrollbar animation enabled through direct pane calls; no self-detours attached.");
+    }
+
+    internal static void Disable() => enabled = false;
+
+    internal static void Draw(string key, bool pruneAfter = false)
+    {
+        if (!enabled) return;
+        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        DevToolScrollChrome.DrawCurrentRegion(key, ImGui.GetIO(), scale);
+        if (pruneAfter)
+            DevToolScrollChrome.PruneInactiveStates();
     }
 }

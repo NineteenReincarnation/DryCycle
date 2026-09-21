@@ -58,6 +58,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             // Enable paths are idempotent.
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldCreatureSpawnInspector.Enable", () => WorldCreatureSpawnInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
 
             // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
             // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -98,6 +99,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void Update()
     {
         if (!bridgeEnabled) return;
+
+        MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
 
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)
@@ -230,6 +233,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         ownsCreatureCatalogRuntime = false;
         creatureCatalogFallbackChecked = false;
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
+        SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
+        SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }
 
