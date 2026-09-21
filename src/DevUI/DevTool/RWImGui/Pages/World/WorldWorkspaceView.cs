@@ -301,6 +301,7 @@ internal static class WorldWorkspaceView
         draggingExplorerSplitter = false;
         draggingInspectorSplitter = false;
         WorldMapView.ClearConnectionSelection();
+        WorldMapRetainedV2Runtime.ResetRetainedState();
     }
 
     private static void DrawToolbar(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)

@@ -1,11 +1,19 @@
 # World Map Retained Renderer V2
 
+## Progress convention
+
+Project progress is code-side only. A phase reaches **100%** when its implementation and repository
+integration are complete. Real-game verification remains useful evidence, but it does not hold the
+phase percentage below 100%.
+
 ## Current phase
 
-**Phase 0 — runtime contract verification and baseline measurement**
+- **Phase 0 — 100%**: runtime contract probe, RenderTexture probe and timing baseline instrumentation.
+- **Phase 1 — 100%**: world-space retained scene, view transform and frontend dirty graph.
+- **Phase 2 — next**: retained room thumbnail/geometry resources.
 
-This phase does not replace the current World Map renderer yet. It establishes the real runtime
-contract that later retained-renderer phases are allowed to depend on.
+The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
+subsystem.
 
 ## Engineering boundaries
 
@@ -83,6 +91,45 @@ navigation samples.
 
 These values are the regression baseline for V2. Later phases must demonstrate that pan/zoom cost
 moves toward transform-only work rather than simply hiding detail.
+
+## Phase 1 implementation
+
+### World-space scene
+
+`WorldMapScene` retains room and connection presentation nodes in map-world coordinates. It is a
+frontend projection only; backend snapshots remain authoritative.
+
+### View transform
+
+`WorldMapViewTransform` exclusively owns canvas origin, viewport size, pan and zoom conversion.
+Changing pan/zoom increments only the scene's view revision. It does not enter `WorldMapDirtySet`.
+
+### Dirty graph
+
+`WorldMapDirtySet` separates:
+
+- room transform changes;
+- room metadata changes;
+- room port/topology changes;
+- removed rooms;
+- changed/removed connections;
+- topology/full rebuild flags.
+
+These are derived frontend invalidations and are not a second authoring Revision system.
+
+### Stable-frame fast path
+
+`WorldMapSceneSynchronizer` caches presentation-snapshot identity plus a frontend layout revision.
+When both are unchanged, synchronization stops after updating the view transform. This makes pure
+pan/zoom an O(1) scene-synchronization operation.
+
+Interactive room dragging advances only the frontend layout revision and updates only the actively
+dragged room when the backend snapshot itself is unchanged.
+
+### Lifetime
+
+The retained scene is released from the Map page retained-state reset path. Resetting V2 projection
+never modifies the editor document, history, authoring revision or persistence state.
 
 ## Phase 0 completion criteria
 

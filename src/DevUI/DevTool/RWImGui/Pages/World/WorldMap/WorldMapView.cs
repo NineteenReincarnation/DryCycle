@@ -35,6 +35,7 @@ internal static class WorldMapView
     }
 
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
+    private static long localPositionRevision;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
     private static readonly bool[] layerVisible = { true, true, true };
     private static readonly uint[] geometryColorCache = new uint[16];
@@ -148,6 +149,7 @@ internal static class WorldMapView
         WorldMapPlayerLocator.DrawToolbar(snapshot);
         WorldMapGpuRuntime.DrawToolbar(snapshot);
         WorldMapRetainedV2Phase0.DrawToolbar();
+        WorldMapRetainedV2Runtime.DrawToolbarDiagnostics();
     }
 
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
@@ -208,6 +210,13 @@ internal static class WorldMapView
         // presentation work so the current frame, not only the next one, receives the cheap path.
         if (viewportInteraction || draggingRoom >= 0 || linkingRoom >= 0)
             WorldMapBackgroundBudget.NoteInteraction();
+
+        WorldMapRetainedV2Runtime.Synchronize(
+            snapshot,
+            localPositions,
+            localPositionRevision,
+            draggingRoom,
+            new WorldMapViewTransform(canvasMin, canvasSize, pan, zoom));
 
         WorldMapExactShortcuts.BeforeCanvas(snapshot);
 
@@ -291,7 +300,9 @@ internal static class WorldMapView
             return;
 
         Num.Vector2 mouse = ImGui.GetIO().MousePos;
-        localPositions[draggingRoom] = dragStartWorld + (mouse - dragStartMouse) / zoom;
+        SetLocalPosition(
+            draggingRoom,
+            dragStartWorld + (mouse - dragStartMouse) / zoom);
     }
 
     private static void DrawGrid(ImDrawListPtr draw, Num.Vector2 canvasMin, Num.Vector2 canvasSize)
@@ -790,7 +801,9 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot dragged = FindRoom(snapshot, draggingRoom);
             if (dragged != null && ImGui.IsMouseDown(ImGuiMouseButton.Left))
-                localPositions[draggingRoom] = dragStartWorld + (io.MousePos - dragStartMouse) / zoom;
+                SetLocalPosition(
+                    draggingRoom,
+                    dragStartWorld + (io.MousePos - dragStartMouse) / zoom);
             else
             {
                 if (dragged != null && localPositions.TryGetValue(draggingRoom, out Num.Vector2 final))
@@ -1293,7 +1306,11 @@ internal static class WorldMapView
         string next = snapshot.RegionName ?? string.Empty;
         if (string.Equals(region, next, StringComparison.OrdinalIgnoreCase)) return;
         region = next;
-        localPositions.Clear();
+        if (localPositions.Count > 0)
+        {
+            localPositions.Clear();
+            unchecked { localPositionRevision++; }
+        }
         pan = Num.Vector2.Zero;
         zoom = 1f;
         fitRequested = true;
@@ -1311,15 +1328,34 @@ internal static class WorldMapView
         for (int i = 0; i < rooms.Length; i++)
         {
             EditorMapRoomSnapshot room = rooms[i];
+            if (room == null) continue;
+
             alive.Add(room.RoomIndex);
             if (room.RoomIndex == draggingRoom) continue;
-            localPositions[room.RoomIndex] = new Num.Vector2(room.X, room.Y);
+            SetLocalPosition(room.RoomIndex, new Num.Vector2(room.X, room.Y));
         }
+
         if (localPositions.Count == alive.Count) return;
+
         List<int> remove = new();
         foreach (int key in localPositions.Keys)
             if (!alive.Contains(key)) remove.Add(key);
-        for (int i = 0; i < remove.Count; i++) localPositions.Remove(remove[i]);
+
+        if (remove.Count == 0) return;
+        for (int i = 0; i < remove.Count; i++)
+            localPositions.Remove(remove[i]);
+        unchecked { localPositionRevision++; }
+    }
+
+    private static bool SetLocalPosition(int roomIndex, Num.Vector2 position)
+    {
+        if (localPositions.TryGetValue(roomIndex, out Num.Vector2 current) &&
+            Num.Vector2.DistanceSquared(current, position) <= 0.0001f)
+            return false;
+
+        localPositions[roomIndex] = position;
+        unchecked { localPositionRevision++; }
+        return true;
     }
 
     private static void SynchronizeLinkState(EditorMapPresentationSnapshot snapshot)
