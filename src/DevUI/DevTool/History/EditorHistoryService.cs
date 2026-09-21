@@ -56,7 +56,19 @@ public sealed class CompositeHistoryEntry : IEditorHistoryEntry
         int undoneFrom = entries.Length;
         for (int i = entries.Length - 1; i >= 0; i--)
         {
-            if (entries[i].Undo(session))
+            bool succeeded;
+            try
+            {
+                succeeded = entries[i].Undo(session);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "Composite history undo failed for '" + entries[i].Label + "': " + error);
+                succeeded = false;
+            }
+
+            if (succeeded)
             {
                 undoneFrom = i;
                 continue;
@@ -66,7 +78,12 @@ public sealed class CompositeHistoryEntry : IEditorHistoryEntry
             for (int restore = undoneFrom; restore < entries.Length; restore++)
             {
                 try { entries[restore].Redo(session); }
-                catch { }
+                catch (Exception restoreError)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "Composite history undo rollback failed for '" +
+                        entries[restore].Label + "': " + restoreError);
+                }
             }
             return false;
         }
@@ -78,7 +95,19 @@ public sealed class CompositeHistoryEntry : IEditorHistoryEntry
         int redoneThrough = -1;
         for (int i = 0; i < entries.Length; i++)
         {
-            if (entries[i].Redo(session))
+            bool succeeded;
+            try
+            {
+                succeeded = entries[i].Redo(session);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "Composite history redo failed for '" + entries[i].Label + "': " + error);
+                succeeded = false;
+            }
+
+            if (succeeded)
             {
                 redoneThrough = i;
                 continue;
@@ -88,7 +117,12 @@ public sealed class CompositeHistoryEntry : IEditorHistoryEntry
             for (int restore = redoneThrough; restore >= 0; restore--)
             {
                 try { entries[restore].Undo(session); }
-                catch { }
+                catch (Exception restoreError)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "Composite history redo rollback failed for '" +
+                        entries[restore].Label + "': " + restoreError);
+                }
             }
             return false;
         }
@@ -205,7 +239,16 @@ public sealed class EditorHistoryService
 
         int index = history.Undo.Count - 1;
         IEditorHistoryEntry entry = history.Undo[index];
-        if (!entry.Undo(session)) return false;
+        try
+        {
+            if (!entry.Undo(session)) return false;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool undo failed for '" + entry.Label + "'; history stack was left unchanged. " + error);
+            return false;
+        }
 
         history.Undo.RemoveAt(index);
         history.Redo.Add(entry);
@@ -222,7 +265,16 @@ public sealed class EditorHistoryService
 
         int index = history.Redo.Count - 1;
         IEditorHistoryEntry entry = history.Redo[index];
-        if (!entry.Redo(session)) return false;
+        try
+        {
+            if (!entry.Redo(session)) return false;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool redo failed for '" + entry.Label + "'; history stack was left unchanged. " + error);
+            return false;
+        }
 
         history.Redo.RemoveAt(index);
         history.Undo.Add(entry);
