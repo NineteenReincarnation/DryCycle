@@ -1,256 +1,198 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Startup Safety
-# Consolidated Guard category. Keep checks invariant-focused; implementation-specific checks should be removed or rewritten.
+# Startup / Lifecycle Safety
+#
+# This guard protects only durable lifecycle boundaries that static analysis can verify
+# without freezing DryCycle's current bootstrap implementation. Behavioural guarantees
+# such as transactional rollback, cleanup continuation and irreversible registry state
+# belong in focused tests rather than grep-based architecture locks.
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
-# ============================================================================
-# Migrated from Guard/scripts/validate-auxiliary-plugin-startup.sh
-# ============================================================================
-set -euo pipefail
+python3 - <<'PY'
+from pathlib import Path
+import re
 
-fail=0
+SRC = Path("src")
+if not SRC.is_dir():
+    raise SystemExit("src directory is missing")
 
-while IFS= read -r file; do
-  [[ -z "$file" ]] && continue
+def fail(message):
+    raise SystemExit(message)
 
-  # Only independent BepInEx startup entrypoints matter here.
-  if ! grep -Fq '[BepInPlugin(' "$file" || ! grep -Eq 'OnEnable[[:space:]]*\(' "$file"; then
-    continue
-  fi
+def read(path):
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        fail(f"Could not read {path}: {exc}")
 
-  case "$file" in
-    src/Plugin.cs)
-      if ! grep -Fq 'StartupDiagnostics.Begin(Logger);' "$file" ||
-         ! grep -Fq 'RollbackBootstrap();' "$file"; then
-        echo "Primary DryCycle plugin lost guarded startup: $file" >&2
-        fail=1
-      fi
-      continue
-      ;;
-    src/DevUI/DevTool/RWImGui/BridgePlugin.cs)
-      if ! grep -Fq 'StartupDiagnostics.Marker("BridgePlugin.OnEnable", "ENTER")' "$file" ||
-         ! grep -Fq 'ShutdownBridgeState();' "$file"; then
-        echo "RWImGui bridge lost guarded startup: $file" >&2
-        fail=1
-      fi
-      continue
-      ;;
-    src/DryCycle.AIObservatory.RWImGui/BridgePlugin.cs)
-      if ! grep -Fq '[DryCycle.Startup][AIObservatoryBridge][BEGIN] OnEnable' "$file" ||
-         ! grep -Fq '[DryCycle.Startup][AIObservatoryBridge][FAIL-OPTIONAL] OnEnable' "$file" ||
-         ! grep -Fq 'ShutdownBridgeState("RWImGUI bridge startup failed")' "$file"; then
-        echo "AI Observatory RWImGui bridge lost fail-open traced startup: $file" >&2
-        fail=1
-      fi
-      continue
-      ;;
-  esac
+# ---------------------------------------------------------------------------
+# 1. Optional frontend assemblies must not own Rain World's core mod-init hooks.
+#
+# Frontends may consume any DryCycle lifecycle abstraction the core exposes. This rule
+# deliberately does not require DryCycleLifecycleEvents, fixed event names, fixed
+# BridgePlugin names, or a particular subscription topology.
+# ---------------------------------------------------------------------------
+optional_frontend_roots = [
+    SRC / "DevUI" / "DevTool" / "RWImGui",
+    SRC / "DryCycle.AIObservatory.RWImGui",
+]
 
-  enable_count="$(grep -Ec 'OnEnable[[:space:]]*\(' "$file" || true)"
-  guard_count="$(grep -Fc 'AuxiliaryPluginStartupGuard.Enable' "$file" || true)"
-  if [[ "$guard_count" -lt "$enable_count" ]]; then
-    echo "Auxiliary BepInEx OnEnable coverage is incomplete: $file (OnEnable=$enable_count, guarded=$guard_count)" >&2
-    fail=1
-  fi
-done < <(find src -type f -name '*.cs' -print | sort)
+rainworld_startup_hook = re.compile(
+    r"On\s*\.\s*RainWorld\s*\.\s*(?:PreModsInit|OnModsInit|PostModsInit)\s*\+="
+)
 
-if [[ "$fail" -ne 0 ]]; then
-  exit 1
-fi
+direct_hook_hits = []
+for root in optional_frontend_roots:
+    if not root.exists():
+        continue
+    for source in root.rglob("*.cs"):
+        if rainworld_startup_hook.search(read(source)):
+            direct_hook_hits.append(str(source))
 
-echo "Auxiliary plugin startup guard passed."
+if direct_hook_hits:
+    fail(
+        "Optional frontend assemblies directly own Rain World startup hooks. "
+        "Route frontend startup through a core-owned lifecycle surface instead: "
+        + ", ".join(sorted(direct_hook_hits))
+    )
 
+# ---------------------------------------------------------------------------
+# 2. Independent optional BepInEx entrypoints need a local exception boundary.
+#
+# We intentionally do not prescribe StartupDiagnostics, AuxiliaryPluginStartupGuard,
+# ShutdownBridgeState, exact log text, or rollback method names. The static guard only
+# rejects the clearest unsafe shape: an optional plugin OnEnable with no catch boundary
+# anywhere in that method body.
+#
+# Primary src/Plugin.cs is excluded because core startup can contain irreversible state;
+# "always swallow and continue" is not a valid universal rule for the primary plugin.
+# ---------------------------------------------------------------------------
+plugin_attribute = re.compile(r"\[\s*BepInPlugin\s*\(")
+on_enable = re.compile(
+    r"\b(?:public|private|protected|internal)?\s*(?:static\s+)?void\s+OnEnable\s*\([^)]*\)\s*\{",
+    re.MULTILINE,
+)
 
-# ============================================================================
-# Migrated from Guard/scripts/validate-drycycle-startup-safety.sh
-# ============================================================================
-set -euo pipefail
+def method_body(text, match):
+    brace = text.find("{", match.start())
+    if brace < 0:
+        return None
+    depth = 0
+    i = brace
+    in_string = False
+    verbatim = False
+    escape = False
+    quote = None
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_string:
+            if verbatim:
+                if ch == '"' and nxt == '"':
+                    i += 2
+                    continue
+                if ch == '"':
+                    in_string = False
+            else:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == quote:
+                    in_string = False
+            i += 1
+            continue
+        if ch == '@' and nxt == '"':
+            in_string = True
+            verbatim = True
+            quote = '"'
+            i += 2
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            verbatim = False
+            quote = ch
+            i += 1
+            continue
+        if ch == '/' and nxt == '/':
+            end = text.find("\n", i + 2)
+            i = len(text) if end < 0 else end + 1
+            continue
+        if ch == '/' and nxt == '*':
+            end = text.find("*/", i + 2)
+            i = len(text) if end < 0 else end + 2
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[brace + 1:i]
+        i += 1
+    return None
 
-plugin="src/Plugin.cs"
-lifecycle="src/DryCycleLifecycleEvents.cs"
-misc="src/Misc/MiscRuntime.cs"
-audio="src/Misc/SoundFormatSupport/SoundFormatSupportRuntime.cs"
-bridge="src/DevUI/DevTool/RWImGui/BridgePlugin.cs"
+unsafe_optional_entrypoints = []
+for source in sorted(SRC.rglob("*.cs")):
+    if source == SRC / "Plugin.cs":
+        continue
+    text = read(source)
+    if not plugin_attribute.search(text):
+        continue
+    matches = list(on_enable.finditer(text))
+    if not matches:
+        # A BepInPlugin may intentionally bootstrap through Awake/Start or a base class.
+        # Do not invent a required lifecycle method.
+        continue
+    for match in matches:
+        body = method_body(text, match)
+        if body is None:
+            fail(f"Could not parse OnEnable body in optional BepInEx plugin: {source}")
+        if not re.search(r"\bcatch\s*(?:\([^)]*\))?\s*\{", body):
+            unsafe_optional_entrypoints.append(str(source))
 
-for file in "$plugin" "$lifecycle" "$misc" "$audio" "$bridge"; do
-  if [[ ! -f "$file" ]]; then
-    echo "Startup-safety contract file missing: $file" >&2
-    exit 1
-  fi
-done
+if unsafe_optional_entrypoints:
+    fail(
+        "Optional BepInEx OnEnable entrypoint has no local exception-isolation boundary: "
+        + ", ".join(sorted(set(unsafe_optional_entrypoints)))
+    )
 
-# Rain World lifecycle hooks belong to the core plugin. Optional frontends subscribe to the shared
-# DryCycle event surface instead of stacking their own hooks on the same startup phases.
-for hook in   'On.RainWorld.PreModsInit += RainWorld_PreModsInit'   'On.RainWorld.OnModsInit += RainWorld_OnModsInit'   'On.RainWorld.PostModsInit += RainWorld_PostModsInit'; do
-  if ! grep -Fq "$hook" "$plugin"; then
-    echo "Core Rain World lifecycle ownership is missing: $hook" >&2
-    exit 1
-  fi
-done
+# ---------------------------------------------------------------------------
+# 3. Keep obvious silent exception swallowing out of BepInEx lifecycle entrypoints.
+#
+# This is deliberately narrow. It does not require a logger API or fixed diagnostic text.
+# It catches only an empty catch block at a plugin lifecycle boundary, which would make a
+# startup/shutdown failure invisible and is never an acceptable rollback strategy.
+# ---------------------------------------------------------------------------
+lifecycle_names = ("OnEnable", "OnDisable", "Awake", "Start")
+empty_catch = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}", re.DOTALL)
+silent_hits = []
 
-for phase in BeforePreModsInit AfterPreModsInit BeforeModsInit AfterModsInit; do
-  if ! grep -Fq "internal static event Action<RainWorld> $phase;" "$lifecycle"; then
-    echo "Shared DryCycle lifecycle phase is missing: $phase" >&2
-    exit 1
-  fi
-done
+for source in sorted(SRC.rglob("*.cs")):
+    text = read(source)
+    if not plugin_attribute.search(text):
+        continue
+    for name in lifecycle_names:
+        pattern = re.compile(
+            rf"\b(?:public|private|protected|internal)?\s*(?:static\s+)?void\s+{name}\s*\([^)]*\)\s*\{{",
+            re.MULTILINE,
+        )
+        for match in pattern.finditer(text):
+            body = method_body(text, match)
+            if body is not None and empty_catch.search(body):
+                silent_hits.append(f"{source}:{name}")
 
-if grep -Eq 'On\.RainWorld\.(PreModsInit|OnModsInit)[[:space:]]*\+=' "$bridge"; then
-  echo "RWImGui frontend regained direct RainWorld startup hooks; use DryCycleLifecycleEvents." >&2
-  exit 1
-fi
-for subscription in   'DryCycleLifecycleEvents.BeforePreModsInit +='   'DryCycleLifecycleEvents.AfterPreModsInit +='   'DryCycleLifecycleEvents.BeforeModsInit +='   'DryCycleLifecycleEvents.AfterModsInit +='; do
-  if ! grep -Fq "$subscription" "$bridge"; then
-    echo "RWImGui frontend lost shared lifecycle subscription: $subscription" >&2
-    exit 1
-  fi
-done
+if silent_hits:
+    fail(
+        "BepInEx lifecycle entrypoint contains an empty catch block; failures must remain observable: "
+        + ", ".join(sorted(set(silent_hits)))
+    )
 
-# Both BepInEx bootstrap surfaces must fail open. A single DryCycle hook mismatch may disable the
-# affected subsystem/plugin, but must not propagate an exception that prevents Rain World startup.
-if ! grep -Fq 'DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.' "$plugin" ||
-   ! grep -Fq 'RollbackBootstrap();' "$plugin" ||
-   ! grep -Fq 'SafeBootstrapCleanup' "$plugin" ||
-   ! grep -Fq 'StartupDiagnostics.Begin(Logger);' "$plugin" ||
-   ! grep -Fq 'StartupDiagnostics.Failure("Plugin.OnEnable", error);' "$plugin"; then
-  echo "Core Plugin.OnEnable no longer has transactional fail-open rollback." >&2
-  exit 1
-fi
-if ! grep -Fq 'DryCycle DevTool RWImGui frontend failed during OnEnable and has been isolated; Rain World startup will continue.' "$bridge" ||
-   ! grep -Fq 'ShutdownBridgeState();' "$bridge"; then
-  echo "RWImGui BridgePlugin.OnEnable no longer has fail-open isolation." >&2
-  exit 1
-fi
-
-# Optional compatibility must fail open. SlugBase discovery and DevTool/audio initialization are not
-# allowed to make Rain World's OnModsInit fail solely because an optional integration is broken.
-if ! grep -Fq 'TryInitializeSlugBaseHydrationFeatures();' "$plugin" ||
-   ! grep -Fq 'StartupDiagnostics.Step("RainWorld.OnModsInit/' "$plugin" ||
-   ! grep -Fq 'StartupDiagnostics.Failure("RainWorld.OnModsInit/PostModTransaction", ex);' "$plugin"; then
-  echo "SlugBase hydration compatibility is no longer guarded during startup." >&2
-  exit 1
-fi
-if ! grep -Fq 'DryCycle post-mod initialization failed; the failing runtime transaction was rolled back so Rain World can continue loading.' "$plugin" ||
-   ! grep -Fq 'DryCycleLifecycleEvents.RaiseAfterModsInit(self)' "$plugin"; then
-  echo "DryCycle post-mod startup no longer has the fail-open rollback contract." >&2
-  exit 1
-fi
-
-# Primary plugin shutdown is also a rollback boundary. One broken subsystem cleanup must never
-# stop the remaining hooks from being detached before a reload/shutdown completes.
-if ! grep -Fq 'StartupDiagnostics.Marker("Plugin.OnDisable", "ENTER")' "$plugin" ||
-   ! grep -Fq 'SafeBootstrapCleanup("OnDisable/' "$plugin" ||
-   ! grep -Fq 'RollbackRuntimeInitialization();' "$plugin" ||
-   ! grep -Fq 'StartupDiagnostics.Marker("Plugin.OnDisable", "EXIT")' "$plugin"; then
-  echo "Primary plugin shutdown is no longer failure-independent/traced." >&2
-  exit 1
-fi
-
-# DevConsole reset/registration is optional tooling. It must never be able to abort RainWorld's
-# PreModsInit phase; every reset remains behind the non-throwing startup diagnostic wrapper.
-for optional_reset in   'ScavengerLanceDevConsoleSupport.ResetRegistration'   'CreatureDevConsoleSupport.ResetRegistration'   'RopeSpearDevConsoleSupport.ResetRegistration'   'KarmaSpearDevConsoleSupport.ResetRegistration'   'SpinebackLizardDevConsoleSupport.ResetRegistration'; do
-  if ! grep -Fq "StartupDiagnostics.Optional(\"RainWorld.PreModsInit/$optional_reset\"" "$plugin"; then
-    echo "PreModsInit DevConsole reset can propagate into startup: $optional_reset" >&2
-    exit 1
-  fi
-done
-
-# MP3/M4A overrides are hydrated lazily at SoundClipReady after native release. Running a blocking
-# all-audio hydration from Plugin.OnModsInit would move file decode back onto the startup critical path.
-if grep -Fq 'SoundFormatSupportRuntime.HydrateExisting' "$plugin"; then
-  echo "Blocking custom-audio hydration returned to Plugin.OnModsInit." >&2
-  exit 1
-fi
-
-# DevTool remains an optional development surface, but extended audio decoding is a required
-# DryCycle feature. DevTool failures stay isolated; sound-format hook failures must propagate into
-# Plugin's guarded post-mod transaction instead of silently disabling the feature.
-if ! grep -Fq 'TryEnableDevToolBackend();' "$misc" ||
-   ! grep -Fq 'DryCycle DevTool backend failed to initialize and has been disabled; gameplay startup will continue.' "$misc" ||
-   ! grep -Fq 'DisableDevToolBackendSafely();' "$misc"; then
-  echo "DevTool backend is no longer isolated from gameplay startup." >&2
-  exit 1
-fi
-if grep -Fq 'TryEnableSoundFormatSupport' "$misc" ||
-   grep -Fq 'Optional sound-format support failed to initialize' "$misc" ||
-   ! grep -Fq 'MiscRuntime/SoundFormatSupportRuntime.Enable' "$misc" ||
-   ! grep -Fq 'SoundFormatSupportRuntime.Enable);' "$misc"; then
-  echo "Required sound-format support was downgraded to a silent optional feature." >&2
-  exit 1
-fi
-if ! grep -Fq 'RollbackAfterFailure(' "$audio" ||
-   ! grep -Fq 'RemoveOnHooks("enable rollback")' "$audio" ||
-   ! grep -Fq 'SoundFormatSupportRuntime/' "$audio" ||
-   ! grep -Fq 'enabled = false;' "$audio"; then
-  echo "Sound-format hook installation/rollback is no longer fully diagnostic." >&2
-  exit 1
-fi
-
-# Custom creature ExtEnums/descriptors are process-lifetime registrations. The core registry must
-# be installed transactionally before descriptor creation and must not be removed while registered
-# creature IDs remain globally visible to WorldLoader/StaticWorld.
-creature_registry="src/Framework/Creature/Core/CreatureRegistry.cs"
-if ! grep -Fq '_staticWorldTemplateHookInstalled' "$creature_registry" ||
-   ! grep -Fq 'RemoveInstalledHooksBestEffort("enable rollback")' "$creature_registry" ||
-   ! grep -Fq '_worldLoaderTypeHookInstalled' "$creature_registry"; then
-  echo "CreatureRegistry hook installation is no longer transactional." >&2
-  exit 1
-fi
-core_line="$(grep -n -F 'Plugin.OnEnable/CreatureCoreRegistry.Enable' "$plugin" | head -n1 | cut -d: -f1)"
-moss_line="$(grep -n -F 'Plugin.OnEnable/MossySpiderDefinition.Register' "$plugin" | head -n1 | cut -d: -f1)"
-if [[ -z "$core_line" || -z "$moss_line" || "$core_line" -ge "$moss_line" ]]; then
-  echo "Creature core registry must be enabled before irreversible creature descriptor registration." >&2
-  exit 1
-fi
-if ! grep -Fq 'PreserveCreatureCoreRegistryIfRegistered' "$plugin" ||
-   grep -Fq 'SafeBootstrapCleanup("Creature Core registry", CreatureCoreRegistry.Disable)' "$plugin" ||
-   grep -Fq 'SafeBootstrapCleanup("OnDisable/CreatureCoreRegistry.Disable", CreatureCoreRegistry.Disable)' "$plugin"; then
-  echo "Primary plugin can detach CreatureRegistry while irreversible descriptors remain registered." >&2
-  exit 1
-fi
-if ! grep -Fq 'SKIP-ALREADY-REGISTERED' "$plugin"; then
-  echo "Creature registration bootstrap is not idempotent after partial registration." >&2
-  exit 1
-fi
-
-# Extended audio decoding is a required DryCycle feature, but deployment must remain single-DLL.
-# Compile against NAudio normally, then merge NAudio.Wasapi + NAudio.Core into DryCycle.dll.
-audio_loader="src/Misc/SoundFormatSupport/ExternalAudioLoader.cs"
-repack="src/ILRepack.targets"
-if ! grep -Fq 'using NAudio.Wave;' "$audio_loader" ||
-   ! grep -Fq 'MediaFoundationReader reader' "$audio_loader" ||
-   ! grep -Fq 'reader.ToSampleProvider()' "$audio_loader"; then
-  echo "Full NAudio Media Foundation decoding is no longer compiled into DryCycle." >&2
-  exit 1
-fi
-if ! grep -Fq '<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />' src/DryCycle.csproj ||
-   ! grep -Fq '<PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46">' src/DryCycle.csproj; then
-  echo "DryCycle single-DLL audio build dependencies are incomplete." >&2
-  exit 1
-fi
-if grep -A4 -F '<PackageReference Include="NAudio.Wasapi" Version="2.2.1"' src/DryCycle.csproj |
-     grep -Fq '<ExcludeAssets>compile</ExcludeAssets>'; then
-  echo "NAudio was downgraded to runtime-only; full decoder must compile into the merged DryCycle.dll." >&2
-  exit 1
-fi
-if ! grep -Fq '$(TargetDir)NAudio.Wasapi.dll' "$repack" ||
-   ! grep -Fq '$(TargetDir)NAudio.Core.dll' "$repack" ||
-   ! grep -Fq 'InputAssemblies="@(DryCycleNAudioInput)"' "$repack" ||
-   ! grep -Fq 'OutputFile="$(TargetPath)"' "$repack" ||
-   ! grep -Fq 'Internalize="true"' "$repack"; then
-  echo "NAudio is not guaranteed to be merged into the single DryCycle.dll output." >&2
-  exit 1
-fi
-if ! grep -Fq 'NAudio.Wasapi.dll;$(TargetDir)NAudio.Core.dll' "$repack"; then
-  echo "Merged NAudio sidecar DLLs are not cleaned after single-DLL build." >&2
-  exit 1
-fi
-if ! grep -Fq 'DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime;ILRepacker"' src/Directory.Build.targets; then
-  echo "Optional frontends can build against DryCycle.dll before its NAudio merge completes." >&2
-  exit 1
-fi
-
-
-echo "DryCycle startup-safety guard passed."
+print(
+    "Startup/lifecycle safety guard passed: optional frontends do not own Rain World "
+    "startup hooks, optional plugin OnEnable entrypoints have local isolation boundaries, "
+    "and plugin lifecycle failures are not silently swallowed by empty catch blocks."
+)
+PY
