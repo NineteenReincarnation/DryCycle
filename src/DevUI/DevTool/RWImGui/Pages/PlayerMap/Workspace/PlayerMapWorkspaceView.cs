@@ -1020,3 +1020,727 @@ internal static class PlayerMapRenderProgressView
     }
 
 }
+
+internal static class PlayerMapCanvasAuthoring
+{
+    private enum DragKind
+    {
+        None,
+        Create,
+        Move,
+        HandleA,
+        HandleB
+    }
+
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    private static bool createArmed;
+    private static DragKind dragKind;
+    private static int dragDefId = -1;
+    private static Vector2 dragStartA;
+    private static Vector2 dragStartB;
+    private static Vector2 dragStartMouseCanon;
+    private static Vector2 previewA;
+    private static Vector2 previewB;
+    private static bool consumedCanvasInput;
+
+    internal static bool OwnsCanvas =>
+        enabled && (consumedCanvasInput || createArmed || dragKind != DragKind.None);
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("Player Map direct Def_Mat authoring/output bounds enabled through direct view calls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        createArmed = false;
+        ResetDrag();
+        enabled = false;
+        log = null;
+    }
+
+    internal static void DrawInspectorTools(
+        PlayerMapPresentationSnapshot snapshot,
+        PlayerMapRoomSnapshot room)
+    {
+        if (!enabled) return;
+
+        ImGui.Spacing();
+        string label = createArmed
+            ? DevToolUiSettings.T("取消画矩形", "Cancel Rectangle Tool")
+            : DevToolUiSettings.T("画 Def_Mat 矩形", "Draw Def_Mat Rectangle");
+        if (DevToolWidgets.ActionButton(
+                label,
+                "PlayerMapDefRectTool",
+                createArmed ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            createArmed = !createArmed;
+            ResetDrag();
+        }
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "在中央画布拖拽创建矩形；选中矩形后可直接拖两个角点或拖矩形内部整体移动。",
+                "Drag on the center canvas to create a rectangle. Select one, then drag either corner or the body to move it."));
+    }
+
+    internal static void DrawCanvasOverlay(
+        ImDrawListPtr draw,
+        PlayerMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin)
+    {
+        consumedCanvasInput = false;
+        if (!enabled || snapshot?.Available != true)
+            return;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom))
+            return;
+
+        DrawOutputBounds(draw, snapshot, canvasMin, pan, zoom);
+
+        bool canvasHovered = ImGui.IsItemHovered();
+        Num.Vector2 mouse = ImGui.GetIO().MousePos;
+        Vector2 mouseCanon = ScreenToCanon(mouse, canvasMin, pan, zoom);
+        int selectedId = PlayerMapWorkspaceView.SelectedDefMaterial;
+        PlayerMapDefMaterialSnapshot? selected = FindDef(snapshot, selectedId);
+
+        // Arm/Create mode owns the canvas until mouse-up so room dragging can never start beneath it.
+        if (createArmed)
+        {
+            consumedCanvasInput = canvasHovered || dragKind == DragKind.Create;
+            if (canvasHovered && dragKind == DragKind.None && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                dragKind = DragKind.Create;
+                dragStartMouseCanon = mouseCanon;
+                previewA = mouseCanon;
+                previewB = mouseCanon;
+            }
+
+            if (dragKind == DragKind.Create)
+            {
+                previewB = mouseCanon;
+                DrawPreviewRect(draw, canvasMin, pan, zoom, previewA, previewB, true);
+                if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+                {
+                    if ((previewB - previewA).sqrMagnitude >= 9f)
+                    {
+                        PlayerMapCommandQueue.Enqueue(new PlayerMapCommand(
+                            PlayerMapCommandKind.CreateDefaultMaterial,
+                            value: previewA,
+                            valueB: previewB,
+                            flag: false));
+                    }
+                    createArmed = false;
+                    ResetDrag();
+                }
+            }
+            return;
+        }
+
+        if (selected.HasValue)
+            DrawSelectedHandles(draw, selected.Value, canvasMin, pan, zoom);
+
+        if (dragKind == DragKind.None && canvasHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            PlayerMapDefMaterialSnapshot? hit = HitDef(snapshot, mouseCanon, zoom);
+            if (hit.HasValue)
+            {
+                PlayerMapDefMaterialSnapshot def = hit.Value;
+                PlayerMapWorkspaceView.SelectedDefMaterial = def.Id;
+                selected = def;
+                selectedId = def.Id;
+                dragDefId = def.Id;
+                dragStartA = def.A;
+                dragStartB = def.B;
+                previewA = def.A;
+                previewB = def.B;
+                dragStartMouseCanon = mouseCanon;
+                dragKind = HitHandle(def.A, mouse, canvasMin, pan, zoom)
+                    ? DragKind.HandleA
+                    : HitHandle(def.B, mouse, canvasMin, pan, zoom)
+                        ? DragKind.HandleB
+                        : DragKind.Move;
+                consumedCanvasInput = true;
+            }
+        }
+
+        if (dragKind != DragKind.None && dragKind != DragKind.Create && dragDefId >= 0)
+        {
+            consumedCanvasInput = true;
+            Vector2 delta = mouseCanon - dragStartMouseCanon;
+            switch (dragKind)
+            {
+                case DragKind.HandleA:
+                    previewA = dragStartA + delta;
+                    previewB = dragStartB;
+                    break;
+                case DragKind.HandleB:
+                    previewA = dragStartA;
+                    previewB = dragStartB + delta;
+                    break;
+                case DragKind.Move:
+                    previewA = dragStartA + delta;
+                    previewB = dragStartB + delta;
+                    break;
+            }
+
+            DrawPreviewRect(draw, canvasMin, pan, zoom, previewA, previewB, false);
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                if ((previewA - dragStartA).sqrMagnitude > 0.0001f ||
+                    (previewB - dragStartB).sqrMagnitude > 0.0001f)
+                {
+                    PlayerMapCommandQueue.Enqueue(new PlayerMapCommand(
+                        PlayerMapCommandKind.SetDefaultMaterialRect,
+                        integer: dragDefId,
+                        value: previewA,
+                        valueB: previewB));
+                }
+                ResetDrag();
+            }
+        }
+    }
+
+    private static void DrawOutputBounds(
+        ImDrawListPtr draw,
+        PlayerMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom)
+    {
+        bool any = false;
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+        PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = rooms[i];
+            if (room == null || room.Disabled) continue;
+            float halfW = Math.Max(1, room.Bake?.Width ?? 1) * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            float halfH = Math.Max(1, room.Bake?.Height ?? 1) * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            minX = Math.Min(minX, room.EffectivePosition.x - halfW);
+            minY = Math.Min(minY, room.EffectivePosition.y - halfH);
+            maxX = Math.Max(maxX, room.EffectivePosition.x + halfW);
+            maxY = Math.Max(maxY, room.EffectivePosition.y + halfH);
+            any = true;
+        }
+        if (!any) return;
+
+        float pad = PlayerMapCoordinateSystem.OutputPadding * PlayerMapCoordinateSystem.CanonPixelsPerTile;
+        Vector2 a = new(minX - pad, minY - pad);
+        Vector2 b = new(maxX + pad, maxY + pad);
+        Num.Vector2 sa = CanonToScreen(a, canvasMin, pan, zoom);
+        Num.Vector2 sb = CanonToScreen(b, canvasMin, pan, zoom);
+        Num.Vector2 min = new(Math.Min(sa.X, sb.X), Math.Min(sa.Y, sb.Y));
+        Num.Vector2 max = new(Math.Max(sa.X, sb.X), Math.Max(sa.Y, sb.Y));
+        uint color = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        draw.AddRect(min, max, color, 0f, ImDrawFlags.None, 1.2f);
+
+        int width = (int)((maxX - minX) / PlayerMapCoordinateSystem.CanonPixelsPerTile) +
+                    PlayerMapCoordinateSystem.OutputPadding * 2;
+        int layerHeight = (int)((maxY - minY) / PlayerMapCoordinateSystem.CanonPixelsPerTile) +
+                          PlayerMapCoordinateSystem.OutputPadding * 2;
+        int height = layerHeight * PlayerMapCoordinateSystem.LayerCount;
+        string label = "Render " + width + " × " + height + "  (" + PlayerMapCoordinateSystem.LayerCount + " layers)";
+        draw.AddText(min + new Num.Vector2(5f, 4f), color, label);
+    }
+
+    private static void DrawSelectedHandles(
+        ImDrawListPtr draw,
+        PlayerMapDefMaterialSnapshot def,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom)
+    {
+        uint color = ImGui.GetColorU32(ImGuiCol.HeaderActive);
+        DrawHandle(draw, CanonToScreen(def.A, canvasMin, pan, zoom), color);
+        DrawHandle(draw, CanonToScreen(def.B, canvasMin, pan, zoom), color);
+    }
+
+    private static void DrawPreviewRect(
+        ImDrawListPtr draw,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom,
+        Vector2 a,
+        Vector2 b,
+        bool creating)
+    {
+        Num.Vector2 sa = CanonToScreen(a, canvasMin, pan, zoom);
+        Num.Vector2 sb = CanonToScreen(b, canvasMin, pan, zoom);
+        Num.Vector2 min = new(Math.Min(sa.X, sb.X), Math.Min(sa.Y, sb.Y));
+        Num.Vector2 max = new(Math.Max(sa.X, sb.X), Math.Max(sa.Y, sb.Y));
+        uint color = ImGui.GetColorU32(creating ? ImGuiCol.HeaderHovered : ImGuiCol.HeaderActive);
+        draw.AddRect(min, max, color, 0f, ImDrawFlags.None, 2f);
+        DrawHandle(draw, sa, color);
+        DrawHandle(draw, sb, color);
+    }
+
+    private static void DrawHandle(ImDrawListPtr draw, Num.Vector2 point, uint color)
+    {
+        const float r = 4.5f;
+        draw.AddRectFilled(point - new Num.Vector2(r, r), point + new Num.Vector2(r, r), color);
+    }
+
+    private static PlayerMapDefMaterialSnapshot? HitDef(
+        PlayerMapPresentationSnapshot snapshot,
+        Vector2 point,
+        float zoom)
+    {
+        PlayerMapDefMaterialSnapshot[] defs = snapshot.DefaultMaterials ?? Array.Empty<PlayerMapDefMaterialSnapshot>();
+        // Reverse order: last authored rect is visually/topologically dominant in the compositor.
+        for (int i = defs.Length - 1; i >= 0; i--)
+        {
+            PlayerMapDefMaterialSnapshot def = defs[i];
+            float handleCanon = Math.Max(4f, 8f / Math.Max(0.05f, zoom));
+            if ((def.A - point).sqrMagnitude <= handleCanon * handleCanon ||
+                (def.B - point).sqrMagnitude <= handleCanon * handleCanon ||
+                (point.x >= def.Left && point.x <= def.Right && point.y >= def.Bottom && point.y <= def.Top))
+                return def;
+        }
+        return null;
+    }
+
+    private static bool HitHandle(
+        Vector2 handle,
+        Num.Vector2 mouse,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom)
+    {
+        Num.Vector2 point = CanonToScreen(handle, canvasMin, pan, zoom);
+        Num.Vector2 delta = mouse - point;
+        return delta.X * delta.X + delta.Y * delta.Y <= 64f;
+    }
+
+    private static PlayerMapDefMaterialSnapshot? FindDef(PlayerMapPresentationSnapshot snapshot, int id)
+    {
+        PlayerMapDefMaterialSnapshot[] defs = snapshot?.DefaultMaterials ?? Array.Empty<PlayerMapDefMaterialSnapshot>();
+        for (int i = 0; i < defs.Length; i++)
+            if (defs[i].Id == id) return defs[i];
+        return null;
+    }
+
+    private static Vector2 ScreenToCanon(
+        Num.Vector2 screen,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom)
+    {
+        Num.Vector2 local = (screen - canvasMin - pan) / Math.Max(0.0001f, zoom);
+        return new Vector2(local.X, local.Y);
+    }
+
+    private static Num.Vector2 CanonToScreen(
+        Vector2 point,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom) =>
+        canvasMin + pan + new Num.Vector2(point.x, point.y) * zoom;
+
+    private static void ResetDrag()
+    {
+        dragKind = DragKind.None;
+        dragDefId = -1;
+        dragStartA = default;
+        dragStartB = default;
+        dragStartMouseCanon = default;
+        previewA = default;
+        previewB = default;
+        consumedCanvasInput = false;
+    }
+
+}
+
+internal static class PlayerMapLayoutAssist
+{
+    private sealed class Diagnostics
+    {
+        internal string Region = string.Empty;
+        internal long Revision = long.MinValue;
+        internal readonly HashSet<int> OverlapRooms = new();
+    }
+
+    private static ManualLogSource log;
+    private static bool enabled;
+    private static int snapMode = 1; // 0=off, 1=one output pixel, 2=ten output pixels
+    private static readonly Diagnostics Cached = new();
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        PlayerMapGroupCommandQueue.RegisterMoveTransformer(TransformGroupCommand);
+        logger?.LogInfo("Player Map movement snap and overlap highlighting enabled through direct view/queue APIs; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        PlayerMapGroupCommandQueue.UnregisterMoveTransformer(TransformGroupCommand);
+        Cached.Region = string.Empty;
+        Cached.Revision = long.MinValue;
+        Cached.OverlapRooms.Clear();
+        enabled = false;
+        log = null;
+    }
+
+    internal static void DrawToolbar(PlayerMapPresentationSnapshot snapshot)
+    {
+        if (!enabled) return;
+
+        ImGui.SameLine(0f, 12f);
+        ImGui.TextDisabled("Snap");
+        ImGui.SameLine(0f, 5f);
+        DrawSnapButton("Off", 0);
+        ImGui.SameLine(0f, 3f);
+        DrawSnapButton("1px", 1);
+        ImGui.SameLine(0f, 3f);
+        DrawSnapButton("10px", 2);
+    }
+
+    private static void DrawSnapButton(string label, int mode)
+    {
+        if (DevToolWidgets.ActionButton(
+                label,
+                "PlayerMapSnap" + mode,
+                snapMode == mode ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            snapMode = mode;
+    }
+
+    private static PlayerMapGroupMoveCommand TransformGroupCommand(PlayerMapGroupMoveCommand command)
+    {
+        if (!enabled || snapMode == 0 || command.RoomIndices == null || command.EffectivePositions == null ||
+            command.RoomIndices.Length == 0 || command.RoomIndices.Length != command.EffectivePositions.Length)
+        {
+            return command;
+        }
+
+        PlayerMapPresentationSnapshot snapshot = PlayerMapWorkspaceRuntime.GetPresentation(DevToolRuntime.ActiveSession);
+        PlayerMapRoomSnapshot anchor = FindRoom(snapshot, command.RoomIndices[0]);
+        if (anchor == null)
+        {
+            return command;
+        }
+
+        // GroupMove guarantees a shared translation. Quantize that translation rather than the
+        // destination coordinate itself, preserving legacy Canon phase and all relative offsets.
+        Vector2 requestedDelta = command.EffectivePositions[0] - anchor.EffectivePosition;
+        Vector2 snappedDelta = SnapDelta(requestedDelta, SnapGrid);
+        Vector2[] positions = new Vector2[command.RoomIndices.Length];
+        for (int i = 0; i < command.RoomIndices.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = FindRoom(snapshot, command.RoomIndices[i]);
+            positions[i] = room == null
+                ? command.EffectivePositions[i]
+                : room.EffectivePosition + snappedDelta;
+        }
+
+        return new PlayerMapGroupMoveCommand(command.RoomIndices, positions, command.Label);
+    }
+
+    internal static void DrawOverlay(
+        ImDrawListPtr draw,
+        PlayerMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        PlayerMapRoomSnapshot hovered)
+    {
+        if (!enabled || snapshot?.Available != true) return;
+        Diagnostics diagnostics = GetDiagnostics(snapshot);
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        if (diagnostics.OverlapRooms.Count == 0 || zoom <= 0f ||
+            float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null)
+            return;
+
+        uint warning = ImGui.GetColorU32(ImGuiCol.PlotHistogram);
+        PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = rooms[i];
+            if (room == null || room.Disabled || !diagnostics.OverlapRooms.Contains(room.RoomIndex)) continue;
+            int layer = Math.Max(0, Math.Min(2, room.Layer));
+            if (layers == null || layer >= layers.Length || !layers[layer]) continue;
+
+            Vector2 position = room.EffectivePosition;
+            if (PlayerMapMultiSelection.TryGetPreviewPosition(room.RoomIndex, out Vector2 preview))
+                position = preview;
+            float halfW = Math.Max(1, room.Bake?.Width ?? 1) * PlayerMapCoordinateSystem.CanonPixelsPerTile * zoom * 0.5f;
+            float halfH = Math.Max(1, room.Bake?.Height ?? 1) * PlayerMapCoordinateSystem.CanonPixelsPerTile * zoom * 0.5f;
+            Num.Vector2 center = canvasMin + pan + new Num.Vector2(position.x, position.y) * zoom;
+            draw.AddRect(
+                center - new Num.Vector2(halfW, halfH),
+                center + new Num.Vector2(halfW, halfH),
+                warning,
+                0f,
+                ImDrawFlags.None,
+                2.25f);
+        }
+    }
+
+    internal static Vector2 AdjustPreviewDelta(Vector2 delta) =>
+        enabled && snapMode != 0 ? SnapDelta(delta, SnapGrid) : delta;
+
+    private static Diagnostics GetDiagnostics(PlayerMapPresentationSnapshot snapshot)
+    {
+        string region = snapshot.RegionName ?? string.Empty;
+        if (Cached.Revision == snapshot.Revision && string.Equals(Cached.Region, region, StringComparison.OrdinalIgnoreCase))
+            return Cached;
+
+        Cached.Region = region;
+        Cached.Revision = snapshot.Revision;
+        Cached.OverlapRooms.Clear();
+        PlayerMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        List<(PlayerMapRoomSnapshot Room, int X, int Y, int W, int H)> rects = new();
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = rooms[i];
+            if (room == null || room.Disabled || room.Bake?.Status != RoomMapBakeStatus.Ready) continue;
+            float halfW = room.Bake.Width * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            float halfH = room.Bake.Height * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            minX = Math.Min(minX, room.EffectivePosition.x - halfW);
+            minY = Math.Min(minY, room.EffectivePosition.y - halfH);
+        }
+        if (minX == float.MaxValue) return Cached;
+
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            PlayerMapRoomSnapshot room = rooms[i];
+            if (room == null || room.Disabled || room.Bake?.Status != RoomMapBakeStatus.Ready) continue;
+            float left = room.EffectivePosition.x - room.Bake.Width * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            float bottom = room.EffectivePosition.y - room.Bake.Height * PlayerMapCoordinateSystem.CanonPixelsPerTile * 0.5f;
+            int x = (int)((left - minX) / PlayerMapCoordinateSystem.CanonPixelsPerTile) + PlayerMapCoordinateSystem.OutputPadding;
+            int y = (int)((bottom - minY) / PlayerMapCoordinateSystem.CanonPixelsPerTile) + PlayerMapCoordinateSystem.OutputPadding;
+            rects.Add((room, x, y, room.Bake.Width, room.Bake.Height));
+        }
+
+        for (int i = 0; i < rects.Count; i++)
+        {
+            var a = rects[i];
+            int ax2 = a.X + a.W;
+            int ay2 = a.Y + a.H;
+            for (int j = i + 1; j < rects.Count; j++)
+            {
+                var b = rects[j];
+                if (a.Room.Layer != b.Room.Layer) continue;
+                int bx2 = b.X + b.W;
+                int by2 = b.Y + b.H;
+                if (a.X >= bx2 || b.X >= ax2 || a.Y >= by2 || b.Y >= ay2) continue;
+                Cached.OverlapRooms.Add(a.Room.RoomIndex);
+                Cached.OverlapRooms.Add(b.Room.RoomIndex);
+            }
+        }
+        return Cached;
+    }
+
+    private static PlayerMapRoomSnapshot FindRoom(PlayerMapPresentationSnapshot snapshot, int roomIndex)
+    {
+        PlayerMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+            if (rooms[i]?.RoomIndex == roomIndex) return rooms[i];
+        return null;
+    }
+
+    private static float SnapGrid => PlayerMapCoordinateSystem.CanonPixelsPerTile * (snapMode == 2 ? 10f : 1f);
+
+    private static Vector2 SnapDelta(Vector2 delta, float grid)
+    {
+        if (grid <= 0f) return delta;
+        return new Vector2(
+            Mathf.Round(delta.x / grid) * grid,
+            Mathf.Round(delta.y / grid) * grid);
+    }
+
+}
+
+internal static class PlayerMapMultiPipeConnections
+{
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("Player Map exact multi-pipe connection rendering enabled through direct view calls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        enabled = false;
+        log = null;
+    }
+
+    internal static bool Draw(
+        ImDrawListPtr draw,
+        PlayerMapPresentationSnapshot snapshot,
+        EditorMapPresentationSnapshot worldSnapshot,
+        Num.Vector2 canvasMin)
+    {
+        if (!enabled || snapshot?.Available != true || worldSnapshot?.Connections == null)
+            return false;
+
+        Num.Vector2 pan = PlayerMapWorkspaceView.Pan;
+        float zoom = PlayerMapWorkspaceView.Zoom;
+        bool[] layers = PlayerMapWorkspaceView.LayerVisibility;
+        int draggingRoom = PlayerMapWorkspaceView.DraggingRoom;
+        Vector2 dragPreviewPosition = PlayerMapWorkspaceView.DragPreviewPosition;
+        if (zoom <= 0f || float.IsNaN(zoom) || float.IsInfinity(zoom) || layers == null)
+            return false;
+
+        EditorMapConnectionSnapshot[] links = worldSnapshot.Connections;
+        Dictionary<string, int> pairCounts = CountRoomPairs(links);
+        uint exactColor = ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        uint fallbackColor = ImGui.GetColorU32(ImGuiCol.Border);
+        uint unresolvedColor = ImGui.GetColorU32(ImGuiCol.Text);
+
+        for (int i = 0; i < links.Length; i++)
+        {
+            EditorMapConnectionSnapshot link = links[i];
+            if (link == null) continue;
+            PlayerMapRoomSnapshot a = FindRoom(snapshot, link.FromRoomIndex);
+            PlayerMapRoomSnapshot b = FindRoom(snapshot, link.ToRoomIndex);
+            if (!Visible(a, layers) || !Visible(b, layers)) continue;
+
+            string pair = PairKey(link.FromRoomIndex, link.ToRoomIndex);
+            bool repeatedPair = pairCounts.TryGetValue(pair, out int pairCount) && pairCount > 1;
+            bool trustedExact = !link.Ambiguous && link.FromNodeIndex >= 0 && link.ToNodeIndex >= 0;
+            Num.Vector2 pa = default;
+            Num.Vector2 pb = default;
+            bool exactA = trustedExact && TryEndpointScreen(
+                a, link.FromNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out pa);
+            bool exactB = trustedExact && TryEndpointScreen(
+                b, link.ToNodeIndex, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition, out pb);
+
+            if (exactA && exactB)
+            {
+                draw.AddLine(pa, pb, exactColor, 1.35f);
+                draw.AddCircleFilled(pa, Math.Max(1.6f, 2.15f * zoom), exactColor);
+                draw.AddCircleFilled(pb, Math.Max(1.6f, 2.15f * zoom), exactColor);
+                continue;
+            }
+
+            if (!repeatedPair)
+            {
+                // Compatibility only: one unresolved legacy link cannot be confused with another
+                // pipe, so a centre line remains safe. Repeated unresolved links never get this path.
+                Num.Vector2 ca = RoomCenter(a, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition);
+                Num.Vector2 cb = RoomCenter(b, canvasMin, pan, zoom, draggingRoom, dragPreviewPosition);
+                draw.AddLine(ca, cb, fallbackColor, 1f);
+                continue;
+            }
+
+            if (exactA) DrawUnresolvedEndpoint(draw, pa, unresolvedColor);
+            if (exactB) DrawUnresolvedEndpoint(draw, pb, unresolvedColor);
+        }
+        return true;
+    }
+
+    private static Dictionary<string, int> CountRoomPairs(EditorMapConnectionSnapshot[] links)
+    {
+        Dictionary<string, int> result = new(StringComparer.Ordinal);
+        for (int i = 0; i < links.Length; i++)
+        {
+            EditorMapConnectionSnapshot link = links[i];
+            if (link == null) continue;
+            string key = PairKey(link.FromRoomIndex, link.ToRoomIndex);
+            result.TryGetValue(key, out int count);
+            result[key] = count + 1;
+        }
+        return result;
+    }
+
+    private static string PairKey(int a, int b)
+    {
+        int low = Math.Min(a, b);
+        int high = Math.Max(a, b);
+        return low + ":" + high;
+    }
+
+    private static bool TryEndpointScreen(
+        PlayerMapRoomSnapshot room,
+        int nodeIndex,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom,
+        int draggingRoom,
+        Vector2 dragPreviewPosition,
+        out Num.Vector2 screen)
+    {
+        screen = default;
+        if (room?.Bake == null || room.Bake.Status != RoomMapBakeStatus.Ready ||
+            room.Bake.Width <= 0 || room.Bake.Height <= 0 ||
+            !room.Bake.TryGetNodeAnchor(nodeIndex, out RoomMapNodeAnchorSnapshot anchor) ||
+            anchor.Kind != RoomMapPixelKind.RoomExit)
+            return false;
+
+        Vector2 center = ResolveCenter(room, draggingRoom, dragPreviewPosition);
+        // Room bake coordinates use Rain World's bottom-origin tile Y while ImGui screen Y grows
+        // downward. Mirror only the room-local Y here; the room's global Player Map position stays
+        // in the authoring coordinate system.
+        Vector2 local = new(
+            (anchor.EntranceX - room.Bake.Width * 0.5f) * PlayerMapCoordinateSystem.CanonPixelsPerTile,
+            (room.Bake.Height * 0.5f - anchor.EntranceY) * PlayerMapCoordinateSystem.CanonPixelsPerTile);
+        Vector2 point = center + local;
+        screen = canvasMin + pan + new Num.Vector2(point.x, point.y) * zoom;
+        return true;
+    }
+
+    private static Num.Vector2 RoomCenter(
+        PlayerMapRoomSnapshot room,
+        Num.Vector2 canvasMin,
+        Num.Vector2 pan,
+        float zoom,
+        int draggingRoom,
+        Vector2 dragPreviewPosition)
+    {
+        Vector2 center = ResolveCenter(room, draggingRoom, dragPreviewPosition);
+        return canvasMin + pan + new Num.Vector2(center.x, center.y) * zoom;
+    }
+
+    private static Vector2 ResolveCenter(
+        PlayerMapRoomSnapshot room,
+        int draggingRoom,
+        Vector2 dragPreviewPosition)
+    {
+        if (room != null && PlayerMapMultiSelection.TryGetPreviewPosition(room.RoomIndex, out Vector2 groupPreview))
+            return groupPreview;
+        return draggingRoom == room?.RoomIndex ? dragPreviewPosition : room?.EffectivePosition ?? Vector2.zero;
+    }
+
+    private static bool Visible(PlayerMapRoomSnapshot room, bool[] layers)
+    {
+        if (room == null || room.Disabled) return false;
+        int layer = Math.Max(0, Math.Min(PlayerMapCoordinateSystem.LayerCount - 1, room.Layer));
+        return layers != null && layer < layers.Length && layers[layer];
+    }
+
+    private static PlayerMapRoomSnapshot FindRoom(PlayerMapPresentationSnapshot snapshot, int roomIndex)
+    {
+        PlayerMapRoomSnapshot[] rooms = snapshot?.Rooms ?? Array.Empty<PlayerMapRoomSnapshot>();
+        for (int i = 0; i < rooms.Length; i++)
+            if (rooms[i]?.RoomIndex == roomIndex) return rooms[i];
+        return null;
+    }
+
+    private static void DrawUnresolvedEndpoint(ImDrawListPtr draw, Num.Vector2 point, uint color)
+    {
+        const float radius = 4f;
+        draw.AddLine(point + new Num.Vector2(-radius, -radius), point + new Num.Vector2(radius, radius), color, 1.4f);
+        draw.AddLine(point + new Num.Vector2(-radius, radius), point + new Num.Vector2(radius, -radius), color, 1.4f);
+    }
+
+}
