@@ -8,6 +8,7 @@ using BepInEx.Bootstrap;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Input;
+using DryCycle.DevUI.DevTool.Map;
 using ImGuiNET;
 using RWIMGUI.API;
 
@@ -118,6 +119,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void Update()
     {
         if (!bridgeEnabled) return;
+
+        // The rebuilt World Map intentionally keeps vanilla MapPage drawing/updating quiescent.
+        // Pump the bounded source-recovery backend here so missing RoomRepresentation MapTex
+        // thumbnails are still generated incrementally without invoking vanilla MapObject.Update().
+        MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
 
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)
@@ -261,6 +267,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world inspector readability", WorldInspectorReadability.Disable);
         SafeFrontendCleanup("user-facing copy cleanup", DevToolUserFacingCopyCleanup.Disable);
         SafeFrontendCleanup("retained view lifecycle", retainedViewLifecycle.Disable);
+        SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }
 
