@@ -151,9 +151,6 @@ def local(node):
 def nodes(root, name):
     return [node for node in root.iter() if local(node) == name]
 
-def values(root, name):
-    return [(node.text or "").strip() for node in nodes(root, name)]
-
 def require(condition, message):
     if not condition:
         raise SystemExit(message)
