@@ -18,8 +18,15 @@ public sealed class WorldMapGpuHotQueryPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool GPU World Map Hot Query";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuHotQuery.Enable(Logger);
-    private void OnDisable() => WorldMapGpuHotQuery.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuHotQuery.Enable(Logger),
+            WorldMapGpuHotQuery.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuHotQuery.Disable);
 }
 
 internal static class WorldMapGpuHotQuery
