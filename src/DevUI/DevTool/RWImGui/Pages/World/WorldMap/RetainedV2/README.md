@@ -498,6 +498,16 @@ the RWImGUI texture bridge presents it successfully. If that presentation fails,
 last-known-good surface is restored and the resize is retried after a short cooldown, preventing
 black frames and per-frame allocation thrash.
 
+### Interaction freeze
+
+While pan/zoom/room-drag interaction is active, non-urgent snapshot publication, geometry priming,
+shortcut texture scans, exact-shortcut file parsing, source recovery and room-resource commits are
+paused. Retained last-known-good geometry/thumbnails stay authoritative until the interaction
+cooldown ends.
+
+Connection routes remain incrementally editable for actual room movement, but pure pan/zoom does not
+enqueue route work.
+
 ### Post-refactor overlay locality
 
 The remaining ImGui-only authoring overlays now consume the retained room spatial index whenever V2

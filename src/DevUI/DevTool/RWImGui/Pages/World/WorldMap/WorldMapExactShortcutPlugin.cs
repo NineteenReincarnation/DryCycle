@@ -199,21 +199,21 @@ internal static class WorldMapExactShortcuts
             backgroundCursor = 0;
         }
 
+        // Exact shortcut parsing includes room-file IO. During pan/zoom/room drag, keep the
+        // last-known-good published data and do no structure scan or disk work at all.
+        if (WorldMapBackgroundBudget.InteractionActive)
+            return;
+
         if (regionChanged || entries.Count == 0 || page.subNodes.Count != lastSubNodeCount ||
             Time.frameCount >= nextStructurePollFrame)
             SynchronizeStructure(page);
 
-        bool interactive = WorldMapBackgroundBudget.InteractionActive;
-        int budget = interactive ? 2 : RoomsPerFrame;
+        int budget = RoomsPerFrame;
         int currentRoom = session.Room?.abstractRoom?.index ?? -1;
         if (RefreshRoom(currentRoom, page.world, force: false)) budget--;
         if (selectedRoomIndex != currentRoom && budget > 0 &&
             RefreshRoom(selectedRoomIndex, page.world, force: false))
             budget--;
-
-        // Exact shortcut parsing is disk-heavy. During pan/zoom/room drag, keep only the two
-        // priority rooms current and leave the region-wide scan for the first idle frame.
-        if (interactive) return;
 
         int count = roomOrder.Count;
         if (count == 0 || budget <= 0) return;

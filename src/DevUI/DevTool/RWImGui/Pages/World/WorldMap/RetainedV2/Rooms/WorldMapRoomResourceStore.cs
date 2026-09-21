@@ -28,7 +28,6 @@ internal sealed class WorldMapRoomResourceStore
     }
 
     private const int IdleRoomsPerFrame = 6;
-    private const int InteractiveRoomsPerFrame = 2;
     private const int SourceAuditIntervalFrames = 8;
 
     private readonly Dictionary<int, RoomResource> rooms = new();
@@ -127,10 +126,12 @@ internal sealed class WorldMapRoomResourceStore
             auditCursor = 0;
         }
 
-        int budget = WorldMapBackgroundBudget.InteractionActive
-            ? InteractiveRoomsPerFrame
-            : IdleRoomsPerFrame;
+        // Navigation/room drag owns the frame budget. Keep committed thumbnails/geometry stable
+        // and resume source capture/build commits after the interaction cooldown.
+        if (WorldMapBackgroundBudget.InteractionActive)
+            return;
 
+        int budget = IdleRoomsPerFrame;
         DrainBuildResults(budget);
 
         while (budget > 0 && priorityQueue.Count > 0)

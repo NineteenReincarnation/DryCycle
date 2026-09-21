@@ -248,6 +248,9 @@ internal static class WorldMapUpdateThrottle
             selected != lastPublishSelection ||
             currentRoom != lastPublishCurrentRoom;
 
+        if (!urgent && WorldMapBackgroundBudget.InteractionActive)
+            return false;
+
         if (!urgent &&
             Time.frameCount - lastPublishFrame < SnapshotIntervalFrames)
             return false;
@@ -262,6 +265,7 @@ internal static class WorldMapUpdateThrottle
     internal static bool ShouldPrimeGeometry(EditorSession session)
     {
         if (!enabled) return true;
+        if (WorldMapBackgroundBudget.InteractionActive) return false;
 
         string region = session?.World?.name ?? string.Empty;
         int selected = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
@@ -287,6 +291,7 @@ internal static class WorldMapUpdateThrottle
         int selectedRoomIndex)
     {
         if (!enabled) return true;
+        if (WorldMapBackgroundBudget.InteractionActive) return false;
 
         string region = session?.World?.name ?? string.Empty;
         int currentRoom = session?.Room?.abstractRoom?.index ?? -1;
