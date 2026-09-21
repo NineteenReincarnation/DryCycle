@@ -70,6 +70,16 @@ if ! grep -Fq 'Player Map rebound unsaved authoring state to a replacement MapPa
   exit 1
 fi
 
+# Closing/reopening DevTools must not discard an unsaved Player Map document with the transient
+# EditorSession. Dirty state is retained by region before DevToolSessionHub.Reset and restored later.
+coordinator="src/DevUI/DevTool/Core/DevToolSubsystemCoordinator.cs"
+if ! grep -Fq 'PlayerMapWorkspaceRuntime.RetainDirtyState(DevToolSessionHub.Current)' "$coordinator" ||
+   ! grep -Fq 'retainedDirtyStates' "$map_runtime" ||
+   ! grep -Fq 'Player Map restored retained unsaved authoring state' "$map_runtime"; then
+  echo "Unsaved Player Map state can be lost when the DevTool EditorSession closes." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
