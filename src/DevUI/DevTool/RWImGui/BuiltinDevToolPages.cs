@@ -44,9 +44,11 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
-        ObjectMarqueeSelectionView.Draw(snapshot, display);
-        NativeSpatialGizmoView.DrawObjects(snapshot, display);
+        // Scene mouse priority is intentional: semantic handles own clicks before the generic
+        // object-position point, and marquee selection receives only otherwise-unclaimed room space.
         NativeObjectGizmoView.Draw(snapshot, display);
+        NativeSpatialGizmoView.DrawObjects(snapshot, display);
+        ObjectMarqueeSelectionView.Draw(snapshot, display);
     }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
