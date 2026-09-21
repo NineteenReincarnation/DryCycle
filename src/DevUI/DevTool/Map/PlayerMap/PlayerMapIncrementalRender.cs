@@ -895,8 +895,15 @@ public sealed class PlayerMapIncrementalRenderPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Incremental Render";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapIncrementalRenderHooks.Enable(Logger);
-    private void OnDisable() => PlayerMapIncrementalRenderHooks.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapIncrementalRenderHooks.Enable(Logger),
+            PlayerMapIncrementalRenderHooks.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapIncrementalRenderHooks.Disable);
 }
 
 internal static class PlayerMapIncrementalRenderHooks
