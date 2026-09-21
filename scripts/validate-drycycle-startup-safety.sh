@@ -66,7 +66,7 @@ if ! grep -Fq 'TryInitializeSlugBaseHydrationFeatures();' "$plugin" ||
   exit 1
 fi
 if ! grep -Fq 'DryCycle post-mod initialization failed; the failing runtime transaction was rolled back so Rain World can continue loading.' "$plugin" ||
-   ! grep -Fq 'DryCycleLifecycleEvents.RaiseAfterModsInit(self);' "$plugin"; then
+   ! grep -Fq 'DryCycleLifecycleEvents.RaiseAfterModsInit(self)' "$plugin"; then
   echo "DryCycle post-mod startup no longer has the fail-open rollback contract." >&2
   exit 1
 fi
