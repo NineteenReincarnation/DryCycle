@@ -24,7 +24,8 @@
         Internalize="true"
         InputAssemblies="@(DryCycleNAudioInput)"
         TargetKind="Dll"
-        OutputFile="$(TargetPath)" />
+        OutputFile="$(TargetPath)"
+        LibraryPath="$(RainWorldDir)/BepInEx/core;$(RainWorldDir)/BepInEx/utils;$(RainWorldDir)/BepInEx/plugins;$(RainWorldDir)/RainWorld_Data/Managed" />
 
     <!-- Do not leave misleading runtime sidecars next to the merged gameplay assembly. -->
     <Delete Files="$(TargetDir)NAudio.Wasapi.dll;$(TargetDir)NAudio.Core.dll;$(TargetDir)NAudio.Wasapi.pdb;$(TargetDir)NAudio.Core.pdb" />
