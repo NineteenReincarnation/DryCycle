@@ -54,8 +54,9 @@
       <HintPath>$(RainWorldDir)/BepInEx/core/BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <!-- Use the exact RuntimeDetour assembly already loaded by Rain World's BepInEx.
-         Shipping another NuGet copy could create a version conflict in Mono. -->
+    <!-- HOOKS-Assembly-CSharp/BepInEx are built against the RuntimeDetour assembly shipped with
+         Rain World. Keep that exact dependency available for reference resolution; DryCycle source
+         itself does not install RuntimeDetour Hook sites. -->
     <Reference Include="MonoMod.RuntimeDetour">
       <HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll</HintPath>
       <Private>false</Private>
@@ -125,7 +126,7 @@
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.Utils.dll')" Text="Iterator Framework requires the MonoMod.Utils.dll shipped in RainWorldDir/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/Mono.Cecil.dll')" Text="Iterator Framework requires the Mono.Cecil.dll shipped in RainWorldDir/BepInEx/core." />
-    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll')" Text="MonoMod.RuntimeDetour.dll not found under $(RainWorldDir)/BepInEx/core. AI Observatory Pause/Step and input isolation require the RuntimeDetour version shipped with Rain World/BepInEx." />
+    <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll')" Text="MonoMod.RuntimeDetour.dll not found under $(RainWorldDir)/BepInEx/core. Rain World's HOOKS/BepInEx reference graph expects the RuntimeDetour assembly shipped with the game installation." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/utils/PUBLIC-Assembly-CSharp.dll')" Text="PUBLIC-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/utils." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/plugins/HOOKS-Assembly-CSharp.dll')" Text="HOOKS-Assembly-CSharp.dll not found under $(RainWorldDir)/BepInEx/plugins." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll')" Text="Assembly-CSharp-firstpass.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
