@@ -634,18 +634,45 @@ internal static class PlayerMapWorkspaceRuntime
 
             if (!state.Rooms.TryGetValue(room.index, out PlayerMapRoomState roomState))
             {
-                roomState = new PlayerMapRoomState
+                int previousIndex = int.MinValue;
+                string roomName = room.name ?? string.Empty;
+                foreach (KeyValuePair<int, PlayerMapRoomState> pair in state.Rooms)
                 {
-                    RoomIndex = room.index,
-                    Name = room.name ?? string.Empty,
-                    Mode = PlayerMapPlacementMode.Derived,
-                    Offset = panel.pos - derivedBase,
-                    AbsolutePosition = panel.pos,
-                    LastMirroredCanonical = panel.pos,
-                    HasMirror = true
-                };
-                state.Rooms.Add(room.index, roomState);
-                changed = true;
+                    if (string.Equals(pair.Value?.Name ?? string.Empty, roomName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        previousIndex = pair.Key;
+                        roomState = pair.Value;
+                        break;
+                    }
+                }
+
+                if (roomState != null)
+                {
+                    // A rebuilt World may assign different AbstractRoom indexes even though the
+                    // logical region/room names are unchanged. Re-key the retained unsaved state by
+                    // stable room name and do not adopt the replacement MapPage's disk position.
+                    state.Rooms.Remove(previousIndex);
+                    roomState.RoomIndex = room.index;
+                    roomState.Name = roomName;
+                    roomState.HasMirror = false;
+                    state.Rooms.Add(room.index, roomState);
+                    changed = true;
+                }
+                else
+                {
+                    roomState = new PlayerMapRoomState
+                    {
+                        RoomIndex = room.index,
+                        Name = roomName,
+                        Mode = PlayerMapPlacementMode.Derived,
+                        Offset = panel.pos - derivedBase,
+                        AbsolutePosition = panel.pos,
+                        LastMirroredCanonical = panel.pos,
+                        HasMirror = true
+                    };
+                    state.Rooms.Add(room.index, roomState);
+                    changed = true;
+                }
             }
             else
             {
