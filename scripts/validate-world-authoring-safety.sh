@@ -91,6 +91,18 @@ if ! grep -Fq 'WorldAuthoringPathResolver.AtomicWriteAllText' "$world_text" ||
   exit 1
 fi
 
+# TemperatureSets.json and WeatherSpatial.json are part of the same authoring surface. Their
+# final replace step must restore the pre-save file if commit fails after the original was removed.
+temperature="src/TemperatureSystem/TemperatureSetsLoader.cs"
+weather="src/Weather/Spatial/WeatherSpatialRegistry.Runtime.cs"
+if ! grep -Fq '.drycycle.rollback' "$temperature" ||
+   ! grep -Fq 'File.Copy(rollbackPath, path, overwrite: true)' "$temperature" ||
+   ! grep -Fq '.drycycle.rollback' "$weather" ||
+   ! grep -Fq 'File.Copy(rollback, path, overwrite: true)' "$weather"; then
+  echo "Temperature/Weather authoring lost rollback-safe file replacement." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
