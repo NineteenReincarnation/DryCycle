@@ -1181,19 +1181,94 @@ internal static partial class MapRoomGeometryPresentationHub
         return px * px + py * py;
     }
 
+    private readonly struct RasterMergeKey : IEquatable<RasterMergeKey>
+    {
+        internal RasterMergeKey(EditorMapGeometryKind kind, float x, float width)
+        {
+            Kind = kind;
+            X = x;
+            Width = width;
+        }
+
+        internal EditorMapGeometryKind Kind { get; }
+        internal float X { get; }
+        internal float Width { get; }
+
+        public bool Equals(RasterMergeKey other) =>
+            Kind == other.Kind && X.Equals(other.X) && Width.Equals(other.Width);
+
+        public override bool Equals(object obj) => obj is RasterMergeKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = (int)Kind;
+                hash = hash * 397 ^ X.GetHashCode();
+                return hash * 397 ^ Width.GetHashCode();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Losslessly merges vertically adjacent raster runs with the same X/width/kind.
+    /// The legacy MapTex decoder emits one horizontal rectangle per row; without this compaction
+    /// a single wall can become hundreds of ImGui rectangles every frame.
+    /// </summary>
+    internal static EditorMapRectSnapshot[] CompactRasterRuns(EditorMapRectSnapshot[] source)
+    {
+        if (source == null || source.Length < 2)
+            return source ?? Array.Empty<EditorMapRectSnapshot>();
+
+        List<EditorMapRectSnapshot> compact = new(source.Length);
+        Dictionary<RasterMergeKey, int> active = new();
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorMapRectSnapshot run = source[i];
+            if (run.Width <= 0f || run.Height <= 0f)
+                continue;
+
+            RasterMergeKey key = new(run.Kind, run.X, run.Width);
+            if (active.TryGetValue(key, out int index))
+            {
+                EditorMapRectSnapshot previous = compact[index];
+                if (Math.Abs(previous.Y + previous.Height - run.Y) <= 0.001f)
+                {
+                    compact[index] = new EditorMapRectSnapshot(
+                        previous.X,
+                        previous.Y,
+                        previous.Width,
+                        previous.Height + run.Height,
+                        previous.Kind);
+                    continue;
+                }
+            }
+
+            active[key] = compact.Count;
+            compact.Add(run);
+        }
+
+        if (compact.Count == source.Length)
+            return source;
+        return compact.ToArray();
+    }
+
     private static EditorMapRectSnapshot[] MergeRuns(
         EditorMapRectSnapshot[] baseRuns,
         EditorMapRectSnapshot[] terrainRuns)
     {
         int baseCount = baseRuns?.Length ?? 0;
         int terrainCount = terrainRuns?.Length ?? 0;
-        if (terrainCount == 0) return baseRuns ?? Array.Empty<EditorMapRectSnapshot>();
-        if (baseCount == 0) return terrainRuns ?? Array.Empty<EditorMapRectSnapshot>();
+        if (terrainCount == 0)
+            return CompactRasterRuns(baseRuns ?? Array.Empty<EditorMapRectSnapshot>());
+        if (baseCount == 0)
+            return CompactRasterRuns(terrainRuns ?? Array.Empty<EditorMapRectSnapshot>());
 
         EditorMapRectSnapshot[] merged = new EditorMapRectSnapshot[baseCount + terrainCount];
         Array.Copy(baseRuns, 0, merged, 0, baseCount);
         Array.Copy(terrainRuns, 0, merged, baseCount, terrainCount);
-        return merged;
+        return CompactRasterRuns(merged);
     }
 
     private static void Publish(CacheEntry entry)

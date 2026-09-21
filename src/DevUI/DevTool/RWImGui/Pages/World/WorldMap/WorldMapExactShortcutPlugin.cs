@@ -45,7 +45,7 @@ public sealed class WorldMapExactShortcutPlugin : BaseUnityPlugin
 
 internal static class WorldMapExactShortcuts
 {
-    private const int RoomsPerFrame = 12;
+    private const int RoomsPerFrame = 4;
     private const int StructurePollFrames = 120;
     private const int FilePollFrames = 240;
     private const int ShortcutGuard = 1000;
@@ -171,12 +171,17 @@ internal static class WorldMapExactShortcuts
             Time.frameCount >= nextStructurePollFrame)
             SynchronizeStructure(page);
 
-        int budget = RoomsPerFrame;
+        bool interactive = WorldMapBackgroundBudget.InteractionActive;
+        int budget = interactive ? 2 : RoomsPerFrame;
         int currentRoom = session.Room?.abstractRoom?.index ?? -1;
         if (RefreshRoom(currentRoom, page.world, force: false)) budget--;
         if (selectedRoomIndex != currentRoom && budget > 0 &&
             RefreshRoom(selectedRoomIndex, page.world, force: false))
             budget--;
+
+        // Exact shortcut parsing is disk-heavy. During pan/zoom/room drag, keep only the two
+        // priority rooms current and leave the region-wide scan for the first idle frame.
+        if (interactive) return;
 
         int count = roomOrder.Count;
         if (count == 0 || budget <= 0) return;

@@ -51,6 +51,7 @@ internal static class WorldMapGpuRuntime
     private static volatile WorldMapGpuScene.FrameState latestFrame;
     private static int mainThreadId;
     private static bool enabled;
+    private static bool retainedSuppressionParked;
     private static int requestRebuild;
     private static int frameHoveredRoomIndex = -1;
     private static WorldMapGpuScene.RoomPlacement[] cachedPlacements = Array.Empty<WorldMapGpuScene.RoomPlacement>();
@@ -62,6 +63,7 @@ internal static class WorldMapGpuRuntime
         log = logger;
         mainThreadId = unityMainThreadId;
         enabled = true;
+        retainedSuppressionParked = false;
         WorldMapFrontendBridge.RegisterAllowPresentationPrime(AllowPresentationPrime);
         logger?.LogInfo("Retained GPU World Map integration enabled through direct view/presentation APIs; no self-detours attached.");
     }
@@ -74,6 +76,7 @@ internal static class WorldMapGpuRuntime
         cachedLayoutHash = int.MinValue;
         frameHoveredRoomIndex = -1;
         requestRebuild = 0;
+        retainedSuppressionParked = false;
         WorldMapGpuCache.FlushNow();
         WorldMapGpuScene.Disable();
         // WorldMapGpuScene is the only consumer of the legacy RoomPanel/MapTex source adapter.
@@ -103,6 +106,25 @@ internal static class WorldMapGpuRuntime
             MapRoomGeometryPresentationHub.Clear();
             WorldMapGpuScene.Disable();
         }
+
+        // The correctness gate deliberately prevents the standalone Unity camera from owning the
+        // screen. While that gate is active, building a second GPU cache/scene only duplicates the
+        // visible ImGui map work and was a major source of steady-frame stalls.
+        if (WorldMapPresentationCorrectness.ShouldSuppressRetainedApply)
+        {
+            latestFrame = null;
+            WorldMapGpuScene.SuppressScreenPresentation();
+            if (!retainedSuppressionParked)
+            {
+                WorldMapGpuCache.FlushNow();
+                WorldMapGpuCache.ReleaseWorkingSet();
+                retainedSuppressionParked = true;
+                log?.LogInfo("Retained GPU World Map parked while ImGui correctness presentation owns the canvas.");
+            }
+            return;
+        }
+
+        retainedSuppressionParked = false;
 
         if (session?.ToolMode == EditorToolMode.Map && snapshot?.Available == true)
         {
@@ -215,10 +237,12 @@ internal static class WorldMapGpuRuntime
 
         if (DevToolWidgets.SameLineIfFits(285f, 8f))
         {
-            string state = WorldMapGpuScene.Ready
-                ? "GPU " + WorldMapGpuScene.RetainedChunkCount + "/" + WorldMapGpuScene.RetainedRouteCount +
-                  " · view " + WorldMapGpuScene.VisibleRoomCount + "/" + WorldMapGpuScene.RetainedRoomCount
-                : DevToolUiSettings.T("GPU 初始化", "GPU init");
+            string state = WorldMapPresentationCorrectness.ShouldSuppressRetainedApply
+                ? DevToolUiSettings.T("GPU 已停驻", "GPU parked")
+                : WorldMapGpuScene.Ready
+                    ? "GPU " + WorldMapGpuScene.RetainedChunkCount + "/" + WorldMapGpuScene.RetainedRouteCount +
+                      " · view " + WorldMapGpuScene.VisibleRoomCount + "/" + WorldMapGpuScene.RetainedRoomCount
+                    : DevToolUiSettings.T("GPU 初始化", "GPU init");
             ImGui.TextDisabled("· " + state + " · " + DevToolUiSettings.T("缓存 ", "cache ") + WorldMapGpuCache.CachedRoomCount);
             ImGui.SameLine();
             if (DevToolWidgets.ActionButton(
@@ -245,7 +269,9 @@ internal static class WorldMapGpuRuntime
         string selectedConnectionId,
         string hoveredConnectionId)
     {
-        if (!enabled || snapshot?.Available != true) return;
+        if (!enabled || snapshot?.Available != true ||
+            WorldMapPresentationCorrectness.ShouldSuppressRetainedApply)
+            return;
 
         int layerMask = 0;
         for (int i = 0; i < 3; i++)

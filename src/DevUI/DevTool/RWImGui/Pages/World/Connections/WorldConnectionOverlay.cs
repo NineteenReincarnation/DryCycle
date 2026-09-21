@@ -77,6 +77,9 @@ internal static class WorldConnectionOverlay
 
     private static ManualLogSource log;
     private static bool enabled;
+    private static int cachedCrossingFingerprint = int.MinValue;
+    private static string[] cachedCrossingIds = Array.Empty<string>();
+    private static Crossing[][] cachedRelativeCrossings = Array.Empty<Crossing[]>();
 
     private static FieldInfo showConnectionsField;
     private static FieldInfo panField;
@@ -128,6 +131,9 @@ internal static class WorldConnectionOverlay
     internal static void Disable()
     {
         WorldConnectionRouter.Clear();
+        cachedCrossingFingerprint = int.MinValue;
+        cachedCrossingIds = Array.Empty<string>();
+        cachedRelativeCrossings = Array.Empty<Crossing[]>();
         showConnectionsField = null;
         panField = null;
         zoomField = null;
@@ -178,7 +184,7 @@ internal static class WorldConnectionOverlay
 
         AssignLanes(entries);
         BuildRoutes(entries, obstacles);
-        BuildCrossings(entries);
+        BuildCrossingsCached(entries);
 
         ImGuiIOPtr io = ImGui.GetIO();
         bool mouseInsideCanvas =
@@ -360,6 +366,109 @@ internal static class WorldConnectionOverlay
         {
             entries[i].Route = routes[i];
             entries[i].Rounded = BuildRoundedPolyline(routes[i]?.Points, CornerRadius);
+        }
+    }
+
+    private static void BuildCrossingsCached(List<Entry> entries)
+    {
+        Num.Vector2 anchor = ResolveCrossingAnchor(entries);
+        int fingerprint = ComputeCrossingFingerprint(entries, anchor);
+
+        if (fingerprint == cachedCrossingFingerprint && CrossingCacheMatches(entries))
+        {
+            ApplyCachedCrossings(entries, anchor);
+            return;
+        }
+
+        BuildCrossings(entries);
+        cachedCrossingFingerprint = fingerprint;
+        cachedCrossingIds = new string[entries.Count];
+        cachedRelativeCrossings = new Crossing[entries.Count][];
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            Entry entry = entries[i];
+            cachedCrossingIds[i] = entry.Connection?.ConnectionId ?? string.Empty;
+            Crossing[] source = entry.Crossings.ToArray();
+            Crossing[] relative = new Crossing[source.Length];
+            for (int c = 0; c < source.Length; c++)
+                relative[c] = new Crossing(source[c].Point - anchor, source[c].Tangent);
+            cachedRelativeCrossings[i] = relative;
+        }
+    }
+
+    private static Num.Vector2 ResolveCrossingAnchor(List<Entry> entries)
+    {
+        for (int i = 0; i < entries.Count; i++)
+        {
+            Num.Vector2[] points = entries[i].Route?.Points;
+            if (points != null && points.Length > 0)
+                return points[0];
+        }
+        return Num.Vector2.Zero;
+    }
+
+    private static int ComputeCrossingFingerprint(List<Entry> entries, Num.Vector2 anchor)
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 397 ^ entries.Count;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Entry entry = entries[i];
+                hash = hash * 397 ^ StringComparer.Ordinal.GetHashCode(
+                    entry.Connection?.ConnectionId ?? string.Empty);
+                Num.Vector2[] points = entry.Route?.Points ?? Array.Empty<Num.Vector2>();
+                hash = hash * 397 ^ points.Length;
+                for (int p = 0; p < points.Length; p++)
+                {
+                    Num.Vector2 relative = points[p] - anchor;
+                    hash = hash * 397 ^ QuantizeCrossingCoordinate(relative.X);
+                    hash = hash * 397 ^ QuantizeCrossingCoordinate(relative.Y);
+                }
+            }
+            return hash;
+        }
+    }
+
+    private static int QuantizeCrossingCoordinate(float value)
+    {
+        if (float.IsNaN(value)) return int.MinValue;
+        if (float.IsPositiveInfinity(value)) return int.MaxValue;
+        if (float.IsNegativeInfinity(value)) return int.MinValue + 1;
+        double scaled = Math.Round(value * 8.0);
+        if (scaled > int.MaxValue) return int.MaxValue;
+        if (scaled < int.MinValue) return int.MinValue;
+        return (int)scaled;
+    }
+
+    private static bool CrossingCacheMatches(List<Entry> entries)
+    {
+        if (cachedCrossingIds.Length != entries.Count ||
+            cachedRelativeCrossings.Length != entries.Count)
+            return false;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (!string.Equals(
+                    cachedCrossingIds[i],
+                    entries[i].Connection?.ConnectionId ?? string.Empty,
+                    StringComparison.Ordinal))
+                return false;
+        }
+        return true;
+    }
+
+    private static void ApplyCachedCrossings(List<Entry> entries, Num.Vector2 anchor)
+    {
+        for (int i = 0; i < entries.Count; i++)
+        {
+            List<Crossing> target = entries[i].Crossings;
+            target.Clear();
+            Crossing[] relative = cachedRelativeCrossings[i] ?? Array.Empty<Crossing>();
+            for (int c = 0; c < relative.Length; c++)
+                target.Add(new Crossing(anchor + relative[c].Point, relative[c].Tangent));
         }
     }
 
@@ -874,7 +983,7 @@ internal static class WorldConnectionOverlay
         float zoom,
         Dictionary<int, Num.Vector2> localPositions)
     {
-        EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
         Num.Vector2 roomMin = RoomScreenMin(room, canvasMin, pan, zoom, localPositions);
 
         if (WorldMapShortcutPresentation.TryGetExitMouth(
@@ -917,7 +1026,7 @@ internal static class WorldConnectionOverlay
         out Num.Vector2 min,
         out Num.Vector2 max)
     {
-        EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
         min = RoomScreenMin(room, canvasMin, pan, zoom, localPositions);
         max = min + new Num.Vector2(
             Math.Max(1f, visual.WidthTiles) * TileDisplaySize * zoom,

@@ -123,7 +123,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // The rebuilt World Map intentionally keeps vanilla MapPage drawing/updating quiescent.
         // Pump the bounded source-recovery backend here so missing RoomRepresentation MapTex
         // thumbnails are still generated incrementally without invoking vanilla MapObject.Update().
-        MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
+        if (WorldMapBackgroundBudget.AllowSourceRecovery())
+            MapRoomGeometryPresentationHub.RecoverMissingSources(DevToolRuntime.ActiveSession);
 
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)

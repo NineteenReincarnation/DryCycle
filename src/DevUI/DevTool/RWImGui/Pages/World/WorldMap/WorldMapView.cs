@@ -37,6 +37,9 @@ internal static class WorldMapView
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
     private static readonly bool[] layerVisible = { true, true, true };
+    private static readonly uint[] geometryColorCache = new uint[16];
+    private static readonly bool[] geometryColorCacheValid = new bool[16];
+    private static int geometryColorFrame = int.MinValue;
     private static EditorMapPresentationSnapshot hoverIndexedSnapshot;
 
     private static string region = string.Empty;
@@ -176,6 +179,7 @@ internal static class WorldMapView
             fitRequested = false;
         }
 
+        bool viewportInteraction = false;
         if (canvasHovered && Math.Abs(io.MouseWheel) > 0.0001f && linkingRoom < 0)
         {
             float oldZoom = zoom;
@@ -184,11 +188,15 @@ internal static class WorldMapView
             Num.Vector2 worldAtMouse = (mouseInCanvas - pan) / oldZoom;
             zoom = next;
             pan = mouseInCanvas - worldAtMouse * zoom;
+            viewportInteraction = true;
         }
 
         if (canvasHovered && linkingRoom < 0 &&
             (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || ImGui.IsMouseDragging(ImGuiMouseButton.Right)))
+        {
             pan += io.MouseDelta;
+            viewportInteraction = true;
+        }
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         bool renderChannels = WorldMapRenderOrder.BeginCanvas(draw, snapshot);
@@ -226,6 +234,8 @@ internal static class WorldMapView
         WorldMapRenderOrder.UseOverlay(draw);
 
         HandleInteraction(snapshot, canvasHovered, io, hoveredRoom, hoveredPort, hoveredEdge);
+        if (viewportInteraction || draggingRoom >= 0 || linkingRoom >= 0)
+            WorldMapBackgroundBudget.NoteInteraction();
         DrawLinkPreview(draw, snapshot, canvasMin, io.MousePos, hoveredPort);
         HandleDelete(snapshot);
         if (WorldMapExactShortcuts.AfterCanvas(snapshot, selectedConnectionId))
@@ -290,7 +300,7 @@ internal static class WorldMapView
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
 
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 48f)) continue;
 
@@ -342,9 +352,23 @@ internal static class WorldMapView
             if (visual.DetailedRasterAvailable)
             {
                 EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
+
+                // MapTex represents Air as row runs too. Fill it once for the whole room and skip
+                // thousands of redundant Air rectangles; all non-Air terrain is then painted above it.
+                bool hasAir = false;
+                for (int i = 0; i < runs.Length; i++)
+                {
+                    if (runs[i].Kind != EditorMapGeometryKind.Air) continue;
+                    hasAir = true;
+                    break;
+                }
+                if (hasAir)
+                    draw.AddRectFilled(roomMin, roomMax, GeometryColor(EditorMapGeometryKind.Air));
+
                 for (int i = 0; i < runs.Length; i++)
                 {
                     EditorMapRectSnapshot run = runs[i];
+                    if (run.Kind == EditorMapGeometryKind.Air) continue;
                     if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
                     Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
                     Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
@@ -403,6 +427,17 @@ internal static class WorldMapView
 
     private static uint GeometryColor(EditorMapGeometryKind kind)
     {
+        int frame = global::UnityEngine.Time.frameCount;
+        if (geometryColorFrame != frame)
+        {
+            geometryColorFrame = frame;
+            Array.Clear(geometryColorCacheValid, 0, geometryColorCacheValid.Length);
+        }
+
+        int index = (int)kind;
+        if (index >= 0 && index < geometryColorCache.Length && geometryColorCacheValid[index])
+            return geometryColorCache[index];
+
         uint fallback = kind switch
         {
             EditorMapGeometryKind.Air => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.59f, 0.60f, 1.00f)),
@@ -418,7 +453,14 @@ internal static class WorldMapView
             EditorMapGeometryKind.QuicksandBody => ImGui.GetColorU32(ImGuiCol.Separator),
             _ => ImGui.GetColorU32(ImGuiCol.Border)
         };
-        return WorldMapThumbnailVisibility.ResolveGeometryColor(kind, fallback);
+        uint resolved = WorldMapThumbnailVisibility.ResolveGeometryColor(kind, fallback);
+
+        if (index >= 0 && index < geometryColorCache.Length)
+        {
+            geometryColorCache[index] = resolved;
+            geometryColorCacheValid[index] = true;
+        }
+        return resolved;
     }
 
     private static uint ShortcutGold(bool bright) =>
@@ -525,7 +567,7 @@ internal static class WorldMapView
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
 
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 42f)) continue;
 
@@ -592,7 +634,7 @@ internal static class WorldMapView
                 WorldMapShortcutPresentation.GetCreatureHoles(room.RoomIndex);
             if (holes == null || holes.Length == 0) continue;
 
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 32f)) continue;
 
@@ -753,7 +795,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 8f)) continue;
             if (Contains(min, max, mouse)) return room;
@@ -789,7 +831,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
 
@@ -864,7 +906,7 @@ internal static class WorldMapView
 
     private static Num.Vector2 EndpointPosition(EditorMapRoomSnapshot room, int nodeIndex, Num.Vector2 canvasMin)
     {
-        EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
         Num.Vector2 roomMin = ToScreen(canvasMin, GetPosition(room));
 
         if (WorldMapShortcutPresentation.TryGetExitMouth(
@@ -912,7 +954,7 @@ internal static class WorldMapView
 
     private static Num.Vector2 RoomCenter(EditorMapRoomSnapshot room, Num.Vector2 canvasMin)
     {
-        EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
         GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
         return (min + max) * 0.5f;
     }
@@ -1239,7 +1281,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
             Num.Vector2 p = GetPosition(room);
             Num.Vector2 size = new(
                 Math.Max(1f, visual.WidthTiles) * TileDisplaySize,

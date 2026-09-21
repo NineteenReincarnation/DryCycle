@@ -296,7 +296,7 @@ internal static class WorldMapRasterReadbackFallback
         }
 
         runs.AddRange(waterRuns);
-        return runs.ToArray();
+        return MapRoomGeometryPresentationHub.CompactRasterRuns(runs.ToArray());
     }
 
     private static PixelClass ClassifyPixel(Color color)

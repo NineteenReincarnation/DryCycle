@@ -90,6 +90,8 @@ internal static class WorldMapPerformance
     private static readonly Dictionary<string, EditorMapConnectionSnapshot> connectionsById =
         new(StringComparer.Ordinal);
     private static readonly Dictionary<long, EditorMapConnectionSnapshot> connectionsByEndpoint = new();
+    private static readonly Dictionary<int, EditorMapRoomVisualSnapshot> roomVisualsByIndex = new();
+    private static int roomVisualFrame = int.MinValue;
 
     private static ManualLogSource log;
     private static bool enabled;
@@ -211,6 +213,24 @@ internal static class WorldMapPerformance
         lastShortcutSelection = selectedRoomIndex;
         lastShortcutCurrentRoom = currentRoom;
         return true;
+    }
+
+    internal static EditorMapRoomVisualSnapshot GetRoomVisual(int roomIndex)
+    {
+        int frame = Time.frameCount;
+        if (roomVisualFrame != frame)
+        {
+            roomVisualFrame = frame;
+            roomVisualsByIndex.Clear();
+        }
+
+        if (roomVisualsByIndex.TryGetValue(roomIndex, out EditorMapRoomVisualSnapshot cached))
+            return cached;
+
+        EditorMapRoomVisualSnapshot visual =
+            MapRoomGeometryPresentationHub.Get(roomIndex) ?? EditorMapRoomVisualSnapshot.Empty;
+        roomVisualsByIndex[roomIndex] = visual;
+        return visual;
     }
 
     internal static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex)
@@ -389,6 +409,8 @@ internal static class WorldMapPerformance
         roomsByIndex.Clear();
         connectionsById.Clear();
         connectionsByEndpoint.Clear();
+        roomVisualsByIndex.Clear();
+        roomVisualFrame = int.MinValue;
     }
 
     private static long EndpointKey(int roomIndex, int nodeIndex) =>
@@ -576,12 +598,14 @@ internal static class WorldMapBackgroundBudget
     private const float DetailedBackgroundZoom = 0.42f;
     private const int GeometrySweepIntervalFrames = 4;
     private const int ShortcutSweepIntervalFrames = 4;
+    private const int InteractionCooldownFrames = 3;
 
     private static bool enabled;
     private static int lastGeometrySweepFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
     private static string geometryRegion = string.Empty;
     private static string shortcutRegion = string.Empty;
+    private static int interactionUntilFrame = int.MinValue;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -600,9 +624,24 @@ internal static class WorldMapBackgroundBudget
         WorldMapHotState.Invalidate();
     }
 
+    internal static bool InteractionActive =>
+        enabled && Time.frameCount <= interactionUntilFrame;
+
+    internal static void NoteInteraction()
+    {
+        if (!enabled) return;
+        interactionUntilFrame = Math.Max(
+            interactionUntilFrame,
+            Time.frameCount + InteractionCooldownFrames);
+    }
+
+    internal static bool AllowSourceRecovery() =>
+        !enabled || !InteractionActive;
+
     internal static bool ShouldProcessGeometry(global::World world)
     {
         if (!enabled) return true;
+        if (InteractionActive) return false;
 
         string region = world?.name ?? string.Empty;
         if (!string.Equals(region, geometryRegion, StringComparison.OrdinalIgnoreCase))
@@ -625,6 +664,7 @@ internal static class WorldMapBackgroundBudget
     internal static bool ShouldProcessShortcuts()
     {
         if (!enabled) return true;
+        if (InteractionActive) return false;
 
         string region = DevToolRuntime.ActiveSession?.World?.name ?? string.Empty;
         if (!string.Equals(region, shortcutRegion, StringComparison.OrdinalIgnoreCase))
@@ -647,5 +687,6 @@ internal static class WorldMapBackgroundBudget
         lastShortcutSweepFrame = -1000;
         geometryRegion = string.Empty;
         shortcutRegion = string.Empty;
+        interactionUntilFrame = int.MinValue;
     }
 }
