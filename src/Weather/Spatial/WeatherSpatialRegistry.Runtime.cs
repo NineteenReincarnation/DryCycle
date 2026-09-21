@@ -138,22 +138,44 @@ internal static partial class WeatherSpatialRegistry
             }
 
             string temp = path + ".tmp";
+            string rollback = path + ".drycycle.rollback";
             File.WriteAllText(temp, json);
 
-            if (_recoveredFromBackup && File.Exists(path))
-            {
-                ArchiveInvalid(path);
-            }
-            else if (File.Exists(path))
-            {
-                File.Copy(path, path + ".bak", overwrite: true);
-            }
+            bool hadOriginal = File.Exists(path);
+            if (hadOriginal)
+                File.Copy(path, rollback, overwrite: true);
 
-            if (File.Exists(path))
+            try
             {
-                File.Delete(path);
+                if (_recoveredFromBackup && File.Exists(path))
+                {
+                    ArchiveInvalid(path);
+                }
+                else if (File.Exists(path))
+                {
+                    File.Copy(path, path + ".bak", overwrite: true);
+                }
+
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+                File.Move(temp, path);
             }
-            File.Move(temp, path);
+            catch
+            {
+                if (hadOriginal && File.Exists(rollback))
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                    File.Copy(rollback, path, overwrite: true);
+                }
+                throw;
+            }
+            finally
+            {
+                try { if (File.Exists(rollback)) File.Delete(rollback); } catch { }
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            }
 
             LoadedPath = path;
             FatalLoadError = null;
