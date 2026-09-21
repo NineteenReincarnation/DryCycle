@@ -61,6 +61,15 @@ if ! grep -Fq 'SaveVanillaMapConfigToAuthoringSource' "$map_runtime" ||
   exit 1
 fi
 
+# Unsaved Player Map state must survive MapPage rebuilds and region switches. A same-region
+# replacement is rebound; a different region is blocked until the retained dirty document is saved.
+if ! grep -Fq 'Player Map rebound unsaved authoring state to a replacement MapPage' "$map_runtime" ||
+   ! grep -Fq 'Unsaved Player Map belongs to another region' "$map_runtime" ||
+   ! grep -Fq 'if (!EnsureStateForPage(page, state))' "$map_runtime"; then
+  echo "Player Map can lose unsaved authoring state across MapPage/region replacement." >&2
+  exit 1
+fi
+
 # Every map save surface must converge on the same Core transaction. The RWImGui toolbar may only
 # enqueue Save; it must not race the Core command by writing individual files itself.
 editor_actions="src/DevUI/DevTool/Commands/EditorActions.cs"
