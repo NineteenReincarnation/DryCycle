@@ -382,6 +382,8 @@ internal sealed class Plugin : BaseUnityPlugin
     private static void RollbackRuntimeInitialization()
     {
         SafeBootstrapCleanup("AIDebuggerRuntime.Uninstall", AIDebuggerRuntime.Uninstall);
+        SafeBootstrapCleanup("DB_WarpCompatibility.Disable", DB_WarpCompatibility.Disable);
+        SafeBootstrapCleanup("DB_Sandbox.Disable", DB_Sandbox.Disable);
         SafeBootstrapCleanup("InternalGateRuntime.Disable", InternalGateRuntime.Disable);
         SafeBootstrapCleanup("MiscRuntime.Disable", MiscRuntime.Disable);
         SafeBootstrapCleanup("OpenShelterSleepRuntime.Disable", OpenShelterSleepRuntime.Disable);
