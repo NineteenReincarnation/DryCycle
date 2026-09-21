@@ -216,6 +216,7 @@ internal static class WorldMapView
             localPositions,
             localPositionRevision,
             draggingRoom,
+            CurrentLayerMask(),
             new WorldMapViewTransform(canvasMin, canvasSize, pan, zoom));
 
         WorldMapExactShortcuts.BeforeCanvas(snapshot);
@@ -227,6 +228,8 @@ internal static class WorldMapView
         draw.AddRectFilled(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.ChildBg));
         draw.AddRect(canvasMin, canvasMax, ImGui.GetColorU32(ImGuiCol.Border));
         DrawGrid(draw, canvasMin, canvasSize);
+        bool retainedRoomsPresented =
+            WorldMapRetainedV2Runtime.TryPresentSurface(draw, canvasMin, canvasMax);
 
         EditorMapRoomSnapshot hoveredRoom = !viewportInteraction && canvasHovered
             ? FindHoveredRoom(snapshot, canvasMin, canvasSize, io.MousePos)
@@ -243,7 +246,15 @@ internal static class WorldMapView
         if (!routedConnections)
             hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
-        DrawRooms(draw, snapshot, canvasMin, canvasSize, hoveredRoom, hoveredPort, viewportInteraction);
+        DrawRooms(
+            draw,
+            snapshot,
+            canvasMin,
+            canvasSize,
+            hoveredRoom,
+            hoveredPort,
+            viewportInteraction,
+            retainedRoomsPresented);
         if (viewportInteraction && showConnections)
         {
             DrawConnections(draw, snapshot, canvasMin, canvasSize);
@@ -325,7 +336,8 @@ internal static class WorldMapView
         Num.Vector2 canvasSize,
         EditorMapRoomSnapshot hoveredRoom,
         ExitPortHit hoveredPort,
-        bool fastNavigation)
+        bool fastNavigation,
+        bool retainedRoomsPresented)
     {
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = 0; i < rooms.Length; i++)
@@ -339,10 +351,13 @@ internal static class WorldMapView
 
             bool selected = room.RoomIndex == snapshot.SelectedRoomIndex;
             bool hovered = ReferenceEquals(room, hoveredRoom);
-            if (fastNavigation)
-                DrawRoomNavigationLod(draw, room, min, max, selected);
-            else
-                DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+            if (!retainedRoomsPresented)
+            {
+                if (fastNavigation)
+                    DrawRoomNavigationLod(draw, room, min, max, selected);
+                else
+                    DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+            }
 
             if (!fastNavigation || selected || room.CurrentRoom)
                 DrawRoomLabel(draw, room, min, max, selected, hovered);
@@ -1447,6 +1462,14 @@ internal static class WorldMapView
 
     private static bool IsLayerVisible(int layer) =>
         layer >= 0 && layer < layerVisible.Length ? layerVisible[layer] : true;
+
+    private static int CurrentLayerMask()
+    {
+        int mask = 0;
+        for (int i = 0; i < layerVisible.Length; i++)
+            if (layerVisible[i]) mask |= 1 << i;
+        return mask;
+    }
 
     private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
     {

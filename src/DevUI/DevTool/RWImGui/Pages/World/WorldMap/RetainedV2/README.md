@@ -12,7 +12,8 @@ phase percentage below 100%.
 - **Phase 1 — 100%**: world-space retained scene, view transform and frontend dirty graph.
 - **Phase 2 — 100%**: retained room thumbnail/geometry resources with last-known-good continuity.
 - **Phase 3 — 100%**: world-space connection routing and retained route resources.
-- **Phase 4 — next**: off-screen RenderTexture surface and ImGui presentation bridge.
+- **Phase 4 — 100%**: off-screen RenderTexture surface, runtime texture bridge and retained room GPU presentation.
+- **Phase 5 — next**: spatial index, background build scheduler and local scene upload scheduling.
 
 The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
 subsystem.
@@ -210,6 +211,55 @@ stale route resources when topology changes.
 When Phase 2 publishes a new room geometry blob, the room resource store emits the affected room ID.
 Phase 3 consumes that ID and invalidates only routes incident to that room, covering changed room
 dimensions/port geometry without scanning or rebuilding the entire route set.
+
+## Phase 4 implementation
+
+### Off-screen surface
+
+`WorldMapRenderTextureSurface` owns an orthographic Unity camera whose target is an off-screen
+`RenderTexture`. The camera never renders directly to the game screen.
+
+RenderTexture allocation depends only on canvas pixel size. Pan/zoom changes only camera transform,
+so zoom never recreates the surface.
+
+When the canvas size changes, a new target is created, explicitly cleared and rendered before it
+replaces the presented target. The previous target remains alive until the new target has actually
+been accepted by the ImGui texture bridge. A failed replacement therefore leaves the last-known-good
+surface intact.
+
+### Runtime texture bridge
+
+`WorldMapTextureBridge` resolves the exact loaded RWImGUI contract through reflection. It requires:
+
+1. a public method that accepts `Texture` / `RenderTexture` and returns a native ImGui-compatible
+   texture ID;
+2. an `ImDrawListPtr.AddImage`-compatible method consuming that ID.
+
+It never treats `GetNativeTexturePtr()` as an ImGui texture ID by assumption. If the loaded RWImGUI
+build exposes no verified adapter, V2 presentation remains unavailable and the existing immediate
+renderer continues to draw the map.
+
+### Retained room GPU objects
+
+`WorldMapRetainedRoomRenderer` owns persistent Unity room objects and meshes.
+
+- room movement updates only the room GameObject transform;
+- pan/zoom rebuilds no room mesh;
+- committed thumbnails render as UV quads from the vanilla/Futile texture source;
+- custom semantic terrain is a separate retained color overlay;
+- rooms with no committed thumbnail render their retained neutral/semantic geometry instead of a
+  black placeholder;
+- layer filtering toggles retained room objects without rebuilding geometry.
+
+### Migration presentation
+
+`WorldMapView` attempts to present the V2 off-screen room surface inside the existing clipped ImGui
+canvas. If presentation succeeds, legacy immediate room geometry is skipped while labels, ports,
+interaction and the still-unmigrated connection presentation remain active above the retained room
+surface.
+
+If the runtime texture bridge is unavailable, the existing room renderer remains the explicit
+fallback; no silent partial surface is treated as success.
 
 ## Legacy retirement policy
 
