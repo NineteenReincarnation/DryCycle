@@ -69,6 +69,11 @@ internal static class ExternalAudioFormatRegistry
     private static readonly List<ExternalAudioFormat> Formats = new();
     private static readonly Dictionary<string, ExternalAudioFormat> ByExtension =
         new(StringComparer.OrdinalIgnoreCase);
+    // SoundClipReady runs on the gameplay hot path. A cache miss used to probe every supported
+    // extension through AssetManager.ResolveFilePath + File.Exists on every sound playback (jump,
+    // footsteps, impacts, etc.). Cache both positive and negative LoadedSoundEffects lookups.
+    private static readonly Dictionary<string, ResolvedAudioFile?> LoadedSoundEffectResolutionCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     static ExternalAudioFormatRegistry()
     {
@@ -135,6 +140,7 @@ internal static class ExternalAudioFormatRegistry
         {
             if (ByExtension.ContainsKey(format.Extension)) return false;
             AddFormatNoLock(format);
+            LoadedSoundEffectResolutionCache.Clear();
             return true;
         }
     }
@@ -193,7 +199,25 @@ internal static class ExternalAudioFormatRegistry
     {
         file = default;
         if (string.IsNullOrWhiteSpace(selectedStem)) return false;
-        return TryResolveOverrideStem("LoadedSoundEffects", selectedStem.Trim(), out file);
+
+        string stem = selectedStem.Trim();
+        lock (Gate)
+        {
+            if (LoadedSoundEffectResolutionCache.TryGetValue(stem, out ResolvedAudioFile? cached))
+            {
+                if (!cached.HasValue) return false;
+                file = cached.Value;
+                return true;
+            }
+        }
+
+        bool found = TryResolveOverrideStem("LoadedSoundEffects", stem, out ResolvedAudioFile resolved);
+        lock (Gate)
+            LoadedSoundEffectResolutionCache[stem] = found ? resolved : null;
+
+        if (!found) return false;
+        file = resolved;
+        return true;
     }
 
     internal static bool TryResolveLoadedAmbient(string clipName, out ResolvedAudioFile file)
