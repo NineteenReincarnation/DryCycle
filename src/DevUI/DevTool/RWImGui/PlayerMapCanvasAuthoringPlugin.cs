@@ -20,8 +20,15 @@ public sealed class PlayerMapCanvasAuthoringPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Canvas Authoring";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapCanvasAuthoring.Enable(Logger);
-    private void OnDisable() => PlayerMapCanvasAuthoring.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapCanvasAuthoring.Enable(Logger),
+            PlayerMapCanvasAuthoring.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapCanvasAuthoring.Disable);
 }
 
 internal static class PlayerMapCanvasAuthoring
