@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.World;
@@ -1370,5 +1371,329 @@ internal static class WorldMapView
         if (modulus <= 0f) return 0f;
         float result = value % modulus;
         return result < 0f ? result + modulus : result;
+    }
+}
+
+internal static class WorldMapThumbnailVisibility
+{
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        logger?.LogInfo("World Map thumbnails use direct zoom-independent contrast styling; no self-detour attached.");
+    }
+
+    internal static void Disable() => enabled = false;
+
+    internal static int PushRoomStyle()
+    {
+        if (!enabled) return 0;
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Num.Vector4(0.35f, 0.36f, 0.38f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Num.Vector4(0.62f, 0.64f, 0.66f, 0.95f));
+        return 2;
+    }
+
+    internal static void PopRoomStyle(int count)
+    {
+        if (count > 0) ImGui.PopStyleColor(count);
+    }
+
+    internal static uint ResolveGeometryColor(EditorMapGeometryKind kind, uint fallback)
+    {
+        if (!enabled) return fallback;
+
+        return kind switch
+        {
+            EditorMapGeometryKind.Air =>
+                ImGui.GetColorU32(new Num.Vector4(0.68f, 0.69f, 0.70f, 1.00f)),
+            EditorMapGeometryKind.BackWall =>
+                ImGui.GetColorU32(new Num.Vector4(0.56f, 0.57f, 0.58f, 1.00f)),
+            EditorMapGeometryKind.Solid =>
+                ImGui.GetColorU32(new Num.Vector4(0.41f, 0.42f, 0.43f, 1.00f)),
+            EditorMapGeometryKind.Structure =>
+                ImGui.GetColorU32(new Num.Vector4(0.66f, 0.35f, 0.35f, 1.00f)),
+            _ => fallback
+        };
+    }
+}
+
+internal static class WorldMapPipeLayers
+{
+    private static bool enabled;
+    private static bool roomPipesVisible = true;
+    private static bool creaturePipesVisible = true;
+
+    internal static bool RoomPipesVisible => !enabled || roomPipesVisible;
+    internal static bool CreaturePipesVisible => !enabled || creaturePipesVisible;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        roomPipesVisible = true;
+        creaturePipesVisible = true;
+        logger?.LogInfo("World Map room/creature pipe layers use direct view controls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        enabled = false;
+        roomPipesVisible = true;
+        creaturePipesVisible = true;
+    }
+
+    internal static void DrawToolbarControls(ref bool portLabels, ref int linkingRoom, ref int linkingNode)
+    {
+        if (!enabled) return;
+
+        bool roomVisible = roomPipesVisible;
+        if (ImGui.Checkbox(
+                DevToolUiSettings.T("房间管道", "Room pipes") + "##WorldMapRoomPipes",
+                ref roomVisible))
+        {
+            bool wasVisible = roomPipesVisible;
+            roomPipesVisible = roomVisible;
+            if (wasVisible && !roomPipesVisible)
+            {
+                linkingRoom = -1;
+                linkingNode = -1;
+            }
+        }
+
+        portLabels = roomPipesVisible;
+
+        ImGui.SameLine();
+        bool creatureVisible = creaturePipesVisible;
+        if (ImGui.Checkbox(
+                DevToolUiSettings.T("生物管道", "Creature pipes") + "##WorldMapCreaturePipes",
+                ref creatureVisible))
+            creaturePipesVisible = creatureVisible;
+    }
+}
+
+internal static class WorldMapRenderOrder
+{
+    private const int BaseChannel = 0;
+    private const int ConnectionChannel = 1;
+    private const int OverlayChannel = 2;
+    private const int ChannelCount = 3;
+
+    private static ManualLogSource log;
+    private static bool enabled;
+    private static bool channelsActive;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("World Map render order uses direct draw-channel calls: rooms < connections < overlays; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        channelsActive = false;
+        enabled = false;
+        log = null;
+    }
+
+    internal static bool BeginCanvas(ImDrawListPtr draw, EditorMapPresentationSnapshot snapshot)
+    {
+        if (!enabled || snapshot?.Available != true || channelsActive)
+            return false;
+
+        try
+        {
+            draw.ChannelsSplit(ChannelCount);
+            channelsActive = true;
+            draw.ChannelsSetCurrent(BaseChannel);
+            return true;
+        }
+        catch (Exception error)
+        {
+            channelsActive = false;
+            log?.LogDebug("World Map channel split failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static void EndCanvas(ImDrawListPtr draw, bool split)
+    {
+        if (!split) return;
+        channelsActive = false;
+        try
+        {
+            draw.ChannelsSetCurrent(BaseChannel);
+            draw.ChannelsMerge();
+        }
+        catch (Exception error)
+        {
+            log?.LogDebug("World Map channel merge failed: " + error.Message);
+        }
+    }
+
+    internal static void UseBase(ImDrawListPtr draw)
+    {
+        if (channelsActive) draw.ChannelsSetCurrent(BaseChannel);
+    }
+
+    internal static void UseConnections(ImDrawListPtr draw)
+    {
+        if (channelsActive) draw.ChannelsSetCurrent(ConnectionChannel);
+    }
+
+    internal static void UseOverlay(ImDrawListPtr draw)
+    {
+        if (channelsActive) draw.ChannelsSetCurrent(OverlayChannel);
+    }
+}
+
+internal static class WorldMapPresentationCorrectness
+{
+    private static ManualLogSource log;
+    private static bool enabled;
+
+    internal static bool ShouldSuppressRetainedApply => enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        SuppressRetainedPresentation();
+        logger?.LogInfo("World Map correctness gate uses direct scene/view APIs; retained screen renderers paused with no self-detours.");
+    }
+
+    internal static void Disable()
+    {
+        enabled = false;
+        log = null;
+    }
+
+    internal static void LateUpdate()
+    {
+        if (!enabled || !DevToolSessionHub.IsCurrentSessionLive)
+            return;
+
+        EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map)
+            return;
+
+        SuppressRetainedPresentation();
+    }
+
+    internal static void SuppressRetainedPresentation()
+    {
+        if (!enabled) return;
+        WorldMapGpuScene.SuppressScreenPresentation();
+        WorldMapGpuPipeBatch.SuppressScreenPresentation();
+    }
+
+    internal static bool BeginCanvasClip(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize)
+    {
+        if (!enabled || snapshot?.Available != true || canvasSize.X < 1f || canvasSize.Y < 1f)
+            return false;
+
+        try
+        {
+            draw.PushClipRect(canvasMin, canvasMin + canvasSize, true);
+            return true;
+        }
+        catch (Exception error)
+        {
+            log?.LogDebug("World Map canvas clip push failed: " + error.Message);
+            return false;
+        }
+    }
+
+    internal static void EndCanvasClip(ImDrawListPtr draw, bool pushed)
+    {
+        if (!pushed) return;
+        try { draw.PopClipRect(); }
+        catch (Exception error) { log?.LogDebug("World Map canvas clip pop failed: " + error.Message); }
+    }
+
+    internal static bool TryDrawBidirectionalStroke(
+        ImDrawListPtr draw,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        uint shadow,
+        uint core,
+        float shadowThickness,
+        float coreThickness,
+        WorldConnectionDirection direction,
+        bool dashed)
+    {
+        if (!enabled || dashed || direction != WorldConnectionDirection.Bidirectional)
+            return false;
+
+        Num.Vector2 delta = b - a;
+        float length = delta.Length();
+        if (length < 34f)
+        {
+            draw.AddLine(a, b, shadow, shadowThickness);
+            draw.AddLine(a, b, core, coreThickness);
+            return true;
+        }
+
+        Num.Vector2 forward = delta / length;
+        Num.Vector2 normal = new(-forward.Y, forward.X);
+        float railOffset = Math.Max(2f, coreThickness * 0.72f);
+        float railThickness = Math.Max(1.6f, coreThickness * 0.72f);
+        float lead = Math.Min(18f, Math.Max(9f, length * 0.12f));
+        Num.Vector2 splitA = a + forward * lead;
+        Num.Vector2 splitB = b - forward * lead;
+        Num.Vector2 aPlus = splitA + normal * railOffset;
+        Num.Vector2 aMinus = splitA - normal * railOffset;
+        Num.Vector2 bPlus = splitB + normal * railOffset;
+        Num.Vector2 bMinus = splitB - normal * railOffset;
+
+        draw.AddLine(a, b, shadow, shadowThickness);
+        draw.AddLine(a, aPlus, core, railThickness);
+        draw.AddLine(a, aMinus, core, railThickness);
+        draw.AddLine(aPlus, bPlus, core, railThickness);
+        draw.AddLine(aMinus, bMinus, core, railThickness);
+        draw.AddLine(bPlus, b, core, railThickness);
+        draw.AddLine(bMinus, b, core, railThickness);
+
+        float arrowSize = Math.Max(6.2f, Math.Min(9.2f, 6.2f + coreThickness * 0.55f));
+        DrawArrowHead(draw, Num.Vector2.Lerp(aPlus, bPlus, 0.64f), forward, shadow, core, arrowSize);
+        DrawArrowHead(draw, Num.Vector2.Lerp(aMinus, bMinus, 0.36f), -forward, shadow, core, arrowSize);
+        return true;
+    }
+
+    private static void DrawArrowHead(
+        ImDrawListPtr draw,
+        Num.Vector2 tip,
+        Num.Vector2 direction,
+        uint shadow,
+        uint core,
+        float size)
+    {
+        float length = direction.Length();
+        if (length <= 0.001f) return;
+        Num.Vector2 forward = direction / length;
+        Num.Vector2 normal = new(-forward.Y, forward.X);
+        DrawArrowTriangle(draw, tip, forward, normal, shadow, size + 2.4f);
+        DrawArrowTriangle(draw, tip, forward, normal, core, size);
+    }
+
+    private static void DrawArrowTriangle(
+        ImDrawListPtr draw,
+        Num.Vector2 tip,
+        Num.Vector2 forward,
+        Num.Vector2 normal,
+        uint color,
+        float size)
+    {
+        Num.Vector2 baseCenter = tip - forward * size;
+        float wing = size * 0.58f;
+        draw.AddTriangleFilled(tip, baseCenter + normal * wing, baseCenter - normal * wing, color);
     }
 }

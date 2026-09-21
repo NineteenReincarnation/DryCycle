@@ -1,4 +1,5 @@
 using System;
+using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -761,4 +762,70 @@ internal static class PlayerMapWorkspaceView
 
     private static Num.Vector2 ToNum(Vector2 value) => new(value.x, value.y);
     private static Vector2 ToUnity(Num.Vector2 value) => new(value.X, value.Y);
+}
+
+internal static class PlayerMapWorkspaceIntegration
+{
+    private static ManualLogSource log;
+    private static bool enabled;
+    private static bool playerMapActive;
+
+    internal static bool Active => enabled && playerMapActive;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        log = logger;
+        logger?.LogInfo("Player Map integrated into World Workspace through direct view calls; no self-detour attached.");
+    }
+
+    internal static void Disable()
+    {
+        playerMapActive = false;
+        PlayerMapActivityGate.Reset();
+        enabled = false;
+        log = null;
+    }
+
+    internal static void DrawToolbar(
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!enabled || snapshot?.Available != true) return;
+
+        if (playerMapActive && WorldWorkspaceView.WorkspaceModeValue != 0)
+        {
+            playerMapActive = false;
+            PlayerMapActivityGate.Reset();
+        }
+
+        ImGui.SameLine(0f, 8f);
+        string label = playerMapActive
+            ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
+            : DevToolUiSettings.T("玩家地图", "Player Map");
+        if (DevToolWidgets.ActionButton(
+                label,
+                "WorldWorkspacePlayerMap",
+                playerMapActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            playerMapActive = !playerMapActive;
+            if (playerMapActive)
+                WorldWorkspaceView.WorkspaceModeValue = 0;
+            else
+                PlayerMapActivityGate.Reset();
+        }
+    }
+
+    internal static bool DrawBodyIfActive(
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!enabled || !playerMapActive)
+            return false;
+
+        PlayerMapActivityGate.MarkVisible();
+        PlayerMapWorkspaceView.DrawBody(editor, snapshot);
+        return true;
+    }
 }

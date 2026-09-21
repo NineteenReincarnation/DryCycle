@@ -61,6 +61,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapImGuiPresentationFallback.Enable", () => WorldMapImGuiPresentationFallback.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPresentationCorrectness.Enable", () => WorldMapPresentationCorrectness.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRenderOrder.Enable", () => WorldMapRenderOrder.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapThumbnailVisibility.Enable", () => WorldMapThumbnailVisibility.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPipeLayers.Enable", () => WorldMapPipeLayers.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/PlayerMapFrontendLifecycle.Enable", () => PlayerMapFrontendLifecycle.Enable(Logger));
 
             // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
             // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -88,6 +93,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
         WorldMapImGuiPresentationFallback.LateUpdate();
+        WorldMapPresentationCorrectness.LateUpdate();
     }
 
     private void OnApplicationFocus(bool hasFocus)
@@ -244,6 +250,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
         SafeFrontendCleanup("world map presentation fallback", WorldMapImGuiPresentationFallback.Disable);
+        SafeFrontendCleanup("world map presentation correctness", WorldMapPresentationCorrectness.Disable);
+        SafeFrontendCleanup("world map render order", WorldMapRenderOrder.Disable);
+        SafeFrontendCleanup("world map thumbnail visibility", WorldMapThumbnailVisibility.Disable);
+        SafeFrontendCleanup("world map pipe layers", WorldMapPipeLayers.Disable);
+        SafeFrontendCleanup("player map frontend lifecycle", PlayerMapFrontendLifecycle.Disable);
         SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }
