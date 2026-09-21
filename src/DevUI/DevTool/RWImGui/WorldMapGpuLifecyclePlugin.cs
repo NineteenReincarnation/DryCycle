@@ -26,7 +26,13 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
     private bool observedLiveSession;
     private bool runtimeSuspendedForDormantSession;
 
-    private void OnEnable()
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            InitializeState,
+            Shutdown);
+
+    private void InitializeState()
     {
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
@@ -127,7 +133,12 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
         WorldMapGpuStableCacheGate.Enable(Logger);
     }
 
-    private void OnDisable()
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            Shutdown);
+
+    private void Shutdown()
     {
         // Plugin shutdown can arrive in any component order. Hide presentation immediately; the
         // owning plugin runtimes perform their own idempotent final Disable calls afterwards.
