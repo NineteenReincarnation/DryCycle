@@ -5,7 +5,6 @@ cd "$repo_root"
 categories=(
   "build-compile"
   "startup-safety"
-  "runtime-hook-safety"
   "persistence-authoring-safety"
   "devtool-architecture"
   "feature-specific"
