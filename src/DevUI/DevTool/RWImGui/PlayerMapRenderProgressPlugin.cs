@@ -21,8 +21,15 @@ public sealed class PlayerMapRenderProgressPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Render Progress";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => PlayerMapRenderProgressView.Enable(Logger);
-    private void OnDisable() => PlayerMapRenderProgressView.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapRenderProgressView.Enable(Logger),
+            PlayerMapRenderProgressView.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapRenderProgressView.Disable);
 }
 
 internal static class PlayerMapRenderProgressView
