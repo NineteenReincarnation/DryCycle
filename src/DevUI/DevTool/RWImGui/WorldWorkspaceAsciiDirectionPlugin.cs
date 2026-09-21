@@ -15,5 +15,9 @@ public sealed class WorldWorkspaceAsciiDirectionPlugin : BaseUnityPlugin
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
     private void OnEnable() =>
-        Logger?.LogInfo("World Workspace ASCII direction labels are integrated directly into the view; no self-detours attached.");
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => Logger?.LogInfo(
+                "World Workspace ASCII direction labels are integrated directly into the view; no self-detours attached."),
+            null);
 }
