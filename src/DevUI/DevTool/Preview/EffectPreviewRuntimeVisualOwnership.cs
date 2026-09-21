@@ -22,24 +22,16 @@ internal static class EffectPreviewRuntimeVisualOwnership
     {
         if (enabled) return;
 
-        // RuntimeDetour-based FContainer interception was removed. Advanced preview is currently
-        // gated off by EffectPreviewRuntime; keep only the HookGen Room.AddObject boundary here so
-        // a future advanced implementation cannot silently reinstall process-level detours.
-        On.Room.AddObject += Room_AddObject;
+        // Room.AddObject ownership belongs exclusively to EffectPreviewObjectCapture. This layer is
+        // a pure safety/journal service and receives newly-owned runtime objects by direct call.
         enabled = true;
     }
 
     internal static void Disable()
     {
-        if (!enabled)
-        {
-            active = null;
-            return;
-        }
-
         active = null;
-        On.Room.AddObject -= Room_AddObject;
         RuntimeCameraUsageScanner.Clear();
+        RuntimeMutationSafetyScanner.Clear();
         enabled = false;
     }
 
@@ -83,6 +75,9 @@ internal static class EffectPreviewRuntimeVisualOwnership
         if (owned.Count == 0)
             return true;
 
+        if (!RuntimeMutationSafetyScanner.TryValidate(owned, out failureReason))
+            return false;
+
         if (!RuntimeCameraUsageScanner.TryCreateJournal(
                 room,
                 owned,
@@ -108,23 +103,21 @@ internal static class EffectPreviewRuntimeVisualOwnership
 
     internal static void DetachWithoutRollback() => active = null;
 
-    private static void Room_AddObject(
-        On.Room.orig_AddObject orig,
-        global::Room self,
-        UpdatableAndDeletable obj)
+    internal static bool TryAdoptRuntimeObject(
+        UpdatableAndDeletable obj,
+        out string failureReason)
     {
+        failureReason = string.Empty;
         RuntimeSession session = active;
-        bool propagate = session != null && session.IsOwnedExecution(self);
+        if (session == null || obj == null)
+            return true;
 
-        orig(self, obj);
+        session.AdoptRuntimeObject(obj);
+        if (!session.RequiresAbort)
+            return true;
 
-        if (!propagate || obj == null || obj is PhysicalObject || session == null ||
-            !ReferenceEquals(self, session.Room))
-            return;
-
-        bool attached = ReferenceEquals(obj.room, self) || ContainsReference(self.updateList, obj);
-        if (attached)
-            session.AdoptRuntimeObject(obj);
+        failureReason = session.AbortReason;
+        return false;
     }
 
     private static bool ContainsReference(List<UpdatableAndDeletable> values, UpdatableAndDeletable target)
@@ -166,6 +159,12 @@ internal static class EffectPreviewRuntimeVisualOwnership
         internal void AdoptRuntimeObject(UpdatableAndDeletable obj)
         {
             if (obj == null || !ownedRuntimeObjects.Add(obj)) return;
+
+            if (!RuntimeMutationSafetyScanner.TryValidateType(obj.GetType(), out string mutationReason))
+            {
+                MarkAbort("preview descendant is not runtime-safe: " + mutationReason);
+                return;
+            }
 
             if (!cameraJournal.TryAdoptType(obj.GetType(), ownedRuntimeObjects, out string reason))
                 MarkAbort("preview descendant cannot be safely journaled: " + reason);
