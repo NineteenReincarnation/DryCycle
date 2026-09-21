@@ -53,10 +53,19 @@ internal static class WalkableDynamicSurfaceRuntime
     internal static void Enable()
     {
         if (enabled) return;
-        On.Player.Jump += Player_Jump;
-        On.Player.MovementUpdate += Player_MovementUpdate;
-        On.Room.Update += Room_Update;
+
         enabled = true;
+        try
+        {
+            On.Player.Jump += Player_Jump;
+            On.Player.MovementUpdate += Player_MovementUpdate;
+            On.Room.Update += Room_Update;
+        }
+        catch
+        {
+            Disable();
+            throw;
+        }
     }
 
     internal static void Disable()
