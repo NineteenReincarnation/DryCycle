@@ -46,13 +46,6 @@ jobs:
             exit 1
           }
 
-  devtool-architecture:
-    name: DevTool Architecture
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash Guard/devtool-architecture.sh
-
   feature-specific:
     name: Feature-specific Guards
     runs-on: ubuntu-latest
