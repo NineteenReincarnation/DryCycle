@@ -279,19 +279,11 @@ internal static class WorldTopologyRegistry
             return false;
         }
 
-        string temp = path + ".tmp";
         try
         {
-            string directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-            File.WriteAllText(temp, Json.Serialize(BuildJsonRoot()));
-            if (File.Exists(path))
-            {
-                File.Copy(path, path + ".bak", overwrite: true);
-                File.Delete(path);
-            }
-            File.Move(temp, path);
+            WorldAuthoringPathResolver.AtomicWriteAllText(
+                path,
+                Json.Serialize(BuildJsonRoot()));
 
             LoadedPath = path;
             Dirty = false;
@@ -302,7 +294,6 @@ internal static class WorldTopologyRegistry
         catch (Exception ex)
         {
             global::DryCycle.Plugin.Logger?.LogError("WorldTopology save failed: " + ex);
-            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
             return false;
         }
     }
