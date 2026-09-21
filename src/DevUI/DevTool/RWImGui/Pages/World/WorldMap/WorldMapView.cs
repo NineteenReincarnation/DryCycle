@@ -1136,7 +1136,7 @@ internal static class WorldMapView
         float coreThickness)
     {
         Num.Vector2 forward = b - a;
-        float size = Math.Min(forward.Length() * 0.28f, Math.Max(12f, Math.Min(14f, 10f + coreThickness * 0.55f)));
+        float size = Math.Min(forward.Length() * 0.30f, Math.Max(13f, Math.Min(15.5f, 11f + coreThickness * 0.60f)));
         switch (direction)
         {
             case WorldConnectionDirection.AToB:
@@ -1622,36 +1622,21 @@ internal static class WorldMapPresentationCorrectness
 
         Num.Vector2 delta = b - a;
         float length = delta.Length();
-        if (length < 34f)
-        {
-            draw.AddLine(a, b, shadow, shadowThickness);
-            draw.AddLine(a, b, core, coreThickness);
-            return true;
-        }
+        if (length <= 0.001f) return true;
 
-        Num.Vector2 forward = delta / length;
-        Num.Vector2 normal = new(-forward.Y, forward.X);
-        float railOffset = Math.Max(2f, coreThickness * 0.72f);
-        float railThickness = Math.Max(1.6f, coreThickness * 0.72f);
-        float lead = Math.Min(18f, Math.Max(9f, length * 0.12f));
-        Num.Vector2 splitA = a + forward * lead;
-        Num.Vector2 splitB = b - forward * lead;
-        Num.Vector2 aPlus = splitA + normal * railOffset;
-        Num.Vector2 aMinus = splitA - normal * railOffset;
-        Num.Vector2 bPlus = splitB + normal * railOffset;
-        Num.Vector2 bMinus = splitB - normal * railOffset;
-
+        // Bidirectional links use the same single stroke as routed links. Opposing arrowheads carry
+        // the semantics; parallel rails looked like duplicated/overlapping connections at a glance.
         draw.AddLine(a, b, shadow, shadowThickness);
-        draw.AddLine(a, aPlus, core, railThickness);
-        draw.AddLine(a, aMinus, core, railThickness);
-        draw.AddLine(aPlus, bPlus, core, railThickness);
-        draw.AddLine(aMinus, bMinus, core, railThickness);
-        draw.AddLine(bPlus, b, core, railThickness);
-        draw.AddLine(bMinus, b, core, railThickness);
-
-        float arrowSize = Math.Min((length - lead * 2f) * 0.40f, Math.Max(12f, Math.Min(14f, 10f + coreThickness * 0.55f)));
-        DrawArrowHead(draw, Num.Vector2.Lerp(aPlus, bPlus, 0.64f), forward, shadow, core, arrowSize);
-        DrawArrowHead(draw, Num.Vector2.Lerp(aMinus, bMinus, 0.36f), -forward, shadow, core, arrowSize);
+        draw.AddLine(a, b, core, coreThickness);
+        if (length >= 25f)
+        {
+            float arrowSize = Math.Min(
+                length * 0.30f,
+                Math.Max(13f, Math.Min(15.5f, 11f + coreThickness * 0.60f)));
+            Num.Vector2 forward = delta / length;
+            DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.35f), -forward, shadow, core, arrowSize);
+            DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.65f), forward, shadow, core, arrowSize);
+        }
         return true;
     }
 

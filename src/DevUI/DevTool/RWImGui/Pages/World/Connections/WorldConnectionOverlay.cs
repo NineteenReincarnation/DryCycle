@@ -465,7 +465,7 @@ internal static class WorldConnectionOverlay
             DrawPolyline(draw, path, core, coreThickness);
         }
 
-        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 14f : 12f);
+        DrawDirectionArrows(draw, path, entry.Connection.Direction, shadow, core, focused ? 15.5f : 13f);
 
         if (!dimmed)
         {
@@ -573,22 +573,23 @@ internal static class WorldConnectionOverlay
     {
         float length = WorldConnectionRouter.PathLength(path);
         if (path.Length < 2 || length < 24f) return;
-        // Keep the larger arrowheads inside short links and away from the endpoint sockets.
-        size = Math.Min(size, length * (direction == WorldConnectionDirection.Bidirectional ? 0.28f : 0.42f));
 
-        switch (direction)
+        size = Math.Min(size, length * (direction == WorldConnectionDirection.Bidirectional ? 0.28f : 0.42f));
+        if (direction == WorldConnectionDirection.Bidirectional)
         {
-            case WorldConnectionDirection.AToB:
-                DrawArrowAt(draw, path, 0.58f, false, shadow, core, size);
-                break;
-            case WorldConnectionDirection.BToA:
-                DrawArrowAt(draw, path, 0.42f, true, shadow, core, size);
-                break;
-            default:
-                // Opposing arrows belong to the stroke itself, including short room-to-room links.
-                DrawArrowAt(draw, path, 0.35f, true, shadow, core, size);
-                DrawArrowAt(draw, path, 0.65f, false, shadow, core, size);
-                break;
+            // Two large in-stroke arrows make both travel directions explicit without a text badge.
+            DrawArrowAt(draw, path, 0.35f, true, shadow, core, size);
+            DrawArrowAt(draw, path, 0.65f, false, shadow, core, size);
+            return;
+        }
+
+        // Long routes get repeated direction marks so a bend or crossing cannot hide the only arrow.
+        int arrowCount = length >= 360f ? 3 : length >= 190f ? 2 : 1;
+        bool reverse = direction == WorldConnectionDirection.BToA;
+        for (int i = 0; i < arrowCount; i++)
+        {
+            float fraction = (i + 1f) / (arrowCount + 1f);
+            DrawArrowAt(draw, path, fraction, reverse, shadow, core, size);
         }
     }
 

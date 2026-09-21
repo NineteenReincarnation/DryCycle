@@ -26,8 +26,8 @@ internal static class WorldMapGpuScene
     private const float RouteGridSize = 256f;
     private const float LaneSpacing = 9f;
     private const float MaxLaneOffset = 27f;
-    private const float ArrowSpacing = 72f;
-    private const float ArrowSize = 12f;
+    private const float ArrowSpacing = 180f;
+    private const float ArrowSize = 13f;
     private const float CrossingRadius = 7f;
     private const float CrossingRise = 5.5f;
 
@@ -1265,21 +1265,17 @@ internal static class WorldMapGpuScene
             if (points.Length < 2) continue;
             Color32 color = ConnectionColor(entry.Connection);
 
+            AddPolyline(vertices, colors, indices, points, color, entry.Connection.Ambiguous);
             if (entry.Connection.Direction == WorldConnectionDirection.Bidirectional)
             {
-                Num.Vector2[] left = OffsetPath(points, -2.3f);
-                Num.Vector2[] right = OffsetPath(points, 2.3f);
-                AddPolyline(vertices, colors, indices, left, color, false);
-                AddPolyline(vertices, colors, indices, right, color, false);
-                AddArrow(vertices, colors, indices, left, 0.58f, false, color);
-                AddArrow(vertices, colors, indices, right, 0.42f, true, color);
+                AddArrow(vertices, colors, indices, points, 0.35f, true, color);
+                AddArrow(vertices, colors, indices, points, 0.65f, false, color);
             }
             else
             {
                 bool reverse = entry.Connection.Direction == WorldConnectionDirection.BToA;
-                AddPolyline(vertices, colors, indices, points, color, entry.Connection.Ambiguous);
                 float length = PolylineLength(points);
-                int arrows = Math.Max(1, (int)(length / ArrowSpacing));
+                int arrows = Math.Max(1, Math.Min(3, (int)Math.Ceiling(length / ArrowSpacing)));
                 for (int a = 1; a <= arrows; a++)
                     AddArrow(vertices, colors, indices, points, a / (float)(arrows + 1), reverse, color);
             }
