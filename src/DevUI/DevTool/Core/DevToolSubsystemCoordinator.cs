@@ -9,6 +9,7 @@ using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
 using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
+using DryCycle.DevUI.DevTool.World;
 
 namespace DryCycle.DevUI.DevTool.Core;
 
@@ -104,6 +105,7 @@ internal static class DevToolSubsystemCoordinator
         ClearDetailPresentations();
         ResetWorkspaceState();
         ResetPresentationHints();
+        WorldRoomAttractionRegistry.ResetIfClean();
         EditorRevisionHub.Reset();
         DevToolSessionHub.Reset();
         DevToolPerformanceMonitor.SetEnabled(false);
