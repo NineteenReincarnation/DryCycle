@@ -4,8 +4,8 @@ DryCycle 的 Guard 统一放在这里。Guard 只保护能够长期、客观、�
 
 ## 当前结构
 
-- `build-compile.sh`：构建契约、C# 语法、部署隔离和可选前端依赖方向。
-- `tools/devtool-local.ps1`：需要本地 Rain World 环境的 DevTool 验证工具，不是独立 Guard 类别。
+- `build-safety.sh`：CI 可执行的 C# 语法验证、直接部署写入安全检查和构建依赖方向检查。
+- `tools/local-build.ps1`：使用真实 Rain World 引用进行隔离编译的本地高保真验证工具，不是独立 Guard 类别。
 - `run-all.sh`：本地统一入口。
 
 功能行为、存档兼容、作者格式兼容、启动/回滚语义和性能预算应通过对应测试、真实构建、游戏运行或性能分析验证，不放进按功能增长的字符串 Guard。
@@ -16,7 +16,7 @@ GitHub Actions 入口位于：
 
 `.github/workflows/guard.yml`
 
-CI 只调用当前有效的 Guard 和可在托管环境执行的验证。需要真实 Rain World 程序集、游戏启动或运行时环境的检查，应保留为本地或专门的高保真验证步骤，不用伪造环境换取表面通过。
+CI 只调用当前有效的静态 Build Safety Guard 和可在托管环境执行的验证；C# 语法解析不等同于完整项目编译。需要真实 Rain World 程序集、游戏启动或运行时环境的检查，应保留为本地或专门的高保真验证步骤，不用伪造环境换取表面通过。
 
 ## 原则
 
