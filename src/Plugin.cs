@@ -124,11 +124,11 @@ internal sealed class Plugin : BaseUnityPlugin
         LanceScavengerAssets.Unload();
         CreatureCoreRegistry.Disable();
         DryCycleContent.Disable();
-        StartupDiagnostics.Step("RainWorld.PreModsInit/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
-        StartupDiagnostics.Step("RainWorld.PreModsInit/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
+        SafeBootstrapCleanup("OnDisable/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
+        SafeBootstrapCleanup("OnDisable/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
+        SafeBootstrapCleanup("OnDisable/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
         SpinebackLizardHooks.Disable();
-        StartupDiagnostics.Step("RainWorld.PreModsInit/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
+        SafeBootstrapCleanup("OnDisable/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
 
         // PaletteDirectInputRuntime is installed from OnEnable, so always remove it even when
         // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
@@ -245,10 +245,10 @@ internal sealed class Plugin : BaseUnityPlugin
         StartupDiagnostics.Marker("RainWorld.PreModsInit", "ENTER");
         StartupDiagnostics.Step("RainWorld.PreModsInit/BeforePreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseBeforePreModsInit(self));
         StartupDiagnostics.Step("RainWorld.PreModsInit/ScavengerLanceDevConsoleSupport.ResetRegistration", ScavengerLanceDevConsoleSupport.ResetRegistration);
-        CreatureDevConsoleSupport.ResetRegistration();
-        RopeSpearDevConsoleSupport.ResetRegistration();
-        KarmaSpearDevConsoleSupport.ResetRegistration();
-        SpinebackLizardDevConsoleSupport.ResetRegistration();
+        StartupDiagnostics.Step("RainWorld.PreModsInit/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
+        StartupDiagnostics.Step("RainWorld.PreModsInit/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
         TryInitializeSlugBaseHydrationFeatures();
         StartupDiagnostics.Step("RainWorld.PreModsInit/orig", () => orig(self));
         StartupDiagnostics.Step("RainWorld.PreModsInit/AfterPreModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterPreModsInit(self));
@@ -362,6 +362,7 @@ internal sealed class Plugin : BaseUnityPlugin
             StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ROLLED-BACK");
             return;
         }
+    }
 
     private static void TryInitializeSlugBaseHydrationFeatures()
     {
@@ -441,11 +442,11 @@ internal sealed class Plugin : BaseUnityPlugin
     {
         StartupDiagnostics.Marker("RainWorld.PostModsInit", "ENTER");
         StartupDiagnostics.Step("RainWorld.PostModsInit/orig", () => orig(self));
-        StartupDiagnostics.Optional("RainWorld.PostModsInit/CreatureDevConsoleSupport.TryRegisterAll", CreatureDevConsoleSupport.TryRegisterAll);
-        StartupDiagnostics.Optional("RainWorld.PostModsInit/ScavengerLanceDevConsoleSupport.TryRegister", ScavengerLanceDevConsoleSupport.TryRegister);
-        StartupDiagnostics.Optional("RainWorld.PostModsInit/RopeSpearDevConsoleSupport.TryRegister", RopeSpearDevConsoleSupport.TryRegister);
-        StartupDiagnostics.Optional("RainWorld.PostModsInit/KarmaSpearDevConsoleSupport.TryRegister", KarmaSpearDevConsoleSupport.TryRegister);
-        StartupDiagnostics.Optional("RainWorld.PostModsInit/SpinebackLizardDevConsoleSupport.TryRegister", SpinebackLizardDevConsoleSupport.TryRegister);
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/CreatureDevConsoleSupport.TryRegisterAll", () => CreatureDevConsoleSupport.TryRegisterAll());
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/ScavengerLanceDevConsoleSupport.TryRegister", () => ScavengerLanceDevConsoleSupport.TryRegister());
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/RopeSpearDevConsoleSupport.TryRegister", () => RopeSpearDevConsoleSupport.TryRegister());
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/KarmaSpearDevConsoleSupport.TryRegister", () => KarmaSpearDevConsoleSupport.TryRegister());
+        StartupDiagnostics.Optional("RainWorld.PostModsInit/SpinebackLizardDevConsoleSupport.TryRegister", () => SpinebackLizardDevConsoleSupport.TryRegister());
         StartupDiagnostics.Marker("RainWorld.PostModsInit", "EXIT");
     }
 }
