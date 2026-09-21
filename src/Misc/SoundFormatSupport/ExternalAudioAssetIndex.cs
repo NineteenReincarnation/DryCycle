@@ -17,16 +17,16 @@ internal static class ExternalAudioAssetIndex
     private const int MaxVariations = 100;
     private static readonly object Gate = new();
 
-    private static Dictionary<string, ResolvedAudioFile> soundEffects =
+    private static volatile Dictionary<string, ResolvedAudioFile> soundEffects =
         new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, ResolvedAudioFile> loadedSoundEffects =
+    private static volatile Dictionary<string, ResolvedAudioFile> loadedSoundEffects =
         new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, ResolvedAudioFile> loadedAmbientByStem =
+    private static volatile Dictionary<string, ResolvedAudioFile> loadedAmbientByStem =
         new(StringComparer.OrdinalIgnoreCase);
-    private static Dictionary<string, ResolvedAudioFile> loadedAmbientByFileName =
+    private static volatile Dictionary<string, ResolvedAudioFile> loadedAmbientByFileName =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private static bool ready;
+    private static volatile bool ready;
     private static int generation;
 
     internal static int Generation
@@ -43,19 +43,16 @@ internal static class ExternalAudioAssetIndex
 
         try
         {
-            ExternalAudioFormat[] formats = ExternalAudioFormatRegistry.SnapshotFormats();
-
             Dictionary<string, ResolvedAudioFile> nextSoundEffects =
-                ScanDirectory("SoundEffects", moddedOnly: false, formats, includeFileNameIndex: false, out _);
+                ScanDirectory("SoundEffects", moddedOnly: false, includeFileNameIndex: false, out _);
 
             Dictionary<string, ResolvedAudioFile> nextLoadedSoundEffects =
-                ScanDirectory("LoadedSoundEffects", moddedOnly: true, formats, includeFileNameIndex: false, out _);
+                ScanDirectory("LoadedSoundEffects", moddedOnly: true, includeFileNameIndex: false, out _);
 
             Dictionary<string, ResolvedAudioFile> nextLoadedAmbient =
                 ScanDirectory(
                     Path.Combine("LoadedSoundEffects", "Ambient"),
                     moddedOnly: true,
-                    formats,
                     includeFileNameIndex: true,
                     out Dictionary<string, ResolvedAudioFile> nextLoadedAmbientByFileName);
 
@@ -109,54 +106,49 @@ internal static class ExternalAudioAssetIndex
         out ResolvedAudioFile file)
     {
         file = default;
-        if (string.IsNullOrWhiteSpace(logicalName) || oneBasedVariation < 1 || !IsReady())
+        if (string.IsNullOrWhiteSpace(logicalName) || oneBasedVariation < 1 || !ready)
             return false;
 
         string stem = logicalName.Trim();
-        lock (Gate)
+        Dictionary<string, ResolvedAudioFile> snapshot = soundEffects;
+        if (oneBasedVariation == 1)
         {
-            if (oneBasedVariation == 1)
-            {
-                if (soundEffects.TryGetValue(stem + "_1", out file)) return true;
-                return soundEffects.TryGetValue(stem, out file);
-            }
-
-            return soundEffects.TryGetValue(stem + "_" + oneBasedVariation, out file);
+            if (snapshot.TryGetValue(stem + "_1", out file)) return true;
+            return snapshot.TryGetValue(stem, out file);
         }
+
+        return snapshot.TryGetValue(stem + "_" + oneBasedVariation, out file);
     }
 
     internal static int CountSoundEffectVariations(string logicalName)
     {
-        if (string.IsNullOrWhiteSpace(logicalName) || !IsReady()) return 0;
+        if (string.IsNullOrWhiteSpace(logicalName) || !ready) return 0;
         string stem = logicalName.Trim();
+        Dictionary<string, ResolvedAudioFile> snapshot = soundEffects;
 
-        lock (Gate)
+        if (!snapshot.ContainsKey(stem + "_1") && !snapshot.ContainsKey(stem))
+            return 0;
+
+        int count = 1;
+        for (int variation = 2; variation <= MaxVariations; variation++)
         {
-            if (!soundEffects.ContainsKey(stem + "_1") && !soundEffects.ContainsKey(stem))
-                return 0;
-
-            int count = 1;
-            for (int variation = 2; variation <= MaxVariations; variation++)
-            {
-                if (!soundEffects.ContainsKey(stem + "_" + variation)) break;
-                count++;
-            }
-            return count;
+            if (!snapshot.ContainsKey(stem + "_" + variation)) break;
+            count++;
         }
+        return count;
     }
 
     internal static bool TryResolveLoadedSoundEffect(string selectedStem, out ResolvedAudioFile file)
     {
         file = default;
-        if (string.IsNullOrWhiteSpace(selectedStem) || !IsReady()) return false;
-        lock (Gate)
-            return loadedSoundEffects.TryGetValue(selectedStem.Trim(), out file);
+        if (string.IsNullOrWhiteSpace(selectedStem) || !ready) return false;
+        return loadedSoundEffects.TryGetValue(selectedStem.Trim(), out file);
     }
 
     internal static bool TryResolveLoadedAmbient(string clipName, out ResolvedAudioFile file)
     {
         file = default;
-        if (string.IsNullOrWhiteSpace(clipName) || !IsReady()) return false;
+        if (string.IsNullOrWhiteSpace(clipName) || !ready) return false;
 
         string fileName;
         string extension;
@@ -170,19 +162,16 @@ internal static class ExternalAudioAssetIndex
             return false;
         }
 
-        lock (Gate)
-        {
-            if (!string.IsNullOrEmpty(extension) &&
-                loadedAmbientByFileName.TryGetValue(fileName, out file))
-                return true;
+        Dictionary<string, ResolvedAudioFile> byFileName = loadedAmbientByFileName;
+        if (!string.IsNullOrEmpty(extension) && byFileName.TryGetValue(fileName, out file))
+            return true;
 
-            string stem;
-            try { stem = Path.GetFileNameWithoutExtension(fileName); }
-            catch { return false; }
+        string stem;
+        try { stem = Path.GetFileNameWithoutExtension(fileName); }
+        catch { return false; }
 
-            if (string.IsNullOrWhiteSpace(stem)) stem = fileName;
-            return loadedAmbientByStem.TryGetValue(stem, out file);
-        }
+        if (string.IsNullOrWhiteSpace(stem)) stem = fileName;
+        return loadedAmbientByStem.TryGetValue(stem, out file);
     }
 
     internal static bool IsPreferredSoundEffectPath(
@@ -194,15 +183,9 @@ internal static class ExternalAudioAssetIndex
                ExternalAudioFormatRegistry.PathsEqual(path, preferred.Path);
     }
 
-    private static bool IsReady()
-    {
-        lock (Gate) return ready;
-    }
-
     private static Dictionary<string, ResolvedAudioFile> ScanDirectory(
         string relativeDirectory,
         bool moddedOnly,
-        ExternalAudioFormat[] formats,
         bool includeFileNameIndex,
         out Dictionary<string, ResolvedAudioFile> byFileName)
     {
@@ -217,9 +200,9 @@ internal static class ExternalAudioAssetIndex
         // names. We preserve that ownership model rather than inventing a second mod resolver.
         string[] files = AssetManager.ListDirectory(
             relativeDirectory,
-            directories: false,
-            includeAll: false,
-            moddedOnly: moddedOnly);
+            false,
+            false,
+            moddedOnly);
 
         for (int i = 0; i < files.Length; i++)
         {
