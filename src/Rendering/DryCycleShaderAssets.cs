@@ -91,8 +91,25 @@ internal static class DryCycleShaderAssets
             return;
         }
 
-        On.RainWorld.LoadResources += RainWorld_LoadResources;
         _enabled = true;
+        try
+        {
+            On.RainWorld.LoadResources += RainWorld_LoadResources;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "DryCycleShaderAssets.Enable",
+                error,
+                () =>
+                {
+                    global::DryCycle.StartupDiagnostics.RollbackStep(
+                        "DryCycleShaderAssets.Enable/RainWorld.LoadResources",
+                        () => On.RainWorld.LoadResources -= RainWorld_LoadResources);
+                    _enabled = false;
+                });
+            throw;
+        }
     }
 
     internal static void Disable()
@@ -131,28 +148,25 @@ internal static class DryCycleShaderAssets
             return;
         }
 
-        string path = ResolveWeatherAssetPath(BundleRelativePath);
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-        {
-            if (!_missingBundleLogged)
-            {
-                _missingBundleLogged = true;
-                Plugin.Logger?.LogWarning(
-                    $"DryCycle weather AssetBundle not found at '{path}'. " +
-                    "Fog will use the compatibility renderer. HeatWave will retain " +
-                    "Rain World's LevelHeat core, while IntenseHeat will retain its " +
-                    "gameplay solar hazard but custom atmosphere passes remain " +
-                    "unavailable until " +
-                    $"'{BundleRelativePath}' is built and installed. " +
-                    $"Runtime Unity version: {Application.unityVersion}.");
-            }
-            return;
-        }
-
-        LogEditorPlayerVersionRelationship();
-
         try
         {
+            string path = ResolveWeatherAssetPath(BundleRelativePath);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                if (!_missingBundleLogged)
+                {
+                    _missingBundleLogged = true;
+                    global::DryCycle.StartupDiagnostics.Marker(
+                        "DryCycleShaderAssets.TryLoad",
+                        "BUNDLE-MISSING",
+                        "path=" + (path ?? "<null>") +
+                        " runtimeUnity=" + Application.unityVersion);
+                }
+                return;
+            }
+
+            LogEditorPlayerVersionRelationship();
+
             _bundle = AssetBundle.LoadFromFile(path);
             if (_bundle == null)
             {
@@ -194,10 +208,13 @@ internal static class DryCycleShaderAssets
             HeatWaveAtmosphere = null;
             IntenseHeatAtmosphere = null;
             DehydrationComposite = null;
-            Plugin.Logger?.LogError(
-                "DryCycle failed to initialize custom weather shaders. " +
-                "Compatibility renderers will remain available where implemented.");
-            Plugin.Logger?.LogError(ex);
+            global::DryCycle.StartupDiagnostics.Failure(
+                "DryCycleShaderAssets.TryLoad",
+                ex);
+            global::DryCycle.StartupDiagnostics.Marker(
+                "DryCycleShaderAssets.TryLoad",
+                "ISOLATED",
+                "weather asset load failed; compatibility rendering remains active");
         }
     }
 
@@ -373,10 +390,20 @@ internal static class DryCycleShaderAssets
 
     private static string ResolveWeatherAssetPath(string relativePath)
     {
-        string resolvedPath = AssetManager.ResolveFilePath(relativePath);
-        if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+        string resolvedPath = null;
+        try
         {
-            return resolvedPath;
+            resolvedPath = AssetManager.ResolveFilePath(relativePath);
+            if (!string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath))
+            {
+                return resolvedPath;
+            }
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "DryCycleShaderAssets.Resolve/AssetManager/" + relativePath,
+                error);
         }
 
         try
@@ -403,11 +430,11 @@ internal static class DryCycleShaderAssets
                 directory = directory.Parent;
             }
         }
-        catch (Exception ex)
+        catch (Exception error)
         {
-            Plugin.Logger?.LogWarning(
-                $"DryCycle could not resolve mod-local weather asset " +
-                $"'{relativePath}': {ex.Message}");
+            global::DryCycle.StartupDiagnostics.Failure(
+                "DryCycleShaderAssets.Resolve/ModLocal/" + relativePath,
+                error);
         }
 
         return resolvedPath;
