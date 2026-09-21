@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Runtime.CompilerServices;
 using AssetBundles;
 using RWCustom;
 using UnityEngine;
@@ -14,7 +15,10 @@ namespace DryCycle.Misc.SoundFormatSupport;
 /// </summary>
 internal static class SoundFormatSupportRuntime
 {
+    private sealed class CustomOverrideMarker { }
+
     private static bool enabled;
+    private static ConditionalWeakTable<AudioClip, CustomOverrideMarker> customOverrides = new();
 
     internal static void Enable()
     {
@@ -28,7 +32,8 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
         On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
         On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
-        On.SoundLoader.ReleaseAllUnityAudio += SoundLoader_ReleaseAllUnityAudio;
+        On.VirtualMicrophone.SoundClipReady += VirtualMicrophone_SoundClipReady;
+        On.MenuMicrophone.SoundClipReady += MenuMicrophone_SoundClipReady;
 
         enabled = true;
         Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
@@ -39,6 +44,7 @@ internal static class SoundFormatSupportRuntime
         if (!enabled) return;
 
         RemoveOnHooks();
+        customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
         enabled = false;
     }
 
@@ -50,7 +56,8 @@ internal static class SoundFormatSupportRuntime
 
     private static void RemoveOnHooks()
     {
-        On.SoundLoader.ReleaseAllUnityAudio -= SoundLoader_ReleaseAllUnityAudio;
+        On.MenuMicrophone.SoundClipReady -= MenuMicrophone_SoundClipReady;
+        On.VirtualMicrophone.SoundClipReady -= VirtualMicrophone_SoundClipReady;
         On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds;
         On.SoundLoader.RequestAmbientAudioClip -= SoundLoader_RequestAmbientAudioClip;
         On.SoundLoader.VariationsForSound -= SoundLoader_VariationsForSound;
@@ -146,68 +153,79 @@ internal static class SoundFormatSupportRuntime
         HydrateLoadedSoundEffectOverrides(self);
     }
 
-    private static void SoundLoader_ReleaseAllUnityAudio(
-        On.SoundLoader.orig_ReleaseAllUnityAudio orig,
-        SoundLoader self)
+    private static bool VirtualMicrophone_SoundClipReady(
+        On.VirtualMicrophone.orig_SoundClipReady orig,
+        VirtualMicrophone self,
+        SoundLoader.SoundData soundData)
     {
-        orig(self);
+        HydrateLoadedSoundEffectOverride(self?.soundLoader, soundData.audioClip);
+        return orig(self, soundData);
+    }
 
-        // Rain World clears non-cached audioClipThroughUnity entries here. Rehydrate only the
-        // custom LoadedSoundEffects overrides afterwards so MP3/M4A/etc. remain available without
-        // reintroducing a GetAudioClip RuntimeDetour.
-        HydrateLoadedSoundEffectOverrides(self);
+    private static bool MenuMicrophone_SoundClipReady(
+        On.MenuMicrophone.orig_SoundClipReady orig,
+        MenuMicrophone self,
+        SoundLoader.SoundData soundData)
+    {
+        HydrateLoadedSoundEffectOverride(self?.soundLoader, soundData.audioClip);
+        return orig(self, soundData);
     }
 
     private static void HydrateLoadedSoundEffectOverrides(SoundLoader self)
     {
         if (self?.allAudio == null) return;
-
         for (int i = 0; i < self.allAudio.Length; i++)
+            HydrateLoadedSoundEffectOverride(self, i);
+    }
+
+    private static void HydrateLoadedSoundEffectOverride(SoundLoader self, int audioIndex)
+    {
+        if (self?.allAudio == null || audioIndex < 0 || audioIndex >= self.allAudio.Length)
+            return;
+
+        SoundLoader.ClipLoadData data = self.allAudio[audioIndex];
+        if (!data.audioClipThroughUnity || data.audio == null || data.audio.Length == 0)
+            return;
+
+        int variationCount = Math.Min(data.soundVariations, data.audio.Length);
+        for (int variationIndex = 0; variationIndex < variationCount; variationIndex++)
         {
-            SoundLoader.ClipLoadData data = self.allAudio[i];
-            if (!data.audioClipThroughUnity || data.audio == null || data.audio.Length == 0)
+            string logicalName = data.soundVariations > 1
+                ? data.name + "_" + (variationIndex + 1)
+                : data.name;
+
+            if (!ExternalAudioFormatRegistry.TryResolveLoadedSoundEffect(
+                    logicalName,
+                    out ResolvedAudioFile file) ||
+                IsVanillaLoadedOverrideFormat(file.Format))
                 continue;
 
-            int variationCount = Math.Min(data.soundVariations, data.audio.Length);
-            for (int variationIndex = 0; variationIndex < variationCount; variationIndex++)
+            AudioClip existing = data.audio[variationIndex];
+            if (existing != null && customOverrides.TryGetValue(existing, out _))
+                continue;
+
+            AudioClip clip = ExternalAudioLoader.LoadBlocking(
+                file,
+                logicalName,
+                stream: true,
+                out string error);
+            if (clip == null)
             {
-                string logicalName = data.soundVariations > 1
-                    ? data.name + "_" + (variationIndex + 1)
-                    : data.name;
+                LogDecodeFailure("LoadedSoundEffects", file.Path, error, self.errors);
+                continue;
+            }
 
-                if (!ExternalAudioFormatRegistry.TryResolveLoadedSoundEffect(
-                        logicalName,
-                        out ResolvedAudioFile file) ||
-                    IsVanillaLoadedOverrideFormat(file.Format))
-                    continue;
-
-                AudioClip existing = data.audio[variationIndex];
-                if (existing != null &&
-                    string.Equals(existing.name, logicalName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                AudioClip clip = ExternalAudioLoader.LoadBlocking(
-                    file,
-                    logicalName,
-                    stream: true,
-                    out string error);
-                if (clip == null)
-                {
-                    LogDecodeFailure("LoadedSoundEffects", file.Path, error, self.errors);
-                    continue;
-                }
-
-                self.allAudio[i].audio[variationIndex] = clip;
-                if (self.unityAudioLoaders != null &&
-                    i < self.unityAudioLoaders.Length &&
-                    self.unityAudioLoaders[i] != null &&
-                    variationIndex < self.unityAudioLoaders[i].Length)
-                {
-                    // LoadSounds may already have queued the AssetBundle version for cached sounds.
-                    // Drop our reference to that request so SoundLoader.Update cannot overwrite the
-                    // higher-priority loose custom-format clip after it finishes.
-                    self.unityAudioLoaders[i][variationIndex] = null;
-                }
+            customOverrides.Remove(clip);
+            customOverrides.Add(clip, new CustomOverrideMarker());
+            self.allAudio[audioIndex].audio[variationIndex] = clip;
+            if (self.unityAudioLoaders != null &&
+                audioIndex < self.unityAudioLoaders.Length &&
+                self.unityAudioLoaders[audioIndex] != null &&
+                variationIndex < self.unityAudioLoaders[audioIndex].Length)
+            {
+                // A cached AssetBundle request may already be queued. Drop our reference to it so
+                // SoundLoader.Update cannot overwrite the higher-priority loose custom-format clip.
+                self.unityAudioLoaders[audioIndex][variationIndex] = null;
             }
         }
     }
