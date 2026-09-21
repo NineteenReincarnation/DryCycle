@@ -22,8 +22,10 @@ internal static class AuxiliaryPluginStartupGuard
                 source,
                 "SKIP-PRIMARY-FAILED",
                 "primary DryCycle OnEnable rolled back; auxiliary startup suppressed");
-            Plugin.Logger?.LogWarning(
-                source + " was not started because the primary DryCycle bootstrap failed.");
+            StartupDiagnostics.Marker(
+                source,
+                "ISOLATED",
+                "auxiliary plugin remained disabled after primary bootstrap failure");
             return false;
         }
 
@@ -32,8 +34,10 @@ internal static class AuxiliaryPluginStartupGuard
             return true;
 
         StartupDiagnostics.RollbackStep(source + "/rollback", rollback);
-        Plugin.Logger?.LogWarning(
-            source + " failed and was isolated; Rain World startup will continue.");
+        StartupDiagnostics.Marker(
+            source,
+            "ISOLATED",
+            "auxiliary startup failed; Rain World startup will continue");
         return false;
     }
 
