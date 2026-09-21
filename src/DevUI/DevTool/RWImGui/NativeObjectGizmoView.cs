@@ -40,9 +40,13 @@ internal static class NativeObjectGizmoView
     }
 
     private static DragState drag;
+    private static bool claimedMouseThisFrame;
+
+    internal static bool OwnsMouse => drag.Active || claimedMouseThisFrame;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        claimedMouseThisFrame = false;
         EditorInspectorSnapshot inspector = snapshot?.Inspector;
         EditorObjectGizmoSnapshot gizmo = inspector?.ObjectGizmo;
         EditorViewportSnapshot viewport = EditorViewportPresentationHub.Current;
@@ -77,13 +81,15 @@ internal static class NativeObjectGizmoView
             return;
         }
 
-        if (io.WantCaptureMouse || !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        if (io.WantCaptureMouse || NativeSpatialGizmoView.OwnsMouse ||
+            !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             return;
 
         // Match vanilla BezierSplineControl semantics: Shift-click near a curve splits it, while
         // Ctrl/Command-click on a midpoint joins adjacent segments.
         if (io.KeyShift && nearestCurve != null)
         {
+            claimedMouseThisFrame = true;
             NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
                 NativeObjectGizmoEditKind.InsertCurvePoint,
                 gizmo.ObjectIndex,
@@ -94,6 +100,7 @@ internal static class NativeObjectGizmoView
 
         if (io.KeyCtrl && nearestHandle?.Removable == true)
         {
+            claimedMouseThisFrame = true;
             NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
                 NativeObjectGizmoEditKind.RemoveHandle,
                 gizmo.ObjectIndex,
@@ -104,6 +111,7 @@ internal static class NativeObjectGizmoView
         if (nearestHandle == null)
             return;
 
+        claimedMouseThisFrame = true;
         drag = new DragState
         {
             Active = true,
@@ -121,6 +129,7 @@ internal static class NativeObjectGizmoView
     {
         CancelIfOrphaned();
         drag = default;
+        claimedMouseThisFrame = false;
     }
 
     private static void ContinueDrag(
