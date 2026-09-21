@@ -44,6 +44,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        ObjectMarqueeSelectionView.Draw(snapshot, display);
         NativeSpatialGizmoView.DrawObjects(snapshot, display);
         NativeObjectGizmoView.Draw(snapshot, display);
     }
@@ -73,6 +74,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     {
         NativeSpatialGizmoView.ResetRetainedState();
         NativeObjectGizmoView.ResetRetainedState();
+        ObjectMarqueeSelectionView.Reset();
         ObjectExplorerView.ResetRetainedState();
         ObjectSceneWorkspaceView.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
