@@ -132,8 +132,10 @@ internal sealed class Plugin : BaseUnityPlugin
         {
             BootstrapFailed = true;
             StartupDiagnostics.Failure("Plugin.OnEnable", error);
-            Logger?.LogError(
-                "DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.");
+            StartupDiagnostics.Marker(
+                "Plugin.OnEnable",
+                "ROLLBACK-REQUESTED",
+                "partial hooks will be removed so Rain World can continue loading");
             RollbackBootstrap();
         }
     }
@@ -253,9 +255,10 @@ internal sealed class Plugin : BaseUnityPlugin
 
         if (!StartupDiagnostics.RollbackStep("Rollback/" + name, action))
         {
-            Logger?.LogWarning(
-                "DryCycle rollback step failed for '" + name +
-                "'. See the preceding [ROLLBACK-FAIL] startup entry for the full exception.");
+            StartupDiagnostics.Marker(
+                "Rollback/" + name,
+                "ROLLBACK-INCOMPLETE",
+                "see preceding ROLLBACK-FAIL entry for the full exception");
         }
     }
 
@@ -368,7 +371,10 @@ internal sealed class Plugin : BaseUnityPlugin
             StartupDiagnostics.Step("RainWorld.OnModsInit/MiscRuntime.Enable", MiscRuntime.Enable);
             _initialized = true;
             StartupDiagnostics.Optional("RainWorld.OnModsInit/AIDebuggerRuntime.Install", () => AIDebuggerRuntime.Install(self, Logger));
-            Logger.LogInfo($"{ModName} {Version}: systems enabled.");
+            StartupDiagnostics.Marker(
+                "RainWorld.OnModsInit",
+                "SYSTEMS-ENABLED",
+                ModName + " " + Version);
             StartupDiagnostics.Step("RainWorld.OnModsInit/AfterModsInit subscribers", () => DryCycleLifecycleEvents.RaiseAfterModsInit(self));
             StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT");
         }
@@ -377,7 +383,10 @@ internal sealed class Plugin : BaseUnityPlugin
             // Log the primary failure before any rollback work. If cleanup itself encounters a
             // secondary problem, the original startup source and full stack are already durable.
             StartupDiagnostics.Failure("RainWorld.OnModsInit/PostModTransaction", ex);
-            Logger.LogError("DryCycle post-mod initialization failed; the failing runtime transaction was rolled back so Rain World can continue loading.");
+            StartupDiagnostics.Marker(
+                "RainWorld.OnModsInit/PostModTransaction",
+                "ROLLBACK-REQUESTED",
+                "runtime transaction failed; cleanup will run before startup continues");
             RollbackRuntimeInitialization();
             StartupDiagnostics.Step("RainWorld.OnModsInit/AfterModsInit subscribers after rollback", () => DryCycleLifecycleEvents.RaiseAfterModsInit(self));
             StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ROLLED-BACK");
