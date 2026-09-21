@@ -26,9 +26,16 @@ public sealed class WorldConnectionRoutingPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Connection Routing";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldConnectionOverlay.Enable(Logger);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldConnectionOverlay.Enable(Logger),
+            WorldConnectionOverlay.Disable);
 
-    private void OnDisable() => WorldConnectionOverlay.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldConnectionOverlay.Disable);
 }
 
 internal static class WorldConnectionOverlay
