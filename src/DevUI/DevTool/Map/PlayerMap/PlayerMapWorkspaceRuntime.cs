@@ -450,11 +450,31 @@ internal static class PlayerMapWorkspaceRuntime
         {
             if (state.Dirty)
             {
-                state.RenderReport = PlayerMapRenderReport.Failure(
-                    "Unsaved Player Map belongs to another region",
+                string message =
                     "Unsaved authoring state for " + state.Region +
                     " is being retained. Return to that region and save or undo it before editing " +
-                    region + ".");
+                    region + ".";
+                state.RenderReport = PlayerMapRenderReport.Failure(
+                    "Unsaved Player Map belongs to another region",
+                    message);
+
+                if (state.Presentation.Available ||
+                    !string.Equals(state.Presentation.RegionName, region, StringComparison.OrdinalIgnoreCase))
+                {
+                    state.Revision = state.Revision >= long.MaxValue ? 1L : state.Revision + 1L;
+                    state.Presentation = new PlayerMapPresentationSnapshot
+                    {
+                        Available = false,
+                        RegionName = region,
+                        Dirty = true,
+                        Revision = state.Revision,
+                        SelectedRoomIndex = -1,
+                        Rooms = Array.Empty<PlayerMapRoomSnapshot>(),
+                        DefaultMaterials = Array.Empty<PlayerMapDefMaterialSnapshot>(),
+                        RenderReport = state.RenderReport,
+                        Preview = PlayerMapRenderPreview.Empty
+                    };
+                }
                 return false;
             }
 
