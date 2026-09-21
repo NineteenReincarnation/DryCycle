@@ -14,7 +14,7 @@ internal sealed class ConnectionRouteResource
     internal int ToRoomIndex;
     internal WorldConnectionDirection Direction;
     internal bool Ambiguous;
-    internal WorldConnectionRouter.RouteKind Kind;
+    internal WorldMapOrthogonalRouter.RouteKind Kind;
     internal Num.Vector2[] Points = Array.Empty<Num.Vector2>();
     internal Num.Vector2 StartDirection;
     internal Num.Vector2 EndDirection;

@@ -61,6 +61,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldCreatureSpawnInspector.Enable", () => WorldCreatureSpawnInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapUpdateThrottle.Enable", () => WorldMapUpdateThrottle.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Phase0.Enable", () => WorldMapRetainedV2Phase0.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Runtime.Enable", () => WorldMapRetainedV2Runtime.Enable(Logger));
@@ -100,7 +101,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
         WorldMapImGuiPresentationFallback.LateUpdate();
-        WorldMapPresentationCorrectness.LateUpdate();
         retainedViewLifecycle.LateUpdate();
     }
 
@@ -267,6 +267,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
+        SafeFrontendCleanup("world map update throttle", WorldMapUpdateThrottle.Disable);
         SafeFrontendCleanup("world map retained v2 phase 0", WorldMapRetainedV2Phase0.Disable);
         SafeFrontendCleanup("world map retained v2 runtime", WorldMapRetainedV2Runtime.Disable);
         SafeFrontendCleanup("world map presentation fallback", WorldMapImGuiPresentationFallback.Disable);

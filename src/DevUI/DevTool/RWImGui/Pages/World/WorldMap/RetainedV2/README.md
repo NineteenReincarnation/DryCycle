@@ -15,10 +15,9 @@ phase percentage below 100%.
 - **Phase 4 — 100%**: off-screen RenderTexture surface, runtime texture bridge and retained room GPU presentation.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
-- **Phase 7 — next**: final legacy retirement, responsibility audit and removal of obsolete Map performance compatibility paths.
+- **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
 
-The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
-subsystem.
+Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
 
 ## Engineering boundaries
 
@@ -360,6 +359,111 @@ incomplete V2 route set as success.
 Once V2 reports a complete route set, the legacy connection renderer/router is no longer called for
 that frame. This is the first runtime retirement of that legacy hot path; physical file removal is
 reserved for Phase 7 after all remaining consumers are audited.
+
+## Phase 7 implementation
+
+### Final ownership table
+
+| Responsibility | Owner after Phase 7 |
+| --- | --- |
+| Authoritative map data / undo / persistence | backend `EditorSession`, revisions and command queues |
+| Detached room/connection presentation | `MapEditorPresentationHub` |
+| Snapshot lookup/indexing | `WorldMapPresentationIndex` |
+| Publish/prime throttling | `WorldMapUpdateThrottle` |
+| Background interaction budget | `WorldMapBackgroundBudget` |
+| Render-thread retained scene | `WorldMapSceneSynchronizer` + render scene |
+| Main-thread scene mirror | `WorldMapSceneTransfer` + main scene |
+| Pan/zoom handoff | `WorldMapViewTransformMailbox` |
+| Room geometry/background builds | `WorldMapRoomResourceStore` + `WorldMapBuildScheduler` |
+| Vanilla MapTex compatibility boundary | `WorldMapLegacyRoomSourceService` |
+| Room GPU presentation | `WorldMapRetainedRoomRenderer` |
+| Orthogonal route algorithm | `WorldMapOrthogonalRouter` |
+| World-space route ownership | `WorldMapConnectionResourceStore` |
+| Connection GPU presentation | `WorldMapRetainedConnectionRenderer` |
+| Room/route hit testing | `WorldMapSpatialIndex` + `WorldMapRouteSpatialIndex` |
+| Off-screen composition | `WorldMapRenderTextureSurface` + `WorldMapTextureBridge` |
+| Dynamic labels/gizmos/selection/link preview | `WorldMapView` ImGui overlay |
+
+No retired renderer remains an owner of normal-frame map presentation.
+
+### Orthogonal router ownership
+
+The coordinate-system-agnostic A*/orthogonal routing core has moved under `RetainedV2/Connections`
+as `WorldMapOrthogonalRouter`. V2 no longer depends on the old screen-space
+`WorldConnectionRouter` or on translation caches from the legacy connection overlay.
+
+The router cache now contains world-space V2 routes only and is reset with the retained connection
+resource lifetime.
+
+### Legacy connection presentation retired
+
+The old `WorldConnectionOverlay` BepInEx plugin and screen-space route renderer are removed.
+
+When the V2 surface is available, retained route meshes own presentation and
+`WorldMapRouteSpatialIndex` owns hover selection. If the surface is unavailable, the existing
+simple direct-line ImGui fallback remains local to `WorldMapView`; it does not start a second
+router/cache system.
+
+### Legacy GPU World Map retired
+
+The old standalone GPU stack is removed:
+
+- `WorldMapGpuRendererPlugin / WorldMapGpuRuntime`
+- `WorldMapGpuScene`
+- `WorldMapGpuCache`
+- `WorldMapGpuLifecyclePlugin`
+- `WorldMapGpuPipeBatchPlugin`
+- `WorldMapGpuRegionPreloadPlugin`
+
+These components had become a parked duplicate after the correctness gate disabled their direct
+screen camera. V2 owns off-screen rendering, resource lifetime, visibility indexing and background
+geometry work, so keeping the old stack would only preserve duplicate state/caches.
+
+`WorldMapPresentationCorrectness` now owns only ImGui canvas clipping and stroke correctness; it no
+longer suppresses any standalone GPU camera because no legacy map camera exists.
+
+### Old performance compatibility layer retired
+
+The monolithic `WorldMapPerformancePlugin` is removed. Its still-valid responsibilities are split
+into explicit services:
+
+- `WorldMapPresentationIndex` — snapshot and one-frame visual lookup cache;
+- `WorldMapUpdateThrottle` — detached snapshot/geometry/shortcut publication cadence;
+- `WorldMapBackgroundBudget` — interaction-aware background work budget.
+
+Legacy route translation caches, rounded-polyline caches and the low-zoom overview card are removed.
+The overview card previously replaced room detail with a theme `FrameBg` rectangle; removing that
+path also enforces the hard invariant that zoom cannot turn a room thumbnail black.
+
+### Compatibility adapters deliberately retained
+
+Two components remain because they still own real source compatibility responsibilities rather than
+legacy presentation:
+
+- `WorldMapLegacyRoomSourceService` resolves vanilla `RoomPanel/MapTex` texture descriptors for
+  the V2 room resource store. GPU-cache/source-hash responsibilities have been removed from it.
+- `WorldMapRasterReadbackFallback` supplies semantic raster data only when the atlas cannot be read
+  through the normal CPU path.
+
+`WorldMapLegacyVisualGuard` also remains while vanilla `MapPage` is kept alive as a data source;
+its dependency is the frontend bridge, not the retired GPU renderer.
+
+### Final pan/zoom invariant
+
+After Phase 7, normal retained navigation has one state transition:
+
+```text
+pan / zoom
+    -> WorldMapViewTransformMailbox
+    -> off-screen camera transform
+    -> present existing retained room/route resources
+```
+
+It does not invoke a legacy GPU cache, legacy routed overlay, screen-space A* rebuild, thumbnail
+readback, room mesh rebuild or route mesh rebuild.
+
+Base room thumbnails remain committed independently from zoom and are never replaced by a black LOD
+placeholder.
 
 ## Legacy retirement policy
 

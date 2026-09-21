@@ -21,7 +21,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// stable frame.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(WorldMapGpuRendererPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
 public sealed class WorldMapLegacyVisualGuardPlugin : BaseUnityPlugin
 {
     public const string PluginId = "DryCycle.DevTool.RWImGui.WorldMapGPU.LegacyVisualGuard";
@@ -144,8 +144,8 @@ internal static class WorldMapLegacyVisualGuard
             return;
         }
 
-        // Escape-hidden overlay is still rebuilt-mode ownership: the GPU camera is disabled by the
-        // map lifecycle controller, while the vanilla MapPage must remain visually suppressed. If we
+        // Escape-hidden overlay is still rebuilt-mode ownership: the V2 off-screen surface is not
+        // presented while the vanilla MapPage must remain visually suppressed. If we
         // restored here, Restore() would run MapPage.Refresh in LateUpdate after the core suppression
         // pass and make the entire vanilla map leak into the supposedly hidden editor frame.
         MapPage page = session.Owner.activePage as MapPage;

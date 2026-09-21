@@ -242,6 +242,7 @@ internal static class WorldMapRetainedV2Runtime
         MainSceneState.Reset();
         SceneTransfer.Clear();
         RoomResources.Reset();
+        WorldMapLegacyRoomSourceService.Reset();
         ConnectionResources.Reset();
         SpatialIndex.Reset();
         RouteSpatialIndex.Reset();

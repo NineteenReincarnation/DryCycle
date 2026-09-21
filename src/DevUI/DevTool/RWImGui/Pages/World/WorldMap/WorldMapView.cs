@@ -181,7 +181,6 @@ internal static class WorldMapView
         }
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
-        WorldMapGpuRuntime.DrawToolbar(snapshot);
         WorldMapRetainedV2Phase0.DrawToolbar();
         WorldMapRetainedV2Runtime.DrawToolbarDiagnostics();
     }
@@ -269,7 +268,6 @@ internal static class WorldMapView
         EditorMapRoomSnapshot hoveredRoom = !viewportInteraction && canvasHovered
             ? FindHoveredRoom(snapshot, canvasMin, canvasSize, io.MousePos)
             : null;
-        WorldMapGpuRuntime.SetHoveredRoom(hoveredRoom?.RoomIndex ?? -1);
         ExitPortHit hoveredPort = !viewportInteraction && canvasHovered
             ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
             : null;
@@ -301,19 +299,14 @@ internal static class WorldMapView
             hoveredConnectionId = string.Empty;
         }
 
-        bool routedConnections =
-            !retainedConnectionsPresented &&
-            showConnections &&
-            WorldConnectionOverlay.Ready;
         EdgeHit hoveredEdge =
             !retainedConnectionsPresented &&
             !viewportInteraction &&
             canvasHovered &&
-            hoveredPort == null &&
-            !routedConnections
+            hoveredPort == null
                 ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
                 : null;
-        if (!retainedConnectionsPresented && !routedConnections)
+        if (!retainedConnectionsPresented)
             hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
 
         DrawRooms(
@@ -325,22 +318,8 @@ internal static class WorldMapView
             hoveredPort,
             viewportInteraction,
             retainedRoomsPresented);
-        if (!retainedConnectionsPresented)
-        {
-            if (viewportInteraction && showConnections)
-            {
-                DrawConnections(draw, snapshot, canvasMin, canvasSize);
-            }
-            else if (routedConnections)
-            {
-                WorldMapRenderOrder.UseConnections(draw);
-                WorldConnectionOverlay.DrawRoutedLayer(snapshot, canvasMin, canvasMax, canvasHovered);
-            }
-            else if (showConnections)
-            {
-                DrawConnections(draw, snapshot, canvasMin, canvasSize);
-            }
-        }
+        if (!retainedConnectionsPresented && showConnections)
+            DrawConnections(draw, snapshot, canvasMin, canvasSize);
         WorldMapRenderOrder.UseOverlay(draw);
 
         if (retainedConnectionsPresented &&
@@ -371,18 +350,6 @@ internal static class WorldMapView
             zoom,
             localPositions,
             layerVisible);
-        WorldMapGpuRuntime.PublishFrame(
-            snapshot,
-            canvasMin,
-            canvasSize,
-            io.DisplaySize,
-            pan,
-            zoom,
-            showConnections: false,
-            layerVisible,
-            localPositions,
-            selectedConnectionId,
-            hoveredConnectionId);
         WorldMapPresentationCorrectness.EndCanvasClip(draw, canvasClip);
         WorldMapRenderOrder.EndCanvas(draw, renderChannels);
         WorldMapRetainedV2Phase0.EndMapFrame(
@@ -491,7 +458,7 @@ internal static class WorldMapView
     {
         if (!IsLayerVisible(room.Layer)) return;
 
-        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
         GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
         if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 48f)) return;
 
@@ -550,9 +517,6 @@ internal static class WorldMapView
         bool hovered)
     {
         WorldMapRenderOrder.UseBase(draw);
-        if (WorldMapGpuRuntime.TryDrawRoomGeometry(draw, room, visual, roomMin, selected, hovered, zoom) ||
-            WorldMapPerformance.TryDrawOverviewRoom(draw, room, visual, roomMin, selected, hovered))
-            return;
 
         int pushedStyleColors = WorldMapThumbnailVisibility.PushRoomStyle();
         try
@@ -794,7 +758,7 @@ internal static class WorldMapView
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
 
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 42f)) continue;
 
@@ -861,7 +825,7 @@ internal static class WorldMapView
                 WorldMapShortcutPresentation.GetCreatureHoles(room.RoomIndex);
             if (holes == null || holes.Length == 0) continue;
 
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 32f)) continue;
 
@@ -920,12 +884,6 @@ internal static class WorldMapView
                     FindConnection(snapshot, hoveredConnectionId);
                 if (connection != null)
                     SelectRoom(connection.FromRoomIndex);
-                draggingRoom = -1;
-            }
-            else if (showConnections && WorldConnectionOverlay.Ready && !string.IsNullOrEmpty(hoveredConnectionId))
-            {
-                // Legacy routed connection input remains active only while V2 has not committed a
-                // complete retained route set.
                 draggingRoom = -1;
             }
             else if (hoveredEdge?.Connection != null && showConnections)
@@ -1083,35 +1041,12 @@ internal static class WorldMapView
                 : null;
         }
 
-        // Legacy GPU index remains available until its remaining responsibilities retire.
-        if (WorldMapGpuScene.Ready)
-        {
-            try
-            {
-                if (!WorldMapGpuScene.TryHitRoom(
-                        mapPoint,
-                        currentLayerMask,
-                        out int roomIndex))
-                    return null;
-
-                EnsureHoverRoomLookup(snapshot);
-                return hoverRoomLookup.TryGetValue(roomIndex, out EditorMapRoomSnapshot indexedRoom)
-                    ? indexedRoom
-                    : null;
-            }
-            catch
-            {
-                // If the retained scene is not ready for this exact frame, preserve the original
-                // immediate-mode hit test below instead of failing interaction.
-            }
-        }
-
         EditorMapRoomSnapshot[] rooms = snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         for (int i = rooms.Length - 1; i >= 0; i--)
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 8f)) continue;
             if (Contains(min, max, mouse)) return room;
@@ -1147,7 +1082,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
             if (!Intersects(min, max, canvasMin, canvasMin + canvasSize, 36f)) continue;
 
@@ -1222,7 +1157,7 @@ internal static class WorldMapView
 
     private static Num.Vector2 EndpointPosition(EditorMapRoomSnapshot room, int nodeIndex, Num.Vector2 canvasMin)
     {
-        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
         Num.Vector2 roomMin = ToScreen(canvasMin, GetPosition(room));
 
         if (WorldMapShortcutPresentation.TryGetExitMouth(
@@ -1270,7 +1205,7 @@ internal static class WorldMapView
 
     private static Num.Vector2 RoomCenter(EditorMapRoomSnapshot room, Num.Vector2 canvasMin)
     {
-        EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+        EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
         GetRoomRect(room, visual, canvasMin, out Num.Vector2 min, out Num.Vector2 max);
         return (min + max) * 0.5f;
     }
@@ -1326,13 +1261,13 @@ internal static class WorldMapView
     }
 
     private static bool IsEndpointFree(EditorMapPresentationSnapshot snapshot, int roomIndex, EditorMapRoomNodeSnapshot node) =>
-        WorldMapPerformance.IsEndpointFree(snapshot, roomIndex, node);
+        WorldMapPresentationIndex.IsEndpointFree(snapshot, roomIndex, node);
 
     private static EditorMapConnectionSnapshot FindConnectionAtEndpoint(
         EditorMapPresentationSnapshot snapshot,
         int roomIndex,
         int nodeIndex) =>
-        WorldMapPerformance.FindConnectionAtEndpoint(snapshot, roomIndex, nodeIndex);
+        WorldMapPresentationIndex.FindConnectionAtEndpoint(snapshot, roomIndex, nodeIndex);
 
     private static void DrawShortcutSocket(
         ImDrawListPtr draw,
@@ -1342,7 +1277,6 @@ internal static class WorldMapView
         bool connected,
         bool emphasized)
     {
-        if (!WorldMapGpuPipeBatch.ShouldDrawRoomPipeSocket(emphasized)) return;
         float iconScale = zoom < 0.30f ? 0.92f : 1f;
         float half = (emphasized ? 10.2f : connected ? 9.2f : 8.4f) * iconScale;
         float halo = half + 3.3f * iconScale;
@@ -1388,7 +1322,6 @@ internal static class WorldMapView
 
     private static void DrawCreatureShortcutSocket(ImDrawListPtr draw, Num.Vector2 point, uint shadow)
     {
-        if (!WorldMapGpuPipeBatch.ShouldDrawCreaturePipeSocket()) return;
         float iconScale = zoom < 0.30f ? 0.90f : 1f;
         float half = 7.8f * iconScale;
         float halo = half + 2.8f * iconScale;
@@ -1626,7 +1559,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot room = rooms[i];
             if (!IsLayerVisible(room.Layer)) continue;
-            EditorMapRoomVisualSnapshot visual = WorldMapPerformance.GetRoomVisual(room.RoomIndex);
+            EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
             Num.Vector2 p = GetPosition(room);
             Num.Vector2 size = new(
                 Math.Max(1f, visual.WidthTiles) * TileDisplaySize,
@@ -1676,7 +1609,7 @@ internal static class WorldMapView
     }
 
     private static EditorMapRoomSnapshot FindRoom(EditorMapPresentationSnapshot snapshot, int roomIndex) =>
-        WorldMapPerformance.FindRoom(snapshot, roomIndex);
+        WorldMapPresentationIndex.FindRoom(snapshot, roomIndex);
 
     private static EditorMapRoomNodeSnapshot FindNode(EditorMapRoomSnapshot room, int nodeIndex)
     {
@@ -1687,7 +1620,7 @@ internal static class WorldMapView
     }
 
     private static EditorMapConnectionSnapshot FindConnection(EditorMapPresentationSnapshot snapshot, string id) =>
-        WorldMapPerformance.FindConnection(snapshot, id);
+        WorldMapPresentationIndex.FindConnection(snapshot, id);
 
     private static bool IsLayerVisible(int layer) =>
         layer >= 0 && layer < layerVisible.Length ? layerVisible[layer] : true;
@@ -1937,40 +1870,18 @@ internal static class WorldMapPresentationCorrectness
     private static ManualLogSource log;
     private static bool enabled;
 
-    internal static bool ShouldSuppressRetainedApply => enabled;
-
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
         enabled = true;
         log = logger;
-        SuppressRetainedPresentation();
-        logger?.LogInfo("World Map correctness gate uses direct scene/view APIs; retained screen renderers paused with no self-detours.");
+        logger?.LogInfo("World Map canvas correctness service enabled for clipping and connection stroke presentation.");
     }
 
     internal static void Disable()
     {
         enabled = false;
         log = null;
-    }
-
-    internal static void LateUpdate()
-    {
-        if (!enabled || !DevToolSessionHub.IsCurrentSessionLive)
-            return;
-
-        EditorSession session = DevToolRuntime.ActiveSession;
-        if (session?.ToolMode != EditorToolMode.Map)
-            return;
-
-        SuppressRetainedPresentation();
-    }
-
-    internal static void SuppressRetainedPresentation()
-    {
-        if (!enabled) return;
-        WorldMapGpuScene.SuppressScreenPresentation();
-        WorldMapGpuPipeBatch.SuppressScreenPresentation();
     }
 
     internal static bool BeginCanvasClip(

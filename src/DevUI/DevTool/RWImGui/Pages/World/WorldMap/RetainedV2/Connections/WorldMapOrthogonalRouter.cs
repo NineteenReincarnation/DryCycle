@@ -5,11 +5,10 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Screen-space orthogonal connection router for the World Map.
-/// Rooms are obstacles, shortcut mouths are constrained ports, and cached routes are biased toward
-/// their previous corridor so interactive room dragging does not make links jump from side to side.
+/// Coordinate-system-agnostic orthogonal router owned by Retained V2.
+/// V2 supplies map-world room bounds and ports, so pan/zoom never enter routing or its cache.
 /// </summary>
-internal static class WorldConnectionRouter
+internal static class WorldMapOrthogonalRouter
 {
     internal enum RouteKind
     {
@@ -178,7 +177,7 @@ internal static class WorldConnectionRouter
     private static int generation;
 
     internal static Route[] BuildRoutes(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles) =>
-        WorldMapPerformance.BuildRoutes(requests, sourceObstacles);
+        BuildRoutesCore(requests, sourceObstacles);
 
     internal static Route[] BuildRoutesCore(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles)
     {

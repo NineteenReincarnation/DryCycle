@@ -161,6 +161,7 @@ internal sealed class WorldMapConnectionResourceStore
         queued.Clear();
         routeChanged.Clear();
         buildBatch.Clear();
+        WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
 
