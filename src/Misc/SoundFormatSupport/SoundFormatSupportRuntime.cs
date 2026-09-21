@@ -19,6 +19,8 @@ internal static class SoundFormatSupportRuntime
 
     private static bool enabled;
     private static ConditionalWeakTable<AudioClip, CustomOverrideMarker> customOverrides = new();
+    private static readonly System.Collections.Generic.HashSet<string> DeferredAmbientFailuresLogged =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal static void Enable()
     {
@@ -33,9 +35,8 @@ internal static class SoundFormatSupportRuntime
             On.SoundLoader.CheckIfFileExistsAsExternal += SoundLoader_CheckIfFileExistsAsExternal;
             On.SoundLoader.VariationsForSound += SoundLoader_VariationsForSound;
             On.SoundLoader.RequestAmbientAudioClip += SoundLoader_RequestAmbientAudioClip;
+            ExternalAudioAssetIndex.Refresh("SoundFormatSupportRuntime.Enable");
             On.SoundLoader.LoadSounds += SoundLoader_LoadSounds;
-            On.VirtualMicrophone.SoundClipReady += VirtualMicrophone_SoundClipReady;
-            On.MenuMicrophone.SoundClipReady += MenuMicrophone_SoundClipReady;
 
             enabled = true;
             global::DryCycle.StartupDiagnostics.Marker(
@@ -49,6 +50,9 @@ internal static class SoundFormatSupportRuntime
                 "SoundFormatSupportRuntime.Enable",
                 error,
                 () => RemoveOnHooks("enable rollback"));
+            ExternalAudioLoader.ResetDeferredLoads();
+            ExternalAudioAssetIndex.Reset();
+            DeferredAmbientFailuresLogged.Clear();
             customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
             enabled = false;
             throw;
@@ -60,6 +64,9 @@ internal static class SoundFormatSupportRuntime
         if (!enabled) return;
 
         RemoveOnHooks("disable");
+        ExternalAudioLoader.ResetDeferredLoads();
+        ExternalAudioAssetIndex.Reset();
+        DeferredAmbientFailuresLogged.Clear();
         customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
         enabled = false;
     }
@@ -67,15 +74,12 @@ internal static class SoundFormatSupportRuntime
     internal static void HydrateExisting(SoundLoader loader)
     {
         if (!enabled || loader == null) return;
+        ExternalAudioAssetIndex.Refresh("HydrateExisting");
         HydrateLoadedSoundEffectOverrides(loader);
     }
 
     private static void RemoveOnHooks(string phase)
     {
-        Rollback(phase + "/MenuMicrophone.SoundClipReady",
-            () => On.MenuMicrophone.SoundClipReady -= MenuMicrophone_SoundClipReady);
-        Rollback(phase + "/VirtualMicrophone.SoundClipReady",
-            () => On.VirtualMicrophone.SoundClipReady -= VirtualMicrophone_SoundClipReady);
         Rollback(phase + "/SoundLoader.LoadSounds",
             () => On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds);
         Rollback(phase + "/SoundLoader.RequestAmbientAudioClip",
@@ -182,26 +186,12 @@ internal static class SoundFormatSupportRuntime
         On.SoundLoader.orig_LoadSounds orig,
         SoundLoader self)
     {
+        // Reload is the explicit invalidation boundary. Re-index before vanilla parses Sounds.txt so
+        // CheckIfFileExistsAsExternal/VariationsForSound are O(1) dictionary queries throughout the
+        // load, then inject custom LoadedSoundEffects before gameplay can request them.
+        ExternalAudioAssetIndex.Refresh("SoundLoader.LoadSounds");
         orig(self);
         HydrateLoadedSoundEffectOverrides(self);
-    }
-
-    private static bool VirtualMicrophone_SoundClipReady(
-        On.VirtualMicrophone.orig_SoundClipReady orig,
-        VirtualMicrophone self,
-        SoundLoader.SoundData soundData)
-    {
-        HydrateLoadedSoundEffectOverride(self?.soundLoader, soundData.audioClip);
-        return orig(self, soundData);
-    }
-
-    private static bool MenuMicrophone_SoundClipReady(
-        On.MenuMicrophone.orig_SoundClipReady orig,
-        MenuMicrophone self,
-        SoundLoader.SoundData soundData)
-    {
-        HydrateLoadedSoundEffectOverride(self?.soundLoader, soundData.audioClip);
-        return orig(self, soundData);
     }
 
     private static void HydrateLoadedSoundEffectOverrides(SoundLoader self)
@@ -279,13 +269,30 @@ internal static class SoundFormatSupportRuntime
             if (cached != null && string.Equals(cached.name, clipName, StringComparison.Ordinal)) return cached;
         }
 
-        AudioClip clip = ExternalAudioLoader.LoadBlocking(file, clipName, stream: true, out string error);
-        if (clip == null)
-        {
-            // Vanilla treats every non-WAV loose ambient override as OGG. Falling through after an
-            // MP3/M4A decode failure would therefore retry the same file with the wrong decoder.
-            LogDecodeFailure("LoadedSoundEffects/Ambient", file.Path, error, self.errors);
+        AudioClip clip;
+        string error;
+
+        DeferredAudioLoadState deferredState =
+            ExternalAudioLoader.TryLoadDeferredMediaFoundation(file, clipName, out clip, out error);
+        if (deferredState == DeferredAudioLoadState.Pending)
             return null;
+
+        if (deferredState == DeferredAudioLoadState.Failed)
+        {
+            if (DeferredAmbientFailuresLogged.Add(file.Path))
+                LogDecodeFailure("LoadedSoundEffects/Ambient", file.Path, error, self.errors);
+            return null;
+        }
+
+        if (deferredState == DeferredAudioLoadState.Unsupported)
+        {
+            clip = ExternalAudioLoader.LoadBlocking(file, clipName, stream: true, out error);
+            if (clip == null)
+            {
+                if (DeferredAmbientFailuresLogged.Add(file.Path))
+                    LogDecodeFailure("LoadedSoundEffects/Ambient", file.Path, error, self.errors);
+                return null;
+            }
         }
 
         self.ambientClipsThroughUnity.Add(clip);

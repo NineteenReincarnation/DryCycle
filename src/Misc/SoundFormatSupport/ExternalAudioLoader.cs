@@ -11,6 +11,14 @@ namespace DryCycle.Misc.SoundFormatSupport;
 /// Decodes a resolved loose-audio file into the AudioClip surface expected by Rain World.
 /// Format selection stays in ExternalAudioFormatRegistry; decoder details stay here.
 /// </summary>
+internal enum DeferredAudioLoadState
+{
+    Unsupported = 0,
+    Pending = 1,
+    Ready = 2,
+    Failed = 3
+}
+
 internal static class ExternalAudioLoader
 {
     private sealed class DecodedPcm
@@ -19,6 +27,18 @@ internal static class ExternalAudioLoader
         internal int Channels;
         internal int SampleRate;
     }
+
+    private sealed class DeferredDecode
+    {
+        internal Task<DecodedPcm> Task;
+        internal AudioClip Clip;
+        internal string Error;
+        internal bool Failed;
+    }
+
+    private static readonly object DeferredGate = new();
+    private static readonly Dictionary<string, DeferredDecode> DeferredDecodes =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal static IEnumerator LoadCoroutine(
         ResolvedAudioFile file,
@@ -65,6 +85,90 @@ internal static class ExternalAudioLoader
 
         IEnumerator unityLoad = LoadWithUnityCoroutine(file, clipName, onLoaded, onFailed);
         while (unityLoad.MoveNext()) yield return unityLoad.Current;
+    }
+
+    internal static DeferredAudioLoadState TryLoadDeferredMediaFoundation(
+        ResolvedAudioFile file,
+        string clipName,
+        out AudioClip clip,
+        out string error)
+    {
+        clip = null;
+        error = null;
+        if (file.Format.Decoder != ExternalAudioDecoderKind.MediaFoundation || !IsWindows())
+            return DeferredAudioLoadState.Unsupported;
+
+        DeferredDecode entry;
+        lock (DeferredGate)
+        {
+            if (!DeferredDecodes.TryGetValue(file.Path, out entry))
+            {
+                entry = new DeferredDecode();
+                try
+                {
+                    entry.Task = Task.Run(() => DecodeWithMediaFoundation(file.Path));
+                }
+                catch (Exception startError)
+                {
+                    entry.Failed = true;
+                    entry.Error = startError.Message;
+                }
+                DeferredDecodes[file.Path] = entry;
+            }
+
+            if (entry.Clip != null)
+            {
+                clip = entry.Clip;
+                return DeferredAudioLoadState.Ready;
+            }
+            if (entry.Failed)
+            {
+                error = entry.Error ?? "Deferred Media Foundation decode failed.";
+                return DeferredAudioLoadState.Failed;
+            }
+            if (entry.Task == null)
+            {
+                entry.Failed = true;
+                entry.Error = "Deferred Media Foundation decode task was not created.";
+                error = entry.Error;
+                return DeferredAudioLoadState.Failed;
+            }
+            if (!entry.Task.IsCompleted)
+                return DeferredAudioLoadState.Pending;
+            if (entry.Task.IsCanceled || entry.Task.IsFaulted)
+            {
+                entry.Failed = true;
+                entry.Error = entry.Task.Exception?.GetBaseException().Message ??
+                              "Deferred Media Foundation decode task was cancelled.";
+                error = entry.Error;
+                return DeferredAudioLoadState.Failed;
+            }
+        }
+
+        // Unity AudioClip creation and SetData stay on the main thread. The expensive container /
+        // codec decode already completed on the worker, so this finalization is bounded and contains
+        // no file discovery or Media Foundation read loop.
+        AudioClip created = CreateClip(clipName, entry.Task.Result, out string createError);
+        lock (DeferredGate)
+        {
+            if (created == null)
+            {
+                entry.Failed = true;
+                entry.Error = createError;
+                error = createError;
+                return DeferredAudioLoadState.Failed;
+            }
+
+            entry.Clip = created;
+            clip = created;
+            return DeferredAudioLoadState.Ready;
+        }
+    }
+
+    internal static void ResetDeferredLoads()
+    {
+        lock (DeferredGate)
+            DeferredDecodes.Clear();
     }
 
     internal static AudioClip LoadBlocking(ResolvedAudioFile file, string clipName, bool stream, out string error)
