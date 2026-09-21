@@ -32,6 +32,7 @@ internal sealed class WorldMapRoomResourceStore
     private readonly Dictionary<int, RoomResource> rooms = new();
     private readonly Queue<int> priorityQueue = new();
     private readonly HashSet<int> queued = new();
+    private readonly HashSet<int> geometryChanged = new();
     private string region = string.Empty;
     private EditorMapRoomSnapshot[] auditRooms = Array.Empty<EditorMapRoomSnapshot>();
     private int auditCursor;
@@ -53,6 +54,15 @@ internal sealed class WorldMapRoomResourceStore
 
     internal bool TryGet(int roomIndex, out RoomResource resource) =>
         rooms.TryGetValue(roomIndex, out resource);
+
+    internal void DrainGeometryChanges(List<int> output)
+    {
+        if (output == null) return;
+        output.Clear();
+        if (geometryChanged.Count == 0) return;
+        output.AddRange(geometryChanged);
+        geometryChanged.Clear();
+    }
 
     internal void ApplyDirty(WorldMapScene scene, WorldMapDirtySet dirty)
     {
@@ -142,6 +152,7 @@ internal sealed class WorldMapRoomResourceStore
         rooms.Clear();
         priorityQueue.Clear();
         queued.Clear();
+        geometryChanged.Clear();
         region = string.Empty;
         auditRooms = Array.Empty<EditorMapRoomSnapshot>();
         auditCursor = 0;
@@ -164,6 +175,7 @@ internal sealed class WorldMapRoomResourceStore
                 Geometry = RoomGeometryBuilder.BuildNeutral(roomIndex)
             };
             rooms.Add(roomIndex, resource);
+            geometryChanged.Add(roomIndex);
         }
 
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(roomIndex);
@@ -172,6 +184,7 @@ internal sealed class WorldMapRoomResourceStore
         {
             resource.Geometry = RoomGeometryBuilder.Build(roomIndex, visual, visualStamp);
             resource.VisualStamp = visualStamp;
+            geometryChanged.Add(roomIndex);
             unchecked { resource.GeometryGeneration++; }
         }
 

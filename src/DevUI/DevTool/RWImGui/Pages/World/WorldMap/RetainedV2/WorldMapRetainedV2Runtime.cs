@@ -14,12 +14,15 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly WorldMapScene SceneState = new();
     private static readonly WorldMapSceneSynchronizer Synchronizer = new();
     private static readonly WorldMapRoomResourceStore RoomResources = new();
-    private static readonly WorldMapDirtySet pendingRoomResourceDirty = new();
+    private static readonly WorldMapConnectionResourceStore ConnectionResources = new();
+    private static readonly WorldMapDirtySet pendingResourceDirty = new();
+    private static readonly List<int> geometryChangedRooms = new();
     private static WorldMapDirtySet lastDirty = new();
 
     internal static WorldMapScene Scene => SceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
     internal static WorldMapRoomResourceStore Resources => RoomResources;
+    internal static WorldMapConnectionResourceStore Routes => ConnectionResources;
 
     internal static void Synchronize(
         EditorMapPresentationSnapshot snapshot,
@@ -36,7 +39,7 @@ internal static class WorldMapRetainedV2Runtime
             interactiveRoom,
             viewTransform);
 
-        pendingRoomResourceDirty.MergeFrom(lastDirty);
+        pendingResourceDirty.MergeFrom(lastDirty);
     }
 
     internal static void UpdateMainThread()
@@ -44,13 +47,18 @@ internal static class WorldMapRetainedV2Runtime
         EditorSession session = DevToolRuntime.ActiveSession;
         EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
 
-        if (!pendingRoomResourceDirty.IsEmpty)
+        if (!pendingResourceDirty.IsEmpty)
         {
-            RoomResources.ApplyDirty(SceneState, pendingRoomResourceDirty);
-            pendingRoomResourceDirty.Clear();
+            RoomResources.ApplyDirty(SceneState, pendingResourceDirty);
+            ConnectionResources.ApplyDirty(SceneState, pendingResourceDirty);
+            pendingResourceDirty.Clear();
         }
 
         RoomResources.UpdateMainThread(session, snapshot, SceneState);
+        RoomResources.DrainGeometryChanges(geometryChangedRooms);
+        if (geometryChangedRooms.Count > 0)
+            ConnectionResources.InvalidateRooms(geometryChangedRooms);
+        ConnectionResources.Update(SceneState, RoomResources);
     }
 
     internal static void ResetRetainedState()
@@ -58,7 +66,9 @@ internal static class WorldMapRetainedV2Runtime
         Synchronizer.Reset();
         SceneState.Reset();
         RoomResources.Reset();
-        pendingRoomResourceDirty.Clear();
+        ConnectionResources.Reset();
+        pendingResourceDirty.Clear();
+        geometryChangedRooms.Clear();
         lastDirty = new WorldMapDirtySet();
     }
 
@@ -79,6 +89,7 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
             " · thumbnails " + RoomResources.CommittedThumbnailCount);
+        ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
         ImGui.TextUnformatted("scene revision: " + SceneState.SceneRevision);
         ImGui.TextUnformatted("view revision: " + SceneState.ViewRevision);
         ImGui.TextUnformatted("last scene dirty count: " + lastDirty.ChangeCount);

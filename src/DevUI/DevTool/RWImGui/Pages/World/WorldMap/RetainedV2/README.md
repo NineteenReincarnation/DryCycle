@@ -11,7 +11,8 @@ phase percentage below 100%.
 - **Phase 0 — 100%**: runtime contract probe, RenderTexture probe and timing baseline instrumentation.
 - **Phase 1 — 100%**: world-space retained scene, view transform and frontend dirty graph.
 - **Phase 2 — 100%**: retained room thumbnail/geometry resources with last-known-good continuity.
-- **Phase 3 — next**: world-space connection router and retained route resources.
+- **Phase 3 — 100%**: world-space connection routing and retained route resources.
+- **Phase 4 — next**: off-screen RenderTexture surface and ImGui presentation bridge.
 
 The legacy renderer still presents the map while V2 responsibilities are migrated subsystem by
 subsystem.
@@ -181,6 +182,34 @@ late MapTex/geometry availability. Interaction frames use a smaller capture budg
 
 Removing a room drops only its V2 derived resource. Region/page reset clears the V2 store and retained
 references without touching authoring data or destroying vanilla-owned textures.
+
+## Phase 3 implementation
+
+### World-space routing
+
+`WorldMapWorldSpaceRouter` resolves room bounds and exit positions from retained Phase 1/2 data.
+Its inputs contain no canvas origin, pan or zoom. The orthogonal routing core is reused temporarily
+because the algorithm itself is coordinate-system agnostic; V2 IDs are isolated with a `v2:`
+prefix. Once the legacy screen-space caller retires, the shared algorithm core can move physically
+under RetainedV2 without changing V2 route semantics.
+
+### Connection dependencies
+
+`ConnectionDependencyIndex` maps room IDs to connection IDs. Moving a room or changing its ports
+invalidates only incident routes. Pure pan/zoom does not enqueue any route work.
+
+### Retained routes
+
+`ConnectionRouteResource` stores the committed world-space polyline, endpoint directions, direction
+semantics and a route revision. `WorldMapConnectionResourceStore` batches only dirty route IDs,
+keeps deterministic parallel-lane offsets for multiple links between the same room pair, and removes
+stale route resources when topology changes.
+
+### Geometry-driven invalidation
+
+When Phase 2 publishes a new room geometry blob, the room resource store emits the affected room ID.
+Phase 3 consumes that ID and invalidates only routes incident to that room, covering changed room
+dimensions/port geometry without scanning or rebuilding the entire route set.
 
 ## Legacy retirement policy
 
