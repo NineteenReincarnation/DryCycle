@@ -9,78 +9,173 @@ namespace DryCycle.Creatures.LanceScavenger;
 internal static class LanceScavengerHooks
 {
     private static bool _enabled;
+    private static bool _relationshipsHook;
+    private static bool _actHook;
+    private static bool _combatUpdateHook;
+    private static bool _throwHook;
+    private static bool _weaponScoreHook;
+    private static bool _collectScoreHook;
+    private static bool _realWeaponHook;
+    private static bool _checkThrowHook;
+    private static bool _initGearHook;
+
     internal static void Enable()
     {
-        if (_enabled) return;
+        if (_enabled && AllHooksInstalled())
+        {
+            return;
+        }
 
-        _enabled = true;
+        _enabled = false;
         try
         {
-            On.StaticWorld.InitStaticWorld += Relationships;
-            On.Scavenger.Act += Act;
-            On.Scavenger.CombatUpdate += CombatUpdate;
-            On.Scavenger.Throw += Throw;
-            On.ScavengerAI.WeaponScore += WeaponScore;
-            On.ScavengerAI.CollectScore_PhysicalObject_bool += CollectScore;
-            On.ScavengerAI.RealWeapon += RealWeapon;
-            On.ScavengerAI.CheckThrow += CheckThrow;
-            On.ScavengerAbstractAI.InitGearUp += InitGear;
+            InstallHook(
+                ref _relationshipsHook,
+                () => On.StaticWorld.InitStaticWorld += Relationships);
+            InstallHook(
+                ref _actHook,
+                () => On.Scavenger.Act += Act);
+            InstallHook(
+                ref _combatUpdateHook,
+                () => On.Scavenger.CombatUpdate += CombatUpdate);
+            InstallHook(
+                ref _throwHook,
+                () => On.Scavenger.Throw += Throw);
+            InstallHook(
+                ref _weaponScoreHook,
+                () => On.ScavengerAI.WeaponScore += WeaponScore);
+            InstallHook(
+                ref _collectScoreHook,
+                () => On.ScavengerAI.CollectScore_PhysicalObject_bool += CollectScore);
+            InstallHook(
+                ref _realWeaponHook,
+                () => On.ScavengerAI.RealWeapon += RealWeapon);
+            InstallHook(
+                ref _checkThrowHook,
+                () => On.ScavengerAI.CheckThrow += CheckThrow);
+            InstallHook(
+                ref _initGearHook,
+                () => On.ScavengerAbstractAI.InitGearUp += InitGear);
+
+            _enabled = true;
         }
         catch (Exception error)
         {
             global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
                 "LanceScavengerHooks.Enable",
                 error,
-                RollbackPartialEnable);
+                () => CleanupHooks("enable rollback"));
             throw;
         }
-    }
-    private static void RollbackPartialEnable()
-    {
-        _enabled = false;
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/ScavengerAbstractAI.InitGearUp",
-            () => On.ScavengerAbstractAI.InitGearUp -= InitGear);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/ScavengerAI.CheckThrow",
-            () => On.ScavengerAI.CheckThrow -= CheckThrow);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/ScavengerAI.RealWeapon",
-            () => On.ScavengerAI.RealWeapon -= RealWeapon);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/ScavengerAI.CollectScore",
-            () => On.ScavengerAI.CollectScore_PhysicalObject_bool -= CollectScore);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/ScavengerAI.WeaponScore",
-            () => On.ScavengerAI.WeaponScore -= WeaponScore);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/Scavenger.Throw",
-            () => On.Scavenger.Throw -= Throw);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/Scavenger.CombatUpdate",
-            () => On.Scavenger.CombatUpdate -= CombatUpdate);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/Scavenger.Act",
-            () => On.Scavenger.Act -= Act);
-        global::DryCycle.StartupDiagnostics.RollbackStep(
-            "LanceScavengerHooks.Enable/StaticWorld.InitStaticWorld",
-            () => On.StaticWorld.InitStaticWorld -= Relationships);
     }
 
     internal static void Disable()
     {
-        if (!_enabled) return;
-        On.StaticWorld.InitStaticWorld -= Relationships;
-        On.Scavenger.Act -= Act;
-        On.Scavenger.CombatUpdate -= CombatUpdate;
-        On.Scavenger.Throw -= Throw;
-        On.ScavengerAI.WeaponScore -= WeaponScore;
-        On.ScavengerAI.CollectScore_PhysicalObject_bool -= CollectScore;
-        On.ScavengerAI.RealWeapon -= RealWeapon;
-        On.ScavengerAI.CheckThrow -= CheckThrow;
-        On.ScavengerAbstractAI.InitGearUp -= InitGear;
-        _enabled = false;
+        if (!_enabled && !AnyHookInstalled())
+        {
+            return;
+        }
+
+        CleanupHooks("disable");
     }
+
+    private static void InstallHook(ref bool installed, Action install)
+    {
+        if (installed)
+        {
+            return;
+        }
+
+        install();
+        installed = true;
+    }
+
+    private static void CleanupHooks(string phase)
+    {
+        _enabled = false;
+
+        RemoveHook(
+            ref _initGearHook,
+            phase + "/ScavengerAbstractAI.InitGearUp",
+            () => On.ScavengerAbstractAI.InitGearUp -= InitGear);
+        RemoveHook(
+            ref _checkThrowHook,
+            phase + "/ScavengerAI.CheckThrow",
+            () => On.ScavengerAI.CheckThrow -= CheckThrow);
+        RemoveHook(
+            ref _realWeaponHook,
+            phase + "/ScavengerAI.RealWeapon",
+            () => On.ScavengerAI.RealWeapon -= RealWeapon);
+        RemoveHook(
+            ref _collectScoreHook,
+            phase + "/ScavengerAI.CollectScore",
+            () => On.ScavengerAI.CollectScore_PhysicalObject_bool -= CollectScore);
+        RemoveHook(
+            ref _weaponScoreHook,
+            phase + "/ScavengerAI.WeaponScore",
+            () => On.ScavengerAI.WeaponScore -= WeaponScore);
+        RemoveHook(
+            ref _throwHook,
+            phase + "/Scavenger.Throw",
+            () => On.Scavenger.Throw -= Throw);
+        RemoveHook(
+            ref _combatUpdateHook,
+            phase + "/Scavenger.CombatUpdate",
+            () => On.Scavenger.CombatUpdate -= CombatUpdate);
+        RemoveHook(
+            ref _actHook,
+            phase + "/Scavenger.Act",
+            () => On.Scavenger.Act -= Act);
+        RemoveHook(
+            ref _relationshipsHook,
+            phase + "/StaticWorld.InitStaticWorld",
+            () => On.StaticWorld.InitStaticWorld -= Relationships);
+
+        if (AnyHookInstalled())
+        {
+            global::DryCycle.StartupDiagnostics.Marker(
+                "LanceScavengerHooks/" + phase,
+                "ROLLBACK-INCOMPLETE",
+                "one or more HookGen subscriptions remain installed; next Enable will reuse them instead of duplicating them");
+        }
+    }
+
+    private static void RemoveHook(ref bool installed, string source, Action remove)
+    {
+        if (!installed)
+        {
+            return;
+        }
+
+        if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                "LanceScavengerHooks/" + source,
+                remove))
+        {
+            installed = false;
+        }
+    }
+
+    private static bool AllHooksInstalled() =>
+        _relationshipsHook &&
+        _actHook &&
+        _combatUpdateHook &&
+        _throwHook &&
+        _weaponScoreHook &&
+        _collectScoreHook &&
+        _realWeaponHook &&
+        _checkThrowHook &&
+        _initGearHook;
+
+    private static bool AnyHookInstalled() =>
+        _relationshipsHook ||
+        _actHook ||
+        _combatUpdateHook ||
+        _throwHook ||
+        _weaponScoreHook ||
+        _collectScoreHook ||
+        _realWeaponHook ||
+        _checkThrowHook ||
+        _initGearHook;
 
     private static void Act(On.Scavenger.orig_Act orig, Scavenger self)
     {
