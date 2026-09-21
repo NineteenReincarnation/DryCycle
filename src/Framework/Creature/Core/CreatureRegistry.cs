@@ -451,6 +451,8 @@ public static class CreatureRegistry
             return;
         }
 
+        EnsureTemplateArrayCapacity();
+
         CreatureTemplate safeFallback = null;
         try
         {
@@ -503,6 +505,39 @@ public static class CreatureRegistry
                 }
             }
         }
+    }
+
+    private static void EnsureTemplateArrayCapacity()
+    {
+        if (StaticWorld.creatureTemplates == null)
+        {
+            throw new InvalidOperationException(
+                "StaticWorld.InitCustomTemplates returned without creating creatureTemplates.");
+        }
+
+        int requiredLength = StaticWorld.creatureTemplates.Length;
+        for (int i = 0; i < _descriptors.Count; i++)
+        {
+            CreatureTemplate.Type type = _descriptors[i]?.Type;
+            if (type != null && type.Index >= 0)
+                requiredLength = Math.Max(requiredLength, type.Index + 1);
+        }
+
+        requiredLength = Math.Max(
+            requiredLength,
+            ExtEnum<CreatureTemplate.Type>.values.Count);
+
+        if (requiredLength <= StaticWorld.creatureTemplates.Length)
+        {
+            return;
+        }
+
+        int previousLength = StaticWorld.creatureTemplates.Length;
+        Array.Resize(ref StaticWorld.creatureTemplates, requiredLength);
+        global::DryCycle.StartupDiagnostics.Marker(
+            "CreatureRegistry/StaticWorld",
+            "ARRAY-RESIZED",
+            "creatureTemplates " + previousLength + " -> " + requiredLength);
     }
 
     private static CreatureTemplate BuildAndValidateTemplate(CreatureDescriptor descriptor)
