@@ -1,3 +1,5 @@
+using System;
+using DryCycle.Framework.Creature.Core;
 using Watcher;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -38,7 +40,26 @@ internal static class DB_Relationships
     private static void StaticWorld_InitStaticWorld(On.StaticWorld.orig_InitStaticWorld orig)
     {
         orig();
-        EstablishRelationships();
+
+        if (CreatureRegistry.IsQuarantined(DB_Definition.CreatureType))
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "DesertBatfly relationships were skipped because its creature template is quarantined.");
+            return;
+        }
+
+        try
+        {
+            EstablishRelationships();
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "DB_Relationships/StaticWorld.InitStaticWorld",
+                error);
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "DesertBatfly relationship setup failed and was isolated so StaticWorld startup can continue.");
+        }
     }
 
     private static void EstablishRelationships()
@@ -47,14 +68,24 @@ internal static class DB_Relationships
         CreatureTemplate desert = StaticWorld.GetCreatureTemplate(type);
         CreatureTemplate fly = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
 
-        if (desert == null || fly == null)
+        if (desert == null ||
+            fly == null ||
+            desert.relationships == null ||
+            fly.relationships == null)
         {
             return;
         }
 
         foreach (CreatureTemplate other in StaticWorld.creatureTemplates)
         {
-            if (other == null || other == desert)
+            if (other == null ||
+                other == desert ||
+                other.type == null ||
+                other.relationships == null ||
+                other.type.Index < 0 ||
+                other.type.Index >= desert.relationships.Length ||
+                type.Index < 0 ||
+                type.Index >= other.relationships.Length)
             {
                 continue;
             }
@@ -83,7 +114,12 @@ internal static class DB_Relationships
             CreatureTemplate peach = StaticWorld.GetCreatureTemplate(
                 WatcherEnums.CreatureTemplateType.PeachLizard);
 
-            if (peach != null)
+            if (peach?.relationships != null &&
+                type.Index >= 0 &&
+                type.Index < peach.relationships.Length &&
+                peach.type != null &&
+                peach.type.Index >= 0 &&
+                peach.type.Index < desert.relationships.Length)
             {
                 peach.relationships[type.Index] = new CreatureTemplate.Relationship(
                     CreatureTemplate.Relationship.Type.Eats,
@@ -94,14 +130,37 @@ internal static class DB_Relationships
             }
         }
 
-        desert.relationships[CreatureTemplate.Type.Slugcat.Index] = new CreatureTemplate.Relationship(
+        SetRelationshipIfValid(
+            desert,
+            CreatureTemplate.Type.Slugcat.Index,
             CreatureTemplate.Relationship.Type.Ignores,
             0f);
-        desert.relationships[type.Index] = new CreatureTemplate.Relationship(
+        SetRelationshipIfValid(
+            desert,
+            type.Index,
             CreatureTemplate.Relationship.Type.Ignores,
             0f);
-        desert.relationships[CreatureTemplate.Type.Fly.Index] = new CreatureTemplate.Relationship(
+        SetRelationshipIfValid(
+            desert,
+            CreatureTemplate.Type.Fly.Index,
             CreatureTemplate.Relationship.Type.Ignores,
             0f);
     }
+    private static void SetRelationshipIfValid(
+        CreatureTemplate source,
+        int targetIndex,
+        CreatureTemplate.Relationship.Type relationshipType,
+        float intensity)
+    {
+        if (source?.relationships == null ||
+            targetIndex < 0 ||
+            targetIndex >= source.relationships.Length)
+        {
+            return;
+        }
+
+        source.relationships[targetIndex] =
+            new CreatureTemplate.Relationship(relationshipType, intensity);
+    }
+
 }
