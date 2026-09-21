@@ -34,15 +34,12 @@ internal static class DryCycleLifecycleEvents
         Delegate[] invocationList = handlers.GetInvocationList();
         for (int i = 0; i < invocationList.Length; i++)
         {
-            try
-            {
-                ((Action<RainWorld>)invocationList[i])(rainWorld);
-            }
-            catch (Exception error)
-            {
-                Plugin.Logger?.LogWarning(
-                    "DryCycle lifecycle subscriber failed during " + phase + ": " + error);
-            }
+            Delegate handler = invocationList[i];
+            string owner = handler?.Method?.DeclaringType?.FullName ?? "<unknown>";
+            string method = handler?.Method?.Name ?? "<unknown>";
+            StartupDiagnostics.Optional(
+                "Lifecycle/" + phase + "/" + owner + "." + method,
+                () => ((Action<RainWorld>)handler)(rainWorld));
         }
     }
 }
