@@ -5,6 +5,7 @@ using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
+using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Preview;
 using DryCycle.DevUI.DevTool.World;
@@ -70,6 +71,12 @@ public static class EditorActions
 
         bool ok = true;
         map.SaveMapConfig();
+        if (PlayerMapWorkspaceRuntime.IsDirty(session))
+        {
+            ok = false;
+            Plugin.Logger?.LogWarning(
+                "DevTool Map save did not persist the Player Map config; the workspace remains dirty.");
+        }
 
         if (WorldTextRegistry.Dirty)
         {
