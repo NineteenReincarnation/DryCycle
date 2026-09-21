@@ -491,17 +491,17 @@ public static class CreatureRegistry
                     index < StaticWorld.creatureTemplates.Length)
                 {
                     StaticWorld.creatureTemplates[index] = safeFallback;
-                    global::DryCycle.Plugin.Logger?.LogWarning(
-                        "Creature '" + descriptor.Type.value +
-                        "' was quarantined after template construction failed; " +
-                        "its StaticWorld slot temporarily resolves to vanilla Fly so startup can continue.");
+                    global::DryCycle.StartupDiagnostics.Marker(
+                        "CreatureRegistry/StaticWorld/" + descriptor.Type.value,
+                        "QUARANTINED",
+                        "template construction failed; StaticWorld slot temporarily uses vanilla Fly");
                 }
                 else
                 {
-                    global::DryCycle.Plugin.Logger?.LogError(
-                        "Creature '" + descriptor.Type.value +
-                        "' template failed and no safe fallback template was available. " +
-                        "The failure was isolated to keep StaticWorld initialization running.");
+                    global::DryCycle.StartupDiagnostics.Marker(
+                        "CreatureRegistry/StaticWorld/" + descriptor.Type.value,
+                        "QUARANTINED-NO-FALLBACK",
+                        "template failed and no safe fallback was available; StaticWorld initialization continues");
                 }
             }
         }
