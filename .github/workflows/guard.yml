@@ -24,21 +24,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-compile:
-    name: Build / Compile
+  build-safety:
+    name: Build Safety
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build and compile contracts
+      - name: Build safety contracts
         shell: bash
-        run: bash Guard/build-compile.sh
-      - name: Parse local DevTool validator
+        run: bash Guard/build-safety.sh
+      - name: Parse local build validator
         shell: pwsh
         run: |
           $tokens = $null
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Join-Path $PWD 'Guard/tools/devtool-local.ps1'),
+            (Join-Path $PWD 'Guard/tools/local-build.ps1'),
             [ref]$tokens,
             [ref]$errors)
           if ($errors.Count -gt 0) {
