@@ -110,95 +110,46 @@ internal sealed class Plugin : BaseUnityPlugin
 
     public void OnDisable()
     {
-        Iterators.PwnIteratorExample.Unregister();
-        Iterators.IteratorHooks.Uninstall();
-        Iterators.IteratorLogBridge.Disable();
-        AIDebuggerRuntime.Uninstall();
-        On.RainWorld.PreModsInit -= RainWorld_PreModsInit;
-        On.RainWorld.OnModsInit -= RainWorld_OnModsInit;
-        On.RainWorld.PostModsInit -= RainWorld_PostModsInit;
-        DB_Relationships.Disable();
-        DB_RainWorldHooks.Disable();
-        LanceScavengerHooks.Disable();
-        ScavengerLanceHooks.Disable();
-        LanceScavengerAssets.Unload();
-        CreatureCoreRegistry.Disable();
-        DryCycleContent.Disable();
+        StartupDiagnostics.Marker("Plugin.OnDisable", "ENTER");
+
+        SafeBootstrapCleanup("OnDisable/PwnIteratorExample.Unregister", Iterators.PwnIteratorExample.Unregister);
+        SafeBootstrapCleanup("OnDisable/IteratorHooks.Uninstall", Iterators.IteratorHooks.Uninstall);
+        SafeBootstrapCleanup("OnDisable/IteratorLogBridge.Disable", Iterators.IteratorLogBridge.Disable);
+        SafeBootstrapCleanup("OnDisable/AIDebuggerRuntime.Uninstall", AIDebuggerRuntime.Uninstall);
+
+        SafeBootstrapCleanup(
+            "OnDisable/RainWorld.PreModsInit hook",
+            () => On.RainWorld.PreModsInit -= RainWorld_PreModsInit);
+        SafeBootstrapCleanup(
+            "OnDisable/RainWorld.OnModsInit hook",
+            () => On.RainWorld.OnModsInit -= RainWorld_OnModsInit);
+        SafeBootstrapCleanup(
+            "OnDisable/RainWorld.PostModsInit hook",
+            () => On.RainWorld.PostModsInit -= RainWorld_PostModsInit);
+
+        SafeBootstrapCleanup("OnDisable/DB_Relationships.Disable", DB_Relationships.Disable);
+        SafeBootstrapCleanup("OnDisable/DB_RainWorldHooks.Disable", DB_RainWorldHooks.Disable);
+        SafeBootstrapCleanup("OnDisable/LanceScavengerHooks.Disable", LanceScavengerHooks.Disable);
+        SafeBootstrapCleanup("OnDisable/ScavengerLanceHooks.Disable", ScavengerLanceHooks.Disable);
+        SafeBootstrapCleanup("OnDisable/LanceScavengerAssets.Unload", LanceScavengerAssets.Unload);
+        SafeBootstrapCleanup("OnDisable/CreatureCoreRegistry.Disable", CreatureCoreRegistry.Disable);
+        SafeBootstrapCleanup("OnDisable/DryCycleContent.Disable", DryCycleContent.Disable);
         SafeBootstrapCleanup("OnDisable/CreatureDevConsoleSupport.ResetRegistration", CreatureDevConsoleSupport.ResetRegistration);
         SafeBootstrapCleanup("OnDisable/RopeSpearDevConsoleSupport.ResetRegistration", RopeSpearDevConsoleSupport.ResetRegistration);
         SafeBootstrapCleanup("OnDisable/KarmaSpearDevConsoleSupport.ResetRegistration", KarmaSpearDevConsoleSupport.ResetRegistration);
-        SpinebackLizardHooks.Disable();
+        SafeBootstrapCleanup("OnDisable/SpinebackLizardHooks.Disable", SpinebackLizardHooks.Disable);
         SafeBootstrapCleanup("OnDisable/SpinebackLizardDevConsoleSupport.ResetRegistration", SpinebackLizardDevConsoleSupport.ResetRegistration);
 
-        // PaletteDirectInputRuntime is installed from OnEnable, so always remove it even when
-        // full runtime initialization never completed. MiscRuntime.Disable is idempotent.
-        PaletteDirectInputRuntime.Disable();
-        WorldTopologyRuntime.Disable();
+        // These are installed from OnEnable and therefore must be removed even when full
+        // RainWorld.OnModsInit initialization never completed.
+        SafeBootstrapCleanup("OnDisable/PaletteDirectInputRuntime.Disable", PaletteDirectInputRuntime.Disable);
+        SafeBootstrapCleanup("OnDisable/WorldTopologyRuntime.Disable", WorldTopologyRuntime.Disable);
 
         if (_initialized)
-        {
-            InternalGateRuntime.Disable();
-            MiscRuntime.Disable();
-            OpenShelterSleepRuntime.Disable();
-            RainDrinkingRuntime.Disable();
-            RainMeterFastForwardForecastFix.Disable();
-            FogForecastFlowRuntime.Disable();
-            RainMeterRoundPipRuntime.Disable();
-            WeatherForecastHudRuntime.Disable();
-            WeatherCameraEffectsRuntime.Disable();
-            SyntheticRoomRainTakeoverRuntime.Disable();
-            ScheduledHeavyRainImpactGuardRuntime.Disable();
-            ScheduledHeavyRainTraversalRuntime.Disable();
-            RainWeatherRuntime.Disable();
-            SandstormWeatherRuntime.Disable();
-            IntenseHeatWeatherRuntime.Disable();
-            HeatWaveWeatherRuntime.Disable();
-            FogWeatherRuntime.Disable();
-            WeatherScheduleRuntime.Disable();
-            ShelterCycleResetRuntime.Disable();
-            WorldClockRegionContinuityRuntime.Disable();
-            DayNightRuntime.Disable();
-            HydrationDivider.Disable();
-            DehydrationVisualRuntime.Disable();
-            HydrationWeakness.Disable();
-            KingVultureSpearCombat.Disable();
-            RopeSpearWallStickRuntime.Disable();
-            RopeSpearMountVinePoseRuntime.Disable();
-            RopeSpearDiagonalClimbRuntime.Disable();
-            RopeSpearAimController.Disable();
-            RopeSpearSandboxRuntime.Disable();
-            DryCycleTokenRuntime.Disable();
-            RopeSpearHooks.Disable();
-            QuicksandSubmersionCleanup.Disable();
-            QuicksandCreatureEscape.Disable();
-            QuicksandAIHazard.Disable();
-            QuicksandWeaponSettling.Disable();
-            QuicksandPlayerShoreConstraint.Disable();
-            QuicksandPlayerStruggleControl.Disable();
-            QuicksandPlayerLocomotionSupport.Disable();
-            QuicksandLooseObjectSinkEase.Disable();
-            QuicksandSinkRateLimiter.Disable();
-            QuicksandPlayerHorizontalStability.Disable();
-            QuicksandDrillCrabCompatibility.Disable();
-            QuicksandZoneHooks.Disable();
-            DewPodAudioHooks.Disable();
-            DewPodRuntimeTuningHooks.Disable();
-            DewPodClassicVisualHooks.Disable();
-            DewPodPlantCollisionHooks.Disable();
-            DewPodPlantHooks.Disable();
-            DewPodHooks.Disable();
-            TemperatureSystemRuntime.Disable();
-            SlugCatKarmicArmorRuntime.Disable();
-            KarmaSpearHooks.Disable();
-            DevFoodWaterRefillRuntime.Disable();
-            ThirstHooks.Disable();
-            KingVultureSpearFeedback.Disable();
-            KingVultureSpearPlayerEffects.Disable();
-            KingVultureSpearHooks.Disable();
-            _initialized = false;
-        }
+            RollbackRuntimeInitialization();
 
-        DryCycleShaderAssets.Disable();
+        SafeBootstrapCleanup("OnDisable/DryCycleShaderAssets.Disable", DryCycleShaderAssets.Disable);
+        StartupDiagnostics.Marker("Plugin.OnDisable", "EXIT");
     }
 
     private static void RollbackBootstrap()
