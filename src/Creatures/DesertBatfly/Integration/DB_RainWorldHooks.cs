@@ -1,3 +1,4 @@
+using System;
 using DryCycle.Debugging.AI;
 
 namespace DryCycle.Creatures.DesertBatfly;
@@ -13,7 +14,10 @@ internal static class DB_RainWorldHooks
     {
         if (enabled) return;
         enabled = true;
-        DB_CorpseWarningRuntime.Reset();
+
+        try
+        {
+            DB_CorpseWarningRuntime.Reset();
         DB_RoomContext.Reset();
         DB_PerformanceProbe.Reset();
         DB_FrameContextRuntime.Reset();
@@ -46,47 +50,93 @@ internal static class DB_RainWorldHooks
         On.FlyAI.IdleUpdate += Idle;
         On.FlyAI.SwarmUpdate += Swarm;
         On.FlyAI.UpdateFollowDijsktra += Follow;
-        On.Room.Update += UpdateRoom;
-        On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
+            On.Room.Update += UpdateRoom;
+            On.SlugcatStats.NourishmentOfObjectEaten += Nourishment;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "DB_RainWorldHooks.Enable",
+                error,
+                () => CleanupInstalledState("enable rollback"));
+            throw;
+        }
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
+        CleanupInstalledState("disable");
+    }
+
+    private static void CleanupInstalledState(string phase)
+    {
         enabled = false;
-        On.Fly.ReportToFliesRoomAI -= Report;
-        On.FliesRoomAI.FlyEmergeFromHive -= Emerge;
-        On.Fly.Burrowed -= Burrow;
-        On.FlyAI.Update -= UpdateAI;
-        On.FlyAI.UpdateThreats -= Threats;
-        On.FlyAI.ConsiderOtherFly -= ConsiderOtherFly;
-        On.FlyAI.IdleUpdate -= Idle;
-        On.FlyAI.SwarmUpdate -= Swarm;
-        On.FlyAI.UpdateFollowDijsktra -= Follow;
-        On.Room.Update -= UpdateRoom;
-        On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment;
-        DB_DehydrationGripRuntime.Disable();
-        DB_EventConsumers.Disable();
-        DB_EventHub.Disable();
-        DB_ThreatRuntime.Disable();
-        DB_SignalRuntime.Reset();
-        DB_EnvironmentRuntime.Reset();
-        DB_EnvironmentRoomRuntime.Reset();
-        DB_FeedingCoordinator.Reset();
-        DB_SocialRuntime.Reset();
-        DB_NeutralBehaviorRuntime.Reset();
-        DB_ColonyRuntime.Disable();
-        DB_RefugePolicy.Reset();
-        DB_CorpseWarningRuntime.Reset();
-        DB_RoomContext.Reset();
-        DB_PerformanceProbe.Reset();
-        DB_FrameContextRuntime.Reset();
-        DB_BehaviorArbiter.Reset();
-        DB_FlightMotor.Reset();
-        DB_FearRuntime.Reset();
-        DB_WarpCompatibility.Disable();
-        DB_Sandbox.Disable();
-        DB_SwarmRoom.Reset();
+
+        Rollback(
+            phase + "/SlugcatStats.NourishmentOfObjectEaten",
+            () => On.SlugcatStats.NourishmentOfObjectEaten -= Nourishment);
+        Rollback(
+            phase + "/Room.Update",
+            () => On.Room.Update -= UpdateRoom);
+        Rollback(
+            phase + "/FlyAI.UpdateFollowDijsktra",
+            () => On.FlyAI.UpdateFollowDijsktra -= Follow);
+        Rollback(
+            phase + "/FlyAI.SwarmUpdate",
+            () => On.FlyAI.SwarmUpdate -= Swarm);
+        Rollback(
+            phase + "/FlyAI.IdleUpdate",
+            () => On.FlyAI.IdleUpdate -= Idle);
+        Rollback(
+            phase + "/FlyAI.ConsiderOtherFly",
+            () => On.FlyAI.ConsiderOtherFly -= ConsiderOtherFly);
+        Rollback(
+            phase + "/FlyAI.UpdateThreats",
+            () => On.FlyAI.UpdateThreats -= Threats);
+        Rollback(
+            phase + "/FlyAI.Update",
+            () => On.FlyAI.Update -= UpdateAI);
+        Rollback(
+            phase + "/Fly.Burrowed",
+            () => On.Fly.Burrowed -= Burrow);
+        Rollback(
+            phase + "/FliesRoomAI.FlyEmergeFromHive",
+            () => On.FliesRoomAI.FlyEmergeFromHive -= Emerge);
+        Rollback(
+            phase + "/Fly.ReportToFliesRoomAI",
+            () => On.Fly.ReportToFliesRoomAI -= Report);
+
+        Rollback(phase + "/DB_DehydrationGripRuntime.Disable", DB_DehydrationGripRuntime.Disable);
+        Rollback(phase + "/DB_EventConsumers.Disable", DB_EventConsumers.Disable);
+        Rollback(phase + "/DB_EventHub.Disable", DB_EventHub.Disable);
+        Rollback(phase + "/DB_ThreatRuntime.Disable", DB_ThreatRuntime.Disable);
+        Rollback(phase + "/DB_ColonyRuntime.Disable", DB_ColonyRuntime.Disable);
+
+        Rollback(phase + "/DB_SignalRuntime.Reset", DB_SignalRuntime.Reset);
+        Rollback(phase + "/DB_EnvironmentRuntime.Reset", DB_EnvironmentRuntime.Reset);
+        Rollback(phase + "/DB_EnvironmentRoomRuntime.Reset", DB_EnvironmentRoomRuntime.Reset);
+        Rollback(phase + "/DB_FeedingCoordinator.Reset", DB_FeedingCoordinator.Reset);
+        Rollback(phase + "/DB_SocialRuntime.Reset", DB_SocialRuntime.Reset);
+        Rollback(phase + "/DB_NeutralBehaviorRuntime.Reset", DB_NeutralBehaviorRuntime.Reset);
+        Rollback(phase + "/DB_RefugePolicy.Reset", DB_RefugePolicy.Reset);
+        Rollback(phase + "/DB_CorpseWarningRuntime.Reset", DB_CorpseWarningRuntime.Reset);
+        Rollback(phase + "/DB_RoomContext.Reset", DB_RoomContext.Reset);
+        Rollback(phase + "/DB_PerformanceProbe.Reset", DB_PerformanceProbe.Reset);
+        Rollback(phase + "/DB_FrameContextRuntime.Reset", DB_FrameContextRuntime.Reset);
+        Rollback(phase + "/DB_BehaviorArbiter.Reset", DB_BehaviorArbiter.Reset);
+        Rollback(phase + "/DB_FlightMotor.Reset", DB_FlightMotor.Reset);
+        Rollback(phase + "/DB_FearRuntime.Reset", DB_FearRuntime.Reset);
+        Rollback(phase + "/DB_WarpCompatibility.Disable", DB_WarpCompatibility.Disable);
+        Rollback(phase + "/DB_Sandbox.Disable", DB_Sandbox.Disable);
+        Rollback(phase + "/DB_SwarmRoom.Reset", DB_SwarmRoom.Reset);
+    }
+
+    private static void Rollback(string source, Action action)
+    {
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "DB_RainWorldHooks/" + source,
+            action);
     }
 
     private static void Report(On.Fly.orig_ReportToFliesRoomAI orig, Fly self, Room room)
