@@ -144,22 +144,42 @@ if ! grep -Fq 'SKIP-ALREADY-REGISTERED' "$plugin"; then
   exit 1
 fi
 
-# Optional audio codecs must never become an assembly-load prerequisite for DryCycle.dll.
-# NAudio is runtime-discovered through reflection; compile-time type references can make BepInEx
-# fail before Plugin.OnEnable and before startup diagnostics exist.
-if grep -R --include='*.cs' -E '(^|[[:space:]])using[[:space:]]+NAudio\.|typeof[[:space:]]*\([[:space:]]*NAudio\.|new[[:space:]]+NAudio\.' src/Misc/SoundFormatSupport; then
-  echo "SoundFormatSupport reintroduced a compile-time NAudio type dependency." >&2
+# Extended audio decoding is a required DryCycle feature, but deployment must remain single-DLL.
+# Compile against NAudio normally, then merge NAudio.Wasapi + NAudio.Core into DryCycle.dll.
+audio_loader="src/Misc/SoundFormatSupport/ExternalAudioLoader.cs"
+repack="src/ILRepack.targets"
+if ! grep -Fq 'using NAudio.Wave;' "$audio_loader" ||
+   ! grep -Fq 'MediaFoundationReader reader' "$audio_loader" ||
+   ! grep -Fq 'reader.ToSampleProvider()' "$audio_loader"; then
+  echo "Full NAudio Media Foundation decoding is no longer compiled into DryCycle." >&2
   exit 1
 fi
-if ! grep -A4 -F '<PackageReference Include="NAudio.Wasapi" Version="2.2.1">' src/DryCycle.csproj |
+if ! grep -Fq '<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />' src/DryCycle.csproj ||
+   ! grep -Fq '<PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46">' src/DryCycle.csproj; then
+  echo "DryCycle single-DLL audio build dependencies are incomplete." >&2
+  exit 1
+fi
+if grep -A4 -F '<PackageReference Include="NAudio.Wasapi" Version="2.2.1"' src/DryCycle.csproj |
      grep -Fq '<ExcludeAssets>compile</ExcludeAssets>'; then
-  echo "NAudio.Wasapi must remain runtime-only so DryCycle.dll has no hard codec assembly dependency." >&2
+  echo "NAudio was downgraded to runtime-only; full decoder must compile into the merged DryCycle.dll." >&2
   exit 1
 fi
-if ! grep -Fq 'Type.GetType(' src/Misc/SoundFormatSupport/ExternalAudioLoader.cs ||
-   ! grep -Fq 'NAudio.Wave.MediaFoundationReader, NAudio.Wasapi' src/Misc/SoundFormatSupport/ExternalAudioLoader.cs; then
-  echo "Optional Media Foundation backend is no longer reflection-isolated." >&2
+if ! grep -Fq '$(TargetDir)NAudio.Wasapi.dll' "$repack" ||
+   ! grep -Fq '$(TargetDir)NAudio.Core.dll' "$repack" ||
+   ! grep -Fq 'InputAssemblies="@(DryCycleNAudioInput)"' "$repack" ||
+   ! grep -Fq 'OutputFile="$(TargetPath)"' "$repack" ||
+   ! grep -Fq 'Internalize="true"' "$repack"; then
+  echo "NAudio is not guaranteed to be merged into the single DryCycle.dll output." >&2
   exit 1
 fi
+if ! grep -Fq 'NAudio.Wasapi.dll;$(TargetDir)NAudio.Core.dll' "$repack"; then
+  echo "Merged NAudio sidecar DLLs are not cleaned after single-DLL build." >&2
+  exit 1
+fi
+if ! grep -Fq 'DependsOnTargets="RemoveLegacyDryCycleImGuiRuntime;ILRepacker"' src/Directory.Build.targets; then
+  echo "Optional frontends can build against DryCycle.dll before its NAudio merge completes." >&2
+  exit 1
+fi
+
 
 echo "DryCycle startup-safety guard passed."
