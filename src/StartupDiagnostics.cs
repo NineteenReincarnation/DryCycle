@@ -137,8 +137,8 @@ internal static class StartupDiagnostics
         catch (Exception error)
         {
             string prefix = FormatPrefix(id, source, "ROLLBACK-FAIL");
-            logger?.LogError(prefix + " " + Describe(error));
-            logger?.LogError(error);
+            SafeLogError(prefix + " " + Describe(error));
+            SafeLogError(error);
             return false;
         }
     }
