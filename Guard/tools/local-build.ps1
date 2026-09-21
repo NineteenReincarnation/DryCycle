@@ -13,6 +13,8 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GuardRoot = Split-Path -Parent $ScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $GuardRoot))
 $DefaultBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".build-validation"))
+$ValidationMarkerName = ".drycycle-build-validation"
+$ValidationMarkerText = "DryCycle Local Build Validation"
 
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
     $BuildRoot = $DefaultBuildRoot
@@ -86,6 +88,85 @@ function Invoke-DotNetBuild(
     Pass $Label
 }
 
+function Initialize-BuildRoot {
+    $buildDriveRoot = [System.IO.Path]::GetPathRoot($BuildRoot)
+    $insideRepository = Is-PathWithin $BuildRoot $RepoRoot
+    $insideSafeRepositoryOutput = Is-PathWithin $BuildRoot $DefaultBuildRoot
+    if ((Same-Path $BuildRoot $buildDriveRoot) -or
+        (Is-PathWithin $BuildRoot $RainWorldDir) -or
+        ($insideRepository -and -not $insideSafeRepositoryOutput)) {
+        Fail "Unsafe BuildRoot. Use .build-validation (or a child of it), or a dedicated directory outside the repository and Rain World installation."
+    }
+
+    $marker = Join-Path $BuildRoot $ValidationMarkerName
+    if (Test-Path -LiteralPath $BuildRoot) {
+        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+            Fail "Refusing to delete existing BuildRoot because it is not owned by DryCycle validation: $BuildRoot"
+        }
+        $markerContent = (Get-Content -LiteralPath $marker -Raw).Trim()
+        if ($markerContent -ne $ValidationMarkerText) {
+            Fail "Refusing to delete existing BuildRoot because its validation marker is invalid: $BuildRoot"
+        }
+        Remove-Item -LiteralPath $BuildRoot -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $BuildRoot | Out-Null
+    Set-Content -LiteralPath (Join-Path $BuildRoot $ValidationMarkerName) -Value $ValidationMarkerText -Encoding UTF8
+}
+
+function Validate-BackendArtifact([string]$AssemblyPath) {
+    Write-Host ""
+    Write-Host "=== DryCycle.dll artifact ===" -ForegroundColor Cyan
+
+    $cecilPath = Join-Path $RainWorldDir "BepInEx/core/Mono.Cecil.dll"
+    Require-File $cecilPath "Mono.Cecil artifact inspector"
+
+    try {
+        Add-Type -Path $cecilPath
+        $assembly = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($AssemblyPath)
+        try {
+            $references = @($assembly.MainModule.AssemblyReferences | ForEach-Object { $_.Name })
+            $forbiddenOptionalReferences = @(
+                "ImGui.NET",
+                "rain-world-imgui-api",
+                "DryCycle.DevTool.RWImGui",
+                "DryCycle.AIObservatory.RWImGui"
+            )
+            $badOptionalReferences = @($references | Where-Object { $forbiddenOptionalReferences -contains $_ })
+            if ($badOptionalReferences.Count -gt 0) {
+                Fail ("DryCycle.dll has optional frontend/runtime AssemblyRef(s): " + ($badOptionalReferences -join ", "))
+            }
+
+            $externalNAudioReferences = @($references | Where-Object { $_ -eq "NAudio.Core" -or $_ -eq "NAudio.Wasapi" -or $_ -eq "NAudio" })
+            if ($externalNAudioReferences.Count -gt 0) {
+                Fail ("DryCycle.dll still requires external NAudio managed assembly/assemblies: " + ($externalNAudioReferences -join ", "))
+            }
+
+            $containsNAudio = $false
+            foreach ($module in $assembly.Modules) {
+                foreach ($type in $module.Types) {
+                    if ($type.Namespace -eq "NAudio" -or $type.Namespace.StartsWith("NAudio.", [System.StringComparison]::Ordinal)) {
+                        $containsNAudio = $true
+                        break
+                    }
+                }
+                if ($containsNAudio) { break }
+            }
+            if (-not $containsNAudio) {
+                Fail "DryCycle.dll has no NAudio TypeDef. The managed NAudio implementation was not verified as merged into the gameplay DLL."
+            }
+        }
+        finally {
+            $assembly.Dispose()
+        }
+    }
+    catch {
+        Fail ("DryCycle.dll artifact inspection failed: " + $_.Exception.Message)
+    }
+
+    Pass "DryCycle.dll managed dependency and merge contract"
+}
+
 Write-Host "============================================================"
 Write-Host "DryCycle Local Build Validation"
 Write-Host "============================================================"
@@ -93,7 +174,7 @@ Write-Host "Repository : $RepoRoot"
 Write-Host "Rain World : $RainWorldDir"
 Write-Host "Build root : $BuildRoot"
 Write-Host "Config     : $Configuration"
-Write-Host "Mode       : $(if ($BackendOnly) { 'Backend only' } else { 'Backend + RWImGui frontend' })"
+Write-Host "Mode       : $(if ($BackendOnly) { 'Backend only' } else { 'Backend + optional RWImGui frontends' })"
 Write-Host ""
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
@@ -102,50 +183,20 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 
 Require-Directory $RainWorldDir "Rain World directory"
 
-$buildDriveRoot = [System.IO.Path]::GetPathRoot($BuildRoot)
-$insideRepository = Is-PathWithin $BuildRoot $RepoRoot
-$insideSafeRepositoryOutput = Is-PathWithin $BuildRoot $DefaultBuildRoot
-if ((Same-Path $BuildRoot $buildDriveRoot) -or
-    (Is-PathWithin $BuildRoot $RainWorldDir) -or
-    ($insideRepository -and -not $insideSafeRepositoryOutput)) {
-    Fail "Unsafe BuildRoot. Use .build-validation (or a child of it), or a dedicated directory outside the repository and Rain World installation."
-}
-
-$requiredRainWorldFiles = [ordered]@{
-    "BepInEx" = "BepInEx/core/BepInEx.dll"
-    "MonoMod.RuntimeDetour" = "BepInEx/core/MonoMod.RuntimeDetour.dll"
-    "MonoMod.Utils" = "BepInEx/core/MonoMod.Utils.dll"
-    "Mono.Cecil" = "BepInEx/core/Mono.Cecil.dll"
-    "PUBLIC-Assembly-CSharp" = "BepInEx/utils/PUBLIC-Assembly-CSharp.dll"
-    "HOOKS-Assembly-CSharp" = "BepInEx/plugins/HOOKS-Assembly-CSharp.dll"
-    "Assembly-CSharp-firstpass" = "RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll"
-    "UnityEngine" = "RainWorld_Data/Managed/UnityEngine.dll"
-    "UnityEngine.CoreModule" = "RainWorld_Data/Managed/UnityEngine.CoreModule.dll"
-    "UnityEngine.AssetBundleModule" = "RainWorld_Data/Managed/UnityEngine.AssetBundleModule.dll"
-    "UnityEngine.AudioModule" = "RainWorld_Data/Managed/UnityEngine.AudioModule.dll"
-    "UnityEngine.InputLegacyModule" = "RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll"
-    "Unity.Mathematics" = "RainWorld_Data/Managed/Unity.Mathematics.dll"
-}
-
-Write-Host "=== Rain World references ===" -ForegroundColor Cyan
-foreach ($entry in $requiredRainWorldFiles.GetEnumerator()) {
-    Require-File (Join-Path $RainWorldDir $entry.Value) $entry.Key
-}
-
 $mainProject = Join-Path $RepoRoot "src/DryCycle.csproj"
-$frontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
+$aiFrontendProject = Join-Path $RepoRoot "src/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj"
+$devToolFrontendProject = Join-Path $RepoRoot "src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj"
 Require-File $mainProject "DryCycle project"
 if (-not $BackendOnly) {
-    Require-File $frontendProject "DevTool RWImGui project"
+    Require-File $aiFrontendProject "AI Observatory RWImGui project"
+    Require-File $devToolFrontendProject "DevTool RWImGui project"
 }
 
-if (Test-Path -LiteralPath $BuildRoot) {
-    Remove-Item -LiteralPath $BuildRoot -Recurse -Force
-}
-New-Item -ItemType Directory -Path $BuildRoot | Out-Null
+Initialize-BuildRoot
 
-# Build the backend into an isolated directory. DeployToGame=false guarantees that the validation
-# run does not overwrite the user's active Rain World mod installation.
+# The validation build uses an isolated output directory and explicitly disables deployment.
+# Build targets are expected to respect that contract; this script does not claim to prove arbitrary
+# MSBuild data flow or runtime behavior.
 $backendProperties = @(
     "RainWorldDir=$RainWorldDir",
     "DeployToGame=false",
@@ -155,15 +206,16 @@ Invoke-DotNetBuild $mainProject $backendProperties "DryCycle.dll"
 
 $dryCycleDll = Join-Path $BuildRoot "DryCycle.dll"
 Require-File $dryCycleDll "compiled DryCycle.dll"
+Validate-BackendArtifact $dryCycleDll
 
 if ($BackendOnly) {
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Green
-    Write-Host "Backend compile validation passed." -ForegroundColor Green
+    Write-Host "Backend build and artifact validation passed." -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
-    Write-Host "Backend  : $dryCycleDll"
+    Write-Host "Backend : $dryCycleDll"
     Write-Host ""
-    Write-Host "BackendOnly validates DryCycle.dll compilation only. RWImGui frontend, Rain World runtime, and performance regression are still pending."
+    Write-Host "Runtime behavior was not validated."
     exit 0
 }
 
@@ -186,7 +238,7 @@ if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($RWImGuiPluginDir)) {
-    Fail "RWImGui plugin directory was not found. Pass -RWImGuiPluginDir explicitly, or use -BackendOnly to validate DryCycle.dll first."
+    Fail "RWImGui plugin directory was not found. Pass -RWImGuiPluginDir explicitly, or use -BackendOnly."
 }
 $RWImGuiPluginDir = [System.IO.Path]::GetFullPath($RWImGuiPluginDir)
 
@@ -196,30 +248,27 @@ Require-Directory $RWImGuiPluginDir "RWImGui plugin directory"
 Require-File (Join-Path $RWImGuiPluginDir "rain-world-imgui-api.dll") "rain-world-imgui-api"
 Require-File (Join-Path $RWImGuiPluginDir "ImGui.NET.dll") "RWImGui ImGui.NET"
 
-# The frontend project resolves DryCycle.dll through GameModOutputDir. Point that property at the
-# isolated validation output so it compiles against the exact backend produced above.
+# Both optional frontends compile against the exact isolated DryCycle.dll produced above.
 $frontendProperties = @(
     "RainWorldDir=$RainWorldDir",
+    "DeployToGame=false",
     "GameModOutputDir=$BuildRoot",
     "RWImGuiPluginDir=$RWImGuiPluginDir"
 )
-Invoke-DotNetBuild $frontendProject $frontendProperties "DryCycle.DevTool.RWImGui.dll"
+Invoke-DotNetBuild $aiFrontendProject $frontendProperties "DryCycle.AIObservatory.RWImGui.dll"
+Invoke-DotNetBuild $devToolFrontendProject $frontendProperties "DryCycle.DevTool.RWImGui.dll"
 
-$frontendDll = Join-Path $BuildRoot "DryCycle.DevTool.RWImGui.dll"
-Require-File $frontendDll "compiled DryCycle.DevTool.RWImGui.dll"
+$aiFrontendDll = Join-Path $BuildRoot "DryCycle.AIObservatory.RWImGui.dll"
+$devToolFrontendDll = Join-Path $BuildRoot "DryCycle.DevTool.RWImGui.dll"
+Require-File $aiFrontendDll "compiled DryCycle.AIObservatory.RWImGui.dll"
+Require-File $devToolFrontendDll "compiled DryCycle.DevTool.RWImGui.dll"
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "Compile validation passed." -ForegroundColor Green
+Write-Host "Build and artifact validation passed." -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "Backend  : $dryCycleDll"
-Write-Host "Frontend : $frontendDll"
+Write-Host "Backend             : $dryCycleDll"
+Write-Host "AI Observatory UI   : $aiFrontendDll"
+Write-Host "DevTool UI          : $devToolFrontendDll"
 Write-Host ""
-Write-Host "This script validates compilation only. It does not claim Rain World runtime regression or performance validation."
-Write-Host "Next runtime checks:"
-Write-Host "  1. New UI / Vanilla switching"
-Write-Host "  2. Save / Undo / Redo"
-Write-Host "  3. Objects / Room / Sound / Triggers / Map / Dialog / Relationships"
-Write-Host "  4. Generic DevInterface fallback"
-Write-Host "  5. DevTool Extension API register / dispose / reload"
-Write-Host "  6. Stable-frame performance and snapshot-cache regression"
+Write-Host "Runtime behavior was not validated."
