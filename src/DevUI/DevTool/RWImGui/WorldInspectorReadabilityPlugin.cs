@@ -18,8 +18,15 @@ public sealed class WorldInspectorReadabilityPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool World Inspector Readability";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldInspectorReadability.Enable(Logger);
-    private void OnDisable() => WorldInspectorReadability.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldInspectorReadability.Enable(Logger),
+            WorldInspectorReadability.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldInspectorReadability.Disable);
 }
 
 internal static class WorldInspectorReadability
