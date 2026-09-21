@@ -39,7 +39,26 @@ internal static class ItemRegistry
         }
 
         _enabled = true;
-        On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
+        try
+        {
+            On.SaveState.AbstractPhysicalObjectFromString += SaveState_AbstractPhysicalObjectFromString;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "ItemRegistry.Enable",
+                error,
+                () =>
+                {
+                    if (global::DryCycle.StartupDiagnostics.RollbackStep(
+                            "ItemRegistry.Enable/SaveState.AbstractPhysicalObjectFromString",
+                            () => On.SaveState.AbstractPhysicalObjectFromString -= SaveState_AbstractPhysicalObjectFromString))
+                    {
+                        _enabled = false;
+                    }
+                });
+            throw;
+        }
     }
 
     internal static void Disable()
