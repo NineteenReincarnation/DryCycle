@@ -61,7 +61,14 @@ internal sealed class Plugin : BaseUnityPlugin
         try
         {
             StartupDiagnostics.Step("Plugin.OnEnable/IteratorLogBridge.Enable", () => Iterators.IteratorLogBridge.Enable(Logger));
-            StartupDiagnostics.Step("Plugin.OnEnable/IteratorHooks.Install", Iterators.IteratorHooks.Install);
+            bool iteratorHooksInstalled = StartupDiagnostics.Step(
+                "Plugin.OnEnable/IteratorHooks.Install",
+                Iterators.IteratorHooks.Install);
+            if (!iteratorHooksInstalled)
+            {
+                throw new InvalidOperationException(
+                    "IteratorHooks.Install returned false. The iterator runtime was not installed.");
+            }
             StartupDiagnostics.Step("Plugin.OnEnable/PwnIteratorExample.Enable", Iterators.PwnIteratorExample.Enable);
 
             // CreatureTemplate.Type / descriptor registration is process-lifetime state. Install
