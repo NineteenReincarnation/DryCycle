@@ -38,7 +38,10 @@ internal static class SoundFormatSupportRuntime
             On.MenuMicrophone.SoundClipReady += MenuMicrophone_SoundClipReady;
 
             enabled = true;
-            Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
+            global::DryCycle.StartupDiagnostics.Marker(
+                "SoundFormatSupportRuntime.Enable",
+                "READY",
+                "formats=" + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
         }
         catch (Exception error)
         {
@@ -374,7 +377,10 @@ internal static class SoundFormatSupportRuntime
     {
         string message = "DryCycle audio decode failed [" + scope + "]: " + path;
         if (!string.IsNullOrWhiteSpace(error)) message += " | " + error;
-        Plugin.Logger?.LogWarning(message);
+        global::DryCycle.StartupDiagnostics.Marker(
+            "SoundFormatSupportRuntime.Decode",
+            "DECODE-FAIL",
+            message);
         errors?.Add(message);
     }
 }
