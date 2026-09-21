@@ -13,16 +13,12 @@ namespace DryCycle.DevUI.DevTool.Map;
 internal static class WorldMapFrontendBridge
 {
     private static Func<EditorSession, bool> shouldPublish;
-    private static Func<bool> allowPresentationPrime;
     private static Func<EditorSession, bool> shouldPrimeGeometry;
     private static Func<int, EditorMapRoomVisualSnapshot, EditorMapRoomVisualSnapshot> enhanceRaster;
     private static Func<global::World, bool> shouldProcessGeometryBackground;
 
     internal static bool ShouldPublish(EditorSession session) =>
         shouldPublish?.Invoke(session) ?? true;
-
-    internal static bool AllowPresentationPrime() =>
-        allowPresentationPrime?.Invoke() ?? true;
 
     internal static bool ShouldPrimeGeometry(EditorSession session) =>
         shouldPrimeGeometry?.Invoke(session) ?? true;
@@ -42,15 +38,6 @@ internal static class WorldMapFrontendBridge
     {
         if (Delegate.Equals(shouldPublish, callback))
             shouldPublish = null;
-    }
-
-    internal static void RegisterAllowPresentationPrime(Func<bool> callback) =>
-        allowPresentationPrime = callback;
-
-    internal static void UnregisterAllowPresentationPrime(Func<bool> callback)
-    {
-        if (Delegate.Equals(allowPresentationPrime, callback))
-            allowPresentationPrime = null;
     }
 
     internal static void RegisterShouldPrimeGeometry(Func<EditorSession, bool> callback) =>

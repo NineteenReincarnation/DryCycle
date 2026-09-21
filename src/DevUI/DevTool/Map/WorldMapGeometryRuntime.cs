@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.TerrainExt.QuicksandZone;
@@ -168,6 +169,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static readonly object publishedGate = new();
     private static readonly Dictionary<int, EditorMapRoomVisualSnapshot> published = new();
+    private static int publishedGeneration;
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
@@ -176,6 +178,9 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int backgroundCursor;
     private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
+
+    internal static int PublishedGeneration =>
+        Volatile.Read(ref publishedGeneration);
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
     {
@@ -189,8 +194,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     internal static void Prime(EditorSession session)
     {
-        if (!WorldMapFrontendBridge.AllowPresentationPrime() ||
-            !WorldMapFrontendBridge.ShouldPrimeGeometry(session))
+        if (!WorldMapFrontendBridge.ShouldPrimeGeometry(session))
             return;
 
         if (session?.Owner?.activePage is not MapPage page || page.world == null)
@@ -251,6 +255,7 @@ internal static partial class MapRoomGeometryPresentationHub
         PersistentBeforeClear();
         cache.Clear();
         lock (publishedGate) published.Clear();
+        Interlocked.Increment(ref publishedGeneration);
         roomOrder.Clear();
         region = string.Empty;
         lastPrimeFrame = -1;
@@ -265,6 +270,7 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         cache.Clear();
         lock (publishedGate) published.Clear();
+        Interlocked.Increment(ref publishedGeneration);
         roomOrder.Clear();
         region = nextRegion ?? string.Empty;
         lastPrimeFrame = -1;
@@ -313,7 +319,11 @@ internal static partial class MapRoomGeometryPresentationHub
             for (int i = 0; i < stale.Count; i++)
             {
                 cache.Remove(stale[i]);
-                lock (publishedGate) published.Remove(stale[i]);
+                bool removedPublished;
+                lock (publishedGate)
+                    removedPublished = published.Remove(stale[i]);
+                if (removedPublished)
+                    Interlocked.Increment(ref publishedGeneration);
                 PersistentOnRoomRemoved(stale[i]);
             }
         }
@@ -1300,7 +1310,18 @@ internal static partial class MapRoomGeometryPresentationHub
             WorldMapFrontendBridge.EnhanceRaster(entry.RoomIndex, entry.Snapshot) ??
             EditorMapRoomVisualSnapshot.Empty;
 
+        bool changed;
         lock (publishedGate)
+        {
+            changed =
+                !published.TryGetValue(
+                    entry.RoomIndex,
+                    out EditorMapRoomVisualSnapshot previous) ||
+                !ReferenceEquals(previous, snapshot);
             published[entry.RoomIndex] = snapshot;
+        }
+
+        if (changed)
+            Interlocked.Increment(ref publishedGeneration);
     }
 }

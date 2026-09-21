@@ -16,7 +16,7 @@ phase percentage below 100%.
 - **Phase 5 — 100%**: spatial index, background room-geometry scheduler and visible/local GPU upload scheduling.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
-- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
+- **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; geometry visual caches invalidate from publication generations instead of Unity frame polling; interaction cooldown handoff is thread-safe and Unity-Time-free; fallback rooms use the visible Air tone rather than a near-black FrameBg; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
 

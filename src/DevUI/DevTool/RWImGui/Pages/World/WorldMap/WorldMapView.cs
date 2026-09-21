@@ -43,7 +43,6 @@ internal static class WorldMapView
     private static readonly bool[] layerVisible = { true, true, true };
     private static readonly uint[] geometryColorCache = new uint[16];
     private static readonly bool[] geometryColorCacheValid = new bool[16];
-    private static int geometryColorFrame = int.MinValue;
     private static EditorMapPresentationSnapshot hoverIndexedSnapshot;
 
     private static string region = string.Empty;
@@ -84,7 +83,6 @@ internal static class WorldMapView
         synchronizedPositionRooms = null;
         hoverRoomLookup.Clear();
         hoverIndexedSnapshot = null;
-        geometryColorFrame = int.MinValue;
         Array.Clear(geometryColorCacheValid, 0, geometryColorCacheValid.Length);
 
         region = string.Empty;
@@ -115,6 +113,8 @@ internal static class WorldMapView
             DevToolWidgets.MutedText(DevToolUiSettings.T("世界地图不可用。", "World Map unavailable."), true);
             return;
         }
+
+        Array.Clear(geometryColorCacheValid, 0, geometryColorCacheValid.Length);
 
         SynchronizeRegion(snapshot);
         SynchronizePositions(snapshot);
@@ -536,7 +536,9 @@ internal static class WorldMapView
 
             if (!visual.DetailedRasterAvailable)
             {
-                uint fill = ImGui.GetColorU32(selected ? ImGuiCol.Button : ImGuiCol.FrameBg);
+                uint fill = selected
+                    ? ImGui.GetColorU32(ImGuiCol.Button)
+                    : GeometryColor(EditorMapGeometryKind.Air);
                 draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
             }
 
@@ -618,13 +620,6 @@ internal static class WorldMapView
 
     private static uint GeometryColor(EditorMapGeometryKind kind)
     {
-        int frame = global::UnityEngine.Time.frameCount;
-        if (geometryColorFrame != frame)
-        {
-            geometryColorFrame = frame;
-            Array.Clear(geometryColorCacheValid, 0, geometryColorCacheValid.Length);
-        }
-
         int index = (int)kind;
         if (index >= 0 && index < geometryColorCache.Length && geometryColorCacheValid[index])
             return geometryColorCache[index];

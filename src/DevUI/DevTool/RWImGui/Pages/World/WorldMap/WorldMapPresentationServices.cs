@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -28,21 +29,22 @@ internal static class WorldMapPresentationIndex
     private static int visualResetGeneration;
 
     [ThreadStatic] private static Dictionary<int, EditorMapRoomVisualSnapshot> threadRoomVisuals;
-    [ThreadStatic] private static int threadRoomVisualFrame;
-    [ThreadStatic] private static int threadVisualGeneration;
+    [ThreadStatic] private static int threadGeometryGeneration;
+    [ThreadStatic] private static int threadVisualResetGeneration;
 
     internal static EditorMapRoomVisualSnapshot GetRoomVisual(int roomIndex)
     {
-        int frame = Time.frameCount;
-        int generation = Volatile.Read(ref visualResetGeneration);
+        int geometryGeneration =
+            MapRoomGeometryPresentationHub.PublishedGeneration;
+        int resetGeneration = Volatile.Read(ref visualResetGeneration);
         Dictionary<int, EditorMapRoomVisualSnapshot> cache =
             threadRoomVisuals ??= new Dictionary<int, EditorMapRoomVisualSnapshot>();
 
-        if (threadRoomVisualFrame != frame ||
-            threadVisualGeneration != generation)
+        if (threadGeometryGeneration != geometryGeneration ||
+            threadVisualResetGeneration != resetGeneration)
         {
-            threadRoomVisualFrame = frame;
-            threadVisualGeneration = generation;
+            threadGeometryGeneration = geometryGeneration;
+            threadVisualResetGeneration = resetGeneration;
             cache.Clear();
         }
 
@@ -337,14 +339,14 @@ internal static class WorldMapBackgroundBudget
     private const float DetailedBackgroundZoom = 0.42f;
     private const int GeometrySweepIntervalFrames = 4;
     private const int ShortcutSweepIntervalFrames = 4;
-    private const int InteractionCooldownFrames = 3;
+    private const int InteractionCooldownMilliseconds = 90;
 
     private static volatile bool enabled;
     private static int lastGeometrySweepFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
     private static string geometryRegion = string.Empty;
     private static string shortcutRegion = string.Empty;
-    private static int interactionUntilFrame = int.MinValue;
+    private static long interactionUntilTimestamp;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -365,19 +367,23 @@ internal static class WorldMapBackgroundBudget
 
     internal static bool InteractionActive =>
         enabled &&
-        Time.frameCount <= Volatile.Read(ref interactionUntilFrame);
+        Stopwatch.GetTimestamp() <= Interlocked.Read(ref interactionUntilTimestamp);
 
     internal static void NoteInteraction()
     {
         if (!enabled) return;
 
-        int target = Time.frameCount + InteractionCooldownFrames;
+        long cooldown =
+            Math.Max(
+                1L,
+                Stopwatch.Frequency * InteractionCooldownMilliseconds / 1000L);
+        long target = Stopwatch.GetTimestamp() + cooldown;
         while (true)
         {
-            int current = Volatile.Read(ref interactionUntilFrame);
+            long current = Interlocked.Read(ref interactionUntilTimestamp);
             if (current >= target) return;
             if (Interlocked.CompareExchange(
-                    ref interactionUntilFrame,
+                    ref interactionUntilTimestamp,
                     target,
                     current) == current)
                 return;
@@ -440,6 +446,6 @@ internal static class WorldMapBackgroundBudget
         lastShortcutSweepFrame = -1000;
         geometryRegion = string.Empty;
         shortcutRegion = string.Empty;
-        interactionUntilFrame = int.MinValue;
+        Interlocked.Exchange(ref interactionUntilTimestamp, 0L);
     }
 }
