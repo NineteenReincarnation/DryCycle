@@ -71,6 +71,15 @@ if ! grep -Fq 'DryCycle post-mod initialization failed; the failing runtime tran
   exit 1
 fi
 
+# DevConsole reset/registration is optional tooling. It must never be able to abort RainWorld's
+# PreModsInit phase; every reset remains behind the non-throwing startup diagnostic wrapper.
+for optional_reset in   'ScavengerLanceDevConsoleSupport.ResetRegistration'   'CreatureDevConsoleSupport.ResetRegistration'   'RopeSpearDevConsoleSupport.ResetRegistration'   'KarmaSpearDevConsoleSupport.ResetRegistration'   'SpinebackLizardDevConsoleSupport.ResetRegistration'; do
+  if ! grep -Fq "StartupDiagnostics.Optional(\"RainWorld.PreModsInit/$optional_reset\"" "$plugin"; then
+    echo "PreModsInit DevConsole reset can propagate into startup: $optional_reset" >&2
+    exit 1
+  fi
+done
+
 # MP3/M4A overrides are hydrated lazily at SoundClipReady after native release. Running a blocking
 # all-audio hydration from Plugin.OnModsInit would move file decode back onto the startup critical path.
 if grep -Fq 'SoundFormatSupportRuntime.HydrateExisting' "$plugin"; then
