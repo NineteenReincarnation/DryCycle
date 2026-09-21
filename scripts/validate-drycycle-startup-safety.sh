@@ -117,6 +117,33 @@ if ! grep -Fq 'catch' "$audio" ||
   exit 1
 fi
 
+# Custom creature ExtEnums/descriptors are process-lifetime registrations. The core registry must
+# be installed transactionally before descriptor creation and must not be removed while registered
+# creature IDs remain globally visible to WorldLoader/StaticWorld.
+creature_registry="src/Framework/Creature/Core/CreatureRegistry.cs"
+if ! grep -Fq '_staticWorldTemplateHookInstalled' "$creature_registry" ||
+   ! grep -Fq 'RemoveInstalledHooksBestEffort("enable rollback")' "$creature_registry" ||
+   ! grep -Fq '_worldLoaderTypeHookInstalled' "$creature_registry"; then
+  echo "CreatureRegistry hook installation is no longer transactional." >&2
+  exit 1
+fi
+core_line="$(grep -n -F 'Plugin.OnEnable/CreatureCoreRegistry.Enable' "$plugin" | head -n1 | cut -d: -f1)"
+moss_line="$(grep -n -F 'Plugin.OnEnable/MossySpiderDefinition.Register' "$plugin" | head -n1 | cut -d: -f1)"
+if [[ -z "$core_line" || -z "$moss_line" || "$core_line" -ge "$moss_line" ]]; then
+  echo "Creature core registry must be enabled before irreversible creature descriptor registration." >&2
+  exit 1
+fi
+if ! grep -Fq 'PreserveCreatureCoreRegistryIfRegistered' "$plugin" ||
+   grep -Fq 'SafeBootstrapCleanup("Creature Core registry", CreatureCoreRegistry.Disable)' "$plugin" ||
+   grep -Fq 'SafeBootstrapCleanup("OnDisable/CreatureCoreRegistry.Disable", CreatureCoreRegistry.Disable)' "$plugin"; then
+  echo "Primary plugin can detach CreatureRegistry while irreversible descriptors remain registered." >&2
+  exit 1
+fi
+if ! grep -Fq 'SKIP-ALREADY-REGISTERED' "$plugin"; then
+  echo "Creature registration bootstrap is not idempotent after partial registration." >&2
+  exit 1
+fi
+
 # Optional audio codecs must never become an assembly-load prerequisite for DryCycle.dll.
 # NAudio is runtime-discovered through reflection; compile-time type references can make BepInEx
 # fail before Plugin.OnEnable and before startup diagnostics exist.
