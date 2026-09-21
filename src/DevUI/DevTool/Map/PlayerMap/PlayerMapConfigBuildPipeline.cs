@@ -76,6 +76,8 @@ internal static class PlayerMapConfigBuildPipeline
     private static ManualLogSource log;
     private static bool enabled;
 
+    internal static bool Enabled => enabled;
+
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
@@ -187,7 +189,7 @@ internal static class PlayerMapConfigBuildPipeline
 
             IReadOnlyList<string> filtered = PlayerMapDisabledConfigFilter.Filter(authoringPath, output);
             AtomicWriteAllLines(authoringPath, filtered);
-            PlayerMapMigrationDirtyBridge.OnSaveSuccess(page);
+            PlayerMapMigrationDirtyBridge.OnSaveSucceeded(page);
             return true;
         }
         catch (Exception exception)
