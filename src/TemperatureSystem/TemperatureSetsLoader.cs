@@ -214,6 +214,7 @@ internal static class TemperatureSetsLoader
         }
 
         string tempPath = path + ".tmp";
+        string rollbackPath = path + ".drycycle.rollback";
         try
         {
             string directory = Path.GetDirectoryName(path);
@@ -223,12 +224,31 @@ internal static class TemperatureSetsLoader
             }
 
             File.WriteAllText(tempPath, Json.Serialize(BuildJsonRoot()));
-            if (File.Exists(path))
+            bool hadOriginal = File.Exists(path);
+            if (hadOriginal)
             {
+                File.Copy(path, rollbackPath, overwrite: true);
                 File.Copy(path, path + ".bak", overwrite: true);
                 File.Delete(path);
             }
-            File.Move(tempPath, path);
+
+            try
+            {
+                File.Move(tempPath, path);
+            }
+            catch
+            {
+                if (hadOriginal && File.Exists(rollbackPath))
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                    File.Copy(rollbackPath, path, overwrite: true);
+                }
+                throw;
+            }
+            finally
+            {
+                try { if (File.Exists(rollbackPath)) File.Delete(rollbackPath); } catch { }
+            }
 
             LoadedPath = path;
             Dirty = false;
@@ -242,6 +262,7 @@ internal static class TemperatureSetsLoader
         {
             global::DryCycle.Plugin.Logger?.LogError("TemperatureSets save failed: " + ex);
             TryDeleteTemp(tempPath);
+            try { if (File.Exists(rollbackPath)) File.Delete(rollbackPath); } catch { }
             return false;
         }
     }
