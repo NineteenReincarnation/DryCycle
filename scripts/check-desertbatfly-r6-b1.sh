@@ -33,10 +33,20 @@ hooks = hooks_path.read_text(encoding='utf-8')
 plugin = plugin_path.read_text(encoding='utf-8')
 joined = '\n'.join(path.read_text(encoding='utf-8') for path in files)
 
-# External lifecycle integration remains explicit. Internal implementation is free to move.
-if 'DB_RainWorldHooks.Enable()' not in plugin:
+# External lifecycle integration remains explicit. Accept either a direct call or a method-group
+# passed through the startup/rollback diagnostics wrapper; the semantic requirement is that Plugin
+# owns both lifecycle edges, not a specific call syntax.
+enable_owned = (
+    'DB_RainWorldHooks.Enable()' in plugin or
+    re.search(r'StartupDiagnostics\.Step\([^\n]*DB_RainWorldHooks\.Enable\s*\)', plugin)
+)
+disable_owned = (
+    'DB_RainWorldHooks.Disable()' in plugin or
+    re.search(r'SafeBootstrapCleanup\([^\n]*DB_RainWorldHooks\.Disable\s*\)', plugin)
+)
+if not enable_owned:
     failures.append('Plugin no longer enables DesertBatfly integration')
-if 'DB_RainWorldHooks.Disable()' not in plugin:
+if not disable_owned:
     failures.append('Plugin no longer disables DesertBatfly integration')
 
 # Hook subscriptions in the central integration adapter must stay symmetric. New hook types are
