@@ -51,10 +51,12 @@ internal sealed class Plugin : BaseUnityPlugin
     internal new static ManualLogSource Logger;
     private static bool _contentRegistered;
     private static bool _initialized;
+    internal static bool BootstrapFailed { get; private set; }
 
     public void OnEnable()
     {
         Logger = base.Logger;
+        BootstrapFailed = false;
         StartupDiagnostics.Begin(Logger);
         StartupDiagnostics.Marker("Plugin.OnEnable", "ENTER");
 
@@ -128,6 +130,7 @@ internal sealed class Plugin : BaseUnityPlugin
         }
         catch (Exception error)
         {
+            BootstrapFailed = true;
             StartupDiagnostics.Failure("Plugin.OnEnable", error);
             Logger?.LogError(
                 "DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.");
@@ -137,6 +140,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     public void OnDisable()
     {
+        BootstrapFailed = true;
         StartupDiagnostics.Marker("Plugin.OnDisable", "ENTER");
 
         SafeBootstrapCleanup("OnDisable/PwnIteratorExample.Unregister", Iterators.PwnIteratorExample.Unregister);
