@@ -19,8 +19,15 @@ public sealed class DevToolUserFacingCopyCleanupPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool User-Facing Copy Cleanup";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => DevToolUserFacingCopyCleanup.Enable(Logger);
-    private void OnDisable() => DevToolUserFacingCopyCleanup.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => DevToolUserFacingCopyCleanup.Enable(Logger),
+            DevToolUserFacingCopyCleanup.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            DevToolUserFacingCopyCleanup.Disable);
 }
 
 internal static class DevToolUserFacingCopyCleanup
