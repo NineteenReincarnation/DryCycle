@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.TemperatureSystem;
 using DryCycle.Weather.Spatial;
@@ -168,7 +169,9 @@ internal static class WorldWorkspaceDataView
                 "WorldDataSaveAll",
                 HasDirtyData ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
         {
-            SaveDirty();
+            // World Data belongs to the same Map document transaction as map config, world.txt,
+            // Room_Attr and topology. The frontend only queues the canonical Core save.
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.Save));
         }
         if (!HasDirtyData) ImGui.EndDisabled();
 
