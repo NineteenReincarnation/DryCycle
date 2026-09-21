@@ -77,6 +77,7 @@ internal static class WorldTopologyRuntime
         global::Room room,
         ShortcutData shortcut)
     {
+        WorldTopologyLiveTraversalFix.BeforeShortcutTraversal(room, shortcut);
         CapturePendingRoute(creature, room, shortcut);
         orig(self, creature, room, shortcut);
     }
