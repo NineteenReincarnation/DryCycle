@@ -10,30 +10,6 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
-/// <summary>
-/// Multi-room selection/box selection/group movement for the rebuilt Player Map canvas. Group moves
-/// are submitted to PlayerMapGroupCommandQueue and therefore become one CompositeHistoryEntry.
-/// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(PlayerMapCanvasAuthoringPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency(PlayerMapGroupCommandPlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class PlayerMapMultiSelectionPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.PlayerMap.MultiSelection";
-    public const string PluginName = "DryCycle Player Map Multi Selection";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => PlayerMapMultiSelection.Enable(Logger),
-            PlayerMapMultiSelection.Disable);
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            PlayerMapMultiSelection.Disable);
-}
-
 internal static class PlayerMapMultiSelection
 {
     private static readonly HashSet<int> Selection = new();

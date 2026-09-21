@@ -66,6 +66,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRenderOrder.Enable", () => WorldMapRenderOrder.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapThumbnailVisibility.Enable", () => WorldMapThumbnailVisibility.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPipeLayers.Enable", () => WorldMapPipeLayers.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldInspectorReadability.Enable", () => WorldInspectorReadability.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/UserFacingCopyCleanup.Enable", () => DevToolUserFacingCopyCleanup.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/PlayerMapFrontendLifecycle.Enable", () => PlayerMapFrontendLifecycle.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/RetainedViewLifecycle.Enable", retainedViewLifecycle.Enable);
 
@@ -258,6 +260,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world map thumbnail visibility", WorldMapThumbnailVisibility.Disable);
         SafeFrontendCleanup("world map pipe layers", WorldMapPipeLayers.Disable);
         SafeFrontendCleanup("player map frontend lifecycle", PlayerMapFrontendLifecycle.Disable);
+        SafeFrontendCleanup("world inspector readability", WorldInspectorReadability.Disable);
+        SafeFrontendCleanup("user-facing copy cleanup", DevToolUserFacingCopyCleanup.Disable);
         SafeFrontendCleanup("retained view lifecycle", retainedViewLifecycle.Disable);
         SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);

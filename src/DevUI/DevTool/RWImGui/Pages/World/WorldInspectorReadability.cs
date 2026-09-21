@@ -6,29 +6,6 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
-/// <summary>
-/// Presentation/layout guard for the World Workspace inspector. The view enters this scope directly;
-/// no DryCycle-owned method or ImGui API is RuntimeDetoured.
-/// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class WorldInspectorReadabilityPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.WorldWorkspace.InspectorReadability";
-    public const string PluginName = "DryCycle DevTool World Inspector Readability";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => WorldInspectorReadability.Enable(Logger),
-            WorldInspectorReadability.Disable);
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            WorldInspectorReadability.Disable);
-}
-
 internal static class WorldInspectorReadability
 {
     private const float PreferredInspectorWidth = 420f;

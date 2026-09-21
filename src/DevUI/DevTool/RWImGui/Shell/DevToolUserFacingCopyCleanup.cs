@@ -7,29 +7,6 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
-/// <summary>
-/// User-facing copy policy consumed explicitly by normal authoring surfaces.
-/// Diagnostics remain available in debug/log paths; no UI method is RuntimeDetoured.
-/// </summary>
-[BepInPlugin(PluginId, PluginName, PluginVersion)]
-[BepInDependency(BridgePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
-public sealed class DevToolUserFacingCopyCleanupPlugin : BaseUnityPlugin
-{
-    public const string PluginId = "DryCycle.DevTool.RWImGui.UserFacingCopyCleanup";
-    public const string PluginName = "DryCycle DevTool User-Facing Copy Cleanup";
-    public const string PluginVersion = BridgePlugin.PluginVersion;
-
-    private void OnEnable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
-            PluginName + ".OnEnable",
-            () => DevToolUserFacingCopyCleanup.Enable(Logger),
-            DevToolUserFacingCopyCleanup.Disable);
-    private void OnDisable() =>
-        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
-            PluginName + ".OnDisable",
-            DevToolUserFacingCopyCleanup.Disable);
-}
-
 internal static class DevToolUserFacingCopyCleanup
 {
     private static bool enabled;
