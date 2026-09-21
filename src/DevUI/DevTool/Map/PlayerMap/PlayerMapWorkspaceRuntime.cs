@@ -246,6 +246,8 @@ public static class PlayerMapCommandQueue
 internal static class PlayerMapWorkspaceRuntime
 {
     private static ConditionalWeakTable<EditorSession, PlayerMapSessionState> states = new();
+    private static readonly Dictionary<string, PlayerMapSessionState> retainedDirtyStates =
+        new(StringComparer.OrdinalIgnoreCase);
     private static bool enabled;
 
     internal static void Enable()
@@ -260,6 +262,7 @@ internal static class PlayerMapWorkspaceRuntime
         if (!enabled) return;
         On.DevInterface.MapPage.SaveMapConfig -= MapPage_SaveMapConfig;
         states = new ConditionalWeakTable<EditorSession, PlayerMapSessionState>();
+        retainedDirtyStates.Clear();
         PlayerMapCommandQueue.Clear();
         RoomMapBakeCache.Clear();
         enabled = false;
@@ -268,7 +271,9 @@ internal static class PlayerMapWorkspaceRuntime
     internal static PlayerMapPresentationSnapshot GetPresentation(EditorSession session)
     {
         if (session == null) return PlayerMapPresentationSnapshot.Empty;
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(
+            session,
+            session.Owner?.activePage as MapPage);
         PlayerMapPresentationSnapshot snapshot = state.Presentation;
         snapshot = PlayerMapDerivedLayoutBridge.Project(session, snapshot);
         snapshot = PlayerMapIncrementalRenderHooks.ProjectPresentation(session, snapshot);
@@ -278,8 +283,33 @@ internal static class PlayerMapWorkspaceRuntime
 
     internal static bool IsDirty(EditorSession session)
     {
-        if (session == null || !states.TryGetValue(session, out PlayerMapSessionState state)) return false;
-        return state.Dirty;
+        if (session == null) return false;
+        PlayerMapSessionState state = GetOrCreateState(
+            session,
+            session.Owner?.activePage as MapPage);
+        return state?.Dirty == true;
+    }
+
+    internal static void RetainDirtyState(EditorSession session)
+    {
+        if (session == null || !states.TryGetValue(session, out PlayerMapSessionState state))
+            return;
+
+        if (state.Dirty && state.Initialized && !string.IsNullOrWhiteSpace(state.Region))
+        {
+            state.Page = null;
+            state.ObservedBakeRevision = -1;
+            state.ObservedSelectedRoom = int.MinValue;
+            foreach (PlayerMapRoomState roomState in state.Rooms.Values)
+                roomState.HasMirror = false;
+
+            retainedDirtyStates[state.Region] = state;
+            Plugin.Logger?.LogInfo(
+                "Player Map retained unsaved authoring state for region " + state.Region +
+                " across DevTool session shutdown.");
+        }
+
+        states.Remove(session);
     }
 
     internal static void Synchronize(EditorSession session)
@@ -287,7 +317,7 @@ internal static class PlayerMapWorkspaceRuntime
         if (session?.Owner?.activePage is not MapPage page || page.world == null)
             return;
 
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(session, page);
         if (!EnsureStateForPage(page, state))
             return;
 
@@ -314,7 +344,7 @@ internal static class PlayerMapWorkspaceRuntime
         if (PlayerMapLayerMutationFilter.ShouldSkip(session, command)) return;
         if (PlayerMapIncrementalRenderHooks.TryHandleExecute(session, command)) return;
 
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(session, page);
         if (!EnsureStateForPage(page, state))
             return;
 
@@ -374,7 +404,7 @@ internal static class PlayerMapWorkspaceRuntime
             return;
         }
 
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(session, self);
         if (!EnsureStateForPage(self, state))
         {
             Plugin.Logger?.LogWarning(
@@ -391,6 +421,7 @@ internal static class PlayerMapWorkspaceRuntime
         }
 
         state.Dirty = false;
+        retainedDirtyStates.Remove(state.Region);
         PlayerMapMigrationDirtyBridge.OnSaveSucceeded(self);
         Touch(state, dirty: false);
     }
@@ -432,6 +463,49 @@ internal static class PlayerMapWorkspaceRuntime
         {
             page.filePath = readPath;
         }
+    }
+
+    private static PlayerMapSessionState GetOrCreateState(
+        EditorSession session,
+        MapPage page)
+    {
+        if (session == null)
+            return null;
+
+        string targetRegion = page?.world?.name ?? string.Empty;
+        if (states.TryGetValue(session, out PlayerMapSessionState existing))
+        {
+            if (!existing.Dirty &&
+                !string.IsNullOrWhiteSpace(targetRegion) &&
+                retainedDirtyStates.TryGetValue(targetRegion, out PlayerMapSessionState retained) &&
+                !ReferenceEquals(existing, retained))
+            {
+                states.Remove(session);
+                retainedDirtyStates.Remove(targetRegion);
+                states.Add(session, retained);
+                Plugin.Logger?.LogInfo(
+                    "Player Map restored retained unsaved authoring state for region " +
+                    targetRegion + " into the new DevTool session.");
+                return retained;
+            }
+
+            return existing;
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetRegion) &&
+            retainedDirtyStates.TryGetValue(targetRegion, out PlayerMapSessionState recovered))
+        {
+            retainedDirtyStates.Remove(targetRegion);
+            states.Add(session, recovered);
+            Plugin.Logger?.LogInfo(
+                "Player Map restored retained unsaved authoring state for region " +
+                targetRegion + " into the new DevTool session.");
+            return recovered;
+        }
+
+        PlayerMapSessionState created = new();
+        states.Add(session, created);
+        return created;
     }
 
     private static bool EnsureStateForPage(MapPage page, PlayerMapSessionState state)
@@ -758,7 +832,7 @@ internal static class PlayerMapWorkspaceRuntime
     private static bool RestorePlacement(EditorSession session, int roomIndex, PlacementValue value)
     {
         if (session?.Owner?.activePage is not MapPage page) return false;
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(session, page);
         if (!EnsureStateForPage(page, state))
             return false;
         RoomPanel panel = FindRoomPanel(page, roomIndex);
@@ -913,7 +987,7 @@ internal static class PlayerMapWorkspaceRuntime
     private static PlayerMapSessionState GetLiveState(EditorSession session)
     {
         if (session?.Owner?.activePage is not MapPage page) return null;
-        PlayerMapSessionState state = states.GetValue(session, _ => new PlayerMapSessionState());
+        PlayerMapSessionState state = GetOrCreateState(session, page);
         return EnsureStateForPage(page, state) ? state : null;
     }
 
