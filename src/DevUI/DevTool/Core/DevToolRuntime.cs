@@ -388,11 +388,32 @@ public sealed class EditorSession
         RoomSettings nextRoomSettings = nextRoom?.roomSettings;
 
         EditorDocumentKey next = ResolveDocument(owner);
-        if (!next.Equals(documentKey))
+        bool documentIdentityChanged = !next.Equals(documentKey);
+        bool documentInstanceReplaced =
+            !documentIdentityChanged &&
+            ((next.Kind == EditorDocumentKind.Room &&
+              (!ReferenceEquals(observedWorld, nextWorld) ||
+               !ReferenceEquals(observedRoomSettings, nextRoomSettings))) ||
+             (next.Kind == EditorDocumentKind.RegionMap &&
+              !ReferenceEquals(observedWorld, nextWorld)));
+
+        if (documentIdentityChanged)
         {
             documentKey = next;
             Selection.Clear();
             History.ActivateDocument(next);
+            LegacyTransactions.Reset();
+            LegacyUiVisible = false;
+            CancelPlacement();
+            ResetSelectionValidation();
+        }
+        else if (documentInstanceReplaced)
+        {
+            // Same logical name, new runtime model. Existing history entries may capture direct
+            // PlacedObject/RoomSettings/World identities from the retired instance and must never
+            // replay into the replacement object graph.
+            Selection.Clear();
+            History.ClearActive();
             LegacyTransactions.Reset();
             LegacyUiVisible = false;
             CancelPlacement();
