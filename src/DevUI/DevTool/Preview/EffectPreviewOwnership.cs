@@ -261,6 +261,15 @@ internal sealed class EffectPreviewOwnershipTransaction
             if (!attached) return;
 
             OwnAttachedObject(obj, observation.BeforeDrawables ?? SnapshotDrawables(room));
+            if (!EffectPreviewRuntimeVisualOwnership.TryAdoptRuntimeObject(
+                    obj,
+                    out string visualFailure))
+            {
+                MarkContamination(
+                    string.IsNullOrWhiteSpace(visualFailure)
+                        ? "runtime visual ownership rejected preview descendant"
+                        : visualFailure);
+            }
         }
         catch (Exception error)
         {
