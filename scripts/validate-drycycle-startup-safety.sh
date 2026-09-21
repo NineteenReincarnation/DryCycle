@@ -41,6 +41,20 @@ for subscription in   'DryCycleLifecycleEvents.BeforePreModsInit +='   'DryCycle
   fi
 done
 
+# Both BepInEx bootstrap surfaces must fail open. A single DryCycle hook mismatch may disable the
+# affected subsystem/plugin, but must not propagate an exception that prevents Rain World startup.
+if ! grep -Fq 'DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.' "$plugin" ||
+   ! grep -Fq 'RollbackBootstrap();' "$plugin" ||
+   ! grep -Fq 'SafeBootstrapCleanup' "$plugin"; then
+  echo "Core Plugin.OnEnable no longer has transactional fail-open rollback." >&2
+  exit 1
+fi
+if ! grep -Fq 'DryCycle DevTool RWImGui frontend failed during OnEnable and has been isolated; Rain World startup will continue.' "$bridge" ||
+   ! grep -Fq 'ShutdownBridgeState();' "$bridge"; then
+  echo "RWImGui BridgePlugin.OnEnable no longer has fail-open isolation." >&2
+  exit 1
+fi
+
 # Optional compatibility must fail open. SlugBase discovery and DevTool/audio initialization are not
 # allowed to make Rain World's OnModsInit fail solely because an optional integration is broken.
 if ! grep -Fq 'TryInitializeSlugBaseHydrationFeatures();' "$plugin"; then
