@@ -103,14 +103,7 @@ internal sealed class Plugin : BaseUnityPlugin
                 "DryCycle bootstrap failed during OnEnable. Partial hooks are being rolled back so Rain World can continue loading.");
             Logger?.LogError(error);
 
-            try
-            {
-                OnDisable();
-            }
-            catch (Exception cleanupError)
-            {
-                Logger?.LogWarning("DryCycle bootstrap rollback encountered an additional error: " + cleanupError);
-            }
+            RollbackBootstrap();
         }
     }
 
@@ -205,6 +198,44 @@ internal sealed class Plugin : BaseUnityPlugin
         }
 
         DryCycleShaderAssets.Disable();
+    }
+
+    private static void RollbackBootstrap()
+    {
+        SafeBootstrapCleanup(
+            "RainWorld.PostModsInit hook",
+            () => On.RainWorld.PostModsInit -= RainWorld_PostModsInit);
+        SafeBootstrapCleanup(
+            "RainWorld.OnModsInit hook",
+            () => On.RainWorld.OnModsInit -= RainWorld_OnModsInit);
+        SafeBootstrapCleanup(
+            "RainWorld.PreModsInit hook",
+            () => On.RainWorld.PreModsInit -= RainWorld_PreModsInit);
+        SafeBootstrapCleanup("Spineback lizard hooks", SpinebackLizardHooks.Disable);
+        SafeBootstrapCleanup("Desert Batfly RainWorld hooks", DB_RainWorldHooks.Disable);
+        SafeBootstrapCleanup("Desert Batfly relationships", DB_Relationships.Disable);
+        SafeBootstrapCleanup("Lance Scavenger hooks", LanceScavengerHooks.Disable);
+        SafeBootstrapCleanup("Scavenger Lance hooks", ScavengerLanceHooks.Disable);
+        SafeBootstrapCleanup("DryCycle content runtime", DryCycleContent.Disable);
+        SafeBootstrapCleanup("Creature Core registry", CreatureCoreRegistry.Disable);
+        SafeBootstrapCleanup("world topology runtime", WorldTopologyRuntime.Disable);
+        SafeBootstrapCleanup("palette direct input", PaletteDirectInputRuntime.Disable);
+        SafeBootstrapCleanup("shader assets", DryCycleShaderAssets.Disable);
+        SafeBootstrapCleanup("PWN iterator example", Iterators.PwnIteratorExample.Unregister);
+        SafeBootstrapCleanup("iterator hooks", Iterators.IteratorHooks.Uninstall);
+        SafeBootstrapCleanup("iterator log bridge", Iterators.IteratorLogBridge.Disable);
+    }
+
+    private static void SafeBootstrapCleanup(string name, Action action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception cleanupError)
+        {
+            Logger?.LogWarning("DryCycle bootstrap rollback failed for " + name + ": " + cleanupError);
+        }
     }
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
