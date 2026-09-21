@@ -248,8 +248,10 @@ internal static class SpinebackLizardHooks
             global::DryCycle.StartupDiagnostics.Failure(
                 "SpinebackLizard/StaticWorld.InitStaticWorld",
                 error);
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "SpinebackLizard relationship setup failed and was isolated so StaticWorld startup can continue.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "SpinebackLizard/StaticWorld.InitStaticWorld",
+                "ISOLATED",
+                "relationship setup failed; StaticWorld startup will continue");
         }
     }
 
@@ -272,8 +274,10 @@ internal static class SpinebackLizardHooks
             }
 
             templates[spinebackType.Index] = templates[greenIndex];
-            global::DryCycle.Plugin.Logger?.LogWarning(
-                "SpinebackLizard template construction failed; its StaticWorld slot temporarily uses GreenLizard so startup can continue.");
+            global::DryCycle.StartupDiagnostics.Marker(
+                "SpinebackLizard/StaticWorld.InitCustomTemplates",
+                "QUARANTINED",
+                "template construction failed; StaticWorld slot temporarily uses GreenLizard");
         }
         catch (Exception fallbackError)
         {
