@@ -60,7 +60,9 @@ internal static class ObjectMarqueeSelectionView
         {
             if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left) ||
                 ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow) ||
-                FloatingWindowSnap.OwnsMouse)
+                FloatingWindowSnap.OwnsMouse ||
+                NativeObjectGizmoView.OwnsMouse ||
+                NativeSpatialGizmoView.OwnsMouse)
                 return;
 
             Num.Vector2 mouse = io.MousePos;
