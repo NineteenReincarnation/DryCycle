@@ -190,6 +190,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RainWorld_PreModsInit(On.RainWorld.orig_PreModsInit orig, RainWorld self)
     {
+        DryCycleLifecycleEvents.RaiseBeforePreModsInit(self);
         ScavengerLanceDevConsoleSupport.ResetRegistration();
         CreatureDevConsoleSupport.ResetRegistration();
         RopeSpearDevConsoleSupport.ResetRegistration();
@@ -197,10 +198,12 @@ internal sealed class Plugin : BaseUnityPlugin
         SpinebackLizardDevConsoleSupport.ResetRegistration();
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
+        DryCycleLifecycleEvents.RaiseAfterPreModsInit(self);
     }
 
     private static void RainWorld_OnModsInit(On.RainWorld.orig_OnModsInit orig, RainWorld self)
     {
+        DryCycleLifecycleEvents.RaiseBeforeModsInit(self);
         SlugBaseHydrationFeatures.Initialize();
         orig(self);
 
@@ -211,6 +214,7 @@ internal sealed class Plugin : BaseUnityPlugin
         if (_initialized)
         {
             AIDebuggerRuntime.Install(self, Logger);
+            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
             return;
         }
 
@@ -290,6 +294,7 @@ internal sealed class Plugin : BaseUnityPlugin
             _initialized = true;
             AIDebuggerRuntime.Install(self, Logger);
             Logger.LogInfo($"{ModName} {Version}: systems enabled.");
+            DryCycleLifecycleEvents.RaiseAfterModsInit(self);
         }
         catch (Exception ex)
         {
