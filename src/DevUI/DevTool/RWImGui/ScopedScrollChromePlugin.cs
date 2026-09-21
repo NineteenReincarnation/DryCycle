@@ -17,8 +17,15 @@ public sealed class ScopedScrollChromePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool Scoped Scroll Chrome";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => ScopedScrollChrome.Enable(Logger);
-    private void OnDisable() => ScopedScrollChrome.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => ScopedScrollChrome.Enable(Logger),
+            ScopedScrollChrome.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            ScopedScrollChrome.Disable);
 }
 
 internal static class ScopedScrollChrome
