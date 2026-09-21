@@ -40,11 +40,12 @@ internal static class SoundFormatSupportRuntime
             enabled = true;
             Plugin.Logger?.LogInfo("Sound format support enabled without RuntimeDetour: " + string.Join(", ", ExternalAudioFormatRegistry.SupportedExtensions));
         }
-        catch
+        catch (Exception error)
         {
-            // Hook installation is a transaction. A signature/API mismatch on one optional audio
-            // hook must not leave the earlier hooks installed in a half-enabled state.
-            RemoveOnHooks();
+            global::DryCycle.StartupDiagnostics.RollbackAfterFailure(
+                "SoundFormatSupportRuntime.Enable",
+                error,
+                () => RemoveOnHooks("enable rollback"));
             customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
             enabled = false;
             throw;
@@ -55,7 +56,7 @@ internal static class SoundFormatSupportRuntime
     {
         if (!enabled) return;
 
-        RemoveOnHooks();
+        RemoveOnHooks("disable");
         customOverrides = new ConditionalWeakTable<AudioClip, CustomOverrideMarker>();
         enabled = false;
     }
@@ -66,18 +67,35 @@ internal static class SoundFormatSupportRuntime
         HydrateLoadedSoundEffectOverrides(loader);
     }
 
-    private static void RemoveOnHooks()
+    private static void RemoveOnHooks(string phase)
     {
-        On.MenuMicrophone.SoundClipReady -= MenuMicrophone_SoundClipReady;
-        On.VirtualMicrophone.SoundClipReady -= VirtualMicrophone_SoundClipReady;
-        On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds;
-        On.SoundLoader.RequestAmbientAudioClip -= SoundLoader_RequestAmbientAudioClip;
-        On.SoundLoader.VariationsForSound -= SoundLoader_VariationsForSound;
-        On.SoundLoader.CheckIfFileExistsAsExternal -= SoundLoader_CheckIfFileExistsAsExternal;
-        On.SoundLoader.AmbientImporter.loadFile -= AmbientImporter_loadFile;
-        On.SoundLoader.AmbientImporter.validFileType -= AmbientImporter_validFileType;
-        On.SoundLoader.SoundImporter.loadFile -= SoundImporter_loadFile;
-        On.SoundLoader.SoundImporter.validFileType -= SoundImporter_validFileType;
+        Rollback(phase + "/MenuMicrophone.SoundClipReady",
+            () => On.MenuMicrophone.SoundClipReady -= MenuMicrophone_SoundClipReady);
+        Rollback(phase + "/VirtualMicrophone.SoundClipReady",
+            () => On.VirtualMicrophone.SoundClipReady -= VirtualMicrophone_SoundClipReady);
+        Rollback(phase + "/SoundLoader.LoadSounds",
+            () => On.SoundLoader.LoadSounds -= SoundLoader_LoadSounds);
+        Rollback(phase + "/SoundLoader.RequestAmbientAudioClip",
+            () => On.SoundLoader.RequestAmbientAudioClip -= SoundLoader_RequestAmbientAudioClip);
+        Rollback(phase + "/SoundLoader.VariationsForSound",
+            () => On.SoundLoader.VariationsForSound -= SoundLoader_VariationsForSound);
+        Rollback(phase + "/SoundLoader.CheckIfFileExistsAsExternal",
+            () => On.SoundLoader.CheckIfFileExistsAsExternal -= SoundLoader_CheckIfFileExistsAsExternal);
+        Rollback(phase + "/SoundLoader.AmbientImporter.loadFile",
+            () => On.SoundLoader.AmbientImporter.loadFile -= AmbientImporter_loadFile);
+        Rollback(phase + "/SoundLoader.AmbientImporter.validFileType",
+            () => On.SoundLoader.AmbientImporter.validFileType -= AmbientImporter_validFileType);
+        Rollback(phase + "/SoundLoader.SoundImporter.loadFile",
+            () => On.SoundLoader.SoundImporter.loadFile -= SoundImporter_loadFile);
+        Rollback(phase + "/SoundLoader.SoundImporter.validFileType",
+            () => On.SoundLoader.SoundImporter.validFileType -= SoundImporter_validFileType);
+    }
+
+    private static void Rollback(string source, Action action)
+    {
+        global::DryCycle.StartupDiagnostics.RollbackStep(
+            "SoundFormatSupportRuntime/" + source,
+            action);
     }
 
     private static bool SoundImporter_validFileType(
