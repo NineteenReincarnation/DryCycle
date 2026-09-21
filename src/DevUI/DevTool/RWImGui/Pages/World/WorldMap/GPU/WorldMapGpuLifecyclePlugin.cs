@@ -125,9 +125,13 @@ public sealed class WorldMapGpuLifecyclePlugin : BaseUnityPlugin
 
     private void Shutdown()
     {
-        // Plugin shutdown can arrive in any component order. Hide presentation immediately; the
-        // owning plugin runtimes perform their own idempotent final Disable calls afterwards.
+        // Plugin shutdown can arrive in any component order. Hide presentation immediately.
+        // If this lifecycle parked the shared runtimes while DevTools was dormant, restore them
+        // before this component disappears: their owning BepInEx plugins may remain enabled and
+        // must not be left permanently disabled just because this observer shut down first.
         WorldMapGpuScene.Apply(null, DevToolRuntime.ActiveSession);
+        if (runtimeSuspendedForDormantSession)
+            ResumeDormantMapRuntime();
         observedLiveSession = false;
         runtimeSuspendedForDormantSession = false;
     }
