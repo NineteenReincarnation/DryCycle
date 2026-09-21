@@ -14,29 +14,48 @@ internal static class DB_Sandbox
 
     internal static void Enable()
     {
-        // RainWorld.OnModsInit reinitializes ExtEnum registries. Recreate the ID if
-        // a mod refresh invalidated its previous index, even when our hooks remain.
-        if (UnlockID == null || UnlockID.Index < 0)
-            UnlockID = new MultiplayerUnlocks.SandboxUnlockID(UnlockValue, true);
-        EnsureCreatureUnlockList();
+        if (enabled)
+        {
+            EnsureCreatureUnlockList();
+            return;
+        }
 
-        if (enabled) return;
-        enabled = true;
+        try
+        {
+            // RainWorld.OnModsInit reinitializes ExtEnum registries. Recreate the ID if
+            // a mod refresh invalidated its previous index, even when our hooks remain.
+            if (UnlockID == null || UnlockID.Index < 0)
+                UnlockID = new MultiplayerUnlocks.SandboxUnlockID(UnlockValue, true);
+            EnsureCreatureUnlockList();
 
-        harmony = DB_RuntimePatch.Create("Anno.DesertBatfly.Sandbox");
-        MethodInfo sprite = typeof(CreatureSymbol).GetMethod(
-            nameof(CreatureSymbol.SpriteNameOfCreature),
-            BindingFlags.Public | BindingFlags.Static);
-        MethodInfo color = typeof(CreatureSymbol).GetMethod(
-            nameof(CreatureSymbol.ColorOfCreature),
-            BindingFlags.Public | BindingFlags.Static);
-        MethodInfo spritePrefix = typeof(DB_Sandbox).GetMethod(
-            nameof(SpriteNamePrefix), BindingFlags.NonPublic | BindingFlags.Static);
-        MethodInfo colorPrefix = typeof(DB_Sandbox).GetMethod(
-            nameof(ColorPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+            harmony = DB_RuntimePatch.Create("Anno.DesertBatfly.Sandbox")
+                ?? throw new InvalidOperationException("Harmony runtime is unavailable for DesertBatfly sandbox integration.");
 
-        DB_RuntimePatch.Patch(harmony, sprite, spritePrefix);
-        DB_RuntimePatch.Patch(harmony, color, colorPrefix);
+            MethodInfo sprite = typeof(CreatureSymbol).GetMethod(
+                nameof(CreatureSymbol.SpriteNameOfCreature),
+                BindingFlags.Public | BindingFlags.Static);
+            MethodInfo color = typeof(CreatureSymbol).GetMethod(
+                nameof(CreatureSymbol.ColorOfCreature),
+                BindingFlags.Public | BindingFlags.Static);
+            MethodInfo spritePrefix = typeof(DB_Sandbox).GetMethod(
+                nameof(SpriteNamePrefix), BindingFlags.NonPublic | BindingFlags.Static);
+            MethodInfo colorPrefix = typeof(DB_Sandbox).GetMethod(
+                nameof(ColorPrefix), BindingFlags.NonPublic | BindingFlags.Static);
+
+            if (!DB_RuntimePatch.Patch(harmony, sprite, spritePrefix) ||
+                !DB_RuntimePatch.Patch(harmony, color, colorPrefix))
+            {
+                throw new InvalidOperationException(
+                    "DesertBatfly sandbox symbol patches could not be installed completely.");
+            }
+
+            enabled = true;
+        }
+        catch
+        {
+            Disable();
+            throw;
+        }
     }
 
     internal static void Disable()
