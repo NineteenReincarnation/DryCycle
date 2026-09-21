@@ -88,6 +88,61 @@ internal static class StartupDiagnostics
         Failure(Interlocked.Increment(ref sequence), source, error);
     }
 
+    internal static void RollbackAfterFailure(
+        string source,
+        Exception originalError,
+        Action rollback)
+    {
+        Failure(source, originalError);
+        Marker(
+            source,
+            "ROLLBACK-BEGIN",
+            originalError == null
+                ? "trigger=<unknown>"
+                : "trigger=" + Describe(originalError));
+
+        if (rollback == null)
+        {
+            Marker(source, "ROLLBACK-END", "no rollback action");
+            return;
+        }
+
+        try
+        {
+            rollback();
+            Marker(source, "ROLLBACK-END", "cleanup completed");
+        }
+        catch (Exception rollbackError)
+        {
+            Failure(source + "/rollback", rollbackError);
+            Marker(
+                source,
+                "ROLLBACK-END",
+                "cleanup threw; original failure preserved");
+        }
+    }
+
+    internal static bool RollbackStep(string source, Action action)
+    {
+        if (action == null) return true;
+
+        int id = Interlocked.Increment(ref sequence);
+        WriteInfo(id, source, "ROLLBACK-BEGIN", null);
+        try
+        {
+            action();
+            WriteInfo(id, source, "ROLLBACK-OK", null);
+            return true;
+        }
+        catch (Exception error)
+        {
+            string prefix = FormatPrefix(id, source, "ROLLBACK-FAIL");
+            logger?.LogError(prefix + " " + Describe(error));
+            logger?.LogError(error);
+            return false;
+        }
+    }
+
     private static void Failure(int id, string source, Exception error, bool optional = false)
     {
         string prefix = FormatPrefix(id, source, optional ? "FAIL-OPTIONAL" : "FAIL");
