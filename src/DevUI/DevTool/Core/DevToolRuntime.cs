@@ -91,7 +91,10 @@ internal static class DevToolRuntime
             EditorInputRouter.UpdateShortcuts(session);
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.VanillaDevUiUpdate))
-            orig(self);
+        {
+            if (!NativeSoundTriggerDevUiScheduler.TryRun(self))
+                orig(self);
+        }
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.PostLegacySynchronization))
         {
