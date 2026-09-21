@@ -147,7 +147,7 @@ fi
 # Optional audio codecs must never become an assembly-load prerequisite for DryCycle.dll.
 # NAudio is runtime-discovered through reflection; compile-time type references can make BepInEx
 # fail before Plugin.OnEnable and before startup diagnostics exist.
-if grep -R --include='*.cs' -E '(^|[[:space:]])using[[:space:]]+NAudio\.|NAudio\.(Wave|CoreAudioApi|MediaFoundation)' src/Misc/SoundFormatSupport; then
+if grep -R --include='*.cs' -E '(^|[[:space:]])using[[:space:]]+NAudio\.|typeof[[:space:]]*\([[:space:]]*NAudio\.|new[[:space:]]+NAudio\.' src/Misc/SoundFormatSupport; then
   echo "SoundFormatSupport reintroduced a compile-time NAudio type dependency." >&2
   exit 1
 fi
