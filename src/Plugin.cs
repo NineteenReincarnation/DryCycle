@@ -31,6 +31,7 @@ using DryCycle.Weather.HeatWave;
 using DryCycle.Weather.IntenseHeat;
 using DryCycle.Weather.Scheduling;
 using DryCycle.WorldLink.InternalGate;
+using CreatureDescriptor = DryCycle.Framework.Creature.Core.CreatureDescriptor;
 using CreatureCoreRegistry = DryCycle.Framework.Creature.Core.CreatureRegistry;
 
 #pragma warning disable CS0618
