@@ -71,6 +71,16 @@ if ! grep -Fq 'DryCycle post-mod initialization failed; the failing runtime tran
   exit 1
 fi
 
+# Primary plugin shutdown is also a rollback boundary. One broken subsystem cleanup must never
+# stop the remaining hooks from being detached before a reload/shutdown completes.
+if ! grep -Fq 'StartupDiagnostics.Marker("Plugin.OnDisable", "ENTER")' "$plugin" ||
+   ! grep -Fq 'SafeBootstrapCleanup("OnDisable/' "$plugin" ||
+   ! grep -Fq 'RollbackRuntimeInitialization();' "$plugin" ||
+   ! grep -Fq 'StartupDiagnostics.Marker("Plugin.OnDisable", "EXIT")' "$plugin"; then
+  echo "Primary plugin shutdown is no longer failure-independent/traced." >&2
+  exit 1
+fi
+
 # DevConsole reset/registration is optional tooling. It must never be able to abort RainWorld's
 # PreModsInit phase; every reset remains behind the non-throwing startup diagnostic wrapper.
 for optional_reset in   'ScavengerLanceDevConsoleSupport.ResetRegistration'   'CreatureDevConsoleSupport.ResetRegistration'   'RopeSpearDevConsoleSupport.ResetRegistration'   'KarmaSpearDevConsoleSupport.ResetRegistration'   'SpinebackLizardDevConsoleSupport.ResetRegistration'; do
