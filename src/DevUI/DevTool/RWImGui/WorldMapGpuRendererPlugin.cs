@@ -31,11 +31,18 @@ public sealed class WorldMapGpuRendererPlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle DevTool Retained GPU World Map";
     public const string PluginVersion = BridgePlugin.PluginVersion;
 
-    private void OnEnable() => WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId);
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => WorldMapGpuRuntime.Enable(Logger, Thread.CurrentThread.ManagedThreadId),
+            WorldMapGpuRuntime.Disable);
 
     private void Update() => WorldMapGpuRuntime.UpdateMainThread();
 
-    private void OnDisable() => WorldMapGpuRuntime.Disable();
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            WorldMapGpuRuntime.Disable);
 }
 
 internal static class WorldMapGpuRuntime
