@@ -1,8 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading.Tasks;
+using NAudio.Wave;
 using UnityEngine;
 
 namespace DryCycle.Misc.SoundFormatSupport;
@@ -26,9 +26,7 @@ internal static class ExternalAudioLoader
         Action<AudioClip> onLoaded,
         Action<string> onFailed)
     {
-        if (file.Format.Decoder == ExternalAudioDecoderKind.MediaFoundation &&
-            IsWindows() &&
-            IsMediaFoundationBackendAvailable())
+        if (file.Format.Decoder == ExternalAudioDecoderKind.MediaFoundation && IsWindows())
         {
             Task<DecodedPcm> task = null;
             string taskStartError = null;
@@ -169,144 +167,49 @@ internal static class ExternalAudioLoader
 #pragma warning restore CS0618
     }
 
-    private static bool IsMediaFoundationBackendAvailable() =>
-        ResolveMediaFoundationReaderType() != null;
-
-    private static Type ResolveMediaFoundationReaderType()
-    {
-        try
-        {
-            return Type.GetType(
-                "NAudio.Wave.MediaFoundationReader, NAudio.Wasapi",
-                throwOnError: false);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static DecodedPcm DecodeWithMediaFoundation(string path)
     {
-        Type readerType = ResolveMediaFoundationReaderType();
-        if (readerType == null)
-            throw new NotSupportedException(
-                "Optional NAudio.Wasapi MediaFoundation backend is not installed.");
+        using MediaFoundationReader reader = new(path);
+        ISampleProvider provider = reader.ToSampleProvider();
+        int channels = provider.WaveFormat.Channels;
+        int sampleRate = provider.WaveFormat.SampleRate;
+        if (channels < 1 || channels > 8)
+            throw new NotSupportedException("Decoded channel count " + channels + " is outside Unity's 1-8 channel AudioClip range.");
+        if (sampleRate <= 0)
+            throw new InvalidOperationException("Media Foundation returned an invalid sample rate.");
 
-        object reader = null;
+        int estimated = 0;
         try
         {
-            reader = Activator.CreateInstance(readerType, path)
-                ?? throw new InvalidOperationException("NAudio MediaFoundationReader construction returned null.");
-
-            PropertyInfo waveFormatProperty = readerType.GetProperty("WaveFormat");
-            object waveFormat = waveFormatProperty?.GetValue(reader)
-                ?? throw new MissingMemberException(readerType.FullName, "WaveFormat");
-
-            Type waveFormatType = waveFormat.GetType();
-            int channels = ReadIntProperty(waveFormat, waveFormatType, "Channels");
-            int sampleRate = ReadIntProperty(waveFormat, waveFormatType, "SampleRate");
-            int bitsPerSample = ReadIntProperty(waveFormat, waveFormatType, "BitsPerSample");
-            string encodingName = waveFormatType.GetProperty("Encoding")?.GetValue(waveFormat)?.ToString() ?? string.Empty;
-
-            if (channels < 1 || channels > 8)
-                throw new NotSupportedException(
-                    "Decoded channel count " + channels + " is outside Unity's 1-8 channel AudioClip range.");
-            if (sampleRate <= 0)
-                throw new InvalidOperationException("Media Foundation returned an invalid sample rate.");
-            if (!string.Equals(encodingName, "Pcm", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException(
-                    "Media Foundation returned unsupported sample encoding '" + encodingName + "'.");
-            if (bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32)
-                throw new NotSupportedException(
-                    "Media Foundation returned unsupported PCM depth " + bitsPerSample + " bits.");
-
-            MethodInfo readMethod = readerType.GetMethod(
-                "Read",
-                new[] { typeof(byte[]), typeof(int), typeof(int) })
-                ?? throw new MissingMethodException(readerType.FullName, "Read(byte[], int, int)");
-
-            int bytesPerSample = bitsPerSample / 8;
-            int blockAlign = Math.Max(bytesPerSample * channels, bytesPerSample);
-            byte[] byteBuffer = new byte[Math.Max(16384, blockAlign * 4096)];
-            List<float> samplesOut = new();
-
-            while (true)
-            {
-                object readResult = readMethod.Invoke(reader, new object[] { byteBuffer, 0, byteBuffer.Length });
-                int read = readResult is int count ? count : 0;
-                if (read <= 0)
-                    break;
-
-                int completeBytes = read - (read % bytesPerSample);
-                for (int offset = 0; offset < completeBytes; offset += bytesPerSample)
-                    samplesOut.Add(PcmToFloat(byteBuffer, offset, bitsPerSample));
-            }
-
-            if (samplesOut.Count == 0)
-                throw new InvalidOperationException(
-                    "Media Foundation decoded zero PCM samples from " + path + ".");
-
-            int completeSampleCount = samplesOut.Count - samplesOut.Count % channels;
-            if (completeSampleCount <= 0)
-                throw new InvalidOperationException(
-                    "Decoded audio does not contain a complete sample frame.");
-            if (completeSampleCount != samplesOut.Count)
-                samplesOut.RemoveRange(completeSampleCount, samplesOut.Count - completeSampleCount);
-
-            return new DecodedPcm
-            {
-                Samples = samplesOut.ToArray(),
-                Channels = channels,
-                SampleRate = sampleRate
-            };
+            double samples = reader.TotalTime.TotalSeconds * sampleRate * channels;
+            if (samples > 0d && samples < int.MaxValue) estimated = (int)samples;
         }
-        catch (TargetInvocationException invocation) when (invocation.InnerException != null)
+        catch { }
+
+        List<float> samplesOut = estimated > 0 ? new List<float>(estimated) : new List<float>();
+        float[] buffer = new float[Math.Max(4096, channels * 4096)];
+        while (true)
         {
-            throw invocation.InnerException;
+            int read = provider.Read(buffer, 0, buffer.Length);
+            if (read <= 0) break;
+            for (int i = 0; i < read; i++) samplesOut.Add(buffer[i]);
         }
-        finally
-        {
-            if (reader is IDisposable disposable)
-                disposable.Dispose();
-        }
-    }
 
-    private static int ReadIntProperty(object instance, Type type, string name)
-    {
-        object value = type.GetProperty(name)?.GetValue(instance);
-        return value is int number
-            ? number
-            : throw new MissingMemberException(type.FullName, name);
-    }
+        if (samplesOut.Count == 0)
+            throw new InvalidOperationException("Media Foundation decoded zero PCM samples from " + path + ".");
 
-    private static float PcmToFloat(byte[] buffer, int offset, int bitsPerSample)
-    {
-        switch (bitsPerSample)
+        int completeSampleCount = samplesOut.Count - samplesOut.Count % channels;
+        if (completeSampleCount <= 0)
+            throw new InvalidOperationException("Decoded audio does not contain a complete sample frame.");
+        if (completeSampleCount != samplesOut.Count)
+            samplesOut.RemoveRange(completeSampleCount, samplesOut.Count - completeSampleCount);
+
+        return new DecodedPcm
         {
-            case 8:
-                return (buffer[offset] - 128) / 128f;
-            case 16:
-                short sample16 = (short)(buffer[offset] | buffer[offset + 1] << 8);
-                return sample16 / 32768f;
-            case 24:
-                int sample24 =
-                    buffer[offset] |
-                    buffer[offset + 1] << 8 |
-                    buffer[offset + 2] << 16;
-                if ((sample24 & 0x00800000) != 0)
-                    sample24 |= unchecked((int)0xFF000000);
-                return sample24 / 8388608f;
-            case 32:
-                int sample32 =
-                    buffer[offset] |
-                    buffer[offset + 1] << 8 |
-                    buffer[offset + 2] << 16 |
-                    buffer[offset + 3] << 24;
-                return sample32 / 2147483648f;
-            default:
-                throw new NotSupportedException("Unsupported PCM depth " + bitsPerSample + " bits.");
-        }
+            Samples = samplesOut.ToArray(),
+            Channels = channels,
+            SampleRate = sampleRate
+        };
     }
 
     private static AudioClip CreateClip(string clipName, DecodedPcm decoded, out string error)
