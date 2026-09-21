@@ -15,6 +15,14 @@ if [[ -z "$sdk_path" ]]; then
   exit 1
 fi
 roslyn_dir="${sdk_path%/}/Roslyn/bincore"
+sdk_version="$(basename "${sdk_path%/}")"
+sdk_major="${sdk_version%%.*}"
+if [[ ! "$sdk_major" =~ ^[0-9]+$ ]]; then
+  echo "Could not resolve .NET SDK major version from: $sdk_version" >&2
+  exit 1
+fi
+guard_tfm="net${sdk_major}.0"
+
 if [[ ! -f "$roslyn_dir/Microsoft.CodeAnalysis.dll" || ! -f "$roslyn_dir/Microsoft.CodeAnalysis.CSharp.dll" ]]; then
   echo "Roslyn compiler assemblies not found under $roslyn_dir." >&2
   exit 1
@@ -24,7 +32,7 @@ cat >"$tmp/SyntaxGuard.csproj" <<EOF
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>$guard_tfm</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
