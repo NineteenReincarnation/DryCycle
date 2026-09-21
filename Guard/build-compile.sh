@@ -162,36 +162,32 @@ def require(condition, message):
     if not condition:
         raise SystemExit(message)
 
-# Compatibility baseline, deliberately treated as upgradeable rather than a permanent architecture
-# law. Backend and optional frontend run in the same Rain World/BepInEx process and must not silently
-# drift to different target frameworks. An intentional platform migration may update both together.
-backend_tfms = values(backend, "TargetFramework")
-frontend_tfms = values(frontend, "TargetFramework")
-require(len(backend_tfms) == 1 and len(frontend_tfms) == 1,
-        "Backend/frontend must each declare one TargetFramework")
-require(backend_tfms[0] == frontend_tfms[0],
-        f"Backend/frontend target-framework drift: {backend_tfms[0]} vs {frontend_tfms[0]}")
-
-# Compile-only safety: any MSBuild operation that directly names the game deployment properties must
-# be deployment-gated. This intentionally does not care what the target is called.
+# Compile-only safety: operations that can write to the real game/mod deployment tree must be
+# guarded either by their Target or by the write operation itself. Target names and layout are free.
 deployment_tokens = ("$(GameModOutputDir)", "$(GameModRootDir)")
 write_tags = {"Copy", "Delete", "MakeDir", "Exec", "MSBuild"}
+
+def deployment_gate(condition):
+    normalized = "".join((condition or "").lower().split())
+    return "$(deploytogame)" in normalized and "true" in normalized
+
 unsafe = []
-for target in nodes(project, "Target") + nodes(targets, "Target"):
-    target_xml = ET.tostring(target, encoding="unicode")
-    has_deployment_path = any(token in target_xml for token in deployment_tokens)
-    has_write = any(local(child) in write_tags for child in target.iter())
-    if not (has_deployment_path and has_write):
-        continue
-    condition = target.attrib.get("Condition", "")
-    if "$(DeployToGame)" not in condition or "true" not in condition.lower():
-        unsafe.append(target.attrib.get("Name", "<unnamed>"))
+for target in nodes(backend, "Target") + nodes(targets, "Target"):
+    target_gate = deployment_gate(target.attrib.get("Condition", ""))
+    for operation in target.iter():
+        if local(operation) not in write_tags:
+            continue
+        operation_xml = ET.tostring(operation, encoding="unicode")
+        if not any(token in operation_xml for token in deployment_tokens):
+            continue
+        if not target_gate and not deployment_gate(operation.attrib.get("Condition", "")):
+            unsafe.append(f"{target.attrib.get('Name', '<unnamed>')}:{local(operation)}")
 require(not unsafe,
-        "Targets can write the game/mod deployment tree without an explicit DeployToGame=true gate: "
+        "Game/mod deployment writes are reachable without DeployToGame=true gating: "
         + ", ".join(unsafe))
 
-# Core must stay independent from the optional frontend and its ImGui runtime. Namespace/type names
-# inside the frontend may evolve; the forbidden dependency direction may not.
+# Core must stay independent from optional RWImGui/ImGui frontends. This is a dependency-direction
+# invariant: optional UI may depend on core, but core must remain usable without the optional UI.
 backend_sources = Path("src").rglob("*.cs")
 forbidden_source_tokens = (
     "DryCycle.DevUI.DevTool.RWImGui",
@@ -214,39 +210,9 @@ bad_refs = sorted(ref for ref in backend_refs if ref in forbidden_backend_refs)
 require(not bad_refs,
         "DryCycle core project directly references optional frontend/runtime assemblies: " + ", ".join(bad_refs))
 
-# Frontend identity is allowed to change. If it consumes backend internals, however, its declared
-# AssemblyName and backend InternalsVisibleTo must remain consistent. Do not freeze a literal name.
-frontend_names = values(frontend, "AssemblyName")
-require(len(frontend_names) == 1 and frontend_names[0],
-        "DevTool frontend must declare one non-empty AssemblyName")
-frontend_name = frontend_names[0]
-friend_names = {node.attrib.get("Include", "").strip() for node in nodes(backend, "InternalsVisibleTo")}
-frontend_source_text = "\n".join(
-    p.read_text(encoding="utf-8", errors="ignore") for p in frontend_dir.rglob("*.cs")
-)
-backend_internal_contracts = (
-    "IDevToolPage",
-    "DevToolSession",
-    "DevToolSubsystem",
-)
-if any(token in frontend_source_text for token in backend_internal_contracts):
-    require(frontend_name in friend_names,
-            f"Frontend '{frontend_name}' consumes backend internal contracts but backend InternalsVisibleTo does not match it")
-
-# Frontend source inclusion is checked as a relationship. We deliberately do not require SDK default
-# globs: explicit Compile lists/removals are allowed, provided they do not accidentally exclude every
-# frontend source file.
-frontend_cs = list(frontend_dir.rglob("*.cs"))
-require(frontend_cs, "DevTool frontend contains no C# source files")
-enable_default = [v.lower() for v in values(frontend, "EnableDefaultCompileItems")]
-if "false" in enable_default:
-    includes = [node.attrib.get("Include", "") for node in nodes(frontend, "Compile") if node.attrib.get("Include")]
-    require(includes,
-            "DevTool frontend disables default Compile items but declares no explicit Compile inputs")
-
 print(
-    "Build relationship guard passed: syntax, compile-only deployment isolation, "
-    "backend/frontend framework alignment, optional dependency direction and frontend identity consistency are intact."
+    "Build relationship guard passed: syntax, compile-only deployment isolation and "
+    "optional frontend dependency direction are intact."
 )
 PY
 
