@@ -59,6 +59,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldCreatureSpawnInspector.Enable", () => WorldCreatureSpawnInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapImGuiPresentationFallback.Enable", () => WorldMapImGuiPresentationFallback.Enable(Logger));
 
             // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
             // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
@@ -80,6 +82,12 @@ public sealed class BridgePlugin : BaseUnityPlugin
                 "DryCycle DevTool RWImGui frontend failed during OnEnable and has been isolated; Rain World startup will continue.");
             ShutdownBridgeState();
         }
+    }
+
+    private void LateUpdate()
+    {
+        if (!bridgeEnabled) return;
+        WorldMapImGuiPresentationFallback.LateUpdate();
     }
 
     private void OnApplicationFocus(bool hasFocus)
@@ -234,6 +242,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         creatureCatalogFallbackChecked = false;
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
+        SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
+        SafeFrontendCleanup("world map presentation fallback", WorldMapImGuiPresentationFallback.Disable);
         SafeFrontendCleanup("world map source recovery", MapRoomGeometryPresentationHub.ResetSourceRecovery);
         SafeFrontendCleanup("world creature inspector", WorldCreatureSpawnInspector.Disable);
     }

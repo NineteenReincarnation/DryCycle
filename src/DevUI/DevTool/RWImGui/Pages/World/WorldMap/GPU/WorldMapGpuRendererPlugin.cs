@@ -326,3 +326,36 @@ internal static class WorldMapGpuRuntime
         point.X >= min.X && point.X <= max.X && point.Y >= min.Y && point.Y <= max.Y;
 
 }
+
+internal static class WorldMapImGuiPresentationFallback
+{
+    private static bool enabled;
+
+    internal static void Enable(ManualLogSource logger)
+    {
+        if (enabled) return;
+        enabled = true;
+        SuppressStandaloneCamera();
+        logger?.LogInfo("World Map ImGui presentation fallback uses direct camera suppression; no self-detour attached.");
+    }
+
+    internal static void Disable() => enabled = false;
+
+    internal static void LateUpdate()
+    {
+        if (!enabled || !DevToolSessionHub.IsCurrentSessionLive)
+            return;
+
+        EditorSession session = DevToolRuntime.ActiveSession;
+        if (session?.ToolMode != EditorToolMode.Map)
+            return;
+
+        SuppressStandaloneCamera();
+    }
+
+    internal static void SuppressStandaloneCamera()
+    {
+        if (!enabled) return;
+        WorldMapGpuScene.SuppressStandaloneCamera();
+    }
+}
