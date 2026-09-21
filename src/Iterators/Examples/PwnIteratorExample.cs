@@ -26,8 +26,17 @@ public static class PwnIteratorExample
     }
     internal static void Enable()
     {
-        try { Register(); }
-        catch (Exception exception) { new IteratorLogger(new IteratorID(ID)).ForModule("Example").Error("PWN_AI example registration failed.", exception); }
+        try
+        {
+            Register();
+        }
+        catch (Exception exception)
+        {
+            new IteratorLogger(new IteratorID(ID))
+                .ForModule("Example")
+                .Error("PWN_AI example registration failed.", exception);
+            throw;
+        }
     }
     private sealed class SampleRuntime : IteratorRuntime
     {
