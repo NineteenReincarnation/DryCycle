@@ -21,6 +21,7 @@ public static class CreatureRegistry
     private static readonly Dictionary<string, CreatureDescriptor> _byTypeValue = new(StringComparer.Ordinal);
     private static readonly Dictionary<int, CreatureDescriptor> _byTypeIndex = new();
     private static readonly Dictionary<string, CreatureDescriptor> _byName = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _quarantinedTypes = new(StringComparer.Ordinal);
 
     private static bool _enabled;
     private static bool _staticWorldTemplateHookInstalled;
@@ -44,6 +45,16 @@ public static class CreatureRegistry
     /// True when the registry's Rain World core hooks are currently enabled.
     /// </summary>
     public static bool IsEnabled => _enabled;
+
+    /// <summary>
+    /// True when template construction failed for this type during the current StaticWorld build.
+    /// Quarantined descriptors stay registered for text compatibility but use a vanilla fallback
+    /// template and must not run their custom state/entity/AI factories.
+    /// </summary>
+    public static bool IsQuarantined(CreatureTemplate.Type type) =>
+        type != null &&
+        !string.IsNullOrWhiteSpace(type.value) &&
+        _quarantinedTypes.Contains(type.value);
 
     /// <summary>
     /// 当前是否还允许登记新的生物。
@@ -436,35 +447,63 @@ public static class CreatureRegistry
         _registrationClosed = true;
         orig();
 
+        _quarantinedTypes.Clear();
         if (_descriptors.Count == 0)
         {
             return;
         }
 
-        Dictionary<int, CreatureTemplate> previousTemplates = new();
-
+        CreatureTemplate safeFallback = null;
         try
         {
-            for (int i = 0; i < _descriptors.Count; i++)
-            {
-                CreatureDescriptor descriptor = _descriptors[i];
-                CreatureTemplate template = BuildAndValidateTemplate(descriptor);
-                int index = descriptor.Type.Index;
+            safeFallback = StaticWorld.GetCreatureTemplate(CreatureTemplate.Type.Fly);
+        }
+        catch (Exception fallbackLookupError)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "CreatureRegistry/StaticWorld/FallbackFlyLookup",
+                fallbackLookupError);
+        }
 
-                previousTemplates.Add(index, StaticWorld.creatureTemplates[index]);
+        for (int i = 0; i < _descriptors.Count; i++)
+        {
+            CreatureDescriptor descriptor = _descriptors[i];
+            int index = descriptor.Type.Index;
+
+            try
+            {
+                CreatureTemplate template = BuildAndValidateTemplate(descriptor);
                 StaticWorld.creatureTemplates[index] = template;
             }
-        }
-        catch
-        {
-            // 如果后面的模板创建失败，把前面已经写入的槽位全部还原，避免留下“注册一半”的 StaticWorld。
-            // If a later template fails, restore every slot already changed so StaticWorld is not left half-registered.
-            foreach (KeyValuePair<int, CreatureTemplate> pair in previousTemplates)
+            catch (Exception error)
             {
-                StaticWorld.creatureTemplates[pair.Key] = pair.Value;
-            }
+                // A broken custom creature must not abort StaticWorld and prevent Rain World from
+                // reaching the menu. Quarantine only that descriptor. The custom ExtEnum remains
+                // parseable, but resolving its template yields a known vanilla Fly template instead
+                // of a null slot or a startup exception. Other registered creatures keep loading.
+                _quarantinedTypes.Add(descriptor.Type.value);
+                global::DryCycle.StartupDiagnostics.Failure(
+                    "CreatureRegistry/StaticWorld/" + descriptor.Type.value,
+                    error);
 
-            throw;
+                if (safeFallback != null &&
+                    index >= 0 &&
+                    index < StaticWorld.creatureTemplates.Length)
+                {
+                    StaticWorld.creatureTemplates[index] = safeFallback;
+                    global::DryCycle.Plugin.Logger?.LogWarning(
+                        "Creature '" + descriptor.Type.value +
+                        "' was quarantined after template construction failed; " +
+                        "its StaticWorld slot temporarily resolves to vanilla Fly so startup can continue.");
+                }
+                else
+                {
+                    global::DryCycle.Plugin.Logger?.LogError(
+                        "Creature '" + descriptor.Type.value +
+                        "' template failed and no safe fallback template was available. " +
+                        "The failure was isolated to keep StaticWorld initialization running.");
+                }
+            }
         }
     }
 
@@ -538,7 +577,10 @@ public static class CreatureRegistry
     {
         orig(self, world, template, realizedCreature, position, id);
 
-        if (world == null || template?.type == null || !TryGet(template.type, out CreatureDescriptor descriptor))
+        if (world == null ||
+            template?.type == null ||
+            IsQuarantined(template.type) ||
+            !TryGet(template.type, out CreatureDescriptor descriptor))
         {
             return;
         }
@@ -616,7 +658,8 @@ public static class CreatureRegistry
         On.AbstractCreature.orig_Realize orig,
         AbstractCreature self)
     {
-        if (!TryGet(self.creatureTemplate?.type, out CreatureDescriptor descriptor) ||
+        if (IsQuarantined(self.creatureTemplate?.type) ||
+            !TryGet(self.creatureTemplate?.type, out CreatureDescriptor descriptor) ||
             descriptor.CreatureFactory == null)
         {
             orig(self);
@@ -682,7 +725,8 @@ public static class CreatureRegistry
         On.AbstractCreature.orig_InitiateAI orig,
         AbstractCreature self)
     {
-        if (!TryGet(self.creatureTemplate?.type, out CreatureDescriptor descriptor) ||
+        if (IsQuarantined(self.creatureTemplate?.type) ||
+            !TryGet(self.creatureTemplate?.type, out CreatureDescriptor descriptor) ||
             descriptor.RealizedAIFactory == null)
         {
             orig(self);
