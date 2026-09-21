@@ -23,8 +23,15 @@ public sealed class PlayerMapTerrainBakeBridgePlugin : BaseUnityPlugin
     public const string PluginName = "DryCycle Player Map Terrain Bake Bridge";
     public const string PluginVersion = global::DryCycle.Plugin.Version;
 
-    private void OnEnable() => PlayerMapTerrainBakeBridge.Enable(Logger);
-    private void OnDisable() => PlayerMapTerrainBakeBridge.Disable();
+    private void OnEnable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
+            PluginName + ".OnEnable",
+            () => PlayerMapTerrainBakeBridge.Enable(Logger),
+            PlayerMapTerrainBakeBridge.Disable);
+    private void OnDisable() =>
+        global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
+            PluginName + ".OnDisable",
+            PlayerMapTerrainBakeBridge.Disable);
 }
 
 internal static class PlayerMapTerrainBakeBridge
