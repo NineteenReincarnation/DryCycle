@@ -52,9 +52,20 @@ internal static class DewPodAudioHooks
     /// </summary>
     internal static void InitializeSoundIds()
     {
-        if (DrinkWaterSound == null)
+        if (DrinkWaterSound != null && DrinkWaterSound.Index >= 0)
         {
-            DrinkWaterSound = new SoundID(DrinkWaterSoundName, register: true);
+            return;
+        }
+
+        bool replacingInvalidRegistration = DrinkWaterSound != null;
+        DrinkWaterSound = new SoundID(DrinkWaterSoundName, register: true);
+
+        if (replacingInvalidRegistration)
+        {
+            global::DryCycle.StartupDiagnostics.Marker(
+                "DewPodAudioHooks.InitializeSoundIds",
+                "RE-REGISTERED",
+                "previous SoundID object survived an ExtEnum reset with an invalid index");
         }
     }
 
