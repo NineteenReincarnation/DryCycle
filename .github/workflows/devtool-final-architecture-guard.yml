@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'src/DevUI/DevTool/**'
+      - 'src/Plugin.cs'
+      - 'src/DryCycleLifecycleEvents.cs'
+      - 'src/Misc/MiscRuntime.cs'
+      - 'src/Misc/SoundFormatSupport/**'
       - 'src/Directory.Build.targets'
       - 'src/DryCycle.csproj'
       - 'scripts/validate-devtool-final-architecture.sh'
@@ -13,10 +17,15 @@ on:
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
+      - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
   push:
     paths:
       - 'src/DevUI/DevTool/**'
+      - 'src/Plugin.cs'
+      - 'src/DryCycleLifecycleEvents.cs'
+      - 'src/Misc/MiscRuntime.cs'
+      - 'src/Misc/SoundFormatSupport/**'
       - 'src/Directory.Build.targets'
       - 'src/DryCycle.csproj'
       - 'scripts/validate-devtool-final-architecture.sh'
@@ -26,6 +35,7 @@ on:
       - 'scripts/validate-devtool-native-gizmo-boundaries.sh'
       - 'scripts/validate-devtool-native-sound-trigger-runtime.sh'
       - 'scripts/validate-devtool-native-objects-runtime.sh'
+      - 'scripts/validate-drycycle-startup-safety.sh'
       - '.github/workflows/devtool-final-architecture-guard.yml'
 
 jobs:
@@ -54,3 +64,6 @@ jobs:
       - name: Validate DevTool Native Objects runtime boundaries
         shell: bash
         run: bash scripts/validate-devtool-native-objects-runtime.sh
+      - name: Validate DryCycle startup safety
+        shell: bash
+        run: bash scripts/validate-drycycle-startup-safety.sh
