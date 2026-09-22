@@ -892,23 +892,145 @@ internal static class WorldMapOrthogonalRouter
         List<Obstacle> obstacles,
         float terminalExtraDepth)
     {
-        Num.Vector2 escape =
-            mouth +
-            direction *
-            (PortNeck + Math.Max(0f, terminalExtraDepth));
+        const float clearance = 5f;
+
+        float ownRequiredDistance = PortNeck;
         for (int i = 0; i < obstacles.Count; i++)
         {
             Obstacle obstacle = obstacles[i];
-            if (obstacle.RoomIndex != roomIndex) continue;
+            if (obstacle.RoomIndex != roomIndex)
+                continue;
 
-            const float clearance = 5f;
-            if (direction.X < -0.5f) escape.X = Math.Min(escape.X, obstacle.Min.X - clearance);
-            else if (direction.X > 0.5f) escape.X = Math.Max(escape.X, obstacle.Max.X + clearance);
-            else if (direction.Y < -0.5f) escape.Y = Math.Min(escape.Y, obstacle.Min.Y - clearance);
-            else escape.Y = Math.Max(escape.Y, obstacle.Max.Y + clearance);
+            if (direction.X < -0.5f)
+            {
+                ownRequiredDistance =
+                    Math.Max(
+                        ownRequiredDistance,
+                        mouth.X - obstacle.Min.X + clearance);
+            }
+            else if (direction.X > 0.5f)
+            {
+                ownRequiredDistance =
+                    Math.Max(
+                        ownRequiredDistance,
+                        obstacle.Max.X - mouth.X + clearance);
+            }
+            else if (direction.Y < -0.5f)
+            {
+                ownRequiredDistance =
+                    Math.Max(
+                        ownRequiredDistance,
+                        mouth.Y - obstacle.Min.Y + clearance);
+            }
+            else
+            {
+                ownRequiredDistance =
+                    Math.Max(
+                        ownRequiredDistance,
+                        obstacle.Max.Y - mouth.Y + clearance);
+            }
+
             break;
         }
-        return escape;
+
+        float distance =
+            Math.Max(
+                ownRequiredDistance,
+                PortNeck +
+                Math.Max(
+                    0f,
+                    terminalExtraDepth));
+
+        // Terminal fan-out is visual/readability infrastructure, not permission to cut through the
+        // next room. Cap the outward neck at the nearest foreign routing obstacle when necessary.
+        // The later orthogonal router can still fan around that obstacle from the safe point.
+        for (int i = 0; i < obstacles.Count; i++)
+        {
+            Obstacle obstacle = obstacles[i];
+            if (obstacle.RoomIndex == roomIndex)
+                continue;
+
+            if (!TryForwardObstacleDistance(
+                    mouth,
+                    direction,
+                    obstacle,
+                    clearance,
+                    out float safeDistance))
+                continue;
+
+            if (safeDistance < ownRequiredDistance)
+                continue;
+
+            distance =
+                Math.Min(
+                    distance,
+                    safeDistance);
+        }
+
+        return mouth + direction * distance;
+    }
+
+    private static bool TryForwardObstacleDistance(
+        Num.Vector2 mouth,
+        Num.Vector2 direction,
+        Obstacle obstacle,
+        float clearance,
+        out float safeDistance)
+    {
+        safeDistance = float.MaxValue;
+
+        if (direction.X > 0.5f)
+        {
+            if (mouth.Y < obstacle.Min.Y - clearance ||
+                mouth.Y > obstacle.Max.Y + clearance ||
+                obstacle.Min.X <= mouth.X)
+                return false;
+
+            safeDistance =
+                obstacle.Min.X -
+                mouth.X -
+                clearance;
+            return true;
+        }
+
+        if (direction.X < -0.5f)
+        {
+            if (mouth.Y < obstacle.Min.Y - clearance ||
+                mouth.Y > obstacle.Max.Y + clearance ||
+                obstacle.Max.X >= mouth.X)
+                return false;
+
+            safeDistance =
+                mouth.X -
+                obstacle.Max.X -
+                clearance;
+            return true;
+        }
+
+        if (direction.Y > 0.5f)
+        {
+            if (mouth.X < obstacle.Min.X - clearance ||
+                mouth.X > obstacle.Max.X + clearance ||
+                obstacle.Min.Y <= mouth.Y)
+                return false;
+
+            safeDistance =
+                obstacle.Min.Y -
+                mouth.Y -
+                clearance;
+            return true;
+        }
+
+        if (mouth.X < obstacle.Min.X - clearance ||
+            mouth.X > obstacle.Max.X + clearance ||
+            obstacle.Max.Y >= mouth.Y)
+            return false;
+
+        safeDistance =
+            mouth.Y -
+            obstacle.Max.Y -
+            clearance;
+        return true;
     }
 
     private static bool CanUseBridge(

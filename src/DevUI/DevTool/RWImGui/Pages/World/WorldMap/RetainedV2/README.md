@@ -705,6 +705,8 @@ Phase 1 introduces stable terminal lanes without replacing the retained router:
 - every connection endpoint is grouped by **room + physical room side**;
 - endpoints are stably ordered by along-edge position, node index and connection ID;
 - non-Compact routes receive a unique outward terminal depth before entering shared routing space;
+- terminal depth is capped by the nearest foreign routing obstacle, so fan-out never gains permission
+  to pierce a neighbouring room merely to preserve spacing;
 - same-room-pair lane offsets no longer clamp at ±24 px, so the 8th+ link cannot collapse back onto
   an already-used visual lane;
 - dense groups use adaptive spacing: normal groups retain generous separation, while large groups
