@@ -249,11 +249,12 @@ internal sealed class WorldMapRoomResourceStore
                 resource.RequestedVisualStamp = int.MinValue;
         }
 
+        WorldMapLegacyRoomSourceService.RoomTextureSource source = default;
         bool resolvedPersistent =
             !resource.Thumbnail.HasCommitted &&
             WorldMapPersistentRetainedCache.TryResolveThumbnail(
                 roomIndex,
-                out WorldMapLegacyRoomSourceService.RoomTextureSource source);
+                out source);
 
         bool resolvedLive =
             resolvedPersistent ||
