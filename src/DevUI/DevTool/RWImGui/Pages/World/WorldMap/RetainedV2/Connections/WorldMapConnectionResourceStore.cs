@@ -164,6 +164,7 @@ internal sealed class WorldMapConnectionResourceStore
             WorldMapPersistentRouteRestoreResult restore =
                 WorldMapPersistentRetainedCache.TryRestoreRoute(
                     scene,
+                    roomResources,
                     id,
                     out ConnectionRouteResource restoredRoute);
 

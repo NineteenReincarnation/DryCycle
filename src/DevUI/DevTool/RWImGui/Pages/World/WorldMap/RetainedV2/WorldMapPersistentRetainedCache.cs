@@ -80,6 +80,7 @@ internal static class WorldMapPersistentRetainedCache
 
     internal static WorldMapPersistentRouteRestoreResult TryRestoreRoute(
         WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources,
         string connectionId,
         out ConnectionRouteResource route)
     {
@@ -99,6 +100,17 @@ internal static class WorldMapPersistentRetainedCache
 
         if (!validRooms.ContainsKey(stored.FromRoomIndex) ||
             !validRooms.ContainsKey(stored.ToRoomIndex))
+            return WorldMapPersistentRouteRestoreResult.Pending;
+
+        if (roomResources == null ||
+            !roomResources.TryGet(
+                stored.FromRoomIndex,
+                out WorldMapRoomResourceStore.RoomResource fromResource) ||
+            !roomResources.TryGet(
+                stored.ToRoomIndex,
+                out WorldMapRoomResourceStore.RoomResource toResource) ||
+            fromResource?.GeometryGeneration <= 0 ||
+            toResource?.GeometryGeneration <= 0)
             return WorldMapPersistentRouteRestoreResult.Pending;
 
         if (!scene.TryGetConnection(connectionId, out WorldMapScene.ConnectionNode connection) ||

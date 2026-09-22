@@ -264,7 +264,8 @@ internal sealed class WorldMapRoomResourceStore
                 resource.Thumbnail.CommitPending())
             {
                 AdvanceRevision();
-                if (!string.IsNullOrEmpty(source.PersistentElementName))
+                if (!resolvedPersistent &&
+                    !string.IsNullOrEmpty(source.PersistentElementName))
                     MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
             }
         }
