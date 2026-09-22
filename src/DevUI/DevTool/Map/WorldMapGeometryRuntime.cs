@@ -371,6 +371,8 @@ internal static partial class MapRoomGeometryPresentationHub
             }
         }
 
+        WorldMapFrontendBridge.CompletePersistentRoomValidation(alive);
+
         if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
         lastSubNodeCount = page.subNodes.Count;
         nextStructureSyncFrame = Time.frameCount + StructureSyncIntervalFrames;

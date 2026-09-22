@@ -31,6 +31,7 @@ internal static class WorldMapPersistentRetainedCache
     private static long cachedTopologyFingerprint;
     private static long verifiedTopologyFingerprint;
     private static bool topologyRejected;
+    private static bool roomValidationComplete;
 
     internal static int ValidatedRoomCount =>
         enabled ? validRooms.Count : 0;
@@ -46,6 +47,7 @@ internal static class WorldMapPersistentRetainedCache
             Capture,
             RestoreSnapshot,
             RestoreRoom,
+            CompleteRoomValidation,
             Clear);
     }
 
@@ -57,6 +59,7 @@ internal static class WorldMapPersistentRetainedCache
                 Capture,
                 RestoreSnapshot,
                 RestoreRoom,
+                CompleteRoomValidation,
                 Clear);
         }
 
@@ -113,10 +116,17 @@ internal static class WorldMapPersistentRetainedCache
             return WorldMapPersistentRouteRestoreResult.None;
         }
 
-        // Every cached room must first pass the core room-source stamp check. This proves retained
-        // room dimensions/obstacles still come from the same authored geometry as the saved route.
+        // Before the first full source audit finishes, cached routes may wait briefly. After the
+        // audit, any unresolved room is a cache miss and must fail open to normal routing.
         if (validRooms.Count < expectedRoomCount)
-            return WorldMapPersistentRouteRestoreResult.Pending;
+        {
+            if (!roomValidationComplete)
+                return WorldMapPersistentRouteRestoreResult.Pending;
+
+            topologyRejected = true;
+            routes.Clear();
+            return WorldMapPersistentRouteRestoreResult.None;
+        }
 
         if (verifiedTopologyFingerprint == 0L)
         {
@@ -273,6 +283,7 @@ internal static class WorldMapPersistentRetainedCache
             snapshot.FrontendTopologyFingerprint;
         verifiedTopologyFingerprint = 0L;
         topologyRejected = false;
+        roomValidationComplete = false;
 
         for (int i = 0; i < snapshot.Routes.Count; i++)
         {
@@ -304,6 +315,45 @@ internal static class WorldMapPersistentRetainedCache
         validRooms[roomIndex] = room;
     }
 
+    private static void CompleteRoomValidation(
+        IReadOnlyCollection<int> roomIndices)
+    {
+        if (!enabled || roomValidationComplete)
+            return;
+
+        roomValidationComplete = true;
+        int liveCount = roomIndices?.Count ?? 0;
+
+        if (liveCount != expectedRoomCount)
+        {
+            topologyRejected = true;
+            routes.Clear();
+            return;
+        }
+
+        if (roomIndices == null)
+        {
+            topologyRejected = true;
+            routes.Clear();
+            return;
+        }
+
+        foreach (int roomIndex in roomIndices)
+        {
+            if (validRooms.ContainsKey(roomIndex) ||
+                invalidRooms.Contains(roomIndex))
+                continue;
+
+            invalidRooms.Add(roomIndex);
+        }
+
+        if (invalidRooms.Count > 0)
+        {
+            topologyRejected = true;
+            routes.Clear();
+        }
+    }
+
     private static void Clear()
     {
         validRooms.Clear();
@@ -314,6 +364,7 @@ internal static class WorldMapPersistentRetainedCache
         cachedTopologyFingerprint = 0L;
         verifiedTopologyFingerprint = 0L;
         topologyRejected = false;
+        roomValidationComplete = false;
     }
 
     private static long ComputeTopologyFingerprint(

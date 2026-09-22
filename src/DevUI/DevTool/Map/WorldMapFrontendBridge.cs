@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -19,6 +20,7 @@ internal static class WorldMapFrontendBridge
     private static Action<MapViewPersistentSnapshot> capturePersistentSnapshot;
     private static Action<MapViewPersistentSnapshot> restorePersistentSnapshot;
     private static Action<int, MapViewPersistentRoom, bool> restorePersistentRoom;
+    private static Action<IReadOnlyCollection<int>> completePersistentRoomValidation;
     private static Action clearPersistentState;
 
     internal static bool ShouldPublish(EditorSession session) =>
@@ -51,6 +53,10 @@ internal static class WorldMapFrontendBridge
         MapViewPersistentRoom room,
         bool sourceValid) =>
         restorePersistentRoom?.Invoke(roomIndex, room, sourceValid);
+
+    internal static void CompletePersistentRoomValidation(
+        IReadOnlyCollection<int> roomIndices) =>
+        completePersistentRoomValidation?.Invoke(roomIndices);
 
     internal static void ClearPersistentState() =>
         clearPersistentState?.Invoke();
@@ -97,11 +103,13 @@ internal static class WorldMapFrontendBridge
         Action<MapViewPersistentSnapshot> capture,
         Action<MapViewPersistentSnapshot> restore,
         Action<int, MapViewPersistentRoom, bool> restoreRoom,
+        Action<IReadOnlyCollection<int>> completeValidation,
         Action clear)
     {
         capturePersistentSnapshot = capture;
         restorePersistentSnapshot = restore;
         restorePersistentRoom = restoreRoom;
+        completePersistentRoomValidation = completeValidation;
         clearPersistentState = clear;
     }
 
@@ -109,6 +117,7 @@ internal static class WorldMapFrontendBridge
         Action<MapViewPersistentSnapshot> capture,
         Action<MapViewPersistentSnapshot> restore,
         Action<int, MapViewPersistentRoom, bool> restoreRoom,
+        Action<IReadOnlyCollection<int>> completeValidation,
         Action clear)
     {
         if (Delegate.Equals(capturePersistentSnapshot, capture))
@@ -117,6 +126,10 @@ internal static class WorldMapFrontendBridge
             restorePersistentSnapshot = null;
         if (Delegate.Equals(restorePersistentRoom, restoreRoom))
             restorePersistentRoom = null;
+        if (Delegate.Equals(
+                completePersistentRoomValidation,
+                completeValidation))
+            completePersistentRoomValidation = null;
         if (Delegate.Equals(clearPersistentState, clear))
             clearPersistentState = null;
     }

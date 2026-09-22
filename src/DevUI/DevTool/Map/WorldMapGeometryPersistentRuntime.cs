@@ -127,8 +127,16 @@ internal static partial class MapRoomGeometryPresentationHub
         state.RestoreAttempted = true;
 
         if (string.IsNullOrWhiteSpace(entry.RoomName) ||
-            !persistentRooms.TryGetValue(entry.RoomName, out MapViewPersistentRoom stored))
+            !persistentRooms.TryGetValue(
+                entry.RoomName,
+                out MapViewPersistentRoom stored))
+        {
+            WorldMapFrontendBridge.RestorePersistentRoom(
+                entry.RoomIndex,
+                null,
+                sourceValid: false);
             return;
+        }
 
         MapViewFileStamp roomSource = MapViewFileStamp.Capture(ResolveRoomGeometryPath(world, room));
         MapViewFileStamp settingsSource = MapViewFileStamp.Capture(ResolveRoomSettingsPath(world, room));
