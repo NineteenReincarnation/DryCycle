@@ -167,9 +167,6 @@ internal static class WorldMapRetainedV2Runtime
             MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
         {
             WorldMapViewTransform view = MainSceneState.ViewTransform;
-            view.GetVisibleWorldBounds(
-                out Num.Vector2 visibleMin,
-                out Num.Vector2 visibleMax);
 
             int layerMask = Volatile.Read(ref activeLayerMask);
             bool showConnections = Volatile.Read(ref activeShowConnections) != 0;
@@ -183,17 +180,30 @@ internal static class WorldMapRetainedV2Runtime
             long sceneRevision = MainSceneState.SceneRevision;
             long roomResourceRevision = RoomResources.Revision;
             long routeRevision = ConnectionResources.Revision;
-            bool needsRender =
+            bool viewChanged =
+                viewRevision != lastRenderedViewRevision;
+            bool nonViewDirty =
                 Surface.NeedsRender ||
-                viewRevision != lastRenderedViewRevision ||
                 sceneRevision != lastRenderedSceneRevision ||
                 roomResourceRevision != lastRenderedRoomResourceRevision ||
                 routeRevision != lastRenderedRouteRevision ||
                 layerMask != lastRenderedLayerMask ||
                 showConnectionsValue != lastRenderedShowConnections;
+            bool deferViewOnlyRender =
+                viewChanged &&
+                !nonViewDirty &&
+                WorldMapBackgroundBudget.InteractionActive;
+            bool needsRender =
+                nonViewDirty ||
+                (viewChanged && !deferViewOnlyRender);
 
             if (needsRender)
             {
+                Surface.GetRenderWorldBounds(
+                    view,
+                    out Num.Vector2 visibleMin,
+                    out Num.Vector2 visibleMax);
+
                 SpatialIndex.Query(
                     visibleMin,
                     visibleMax,
@@ -237,7 +247,12 @@ internal static class WorldMapRetainedV2Runtime
         ImDrawListPtr draw,
         Num.Vector2 min,
         Num.Vector2 max) =>
-        enabled && Surface.TryPresent(draw, min, max);
+        enabled &&
+        Surface.TryPresent(
+            draw,
+            min,
+            max,
+            RenderSceneState.ViewTransform);
 
     internal static bool TryHitRoom(
         Num.Vector2 worldPoint,

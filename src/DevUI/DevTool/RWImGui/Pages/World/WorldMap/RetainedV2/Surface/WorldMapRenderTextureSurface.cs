@@ -14,14 +14,19 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// gate therefore protects only pointer/state exchange; Camera.Render and ImGui AddImage never run
 /// while holding the same lock. Unity resource destruction is deferred to the main-thread pump.
 ///
-/// Zoom changes the camera transform only. RenderTexture allocation depends on canvas pixel size,
-/// never zoom. A replacement target is not considered committed until RWImGUI successfully presents
-/// it; presentation failure keeps the previous last-known-good surface visible.
+/// Exact renders use a guarded view around the visible canvas when the verified RWImGUI AddImage
+/// contract supports UV sub-rects. Active view-only pan/zoom reprojects that committed surface
+/// without Camera.Render; after interaction settles the main thread renders one exact replacement.
+/// RenderTexture allocation depends on canvas pixel size, never zoom. A replacement target is not
+/// considered committed until RWImGUI successfully presents it; presentation failure keeps the
+/// previous last-known-good surface visible.
 /// </summary>
 internal sealed class WorldMapRenderTextureSurface
 {
     internal const int RenderLayer = 31;
     private const int RejectedResizeRetryFrames = 30;
+    private const float GuardBandScale = 1.5f;
+    private const float CoverageEpsilonPixels = 0.75f;
 
     private readonly object gate = new();
     private readonly object presentationGate = new();
@@ -39,6 +44,10 @@ internal sealed class WorldMapRenderTextureSurface
     private int height;
     private int retiredWidth;
     private int retiredHeight;
+    private WorldMapViewTransform presentedTransform;
+    private WorldMapViewTransform retiredTransform;
+    private bool presentedTransformValid;
+    private bool retiredTransformValid;
 
     private int rejectedWidth;
     private int rejectedHeight;
@@ -91,6 +100,17 @@ internal sealed class WorldMapRenderTextureSurface
 
     internal Camera Camera => camera;
 
+    internal void GetRenderWorldBounds(
+        WorldMapViewTransform viewport,
+        out Num.Vector2 min,
+        out Num.Vector2 max)
+    {
+        GetTargetSize(viewport, out int targetWidth, out int targetHeight);
+        WorldMapViewTransform renderTransform =
+            BuildRenderTransform(viewport, targetWidth, targetHeight);
+        renderTransform.GetVisibleWorldBounds(out min, out max);
+    }
+
     /// <summary>
     /// Main-thread surface pump. It is intentionally cheap on stable frames.
     /// </summary>
@@ -120,8 +140,9 @@ internal sealed class WorldMapRenderTextureSurface
         Initialize(log);
         EnsureCamera();
 
-        int targetWidth = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.X));
-        int targetHeight = Math.Max(2, (int)Math.Ceiling(transform.CanvasSize.Y));
+        GetTargetSize(transform, out int targetWidth, out int targetHeight);
+        WorldMapViewTransform renderTransform =
+            BuildRenderTransform(transform, targetWidth, targetHeight);
 
         RenderTexture current;
         bool currentValid;
@@ -185,7 +206,7 @@ internal sealed class WorldMapRenderTextureSurface
 
         try
         {
-            ConfigureCamera(transform, target);
+            ConfigureCamera(renderTransform, target);
             prepareScene?.Invoke(camera);
             camera.targetTexture = target;
             camera.Render();
@@ -202,14 +223,24 @@ internal sealed class WorldMapRenderTextureSurface
                     retired = presented;
                     retiredWidth = width;
                     retiredHeight = height;
+                    retiredTransform = presentedTransform;
+                    retiredTransformValid = presentedTransformValid;
 
                     presented = target;
                     presentedValid = true;
                     width = targetWidth;
                     height = targetHeight;
+                    presentedTransform = renderTransform;
+                    presentedTransformValid = true;
                     rollbackRequested = false;
                     releaseRetiredRequested = false;
                     ownsCandidate = false;
+                }
+
+                if (!ownsCandidate)
+                {
+                    presentedTransform = renderTransform;
+                    presentedTransformValid = true;
                 }
 
                 renderInvalidated = false;
@@ -244,26 +275,44 @@ internal sealed class WorldMapRenderTextureSurface
     internal bool TryPresent(
         ImDrawListPtr draw,
         Num.Vector2 min,
-        Num.Vector2 max)
+        Num.Vector2 max,
+        WorldMapViewTransform currentView)
     {
         lock (presentationGate)
-            return TryPresentCore(draw, min, max);
+            return TryPresentCore(draw, min, max, currentView);
     }
 
     private bool TryPresentCore(
         ImDrawListPtr draw,
         Num.Vector2 min,
-        Num.Vector2 max)
+        Num.Vector2 max,
+        WorldMapViewTransform currentView)
     {
         RenderTexture current;
         RenderTexture fallback;
+        WorldMapViewTransform currentRenderedView;
+        WorldMapViewTransform fallbackRenderedView;
+        bool currentTransformReady;
+        bool fallbackTransformReady;
+        int currentWidth;
+        int currentHeight;
+        int fallbackWidth;
+        int fallbackHeight;
         bool valid;
 
         lock (gate)
         {
             current = presented;
             fallback = retired;
-            valid = presentedValid && current != null;
+            currentRenderedView = presentedTransform;
+            fallbackRenderedView = retiredTransform;
+            currentTransformReady = presentedTransformValid;
+            fallbackTransformReady = retiredTransformValid;
+            currentWidth = width;
+            currentHeight = height;
+            fallbackWidth = retiredWidth;
+            fallbackHeight = retiredHeight;
+            valid = presentedValid && current != null && currentTransformReady;
             if (valid)
                 presentReaders++;
         }
@@ -273,7 +322,17 @@ internal sealed class WorldMapRenderTextureSurface
 
         try
         {
-            if (bridge.TryPresent(draw, current, min, max))
+            bool currentBridgeAttempted;
+            if (TryPresentTexture(
+                    draw,
+                    current,
+                    currentWidth,
+                    currentHeight,
+                    currentRenderedView,
+                    currentView,
+                    min,
+                    max,
+                    out currentBridgeAttempted))
             {
                 if (fallback != null)
                 {
@@ -287,21 +346,34 @@ internal sealed class WorldMapRenderTextureSurface
                 return true;
             }
 
-            if (fallback == null)
+            if (fallback == null || !fallbackTransformReady)
                 return false;
 
-            // The candidate failed to bind/present. Draw the old committed surface for this frame,
-            // then let Unity's main thread atomically restore it and dispose the rejected candidate.
-            if (!bridge.TryPresent(draw, fallback, min, max))
+            // Coverage exhaustion is not a texture failure: it simply lets WorldMapView use its
+            // immediate compatibility renderer until the interaction settles. Only a real bridge
+            // failure rolls a freshly rendered candidate back to the last-known-good surface.
+            if (!TryPresentTexture(
+                    draw,
+                    fallback,
+                    fallbackWidth,
+                    fallbackHeight,
+                    fallbackRenderedView,
+                    currentView,
+                    min,
+                    max,
+                    out bool _))
                 return false;
 
-            lock (gate)
+            if (currentBridgeAttempted)
             {
-                if (ReferenceEquals(presented, current) &&
-                    ReferenceEquals(retired, fallback))
+                lock (gate)
                 {
-                    rollbackRequested = true;
-                    releaseRetiredRequested = false;
+                    if (ReferenceEquals(presented, current) &&
+                        ReferenceEquals(retired, fallback))
+                    {
+                        rollbackRequested = true;
+                        releaseRetiredRequested = false;
+                    }
                 }
             }
 
@@ -337,6 +409,10 @@ internal sealed class WorldMapRenderTextureSurface
             height = 0;
             retiredWidth = 0;
             retiredHeight = 0;
+            presentedTransform = default;
+            retiredTransform = default;
+            presentedTransformValid = false;
+            retiredTransformValid = false;
             rejectedWidth = 0;
             rejectedHeight = 0;
             resizeRetryAfterFrame = 0;
@@ -383,10 +459,14 @@ internal sealed class WorldMapRenderTextureSurface
                     presentedValid = presented != null;
                     width = retiredWidth;
                     height = retiredHeight;
+                    presentedTransform = retiredTransform;
+                    presentedTransformValid = retiredTransformValid;
 
                     retired = null;
                     retiredWidth = 0;
                     retiredHeight = 0;
+                    retiredTransform = default;
+                    retiredTransformValid = false;
 
                     rejectedWidth = failedWidth;
                     rejectedHeight = failedHeight;
@@ -406,6 +486,8 @@ internal sealed class WorldMapRenderTextureSurface
                 retired = null;
                 retiredWidth = 0;
                 retiredHeight = 0;
+                retiredTransform = default;
+                retiredTransformValid = false;
                 rejectedWidth = 0;
                 rejectedHeight = 0;
                 resizeRetryAfterFrame = 0;
@@ -457,9 +539,13 @@ internal sealed class WorldMapRenderTextureSurface
                 presented = retired;
                 width = retiredWidth;
                 height = retiredHeight;
+                presentedTransform = retiredTransform;
+                presentedTransformValid = retiredTransformValid;
                 retired = null;
                 retiredWidth = 0;
                 retiredHeight = 0;
+                retiredTransform = default;
+                retiredTransformValid = false;
                 rollbackRequested = false;
                 releaseRetiredRequested = false;
 
@@ -509,6 +595,126 @@ internal sealed class WorldMapRenderTextureSurface
 
         for (int i = 0; i < release.Length; i++)
             ReleaseTarget(release[i]);
+    }
+
+    private bool TryPresentTexture(
+        ImDrawListPtr draw,
+        RenderTexture texture,
+        int textureWidth,
+        int textureHeight,
+        WorldMapViewTransform renderedView,
+        WorldMapViewTransform currentView,
+        Num.Vector2 min,
+        Num.Vector2 max,
+        out bool bridgeAttempted)
+    {
+        bridgeAttempted = false;
+        if (texture == null || textureWidth <= 0 || textureHeight <= 0)
+            return false;
+
+        if (!bridge.SupportsUvSubrect)
+        {
+            if (!DirectPresentationMatches(renderedView, currentView, textureWidth, textureHeight))
+                return false;
+
+            bridgeAttempted = true;
+            return bridge.TryPresent(draw, texture, min, max);
+        }
+
+        if (!TryCalculateUv(
+                renderedView,
+                currentView,
+                textureWidth,
+                textureHeight,
+                out Num.Vector2 uvMin,
+                out Num.Vector2 uvMax))
+            return false;
+
+        bridgeAttempted = true;
+        return bridge.TryPresent(draw, texture, min, max, uvMin, uvMax);
+    }
+
+    private static bool TryCalculateUv(
+        WorldMapViewTransform renderedView,
+        WorldMapViewTransform currentView,
+        int textureWidth,
+        int textureHeight,
+        out Num.Vector2 uvMin,
+        out Num.Vector2 uvMax)
+    {
+        uvMin = Num.Vector2.Zero;
+        uvMax = Num.Vector2.One;
+        if (textureWidth <= 0 || textureHeight <= 0 ||
+            renderedView.Zoom <= 0.0001f || currentView.Zoom <= 0.0001f ||
+            currentView.CanvasSize.X < 1f || currentView.CanvasSize.Y < 1f)
+            return false;
+
+        float ratio = renderedView.Zoom / currentView.Zoom;
+        Num.Vector2 sourceMin =
+            renderedView.Pan -
+            currentView.Pan * ratio;
+        Num.Vector2 sourceMax =
+            sourceMin +
+            currentView.CanvasSize * ratio;
+
+        if (sourceMin.X < -CoverageEpsilonPixels ||
+            sourceMin.Y < -CoverageEpsilonPixels ||
+            sourceMax.X > textureWidth + CoverageEpsilonPixels ||
+            sourceMax.Y > textureHeight + CoverageEpsilonPixels)
+            return false;
+
+        sourceMin = Num.Vector2.Max(sourceMin, Num.Vector2.Zero);
+        sourceMax = Num.Vector2.Min(
+            sourceMax,
+            new Num.Vector2(textureWidth, textureHeight));
+
+        uvMin = new Num.Vector2(
+            sourceMin.X / textureWidth,
+            sourceMin.Y / textureHeight);
+        uvMax = new Num.Vector2(
+            sourceMax.X / textureWidth,
+            sourceMax.Y / textureHeight);
+        return uvMax.X > uvMin.X && uvMax.Y > uvMin.Y;
+    }
+
+    private static bool DirectPresentationMatches(
+        WorldMapViewTransform renderedView,
+        WorldMapViewTransform currentView,
+        int textureWidth,
+        int textureHeight) =>
+        Math.Abs(renderedView.Zoom - currentView.Zoom) <= 0.0001f &&
+        Num.Vector2.DistanceSquared(renderedView.Pan, currentView.Pan) <= 0.0001f &&
+        Math.Abs(textureWidth - currentView.CanvasSize.X) <= 1f &&
+        Math.Abs(textureHeight - currentView.CanvasSize.Y) <= 1f;
+
+    private void GetTargetSize(
+        WorldMapViewTransform transform,
+        out int targetWidth,
+        out int targetHeight)
+    {
+        float scale = bridge.SupportsUvSubrect ? GuardBandScale : 1f;
+        targetWidth = Math.Max(
+            2,
+            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.X) * scale));
+        targetHeight = Math.Max(
+            2,
+            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.Y) * scale));
+    }
+
+    private static WorldMapViewTransform BuildRenderTransform(
+        WorldMapViewTransform viewport,
+        int targetWidth,
+        int targetHeight)
+    {
+        Num.Vector2 margin = new(
+            Math.Max(0f, targetWidth - viewport.CanvasSize.X) * 0.5f,
+            Math.Max(0f, targetHeight - viewport.CanvasSize.Y) * 0.5f);
+
+        return new WorldMapViewTransform(
+            viewport.CanvasOrigin,
+            new Num.Vector2(targetWidth, targetHeight),
+            viewport.Pan + margin,
+            viewport.Zoom);
     }
 
     private void EnsureCamera()

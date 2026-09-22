@@ -17,8 +17,9 @@ phase percentage below 100%.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
 - **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; geometry visual caches invalidate from publication generations instead of Unity frame polling; interaction cooldown handoff is thread-safe and Unity-Time-free; fallback rooms use the visible Air tone rather than a near-black FrameBg; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
+- **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface through verified AddImage UVs instead of calling Camera.Render; interaction settle performs one exact render, and guard exhaustion falls back visibly rather than stretching/clamping stale pixels.
 
-Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback only when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface.
+Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
 
 ## Engineering boundaries
 
@@ -461,7 +462,8 @@ After Phase 7, normal retained navigation has one state transition:
 ```text
 pan / zoom
     -> WorldMapViewTransformMailbox
-    -> off-screen camera transform
+    -> active interaction: UV-reproject committed guarded surface
+    -> interaction settle: one exact off-screen camera render
     -> present existing retained room/route resources
 ```
 
@@ -497,6 +499,27 @@ longer share mutable room/connection dictionaries with main-thread reset/publica
 The retained surface now renders only when its view, scene, room resources, route resources, layer
 mask or link visibility revision changes. A fully stable Map frame reuses the existing RenderTexture
 instead of calling `Camera.Render()` again.
+
+### Interaction-time surface reprojection
+
+When the resolved RWImGUI `AddImage` contract exposes UV coordinates, exact renders allocate a
+**1.5x guarded surface** centered around the visible viewport. The retained room/route visibility
+query uses that same guarded world extent, so the extra texture area contains real retained content
+rather than empty padding.
+
+During an active **view-only** pan/zoom, a changed view revision no longer schedules
+`Camera.Render()`. Present converts the live viewport transform back into a UV rectangle inside the
+last committed guarded surface and draws that sub-rectangle directly. Room meshes, route meshes,
+MapTex capture and the Unity camera all stay untouched.
+
+If the live viewport leaves the committed guard band, the surface reports presentation unavailable
+for that frame and `WorldMapView` uses its visible immediate compatibility path. It does not clamp
+the stale texture edge and does not replace rooms with black placeholders. Once the interaction
+cooldown ends, the still-dirty view revision causes one exact guarded render for the settled view.
+
+If the loaded ImGui API has no verified four-`Vector2` AddImage form, UV reprojection and guard-band
+allocation stay disabled. The normal exact-surface path and immediate compatibility fallback remain
+available instead of guessing an unsupported texture contract.
 
 RenderTexture resize is a two-stage commit. A newly rendered candidate is not authoritative until
 the RWImGUI texture bridge presents it successfully. If that presentation fails, the previous
