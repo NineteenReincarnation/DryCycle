@@ -46,6 +46,25 @@ internal static unsafe class DevToolFontCatalog
     internal static int RegisteredLocalFaceCount => RegisteredFaces.Count;
     internal static string RegistrationMessage => registrationMessage;
 
+    internal static void MarkUnsafeLateRegistrationSkipped(
+        ManualLogSource log)
+    {
+        if (registrationAttempted)
+            return;
+
+        registrationAttempted = true;
+        registrationSucceeded = false;
+        registrationMessage =
+            "RWImGUI 未在 RainWorld.Start 同步阶段创建字体 Atlas；" +
+            "为避免 DX11 Present 线程与 Unity Update 线程竞争，已跳过本地字体注入。";
+        InvalidatePresentationCaches();
+
+        log?.LogWarning(
+            "DryCycle DevTool skipped local font injection because RWImGui created " +
+            "its shared ImGui context asynchronously after RainWorld.Start. " +
+            "Late io.Fonts mutation is disabled to prevent a native atlas-build race.");
+    }
+
     internal static string FontDirectory
     {
         get
@@ -57,9 +76,9 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Registers local fonts only after RWImGui has created/configured its ImGui context and before
-    /// the first frame/font texture upload. This is intentionally called from RainWorld.OnModsInit,
-    /// never from RainWorld.Start, BepInEx load, or an active Render() call.
+    /// Registers local fonts only if RWImGui has synchronously created/configured its ImGui context
+    /// before RainWorld.Start returns and before the first frame/font texture upload. If the context
+    /// appears later from the DX11 Present thread, registration is skipped rather than racing it.
     /// </summary>
     internal static bool TryRegisterLocalFonts(ManualLogSource log)
     {

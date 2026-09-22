@@ -81,9 +81,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
             // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
             // terminate the process before BepInEx has a chance to print a managed exception.
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Hook RainWorld.Start", () => On.RainWorld.Start += RainWorld_Start);
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe BeforePreModsInit", () => global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit += DryCycle_BeforePreModsInit);
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterPreModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit += DryCycle_AfterPreModsInit);
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe BeforeModsInit", () => global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit += DryCycle_BeforeModsInit);
+            // Callback registration still waits for AfterModsInit, but local font-atlas mutation is
+            // never retried after RainWorld.Start. RWImGui may create its shared ImGui context from
+            // the DX11 Present thread; mutating io.Fonts later from Unity Update races native atlas
+            // build/NewFrame and can terminate the process without a managed exception.
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit);
 
             bridgeEnabled = true;
@@ -148,12 +149,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)
             WorldCreatureCatalogPicker.PumpMainThread();
-
-        // If RWImGui created the shared context after RainWorld.Start returned, this gives the font
-        // registration one final safe pre-render opportunity. The helper refuses to touch a missing
-        // context and DevToolFontCatalog refuses to mutate an atlas once the first frame has begun.
-        if (nativeImGuiReady && !DevToolFontCatalog.RegistrationAttempted)
-            TryRegisterLocalFontsDuringSafeStartup();
 
         // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
@@ -248,16 +243,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup(
             "AfterModsInit lifecycle subscription",
             () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit -= DryCycle_AfterModsInit);
-        SafeFrontendCleanup(
-            "BeforeModsInit lifecycle subscription",
-            () => global::DryCycle.DryCycleLifecycleEvents.BeforeModsInit -= DryCycle_BeforeModsInit);
-        SafeFrontendCleanup(
-            "AfterPreModsInit lifecycle subscription",
-            () => global::DryCycle.DryCycleLifecycleEvents.AfterPreModsInit -= DryCycle_AfterPreModsInit);
-        SafeFrontendCleanup(
-            "BeforePreModsInit lifecycle subscription",
-            () => global::DryCycle.DryCycleLifecycleEvents.BeforePreModsInit -= DryCycle_BeforePreModsInit);
-
         nativeImGuiReady = false;
         SafeFrontendCleanup("frontend visibility", () => DevToolFrontend.SetVisibleFromMainThread(false));
         SafeFrontendCleanup(
@@ -323,65 +308,42 @@ public sealed class BridgePlugin : BaseUnityPlugin
         nativeImGuiReady = true;
         global::DryCycle.StartupDiagnostics.Optional(
             "BridgePlugin/RainWorld.Start/RegisterLocalFonts",
-            () => TryRegisterLocalFontsDuringSafeStartup());
+            TryRegisterLocalFontsDuringSynchronousStart);
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
-    }
-
-    private static void DryCycle_BeforePreModsInit(RainWorld self)
-    {
-        // Different RWImGui releases create/configure the shared atlas at slightly different
-        // points. Preserve the old outer-hook timing without stacking another RainWorld hook.
-        TryRegisterLocalFontsDuringSafeStartup();
-    }
-
-    private static void DryCycle_AfterPreModsInit(RainWorld self)
-    {
-        TryRegisterLocalFontsDuringSafeStartup();
-    }
-
-    private static void DryCycle_BeforeModsInit(RainWorld self)
-    {
-        TryRegisterLocalFontsDuringSafeStartup();
     }
 
     private static void DryCycle_AfterModsInit(RainWorld self)
     {
-        TryRegisterLocalFontsDuringSafeStartup();
         TryRegisterCallback();
     }
 
-    private static unsafe bool TryRegisterLocalFontsDuringSafeStartup()
+    private static unsafe bool TryRegisterLocalFontsDuringSynchronousStart()
     {
-        if (!nativeImGuiReady || DevToolFontCatalog.RegistrationSucceeded) return false;
+        if (!nativeImGuiReady || DevToolFontCatalog.RegistrationAttempted)
+            return false;
 
         try
         {
-            // GetCurrentContext is the only native probe permitted before touching IO/Fonts. A null
-            // context is normal during startup and must remain retryable instead of consuming the
-            // catalog's one registration attempt.
-            if (ImGui.GetCurrentContext() == IntPtr.Zero) return false;
-
-            if (ImGui.GetFrameCount() != 0)
+            // This is the only allowed atlas-mutation window. If RWImGui has not created its shared
+            // context before RainWorld.Start returns, do NOT retry from Update/lifecycle callbacks:
+            // those run concurrently with the DX11 Present-thread renderer on current RWImGui.
+            if (ImGui.GetCurrentContext() == IntPtr.Zero)
             {
-                // The context is valid but the mutation window is already closed. Let the catalog
-                // record the diagnostic once; it exits before touching a live atlas in this case.
-                return DevToolFontCatalog.TryRegisterLocalFonts(log);
-            }
-
-            ImGuiIOPtr io = ImGui.GetIO();
-            if (io.Fonts.NativePtr == null || io.Fonts.Locked || io.Fonts.TexID != 0UL)
+                DevToolFontCatalog.MarkUnsafeLateRegistrationSkipped(log);
                 return false;
+            }
 
             return DevToolFontCatalog.TryRegisterLocalFonts(log);
         }
         catch (Exception error)
         {
-            // A managed binding/context mismatch should not take the whole game down. Keep the
-            // startup probe retryable and leave a concrete diagnostic in LogOutput.
+            DevToolFontCatalog.MarkUnsafeLateRegistrationSkipped(log);
             global::DryCycle.StartupDiagnostics.Failure(
-                "BridgePlugin/TryRegisterLocalFontsDuringSafeStartup",
+                "BridgePlugin/TryRegisterLocalFontsDuringSynchronousStart",
                 error);
-            log?.LogWarning("DryCycle DevTool deferred local font registration: " + error.Message);
+            log?.LogWarning(
+                "DryCycle DevTool skipped local font registration safely: " +
+                error.Message);
             return false;
         }
     }
