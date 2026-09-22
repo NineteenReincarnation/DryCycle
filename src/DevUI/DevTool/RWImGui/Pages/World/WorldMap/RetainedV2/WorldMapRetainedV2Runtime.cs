@@ -242,8 +242,11 @@ internal static class WorldMapRetainedV2Runtime
     internal static bool TryHitRoom(
         Num.Vector2 worldPoint,
         int layerMask,
-        out int roomIndex) =>
-        enabled && SpatialIndex.TryHitRoom(worldPoint, layerMask, out roomIndex);
+        out int roomIndex)
+    {
+        roomIndex = -1;
+        return enabled && SpatialIndex.TryHitRoom(worldPoint, layerMask, out roomIndex);
+    }
 
     internal static bool RetainedConnectionsReady =>
         enabled && Volatile.Read(ref retainedConnectionsReady) != 0;

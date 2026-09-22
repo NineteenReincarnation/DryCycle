@@ -6,6 +6,7 @@ using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
+using DryCycle.DevUI.DevTool.Map.Cartography;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Preview;
 using DryCycle.DevUI.DevTool.World;
@@ -37,6 +38,7 @@ public static class EditorActions
     {
         EffectPreviewRuntime.EndForPersistentOperation("save");
         if (session?.Owner == null) return false;
+        if (CartographyRuntime.ActiveFor(session)) return CartographyRuntime.SaveActive(session);
         try
         {
             if (session.Owner.activePage is MapPage map)
@@ -120,14 +122,16 @@ public static class EditorActions
     public static bool Undo(EditorSession session)
     {
         EffectPreviewRuntime.EndForPersistentOperation("undo");
-        return session?.History.Undo(session) ?? false;
+        return ActiveHistory(session)?.Undo(session) ?? false;
     }
 
     public static bool Redo(EditorSession session)
     {
         EffectPreviewRuntime.EndForPersistentOperation("redo");
-        return session?.History.Redo(session) ?? false;
+        return ActiveHistory(session)?.Redo(session) ?? false;
     }
+
+    internal static EditorHistoryService ActiveHistory(EditorSession session) => CartographyRuntime.HistoryFor(session);
 
     public static bool PlaceObjectAtCursor(EditorSession session, bool keepPlacementMode)
     {

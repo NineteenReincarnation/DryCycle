@@ -109,6 +109,8 @@ DevTool/
 
 ### Map
 
+- 新增内置 [制图工作区](Map/Cartography/README.md)：参考 Cornifer 的制图流程，使用自有作者文档、房间/标注排布、可编辑图层、独立撤销历史及 PNG/SVG/分层图片导出。入口是 Map 内的“制图 / Cartography”，制图修改不回写游戏地图布局。
+
 - 独立中央节点画布，而不是压在房间场景上。
 - 鼠标滚轮缩放、中键平移、Fit Map、层级过滤、房间搜索。
 - 房间连接线直接读取 `AbstractRoom.connections`，不维护第二份世界拓扑。

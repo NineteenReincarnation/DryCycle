@@ -48,6 +48,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Cartography PNG export uses the framework GDI+ renderer already shipped with Rain World. -->
+    <Reference Include="System.Drawing">
+      <HintPath>$(RainWorldDir)/RainWorld_Data/Managed/System.Drawing.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.IO.Compression" />
     <!-- Only reference the assemblies DryCycle actually needs. SlugBase support
          is reflection-based and therefore remains an optional runtime integration. -->
     <Reference Include="BepInEx">

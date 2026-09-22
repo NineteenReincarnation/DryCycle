@@ -67,7 +67,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapExactShortcuts.Enable", () => WorldMapExactShortcuts.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapLegacyVisualGuard.Enable", () => WorldMapLegacyVisualGuard.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Runtime.Enable", () => WorldMapRetainedV2Runtime.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapImGuiPresentationFallback.Enable", () => WorldMapImGuiPresentationFallback.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPresentationCorrectness.Enable", () => WorldMapPresentationCorrectness.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRenderOrder.Enable", () => WorldMapRenderOrder.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapThumbnailVisibility.Enable", () => WorldMapThumbnailVisibility.Enable(Logger));
@@ -102,7 +101,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         if (!bridgeEnabled) return;
-        WorldMapImGuiPresentationFallback.LateUpdate();
         WorldMapLegacyVisualGuard.LateUpdate();
         retainedViewLifecycle.LateUpdate();
     }
@@ -285,7 +283,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
         SafeFrontendCleanup("world map update throttle", WorldMapUpdateThrottle.Disable);
         SafeFrontendCleanup("world map retained v2 runtime", WorldMapRetainedV2Runtime.Disable);
-        SafeFrontendCleanup("world map presentation fallback", WorldMapImGuiPresentationFallback.Disable);
         SafeFrontendCleanup("world map presentation correctness", WorldMapPresentationCorrectness.Disable);
         SafeFrontendCleanup("world map render order", WorldMapRenderOrder.Disable);
         SafeFrontendCleanup("world map thumbnail visibility", WorldMapThumbnailVisibility.Disable);

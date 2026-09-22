@@ -5,6 +5,7 @@ using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
+using DryCycle.DevUI.DevTool.Map.Cartography;
 using ImGuiNET;
 using UnityEngine;
 using Num = System.Numerics;
@@ -771,6 +772,7 @@ internal static class PlayerMapWorkspaceIntegration
     private static ManualLogSource log;
     private static bool enabled;
     private static bool playerMapActive;
+    private static bool cartographyActive;
 
     internal static bool Active => enabled && playerMapActive;
 
@@ -784,6 +786,7 @@ internal static class PlayerMapWorkspaceIntegration
 
     internal static void Disable()
     {
+        ExitSpecialView();
         playerMapActive = false;
         PlayerMapActivityGate.Reset();
         enabled = false;
@@ -796,10 +799,9 @@ internal static class PlayerMapWorkspaceIntegration
     {
         if (!enabled || snapshot?.Available != true) return;
 
-        if (playerMapActive && WorldWorkspaceView.WorkspaceModeValue != 0)
+        if ((playerMapActive || cartographyActive) && WorldWorkspaceView.WorkspaceModeValue != 0)
         {
-            playerMapActive = false;
-            PlayerMapActivityGate.Reset();
+            ExitSpecialView();
         }
 
         ImGui.SameLine(0f, 8f);
@@ -811,22 +813,42 @@ internal static class PlayerMapWorkspaceIntegration
                 "WorldWorkspacePlayerMap",
                 playerMapActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
         {
+            if (cartographyActive) CartographyView.Leave();
+            cartographyActive = false;
             playerMapActive = !playerMapActive;
             if (playerMapActive)
                 WorldWorkspaceView.WorkspaceModeValue = 0;
             else
                 PlayerMapActivityGate.Reset();
         }
+
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("制图", "Cartography"), "WorldWorkspaceCartography",
+                cartographyActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            if (cartographyActive) ExitSpecialView();
+            else { playerMapActive = false; cartographyActive = true; WorldWorkspaceView.WorkspaceModeValue = 0; }
+        }
+        CartographyRuntime.SetActive(cartographyActive);
+    }
+
+    internal static void ExitSpecialView()
+    {
+        if (cartographyActive) CartographyView.Leave();
+        cartographyActive = false; playerMapActive = false;
+        CartographyRuntime.SetActive(false);
+        PlayerMapActivityGate.Reset();
     }
 
     internal static bool DrawBodyIfActive(
         EditorPresentationSnapshot editor,
         EditorMapPresentationSnapshot snapshot)
     {
-        if (!enabled || !playerMapActive)
+        if (!enabled || (!playerMapActive && !cartographyActive))
             return false;
 
         PlayerMapActivityGate.MarkVisible();
+        if (cartographyActive) { CartographyView.Draw(editor); return true; }
         PlayerMapWorkspaceView.DrawBody(editor, snapshot);
         return true;
     }

@@ -32,8 +32,11 @@ internal sealed class WorldMapConnectionResourceStore
     internal long Revision => revision;
 
 
-    internal bool TryGet(string id, out ConnectionRouteResource route) =>
-        !string.IsNullOrEmpty(id) && routes.TryGetValue(id, out route);
+    internal bool TryGet(string id, out ConnectionRouteResource route)
+    {
+        route = null;
+        return !string.IsNullOrEmpty(id) && routes.TryGetValue(id, out route);
+    }
 
     internal bool HasCompleteRoutes(WorldMapScene scene)
     {

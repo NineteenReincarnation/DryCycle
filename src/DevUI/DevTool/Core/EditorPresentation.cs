@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
@@ -79,6 +80,7 @@ public static partial class EditorPresentationHub
     private static long observedShellRevision;
     private static long observedObjectRevision;
     private static long observedHistoryRevision;
+    private static EditorHistoryService observedActiveHistory;
     private static long observedSelectionRevision;
     private static bool observedShellOnly;
     private static EditorToolMode observedToolMode;
@@ -107,10 +109,11 @@ public static partial class EditorPresentationHub
         // passing through EditorUiCommandQueue. Detect that authoritative revision before reading
         // presentation revisions. Known history snapshots may also have supplied a semantic Object
         // hint; unknown history remains safe because absence of a hint forces a full object capture.
-        long historyRevision = session.History.Revision;
+        EditorHistoryService activeHistory = EditorActions.ActiveHistory(session);
+        long historyRevision = activeHistory.Revision;
         if (ReferenceEquals(observedSession, session) &&
             observedHistoryRevision != 0L &&
-            observedHistoryRevision != historyRevision)
+            (observedHistoryRevision != historyRevision || !ReferenceEquals(observedActiveHistory, activeHistory)))
         {
             EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
             EditorRevisionHub.MarkWorkspace(session);
@@ -163,6 +166,7 @@ public static partial class EditorPresentationHub
             observedShellRevision == shellRevision &&
             observedObjectRevision == objectRevision &&
             observedHistoryRevision == historyRevision &&
+            ReferenceEquals(observedActiveHistory, activeHistory) &&
             observedSelectionRevision == selectionRevision &&
             observedToolMode == session.ToolMode &&
             observedFocusMode == session.FocusMode &&
@@ -258,10 +262,10 @@ public static partial class EditorPresentationHub
             FocusMode = session.FocusMode,
             BrowserOpen = session.BrowserOpen,
             InspectorOpen = session.InspectorOpen,
-            CanUndo = session.History.CanUndo,
-            CanRedo = session.History.CanRedo,
-            UndoLabel = session.History.UndoLabel ?? string.Empty,
-            RedoLabel = session.History.RedoLabel ?? string.Empty,
+            CanUndo = EditorActions.ActiveHistory(session).CanUndo,
+            CanRedo = EditorActions.ActiveHistory(session).CanRedo,
+            UndoLabel = EditorActions.ActiveHistory(session).UndoLabel ?? string.Empty,
+            RedoLabel = EditorActions.ActiveHistory(session).RedoLabel ?? string.Empty,
             PlacementActive = session.PlacementActive,
             PlacementType = placementType,
             SceneObjects = scene,
@@ -275,6 +279,7 @@ public static partial class EditorPresentationHub
         observedShellRevision = shellRevision;
         observedObjectRevision = objectRevision;
         observedHistoryRevision = historyRevision;
+        observedActiveHistory = activeHistory;
         observedSelectionRevision = selectionRevision;
         observedShellOnly = shellOnly;
         observedToolMode = session.ToolMode;
@@ -314,6 +319,7 @@ public static partial class EditorPresentationHub
         observedShellRevision = 0L;
         observedObjectRevision = 0L;
         observedHistoryRevision = 0L;
+        observedActiveHistory = null;
         observedSelectionRevision = 0L;
         observedShellOnly = false;
         observedToolMode = EditorToolMode.Room;

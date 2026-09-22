@@ -56,8 +56,11 @@ internal sealed class WorldMapScene
     internal bool TryGetRoom(int roomIndex, out RoomNode room) =>
         rooms.TryGetValue(roomIndex, out room);
 
-    internal bool TryGetConnection(string id, out ConnectionNode connection) =>
-        !string.IsNullOrEmpty(id) && connections.TryGetValue(id, out connection);
+    internal bool TryGetConnection(string id, out ConnectionNode connection)
+    {
+        connection = null;
+        return !string.IsNullOrEmpty(id) && connections.TryGetValue(id, out connection);
+    }
 
     internal void SetRegion(string region)
     {

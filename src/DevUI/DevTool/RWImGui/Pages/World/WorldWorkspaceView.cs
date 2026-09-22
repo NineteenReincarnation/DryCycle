@@ -364,7 +364,10 @@ internal static class WorldWorkspaceView
                 label,
                 id,
                 workspaceMode == mode ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            PlayerMapWorkspaceIntegration.ExitSpecialView();
             workspaceMode = mode;
+        }
     }
 
     private static void DrawBody(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot snapshot)

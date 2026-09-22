@@ -4,6 +4,7 @@ using DryCycle.DevUI.DevTool.Gizmos;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
+using DryCycle.DevUI.DevTool.Map.Cartography;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Relationships;
 using DryCycle.DevUI.DevTool.Room;
@@ -44,6 +45,7 @@ internal static class DevToolSubsystemCoordinator
             MapEditorPresentationHub.Publish(session);
             PlayerMapCommandQueue.Process(session);
         }
+        CartographyRuntime.Process(session);
         DialogEditorCommandQueue.Process(session);
         RelationshipEditorCommandQueue.Process(session);
 
@@ -94,6 +96,7 @@ internal static class DevToolSubsystemCoordinator
     /// </summary>
     internal static void ResetRuntimeState()
     {
+        CartographyRuntime.ResetView();
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
         LegacyObjectSandbox.Reset();

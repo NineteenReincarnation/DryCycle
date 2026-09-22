@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.Xml.Linq" />
+    <Compile Include="../../src/DevUI/DevTool/Map/Cartography/*.cs" Exclude="../../src/DevUI/DevTool/Map/Cartography/CartographyRuntime.cs" Link="Production/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
