@@ -372,9 +372,21 @@ internal static class WorldCreatureCatalogPicker
         string current = string.IsNullOrWhiteSpace(creatureId)
             ? DevToolUiSettings.T("选择生物…", "Choose creature…")
             : creatureId;
-        string buttonLabel = string.IsNullOrWhiteSpace(label)
-            ? DevToolUiSettings.T("选择生物", "Choose Creature") + "  ·  " + current
-            : label + "  ·  " + current;
+        string fieldLabel =
+            string.IsNullOrWhiteSpace(label)
+                ? DevToolUiSettings.T("选择生物", "Choose Creature")
+                : label;
+        bool stackedLabel =
+            WorldInspectorReadability.ShouldStackFieldLabel(
+                fieldLabel,
+                minimumControlWidth: 190f);
+        if (stackedLabel)
+            WorldInspectorReadability.DrawStackedFieldLabel(fieldLabel);
+
+        string buttonLabel =
+            stackedLabel
+                ? current
+                : fieldLabel + "  ·  " + current;
 
         bool changed = false;
         if (DevToolWidgets.ActionButton(buttonLabel, "CreatureCatalogOpen_" + widgetId, DevToolButtonTone.Normal, true))

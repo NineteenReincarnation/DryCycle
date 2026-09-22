@@ -188,9 +188,12 @@ internal static class WorldLineageInspector
             ? DevToolUiSettings.T("编辑 Lineage", "Edit lineage")
             : DevToolUiSettings.T("新建 Lineage", "New lineage"));
 
-        ImGui.SetNextItemWidth(-1f);
+        string denLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("生物管道", "Creature pipe"),
+                "LineageDen");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("生物管道##LineageDen", "Creature pipe##LineageDen"),
+                denLabel,
                 WorldCreaturePipeCatalog.Label(dens, selectedDen)))
         {
             for (int i = 0; i < dens.Count; i++)
@@ -288,22 +291,33 @@ internal static class WorldLineageInspector
             stage.Creature = selectedCreature;
 
         float chance = stage.Chance;
-        ImGui.SetNextItemWidth(-1f);
+        string chanceLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("进化概率", "Progress chance"),
+                "LineageChance");
         if (ImGui.InputFloat(
-                DevToolUiSettings.T("进化概率##LineageChance", "Progress chance##LineageChance"),
+                chanceLabel,
                 ref chance,
                 0.05f,
                 0.1f,
                 "%.3f"))
             stage.Chance = Math.Max(0f, Math.Min(1f, chance));
 
-        ImGui.SetNextItemWidth(-1f);
+        string spawnDataLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("Spawn 标签", "Spawn tags"),
+                "LineageSpawnData");
         ImGui.InputText(
-            DevToolUiSettings.T("Spawn 标签##LineageSpawnData", "Spawn tags##LineageSpawnData"),
+            spawnDataLabel,
             ref stage.SpawnData,
             512);
+
+        string tagPresetLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("快速添加标签", "Add tag preset"),
+                "LineageTagPreset");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("快速添加标签##LineageTagPreset", "Add tag preset##LineageTagPreset"),
+                tagPresetLabel,
                 DevToolUiSettings.T("选择…", "Select…")))
         {
             for (int i = 0; i < SpawnTagPresets.Length; i++)
@@ -318,9 +332,12 @@ internal static class WorldLineageInspector
 
     private static void DrawTimelineEditor()
     {
-        ImGui.SetNextItemWidth(-1f);
+        string timelineModeLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("时间线范围", "Timeline scope"),
+                "LineageTimelineMode");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("时间线范围##LineageTimelineMode", "Timeline scope##LineageTimelineMode"),
+                timelineModeLabel,
                 TimelineModeText()))
         {
             DrawTimelineMode(TimelineMode.All, DevToolUiSettings.T("全部时间线", "All timelines"));
@@ -330,14 +347,21 @@ internal static class WorldLineageInspector
         }
         if (timelineMode == TimelineMode.All) return;
 
-        ImGui.SetNextItemWidth(-1f);
+        string timelineFilterLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("时间线 / 角色标签", "Timeline / character tags"),
+                "LineageTimeline");
         ImGui.InputText(
-            DevToolUiSettings.T("时间线 / 角色标签##LineageTimeline", "Timeline / character tags##LineageTimeline"),
+            timelineFilterLabel,
             ref timelineFilter,
             256);
-        ImGui.SetNextItemWidth(-1f);
+
+        string timelinePresetLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("添加已注册标签", "Add registered tag"),
+                "LineageTimelinePreset");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("添加已注册标签##LineageTimelinePreset", "Add registered tag##LineageTimelinePreset"),
+                timelinePresetLabel,
                 DevToolUiSettings.T("选择…", "Select…")))
         {
             for (int i = 0; i < timelines.Count; i++)

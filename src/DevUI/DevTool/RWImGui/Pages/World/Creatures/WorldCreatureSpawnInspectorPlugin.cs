@@ -227,9 +227,12 @@ internal static class WorldCreatureSpawnInspector
             ? DevToolUiSettings.T("编辑生成项", "Edit spawn")
             : DevToolUiSettings.T("新建生成项", "New spawn"));
 
-        ImGui.SetNextItemWidth(-1f);
+        string denLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("生物管道", "Creature pipe"),
+                "CreatureSpawnDen");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("生物管道##CreatureSpawnDen", "Creature pipe##CreatureSpawnDen"),
+                denLabel,
                 WorldCreaturePipeCatalog.Label(dens, selectedDen)))
         {
             for (int i = 0; i < dens.Count; i++)
@@ -251,8 +254,11 @@ internal static class WorldCreatureSpawnInspector
             allowNone: false,
             label: DevToolUiSettings.T("生物", "Creature"));
 
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputInt(DevToolUiSettings.T("数量##CreatureSpawnAmount", "Amount##CreatureSpawnAmount"), ref amount);
+        string amountLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("数量", "Amount"),
+                "CreatureSpawnAmount");
+        ImGui.InputInt(amountLabel, ref amount);
         if (amount < 1) amount = 1;
 
         DrawSpawnTags();
@@ -282,9 +288,12 @@ internal static class WorldCreatureSpawnInspector
 
     private static void DrawSpawnTags()
     {
-        ImGui.SetNextItemWidth(-1f);
+        string spawnTagsLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("Spawn 标签", "Spawn tags"),
+                "CreatureSpawnTags");
         ImGui.InputText(
-            DevToolUiSettings.T("Spawn 标签##CreatureSpawnTags", "Spawn tags##CreatureSpawnTags"),
+            spawnTagsLabel,
             ref spawnTags,
             512);
         if (ImGui.IsItemHovered())
@@ -292,9 +301,12 @@ internal static class WorldCreatureSpawnInspector
                 "花括号内部内容，例如 Night,PreCycle,Seed:12。未知标签原样保留给 Mod。",
                 "Contents inside {...}, e.g. Night,PreCycle,Seed:12. Unknown tags are preserved for mods."));
 
-        ImGui.SetNextItemWidth(-1f);
+        string tagPresetLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("快速添加标签", "Add tag preset"),
+                "CreatureSpawnTagPreset");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("快速添加标签##CreatureSpawnTagPreset", "Add tag preset##CreatureSpawnTagPreset"),
+                tagPresetLabel,
                 DevToolUiSettings.T("选择…", "Select…")))
         {
             for (int i = 0; i < KnownSpawnTags.Length; i++)
@@ -308,9 +320,12 @@ internal static class WorldCreatureSpawnInspector
 
     private static void DrawTimelineEditor()
     {
-        ImGui.SetNextItemWidth(-1f);
+        string timelineModeLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("时间线范围", "Timeline scope"),
+                "CreatureTimelineMode");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("时间线范围##CreatureTimelineMode", "Timeline scope##CreatureTimelineMode"),
+                timelineModeLabel,
                 TimelineModeText(timelineMode)))
         {
             DrawTimelineModeOption(TimelineMode.All, DevToolUiSettings.T("全部时间线", "All timelines"));
@@ -321,9 +336,12 @@ internal static class WorldCreatureSpawnInspector
 
         if (timelineMode == TimelineMode.All) return;
 
-        ImGui.SetNextItemWidth(-1f);
+        string timelineFilterLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("时间线 / 角色标签", "Timeline / character tags"),
+                "CreatureTimelineFilter");
         ImGui.InputText(
-            DevToolUiSettings.T("时间线 / 角色标签##CreatureTimelineFilter", "Timeline / character tags##CreatureTimelineFilter"),
+            timelineFilterLabel,
             ref timelineFilter,
             256);
         if (ImGui.IsItemHovered())
@@ -331,9 +349,12 @@ internal static class WorldCreatureSpawnInspector
                 "world.txt 行首条件；逗号分隔，Mod 自定义时间线标签也会原样保留。",
                 "world.txt line-prefix condition; comma-separated mod timeline tags are preserved."));
 
-        ImGui.SetNextItemWidth(-1f);
+        string timelinePresetLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("添加已注册标签", "Add registered tag"),
+                "CreatureTimelinePreset");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("添加已注册标签##CreatureTimelinePreset", "Add registered tag##CreatureTimelinePreset"),
+                timelinePresetLabel,
                 DevToolUiSettings.T("选择…", "Select…")))
         {
             for (int i = 0; i < timelineCatalog.Count; i++)

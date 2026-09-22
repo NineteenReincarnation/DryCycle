@@ -53,6 +53,88 @@ internal static class WorldInspectorReadability
         firstWidthNormalization = false;
     }
 
+    internal static string PrepareField(
+        string visibleLabel,
+        string id,
+        float minimumControlWidth = 150f)
+    {
+        string safeId = "##" + (id ?? string.Empty);
+        if (string.IsNullOrEmpty(visibleLabel))
+        {
+            ImGui.SetNextItemWidth(-1f);
+            return safeId;
+        }
+
+        float available;
+        try { available = ImGui.GetContentRegionAvail().X; }
+        catch
+        {
+            ImGui.SetNextItemWidth(-1f);
+            return safeId;
+        }
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float labelWidth = ImGui.CalcTextSize(visibleLabel).X;
+        float dynamicMinimum =
+            Math.Max(
+                minimumControlWidth,
+                ImGui.CalcTextSize("MMMMMMMM").X +
+                style.FramePadding.X * 2f);
+        float labelReserve =
+            labelWidth +
+            Math.Max(style.ItemInnerSpacing.X, 6f) +
+            4f;
+
+        bool stacked =
+            available <= 1f ||
+            available < dynamicMinimum + labelReserve;
+
+        if (stacked)
+        {
+            DevToolWidgets.MutedText(visibleLabel, true);
+            ImGui.SetNextItemWidth(-1f);
+            return safeId;
+        }
+
+        ImGui.SetNextItemWidth(
+            Math.Max(
+                1f,
+                available - labelReserve));
+        return visibleLabel + safeId;
+    }
+
+    internal static bool ShouldStackFieldLabel(
+        string visibleLabel,
+        float minimumControlWidth = 150f)
+    {
+        if (string.IsNullOrEmpty(visibleLabel))
+            return false;
+
+        float available;
+        try { available = ImGui.GetContentRegionAvail().X; }
+        catch { return true; }
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float labelWidth = ImGui.CalcTextSize(visibleLabel).X;
+        float dynamicMinimum =
+            Math.Max(
+                minimumControlWidth,
+                ImGui.CalcTextSize("MMMMMMMM").X +
+                style.FramePadding.X * 2f);
+        float labelReserve =
+            labelWidth +
+            Math.Max(style.ItemInnerSpacing.X, 6f) +
+            4f;
+        return available <= 1f ||
+               available < dynamicMinimum + labelReserve;
+    }
+
+    internal static void DrawStackedFieldLabel(string label)
+    {
+        if (!string.IsNullOrEmpty(label))
+            DevToolWidgets.MutedText(label, true);
+    }
+
     internal static Scope Enter()
     {
         if (!enabled) return new Scope(false);

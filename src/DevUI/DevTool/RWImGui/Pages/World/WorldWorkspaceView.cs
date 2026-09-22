@@ -467,8 +467,12 @@ internal static class WorldWorkspaceView
         DrawExplorerModeButton(ExplorerMode.Issues, DevToolUiSettings.T("问题", "Issues"), "WorldExplorerModeIssues");
 
         ImGui.Spacing();
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText(DevToolUiSettings.T("搜索##WorldExplorerSearch", "Search##WorldExplorerSearch"), ref search, 192);
+        string explorerSearchLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("搜索", "Search"),
+                "WorldExplorerSearch",
+                minimumControlWidth: 180f);
+        ImGui.InputText(explorerSearchLabel, ref search, 192);
         ImGui.Separator();
 
         switch (explorerMode)
@@ -837,9 +841,16 @@ internal static class WorldWorkspaceView
             ImGui.EndCombo();
         }
 
-        ImGui.SetNextItemWidth(-1f);
+        string subregionLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("子区域", "Subregion"),
+                "WorldRoomSubregion");
         string subregion = inspectorSubregion;
-        bool changed = ImGui.InputText(DevToolUiSettings.T("子区域##WorldRoomSubregion", "Subregion##WorldRoomSubregion"), ref subregion, 128);
+        bool changed =
+            ImGui.InputText(
+                subregionLabel,
+                ref subregion,
+                128);
         inspectorSubregion = subregion;
         if (ImGui.IsItemDeactivatedAfterEdit())
             MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SetRoomSubregion, roomIndex: room.RoomIndex, text: subregion));
@@ -919,15 +930,21 @@ internal static class WorldWorkspaceView
 
         ImGui.Spacing();
         DevToolWidgets.MutedText(DevToolUiSettings.T("添加覆盖", "Add override"));
-        ImGui.SetNextItemWidth(-1f);
+        string attractionSearchLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("搜索生物", "Search creature"),
+                "RoomAttrSearch");
         ImGui.InputText(
-            DevToolUiSettings.T("搜索生物##RoomAttrSearch", "Search creature##RoomAttrSearch"),
+            attractionSearchLabel,
             ref attractionSearch,
             128);
 
-        ImGui.SetNextItemWidth(-1f);
+        string attractionValueLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("新值", "New value"),
+                "RoomAttrNewValue");
         if (ImGui.BeginCombo(
-                DevToolUiSettings.T("新值##RoomAttrNewValue", "New value##RoomAttrNewValue"),
+                attractionValueLabel,
                 newAttraction))
         {
             for (int v = 1; v < AttractionValues.Length; v++)
@@ -1115,11 +1132,14 @@ internal static class WorldWorkspaceView
         }
         if (!candidates.Contains(mappingTargetNode)) mappingTargetNode = candidates[0];
 
-        ImGui.SetNextItemWidth(-1f);
+        string targetExitLabel =
+            WorldInspectorReadability.PrepareField(
+                DevToolUiSettings.T("目标出口", "Target Exit"),
+                "TopologyTargetExit");
         string preview = "Exit " + mappingTargetNode;
         EditorMapRoomNodeSnapshot selectedNode = FindNode(b, mappingTargetNode);
         if (selectedNode?.ConnectedRoomIndex < 0) preview += DevToolUiSettings.T("（空闲）", " (free)");
-        if (ImGui.BeginCombo(DevToolUiSettings.T("目标出口##TopologyTargetExit", "Target Exit##TopologyTargetExit"), preview))
+        if (ImGui.BeginCombo(targetExitLabel, preview))
         {
             for (int i = 0; i < candidates.Count; i++)
             {
