@@ -122,6 +122,13 @@ EOF
 
 dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile -- "$(pwd)/src"
 
+# World Map persistent cache is a binary compatibility boundary. Run its production-code-linked
+# regression suite in CI so V2 fallback, V3 round-trip/corruption handling and shutdown flush cannot
+# silently regress behind syntax-only validation.
+dotnet run --project tests/WorldMapPersistentCache.Tests/WorldMapPersistentCache.Tests.csproj \
+  --configuration Release \
+  --no-launch-profile
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
