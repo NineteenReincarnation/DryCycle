@@ -414,6 +414,14 @@ internal static class WorldCreatureCatalogPicker
         ImGui.SetNextWindowSize(requestedSize, ImGuiCond.Always);
         ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
 
+        // Creature selection is a modal-like authoring task. Open the catalog from the center of the
+        // game viewport instead of letting ImGui anchor it beside the small inspector button. Apply
+        // the position only when the popup appears so the user may still move it afterwards.
+        ImGui.SetNextWindowPos(
+            io.DisplaySize * 0.5f,
+            ImGuiCond.Appearing,
+            new Num.Vector2(0.5f, 0.5f));
+
         if (!ImGui.BeginPopup(popupId)) return false;
         pickerSizeByPopup[popupId] = ClampPickerSize(ImGui.GetWindowSize(), minSize, maxSize);
 
