@@ -67,13 +67,29 @@ internal static class WorldMapCorridorLaneAllocator
     {
         internal RouteLanePlan(int segmentCount)
         {
-            Offsets = new float[Math.Max(0, segmentCount)];
-            Assigned = new bool[Math.Max(0, segmentCount)];
+            int count = Math.Max(0, segmentCount);
+            Offsets = new float[count];
+            Assigned = new bool[count];
+            GroupIds = new int[count];
+
+            for (int i = 0; i < GroupIds.Length; i++)
+                GroupIds[i] = -1;
         }
 
         internal float[] Offsets { get; }
         internal bool[] Assigned { get; }
+        internal int[] GroupIds { get; }
         internal byte DensityTier;
+    }
+
+    private sealed class ContinuityPlanSet
+    {
+        internal readonly Dictionary<string, RouteLanePlan> Routes =
+            new(StringComparer.Ordinal);
+        internal readonly Dictionary<int, byte> GroupDensity =
+            new();
+        internal readonly Dictionary<int, List<string>> GroupRoutes =
+            new();
     }
 
     private const float CoordinateBucketSize = 4f;
@@ -88,10 +104,17 @@ internal static class WorldMapCorridorLaneAllocator
     private const int DenseBankCapacity = 8;
     private const float DenseLaneSpacing = 6.25f;
     private const float DenseBankGutter = 9f;
-    private static readonly float[] DenseCompressionScales =
+    private static readonly float[] DenseGroupScales =
     {
+        1f,
         0.82f,
-        0.68f
+        0.68f,
+        0f
+    };
+    private static readonly float[] NormalGroupScales =
+    {
+        1f,
+        0f
     };
 
     private const float PointEpsilonSquared = 0.04f;
@@ -113,8 +136,13 @@ internal static class WorldMapCorridorLaneAllocator
         List<CorridorComponent> components =
             BuildComponents(buckets);
 
-        Dictionary<string, RouteLanePlan> lanePlans =
+        ContinuityPlanSet planSet =
             BuildContinuityPlans(components);
+        Dictionary<int, float> groupScales =
+            ResolveGroupScales(
+                routes,
+                planSet,
+                obstacles);
 
         for (int i = 0; i < routeIds.Count; i++)
         {
@@ -128,7 +156,7 @@ internal static class WorldMapCorridorLaneAllocator
             byte densityTier =
                 route.BaseDensityTier;
 
-            if (lanePlans.TryGetValue(
+            if (planSet.Routes.TryGetValue(
                     routeId,
                     out RouteLanePlan lanePlan))
             {
@@ -136,7 +164,10 @@ internal static class WorldMapCorridorLaneAllocator
                     densityTier = lanePlan.DensityTier;
 
                 float[] effectiveOffsets =
-                    lanePlan.Offsets;
+                    BuildEffectiveOffsets(
+                        lanePlan,
+                        groupScales);
+
                 Num.Vector2[] continuityCandidate =
                     BuildLanePath(
                         basePoints,
@@ -147,19 +178,6 @@ internal static class WorldMapCorridorLaneAllocator
                         continuityCandidate,
                         route,
                         obstacles);
-
-                if (!continuityClear &&
-                    densityTier > 0)
-                {
-                    continuityClear =
-                        TryBuildCompressedDensePath(
-                            basePoints,
-                            lanePlan.Offsets,
-                            route,
-                            obstacles,
-                            out effectiveOffsets,
-                            out continuityCandidate);
-                }
 
                 if (continuityClear)
                 {
@@ -421,14 +439,14 @@ internal static class WorldMapCorridorLaneAllocator
         }
     }
 
-    private static Dictionary<string, RouteLanePlan> BuildContinuityPlans(
+    private static ContinuityPlanSet BuildContinuityPlans(
         List<CorridorComponent> components)
     {
-        Dictionary<string, RouteLanePlan> lanePlans =
-            new(StringComparer.Ordinal);
+        ContinuityPlanSet planSet =
+            new();
 
         if (components == null || components.Count == 0)
-            return lanePlans;
+            return planSet;
 
         int[] parent =
             new int[components.Count];
@@ -521,14 +539,16 @@ internal static class WorldMapCorridorLaneAllocator
         for (int g = 0; g < orderedGroups.Count; g++)
             AssignContinuityGroup(
                 orderedGroups[g],
-                lanePlans);
+                g,
+                planSet);
 
-        return lanePlans;
+        return planSet;
     }
 
     private static void AssignContinuityGroup(
         List<CorridorComponent> components,
-        Dictionary<string, RouteLanePlan> lanePlans)
+        int groupId,
+        ContinuityPlanSet planSet)
     {
         if (components == null || components.Count == 0)
             return;
@@ -561,10 +581,18 @@ internal static class WorldMapCorridorLaneAllocator
             DensityTierForCount(
                 slotIds.Count);
 
+        planSet.GroupDensity[groupId] =
+            densityTier;
+        planSet.GroupRoutes[groupId] =
+            new List<string>(slotIds);
+
         Dictionary<string, float> slots =
             new(StringComparer.Ordinal);
         for (int i = 0; i < slotIds.Count; i++)
             slots[slotIds[i]] = slotOffsets[i];
+
+        Dictionary<string, RouteLanePlan> lanePlans =
+            planSet.Routes;
 
         for (int c = 0; c < components.Count; c++)
         {
@@ -609,66 +637,285 @@ internal static class WorldMapCorridorLaneAllocator
                         offset;
                     plan.Assigned[segment.SegmentIndex] =
                         true;
+                    plan.GroupIds[segment.SegmentIndex] =
+                        groupId;
                 }
             }
         }
     }
 
-    private static bool TryBuildCompressedDensePath(
-        Num.Vector2[] basePoints,
-        float[] originalOffsets,
-        ConnectionRouteResource route,
-        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles,
-        out float[] effectiveOffsets,
-        out Num.Vector2[] candidate)
+    private static Dictionary<int, float> ResolveGroupScales(
+        Dictionary<string, ConnectionRouteResource> routes,
+        ContinuityPlanSet planSet,
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles)
     {
-        effectiveOffsets = originalOffsets;
-        candidate = null;
+        Dictionary<int, float> scales =
+            new();
 
-        // Bank gaps intentionally favor readability, but nearby rooms can make the full width
-        // impossible. Preserve route ordering first by shrinking the whole lane field uniformly.
-        // Only after both bounded attempts fail do we fall back to BasePoints.
-        for (int attempt = 0;
-             attempt < DenseCompressionScales.Length;
-             attempt++)
+        if (planSet == null ||
+            planSet.GroupRoutes.Count == 0)
+            return scales;
+
+        List<int> groupIds =
+            new(planSet.GroupRoutes.Keys);
+        groupIds.Sort();
+
+        for (int i = 0; i < groupIds.Count; i++)
+            scales[groupIds[i]] = 1f;
+
+        // Resolve one scale for the entire bundle. Two neighbouring routes can never choose
+        // different 82%/68% factors and therefore cannot reverse their lane order.
+        for (int i = 0; i < groupIds.Count; i++)
         {
-            float[] scaled =
-                ScaleOffsets(
-                    originalOffsets,
-                    DenseCompressionScales[attempt]);
+            int groupId =
+                groupIds[i];
 
-            Num.Vector2[] compressed =
-                BuildLanePath(
-                    basePoints,
-                    scaled);
+            planSet.GroupDensity.TryGetValue(
+                groupId,
+                out byte densityTier);
 
-            if (!IsDerivedRouteClear(
-                    compressed,
-                    route,
-                    obstacles))
-                continue;
+            float[] candidates =
+                densityTier > 0
+                    ? DenseGroupScales
+                    : NormalGroupScales;
 
-            effectiveOffsets = scaled;
-            candidate = compressed;
-            return true;
+            float chosen = 0f;
+            bool found = false;
+
+            for (int c = 0;
+                 c < candidates.Length;
+                 c++)
+            {
+                float candidateScale =
+                    candidates[c];
+
+                if (!GroupRoutesClear(
+                        groupId,
+                        candidateScale,
+                        routes,
+                        planSet,
+                        scales,
+                        obstacles))
+                    continue;
+
+                chosen =
+                    candidateScale;
+                found = true;
+                break;
+            }
+
+            scales[groupId] =
+                found ? chosen : 0f;
         }
 
-        return false;
+        // Cross-bundle transition geometry can make a route invalid only after several independent
+        // bundle scales have been chosen. Collapse every bundle touched by such a route together,
+        // then recheck until no new group changes are required. This is conservative but preserves
+        // the "same bundle = same scale" invariant.
+        for (int pass = 0;
+             pass <= groupIds.Count;
+             pass++)
+        {
+            bool changed = false;
+
+            foreach (KeyValuePair<string, RouteLanePlan> pair
+                     in planSet.Routes)
+            {
+                if (!routes.TryGetValue(
+                        pair.Key,
+                        out ConnectionRouteResource route))
+                    continue;
+
+                Num.Vector2[] basePoints =
+                    BasePoints(route);
+                if (basePoints == null ||
+                    basePoints.Length < 2)
+                    continue;
+
+                float[] effective =
+                    BuildEffectiveOffsets(
+                        pair.Value,
+                        scales);
+                Num.Vector2[] candidate =
+                    BuildLanePath(
+                        basePoints,
+                        effective);
+
+                if (IsDerivedRouteClear(
+                        candidate,
+                        route,
+                        obstacles))
+                    continue;
+
+                HashSet<int> touched =
+                    CollectGroups(
+                        pair.Value);
+
+                foreach (int groupId in touched)
+                {
+                    if (scales.TryGetValue(
+                            groupId,
+                            out float current) &&
+                        current > 0f)
+                    {
+                        scales[groupId] = 0f;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (!changed)
+                break;
+        }
+
+        return scales;
     }
 
-    private static float[] ScaleOffsets(
-        float[] source,
-        float scale)
+    private static bool GroupRoutesClear(
+        int groupId,
+        float candidateScale,
+        Dictionary<string, ConnectionRouteResource> routes,
+        ContinuityPlanSet planSet,
+        Dictionary<int, float> scales,
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles)
     {
-        if (source == null)
+        if (!planSet.GroupRoutes.TryGetValue(
+                groupId,
+                out List<string> routeIds))
+            return true;
+
+        for (int i = 0;
+             i < routeIds.Count;
+             i++)
+        {
+            string routeId =
+                routeIds[i];
+
+            if (!routes.TryGetValue(
+                    routeId,
+                    out ConnectionRouteResource route) ||
+                !planSet.Routes.TryGetValue(
+                    routeId,
+                    out RouteLanePlan plan))
+                continue;
+
+            Num.Vector2[] basePoints =
+                BasePoints(route);
+            if (basePoints == null ||
+                basePoints.Length < 2)
+                continue;
+
+            float[] effective =
+                BuildEffectiveOffsets(
+                    plan,
+                    scales,
+                    groupId,
+                    candidateScale);
+
+            Num.Vector2[] candidate =
+                BuildLanePath(
+                    basePoints,
+                    effective);
+
+            if (!IsDerivedRouteClear(
+                    candidate,
+                    route,
+                    obstacles))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static float[] BuildEffectiveOffsets(
+        RouteLanePlan plan,
+        Dictionary<int, float> scales,
+        int overrideGroupId = -1,
+        float overrideScale = 1f)
+    {
+        if (plan == null ||
+            plan.Offsets.Length == 0)
             return Array.Empty<float>();
 
-        float[] scaled =
-            new float[source.Length];
-        for (int i = 0; i < source.Length; i++)
-            scaled[i] = source[i] * scale;
+        bool needsCopy = false;
 
-        return scaled;
+        for (int i = 0;
+             i < plan.GroupIds.Length;
+             i++)
+        {
+            int groupId =
+                plan.GroupIds[i];
+            if (groupId < 0)
+                continue;
+
+            float scale =
+                groupId == overrideGroupId
+                    ? overrideScale
+                    : scales != null &&
+                      scales.TryGetValue(
+                          groupId,
+                          out float resolved)
+                        ? resolved
+                        : 1f;
+
+            if (Math.Abs(scale - 1f) > 0.0001f)
+            {
+                needsCopy = true;
+                break;
+            }
+        }
+
+        if (!needsCopy)
+            return plan.Offsets;
+
+        float[] effective =
+            (float[])plan.Offsets.Clone();
+
+        for (int i = 0;
+             i < effective.Length;
+             i++)
+        {
+            int groupId =
+                plan.GroupIds[i];
+            if (groupId < 0)
+                continue;
+
+            float scale =
+                groupId == overrideGroupId
+                    ? overrideScale
+                    : scales != null &&
+                      scales.TryGetValue(
+                          groupId,
+                          out float resolved)
+                        ? resolved
+                        : 1f;
+
+            effective[i] *= scale;
+        }
+
+        return effective;
+    }
+
+    private static HashSet<int> CollectGroups(
+        RouteLanePlan plan)
+    {
+        HashSet<int> groups =
+            new();
+
+        if (plan == null)
+            return groups;
+
+        for (int i = 0;
+             i < plan.GroupIds.Length;
+             i++)
+        {
+            int groupId =
+                plan.GroupIds[i];
+            if (groupId >= 0)
+                groups.Add(groupId);
+        }
+
+        return groups;
     }
 
     private static bool IsDerivedRouteClear(

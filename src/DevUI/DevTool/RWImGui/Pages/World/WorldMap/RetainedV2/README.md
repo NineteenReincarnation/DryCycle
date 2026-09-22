@@ -868,9 +868,12 @@ Phase 7 hardens the first six readability phases for 8/16/32+ connection cluster
   adds a small depth break every eight endpoints;
 - bank gaps are derived presentation geometry only. They do not create topology, labels, colors or
   endpoint codes;
-- if a dense bank's full width hits a room obstacle, the allocator tries uniform 82% and 68%
-  compression while preserving lane order before falling back to the correct BasePoints; this avoids
-  throwing away all lane separation merely because the preferred dense width is unavailable;
+- if a dense bank's full width hits a room obstacle, compression is resolved once for the entire
+  continuity bundle (100% -> 82% -> 68% -> collapsed) rather than independently per route; adjacent
+  routes therefore cannot reverse lane order because one happened to choose a smaller scale;
+- routes that participate in more than one bundle carry per-segment group IDs. A final convergence
+  pass collapses every bundle touched by any still-invalid transition together, preserving
+  correctness without reintroducing per-route lane-scale divergence;
 - routes record non-persistent endpoint/corridor density tiers and use the larger one, so even short
   Compact routes in a crowded pipe bank receive the dense presentation policy;
 - dense single-direction routes render only one direction arrow, and dense/extreme arrows scale down
