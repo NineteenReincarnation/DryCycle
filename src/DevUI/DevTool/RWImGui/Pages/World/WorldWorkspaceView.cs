@@ -111,7 +111,6 @@ internal static class WorldWorkspaceView
     private static bool draggingInspectorSplitter;
 
     private static int inspectorRoom = -1;
-    private static Num.Vector2 inspectorPosition;
     private static string inspectorSubregion = string.Empty;
     private static string attractionSearch = string.Empty;
     private static string newAttraction = "Neutral";
@@ -290,7 +289,6 @@ internal static class WorldWorkspaceView
         selectedConnectionId = string.Empty;
         lastObservedRoomIndex = -1;
         inspectorRoom = -1;
-        inspectorPosition = default;
         inspectorSubregion = string.Empty;
         attractionSearch = string.Empty;
         newAttraction = "Neutral";
@@ -543,7 +541,7 @@ internal static class WorldWorkspaceView
             rows[i] = new RoomExplorerRow
             {
                 Room = room,
-                LayerToken = "L" + room.Layer
+                LayerToken = DisplayLayerLabel(room.Layer)
             };
         }
         projectedRoomRowsSource = rooms;
@@ -798,48 +796,23 @@ internal static class WorldWorkspaceView
         if (inspectorRoom != room.RoomIndex)
         {
             inspectorRoom = room.RoomIndex;
-            inspectorPosition = new Num.Vector2(room.X, room.Y);
             inspectorSubregion = room.Subregion ?? string.Empty;
         }
         else if (!ImGui.IsAnyItemActive())
         {
-            inspectorPosition = new Num.Vector2(room.X, room.Y);
             inspectorSubregion = room.Subregion ?? string.Empty;
         }
 
         ImGui.TextUnformatted(room.Name);
         ImGui.SameLine();
-        ImGui.TextDisabled("L" + room.Layer);
+        ImGui.TextDisabled(DisplayLayerLabel(room.Layer));
         if (room.CurrentRoom) DevToolWidgets.MutedText(DevToolUiSettings.T("当前镜头房间", "Current camera room"));
         if (room.OffScreenDen) DevToolWidgets.MutedText(DevToolUiSettings.T("屏幕外巢穴", "Off-screen den"));
         if (room.Disabled) DevToolWidgets.MutedText(DevToolUiSettings.T("地图输出隐藏", "Hidden from map output"));
         ImGui.Separator();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("地图", "MAP"));
-        Num.Vector2 position = inspectorPosition;
-        bool positionChanged = ImGui.InputFloat2(DevToolUiSettings.T("位置##WorldRoomPosition", "Position##WorldRoomPosition"), ref position, "%.1f");
-        inspectorPosition = position;
-        if (ImGui.IsItemDeactivatedAfterEdit()) SetPosition(room.RoomIndex, position);
-        else if (!positionChanged && !ImGui.IsItemActive()) inspectorPosition = new Num.Vector2(room.X, room.Y);
-
-        int layer = room.Layer;
-        if (ImGui.BeginCombo(DevToolUiSettings.T("图层##WorldRoomLayer", "Layer##WorldRoomLayer"), "L" + layer))
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                bool selected = layer == i;
-                ImGui.PushID(i);
-                bool clicked = ImGui.Selectable("L" + i, selected);
-                ImGui.PopID();
-                if (clicked)
-                    MapEditorCommandQueue.Enqueue(new MapEditorCommand(
-                        MapEditorCommandKind.SetRoomLayer,
-                        roomIndex: room.RoomIndex,
-                        value: new EditorPropertyValue(EditorPropertyKind.Integer, integer: i)));
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
+        DrawRoomLayerButtons(room);
 
         string subregionLabel =
             WorldInspectorReadability.PrepareField(
@@ -1349,7 +1322,7 @@ internal static class WorldWorkspaceView
             EditorMapRoomSnapshot room = FindRoom(snapshot, snapshot.SelectedRoomIndex);
             selection = room == null
                 ? snapshot.RegionName
-                : room.Name + " · L" + room.Layer +
+                : room.Name + " · " + DisplayLayerLabel(room.Layer) +
                   (string.IsNullOrEmpty(room.Subregion) ? string.Empty : " · " + room.Subregion);
         }
 
@@ -1642,11 +1615,60 @@ internal static class WorldWorkspaceView
     private static void SelectRoom(int roomIndex) =>
         MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex));
 
-    private static void SetPosition(int roomIndex, Num.Vector2 position) =>
-        MapEditorCommandQueue.Enqueue(new MapEditorCommand(
-            MapEditorCommandKind.SetRoomPosition,
-            roomIndex: roomIndex,
-            value: new EditorPropertyValue(EditorPropertyKind.Vector2, x: position.X, y: position.Y)));
+    private static void DrawRoomLayerButtons(EditorMapRoomSnapshot room)
+    {
+        if (room == null)
+            return;
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float spacing = Math.Max(4f, style.ItemSpacing.X);
+        float available = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        float buttonWidth = Math.Max(42f, (available - spacing * 2f) / 3f);
+
+        for (int layer = 0; layer < 3; layer++)
+        {
+            bool selected = room.Layer == layer;
+            ImGui.PushID("WorldRoomLayer_" + layer);
+
+            if (selected)
+            {
+                Num.Vector4 selectedColor =
+                    ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
+                Num.Vector4 hoveredColor =
+                    ImGui.GetStyleColorVec4(ImGuiCol.HeaderHovered);
+                ImGui.PushStyleColor(ImGuiCol.Button, selectedColor);
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hoveredColor);
+                ImGui.PushStyleColor(ImGuiCol.ButtonActive, selectedColor);
+            }
+
+            bool clicked =
+                ImGui.Button(
+                    "L" + (layer + 1),
+                    new Num.Vector2(buttonWidth, 0f));
+
+            if (selected)
+                ImGui.PopStyleColor(3);
+
+            ImGui.PopID();
+
+            if (clicked && !selected)
+            {
+                MapEditorCommandQueue.Enqueue(
+                    new MapEditorCommand(
+                        MapEditorCommandKind.SetRoomLayer,
+                        roomIndex: room.RoomIndex,
+                        value: new EditorPropertyValue(
+                            EditorPropertyKind.Integer,
+                            integer: layer)));
+            }
+
+            if (layer < 2)
+                ImGui.SameLine(0f, spacing);
+        }
+    }
+
+    private static string DisplayLayerLabel(int layer) =>
+        "L" + (Math.Max(0, Math.Min(2, layer)) + 1);
 
     private static void EnsureRoomIndex(EditorMapPresentationSnapshot snapshot)
     {
