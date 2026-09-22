@@ -210,13 +210,6 @@ internal static class WorldMapRouteCrossingResolver
                             StringComparison.Ordinal))
                         continue;
 
-                    long pairKey =
-                        PairKey(
-                            vertical.Id,
-                            horizontal.Id);
-                    if (!checkedPairs.Add(pairKey))
-                        continue;
-
                     if (cellChecks >=
                             MaxUniquePairChecksPerCell ||
                         candidateChecks >=
@@ -226,6 +219,13 @@ internal static class WorldMapRouteCrossingResolver
                         stopCell = true;
                         break;
                     }
+
+                    long pairKey =
+                        PairKey(
+                            vertical.Id,
+                            horizontal.Id);
+                    if (!checkedPairs.Add(pairKey))
+                        continue;
 
                     cellChecks++;
                     candidateChecks++;
@@ -551,7 +551,7 @@ internal static class WorldMapRouteCrossingResolver
             for (int i = 0; i < value.Length; i++)
             {
                 hash =
-                    (hash ^ value[i]) *
+                    (hash ^ (uint)value[i]) *
                     16777619u;
             }
         }

@@ -88,6 +88,11 @@ internal static class WorldMapCorridorLaneAllocator
     private const int DenseBankCapacity = 8;
     private const float DenseLaneSpacing = 6.25f;
     private const float DenseBankGutter = 9f;
+    private static readonly float[] DenseCompressionScales =
+    {
+        0.82f,
+        0.68f
+    };
 
     private const float PointEpsilonSquared = 0.04f;
 
@@ -120,13 +125,15 @@ internal static class WorldMapCorridorLaneAllocator
                 continue;
 
             Num.Vector2[] candidate = basePoints;
-            byte densityTier = 0;
+            byte densityTier =
+                route.BaseDensityTier;
 
             if (lanePlans.TryGetValue(
                     routeId,
                     out RouteLanePlan lanePlan))
             {
-                densityTier = lanePlan.DensityTier;
+                if (lanePlan.DensityTier > densityTier)
+                    densityTier = lanePlan.DensityTier;
 
                 float[] effectiveOffsets =
                     lanePlan.Offsets;
@@ -621,20 +628,14 @@ internal static class WorldMapCorridorLaneAllocator
         // Bank gaps intentionally favor readability, but nearby rooms can make the full width
         // impossible. Preserve route ordering first by shrinking the whole lane field uniformly.
         // Only after both bounded attempts fail do we fall back to BasePoints.
-        float[] scales =
-        {
-            0.82f,
-            0.68f
-        };
-
         for (int attempt = 0;
-             attempt < scales.Length;
+             attempt < DenseCompressionScales.Length;
              attempt++)
         {
             float[] scaled =
                 ScaleOffsets(
                     originalOffsets,
-                    scales[attempt]);
+                    DenseCompressionScales[attempt]);
 
             Num.Vector2[] compressed =
                 BuildLanePath(

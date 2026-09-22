@@ -32,6 +32,8 @@ internal sealed class WorldMapConnectionResourceStore
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorldMapWorldSpaceRouter.TerminalFanout> terminalFanouts =
         new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte> endpointDensityTiers =
+        new(StringComparer.Ordinal);
     private readonly Queue<string> queue = new();
     private readonly HashSet<string> queued = new(StringComparer.Ordinal);
     private readonly HashSet<string> routeChanged = new(StringComparer.Ordinal);
@@ -306,6 +308,7 @@ internal sealed class WorldMapConnectionResourceStore
         dependencies.Reset();
         laneOffsets.Clear();
         terminalFanouts.Clear();
+        endpointDensityTiers.Clear();
         queue.Clear();
         queued.Clear();
         routeChanged.Clear();
@@ -413,6 +416,7 @@ internal sealed class WorldMapConnectionResourceStore
             return;
 
         corridorLayoutDirty = false;
+        ApplyEndpointDensityTiers();
         WorldMapCorridorLaneAllocator.Apply(
             routes,
             GetRoutingObstacleSnapshot(),
@@ -447,6 +451,21 @@ internal sealed class WorldMapConnectionResourceStore
         {
             crossingRevision++;
             revision++;
+        }
+    }
+
+    private void ApplyEndpointDensityTiers()
+    {
+        foreach (KeyValuePair<string, ConnectionRouteResource> pair
+                 in routes)
+        {
+            byte tier = 0;
+            endpointDensityTiers.TryGetValue(
+                pair.Key,
+                out tier);
+
+            if (pair.Value != null)
+                pair.Value.BaseDensityTier = tier;
         }
     }
 
@@ -534,6 +553,7 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapRoomResourceStore roomResources)
     {
         terminalFanouts.Clear();
+        endpointDensityTiers.Clear();
         if (scene == null ||
             scene.Connections.Count == 0)
             return;
@@ -610,11 +630,27 @@ internal sealed class WorldMapConnectionResourceStore
                     PreferredTerminalLaneSpacing,
                     MinimumTerminalLaneSpacing,
                     TerminalLaneTargetSpan);
+            byte endpointDensityTier =
+                DensityTierForCount(
+                    endpoints.Count);
 
             for (int i = 0; i < endpoints.Count; i++)
             {
                 TerminalEndpoint endpoint =
                     endpoints[i];
+
+                if (endpointDensityTier > 0)
+                {
+                    endpointDensityTiers.TryGetValue(
+                        endpoint.ConnectionId,
+                        out byte currentTier);
+                    if (endpointDensityTier > currentTier)
+                    {
+                        endpointDensityTiers[endpoint.ConnectionId] =
+                            endpointDensityTier;
+                    }
+                }
+
                 float extraDepth =
                     i * spacing;
 
@@ -717,6 +753,15 @@ internal sealed class WorldMapConnectionResourceStore
         if (direction.X > 0.5f) return 1;
         if (direction.Y < -0.5f) return 2;
         return 3;
+    }
+
+    private static byte DensityTierForCount(int count)
+    {
+        if (count >= 24)
+            return 2;
+        if (count > DenseLaneBankThreshold)
+            return 1;
+        return 0;
     }
 
     private static float[] BuildPairLaneOffsets(int count)

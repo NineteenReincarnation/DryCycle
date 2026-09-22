@@ -871,9 +871,10 @@ Phase 7 hardens the first six readability phases for 8/16/32+ connection cluster
 - if a dense bank's full width hits a room obstacle, the allocator tries uniform 82% and 68%
   compression while preserving lane order before falling back to the correct BasePoints; this avoids
   throwing away all lane separation merely because the preferred dense width is unavailable;
-- routes record a non-persistent density tier. Dense single-direction routes render only one
-  direction arrow, and dense/extreme arrows scale down while bidirectional routes retain one arrow
-  for each direction;
+- routes record non-persistent endpoint/corridor density tiers and use the larger one, so even short
+  Compact routes in a crowded pipe bank receive the dense presentation policy;
+- dense single-direction routes render only one direction arrow, and dense/extreme arrows scale down
+  while bidirectional routes retain one arrow for each direction;
 - crossing detection is spatially bounded to 4096 unique segment-pair checks per 96-unit cell,
   32768 checks globally, 128 bridge marks per cell and 1024 marks globally per convergence;
 - when a dense cell exceeds the bridge budget, selection is deterministic and route-diverse: each
