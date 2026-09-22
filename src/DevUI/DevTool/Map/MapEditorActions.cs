@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
@@ -49,59 +48,6 @@ internal static class MapEditorActions
             "Change room subregion",
             roomIndex,
             () => NativeMapAuthoringStateHub.SetSubregion(session, roomIndex, subregion));
-    }
-
-    internal static bool DeleteSubregion(
-        EditorSession session,
-        string subregion)
-    {
-        global::World world = session?.World;
-        string target =
-            string.IsNullOrWhiteSpace(subregion)
-                ? string.Empty
-                : subregion.Trim();
-
-        if (world == null || target.Length == 0)
-            return false;
-
-        List<int> affected = new();
-        int end =
-            world.firstRoomIndex +
-            world.NumberOfRooms;
-
-        for (int roomIndex = world.firstRoomIndex;
-             roomIndex < end;
-             roomIndex++)
-        {
-            AbstractRoom room =
-                world.GetAbstractRoom(roomIndex);
-            if (room == null)
-                continue;
-
-            if (string.Equals(
-                    room.subregionName?.Trim(),
-                    target,
-                    StringComparison.Ordinal))
-                affected.Add(roomIndex);
-        }
-
-        if (affected.Count == 0)
-            return false;
-
-        bool changed = false;
-        using (session.History.BeginBatch(
-                   "Delete map subregion: " + target))
-        {
-            for (int i = 0; i < affected.Count; i++)
-            {
-                changed |= SetRoomSubregion(
-                    session,
-                    affected[i],
-                    string.Empty);
-            }
-        }
-
-        return changed;
     }
 
     internal static bool SetRoomAttraction(

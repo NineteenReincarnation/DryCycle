@@ -712,7 +712,6 @@ public enum MapEditorCommandKind
     SetRoomPosition,
     SetRoomLayer,
     SetRoomSubregion,
-    DeleteSubregion,
     SetRoomAttraction
 }
 
@@ -764,9 +763,6 @@ public static class MapEditorCommandQueue
                         break;
                     case MapEditorCommandKind.SetRoomSubregion:
                         MapEditorActions.SetRoomSubregion(session, command.RoomIndex, command.Text);
-                        break;
-                    case MapEditorCommandKind.DeleteSubregion:
-                        MapEditorActions.DeleteSubregion(session, command.Text);
                         break;
                     case MapEditorCommandKind.SetRoomAttraction:
                         MapEditorActions.SetRoomAttraction(

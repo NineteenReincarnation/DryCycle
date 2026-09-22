@@ -4,7 +4,6 @@ using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
 using ImGuiNET;
-using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -34,16 +33,12 @@ public sealed class WorldSubregionSelectorPlugin : BaseUnityPlugin
 
 internal static class WorldSubregionSelector
 {
-    private const string DeletePopupId = "###WorldDeleteSubregionConfirm";
-
     private static ManualLogSource log;
     private static bool enabled;
 
     private static int creatingRoom = -1;
     private static string newSubregionName = string.Empty;
     private static bool focusNewSubregionInput;
-
-    private static string pendingDeleteSubregion = string.Empty;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -58,7 +53,6 @@ internal static class WorldSubregionSelector
     internal static void Disable()
     {
         CancelCreate();
-        pendingDeleteSubregion = string.Empty;
         enabled = false;
         log = null;
     }
@@ -82,7 +76,6 @@ internal static class WorldSubregionSelector
         else
             DrawSelector(snapshot, room);
 
-        DrawDeleteConfirmation();
         return true;
     }
 
@@ -93,14 +86,12 @@ internal static class WorldSubregionSelector
         List<string> subregions = CollectSubregions(snapshot);
         string current = Normalize(room.Subregion);
         string preview = current.Length == 0
-            ? DevToolUiSettings.T("None（无子区域）", "None")
+            ? DevToolUiSettings.T("无子区域", "No subregion")
             : current;
 
         DevToolWidgets.MutedText(
             DevToolUiSettings.T("子区域", "Subregion"),
             true);
-
-        bool requestDeleteConfirmation = false;
 
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
@@ -117,13 +108,11 @@ internal static class WorldSubregionSelector
                 ImGui.CloseCurrentPopup();
             }
 
-            ImGui.Separator();
-
             bool noneSelected = current.Length == 0;
             if (ImGui.Selectable(
                     DevToolUiSettings.T(
-                        "None（无子区域）",
-                        "None") +
+                        "无子区域",
+                        "No subregion") +
                     "##WorldSubregionNone",
                     noneSelected))
             {
@@ -133,6 +122,8 @@ internal static class WorldSubregionSelector
             }
             if (noneSelected)
                 ImGui.SetItemDefaultFocus();
+
+            ImGui.Separator();
 
             for (int i = 0; i < subregions.Count; i++)
             {
@@ -158,34 +149,8 @@ internal static class WorldSubregionSelector
                     ImGui.SetItemDefaultFocus();
             }
 
-            if (current.Length > 0)
-            {
-                ImGui.Separator();
-
-                Num.Vector4 danger =
-                    ImGui.GetStyleColorVec4(ImGuiCol.PlotHistogram);
-                ImGui.PushStyleColor(
-                    ImGuiCol.Text,
-                    danger);
-
-                if (ImGui.Selectable(
-                        DevToolUiSettings.T(
-                            "删除当前子区域…",
-                            "Delete current subregion…") +
-                        "##WorldDeleteSubregion"))
-                {
-                    pendingDeleteSubregion = current;
-                    requestDeleteConfirmation = true;
-                }
-
-                ImGui.PopStyleColor();
-            }
-
             ImGui.EndCombo();
         }
-
-        if (requestDeleteConfirmation)
-            ImGui.OpenPopup(DeletePopupId);
     }
 
     private static void DrawInlineCreate(
@@ -271,79 +236,6 @@ internal static class WorldSubregionSelector
             room.RoomIndex,
             normalized);
         CancelCreate();
-    }
-
-    private static void DrawDeleteConfirmation()
-    {
-        ImGuiIOPtr io = ImGui.GetIO();
-        ImGui.SetNextWindowPos(
-            io.DisplaySize * 0.5f,
-            ImGuiCond.Appearing,
-            new Num.Vector2(0.5f, 0.5f));
-
-        bool open = true;
-        string title =
-            DevToolUiSettings.T(
-                "删除子区域",
-                "Delete Subregion") +
-            DeletePopupId;
-
-        if (!ImGui.BeginPopupModal(
-                title,
-                ref open,
-                ImGuiWindowFlags.AlwaysAutoResize))
-            return;
-
-        ImGui.TextUnformatted(
-            DevToolUiSettings.T(
-                "你确定吗？",
-                "Are you sure?"));
-
-        ImGui.Spacing();
-
-        float spacing =
-            Math.Max(
-                6f,
-                ImGui.GetStyle().ItemSpacing.X);
-        float width =
-            Math.Max(
-                86f,
-                (ImGui.GetContentRegionAvail().X - spacing) *
-                0.5f);
-
-        if (ImGui.Button(
-                DevToolUiSettings.T("是", "Yes") +
-                "##ConfirmDeleteSubregion",
-                new Num.Vector2(width, 0f)))
-        {
-            if (!string.IsNullOrWhiteSpace(
-                    pendingDeleteSubregion))
-            {
-                MapEditorCommandQueue.Enqueue(
-                    new MapEditorCommand(
-                        MapEditorCommandKind.DeleteSubregion,
-                        text: pendingDeleteSubregion));
-            }
-
-            pendingDeleteSubregion = string.Empty;
-            ImGui.CloseCurrentPopup();
-        }
-
-        ImGui.SameLine(0f, spacing);
-
-        if (ImGui.Button(
-                DevToolUiSettings.T("否", "No") +
-                "##CancelDeleteSubregion",
-                new Num.Vector2(width, 0f)))
-        {
-            pendingDeleteSubregion = string.Empty;
-            ImGui.CloseCurrentPopup();
-        }
-
-        if (!open)
-            pendingDeleteSubregion = string.Empty;
-
-        ImGui.EndPopup();
     }
 
     private static void BeginCreate(int roomIndex)
