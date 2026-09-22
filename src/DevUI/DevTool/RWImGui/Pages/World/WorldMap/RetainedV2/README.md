@@ -831,6 +831,31 @@ pan/zoom, hover and active room dragging do not execute the planner.
 The next stage is interaction focus: hover/selection should make one already-readable route stand out
 without being required to understand the base topology.
 
+### Multi-Lane Routing V2 · Phase 6 — Hover / selection focus
+
+Phase 6 adds interaction focus without making interaction responsible for topology readability:
+
+- normal map geometry remains unchanged; Phases 1–5 must stay readable with no hover at all;
+- retained routes are never rebuilt or re-routed for hover/selection;
+- focus is an immediate ImGui overlay that reuses the authoritative retained route points from
+  `WorldMapRouteSpatialIndex` (or the same orthogonal preview while a retained route is not ready);
+- the focused route receives a wider opaque **local isolation halo** plus a thicker core. The halo
+  suppresses only lines directly underneath/alongside the focused route instead of globally dimming
+  every connection;
+- this avoids invalidating the retained RenderTexture or calling `Camera.Render()` merely because
+  the mouse moved;
+- selection persists as a focus overlay; hovering a different connection adds a temporary second
+  focus rather than destroying the selected context;
+- hovering either the route itself or one of its connected pipe sockets emphasizes both endpoint
+  sockets, so the complete From/To relationship is visible immediately;
+- immediate fallback routes no longer contain their own separate selected/hovered thickness policy;
+  retained and fallback connections now share the same focus presentation path;
+- focus work is O(segments in one or two focused routes). It performs no corridor allocation,
+  junction weaving, crossing resolution, topology scan or route search.
+
+Viewport navigation may still draw a selected route overlay because it is only a small transformed
+polyline; no retained geometry is regenerated.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

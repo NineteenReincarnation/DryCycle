@@ -329,12 +329,22 @@ internal static class WorldMapView
             viewportInteraction,
             retainedRoomsPresented);
         if (showConnections)
+        {
             DrawConnections(
                 draw,
                 snapshot,
                 canvasMin,
                 canvasSize,
                 skipRetainedRoutes: retainedConnectionsPresented);
+
+            DrawConnectionFocusOverlays(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                hoveredPort);
+        }
+
         WorldMapRenderOrder.UseOverlay(draw);
 
         if (retainedConnectionsPresented &&
@@ -765,29 +775,20 @@ internal static class WorldMapView
                     42f))
                 continue;
 
-            bool selected =
-                string.Equals(
-                    selectedConnectionId,
-                    connection.ConnectionId,
-                    StringComparison.Ordinal);
-            bool hovered =
-                string.Equals(
-                    hoveredConnectionId,
-                    connection.ConnectionId,
-                    StringComparison.Ordinal);
-            uint core = selected || hovered
-                ? ConnectionColor(connection.Direction)
-                : connection.Ambiguous
+            uint core =
+                connection.Ambiguous
                     ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
                     : ConnectionColor(connection.Direction);
-            uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
+            uint shadow =
+                ImGui.GetColorU32(ImGuiCol.WindowBg);
 
             float coreThickness =
-                selected ? 4.8f :
-                hovered ? 4.2f :
-                connection.Direction == WorldConnectionDirection.Bidirectional ? 3.4f : 3.2f;
+                connection.Direction ==
+                WorldConnectionDirection.Bidirectional
+                    ? 3.4f
+                    : 3.2f;
             float shadowThickness =
-                coreThickness + (selected || hovered ? 5.6f : 4.8f);
+                coreThickness + 4.8f;
 
             DrawConnectionPathStroke(
                 draw,
@@ -814,6 +815,167 @@ internal static class WorldMapView
         }
     }
 
+    private static void DrawConnectionFocusOverlays(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize,
+        ExitPortHit hoveredPort)
+    {
+        if (!showConnections || snapshot == null)
+            return;
+
+        string hoverId =
+            !string.IsNullOrEmpty(hoveredConnectionId)
+                ? hoveredConnectionId
+                : hoveredPort?.Connection?.ConnectionId ??
+                  string.Empty;
+
+        if (!string.IsNullOrEmpty(selectedConnectionId))
+        {
+            DrawConnectionFocusOverlay(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                selectedConnectionId,
+                selected: true);
+        }
+
+        if (!string.IsNullOrEmpty(hoverId) &&
+            !string.Equals(
+                hoverId,
+                selectedConnectionId,
+                StringComparison.Ordinal))
+        {
+            DrawConnectionFocusOverlay(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                hoverId,
+                selected: false);
+        }
+    }
+
+    private static void DrawConnectionFocusOverlay(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize,
+        string connectionId,
+        bool selected)
+    {
+        EditorMapConnectionSnapshot connection =
+            FindConnection(
+                snapshot,
+                connectionId);
+        if (connection == null ||
+            !BuildImmediateConnectionPath(
+                snapshot,
+                connection,
+                canvasMin,
+                connectionPathScratch))
+            return;
+
+        Num.Vector2 canvasMax =
+            canvasMin + canvasSize;
+        if (!PathNearCanvas(
+                connectionPathScratch,
+                canvasMin,
+                canvasMax,
+                48f))
+            return;
+
+        // The broad opaque isolation stroke hides only routes immediately under/alongside the
+        // focused connection. It gives local visual separation without requiring a full retained
+        // surface re-render or global alpha update on every hover frame.
+        uint isolation =
+            ImGui.GetColorU32(ImGuiCol.ChildBg);
+        uint core =
+            connection.Ambiguous
+                ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
+                : ConnectionColor(connection.Direction);
+
+        float coreThickness =
+            selected ? 5.8f : 4.8f;
+        float isolationThickness =
+            selected ? 15.5f : 12.5f;
+
+        DrawConnectionPathStroke(
+            draw,
+            connectionPathScratch,
+            isolation,
+            core,
+            isolationThickness,
+            coreThickness,
+            connection.Direction,
+            connection.Ambiguous);
+
+        DrawFocusedConnectionEndpoints(
+            draw,
+            snapshot,
+            canvasMin,
+            connection);
+    }
+
+    private static void DrawFocusedConnectionEndpoints(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        EditorMapConnectionSnapshot connection)
+    {
+        if (connection == null)
+            return;
+
+        uint shadow =
+            ImGui.GetColorU32(ImGuiCol.WindowBg);
+        uint color =
+            ShortcutGold(true);
+
+        EditorMapRoomSnapshot from =
+            FindRoom(
+                snapshot,
+                connection.FromRoomIndex);
+        if (from != null &&
+            IsLayerVisible(from.Layer) &&
+            connection.FromNodeIndex >= 0)
+        {
+            DrawShortcutSocket(
+                draw,
+                EndpointPosition(
+                    from,
+                    connection.FromNodeIndex,
+                    canvasMin),
+                shadow,
+                color,
+                connected: true,
+                emphasized: true);
+        }
+
+        if (connection.ToNodeIndex < 0)
+            return;
+
+        EditorMapRoomSnapshot to =
+            FindRoom(
+                snapshot,
+                connection.ToRoomIndex);
+        if (to == null ||
+            !IsLayerVisible(to.Layer))
+            return;
+
+        DrawShortcutSocket(
+            draw,
+            EndpointPosition(
+                to,
+                connection.ToNodeIndex,
+                canvasMin),
+            shadow,
+            color,
+            connected: true,
+            emphasized: true);
+    }
+
     private static void DrawExitPorts(
         ImDrawListPtr draw,
         EditorMapPresentationSnapshot snapshot,
@@ -831,6 +993,12 @@ internal static class WorldMapView
                 : null;
         int count = candidateRooms?.Count ?? rooms.Length;
         bool linking = linkingRoom >= 0;
+
+        string hoveredLinkId =
+            !string.IsNullOrEmpty(hoveredConnectionId)
+                ? hoveredConnectionId
+                : hoveredPort?.Connection?.ConnectionId ??
+                  string.Empty;
 
         for (int i = 0; i < count; i++)
         {
@@ -857,12 +1025,26 @@ internal static class WorldMapView
                 bool source = room.RoomIndex == linkingRoom && node.NodeIndex == linkingNode;
                 bool hovered = hoveredPort != null && hoveredPort.Room.RoomIndex == room.RoomIndex && hoveredPort.Node.NodeIndex == node.NodeIndex;
                 bool validTarget = linking && free && room.RoomIndex != linkingRoom;
-                bool selectedLink = endpointConnection != null && string.Equals(
-                    selectedConnectionId,
-                    endpointConnection.ConnectionId,
-                    StringComparison.Ordinal);
+                bool selectedLink =
+                    endpointConnection != null &&
+                    string.Equals(
+                        selectedConnectionId,
+                        endpointConnection.ConnectionId,
+                        StringComparison.Ordinal);
+                bool hoveredLink =
+                    endpointConnection != null &&
+                    !string.IsNullOrEmpty(hoveredLinkId) &&
+                    string.Equals(
+                        hoveredLinkId,
+                        endpointConnection.ConnectionId,
+                        StringComparison.Ordinal);
 
-                bool emphasized = source || hovered || validTarget || selectedLink;
+                bool emphasized =
+                    source ||
+                    hovered ||
+                    validTarget ||
+                    selectedLink ||
+                    hoveredLink;
                 uint color = ShortcutGold(connected || emphasized);
                 uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
                 DrawShortcutSocket(draw, point, shadow, color, connected, emphasized);
