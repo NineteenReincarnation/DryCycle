@@ -538,45 +538,53 @@ internal static class WorldMapView
             bool lowLod = zoom < 0.48f;
             bool highLod = zoom >= 0.82f;
 
-            if (!visual.DetailedRasterAvailable)
+            draw.PushClipRect(roomMin, roomMax, true);
+            try
             {
-                uint fill = selected
-                    ? ImGui.GetColorU32(ImGuiCol.Button)
-                    : GeometryColor(EditorMapGeometryKind.Air);
-                draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
-            }
-
-            if (visual.DetailedRasterAvailable)
-            {
-                EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
-
-                // MapTex represents Air as row runs too. Fill it once for the whole room and skip
-                // thousands of redundant Air rectangles; all non-Air terrain is then painted above it.
-                bool hasAir = false;
-                for (int i = 0; i < runs.Length; i++)
+                if (!visual.DetailedRasterAvailable)
                 {
-                    if (runs[i].Kind != EditorMapGeometryKind.Air) continue;
-                    hasAir = true;
-                    break;
+                    uint fill = selected
+                        ? ImGui.GetColorU32(ImGuiCol.Button)
+                        : GeometryColor(EditorMapGeometryKind.Air);
+                    draw.AddRectFilled(roomMin, roomMax, fill, Math.Max(1f, 3f * zoom));
                 }
-                if (hasAir)
-                    draw.AddRectFilled(roomMin, roomMax, GeometryColor(EditorMapGeometryKind.Air));
 
-                for (int i = 0; i < runs.Length; i++)
+                if (visual.DetailedRasterAvailable)
                 {
-                    EditorMapRectSnapshot run = runs[i];
-                    if (run.Kind == EditorMapGeometryKind.Air) continue;
-                    if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
-                    Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
-                    Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
-                    draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
+                    EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
+
+                    // MapTex represents Air as row runs too. Fill it once for the whole room and skip
+                    // thousands of redundant Air rectangles; all non-Air terrain is then painted above it.
+                    bool hasAir = false;
+                    for (int i = 0; i < runs.Length; i++)
+                    {
+                        if (runs[i].Kind != EditorMapGeometryKind.Air) continue;
+                        hasAir = true;
+                        break;
+                    }
+                    if (hasAir)
+                        draw.AddRectFilled(roomMin, roomMax, GeometryColor(EditorMapGeometryKind.Air));
+
+                    for (int i = 0; i < runs.Length; i++)
+                    {
+                        EditorMapRectSnapshot run = runs[i];
+                        if (run.Kind == EditorMapGeometryKind.Air) continue;
+                        if (lowLod && run.Kind == EditorMapGeometryKind.Water) continue;
+                        Num.Vector2 a = LocalToScreen(roomMin, visual, run.X, run.Y + run.Height);
+                        Num.Vector2 b = LocalToScreen(roomMin, visual, run.X + run.Width, run.Y);
+                        draw.AddRectFilled(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), GeometryColor(run.Kind));
+                    }
+                }
+
+                if (visual.Curves != null)
+                {
+                    for (int i = 0; i < visual.Curves.Length; i++)
+                        DrawCurve(draw, visual, roomMin, visual.Curves[i], highLod);
                 }
             }
-
-            if (visual.Curves != null)
+            finally
             {
-                for (int i = 0; i < visual.Curves.Length; i++)
-                    DrawCurve(draw, visual, roomMin, visual.Curves[i], highLod);
+                draw.PopClipRect();
             }
 
             draw.AddRect(roomMin, roomMax, outline, Math.Max(1f, 3f * zoom), ImDrawFlags.None, selected ? 2.2f : 1f);

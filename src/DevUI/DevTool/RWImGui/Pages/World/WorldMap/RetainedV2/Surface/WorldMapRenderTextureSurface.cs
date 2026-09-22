@@ -14,12 +14,13 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// gate therefore protects only pointer/state exchange; Camera.Render and ImGui AddImage never run
 /// while holding the same lock. Unity resource destruction is deferred to the main-thread pump.
 ///
-/// Exact renders use a guarded view around the visible canvas when the verified RWImGUI AddImage
-/// contract supports UV sub-rects. Active view-only pan/zoom reprojects that committed surface
-/// without Camera.Render; after interaction settles the main thread renders one exact replacement.
-/// RenderTexture allocation depends on canvas pixel size, never zoom. A replacement target is not
-/// considered committed until RWImGUI successfully presents it; presentation failure keeps the
-/// previous last-known-good surface visible.
+/// Exact renders use a guarded view around the visible canvas. Active view-only pan/zoom reprojects
+/// the whole committed texture in screen space and relies on the existing canvas clip instead of
+/// changing texture UVs. This keeps the proven RWImGUI texture contract intact. When navigation
+/// reaches the guard edge the main thread refreshes one exact guarded surface; after interaction
+/// settles it renders once more at the final view. RenderTexture allocation depends on canvas pixel
+/// size, never zoom. A replacement target is not considered committed until RWImGUI successfully
+/// presents it; presentation failure keeps the previous last-known-good surface visible.
 /// </summary>
 internal sealed class WorldMapRenderTextureSurface
 {
@@ -109,6 +110,27 @@ internal sealed class WorldMapRenderTextureSurface
         WorldMapViewTransform renderTransform =
             BuildRenderTransform(viewport, targetWidth, targetHeight);
         renderTransform.GetVisibleWorldBounds(out min, out max);
+    }
+
+    internal bool CoversView(WorldMapViewTransform currentView)
+    {
+        lock (gate)
+        {
+            if (!presentedValid ||
+                presented == null ||
+                !presentedTransformValid)
+                return false;
+
+            return TryCalculatePresentationRect(
+                    presentedTransform,
+                    currentView,
+                    width,
+                    height,
+                    out Num.Vector2 _,
+                    out Num.Vector2 _,
+                    out bool covers) &&
+                covers;
+        }
     }
 
     /// <summary>
@@ -349,9 +371,9 @@ internal sealed class WorldMapRenderTextureSurface
             if (fallback == null || !fallbackTransformReady)
                 return false;
 
-            // Coverage exhaustion is not a texture failure: it simply lets WorldMapView use its
-            // immediate compatibility renderer until the interaction settles. Only a real bridge
-            // failure rolls a freshly rendered candidate back to the last-known-good surface.
+            // The current texture may be only partially covering the canvas while the Unity thread
+            // refreshes a guard edge. Keep presenting retained content instead of switching renderer
+            // families mid-gesture; only a real bridge failure falls through to the retired texture.
             if (!TryPresentTexture(
                     draw,
                     fallback,
@@ -612,93 +634,88 @@ internal sealed class WorldMapRenderTextureSurface
         if (texture == null || textureWidth <= 0 || textureHeight <= 0)
             return false;
 
-        if (!bridge.SupportsUvSubrect)
-        {
-            if (!DirectPresentationMatches(renderedView, currentView, textureWidth, textureHeight))
-                return false;
-
-            bridgeAttempted = true;
-            return bridge.TryPresent(draw, texture, min, max);
-        }
-
-        if (!TryCalculateUv(
+        if (!TryCalculatePresentationRect(
                 renderedView,
                 currentView,
                 textureWidth,
                 textureHeight,
-                out Num.Vector2 uvMin,
-                out Num.Vector2 uvMax))
+                out Num.Vector2 localMin,
+                out Num.Vector2 localMax,
+                out bool _))
+            return false;
+
+        Num.Vector2 destinationMin = min + localMin;
+        Num.Vector2 destinationMax = min + localMax;
+        if (destinationMax.X <= min.X ||
+            destinationMax.Y <= min.Y ||
+            destinationMin.X >= max.X ||
+            destinationMin.Y >= max.Y)
             return false;
 
         bridgeAttempted = true;
-        return bridge.TryPresent(draw, texture, min, max, uvMin, uvMax);
+        return bridge.TryPresent(
+            draw,
+            texture,
+            destinationMin,
+            destinationMax);
     }
 
-    private static bool TryCalculateUv(
+    private static bool TryCalculatePresentationRect(
         WorldMapViewTransform renderedView,
         WorldMapViewTransform currentView,
         int textureWidth,
         int textureHeight,
-        out Num.Vector2 uvMin,
-        out Num.Vector2 uvMax)
+        out Num.Vector2 localMin,
+        out Num.Vector2 localMax,
+        out bool covers)
     {
-        uvMin = Num.Vector2.Zero;
-        uvMax = Num.Vector2.One;
+        localMin = Num.Vector2.Zero;
+        localMax = Num.Vector2.Zero;
+        covers = false;
+
         if (textureWidth <= 0 || textureHeight <= 0 ||
-            renderedView.Zoom <= 0.0001f || currentView.Zoom <= 0.0001f ||
-            currentView.CanvasSize.X < 1f || currentView.CanvasSize.Y < 1f)
+            renderedView.Zoom <= 0.0001f ||
+            currentView.Zoom <= 0.0001f ||
+            currentView.CanvasSize.X < 1f ||
+            currentView.CanvasSize.Y < 1f)
             return false;
 
-        float ratio = renderedView.Zoom / currentView.Zoom;
-        Num.Vector2 sourceMin =
-            renderedView.Pan -
-            currentView.Pan * ratio;
-        Num.Vector2 sourceMax =
-            sourceMin +
-            currentView.CanvasSize * ratio;
-
-        if (sourceMin.X < -CoverageEpsilonPixels ||
-            sourceMin.Y < -CoverageEpsilonPixels ||
-            sourceMax.X > textureWidth + CoverageEpsilonPixels ||
-            sourceMax.Y > textureHeight + CoverageEpsilonPixels)
+        float scale = currentView.Zoom / renderedView.Zoom;
+        if (float.IsNaN(scale) ||
+            float.IsInfinity(scale) ||
+            scale <= 0.0001f)
             return false;
 
-        sourceMin = Num.Vector2.Max(sourceMin, Num.Vector2.Zero);
-        sourceMax = Num.Vector2.Min(
-            sourceMax,
-            new Num.Vector2(textureWidth, textureHeight));
+        localMin =
+            currentView.Pan -
+            renderedView.Pan * scale;
+        localMax =
+            localMin +
+            new Num.Vector2(
+                textureWidth * scale,
+                textureHeight * scale);
 
-        uvMin = new Num.Vector2(
-            sourceMin.X / textureWidth,
-            sourceMin.Y / textureHeight);
-        uvMax = new Num.Vector2(
-            sourceMax.X / textureWidth,
-            sourceMax.Y / textureHeight);
-        return uvMax.X > uvMin.X && uvMax.Y > uvMin.Y;
+        covers =
+            localMin.X <= CoverageEpsilonPixels &&
+            localMin.Y <= CoverageEpsilonPixels &&
+            localMax.X >= currentView.CanvasSize.X - CoverageEpsilonPixels &&
+            localMax.Y >= currentView.CanvasSize.Y - CoverageEpsilonPixels;
+
+        return localMax.X > localMin.X &&
+               localMax.Y > localMin.Y;
     }
 
-    private static bool DirectPresentationMatches(
-        WorldMapViewTransform renderedView,
-        WorldMapViewTransform currentView,
-        int textureWidth,
-        int textureHeight) =>
-        Math.Abs(renderedView.Zoom - currentView.Zoom) <= 0.0001f &&
-        Num.Vector2.DistanceSquared(renderedView.Pan, currentView.Pan) <= 0.0001f &&
-        Math.Abs(textureWidth - currentView.CanvasSize.X) <= 1f &&
-        Math.Abs(textureHeight - currentView.CanvasSize.Y) <= 1f;
-
-    private void GetTargetSize(
+    private static void GetTargetSize(
         WorldMapViewTransform transform,
         out int targetWidth,
         out int targetHeight)
     {
-        float scale = bridge.SupportsUvSubrect ? GuardBandScale : 1f;
         targetWidth = Math.Max(
             2,
-            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.X) * scale));
+            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.X) * GuardBandScale));
         targetHeight = Math.Max(
             2,
-            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.Y) * scale));
+            (int)Math.Ceiling(Math.Max(2f, transform.CanvasSize.Y) * GuardBandScale));
     }
 
     private static WorldMapViewTransform BuildRenderTransform(

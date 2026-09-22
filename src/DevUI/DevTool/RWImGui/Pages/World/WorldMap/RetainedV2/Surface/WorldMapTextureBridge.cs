@@ -47,15 +47,6 @@ internal sealed class WorldMapTextureBridge
         }
     }
 
-    internal bool SupportsUvSubrect
-    {
-        get
-        {
-            lock (gate)
-                return resolved && SupportsUvSubrectMethod(addImageMethod);
-        }
-    }
-
     internal void Initialize(ManualLogSource logger)
     {
         lock (gate)
@@ -70,28 +61,17 @@ internal sealed class WorldMapTextureBridge
         ImDrawListPtr draw,
         Texture texture,
         Num.Vector2 min,
-        Num.Vector2 max) =>
-        TryPresent(draw, texture, min, max, Num.Vector2.Zero, Num.Vector2.One);
-
-    internal bool TryPresent(
-        ImDrawListPtr draw,
-        Texture texture,
-        Num.Vector2 min,
-        Num.Vector2 max,
-        Num.Vector2 uvMin,
-        Num.Vector2 uvMax)
+        Num.Vector2 max)
     {
         lock (gate)
-            return TryPresentCore(draw, texture, min, max, uvMin, uvMax);
+            return TryPresentCore(draw, texture, min, max);
     }
 
     private bool TryPresentCore(
         ImDrawListPtr draw,
         Texture texture,
         Num.Vector2 min,
-        Num.Vector2 max,
-        Num.Vector2 uvMin,
-        Num.Vector2 uvMax)
+        Num.Vector2 max)
     {
         if (!resolved) Resolve();
         if (acquireMethod == null || addImageMethod == null || texture == null)
@@ -125,9 +105,7 @@ internal sealed class WorldMapTextureBridge
                 addImageMethod,
                 registeredId,
                 min,
-                max,
-                uvMin,
-                uvMax);
+                max);
             object boxedDraw = draw;
             addImageMethod.Invoke(boxedDraw, args);
             error = string.Empty;
@@ -206,9 +184,6 @@ internal sealed class WorldMapTextureBridge
     {
         MethodInfo[] methods = typeof(ImDrawListPtr).GetMethods(
             BindingFlags.Public | BindingFlags.Instance);
-        MethodInfo best = null;
-        int bestScore = int.MinValue;
-
         for (int i = 0; i < methods.Length; i++)
         {
             MethodInfo method = methods[i];
@@ -222,14 +197,9 @@ internal sealed class WorldMapTextureBridge
                 !IsNativeIdType(parameters[0].ParameterType))
                 continue;
 
-            int vectorCount = CountVectorParameters(parameters);
-            int score = (vectorCount >= 4 ? 1000 : 0) + vectorCount * 10 + parameters.Length;
-            if (score <= bestScore) continue;
-            best = method;
-            bestScore = score;
+            return method;
         }
-
-        return best;
+        return null;
     }
 
     private static MethodInfo ResolveAcquireMethod(Type targetIdType)
@@ -406,9 +376,7 @@ internal sealed class WorldMapTextureBridge
         MethodInfo method,
         object textureId,
         Num.Vector2 min,
-        Num.Vector2 max,
-        Num.Vector2 uvMin,
-        Num.Vector2 uvMax)
+        Num.Vector2 max)
     {
         ParameterInfo[] parameters = method.GetParameters();
         object[] args = new object[parameters.Length];
@@ -428,9 +396,13 @@ internal sealed class WorldMapTextureBridge
                 if (vectorOrdinal == 0) args[i] = min;
                 else if (vectorOrdinal == 1) args[i] = max;
                 else if (vectorOrdinal == 2)
-                    args[i] = ToTextureUv(uvMin);
+                    args[i] = SystemInfo.graphicsUVStartsAtTop
+                        ? new Num.Vector2(0f, 1f)
+                        : Num.Vector2.Zero;
                 else if (vectorOrdinal == 3)
-                    args[i] = ToTextureUv(uvMax);
+                    args[i] = SystemInfo.graphicsUVStartsAtTop
+                        ? new Num.Vector2(1f, 0f)
+                        : Num.Vector2.One;
                 else
                     args[i] = Num.Vector2.Zero;
                 vectorOrdinal++;
@@ -454,24 +426,6 @@ internal sealed class WorldMapTextureBridge
 
         return args;
     }
-
-    private static int CountVectorParameters(ParameterInfo[] parameters)
-    {
-        int count = 0;
-        if (parameters == null) return count;
-        for (int i = 1; i < parameters.Length; i++)
-            if (parameters[i].ParameterType == typeof(Num.Vector2))
-                count++;
-        return count;
-    }
-
-    private static bool SupportsUvSubrectMethod(MethodInfo method) =>
-        method != null && CountVectorParameters(method.GetParameters()) >= 4;
-
-    private static Num.Vector2 ToTextureUv(Num.Vector2 topDownUv) =>
-        SystemInfo.graphicsUVStartsAtTop
-            ? new Num.Vector2(topDownUv.X, 1f - topDownUv.Y)
-            : topDownUv;
 
     private static object ConvertTextureId(object value, Type targetType)
     {

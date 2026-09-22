@@ -17,7 +17,7 @@ phase percentage below 100%.
 - **Phase 6 — 100%**: retained connection GPU presentation, world-space route interaction, render/main scene handoff and legacy connection hot-path retirement.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
 - **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; geometry visual caches invalidate from publication generations instead of Unity frame polling; interaction cooldown handoff is thread-safe and Unity-Time-free; fallback rooms use the visible Air tone rather than a near-black FrameBg; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
-- **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface through verified AddImage UVs instead of calling Camera.Render; interaction settle performs one exact render, and guard exhaustion falls back visibly rather than stretching/clamping stale pixels.
+- **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface in screen space without changing texture UVs; interaction settle performs one exact render, and reaching the guard edge requests an exact refresh instead of switching to the immediate renderer.
 - **Phase 8.2 — 100%**: viewport, room-drag and linking interaction cooldowns are tracked independently; pure pan/zoom/linking run with zero route-build budget while room drag retains a small incident-route budget, and source/geometry/shortcut work remains frozen for every active interaction class.
 - **Phase 8.3 — 100%**: initial room-source capture is guard-band visible-first; rooms needed by the current retained surface are promoted ahead of the region-wide queue without duplicating caches or changing authoring order.
 - **Phase 8.4 — 100%**: semantic raster fallback no longer performs new readbacks during whole-region structure publication; cached enhancement can be republished freely, while priority/background passes authorize at most one new GetPixels/ReadPixels operation per Unity frame and interaction authorizes none.
@@ -541,24 +541,24 @@ instead of calling `Camera.Render()` again.
 
 ### Interaction-time surface reprojection
 
-When the resolved RWImGUI `AddImage` contract exposes UV coordinates, exact renders allocate a
-**1.5x guarded surface** centered around the visible viewport. The retained room/route visibility
-query uses that same guarded world extent, so the extra texture area contains real retained content
-rather than empty padding.
+Exact renders allocate a **1.5x guarded surface** centered around the visible viewport. The retained
+room/route visibility query uses that same guarded world extent, so the extra texture area contains
+real retained content rather than empty padding.
 
-During an active **view-only** pan/zoom, a changed view revision no longer schedules
-`Camera.Render()`. Present converts the live viewport transform back into a UV rectangle inside the
-last committed guarded surface and draws that sub-rectangle directly. Room meshes, route meshes,
-MapTex capture and the Unity camera all stay untouched.
+During active **view-only** pan/zoom, Present keeps the proven full-texture RWImGUI contract: it
+draws the complete committed RenderTexture at a translated/scaled destination rectangle and relies
+on the existing canvas clip. No UV sub-rectangle or graphics-origin conversion is involved. Room
+meshes, route meshes, MapTex capture and the Unity camera stay untouched while the guarded texture
+still covers the viewport.
 
-If the live viewport leaves the committed guard band, the surface reports presentation unavailable
-for that frame and `WorldMapView` uses its visible immediate compatibility path. It does not clamp
-the stale texture edge and does not replace rooms with black placeholders. Once the interaction
-cooldown ends, the still-dirty view revision causes one exact guarded render for the settled view.
+When navigation reaches a guard edge, `Surface.CoversView` stops the view-only defer and requests
+one exact guarded render at the current view. The retained texture remains the presentation family
+while that refresh happens, avoiding retained/immediate switching during a gesture. Once the
+interaction cooldown ends, a still-dirty final view receives one exact render.
 
-If the loaded ImGui API has no verified four-`Vector2` AddImage form, UV reprojection and guard-band
-allocation stay disabled. The normal exact-surface path and immediate compatibility fallback remain
-available instead of guessing an unsupported texture contract.
+This approach works with the same verified full-texture `AddImage` contract used before Phase 8,
+so navigation correctness no longer depends on optional UV parameters exposed by a particular
+ImGui.NET build.
 
 RenderTexture resize is a two-stage commit. A newly rendered candidate is not authoritative until
 the RWImGUI texture bridge presents it successfully. If that presentation fails, the previous
@@ -608,6 +608,18 @@ near-pointer room candidates instead of scanning every room in the detached regi
 
 This keeps the retained architecture's locality guarantee intact even for overlays that intentionally
 remain immediate-mode.
+
+### Navigation correctness repair
+
+Runtime testing exposed three correctness regressions after the first reprojection pass. The repair
+keeps full-texture presentation, refreshes the guard before it can no longer cover the viewport, and
+never changes renderer families merely because pan/zoom crossed the cached margin. This removes the
+white-thumbnail transition and zoom flicker caused by UV/fallback switching.
+
+Room-local custom terrain is now clipped twice: retained raster quads and curve segments are clipped
+to the room's tile bounds during immutable geometry build, and the immediate compatibility renderer
+also applies a per-room ImGui clip rectangle. Malformed or intentionally oversized curve/fill data
+therefore cannot paint outside the room thumbnail.
 
 ## Legacy retirement policy
 

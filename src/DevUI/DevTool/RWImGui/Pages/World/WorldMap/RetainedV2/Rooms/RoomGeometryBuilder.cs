@@ -40,13 +40,20 @@ internal static class RoomGeometryBuilder
             if (run.Width <= 0f || run.Height <= 0f || run.Kind == EditorMapGeometryKind.Air)
                 continue;
 
+            float x0 = Math.Max(0f, run.X);
+            float y0 = Math.Max(0f, run.Y);
+            float x1 = Math.Min(width, run.X + run.Width);
+            float y1 = Math.Min(height, run.Y + run.Height);
+            if (x1 <= x0 || y1 <= y0)
+                continue;
+
             AddQuad(
                 vertices,
                 indices,
-                run.X,
-                run.Y,
-                run.Width,
-                run.Height,
+                x0,
+                y0,
+                x1 - x0,
+                y1 - y0,
                 run.Kind);
         }
 
@@ -65,11 +72,24 @@ internal static class RoomGeometryBuilder
             {
                 EditorMapPointSnapshot a = points[p];
                 EditorMapPointSnapshot b = points[p + 1];
+                if (!TryClipSegmentToRoom(
+                        a.X,
+                        a.Y,
+                        b.X,
+                        b.Y,
+                        width,
+                        height,
+                        out float ax,
+                        out float ay,
+                        out float bx,
+                        out float by))
+                    continue;
+
                 segments.Add(new RoomGeometryBlob.Segment(
-                    a.X,
-                    a.Y,
-                    b.X,
-                    b.Y,
+                    ax,
+                    ay,
+                    bx,
+                    by,
                     curve.Kind));
             }
         }
@@ -112,6 +132,65 @@ internal static class RoomGeometryBuilder
             indices.ToArray(),
             Array.Empty<RoomGeometryBlob.Segment>(),
             Array.Empty<EditorMapNodeVisualSnapshot>());
+    }
+
+    private static bool TryClipSegmentToRoom(
+        float ax,
+        float ay,
+        float bx,
+        float by,
+        float width,
+        float height,
+        out float clippedAx,
+        out float clippedAy,
+        out float clippedBx,
+        out float clippedBy)
+    {
+        clippedAx = ax;
+        clippedAy = ay;
+        clippedBx = bx;
+        clippedBy = by;
+
+        float dx = bx - ax;
+        float dy = by - ay;
+        float t0 = 0f;
+        float t1 = 1f;
+
+        if (!ClipTest(-dx, ax, ref t0, ref t1) ||
+            !ClipTest(dx, width - ax, ref t0, ref t1) ||
+            !ClipTest(-dy, ay, ref t0, ref t1) ||
+            !ClipTest(dy, height - ay, ref t0, ref t1))
+            return false;
+
+        clippedAx = ax + dx * t0;
+        clippedAy = ay + dy * t0;
+        clippedBx = ax + dx * t1;
+        clippedBy = ay + dy * t1;
+        return true;
+    }
+
+    private static bool ClipTest(
+        float p,
+        float q,
+        ref float t0,
+        ref float t1)
+    {
+        if (Math.Abs(p) <= 0.000001f)
+            return q >= 0f;
+
+        float r = q / p;
+        if (p < 0f)
+        {
+            if (r > t1) return false;
+            if (r > t0) t0 = r;
+        }
+        else
+        {
+            if (r < t0) return false;
+            if (r < t1) t1 = r;
+        }
+
+        return true;
     }
 
     private static void AddQuad(

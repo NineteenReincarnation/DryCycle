@@ -220,7 +220,8 @@ internal static class WorldMapRetainedV2Runtime
             bool deferViewOnlyRender =
                 viewChanged &&
                 !nonViewDirty &&
-                WorldMapBackgroundBudget.ViewportInteractionActive;
+                WorldMapBackgroundBudget.ViewportInteractionActive &&
+                Surface.CoversView(view);
             bool needsRender =
                 nonViewDirty ||
                 (viewChanged && !deferViewOnlyRender);
