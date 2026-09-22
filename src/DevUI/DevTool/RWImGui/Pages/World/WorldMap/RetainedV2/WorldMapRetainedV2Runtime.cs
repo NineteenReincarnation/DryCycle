@@ -51,6 +51,7 @@ internal static class WorldMapRetainedV2Runtime
     private static int lastRenderedShowConnections = int.MinValue;
 
     internal static WorldMapScene Scene => RenderSceneState;
+    internal static WorldMapScene MainSceneForPersistence => MainSceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
     internal static WorldMapRoomResourceStore Resources => RoomResources;
     internal static WorldMapConnectionResourceStore Routes => ConnectionResources;
@@ -68,11 +69,13 @@ internal static class WorldMapRetainedV2Runtime
         enabled = true;
         log = logger;
         RoomResources.Initialize(logger);
+        WorldMapPersistentRetainedCache.Enable(logger);
     }
 
     internal static void Disable()
     {
         enabled = false;
+        WorldMapPersistentRetainedCache.Disable();
         ResetRetainedState();
         log = null;
     }

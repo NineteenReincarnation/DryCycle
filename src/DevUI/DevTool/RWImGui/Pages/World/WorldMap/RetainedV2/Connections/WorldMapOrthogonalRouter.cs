@@ -173,6 +173,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
     private const int RoutingPolicyVersion = 3;
+    internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
     private const float BendPenalty = 0.72f;
