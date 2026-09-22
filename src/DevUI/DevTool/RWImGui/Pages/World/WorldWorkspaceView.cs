@@ -109,6 +109,8 @@ internal static class WorldWorkspaceView
     private static float inspectorWidth = 344f;
     private static bool draggingExplorerSplitter;
     private static bool draggingInspectorSplitter;
+    private static float explorerSplitterReveal;
+    private static float inspectorSplitterReveal;
 
     private static int inspectorRoom = -1;
     private static string inspectorSubregion = string.Empty;
@@ -297,6 +299,8 @@ internal static class WorldWorkspaceView
         mappingDirection = WorldConnectionDirection.Bidirectional;
         draggingExplorerSplitter = false;
         draggingInspectorSplitter = false;
+        explorerSplitterReveal = 0f;
+        inspectorSplitterReveal = 0f;
         WorldMapView.ResetRetainedState();
     }
 
@@ -376,13 +380,24 @@ internal static class WorldWorkspaceView
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         bool showExplorer = editor.BrowserOpen;
         bool showInspector = editor.InspectorOpen;
-        float splitter = Math.Max(8f, ImGui.GetStyle().ItemSpacing.X);
+        float splitter = GetSplitterInteractionWidth();
         float reserved = (showExplorer ? splitter : 0f) + (showInspector ? splitter : 0f);
         float minCenter = 400f;
         float maxSideSpace = Math.Max(0f, available.X - minCenter - reserved);
         float left = showExplorer ? Math.Max(260f, Math.Min(explorerWidth, maxSideSpace * 0.46f)) : 0f;
         WorldInspectorReadability.NormalizeInspectorWidth(ref inspectorWidth);
         float right = showInspector ? Math.Max(238f, Math.Min(inspectorWidth, Math.Max(0f, maxSideSpace - left))) : 0f;
+
+        if (!showExplorer)
+        {
+            draggingExplorerSplitter = false;
+            explorerSplitterReveal = 0f;
+        }
+        if (!showInspector)
+        {
+            draggingInspectorSplitter = false;
+            inspectorSplitterReveal = 0f;
+        }
 
         if (showExplorer && showInspector && left + right > maxSideSpace)
         {
@@ -403,7 +418,15 @@ internal static class WorldWorkspaceView
             }
             ImGui.EndChild();
             ImGui.SameLine(0f, 0f);
-            DrawSplitter("##WorldExplorerSplitter", ref explorerWidth, ref draggingExplorerSplitter, +1f, available.Y, 260f, 450f);
+            DrawSplitter(
+                "##WorldExplorerSplitter",
+                ref explorerWidth,
+                ref draggingExplorerSplitter,
+                ref explorerSplitterReveal,
+                +1f,
+                available.Y,
+                260f,
+                450f);
             ImGui.SameLine(0f, 0f);
         }
 
@@ -418,7 +441,15 @@ internal static class WorldWorkspaceView
         if (showInspector)
         {
             ImGui.SameLine(0f, 0f);
-            DrawSplitter("##WorldInspectorSplitter", ref inspectorWidth, ref draggingInspectorSplitter, -1f, available.Y, 238f, 590f);
+            DrawSplitter(
+                "##WorldInspectorSplitter",
+                ref inspectorWidth,
+                ref draggingInspectorSplitter,
+                ref inspectorSplitterReveal,
+                -1f,
+                available.Y,
+                238f,
+                590f);
             ImGui.SameLine(0f, 0f);
             if (ImGui.BeginChild("##WorldInspector", new Num.Vector2(0f, available.Y), ImGuiChildFlags.Borders))
             {
@@ -429,28 +460,234 @@ internal static class WorldWorkspaceView
         }
     }
 
+    private static float GetSplitterInteractionWidth()
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+        return Math.Max(
+            18f,
+            style.FramePadding.X * 2f + 8f);
+    }
+
     private static void DrawSplitter(
         string id,
         ref float width,
         ref bool dragging,
+        ref float reveal,
         float direction,
         float height,
         float min,
         float max)
     {
-        float splitterWidth = Math.Max(8f, ImGui.GetStyle().ItemSpacing.X);
-        ImGui.InvisibleButton(id, new Num.Vector2(splitterWidth, height));
-        bool hovered = ImGui.IsItemHovered();
-        if (!dragging && hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left)) dragging = true;
-        if (dragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left)) dragging = false;
-        if (dragging)
-            width = Math.Max(min, Math.Min(max, width + ImGui.GetIO().MouseDelta.X * direction));
+        float interactionWidth =
+            GetSplitterInteractionWidth();
 
-        Num.Vector2 minPos = ImGui.GetItemRectMin();
-        Num.Vector2 maxPos = ImGui.GetItemRectMax();
-        float x = (minPos.X + maxPos.X) * 0.5f;
-        uint color = ImGui.GetColorU32(hovered || dragging ? ImGuiCol.HeaderActive : ImGuiCol.Separator);
-        ImGui.GetWindowDrawList().AddLine(new Num.Vector2(x, minPos.Y), new Num.Vector2(x, maxPos.Y), color, dragging ? 3f : 1f);
+        ImGui.InvisibleButton(
+            id,
+            new Num.Vector2(
+                interactionWidth,
+                height));
+
+        bool hovered =
+            ImGui.IsItemHovered();
+        if (hovered || dragging)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+
+        if (!dragging &&
+            hovered &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            dragging = true;
+
+        if (dragging &&
+            !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            dragging = false;
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        if (dragging)
+        {
+            width =
+                Math.Max(
+                    min,
+                    Math.Min(
+                        max,
+                        width +
+                        io.MouseDelta.X *
+                        direction));
+        }
+
+        // Stable frames stop changing state once the spring has converged. No allocations, render
+        // targets, background sampling or blur passes are involved.
+        float target =
+            dragging
+                ? 1f
+                : hovered
+                    ? 0.76f
+                    : 0f;
+        float delta =
+            target - reveal;
+        if (Math.Abs(delta) > 0.001f)
+        {
+            float dt =
+                Math.Max(
+                    0.001f,
+                    Math.Min(
+                        0.05f,
+                        io.DeltaTime));
+            float response =
+                1f -
+                (float)Math.Exp(
+                    -18f * dt);
+            reveal += delta * response;
+        }
+        else
+        {
+            reveal = target;
+        }
+
+        Num.Vector2 minPos =
+            ImGui.GetItemRectMin();
+        Num.Vector2 maxPos =
+            ImGui.GetItemRectMax();
+        float x =
+            (minPos.X + maxPos.X) * 0.5f;
+
+        DrawGlassSplitter(
+            ImGui.GetWindowDrawList(),
+            x,
+            minPos.Y,
+            maxPos.Y,
+            reveal,
+            dragging);
+    }
+
+    private static void DrawGlassSplitter(
+        ImDrawListPtr draw,
+        float x,
+        float top,
+        float bottom,
+        float reveal,
+        bool dragging)
+    {
+        float eased =
+            reveal * reveal *
+            (3f - 2f * reveal);
+        float glassWidth =
+            1.5f +
+            eased *
+            (dragging ? 10.5f : 7.5f);
+        float half =
+            glassWidth * 0.5f;
+        float rounding =
+            Math.Max(
+                1f,
+                half);
+
+        Num.Vector4 separator =
+            ImGui.GetStyleColorVec4(ImGuiCol.Separator);
+        Num.Vector4 accent =
+            ImGui.GetStyleColorVec4(
+                dragging
+                    ? ImGuiCol.HeaderActive
+                    : ImGuiCol.HeaderHovered);
+        Num.Vector4 background =
+            ImGui.GetStyleColorVec4(ImGuiCol.WindowBg);
+        Num.Vector4 text =
+            ImGui.GetStyleColorVec4(ImGuiCol.Text);
+
+        float glassAlpha =
+            0.10f +
+            eased * 0.30f;
+        Num.Vector4 glass =
+            new(
+                accent.X * 0.62f +
+                background.X * 0.38f,
+                accent.Y * 0.62f +
+                background.Y * 0.38f,
+                accent.Z * 0.62f +
+                background.Z * 0.38f,
+                glassAlpha);
+
+        Num.Vector4 shadow =
+            new(
+                0f,
+                0f,
+                0f,
+                0.05f +
+                eased * 0.13f);
+        Num.Vector4 highlight =
+            new(
+                text.X,
+                text.Y,
+                text.Z,
+                0.05f +
+                eased * 0.19f);
+        Num.Vector4 core =
+            new(
+                accent.X,
+                accent.Y,
+                accent.Z,
+                0.48f +
+                eased * 0.42f);
+        Num.Vector4 resting =
+            new(
+                separator.X,
+                separator.Y,
+                separator.Z,
+                0.72f);
+
+        float y0 = top + 2f;
+        float y1 = bottom - 2f;
+
+        if (eased > 0.002f)
+        {
+            // Layered translucent surfaces mimic Apple's frosted-glass depth without performing
+            // an actual blur pass. This keeps the splitter GPU-cheap and independent of the map
+            // RenderTexture pipeline.
+            draw.AddRectFilled(
+                new Num.Vector2(
+                    x - half - 1f,
+                    y0 + 1f),
+                new Num.Vector2(
+                    x + half + 1f,
+                    y1 + 1f),
+                ImGui.GetColorU32(shadow),
+                rounding + 1f);
+
+            draw.AddRectFilled(
+                new Num.Vector2(
+                    x - half,
+                    y0),
+                new Num.Vector2(
+                    x + half,
+                    y1),
+                ImGui.GetColorU32(glass),
+                rounding);
+
+            float highlightX =
+                x - Math.Max(
+                    0.5f,
+                    half * 0.36f);
+            draw.AddLine(
+                new Num.Vector2(
+                    highlightX,
+                    y0 + rounding),
+                new Num.Vector2(
+                    highlightX,
+                    y1 - rounding),
+                ImGui.GetColorU32(highlight),
+                1f);
+        }
+
+        float coreThickness =
+            1.25f +
+            eased * 1.65f;
+        draw.AddLine(
+            new Num.Vector2(x, y0),
+            new Num.Vector2(x, y1),
+            ImGui.GetColorU32(
+                eased > 0.002f
+                    ? core
+                    : resting),
+            coreThickness);
     }
 
     private static void DrawExplorer(EditorMapPresentationSnapshot snapshot)
