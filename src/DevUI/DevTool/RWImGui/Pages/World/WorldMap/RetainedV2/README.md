@@ -867,12 +867,15 @@ Phase 7 hardens the first six readability phases for 8/16/32+ connection cluster
 - same-room-pair base lane offsets use the same dense-bank structure, and very dense terminal fan-out
   adds a small depth break every eight endpoints;
 - bank gaps are derived presentation geometry only. They do not create topology, labels, colors or
-  endpoint codes, and obstacle validation can still reject any unsafe shifted route;
+  endpoint codes;
+- if a dense bank's full width hits a room obstacle, the allocator tries uniform 82% and 68%
+  compression while preserving lane order before falling back to the correct BasePoints; this avoids
+  throwing away all lane separation merely because the preferred dense width is unavailable;
 - routes record a non-persistent density tier. Dense single-direction routes render only one
   direction arrow, and dense/extreme arrows scale down while bidirectional routes retain one arrow
   for each direction;
 - crossing detection is spatially bounded to 4096 unique segment-pair checks per 96-unit cell,
-  128 bridge marks per cell and 1024 marks globally per convergence;
+  32768 checks globally, 128 bridge marks per cell and 1024 marks globally per convergence;
 - when a dense cell exceeds the bridge budget, selection is deterministic and route-diverse: each
   over-route receives one opportunity before any route consumes several bridge slots;
 - dense crossing marks use a three-segment bridge arch instead of the normal six-segment arch,

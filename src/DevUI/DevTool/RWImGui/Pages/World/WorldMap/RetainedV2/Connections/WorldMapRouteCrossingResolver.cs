@@ -82,6 +82,7 @@ internal static class WorldMapRouteCrossingResolver
 
     private const int DenseCellPairThreshold = 96;
     private const int MaxUniquePairChecksPerCell = 4096;
+    private const int MaxTotalCandidateChecks = 32768;
     private const int MaxMarksPerCell = 128;
     private const int MaxDenseMarksPerOverRoutePerCell = 8;
     private const int MaxTotalMarks = 1024;
@@ -166,7 +167,8 @@ internal static class WorldMapRouteCrossingResolver
 
         for (int c = 0; c < cellKeys.Count; c++)
         {
-            if (marks.Count >= MaxTotalMarks)
+            if (marks.Count >= MaxTotalMarks ||
+                candidateChecks >= MaxTotalCandidateChecks)
             {
                 budgetLimited = true;
                 break;
@@ -216,7 +218,9 @@ internal static class WorldMapRouteCrossingResolver
                         continue;
 
                     if (cellChecks >=
-                        MaxUniquePairChecksPerCell)
+                            MaxUniquePairChecksPerCell ||
+                        candidateChecks >=
+                            MaxTotalCandidateChecks)
                     {
                         budgetLimited = true;
                         stopCell = true;

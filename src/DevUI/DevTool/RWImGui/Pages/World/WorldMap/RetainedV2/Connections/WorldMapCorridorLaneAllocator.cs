@@ -128,18 +128,31 @@ internal static class WorldMapCorridorLaneAllocator
             {
                 densityTier = lanePlan.DensityTier;
 
+                float[] effectiveOffsets =
+                    lanePlan.Offsets;
                 Num.Vector2[] continuityCandidate =
                     BuildLanePath(
                         basePoints,
-                        lanePlan.Offsets);
+                        effectiveOffsets);
 
                 bool continuityClear =
-                    continuityCandidate.Length >= 2 &&
-                    WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                    IsDerivedRouteClear(
                         continuityCandidate,
-                        route.FromRoomIndex,
-                        route.ToRoomIndex,
+                        route,
                         obstacles);
+
+                if (!continuityClear &&
+                    densityTier > 0)
+                {
+                    continuityClear =
+                        TryBuildCompressedDensePath(
+                            basePoints,
+                            lanePlan.Offsets,
+                            route,
+                            obstacles,
+                            out effectiveOffsets,
+                            out continuityCandidate);
+                }
 
                 if (continuityClear)
                 {
@@ -148,15 +161,13 @@ internal static class WorldMapCorridorLaneAllocator
                     Num.Vector2[] weaveCandidate =
                         WorldMapJunctionWeavePlanner.Build(
                             basePoints,
-                            lanePlan.Offsets,
+                            effectiveOffsets,
                             lanePlan.Assigned);
 
                     if (weaveCandidate != null &&
-                        weaveCandidate.Length >= 2 &&
-                        WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                        IsDerivedRouteClear(
                             weaveCandidate,
-                            route.FromRoomIndex,
-                            route.ToRoomIndex,
+                            route,
                             obstacles))
                     {
                         candidate = weaveCandidate;
@@ -594,6 +605,84 @@ internal static class WorldMapCorridorLaneAllocator
                 }
             }
         }
+    }
+
+    private static bool TryBuildCompressedDensePath(
+        Num.Vector2[] basePoints,
+        float[] originalOffsets,
+        ConnectionRouteResource route,
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles,
+        out float[] effectiveOffsets,
+        out Num.Vector2[] candidate)
+    {
+        effectiveOffsets = originalOffsets;
+        candidate = null;
+
+        // Bank gaps intentionally favor readability, but nearby rooms can make the full width
+        // impossible. Preserve route ordering first by shrinking the whole lane field uniformly.
+        // Only after both bounded attempts fail do we fall back to BasePoints.
+        float[] scales =
+        {
+            0.82f,
+            0.68f
+        };
+
+        for (int attempt = 0;
+             attempt < scales.Length;
+             attempt++)
+        {
+            float[] scaled =
+                ScaleOffsets(
+                    originalOffsets,
+                    scales[attempt]);
+
+            Num.Vector2[] compressed =
+                BuildLanePath(
+                    basePoints,
+                    scaled);
+
+            if (!IsDerivedRouteClear(
+                    compressed,
+                    route,
+                    obstacles))
+                continue;
+
+            effectiveOffsets = scaled;
+            candidate = compressed;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static float[] ScaleOffsets(
+        float[] source,
+        float scale)
+    {
+        if (source == null)
+            return Array.Empty<float>();
+
+        float[] scaled =
+            new float[source.Length];
+        for (int i = 0; i < source.Length; i++)
+            scaled[i] = source[i] * scale;
+
+        return scaled;
+    }
+
+    private static bool IsDerivedRouteClear(
+        Num.Vector2[] points,
+        ConnectionRouteResource route,
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles)
+    {
+        return points != null &&
+               points.Length >= 2 &&
+               route != null &&
+               WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                   points,
+                   route.FromRoomIndex,
+                   route.ToRoomIndex,
+                   obstacles);
     }
 
     private static Num.Vector2[] BuildLanePath(
