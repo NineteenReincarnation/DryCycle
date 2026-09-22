@@ -167,6 +167,7 @@ internal static class WorldMapOrthogonalRouter
     private const float PortNeck = 22f;
     private const float CompactRoomGap = 52f;
     private const float CompactEndpointDistance = 150f;
+    private const float CompactAdjacentEndpointDistance = 220f;
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
@@ -659,8 +660,12 @@ internal static class WorldMapOrthogonalRouter
                 request.EndRoomMin.Y - request.StartRoomMax.Y));
         float roomGap = (float)Math.Sqrt(gapX * gapX + gapY * gapY);
         float endpointDistance = Num.Vector2.Distance(request.Start, request.End);
-        if (roomGap > CompactRoomGap &&
-            endpointDistance > CompactEndpointDistance)
+        bool closeEndpoints =
+            endpointDistance <= CompactEndpointDistance;
+        bool adjacentRooms =
+            roomGap <= CompactRoomGap &&
+            endpointDistance <= CompactAdjacentEndpointDistance;
+        if (!closeEndpoints && !adjacentRooms)
             return false;
 
         List<Num.Vector2[]> candidates = new(4);
