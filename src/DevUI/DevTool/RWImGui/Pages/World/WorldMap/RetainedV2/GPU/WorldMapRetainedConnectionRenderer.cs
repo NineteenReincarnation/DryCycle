@@ -47,7 +47,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private MeshFilter crossingFilter;
     private MeshRenderer crossingRenderer;
     private long crossingRevision = long.MinValue;
-    private int crossingVisibilityHash = int.MinValue;
+    private readonly HashSet<string> crossingVisibleRouteIds =
+        new(StringComparer.Ordinal);
     private bool crossingHasGeometry;
 
     internal int RetainedRouteCount => routeObjects.Count;
@@ -127,13 +128,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
         }
         else
         {
-            int visibilityHash =
-                VisibleRouteHash(
-                    visibleRouteIds,
+            bool visibilityChanged =
+                !crossingVisibleRouteIds.SetEquals(
                     visibleNow);
 
             if (crossingRevision != resources.CrossingRevision ||
-                crossingVisibilityHash != visibilityHash)
+                visibilityChanged)
             {
                 Mesh crossingMesh =
                     BuildCrossingMesh(
@@ -146,8 +146,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
                 crossingRevision =
                     resources.CrossingRevision;
-                crossingVisibilityHash =
-                    visibilityHash;
+                crossingVisibleRouteIds.Clear();
+                crossingVisibleRouteIds.UnionWith(
+                    visibleNow);
                 crossingHasGeometry =
                     crossingMesh != null;
             }
@@ -177,7 +178,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         crossingFilter = null;
         crossingRenderer = null;
         crossingRevision = long.MinValue;
-        crossingVisibilityHash = int.MinValue;
+        crossingVisibleRouteIds.Clear();
         crossingHasGeometry = false;
 
         if (material != null)
@@ -797,37 +798,6 @@ internal sealed class WorldMapRetainedConnectionRenderer
         filter.sharedMesh = next;
         if (previous != null)
             UnityEngine.Object.Destroy(previous);
-    }
-
-    private static int VisibleRouteHash(
-        IReadOnlyList<string> orderedRouteIds,
-        HashSet<string> visibleRouteIds)
-    {
-        unchecked
-        {
-            int hash = 17;
-
-            if (orderedRouteIds == null ||
-                visibleRouteIds == null)
-                return hash;
-
-            for (int i = 0;
-                 i < orderedRouteIds.Count;
-                 i++)
-            {
-                string id =
-                    orderedRouteIds[i];
-
-                if (string.IsNullOrEmpty(id) ||
-                    !visibleRouteIds.Contains(id))
-                    continue;
-
-                hash = hash * 31 +
-                       StringComparer.Ordinal.GetHashCode(id);
-            }
-
-            return hash;
-        }
     }
 
     private static Mesh NewMesh(string name) =>

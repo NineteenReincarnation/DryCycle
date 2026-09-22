@@ -522,8 +522,10 @@ internal static class WorldMapRetainedV2Runtime
         int layer,
         int layerMask)
     {
+        // WorldMapView exposes exactly L1/L2/L3. Keep its fallback semantics for any extension or
+        // malformed layer value: values outside the three UI layers remain visible.
         if (layer < 0 ||
-            layer >= 31)
+            layer >= 3)
             return true;
 
         return (layerMask &
