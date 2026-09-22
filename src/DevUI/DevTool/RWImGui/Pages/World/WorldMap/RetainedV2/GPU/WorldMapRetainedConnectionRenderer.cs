@@ -47,6 +47,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private MeshFilter crossingFilter;
     private MeshRenderer crossingRenderer;
     private long crossingRevision = long.MinValue;
+    private int crossingVisibilityHash = int.MinValue;
+    private bool crossingHasGeometry;
 
     internal int RetainedRouteCount => routeObjects.Count;
 
@@ -125,17 +127,34 @@ internal sealed class WorldMapRetainedConnectionRenderer
         }
         else
         {
-            if (crossingRevision != resources.CrossingRevision)
+            int visibilityHash =
+                VisibleRouteHash(
+                    visibleRouteIds,
+                    visibleNow);
+
+            if (crossingRevision != resources.CrossingRevision ||
+                crossingVisibilityHash != visibilityHash)
             {
+                Mesh crossingMesh =
+                    BuildCrossingMesh(
+                        resources,
+                        visibleNow);
+
                 ReplaceMesh(
                     crossingFilter,
-                    BuildCrossingMesh(resources));
-                crossingRevision = resources.CrossingRevision;
+                    crossingMesh);
+
+                crossingRevision =
+                    resources.CrossingRevision;
+                crossingVisibilityHash =
+                    visibilityHash;
+                crossingHasGeometry =
+                    crossingMesh != null;
             }
 
             if (crossingObject != null)
                 crossingObject.SetActive(
-                    resources.Crossings.Count > 0);
+                    crossingHasGeometry);
         }
 
         return true;
@@ -158,6 +177,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
         crossingFilter = null;
         crossingRenderer = null;
         crossingRevision = long.MinValue;
+        crossingVisibilityHash = int.MinValue;
+        crossingHasGeometry = false;
 
         if (material != null)
             UnityEngine.Object.Destroy(material);
@@ -312,9 +333,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
     }
 
     private static Mesh BuildCrossingMesh(
-        WorldMapConnectionResourceStore resources)
+        WorldMapConnectionResourceStore resources,
+        HashSet<string> visibleRouteIds)
     {
         if (resources == null ||
+            visibleRouteIds == null ||
+            visibleRouteIds.Count == 0 ||
             resources.Crossings.Count == 0)
             return null;
 
@@ -342,6 +366,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
         {
             WorldMapCrossingMark mark =
                 resources.Crossings[i];
+
+            if (!visibleRouteIds.Contains(
+                    mark.OverRouteId) ||
+                !visibleRouteIds.Contains(
+                    mark.UnderRouteId))
+                continue;
 
             if (!resources.TryGet(
                     mark.OverRouteId,
@@ -767,6 +797,37 @@ internal sealed class WorldMapRetainedConnectionRenderer
         filter.sharedMesh = next;
         if (previous != null)
             UnityEngine.Object.Destroy(previous);
+    }
+
+    private static int VisibleRouteHash(
+        IReadOnlyList<string> orderedRouteIds,
+        HashSet<string> visibleRouteIds)
+    {
+        unchecked
+        {
+            int hash = 17;
+
+            if (orderedRouteIds == null ||
+                visibleRouteIds == null)
+                return hash;
+
+            for (int i = 0;
+                 i < orderedRouteIds.Count;
+                 i++)
+            {
+                string id =
+                    orderedRouteIds[i];
+
+                if (string.IsNullOrEmpty(id) ||
+                    !visibleRouteIds.Contains(id))
+                    continue;
+
+                hash = hash * 31 +
+                       StringComparer.Ordinal.GetHashCode(id);
+            }
+
+            return hash;
+        }
     }
 
     private static Mesh NewMesh(string name) =>

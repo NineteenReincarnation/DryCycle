@@ -890,6 +890,23 @@ All density work remains inside route/corridor convergence. Stable frames, pan/z
 hover/selection continue to perform zero density/crossing topology work; focus cost stays bounded to
 the one or two focused route polylines.
 
+### Multi-Lane Routing V2 · post-phase self-audit
+
+A code-side audit after Phase 7 found and closed presentation-boundary issues that the static Guard
+does not prove:
+
+- retained route visibility is filtered by the active room-layer mask before a surface render, so a
+  hidden L1/L2/L3 room pair cannot leave its connection stroke on the retained texture;
+- immediate retained-point reuse now performs the same layer check before returning route points,
+  keeping fallback drawing and hit testing consistent with the retained surface;
+- crossing bridge mesh generation is filtered by the exact route set rendered into that guarded
+  surface; viewport/layer changes rebuild the crossing mesh only when the surface itself renders;
+- current crossing marks are published as a detached immutable route-keyed snapshot for the ImGui
+  thread. Stale marks are unpublished while route/corridor convergence is pending;
+- Phase 6 focus overlays redraw the appropriate bridge semantic after their local isolation stroke,
+  so hovering/selecting a crossing cannot flatten an existing bridge back into a visually ambiguous
+  junction.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

@@ -925,6 +925,209 @@ internal static class WorldMapView
             coreThickness,
             connection.Direction,
             connection.Ambiguous);
+
+        DrawFocusedCrossingSemantics(
+            draw,
+            snapshot,
+            canvasMin,
+            canvasSize,
+            connection,
+            selected,
+            isolation,
+            core,
+            isolationThickness,
+            coreThickness);
+    }
+
+    private static void DrawFocusedCrossingSemantics(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize,
+        EditorMapConnectionSnapshot focusedConnection,
+        bool selected,
+        uint focusIsolation,
+        uint focusCore,
+        float focusIsolationThickness,
+        float focusCoreThickness)
+    {
+        if (focusedConnection == null ||
+            !WorldMapRetainedV2Runtime.TryGetConnectionCrossings(
+                focusedConnection.ConnectionId,
+                out WorldMapCrossingMark[] marks) ||
+            marks == null ||
+            marks.Length == 0)
+            return;
+
+        Num.Vector2 canvasMax =
+            canvasMin + canvasSize;
+
+        for (int i = 0; i < marks.Length; i++)
+        {
+            WorldMapCrossingMark mark =
+                marks[i];
+
+            EditorMapConnectionSnapshot overConnection =
+                FindConnection(
+                    snapshot,
+                    mark.OverRouteId);
+
+            if (overConnection == null ||
+                !ConnectionLayersVisible(
+                    snapshot,
+                    overConnection))
+                continue;
+
+            Num.Vector2 point =
+                ToScreen(
+                    canvasMin,
+                    mark.Point);
+
+            if (point.X < canvasMin.X - 32f ||
+                point.Y < canvasMin.Y - 32f ||
+                point.X > canvasMax.X + 32f ||
+                point.Y > canvasMax.Y + 32f)
+                continue;
+
+            Num.Vector2 tangent =
+                mark.Tangent;
+            float tangentLength =
+                tangent.Length();
+            if (tangentLength <= 0.001f)
+                continue;
+
+            tangent /= tangentLength;
+            Num.Vector2 normal =
+                new(
+                    -tangent.Y,
+                    tangent.X);
+
+            bool focusedIsOver =
+                string.Equals(
+                    mark.OverRouteId,
+                    focusedConnection.ConnectionId,
+                    StringComparison.Ordinal);
+
+            uint bridgeCore =
+                focusedIsOver
+                    ? focusCore
+                    : overConnection.Ambiguous
+                        ? ImGui.GetColorU32(ImGuiCol.TextDisabled)
+                        : ConnectionColor(
+                            overConnection.Direction);
+
+            uint bridgeShadow =
+                focusedIsOver
+                    ? focusIsolation
+                    : ImGui.GetColorU32(
+                        ImGuiCol.WindowBg);
+
+            float bridgeCoreThickness =
+                focusedIsOver
+                    ? focusCoreThickness
+                    : overConnection.Direction ==
+                      WorldConnectionDirection.Bidirectional
+                        ? 3.4f
+                        : 3.2f;
+
+            float bridgeShadowThickness =
+                focusedIsOver
+                    ? focusIsolationThickness
+                    : bridgeCoreThickness + 4.8f;
+
+            float radius =
+                (mark.Dense ? 5.7f : 7f) *
+                zoom;
+            float rise =
+                (mark.Dense ? 4.2f : 5.5f) *
+                zoom;
+
+            radius =
+                Math.Max(
+                    2.5f,
+                    radius);
+            rise =
+                Math.Max(
+                    1.8f,
+                    rise);
+
+            // Remove the straight focus stroke through the crossing before restoring the bridge.
+            // When the focused route is the under-route this also re-establishes the visible gap
+            // that says "crossing, not junction".
+            draw.AddLine(
+                point -
+                    tangent *
+                    (radius + 3f),
+                point +
+                    tangent *
+                    (radius + 3f),
+                focusIsolation,
+                focusIsolationThickness + 2f);
+
+            int arcSegments =
+                mark.Dense ? 3 : 6;
+            Num.Vector2 previous =
+                point -
+                tangent * radius;
+
+            for (int segment = 1;
+                 segment <= arcSegments;
+                 segment++)
+            {
+                float t =
+                    segment /
+                    (float)arcSegments;
+                float along =
+                    (-1f + t * 2f) *
+                    radius;
+                float lift =
+                    (float)Math.Sin(
+                        Math.PI * t) *
+                    rise;
+
+                Num.Vector2 current =
+                    point +
+                    tangent * along +
+                    normal * lift;
+
+                draw.AddLine(
+                    previous,
+                    current,
+                    bridgeShadow,
+                    bridgeShadowThickness);
+
+                draw.AddLine(
+                    previous,
+                    current,
+                    bridgeCore,
+                    bridgeCoreThickness);
+
+                previous = current;
+            }
+        }
+    }
+
+    private static bool ConnectionLayersVisible(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapConnectionSnapshot connection)
+    {
+        if (snapshot == null ||
+            connection == null)
+            return false;
+
+        EditorMapRoomSnapshot from =
+            FindRoom(
+                snapshot,
+                connection.FromRoomIndex);
+        EditorMapRoomSnapshot to =
+            FindRoom(
+                snapshot,
+                connection.ToRoomIndex);
+
+        return from != null &&
+               to != null &&
+               IsLayerVisible(from.Layer) &&
+               IsLayerVisible(to.Layer);
     }
 
     private static void DrawExitPorts(
@@ -1416,6 +1619,21 @@ internal static class WorldMapView
             connection.ToNodeIndex < 0)
             return false;
 
+        EditorMapRoomSnapshot roomA =
+            FindRoom(
+                snapshot,
+                connection.FromRoomIndex);
+        EditorMapRoomSnapshot roomB =
+            FindRoom(
+                snapshot,
+                connection.ToRoomIndex);
+
+        if (roomA == null ||
+            roomB == null ||
+            !IsLayerVisible(roomA.Layer) ||
+            !IsLayerVisible(roomB.Layer))
+            return false;
+
         if (WorldMapRetainedV2Runtime.TryGetConnectionRoutePoints(
                 connection.ConnectionId,
                 out Num.Vector2[] retainedPoints) &&
@@ -1428,16 +1646,6 @@ internal static class WorldMapView
                     ToScreen(canvasMin, retainedPoints[i]));
             return output.Count >= 2;
         }
-
-        EditorMapRoomSnapshot roomA =
-            FindRoom(snapshot, connection.FromRoomIndex);
-        EditorMapRoomSnapshot roomB =
-            FindRoom(snapshot, connection.ToRoomIndex);
-        if (roomA == null ||
-            roomB == null ||
-            !IsLayerVisible(roomA.Layer) ||
-            !IsLayerVisible(roomB.Layer))
-            return false;
 
         Num.Vector2 a =
             EndpointPosition(
