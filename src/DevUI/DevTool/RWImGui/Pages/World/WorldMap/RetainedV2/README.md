@@ -803,6 +803,34 @@ the existing interaction cooldown.
 Endpoint pair codes are intentionally not part of the normal map presentation. Line geometry,
 fan-out, lane continuity and crossing semantics remain the primary connection language.
 
+### Multi-Lane Routing V2 · Phase 5 — Junction weaving / bundle branching
+
+Phase 5 moves branch/merge readability away from exact T-junction collapse:
+
+- Phase 4 lane metadata now records both the numeric offset and an explicit per-segment
+  **Assigned** bit; a centre lane at offset 0 is therefore distinct from a segment that is not part
+  of any corridor;
+- a dedicated `WorldMapJunctionWeavePlanner` inspects only unassigned middle segments directly
+  adjacent to a bundle;
+- when a route leaves a bundle, its lane is carried a bounded distance into the unique branch before
+  an orthogonal lateral jog returns to that branch's centreline;
+- when a route enters a bundle, the inverse happens before the shared junction: it moves into its
+  assigned slot early and reaches the merge already ordered;
+- a unique segment between two bundles may weave from the incoming slot to the outgoing slot in the
+  middle of that segment;
+- terminal segments remain excluded so Phase 1 fan-out stays authoritative beside room sockets;
+- all weave geometry remains orthogonal. No diagonal compatibility stroke is reintroduced;
+- the Phase 4 continuity path is validated first. Phase 5 weave geometry is then validated
+  independently against retained room obstacles. If weaving is unsafe, only the weave enhancement is
+  rejected and the valid Phase 4 continuity path remains visible;
+- routes without a visible branch boundary take a fast path and allocate no weave geometry.
+
+Junction weaving runs only inside the existing corridor-dirty convergence pass. Stable frames,
+pan/zoom, hover and active room dragging do not execute the planner.
+
+The next stage is interaction focus: hover/selection should make one already-readable route stand out
+without being required to understand the base topology.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

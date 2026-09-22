@@ -63,6 +63,18 @@ internal static class WorldMapCorridorLaneAllocator
         internal readonly List<string> RouteIds = new();
     }
 
+    private sealed class RouteLanePlan
+    {
+        internal RouteLanePlan(int segmentCount)
+        {
+            Offsets = new float[Math.Max(0, segmentCount)];
+            Assigned = new bool[Math.Max(0, segmentCount)];
+        }
+
+        internal float[] Offsets { get; }
+        internal bool[] Assigned { get; }
+    }
+
     private const float CoordinateBucketSize = 4f;
     private const float MinimumSharedRun = 28f;
     private const float PreferredLaneSpacing = 10f;
@@ -87,8 +99,8 @@ internal static class WorldMapCorridorLaneAllocator
         List<CorridorComponent> components =
             BuildComponents(buckets);
 
-        Dictionary<string, float[]> offsetsByRoute =
-            BuildContinuityOffsets(components);
+        Dictionary<string, RouteLanePlan> lanePlans =
+            BuildContinuityPlans(components);
 
         for (int i = 0; i < routeIds.Count; i++)
         {
@@ -99,21 +111,24 @@ internal static class WorldMapCorridorLaneAllocator
                 continue;
 
             Num.Vector2[] candidate;
-            if (offsetsByRoute.TryGetValue(
+            if (lanePlans.TryGetValue(
                     routeId,
-                    out float[] offsets))
+                    out RouteLanePlan lanePlan))
             {
-                candidate =
+                Num.Vector2[] continuityCandidate =
                     BuildLanePath(
                         basePoints,
-                        offsets);
+                        lanePlan.Offsets);
 
-                if (candidate.Length < 2 ||
-                    !WorldMapOrthogonalRouter.IsDerivedRouteClear(
-                        candidate,
+                bool continuityClear =
+                    continuityCandidate.Length >= 2 &&
+                    WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                        continuityCandidate,
                         route.FromRoomIndex,
                         route.ToRoomIndex,
-                        obstacles))
+                        obstacles);
+
+                if (!continuityClear)
                 {
                     if (PathsEquivalent(
                             route.Points,
@@ -122,6 +137,27 @@ internal static class WorldMapCorridorLaneAllocator
 
                     candidate =
                         (Num.Vector2[])basePoints.Clone();
+                }
+                else
+                {
+                    candidate = continuityCandidate;
+
+                    Num.Vector2[] weaveCandidate =
+                        WorldMapJunctionWeavePlanner.Build(
+                            basePoints,
+                            lanePlan.Offsets,
+                            lanePlan.Assigned);
+
+                    if (weaveCandidate != null &&
+                        weaveCandidate.Length >= 2 &&
+                        WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                            weaveCandidate,
+                            route.FromRoomIndex,
+                            route.ToRoomIndex,
+                            obstacles))
+                    {
+                        candidate = weaveCandidate;
+                    }
                 }
             }
             else
@@ -359,14 +395,14 @@ internal static class WorldMapCorridorLaneAllocator
         }
     }
 
-    private static Dictionary<string, float[]> BuildContinuityOffsets(
+    private static Dictionary<string, RouteLanePlan> BuildContinuityPlans(
         List<CorridorComponent> components)
     {
-        Dictionary<string, float[]> offsetsByRoute =
+        Dictionary<string, RouteLanePlan> lanePlans =
             new(StringComparer.Ordinal);
 
         if (components == null || components.Count == 0)
-            return offsetsByRoute;
+            return lanePlans;
 
         int[] parent =
             new int[components.Count];
@@ -459,14 +495,14 @@ internal static class WorldMapCorridorLaneAllocator
         for (int g = 0; g < orderedGroups.Count; g++)
             AssignContinuityGroup(
                 orderedGroups[g],
-                offsetsByRoute);
+                lanePlans);
 
-        return offsetsByRoute;
+        return lanePlans;
     }
 
     private static void AssignContinuityGroup(
         List<CorridorComponent> components,
-        Dictionary<string, float[]> offsetsByRoute)
+        Dictionary<string, RouteLanePlan> lanePlans)
     {
         if (components == null || components.Count == 0)
             return;
@@ -522,27 +558,29 @@ internal static class WorldMapCorridorLaneAllocator
                         out float offset))
                     continue;
 
-                if (!offsetsByRoute.TryGetValue(
+                if (!lanePlans.TryGetValue(
                         segment.RouteId,
-                        out float[] offsets))
+                        out RouteLanePlan plan))
                 {
                     Num.Vector2[] points =
                         BasePoints(segment.Route);
-                    offsets =
-                        new float[
+                    plan =
+                        new RouteLanePlan(
                             Math.Max(
                                 0,
-                                (points?.Length ?? 0) - 1)];
-                    offsetsByRoute.Add(
+                                (points?.Length ?? 0) - 1));
+                    lanePlans.Add(
                         segment.RouteId,
-                        offsets);
+                        plan);
                 }
 
                 if ((uint)segment.SegmentIndex <
-                    (uint)offsets.Length)
+                    (uint)plan.Offsets.Length)
                 {
-                    offsets[segment.SegmentIndex] =
+                    plan.Offsets[segment.SegmentIndex] =
                         offset;
+                    plan.Assigned[segment.SegmentIndex] =
+                        true;
                 }
             }
         }
