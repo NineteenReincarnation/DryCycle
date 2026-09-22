@@ -27,6 +27,10 @@ internal static class WorldMapPersistentRetainedCache
 
     private static ManualLogSource log;
     private static bool enabled;
+    private static int expectedRoomCount;
+    private static long cachedTopologyFingerprint;
+    private static long verifiedTopologyFingerprint;
+    private static bool topologyRejected;
 
     internal static int ValidatedRoomCount =>
         enabled ? validRooms.Count : 0;
@@ -94,27 +98,38 @@ internal static class WorldMapPersistentRetainedCache
             !routes.TryGetValue(connectionId, out MapViewPersistentRoute stored))
             return WorldMapPersistentRouteRestoreResult.None;
 
-        if (invalidRooms.Contains(stored.FromRoomIndex) ||
-            invalidRooms.Contains(stored.ToRoomIndex))
+        if (topologyRejected ||
+            cachedTopologyFingerprint == 0L)
         {
             routes.Remove(connectionId);
             return WorldMapPersistentRouteRestoreResult.None;
         }
 
-        if (!validRooms.ContainsKey(stored.FromRoomIndex) ||
-            !validRooms.ContainsKey(stored.ToRoomIndex))
+        if (invalidRooms.Count > 0 ||
+            scene.Rooms.Count != expectedRoomCount)
+        {
+            topologyRejected = true;
+            routes.Clear();
+            return WorldMapPersistentRouteRestoreResult.None;
+        }
+
+        // Every cached room must first pass the core room-source stamp check. This proves retained
+        // room dimensions/obstacles still come from the same authored geometry as the saved route.
+        if (validRooms.Count < expectedRoomCount)
             return WorldMapPersistentRouteRestoreResult.Pending;
 
-        if (roomResources == null ||
-            !roomResources.TryGet(
-                stored.FromRoomIndex,
-                out WorldMapRoomResourceStore.RoomResource fromResource) ||
-            !roomResources.TryGet(
-                stored.ToRoomIndex,
-                out WorldMapRoomResourceStore.RoomResource toResource) ||
-            fromResource?.GeometryGeneration <= 0 ||
-            toResource?.GeometryGeneration <= 0)
-            return WorldMapPersistentRouteRestoreResult.Pending;
+        if (verifiedTopologyFingerprint == 0L)
+        {
+            verifiedTopologyFingerprint =
+                ComputeTopologyFingerprint(scene);
+            if (verifiedTopologyFingerprint !=
+                cachedTopologyFingerprint)
+            {
+                topologyRejected = true;
+                routes.Clear();
+                return WorldMapPersistentRouteRestoreResult.None;
+            }
+        }
 
         if (!scene.TryGetConnection(connectionId, out WorldMapScene.ConnectionNode connection) ||
             !scene.TryGetRoom(stored.FromRoomIndex, out WorldMapScene.RoomNode fromRoom) ||
@@ -203,6 +218,9 @@ internal static class WorldMapPersistentRetainedCache
             storedRoom.ThumbnailPixelHeight = descriptor.PixelHeight;
         }
 
+        snapshot.FrontendTopologyFingerprint =
+            ComputeTopologyFingerprint(scene);
+
         snapshot.Routes.Clear();
         foreach (KeyValuePair<string, ConnectionRouteResource> pair
                  in WorldMapRetainedV2Runtime.Routes.Routes)
@@ -250,6 +268,12 @@ internal static class WorldMapPersistentRetainedCache
         Clear();
         if (!enabled || snapshot == null) return;
 
+        expectedRoomCount = snapshot.Rooms.Count;
+        cachedTopologyFingerprint =
+            snapshot.FrontendTopologyFingerprint;
+        verifiedTopologyFingerprint = 0L;
+        topologyRejected = false;
+
         for (int i = 0; i < snapshot.Routes.Count; i++)
         {
             MapViewPersistentRoute route = snapshot.Routes[i];
@@ -286,6 +310,80 @@ internal static class WorldMapPersistentRetainedCache
         invalidRooms.Clear();
         consumedThumbnailHints.Clear();
         routes.Clear();
+        expectedRoomCount = 0;
+        cachedTopologyFingerprint = 0L;
+        verifiedTopologyFingerprint = 0L;
+        topologyRejected = false;
+    }
+
+    private static long ComputeTopologyFingerprint(
+        WorldMapScene scene)
+    {
+        if (scene == null) return 0L;
+
+        unchecked
+        {
+            ulong hash = 1469598103934665603UL;
+
+            List<int> roomIds = new(scene.Rooms.Keys);
+            roomIds.Sort();
+            hash = Mix(hash, roomIds.Count);
+            for (int i = 0; i < roomIds.Count; i++)
+            {
+                WorldMapScene.RoomNode room =
+                    scene.Rooms[roomIds[i]];
+                hash = Mix(hash, room.RoomIndex);
+                hash = MixString(hash, room.Name);
+                hash = Mix(hash, room.WorldPosition.X.GetHashCode());
+                hash = Mix(hash, room.WorldPosition.Y.GetHashCode());
+            }
+
+            List<string> connectionIds =
+                new(scene.Connections.Keys);
+            connectionIds.Sort(StringComparer.Ordinal);
+            hash = Mix(hash, connectionIds.Count);
+            for (int i = 0; i < connectionIds.Count; i++)
+            {
+                WorldMapScene.ConnectionNode connection =
+                    scene.Connections[connectionIds[i]];
+                hash = MixString(hash, connection.Id);
+                hash = Mix(hash, connection.FromRoomIndex);
+                hash = Mix(hash, connection.FromNodeIndex);
+                hash = Mix(hash, connection.ToRoomIndex);
+                hash = Mix(hash, connection.ToNodeIndex);
+                hash = Mix(hash, (int)connection.Direction);
+                hash = Mix(hash, connection.Ambiguous ? 1 : 0);
+            }
+
+            return (long)hash;
+        }
+    }
+
+    private static ulong Mix(ulong hash, int value)
+    {
+        unchecked
+        {
+            hash = (hash ^ (uint)value) * 1099511628211UL;
+            hash = (hash ^ (uint)(value >> 16)) * 1099511628211UL;
+            return hash;
+        }
+    }
+
+    private static ulong MixString(ulong hash, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Mix(hash, 0);
+
+        unchecked
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                hash = (hash ^ (byte)c) * 1099511628211UL;
+                hash = (hash ^ (byte)(c >> 8)) * 1099511628211UL;
+            }
+            return hash;
+        }
     }
 
     private static bool Approximately(Num.Vector2 a, Num.Vector2 b) =>

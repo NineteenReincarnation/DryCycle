@@ -111,6 +111,7 @@ internal sealed class MapViewPersistentSnapshot
     internal int FormatVersion;
     internal string ContextKey = string.Empty;
     internal long TemplateFingerprint;
+    internal long FrontendTopologyFingerprint;
     internal readonly List<MapViewPersistentRoom> Rooms = new();
     internal readonly List<MapViewPersistentRoute> Routes = new();
 }
@@ -141,6 +142,7 @@ internal static class MapViewPersistentCacheStore
     private const int MaxNodesPerRoom = 8192;
     private const int MaxRoutes = 16384;
     private const int MaxRoutePoints = 4096;
+    private const int FrontendExtensionMagic = 0x33574656; // VFW3
 
     private static readonly object writeSync = new();
     private static readonly Queue<WriteRequest> writeQueue = new();
@@ -240,6 +242,16 @@ internal static class MapViewPersistentCacheStore
                     ReadSafeCount(reader, MaxRoutes);
                 for (int i = 0; i < routeCount; i++)
                     snapshot.Routes.Add(ReadRoute(reader));
+
+                // Early development V3 files ended after the route list. Keep them readable, but
+                // leave the fingerprint at zero so their routes are treated as untrusted and rebuilt.
+                if (reader.BaseStream.Position + sizeof(int) + sizeof(long) <=
+                    reader.BaseStream.Length)
+                {
+                    int extensionMagic = reader.ReadInt32();
+                    if (extensionMagic == FrontendExtensionMagic)
+                        snapshot.FrontendTopologyFingerprint = reader.ReadInt64();
+                }
             }
 
             return snapshot;
@@ -494,6 +506,9 @@ internal static class MapViewPersistentCacheStore
                 writer.Write(snapshot.Routes.Count);
                 for (int i = 0; i < snapshot.Routes.Count; i++)
                     WriteRoute(writer, snapshot.Routes[i]);
+
+                writer.Write(FrontendExtensionMagic);
+                writer.Write(snapshot.FrontendTopologyFingerprint);
 
                 writer.Flush();
             }
