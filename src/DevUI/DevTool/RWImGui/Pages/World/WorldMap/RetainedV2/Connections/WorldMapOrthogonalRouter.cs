@@ -58,6 +58,12 @@ internal static class WorldMapOrthogonalRouter
         internal Num.Vector2 EndRoomMin;
         internal Num.Vector2 EndRoomMax;
         internal float LaneOffset;
+        internal int StartTerminalLaneIndex;
+        internal int StartTerminalLaneCount;
+        internal float StartTerminalExtraDepth;
+        internal int EndTerminalLaneIndex;
+        internal int EndTerminalLaneCount;
+        internal float EndTerminalExtraDepth;
     }
 
     internal sealed class Route
@@ -68,6 +74,12 @@ internal static class WorldMapOrthogonalRouter
         internal Num.Vector2 StartDirection;
         internal Num.Vector2 EndDirection;
         internal float LaneOffset;
+        internal int StartTerminalLaneIndex;
+        internal int StartTerminalLaneCount;
+        internal float StartTerminalExtraDepth;
+        internal int EndTerminalLaneIndex;
+        internal int EndTerminalLaneCount;
+        internal float EndTerminalExtraDepth;
         internal bool Reused;
     }
 
@@ -79,6 +91,8 @@ internal static class WorldMapOrthogonalRouter
         internal Num.Vector2 StartDirection;
         internal Num.Vector2 EndDirection;
         internal float LaneOffset;
+        internal float StartTerminalExtraDepth;
+        internal float EndTerminalExtraDepth;
         internal int PolicyVersion;
         internal int LastSeenGeneration;
     }
@@ -172,7 +186,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 3;
+    private const int RoutingPolicyVersion = 4;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -257,6 +271,8 @@ internal static class WorldMapOrthogonalRouter
                         StartDirection = request.StartDirection,
                         EndDirection = request.EndDirection,
                         LaneOffset = request.LaneOffset,
+                        StartTerminalExtraDepth = request.StartTerminalExtraDepth,
+                        EndTerminalExtraDepth = request.EndTerminalExtraDepth,
                         PolicyVersion = RoutingPolicyVersion,
                         LastSeenGeneration = generation
                     };
@@ -529,8 +545,20 @@ internal static class WorldMapOrthogonalRouter
             if (Num.Vector2.Dot(endPerp, stableNormal) < 0f) endPerp = -endPerp;
         }
 
-        Num.Vector2 startBaseEscape = EscapeOutsideRoom(request.Start, startDirection, request.StartRoom, obstacles);
-        Num.Vector2 endBaseEscape = EscapeOutsideRoom(request.End, endDirection, request.EndRoom, obstacles);
+        Num.Vector2 startBaseEscape =
+            EscapeOutsideRoom(
+                request.Start,
+                startDirection,
+                request.StartRoom,
+                obstacles,
+                request.StartTerminalExtraDepth);
+        Num.Vector2 endBaseEscape =
+            EscapeOutsideRoom(
+                request.End,
+                endDirection,
+                request.EndRoom,
+                obstacles,
+                request.EndTerminalExtraDepth);
         Num.Vector2 startEscape = startBaseEscape + startPerp * request.LaneOffset;
         Num.Vector2 endEscape = endBaseEscape + endPerp * request.LaneOffset;
 
@@ -605,7 +633,13 @@ internal static class WorldMapOrthogonalRouter
             Points = points ?? Array.Empty<Num.Vector2>(),
             StartDirection = startDirection,
             EndDirection = endDirection,
-            LaneOffset = request.LaneOffset
+            LaneOffset = request.LaneOffset,
+            StartTerminalLaneIndex = request.StartTerminalLaneIndex,
+            StartTerminalLaneCount = request.StartTerminalLaneCount,
+            StartTerminalExtraDepth = request.StartTerminalExtraDepth,
+            EndTerminalLaneIndex = request.EndTerminalLaneIndex,
+            EndTerminalLaneCount = request.EndTerminalLaneCount,
+            EndTerminalExtraDepth = request.EndTerminalExtraDepth
         };
     }
 
@@ -624,7 +658,13 @@ internal static class WorldMapOrthogonalRouter
             Num.Vector2.DistanceSquared(cached.End, request.End) > 0.25f ||
             Num.Vector2.DistanceSquared(cached.StartDirection, request.StartDirection) > 0.01f ||
             Num.Vector2.DistanceSquared(cached.EndDirection, request.EndDirection) > 0.01f ||
-            Math.Abs(cached.LaneOffset - request.LaneOffset) > 0.01f)
+            Math.Abs(cached.LaneOffset - request.LaneOffset) > 0.01f ||
+            Math.Abs(
+                cached.StartTerminalExtraDepth -
+                request.StartTerminalExtraDepth) > 0.01f ||
+            Math.Abs(
+                cached.EndTerminalExtraDepth -
+                request.EndTerminalExtraDepth) > 0.01f)
             return false;
 
         if (!RouteClear(cached.Route.Points, request.StartRoom, request.EndRoom, obstacles)) return false;
@@ -642,6 +682,12 @@ internal static class WorldMapOrthogonalRouter
             StartDirection = route.StartDirection,
             EndDirection = route.EndDirection,
             LaneOffset = route.LaneOffset,
+            StartTerminalLaneIndex = route.StartTerminalLaneIndex,
+            StartTerminalLaneCount = route.StartTerminalLaneCount,
+            StartTerminalExtraDepth = route.StartTerminalExtraDepth,
+            EndTerminalLaneIndex = route.EndTerminalLaneIndex,
+            EndTerminalLaneCount = route.EndTerminalLaneCount,
+            EndTerminalExtraDepth = route.EndTerminalExtraDepth,
             Reused = route.Reused
         };
     }
@@ -843,9 +889,13 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 mouth,
         Num.Vector2 direction,
         int roomIndex,
-        List<Obstacle> obstacles)
+        List<Obstacle> obstacles,
+        float terminalExtraDepth)
     {
-        Num.Vector2 escape = mouth + direction * PortNeck;
+        Num.Vector2 escape =
+            mouth +
+            direction *
+            (PortNeck + Math.Max(0f, terminalExtraDepth));
         for (int i = 0; i < obstacles.Count; i++)
         {
             Obstacle obstacle = obstacles[i];

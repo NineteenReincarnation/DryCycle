@@ -698,6 +698,25 @@ frontends, run:
 That build compiles the backend and both optional frontends against the installed Rain World and
 RWImGUI assemblies in an isolated non-deploying output directory.
 
+### Multi-Lane Routing V2 · Phase 1 — Terminal fan-out
+
+Phase 1 introduces stable terminal lanes without replacing the retained router:
+
+- every connection endpoint is grouped by **room + physical room side**;
+- endpoints are stably ordered by along-edge position, node index and connection ID;
+- non-Compact routes receive a unique outward terminal depth before entering shared routing space;
+- same-room-pair lane offsets no longer clamp at ±24 px, so the 8th+ link cannot collapse back onto
+  an already-used visual lane;
+- dense groups use adaptive spacing: normal groups retain generous separation, while large groups
+  compress only down to a readable minimum instead of aliasing lanes;
+- port-geometry changes rebuild only the derived terminal-lane table and invalidate the normal
+  dependency routes; pan/zoom still perform zero route work;
+- routing policy is bumped to v4 so pre-fan-out persistent routes are rejected automatically.
+
+Close-room Compact links intentionally keep their short direct behavior. Phase 1 changes the
+departure/arrival readability of longer routes; corridor lane allocation, crossing bridges and
+endpoint pair markers remain later phases.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

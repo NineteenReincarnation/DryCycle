@@ -13,13 +13,19 @@ internal sealed class WorldMapConnectionResourceStore
 {
     private const int IdleRoutesPerFrame = 24;
     private const int InteractiveRoutesPerFrame = 8;
-    private const float LaneSpacing = 8f;
-    private const float MaxLaneOffset = 24f;
+    private const float PreferredPairLaneSpacing = 8f;
+    private const float MinimumPairLaneSpacing = 5f;
+    private const float PreferredTerminalLaneSpacing = 10f;
+    private const float MinimumTerminalLaneSpacing = 6f;
+    private const float PairLaneTargetSpan = 72f;
+    private const float TerminalLaneTargetSpan = 72f;
 
     private readonly Dictionary<string, ConnectionRouteResource> routes =
         new(StringComparer.Ordinal);
     private readonly ConnectionDependencyIndex dependencies = new();
     private readonly Dictionary<string, float> laneOffsets =
+        new(StringComparer.Ordinal);
+    private readonly Dictionary<string, WorldMapWorldSpaceRouter.TerminalFanout> terminalFanouts =
         new(StringComparer.Ordinal);
     private readonly Queue<string> queue = new();
     private readonly HashSet<string> queued = new(StringComparer.Ordinal);
@@ -97,11 +103,14 @@ internal sealed class WorldMapConnectionResourceStore
         if (dirty.FullRebuild || dirty.TopologyChanged)
         {
             dependencies.Rebuild(scene);
-            RebuildLaneOffsets(scene);
+            RebuildLanePlan(scene, roomResources);
             RebuildRoutingObstacles(scene, roomResources);
             EnqueueAll(scene);
             return;
         }
+
+        if (dirty.RoomPorts.Count > 0)
+            RebuildTerminalFanouts(scene, roomResources);
 
         foreach (string id in dirty.Connections)
             Enqueue(id);
@@ -208,6 +217,7 @@ internal sealed class WorldMapConnectionResourceStore
                 roomResources,
                 buildBatch,
                 laneOffsets,
+                terminalFanouts,
                 GetRoutingObstacleSnapshot());
 
         for (int i = 0; i < buildBatch.Count; i++)
@@ -233,6 +243,7 @@ internal sealed class WorldMapConnectionResourceStore
         routes.Clear();
         dependencies.Reset();
         laneOffsets.Clear();
+        terminalFanouts.Clear();
         queue.Clear();
         queued.Clear();
         routeChanged.Clear();
@@ -326,35 +337,314 @@ internal sealed class WorldMapConnectionResourceStore
         return routingObstacleSnapshot;
     }
 
-    private void RebuildLaneOffsets(WorldMapScene scene)
+    private readonly struct TerminalEndpoint
+    {
+        internal TerminalEndpoint(
+            string connectionId,
+            bool start,
+            int roomIndex,
+            int nodeIndex,
+            int side,
+            float along)
+        {
+            ConnectionId = connectionId;
+            Start = start;
+            RoomIndex = roomIndex;
+            NodeIndex = nodeIndex;
+            Side = side;
+            Along = along;
+        }
+
+        internal string ConnectionId { get; }
+        internal bool Start { get; }
+        internal int RoomIndex { get; }
+        internal int NodeIndex { get; }
+        internal int Side { get; }
+        internal float Along { get; }
+    }
+
+    private void RebuildLanePlan(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        RebuildPairLaneOffsets(scene);
+        RebuildTerminalFanouts(scene, roomResources);
+    }
+
+    private void RebuildPairLaneOffsets(WorldMapScene scene)
     {
         laneOffsets.Clear();
         Dictionary<long, List<string>> groups = new();
 
         foreach (WorldMapScene.ConnectionNode connection in scene.Connections.Values)
         {
-            int a = Math.Min(connection.FromRoomIndex, connection.ToRoomIndex);
-            int b = Math.Max(connection.FromRoomIndex, connection.ToRoomIndex);
-            long key = ((long)(uint)a << 32) | (uint)b;
+            int a =
+                Math.Min(
+                    connection.FromRoomIndex,
+                    connection.ToRoomIndex);
+            int b =
+                Math.Max(
+                    connection.FromRoomIndex,
+                    connection.ToRoomIndex);
+            long key =
+                ((long)(uint)a << 32) |
+                (uint)b;
+
             if (!groups.TryGetValue(key, out List<string> ids))
             {
                 ids = new List<string>();
                 groups.Add(key, ids);
             }
+
             ids.Add(connection.Id);
         }
 
         foreach (List<string> ids in groups.Values)
         {
             ids.Sort(StringComparer.Ordinal);
-            float center = (ids.Count - 1) * 0.5f;
+            float spacing =
+                AdaptiveLaneSpacing(
+                    ids.Count,
+                    PreferredPairLaneSpacing,
+                    MinimumPairLaneSpacing,
+                    PairLaneTargetSpan);
+            float center =
+                (ids.Count - 1) * 0.5f;
+
             for (int i = 0; i < ids.Count; i++)
             {
-                float offset = (i - center) * LaneSpacing;
-                if (offset < -MaxLaneOffset) offset = -MaxLaneOffset;
-                if (offset > MaxLaneOffset) offset = MaxLaneOffset;
-                laneOffsets[ids[i]] = offset;
+                // Do not clamp offsets to a fixed maximum. Clamping made the 8th+ connection share
+                // a visual lane again, which is exactly the ambiguity this phase is removing.
+                laneOffsets[ids[i]] =
+                    (i - center) * spacing;
             }
         }
     }
+
+    private void RebuildTerminalFanouts(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        terminalFanouts.Clear();
+        if (scene == null ||
+            scene.Connections.Count == 0)
+            return;
+
+        Dictionary<long, List<TerminalEndpoint>> groups =
+            new();
+
+        foreach (WorldMapScene.ConnectionNode connection
+                 in scene.Connections.Values)
+        {
+            if (connection == null ||
+                !scene.TryGetRoom(
+                    connection.FromRoomIndex,
+                    out WorldMapScene.RoomNode fromRoom) ||
+                !scene.TryGetRoom(
+                    connection.ToRoomIndex,
+                    out WorldMapScene.RoomNode toRoom))
+                continue;
+
+            WorldMapWorldSpaceRouter.GetRoomBounds(
+                fromRoom,
+                roomResources,
+                out System.Numerics.Vector2 fromMin,
+                out System.Numerics.Vector2 fromMax);
+            WorldMapWorldSpaceRouter.GetRoomBounds(
+                toRoom,
+                roomResources,
+                out System.Numerics.Vector2 toMin,
+                out System.Numerics.Vector2 toMax);
+
+            System.Numerics.Vector2 start =
+                WorldMapWorldSpaceRouter.EndpointPosition(
+                    fromRoom,
+                    connection.FromNodeIndex,
+                    roomResources);
+            System.Numerics.Vector2 end =
+                connection.ToNodeIndex >= 0
+                    ? WorldMapWorldSpaceRouter.EndpointPosition(
+                        toRoom,
+                        connection.ToNodeIndex,
+                        roomResources)
+                    : BoundaryToward(
+                        toMin,
+                        toMax,
+                        start);
+
+            AddTerminalEndpoint(
+                groups,
+                connection.Id,
+                start: true,
+                fromRoom.RoomIndex,
+                connection.FromNodeIndex,
+                start,
+                fromMin,
+                fromMax);
+            AddTerminalEndpoint(
+                groups,
+                connection.Id,
+                start: false,
+                toRoom.RoomIndex,
+                connection.ToNodeIndex,
+                end,
+                toMin,
+                toMax);
+        }
+
+        foreach (List<TerminalEndpoint> endpoints
+                 in groups.Values)
+        {
+            endpoints.Sort(CompareTerminalEndpoints);
+            float spacing =
+                AdaptiveLaneSpacing(
+                    endpoints.Count,
+                    PreferredTerminalLaneSpacing,
+                    MinimumTerminalLaneSpacing,
+                    TerminalLaneTargetSpan);
+
+            for (int i = 0; i < endpoints.Count; i++)
+            {
+                TerminalEndpoint endpoint =
+                    endpoints[i];
+                float extraDepth =
+                    i * spacing;
+
+                terminalFanouts.TryGetValue(
+                    endpoint.ConnectionId,
+                    out WorldMapWorldSpaceRouter.TerminalFanout current);
+
+                terminalFanouts[endpoint.ConnectionId] =
+                    endpoint.Start
+                        ? current.WithStart(
+                            i,
+                            endpoints.Count,
+                            extraDepth)
+                        : current.WithEnd(
+                            i,
+                            endpoints.Count,
+                            extraDepth);
+            }
+        }
+    }
+
+    private static void AddTerminalEndpoint(
+        Dictionary<long, List<TerminalEndpoint>> groups,
+        string connectionId,
+        bool start,
+        int roomIndex,
+        int nodeIndex,
+        System.Numerics.Vector2 point,
+        System.Numerics.Vector2 roomMin,
+        System.Numerics.Vector2 roomMax)
+    {
+        System.Numerics.Vector2 direction =
+            WorldMapOrthogonalRouter.InferPortDirection(
+                point,
+                roomMin,
+                roomMax);
+        int side =
+            SideCode(direction);
+        float along =
+            direction.X != 0f
+                ? point.Y
+                : point.X;
+        long key =
+            ((long)(uint)roomIndex << 3) |
+            (uint)side;
+
+        if (!groups.TryGetValue(
+                key,
+                out List<TerminalEndpoint> endpoints))
+        {
+            endpoints = new List<TerminalEndpoint>();
+            groups.Add(key, endpoints);
+        }
+
+        endpoints.Add(
+            new TerminalEndpoint(
+                connectionId,
+                start,
+                roomIndex,
+                nodeIndex,
+                side,
+                along));
+    }
+
+    private static int CompareTerminalEndpoints(
+        TerminalEndpoint a,
+        TerminalEndpoint b)
+    {
+        int byAlong =
+            a.Along.CompareTo(b.Along);
+        if (byAlong != 0)
+            return byAlong;
+
+        int byNode =
+            a.NodeIndex.CompareTo(b.NodeIndex);
+        if (byNode != 0)
+            return byNode;
+
+        int byId =
+            string.CompareOrdinal(
+                a.ConnectionId,
+                b.ConnectionId);
+        if (byId != 0)
+            return byId;
+
+        return a.Start.CompareTo(b.Start);
+    }
+
+    private static int SideCode(
+        System.Numerics.Vector2 direction)
+    {
+        if (direction.X < -0.5f) return 0;
+        if (direction.X > 0.5f) return 1;
+        if (direction.Y < -0.5f) return 2;
+        return 3;
+    }
+
+    private static float AdaptiveLaneSpacing(
+        int count,
+        float preferred,
+        float minimum,
+        float targetSpan)
+    {
+        if (count <= 1)
+            return 0f;
+
+        float bounded =
+            targetSpan /
+            Math.Max(
+                1,
+                count - 1);
+        return Math.Max(
+            minimum,
+            Math.Min(
+                preferred,
+                bounded));
+    }
+
+    private static System.Numerics.Vector2 BoundaryToward(
+        System.Numerics.Vector2 min,
+        System.Numerics.Vector2 max,
+        System.Numerics.Vector2 target)
+    {
+        System.Numerics.Vector2 center =
+            (min + max) * 0.5f;
+        System.Numerics.Vector2 delta =
+            target - center;
+
+        if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+        {
+            return new System.Numerics.Vector2(
+                delta.X >= 0f ? max.X : min.X,
+                center.Y);
+        }
+
+        return new System.Numerics.Vector2(
+            center.X,
+            delta.Y >= 0f ? max.Y : min.Y);
+    }
+}
 }

@@ -15,6 +15,56 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class WorldMapWorldSpaceRouter
 {
+    internal readonly struct TerminalFanout
+    {
+        internal TerminalFanout(
+            int startLaneIndex,
+            int startLaneCount,
+            float startExtraDepth,
+            int endLaneIndex,
+            int endLaneCount,
+            float endExtraDepth)
+        {
+            StartLaneIndex = startLaneIndex;
+            StartLaneCount = startLaneCount;
+            StartExtraDepth = startExtraDepth;
+            EndLaneIndex = endLaneIndex;
+            EndLaneCount = endLaneCount;
+            EndExtraDepth = endExtraDepth;
+        }
+
+        internal int StartLaneIndex { get; }
+        internal int StartLaneCount { get; }
+        internal float StartExtraDepth { get; }
+        internal int EndLaneIndex { get; }
+        internal int EndLaneCount { get; }
+        internal float EndExtraDepth { get; }
+
+        internal TerminalFanout WithStart(
+            int laneIndex,
+            int laneCount,
+            float extraDepth) =>
+            new(
+                laneIndex,
+                laneCount,
+                extraDepth,
+                EndLaneIndex,
+                EndLaneCount,
+                EndExtraDepth);
+
+        internal TerminalFanout WithEnd(
+            int laneIndex,
+            int laneCount,
+            float extraDepth) =>
+            new(
+                StartLaneIndex,
+                StartLaneCount,
+                StartExtraDepth,
+                laneIndex,
+                laneCount,
+                extraDepth);
+    }
+
     private const float TileDisplaySize = 2f;
 
     internal static Dictionary<string, ConnectionRouteResource> Build(
@@ -22,6 +72,7 @@ internal static class WorldMapWorldSpaceRouter
         WorldMapRoomResourceStore roomResources,
         IReadOnlyList<WorldMapScene.ConnectionNode> connections,
         IReadOnlyDictionary<string, float> laneOffsets,
+        IReadOnlyDictionary<string, TerminalFanout> terminalFanouts,
         IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> routingObstacles)
     {
         Dictionary<string, ConnectionRouteResource> result =
@@ -55,6 +106,12 @@ internal static class WorldMapWorldSpaceRouter
             if (laneOffsets != null)
                 laneOffsets.TryGetValue(connection.Id, out laneOffset);
 
+            TerminalFanout terminalFanout = default;
+            if (terminalFanouts != null)
+                terminalFanouts.TryGetValue(
+                    connection.Id,
+                    out terminalFanout);
+
             requests.Add(new WorldMapOrthogonalRouter.Request
             {
                 Id = "v2:" + connection.Id,
@@ -68,7 +125,13 @@ internal static class WorldMapWorldSpaceRouter
                 StartRoomMax = startMax,
                 EndRoomMin = endMin,
                 EndRoomMax = endMax,
-                LaneOffset = laneOffset
+                LaneOffset = laneOffset,
+                StartTerminalLaneIndex = terminalFanout.StartLaneIndex,
+                StartTerminalLaneCount = terminalFanout.StartLaneCount,
+                StartTerminalExtraDepth = terminalFanout.StartExtraDepth,
+                EndTerminalLaneIndex = terminalFanout.EndLaneIndex,
+                EndTerminalLaneCount = terminalFanout.EndLaneCount,
+                EndTerminalExtraDepth = terminalFanout.EndExtraDepth
             });
             accepted.Add(connection);
         }
