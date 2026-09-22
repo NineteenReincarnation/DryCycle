@@ -9,9 +9,9 @@ using ImGuiNET;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Owns DevTool-local font discovery and the one safe registration window used before RWImGui's
-/// first rendered frame. RWImGui still owns the native context, renderer backend and atlas texture;
-/// DryCycle never rebuilds or mutates the atlas after the renderer has uploaded its font texture.
+/// Owns fonts for DryCycle's dedicated DevToolInputContext. Local fonts are never injected into
+/// RWImGUI's shared/default context. Registration happens once, immediately after the dedicated
+/// context is activated and before that context renders its first frame.
 /// </summary>
 internal static unsafe class DevToolFontCatalog
 {
@@ -46,25 +46,6 @@ internal static unsafe class DevToolFontCatalog
     internal static int RegisteredLocalFaceCount => RegisteredFaces.Count;
     internal static string RegistrationMessage => registrationMessage;
 
-    internal static void MarkUnsafeLateRegistrationSkipped(
-        ManualLogSource log)
-    {
-        if (registrationAttempted)
-            return;
-
-        registrationAttempted = true;
-        registrationSucceeded = false;
-        registrationMessage =
-            "RWImGUI 未在 RainWorld.Start 同步阶段创建字体 Atlas；" +
-            "为避免 DX11 Present 线程与 Unity Update 线程竞争，已跳过本地字体注入。";
-        InvalidatePresentationCaches();
-
-        log?.LogWarning(
-            "DryCycle DevTool skipped local font injection because RWImGui created " +
-            "its shared ImGui context asynchronously after RainWorld.Start. " +
-            "Late io.Fonts mutation is disabled to prevent a native atlas-build race.");
-    }
-
     internal static string FontDirectory
     {
         get
@@ -76,9 +57,8 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Registers local fonts only if RWImGui has synchronously created/configured its ImGui context
-    /// before RainWorld.Start returns and before the first frame/font texture upload. If the context
-    /// appears later from the DX11 Present thread, registration is skipped rather than racing it.
+    /// Registers local files into the currently-active DryCycle consumer context. Call only once,
+    /// immediately after ImGUIAPI.SwitchContext(DevToolInputContext) and before its first Render.
     /// </summary>
     internal static bool TryRegisterLocalFonts(ManualLogSource log)
     {
@@ -88,13 +68,6 @@ internal static unsafe class DevToolFontCatalog
 
         try
         {
-            if (ImGui.GetFrameCount() != 0)
-            {
-                registrationMessage = "已错过安全注册窗口：ImGui 已开始渲染帧。";
-                log?.LogWarning("DryCycle DevTool skipped local font registration: ImGui has already started rendering frames.");
-                return false;
-            }
-
             ImGuiIOPtr io = ImGui.GetIO();
             if (io.Fonts.NativePtr == null)
             {
@@ -108,10 +81,10 @@ internal static unsafe class DevToolFontCatalog
             // frontend compiles against the DLL that Rain World loads at runtime.
             if (io.Fonts.Locked || io.Fonts.TexID != 0UL)
             {
-                registrationMessage = "已错过安全注册窗口：字体 Atlas 已锁定或已上传纹理。";
+                registrationMessage = "DevTool 独立字体 Atlas 已锁定或已上传纹理，无法再注册本地字体。";
                 log?.LogWarning(
-                    "DryCycle DevTool refused late font registration because RWImGui's font atlas " +
-                    "is already locked or has a live renderer texture.");
+                    "DryCycle DevTool consumer font atlas was already locked/uploaded before local " +
+                    "font registration. The shared RWImGUI atlas was not modified.");
                 return false;
             }
 
@@ -127,7 +100,11 @@ internal static unsafe class DevToolFontCatalog
             string[] files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly);
             Array.Sort(files, StringComparer.OrdinalIgnoreCase);
 
-            IntPtr glyphRanges = GetExtendedChineseGlyphRanges(io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
+            IntPtr chineseGlyphRanges =
+                GetExtendedChineseGlyphRanges(
+                    io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
+            IntPtr defaultGlyphRanges =
+                io.Fonts.GetGlyphRangesDefault();
             int added = 0;
             int eligibleFiles = 0;
 
@@ -148,6 +125,19 @@ internal static unsafe class DevToolFontCatalog
 
                 string fullPath = Path.GetFullPath(file);
                 if (!RegisteredPaths.Add(fullPath)) continue;
+
+                string fileName = Path.GetFileName(file);
+                string faceName = Path.GetFileNameWithoutExtension(file);
+                string family = FamilyFromName(faceName);
+                bool chineseFace =
+                    !string.Equals(
+                        family,
+                        UbuntuMonoFamily,
+                        StringComparison.OrdinalIgnoreCase);
+                IntPtr glyphRanges =
+                    chineseFace
+                        ? chineseGlyphRanges
+                        : defaultGlyphRanges;
 
                 ImFontPtr font;
                 try
@@ -173,13 +163,11 @@ internal static unsafe class DevToolFontCatalog
                     continue;
                 }
 
-                string fileName = Path.GetFileName(file);
-                string faceName = Path.GetFileNameWithoutExtension(file);
                 RegisteredFaces.Add(new RegisteredFace
                 {
                     Font = font,
                     FileName = fileName,
-                    Family = FamilyFromName(faceName),
+                    Family = family,
                     Weight = InferWeight(faceName)
                 });
                 added++;
@@ -196,8 +184,8 @@ internal static unsafe class DevToolFontCatalog
             if (registrationSucceeded)
             {
                 log?.LogInfo(
-                    $"DryCycle DevTool registered {added} local font face(s) into RWImGui's atlas " +
-                    $"before the first frame from {directory}. The renderer remains the sole atlas texture owner.");
+                    $"DryCycle DevTool registered {added} local font face(s) into its dedicated " +
+                    $"consumer atlas from {directory}. RWImGUI's shared atlas was not modified.");
             }
             else
             {
@@ -328,6 +316,47 @@ internal static unsafe class DevToolFontCatalog
             if (IsChineseUiSelectable(RegisteredFaces[i].Font, RegisteredFaces[i].FileName)) count++;
         cachedSelectableLocalChineseFaces = count;
         return count;
+    }
+
+    internal static bool TryResolveRegisteredFace(
+        string family,
+        int preferredWeight,
+        bool requireChinese,
+        out ImFontPtr font,
+        out string name,
+        out int actualWeight,
+        out int variantCount)
+    {
+        font = default;
+        name = string.Empty;
+        actualWeight = preferredWeight;
+        variantCount = 0;
+
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < RegisteredFaces.Count; i++)
+        {
+            RegisteredFace face = RegisteredFaces[i];
+            if (!string.Equals(
+                    NormalizeFamily(face.Family),
+                    NormalizeFamily(family),
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (requireChinese &&
+                !SupportsChinese(face.Font))
+                continue;
+
+            variantCount++;
+            int distance = Math.Abs(face.Weight - preferredWeight);
+            if (distance >= bestDistance)
+                continue;
+
+            bestDistance = distance;
+            font = face.Font;
+            name = face.FileName;
+            actualWeight = face.Weight;
+        }
+
+        return font.NativePtr != null;
     }
 
     internal static bool TryGetRegisteredFace(ImFontPtr font, out string name, out int weight)

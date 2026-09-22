@@ -188,7 +188,7 @@ internal static class FontSettingsWindow
         if (families.Length == 0)
         {
             ImGui.TextWrapped(
-                "当前 Atlas 中没有可用于简体中文界面的字体。DryCycle 会在 RWImGui 初始化完成、第一帧开始前尝试加入本地字体；如果安全窗口已关闭，则不会强行重建 Atlas。"
+                "DryCycle 的独立 DevTool 字体 Atlas 中没有可用的简体中文字体。请检查 ui/fonts 下的 HarmonyOS_Sans_SC_*.ttf。"
             );
         }
         else
@@ -198,7 +198,7 @@ internal static class FontSettingsWindow
 
         DevToolWidgets.MutedText("字体目录");
         ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 · 启动阶段已注册 {registeredLocalFaces} 个 · 可用于中文 {localChineseFaces} 个");
+        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 · DevTool Context 已注册 {registeredLocalFaces} 个 · 可用于中文 {localChineseFaces} 个");
 
         if (DevToolFontCatalog.RegistrationAttempted && !DevToolFontCatalog.RegistrationSucceeded)
         {

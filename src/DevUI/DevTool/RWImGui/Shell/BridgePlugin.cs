@@ -26,7 +26,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
-    private static bool nativeImGuiReady;
     private bool bridgeEnabled;
     private bool sessionWasVisible;
     private bool sessionWasPaused;
@@ -43,7 +42,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         try
         {
-            nativeImGuiReady = false;
             sessionWasVisible = false;
             sessionWasPaused = false;
             focusTransitionActive = false;
@@ -243,7 +241,6 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup(
             "AfterModsInit lifecycle subscription",
             () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit -= DryCycle_AfterModsInit);
-        nativeImGuiReady = false;
         SafeFrontendCleanup("frontend visibility", () => DevToolFrontend.SetVisibleFromMainThread(false));
         SafeFrontendCleanup(
             "frontend focus state",
@@ -300,52 +297,18 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "ENTER");
 
-        // Let RWImGui's own Start hook run first. Its native function-pointer bootstrap is the
-        // boundary after which calling ImGui.NET is valid. Only then probe the shared font atlas.
+        // RWImGUI installs native bindings here. DryCycle deliberately does not touch the shared
+        // ImGui context/font atlas during game startup. DevTool fonts belong to DevToolInputContext
+        // and are installed only when that dedicated consumer context is first activated.
         global::DryCycle.StartupDiagnostics.Step(
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
-        nativeImGuiReady = true;
-        global::DryCycle.StartupDiagnostics.Optional(
-            "BridgePlugin/RainWorld.Start/RegisterLocalFonts",
-            TryRegisterLocalFontsDuringSynchronousStart);
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
     private static void DryCycle_AfterModsInit(RainWorld self)
     {
         TryRegisterCallback();
-    }
-
-    private static unsafe bool TryRegisterLocalFontsDuringSynchronousStart()
-    {
-        if (!nativeImGuiReady || DevToolFontCatalog.RegistrationAttempted)
-            return false;
-
-        try
-        {
-            // This is the only allowed atlas-mutation window. If RWImGui has not created its shared
-            // context before RainWorld.Start returns, do NOT retry from Update/lifecycle callbacks:
-            // those run concurrently with the DX11 Present-thread renderer on current RWImGui.
-            if (ImGui.GetCurrentContext() == IntPtr.Zero)
-            {
-                DevToolFontCatalog.MarkUnsafeLateRegistrationSkipped(log);
-                return false;
-            }
-
-            return DevToolFontCatalog.TryRegisterLocalFonts(log);
-        }
-        catch (Exception error)
-        {
-            DevToolFontCatalog.MarkUnsafeLateRegistrationSkipped(log);
-            global::DryCycle.StartupDiagnostics.Failure(
-                "BridgePlugin/TryRegisterLocalFontsDuringSynchronousStart",
-                error);
-            log?.LogWarning(
-                "DryCycle DevTool skipped local font registration safely: " +
-                error.Message);
-            return false;
-        }
     }
 
     private static unsafe void TryRegisterCallback()
@@ -387,19 +350,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
 [SuppressUnmanagedCodeSecurity]
 internal static class DevToolFrontend
 {
-    private sealed class FontCandidate
-    {
-        internal ImFontPtr Font;
-        internal string Name;
-        internal int Weight;
-    }
-
     // Do not construct a consumer IMGUIContext merely because BepInEx loads the bridge assembly.
     // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
     // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
     // consumer context construction.
     private static DevToolInputContext inputContext;
-    private static readonly List<FontCandidate> CjkFonts = new();
     private static ManualLogSource log;
     private static volatile bool visible;
     private static volatile bool applicationFocused = true;
@@ -407,14 +362,13 @@ internal static class DevToolFrontend
     private static int drawFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
-    private static bool cjkFontsScanned;
-    private static ImFontPtr cjkFont;
+    private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
     private static int resolvedFontWeightVariantCount = 1;
-    private static bool cjkSelectionValid;
-    private static string projectedCjkFamily = string.Empty;
-    private static int projectedCjkWeight = int.MinValue;
+    private static DevToolUiLanguage projectedFontLanguage = (DevToolUiLanguage)(-1);
+    private static string projectedFontFamily = string.Empty;
+    private static int projectedFontWeight = int.MinValue;
 
     internal static string ResolvedFontName => resolvedFontName;
     internal static int ResolvedFontWeight => resolvedFontWeight;
@@ -470,9 +424,13 @@ internal static class DevToolFrontend
                 inputContext = context;
             }
 
-            // Never mutate io.Fonts here. Once the renderer is alive, adding fonts invalidates the
-            // already-built atlas and Dear ImGui will assert on the next NewFrame.
             ImGUIAPI.SwitchContext(context);
+
+            // This context is owned exclusively by DryCycle and has not rendered yet. Register local
+            // fonts here instead of mutating RWImGUI's shared/default context during startup.
+            if (!DevToolFontCatalog.RegistrationAttempted)
+                DevToolFontCatalog.TryRegisterLocalFonts(log);
+
             Interlocked.Exchange(ref contextBusyLogged, 0);
         }
         catch (Exception error)
@@ -533,9 +491,9 @@ internal static class DevToolFrontend
 
             FloatingWindowSnap.BeginFrame(frameContext);
 
-            bool pushedChineseFont = TryPushChineseFont();
+            bool pushedActiveFont = TryPushActiveFont();
             float oldGlobalScale = io.FontGlobalScale;
-            float baseFontSize = ResolveActiveBaseFontSize(pushedChineseFont);
+            float baseFontSize = ResolveActiveBaseFontSize();
             float fontScale = ResolveUiFontScale(baseFontSize);
             float layoutScale = ResolveLayoutScale();
 
@@ -589,7 +547,7 @@ internal static class DevToolFrontend
                 ImGui.PopStyleColor(3);
                 ImGui.PopStyleVar(pushedLayoutVars + 1);
                 io.FontGlobalScale = oldGlobalScale;
-                if (pushedChineseFont) ImGui.PopFont();
+                if (pushedActiveFont) ImGui.PopFont();
             }
 
             // A marquee can begin over empty room pixels, where ImGui itself would normally report
@@ -612,11 +570,8 @@ internal static class DevToolFrontend
         }
     }
 
-    private static unsafe float ResolveActiveBaseFontSize(bool pushedChineseFont)
+    private static unsafe float ResolveActiveBaseFontSize()
     {
-        if (pushedChineseFont && cjkFont.NativePtr != null && cjkFont.FontSize > 0.01f)
-            return cjkFont.FontSize;
-
         ImFontPtr active = ImGui.GetFont();
         return active.NativePtr != null && active.FontSize > 0.01f ? active.FontSize : 13f;
     }
@@ -647,166 +602,84 @@ internal static class DevToolFrontend
         return 7;
     }
 
-    private static unsafe bool TryPushChineseFont()
+    private static unsafe bool TryPushActiveFont()
     {
-        if (!DevToolUiSettings.IsChinese)
+        DevToolUiLanguage language = DevToolUiSettings.Language;
+        string family =
+            language == DevToolUiLanguage.Chinese
+                ? DevToolUiSettings.ChineseFontFamily
+                : DevToolFontCatalog.UbuntuMonoFamily;
+        int preferredWeight = DevToolUiSettings.FontWeight;
+
+        if (projectedFontLanguage != language ||
+            projectedFontWeight != preferredWeight ||
+            !string.Equals(
+                projectedFontFamily,
+                family,
+                StringComparison.OrdinalIgnoreCase))
         {
-            resolvedFontName = "Default";
-            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
-            resolvedFontWeightVariantCount = 1;
-            return false;
+            projectedFontLanguage = language;
+            projectedFontFamily = family ?? string.Empty;
+            projectedFontWeight = preferredWeight;
+            activeFont = default;
+
+            bool requireChinese =
+                language == DevToolUiLanguage.Chinese;
+            if (DevToolFontCatalog.TryResolveRegisteredFace(
+                    family,
+                    preferredWeight,
+                    requireChinese,
+                    out ImFontPtr resolved,
+                    out string name,
+                    out int actualWeight,
+                    out int variantCount))
+            {
+                activeFont = resolved;
+                resolvedFontName = name;
+                resolvedFontWeight = actualWeight;
+                resolvedFontWeightVariantCount =
+                    Math.Max(1, variantCount);
+
+                if (requireChinese &&
+                    Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
+                {
+                    log?.LogInfo(
+                        "DryCycle DevTool selected local CJK font: " +
+                        name +
+                        " · weight " +
+                        actualWeight +
+                        ".");
+                }
+            }
+            else
+            {
+                resolvedFontName = "Default";
+                resolvedFontWeight =
+                    language == DevToolUiLanguage.Chinese
+                        ? DevToolUiSettings.DefaultChineseFontWeight
+                        : DevToolUiSettings.DefaultFontWeight;
+                resolvedFontWeightVariantCount = 1;
+
+                if (requireChinese &&
+                    Interlocked.Exchange(
+                        ref cjkFontMissingLogged,
+                        1) == 0)
+                {
+                    log?.LogWarning(
+                        "DryCycle DevTool could not resolve a local Simplified Chinese font from " +
+                        DevToolFontCatalog.FontDirectory +
+                        ". The UI remains active with the context default font.");
+                }
+            }
         }
 
-        ResolveCjkFont();
-        if (cjkFont.NativePtr == null)
-        {
-            // Do not leave the editor full of missing-glyph boxes. English remains available as
-            // a deterministic fallback on old RWImGUI installations without a CJK atlas font.
-            DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
+        if (activeFont.NativePtr == null)
             return false;
-        }
 
-        ImGui.PushFont(cjkFont);
+        ImGui.PushFont(activeFont);
         return true;
     }
 
-    private static unsafe void ResolveCjkFont()
-    {
-        EnsureCjkFontsScanned();
-        if (CjkFonts.Count == 0)
-        {
-            cjkFont = default;
-            resolvedFontName = string.Empty;
-            resolvedFontWeight = DevToolUiSettings.FontWeight;
-            resolvedFontWeightVariantCount = 0;
-            return;
-        }
-
-        string preferredFamily = DevToolUiSettings.ChineseFontFamily ?? string.Empty;
-        int preferredWeight = DevToolUiSettings.FontWeight;
-        if (cjkSelectionValid &&
-            projectedCjkWeight == preferredWeight &&
-            string.Equals(projectedCjkFamily, preferredFamily, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        projectedCjkFamily = preferredFamily;
-        projectedCjkWeight = preferredWeight;
-        cjkSelectionValid = true;
-
-        bool preferredAvailable = false;
-        for (int i = 0; i < CjkFonts.Count; i++)
-        {
-            if (!DevToolFontCatalog.IsFamilyMatch(CjkFonts[i].Name, preferredFamily)) continue;
-            preferredAvailable = true;
-            break;
-        }
-
-        FontCandidate best = null;
-        int bestWeightDistance = int.MaxValue;
-        float bestSizeDistance = float.MaxValue;
-        HashSet<int> weights = new();
-        for (int i = 0; i < CjkFonts.Count; i++)
-        {
-            FontCandidate candidate = CjkFonts[i];
-            bool familyMatch = DevToolFontCatalog.IsFamilyMatch(candidate.Name, preferredFamily);
-            if (preferredAvailable && !familyMatch) continue;
-            weights.Add(candidate.Weight);
-
-            // Font size must never choose a different atlas font while the developer drags the
-            // size slider. Family selection is applied first, weight picks the nearest family
-            // variant, and baked size only breaks equal-weight ties against the stable reference
-            // size. Visual size is handled exclusively by scale.
-            int weightDistance = Math.Abs(candidate.Weight - preferredWeight);
-            float sizeDistance = Math.Abs(candidate.Font.FontSize - DevToolUiSettings.ReferenceFontSize);
-            if (weightDistance > bestWeightDistance ||
-                (weightDistance == bestWeightDistance && sizeDistance >= bestSizeDistance))
-                continue;
-
-            bestWeightDistance = weightDistance;
-            bestSizeDistance = sizeDistance;
-            best = candidate;
-        }
-
-        if (best == null) return;
-        cjkFont = best.Font;
-        resolvedFontName = best.Name;
-        resolvedFontWeight = best.Weight;
-        resolvedFontWeightVariantCount = weights.Count;
-    }
-
-    private static unsafe void EnsureCjkFontsScanned()
-    {
-        if (cjkFontsScanned) return;
-        cjkFontsScanned = true;
-        CjkFonts.Clear();
-
-        ImVector<ImFontPtr> fonts = ImGui.GetIO().Fonts.Fonts;
-        for (int i = 0; i < fonts.Size; i++)
-        {
-            ImFontPtr candidate = fonts[i];
-            if (candidate.NativePtr == null) continue;
-
-            string name;
-            int weight;
-            if (!DevToolFontCatalog.TryGetRegisteredFace(candidate, out name, out weight))
-            {
-                name = ReadFontName(candidate, i);
-                weight = InferFontWeight(name);
-            }
-
-            if (!DevToolFontCatalog.IsChineseUiSelectable(candidate, name))
-                continue;
-
-            CjkFonts.Add(new FontCandidate
-            {
-                Font = candidate,
-                Name = name,
-                Weight = weight
-            });
-        }
-
-        if (CjkFonts.Count > 0)
-        {
-            if (Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
-                log?.LogInfo($"DryCycle DevTool discovered {CjkFonts.Count} Chinese-UI selectable ImGui atlas font(s).");
-            return;
-        }
-
-        if (Interlocked.Exchange(ref cjkFontMissingLogged, 1) == 0)
-            log?.LogWarning(
-                "DryCycle DevTool could not find a selectable Simplified Chinese UI font in RWImGUI's font atlas; " +
-                "falling back to English UI.");
-    }
-
-    private static unsafe string ReadFontName(ImFontPtr font, int index)
-    {
-        if (font.NativePtr == null || font.NativePtr->ConfigData == null)
-            return "CJK Font #" + index;
-
-        byte* name = font.NativePtr->ConfigData->Name;
-        int length = 0;
-        while (length < 80 && name[length] != 0) length++;
-        if (length == 0) return "CJK Font #" + index;
-
-        byte[] bytes = new byte[length];
-        for (int i = 0; i < length; i++) bytes[i] = name[i];
-        string value = Encoding.UTF8.GetString(bytes).Trim();
-        return string.IsNullOrEmpty(value) ? "CJK Font #" + index : value;
-    }
-
-    private static int InferFontWeight(string name)
-    {
-        string value = (name ?? string.Empty).ToLowerInvariant().Replace(" ", string.Empty).Replace("-", string.Empty).Replace("_", string.Empty);
-        if (value.Contains("black") || value.Contains("heavy")) return 900;
-        if (value.Contains("extrabold") || value.Contains("ultrabold")) return 800;
-        if (value.Contains("semibold") || value.Contains("demibold")) return 600;
-        if (value.Contains("bold")) return 700;
-        if (value.Contains("medium")) return 500;
-        if (value.Contains("extralight") || value.Contains("ultralight")) return 200;
-        if (value.Contains("light")) return 300;
-        if (value.Contains("thin")) return 100;
-        return 400;
-    }
 }
 
 internal sealed class DevToolInputContext : IMGUIContext
