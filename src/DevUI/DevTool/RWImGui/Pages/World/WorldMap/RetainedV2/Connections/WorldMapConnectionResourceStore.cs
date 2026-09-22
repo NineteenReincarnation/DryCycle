@@ -647,4 +647,3 @@ internal sealed class WorldMapConnectionResourceStore
             delta.Y >= 0f ? max.Y : min.Y);
     }
 }
-}
