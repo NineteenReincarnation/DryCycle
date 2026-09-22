@@ -269,40 +269,53 @@ internal static class WorldMapView
 
         bool retainedConnectionsPresented =
             retainedRoomsPresented &&
-            showConnections &&
-            WorldMapRetainedV2Runtime.RetainedConnectionsReady;
+            showConnections;
 
-        if (retainedConnectionsPresented &&
-            !viewportInteraction &&
+        EdgeHit hoveredEdge = null;
+        hoveredConnectionId = string.Empty;
+        if (!viewportInteraction &&
             canvasHovered &&
-            hoveredPort == null)
+            hoveredPort == null &&
+            showConnections)
         {
-            float safeZoom = Math.Max(0.0001f, zoom);
-            Num.Vector2 worldPoint = (io.MousePos - canvasMin - pan) / safeZoom;
-            float worldRadius = 12f / safeZoom;
-            hoveredConnectionId =
-                WorldMapRetainedV2Runtime.TryHitConnection(
-                    worldPoint,
-                    worldRadius,
-                    out string retainedConnectionId,
-                    out float _)
-                    ? retainedConnectionId
-                    : string.Empty;
-        }
-        else if (retainedConnectionsPresented)
-        {
-            hoveredConnectionId = string.Empty;
-        }
+            float retainedScreenDistanceSq = float.MaxValue;
+            if (retainedConnectionsPresented)
+            {
+                float safeZoom = Math.Max(0.0001f, zoom);
+                Num.Vector2 worldPoint =
+                    (io.MousePos - canvasMin - pan) / safeZoom;
+                float worldRadius = 12f / safeZoom;
+                if (WorldMapRetainedV2Runtime.TryHitConnection(
+                        worldPoint,
+                        worldRadius,
+                        out string retainedConnectionId,
+                        out float retainedWorldDistanceSq))
+                {
+                    hoveredConnectionId = retainedConnectionId;
+                    retainedScreenDistanceSq =
+                        retainedWorldDistanceSq *
+                        safeZoom *
+                        safeZoom;
+                }
+            }
 
-        EdgeHit hoveredEdge =
-            !retainedConnectionsPresented &&
-            !viewportInteraction &&
-            canvasHovered &&
-            hoveredPort == null
-                ? FindHoveredEdge(snapshot, canvasMin, canvasSize, io.MousePos)
-                : null;
-        if (!retainedConnectionsPresented)
-            hoveredConnectionId = hoveredEdge?.Connection?.ConnectionId ?? string.Empty;
+            hoveredEdge = FindHoveredEdge(
+                snapshot,
+                canvasMin,
+                canvasSize,
+                io.MousePos,
+                skipRetainedRoutes: retainedConnectionsPresented);
+
+            if (hoveredEdge != null &&
+                hoveredEdge.DistanceSq < retainedScreenDistanceSq)
+            {
+                hoveredConnectionId = string.Empty;
+            }
+            else if (!string.IsNullOrEmpty(hoveredConnectionId))
+            {
+                hoveredEdge = null;
+            }
+        }
 
         DrawRooms(
             draw,
@@ -313,8 +326,13 @@ internal static class WorldMapView
             hoveredPort,
             viewportInteraction,
             retainedRoomsPresented);
-        if (!retainedConnectionsPresented && showConnections)
-            DrawConnections(draw, snapshot, canvasMin, canvasSize);
+        if (showConnections)
+            DrawConnections(
+                draw,
+                snapshot,
+                canvasMin,
+                canvasSize,
+                skipRetainedRoutes: retainedConnectionsPresented);
         WorldMapRenderOrder.UseOverlay(draw);
 
         if (retainedConnectionsPresented &&
@@ -712,13 +730,19 @@ internal static class WorldMapView
         ImDrawListPtr draw,
         EditorMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
-        Num.Vector2 canvasSize)
+        Num.Vector2 canvasSize,
+        bool skipRetainedRoutes)
     {
         WorldMapRenderOrder.UseConnections(draw);
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
+            if (skipRetainedRoutes &&
+                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
+                    connection?.ConnectionId))
+                continue;
+
             if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
             if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 42f)) continue;
 
@@ -1157,7 +1181,8 @@ internal static class WorldMapView
         EditorMapPresentationSnapshot snapshot,
         Num.Vector2 canvasMin,
         Num.Vector2 canvasSize,
-        Num.Vector2 mouse)
+        Num.Vector2 mouse,
+        bool skipRetainedRoutes)
     {
         if (!showConnections) return null;
         EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
@@ -1166,6 +1191,11 @@ internal static class WorldMapView
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
+            if (skipRetainedRoutes &&
+                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
+                    connection?.ConnectionId))
+                continue;
+
             if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
             if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 30f)) continue;
             float distanceSq = DistanceToSegmentSquared(mouse, a, b);

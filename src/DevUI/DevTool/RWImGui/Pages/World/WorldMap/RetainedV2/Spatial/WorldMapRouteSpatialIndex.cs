@@ -148,6 +148,7 @@ internal sealed class WorldMapRouteSpatialIndex
     internal bool TryHit(
         Num.Vector2 point,
         float radius,
+        HashSet<string> allowedIds,
         out string id,
         out float distanceSquared)
     {
@@ -176,6 +177,10 @@ internal sealed class WorldMapRouteSpatialIndex
 
                     foreach (string candidateId in ids)
                     {
+                        if (allowedIds != null &&
+                            !allowedIds.Contains(candidateId))
+                            continue;
+
                         if (!seen.Add(candidateId) ||
                             !entries.TryGetValue(candidateId, out Entry entry) ||
                             !Intersects(

@@ -33,6 +33,8 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly List<int> sourcePriorityRooms = new();
     private static readonly List<int> visibleRooms = new();
     private static readonly List<string> visibleRoutes = new();
+    private static HashSet<string> presentedRouteIds =
+        new(StringComparer.Ordinal);
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
     private static volatile bool enabled;
@@ -119,7 +121,10 @@ internal static class WorldMapRetainedV2Runtime
         if (!mainThreadDirty.IsEmpty)
         {
             RoomResources.ApplyDirty(MainSceneState, mainThreadDirty);
-            ConnectionResources.ApplyDirty(MainSceneState, mainThreadDirty);
+            ConnectionResources.ApplyDirty(
+                MainSceneState,
+                RoomResources,
+                mainThreadDirty);
             SpatialIndex.ApplyDirty(MainSceneState, RoomResources, mainThreadDirty);
             RoomRenderer.ApplyDirty(mainThreadDirty);
             ConnectionRenderer.ApplyDirty(mainThreadDirty);
@@ -162,7 +167,11 @@ internal static class WorldMapRetainedV2Runtime
         RoomResources.DrainGeometryChanges(geometryChangedRooms);
         if (geometryChangedRooms.Count > 0)
         {
-            ConnectionResources.InvalidateRooms(geometryChangedRooms);
+            ConnectionResources.InvalidateRooms(
+                MainSceneState,
+                RoomResources,
+                geometryChangedRooms,
+                refreshObstacle: true);
             SpatialIndex.InvalidateRooms(
                 MainSceneState,
                 RoomResources,
@@ -182,12 +191,9 @@ internal static class WorldMapRetainedV2Runtime
             }
         }
 
-        if (ConnectionResources.PendingCount == 0)
-        {
-            Volatile.Write(
-                ref retainedConnectionsReady,
-                ConnectionResources.HasCompleteRoutes(MainSceneState) ? 1 : 0);
-        }
+        Volatile.Write(
+            ref retainedConnectionsReady,
+            ConnectionResources.HasCompleteRoutes(MainSceneState) ? 1 : 0);
 
         if (session?.ToolMode == EditorToolMode.Map &&
             snapshot?.Available == true &&
@@ -267,6 +273,10 @@ internal static class WorldMapRetainedV2Runtime
                     lastRenderedRouteRevision = routeRevision;
                     lastRenderedLayerMask = layerMask;
                     lastRenderedShowConnections = showConnectionsValue;
+                    PublishPresentedRoutes(
+                        showConnections
+                            ? visibleRoutes
+                            : null);
                 }
             }
         }
@@ -295,6 +305,18 @@ internal static class WorldMapRetainedV2Runtime
     internal static bool RetainedConnectionsReady =>
         enabled && Volatile.Read(ref retainedConnectionsReady) != 0;
 
+    internal static bool IsConnectionRetainedOnSurface(string connectionId)
+    {
+        if (!enabled || string.IsNullOrEmpty(connectionId))
+            return false;
+
+        HashSet<string> ids = Volatile.Read(ref presentedRouteIds);
+        return ids != null && ids.Contains(connectionId);
+    }
+
+    internal static int PresentedRouteCount =>
+        Volatile.Read(ref presentedRouteIds)?.Count ?? 0;
+
     internal static bool TryHitConnection(
         Num.Vector2 worldPoint,
         float worldRadius,
@@ -303,13 +325,35 @@ internal static class WorldMapRetainedV2Runtime
     {
         connectionId = string.Empty;
         distanceSquared = worldRadius * worldRadius;
-        return enabled &&
-               RetainedConnectionsReady &&
+        if (!enabled)
+            return false;
+
+        HashSet<string> allowed = Volatile.Read(ref presentedRouteIds);
+        return allowed != null &&
+               allowed.Count > 0 &&
                RouteSpatialIndex.TryHit(
                    worldPoint,
                    worldRadius,
+                   allowed,
                    out connectionId,
                    out distanceSquared);
+    }
+
+    private static void PublishPresentedRoutes(
+        IReadOnlyList<string> routeIds)
+    {
+        HashSet<string> next = new(StringComparer.Ordinal);
+        if (routeIds != null)
+        {
+            for (int i = 0; i < routeIds.Count; i++)
+            {
+                string id = routeIds[i];
+                if (!string.IsNullOrEmpty(id))
+                    next.Add(id);
+            }
+        }
+
+        Volatile.Write(ref presentedRouteIds, next);
     }
 
     internal static bool QueryRooms(
@@ -348,6 +392,9 @@ internal static class WorldMapRetainedV2Runtime
         sourcePriorityRooms.Clear();
         visibleRooms.Clear();
         visibleRoutes.Clear();
+        Volatile.Write(
+            ref presentedRouteIds,
+            new HashSet<string>(StringComparer.Ordinal));
         Volatile.Write(ref retainedConnectionsReady, 0);
         Volatile.Write(ref activeZoom, 1f);
         lastRenderedViewRevision = long.MinValue;
@@ -384,7 +431,8 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted("retained room objects: " + RoomRenderer.RetainedRoomCount);
         ImGui.TextUnformatted(
             "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
-            " · ready " + RetainedConnectionsReady);
+            " · surface " + PresentedRouteCount +
+            " · complete " + RetainedConnectionsReady);
         ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
             " · visible " + visibleRooms.Count);

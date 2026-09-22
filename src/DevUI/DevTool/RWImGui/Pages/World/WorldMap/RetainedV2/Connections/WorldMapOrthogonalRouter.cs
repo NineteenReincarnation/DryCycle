@@ -12,6 +12,7 @@ internal static class WorldMapOrthogonalRouter
 {
     internal enum RouteKind
     {
+        Compact,
         Bridge,
         Orthogonal,
         Fallback
@@ -52,6 +53,10 @@ internal static class WorldMapOrthogonalRouter
         internal Num.Vector2 End;
         internal Num.Vector2 StartDirection;
         internal Num.Vector2 EndDirection;
+        internal Num.Vector2 StartRoomMin;
+        internal Num.Vector2 StartRoomMax;
+        internal Num.Vector2 EndRoomMin;
+        internal Num.Vector2 EndRoomMax;
         internal float LaneOffset;
     }
 
@@ -160,6 +165,11 @@ internal static class WorldMapOrthogonalRouter
 
     private const float ObstacleMargin = 15f;
     private const float PortNeck = 22f;
+    private const float CompactRoomGap = 52f;
+    private const float CompactEndpointDistance = 150f;
+    private const float CompactDirectionPenalty = 18f;
+    private const float CompactBendPenalty = 3f;
+    private const int CacheRetentionGenerations = 32;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
     private const float BendPenalty = 0.72f;
@@ -179,7 +189,16 @@ internal static class WorldMapOrthogonalRouter
     internal static Route[] BuildRoutes(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles) =>
         BuildRoutesCore(requests, sourceObstacles);
 
-    internal static Route[] BuildRoutesCore(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles)
+    internal static Obstacle CreateRoutingObstacle(
+        int roomIndex,
+        Num.Vector2 min,
+        Num.Vector2 max) =>
+        new Obstacle(roomIndex, min, max).Inflate(ObstacleMargin);
+
+    internal static Route[] BuildRoutesCore(
+        IReadOnlyList<Request> requests,
+        IReadOnlyList<Obstacle> sourceObstacles,
+        bool sourceObstaclesAlreadyInflated = false)
     {
         generation++;
         if (requests == null || requests.Count == 0)
@@ -188,11 +207,23 @@ internal static class WorldMapOrthogonalRouter
             return Array.Empty<Route>();
         }
 
-        List<Obstacle> obstacles = new(sourceObstacles?.Count ?? 0);
-        if (sourceObstacles != null)
+        List<Obstacle> obstacles;
+        if (sourceObstaclesAlreadyInflated &&
+            sourceObstacles is List<Obstacle> retainedList)
         {
-            for (int i = 0; i < sourceObstacles.Count; i++)
-                obstacles.Add(sourceObstacles[i].Inflate(ObstacleMargin));
+            obstacles = retainedList;
+        }
+        else
+        {
+            obstacles = new List<Obstacle>(sourceObstacles?.Count ?? 0);
+            if (sourceObstacles != null)
+            {
+                for (int i = 0; i < sourceObstacles.Count; i++)
+                obstacles.Add(
+                    sourceObstaclesAlreadyInflated
+                        ? sourceObstacles[i]
+                        : sourceObstacles[i].Inflate(ObstacleMargin));
+            }
         }
 
         Dictionary<long, Occupancy> occupancy = new();
@@ -250,6 +281,9 @@ internal static class WorldMapOrthogonalRouter
         for (int routeIndex = 1; routeIndex < routes.Length; routeIndex++)
         {
             Route original = routes[routeIndex];
+            if (original?.Kind == RouteKind.Compact)
+                continue;
+
             Num.Vector2[] points = original?.Points;
             if (points == null || points.Length < 2) continue;
 
@@ -453,6 +487,22 @@ internal static class WorldMapOrthogonalRouter
     {
         Num.Vector2 startDirection = Cardinalize(request.StartDirection, request.End - request.Start);
         Num.Vector2 endDirection = Cardinalize(request.EndDirection, request.Start - request.End);
+
+        if (TryBuildCompactRoute(
+                request,
+                startDirection,
+                endDirection,
+                obstacles,
+                out Num.Vector2[] compact))
+        {
+            return NewRoute(
+                request,
+                RouteKind.Compact,
+                compact,
+                startDirection,
+                endDirection);
+        }
+
         Num.Vector2 startPerp = new(-startDirection.Y, startDirection.X);
         Num.Vector2 endPerp = new(-endDirection.Y, endDirection.X);
 
@@ -586,6 +636,195 @@ internal static class WorldMapOrthogonalRouter
             LaneOffset = route.LaneOffset,
             Reused = route.Reused
         };
+    }
+
+    private static bool TryBuildCompactRoute(
+        Request request,
+        Num.Vector2 startDirection,
+        Num.Vector2 endDirection,
+        List<Obstacle> obstacles,
+        out Num.Vector2[] route)
+    {
+        route = null;
+
+        float gapX = Math.Max(
+            0f,
+            Math.Max(
+                request.StartRoomMin.X - request.EndRoomMax.X,
+                request.EndRoomMin.X - request.StartRoomMax.X));
+        float gapY = Math.Max(
+            0f,
+            Math.Max(
+                request.StartRoomMin.Y - request.EndRoomMax.Y,
+                request.EndRoomMin.Y - request.StartRoomMax.Y));
+        float roomGap = (float)Math.Sqrt(gapX * gapX + gapY * gapY);
+        float endpointDistance = Num.Vector2.Distance(request.Start, request.End);
+        if (roomGap > CompactRoomGap &&
+            endpointDistance > CompactEndpointDistance)
+            return false;
+
+        List<Num.Vector2[]> candidates = new(4);
+        if (Math.Abs(request.LaneOffset) <= 0.5f)
+        {
+            if (Math.Abs(request.Start.X - request.End.X) < 0.5f ||
+                Math.Abs(request.Start.Y - request.End.Y) < 0.5f)
+            {
+                candidates.Add(new[] { request.Start, request.End });
+            }
+
+            candidates.Add(new[]
+            {
+                request.Start,
+                new Num.Vector2(request.End.X, request.Start.Y),
+                request.End
+            });
+            candidates.Add(new[]
+            {
+                request.Start,
+                new Num.Vector2(request.Start.X, request.End.Y),
+                request.End
+            });
+
+            Num.Vector2 delta = request.End - request.Start;
+            if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+            {
+                float midX = (request.Start.X + request.End.X) * 0.5f;
+                candidates.Add(new[]
+                {
+                    request.Start,
+                    new Num.Vector2(midX, request.Start.Y),
+                    new Num.Vector2(midX, request.End.Y),
+                    request.End
+                });
+            }
+            else
+            {
+                float midY = (request.Start.Y + request.End.Y) * 0.5f;
+                candidates.Add(new[]
+                {
+                    request.Start,
+                    new Num.Vector2(request.Start.X, midY),
+                    new Num.Vector2(request.End.X, midY),
+                    request.End
+                });
+            }
+        }
+        else
+        {
+            Num.Vector2 delta = request.End - request.Start;
+            if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+            {
+                float laneY =
+                    (request.Start.Y + request.End.Y) * 0.5f +
+                    request.LaneOffset;
+                candidates.Add(new[]
+                {
+                    request.Start,
+                    new Num.Vector2(request.Start.X, laneY),
+                    new Num.Vector2(request.End.X, laneY),
+                    request.End
+                });
+            }
+            else
+            {
+                float laneX =
+                    (request.Start.X + request.End.X) * 0.5f +
+                    request.LaneOffset;
+                candidates.Add(new[]
+                {
+                    request.Start,
+                    new Num.Vector2(laneX, request.Start.Y),
+                    new Num.Vector2(laneX, request.End.Y),
+                    request.End
+                });
+            }
+        }
+
+        float bestScore = float.MaxValue;
+        Num.Vector2[] best = null;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            Num.Vector2[] candidate = Simplify(candidates[i]);
+            if (candidate == null ||
+                candidate.Length < 2 ||
+                !CompactRouteClear(
+                    candidate,
+                    request.StartRoom,
+                    request.EndRoom,
+                    obstacles))
+                continue;
+
+            float score =
+                PathLength(candidate) +
+                Math.Max(0, candidate.Length - 2) * CompactBendPenalty;
+            score += EndpointDirectionPenalty(
+                candidate,
+                startDirection,
+                endDirection);
+
+            if (score >= bestScore) continue;
+            bestScore = score;
+            best = candidate;
+        }
+
+        if (best == null)
+            return false;
+
+        route = best;
+        return true;
+    }
+
+    private static float EndpointDirectionPenalty(
+        Num.Vector2[] points,
+        Num.Vector2 startDirection,
+        Num.Vector2 endDirection)
+    {
+        if (points == null || points.Length < 2)
+            return CompactDirectionPenalty * 2f;
+
+        Num.Vector2 first = points[1] - points[0];
+        Num.Vector2 last = points[points.Length - 1] - points[points.Length - 2];
+        float penalty = 0f;
+
+        if (first.LengthSquared() > 0.001f)
+        {
+            first = Cardinalize(first, startDirection);
+            if (Num.Vector2.Dot(first, startDirection) < 0.5f)
+                penalty += CompactDirectionPenalty;
+        }
+
+        if (last.LengthSquared() > 0.001f)
+        {
+            last = Cardinalize(last, -endDirection);
+            if (Num.Vector2.Dot(last, -endDirection) < 0.5f)
+                penalty += CompactDirectionPenalty;
+        }
+
+        return penalty;
+    }
+
+    private static bool CompactRouteClear(
+        Num.Vector2[] points,
+        int startRoom,
+        int endRoom,
+        List<Obstacle> obstacles)
+    {
+        for (int p = 0; p < points.Length - 1; p++)
+        {
+            Num.Vector2 a = points[p];
+            Num.Vector2 b = points[p + 1];
+            for (int i = 0; i < obstacles.Count; i++)
+            {
+                Obstacle obstacle = obstacles[i];
+                if (obstacle.RoomIndex == startRoom ||
+                    obstacle.RoomIndex == endRoom)
+                    continue;
+                if (SegmentIntersectsRect(a, b, obstacle.Min, obstacle.Max))
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private static Num.Vector2 EscapeOutsideRoom(
@@ -1147,7 +1386,7 @@ internal static class WorldMapOrthogonalRouter
         List<string> stale = null;
         foreach (KeyValuePair<string, CachedRoute> pair in cache)
         {
-            if (generation - pair.Value.LastSeenGeneration <= 2) continue;
+            if (generation - pair.Value.LastSeenGeneration <= CacheRetentionGenerations) continue;
             stale ??= new List<string>();
             stale.Add(pair.Key);
         }

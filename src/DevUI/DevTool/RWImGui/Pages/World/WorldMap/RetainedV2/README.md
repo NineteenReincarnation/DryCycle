@@ -621,6 +621,32 @@ to the room's tile bounds during immutable geometry build, and the immediate com
 also applies a per-room ImGui clip rectangle. Malformed or intentionally oversized curve/fill data
 therefore cannot paint outside the room thumbnail.
 
+### Per-connection route readiness and compact links
+
+Connection presentation no longer uses an all-or-nothing region gate. The retained surface publishes
+the exact route IDs committed into that surface. Each connection then resolves independently:
+
+- committed retained route -> show the orthogonal/bridge/compact route from the surface;
+- route still queued/not yet committed -> draw only that connection's direct compatibility stroke;
+- once its route is committed, the fallback disappears for that connection without waiting for the
+  rest of the region.
+
+Hover/hit testing follows the same committed-ID set, so the interactive path matches what is
+actually visible rather than what merely exists in the main-thread route cache.
+
+The router also has a **Compact** fast path for nearby room pairs. If room bounds or exit mouths are
+close and the short Manhattan candidates do not cross a third-party room, the router chooses the
+lowest-cost direct/one-bend/mid-corridor path. Start/end room obstacle inflation is deliberately
+ignored only for this compact candidate, preventing the old large U-shaped detour around two
+adjacent rooms. Distant or obstructed pairs still use bridge, simple orthogonal, A* and outer
+fallback routing.
+
+Routing obstacles are now retained by room index. Full topology changes rebuild them once; room
+movement or geometry-size changes update only the affected obstacle. Route batches reuse the same
+inflated obstacle snapshot instead of rebuilding room bounds for the whole region on every batch.
+The orthogonal route cache is retained for 32 build generations instead of being discarded after
+two batches, avoiding cache churn on large regions.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

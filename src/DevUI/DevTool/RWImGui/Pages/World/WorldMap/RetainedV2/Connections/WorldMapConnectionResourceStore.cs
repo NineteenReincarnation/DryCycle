@@ -24,6 +24,11 @@ internal sealed class WorldMapConnectionResourceStore
     private readonly HashSet<string> queued = new(StringComparer.Ordinal);
     private readonly HashSet<string> routeChanged = new(StringComparer.Ordinal);
     private readonly List<WorldMapScene.ConnectionNode> buildBatch = new();
+    private readonly Dictionary<int, WorldMapOrthogonalRouter.Obstacle> routingObstacles =
+        new();
+    private readonly List<WorldMapOrthogonalRouter.Obstacle> routingObstacleSnapshot =
+        new();
+    private bool routingObstacleSnapshotDirty = true;
     private long revision;
 
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
@@ -64,7 +69,10 @@ internal sealed class WorldMapConnectionResourceStore
         routeChanged.Clear();
     }
 
-    internal void ApplyDirty(WorldMapScene scene, WorldMapDirtySet dirty)
+    internal void ApplyDirty(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources,
+        WorldMapDirtySet dirty)
     {
         if (scene == null || dirty == null) return;
 
@@ -78,10 +86,17 @@ internal sealed class WorldMapConnectionResourceStore
             queued.Remove(id);
         }
 
+        foreach (int roomIndex in dirty.RemovedRooms)
+        {
+            if (routingObstacles.Remove(roomIndex))
+                routingObstacleSnapshotDirty = true;
+        }
+
         if (dirty.FullRebuild || dirty.TopologyChanged)
         {
             dependencies.Rebuild(scene);
             RebuildLaneOffsets(scene);
+            RebuildRoutingObstacles(scene, roomResources);
             EnqueueAll(scene);
             return;
         }
@@ -89,16 +104,35 @@ internal sealed class WorldMapConnectionResourceStore
         foreach (string id in dirty.Connections)
             Enqueue(id);
 
-        InvalidateRooms(dirty.RoomTransforms);
-        InvalidateRooms(dirty.RoomPorts);
-        InvalidateRooms(dirty.RemovedRooms);
+        InvalidateRooms(
+            scene,
+            roomResources,
+            dirty.RoomTransforms,
+            refreshObstacle: true);
+        InvalidateRooms(
+            scene,
+            roomResources,
+            dirty.RoomPorts,
+            refreshObstacle: false);
+        InvalidateRooms(
+            scene,
+            roomResources,
+            dirty.RemovedRooms,
+            refreshObstacle: false);
     }
 
-    internal void InvalidateRooms(IEnumerable<int> roomIndices)
+    internal void InvalidateRooms(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources,
+        IEnumerable<int> roomIndices,
+        bool refreshObstacle = true)
     {
         if (roomIndices == null) return;
         foreach (int roomIndex in roomIndices)
         {
+            if (refreshObstacle)
+                UpdateRoutingObstacle(scene, roomResources, roomIndex);
+
             foreach (string id in dependencies.GetForRoom(roomIndex))
                 Enqueue(id);
         }
@@ -137,7 +171,8 @@ internal sealed class WorldMapConnectionResourceStore
                 scene,
                 roomResources,
                 buildBatch,
-                laneOffsets);
+                laneOffsets,
+                GetRoutingObstacleSnapshot());
 
         for (int i = 0; i < buildBatch.Count; i++)
         {
@@ -165,6 +200,9 @@ internal sealed class WorldMapConnectionResourceStore
         queued.Clear();
         routeChanged.Clear();
         buildBatch.Clear();
+        routingObstacles.Clear();
+        routingObstacleSnapshot.Clear();
+        routingObstacleSnapshotDirty = true;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
@@ -197,6 +235,58 @@ internal sealed class WorldMapConnectionResourceStore
     {
         if (string.IsNullOrEmpty(id) || !queued.Add(id)) return;
         queue.Enqueue(id);
+    }
+
+    private void RebuildRoutingObstacles(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        routingObstacles.Clear();
+        if (scene != null)
+        {
+            foreach (WorldMapScene.RoomNode room in scene.Rooms.Values)
+                UpdateRoutingObstacle(scene, roomResources, room.RoomIndex);
+        }
+        routingObstacleSnapshotDirty = true;
+    }
+
+    private void UpdateRoutingObstacle(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources,
+        int roomIndex)
+    {
+        if (scene == null ||
+            !scene.TryGetRoom(roomIndex, out WorldMapScene.RoomNode room))
+        {
+            if (routingObstacles.Remove(roomIndex))
+                routingObstacleSnapshotDirty = true;
+            return;
+        }
+
+        WorldMapWorldSpaceRouter.GetRoomBounds(
+            room,
+            roomResources,
+            out System.Numerics.Vector2 min,
+            out System.Numerics.Vector2 max);
+        routingObstacles[roomIndex] =
+            WorldMapOrthogonalRouter.CreateRoutingObstacle(
+                roomIndex,
+                min,
+                max);
+        routingObstacleSnapshotDirty = true;
+    }
+
+    private IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> GetRoutingObstacleSnapshot()
+    {
+        if (!routingObstacleSnapshotDirty)
+            return routingObstacleSnapshot;
+
+        routingObstacleSnapshot.Clear();
+        foreach (WorldMapOrthogonalRouter.Obstacle obstacle in routingObstacles.Values)
+            routingObstacleSnapshot.Add(obstacle);
+        routingObstacleSnapshot.Sort((a, b) => a.RoomIndex.CompareTo(b.RoomIndex));
+        routingObstacleSnapshotDirty = false;
+        return routingObstacleSnapshot;
     }
 
     private void RebuildLaneOffsets(WorldMapScene scene)

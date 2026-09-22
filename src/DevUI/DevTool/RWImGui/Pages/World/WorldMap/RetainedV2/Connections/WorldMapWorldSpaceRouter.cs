@@ -21,14 +21,14 @@ internal static class WorldMapWorldSpaceRouter
         WorldMapScene scene,
         WorldMapRoomResourceStore roomResources,
         IReadOnlyList<WorldMapScene.ConnectionNode> connections,
-        IReadOnlyDictionary<string, float> laneOffsets)
+        IReadOnlyDictionary<string, float> laneOffsets,
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> routingObstacles)
     {
         Dictionary<string, ConnectionRouteResource> result =
             new(StringComparer.Ordinal);
         if (scene == null || connections == null || connections.Count == 0)
             return result;
 
-        List<WorldMapOrthogonalRouter.Obstacle> obstacles = BuildObstacles(scene, roomResources);
         List<WorldMapOrthogonalRouter.Request> requests = new(connections.Count);
         List<WorldMapScene.ConnectionNode> accepted = new(connections.Count);
 
@@ -64,13 +64,20 @@ internal static class WorldMapWorldSpaceRouter
                 End = end,
                 StartDirection = WorldMapOrthogonalRouter.InferPortDirection(start, startMin, startMax),
                 EndDirection = WorldMapOrthogonalRouter.InferPortDirection(end, endMin, endMax),
+                StartRoomMin = startMin,
+                StartRoomMax = startMax,
+                EndRoomMin = endMin,
+                EndRoomMax = endMax,
                 LaneOffset = laneOffset
             });
             accepted.Add(connection);
         }
 
         WorldMapOrthogonalRouter.Route[] routes =
-            WorldMapOrthogonalRouter.BuildRoutesCore(requests, obstacles);
+            WorldMapOrthogonalRouter.BuildRoutesCore(
+                requests,
+                routingObstacles,
+                sourceObstaclesAlreadyInflated: true);
         int count = Math.Min(accepted.Count, routes.Length);
         for (int i = 0; i < count; i++)
         {
@@ -164,19 +171,6 @@ internal static class WorldMapWorldSpaceRouter
         return new Num.Vector2(
             right ? max.X : min.X,
             min.Y + (max.Y - min.Y) * t);
-    }
-
-    private static List<WorldMapOrthogonalRouter.Obstacle> BuildObstacles(
-        WorldMapScene scene,
-        WorldMapRoomResourceStore roomResources)
-    {
-        List<WorldMapOrthogonalRouter.Obstacle> result = new(scene.Rooms.Count);
-        foreach (WorldMapScene.RoomNode room in scene.Rooms.Values)
-        {
-            GetRoomBounds(room, roomResources, out Num.Vector2 min, out Num.Vector2 max);
-            result.Add(new WorldMapOrthogonalRouter.Obstacle(room.RoomIndex, min, max));
-        }
-        return result;
     }
 
     private static Num.Vector2 BoundaryToward(
