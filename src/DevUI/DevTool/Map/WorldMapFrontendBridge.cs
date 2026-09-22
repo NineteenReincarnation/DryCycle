@@ -18,7 +18,7 @@ internal static class WorldMapFrontendBridge
     private static Func<global::World, bool> shouldProcessGeometryBackground;
     private static Action<MapViewPersistentSnapshot> capturePersistentSnapshot;
     private static Action<MapViewPersistentSnapshot> restorePersistentSnapshot;
-    private static Action<int, MapViewPersistentRoom> restorePersistentRoom;
+    private static Action<int, MapViewPersistentRoom, bool> restorePersistentRoom;
     private static Action clearPersistentState;
 
     internal static bool ShouldPublish(EditorSession session) =>
@@ -48,8 +48,9 @@ internal static class WorldMapFrontendBridge
 
     internal static void RestorePersistentRoom(
         int roomIndex,
-        MapViewPersistentRoom room) =>
-        restorePersistentRoom?.Invoke(roomIndex, room);
+        MapViewPersistentRoom room,
+        bool sourceValid) =>
+        restorePersistentRoom?.Invoke(roomIndex, room, sourceValid);
 
     internal static void ClearPersistentState() =>
         clearPersistentState?.Invoke();
@@ -95,7 +96,7 @@ internal static class WorldMapFrontendBridge
     internal static void RegisterPersistentCacheCallbacks(
         Action<MapViewPersistentSnapshot> capture,
         Action<MapViewPersistentSnapshot> restore,
-        Action<int, MapViewPersistentRoom> restoreRoom,
+        Action<int, MapViewPersistentRoom, bool> restoreRoom,
         Action clear)
     {
         capturePersistentSnapshot = capture;
@@ -107,7 +108,7 @@ internal static class WorldMapFrontendBridge
     internal static void UnregisterPersistentCacheCallbacks(
         Action<MapViewPersistentSnapshot> capture,
         Action<MapViewPersistentSnapshot> restore,
-        Action<int, MapViewPersistentRoom> restoreRoom,
+        Action<int, MapViewPersistentRoom, bool> restoreRoom,
         Action clear)
     {
         if (Delegate.Equals(capturePersistentSnapshot, capture))

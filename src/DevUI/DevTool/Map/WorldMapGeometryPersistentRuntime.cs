@@ -144,12 +144,13 @@ internal static partial class MapRoomGeometryPresentationHub
                                           SettingsPathPollIntervalFrames +
                                           Math.Abs(entry.RoomIndex % 61);
 
+        WorldMapFrontendBridge.RestorePersistentRoom(
+            entry.RoomIndex,
+            stored,
+            roomValid);
+
         if (roomValid)
         {
-            WorldMapFrontendBridge.RestorePersistentRoom(
-                entry.RoomIndex,
-                stored);
-
             entry.WidthTiles = Math.Max(1f, stored.WidthTiles);
             entry.HeightTiles = Math.Max(1f, stored.HeightTiles);
 
@@ -409,6 +410,9 @@ internal static partial class MapRoomGeometryPresentationHub
             MapViewPersistentCacheStore.CurrentCacheVersion;
         return snapshot;
     }
+
+    internal static void MarkPersistentFrontendDirty() =>
+        PersistentMarkDirty();
 
     internal static void FlushPersistentCache()
     {

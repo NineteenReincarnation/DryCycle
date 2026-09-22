@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using DevInterface;
 using UnityEngine;
 
@@ -21,13 +22,15 @@ internal static class WorldMapLegacyRoomSourceService
             Rect uv,
             float width,
             float height,
-            int signature)
+            int signature,
+            string persistentElementName)
         {
             Texture = texture;
             Uv = uv;
             Width = width;
             Height = height;
             Signature = signature;
+            PersistentElementName = persistentElementName ?? string.Empty;
         }
 
         internal Texture2D Texture { get; }
@@ -35,9 +38,13 @@ internal static class WorldMapLegacyRoomSourceService
         internal float Width { get; }
         internal float Height { get; }
         internal int Signature { get; }
+        internal string PersistentElementName { get; }
     }
 
     private static readonly Dictionary<int, RoomPanel> PanelIndex = new();
+    private static bool atlasLookupResolved;
+    private static object atlasManager;
+    private static MethodInfo atlasElementLookup;
 
     private static MapPage indexedPage;
     private static int indexedSubNodeCount = -1;
@@ -81,7 +88,8 @@ internal static class WorldMapLegacyRoomSourceService
                     uv,
                     width,
                     height,
-                    signature);
+                    signature,
+                    element.name);
                 return true;
             }
         }
@@ -101,7 +109,51 @@ internal static class WorldMapLegacyRoomSourceService
                 new Rect(0f, 0f, 1f, 1f),
                 Math.Max(1f, direct.width),
                 Math.Max(1f, direct.height),
-                signature);
+                signature,
+                string.Empty);
+            return true;
+        }
+    }
+
+    internal static bool TryResolvePersistentAtlasTexture(
+        string elementName,
+        out RoomTextureSource source)
+    {
+        source = default;
+        if (string.IsNullOrWhiteSpace(elementName))
+            return false;
+
+        if (!TryFindAtlasElement(elementName, out FAtlasElement element) ||
+            !TryResolveRoomTextureAtlas(
+                element,
+                out Texture2D atlas,
+                out Rect uv,
+                out float width,
+                out float height))
+            return false;
+
+        unchecked
+        {
+            int signature = 17;
+            signature = signature * 397 ^ 1;
+            signature = signature * 397 ^ (element.name?.GetHashCode() ?? 0);
+            signature = signature * 397 ^ atlas.GetInstanceID();
+            signature = signature * 397 ^ atlas.width;
+            signature = signature * 397 ^ atlas.height;
+            signature = signature * 397 ^ Mathf.RoundToInt(width * 1000f);
+            signature = signature * 397 ^ Mathf.RoundToInt(height * 1000f);
+            signature = signature * 397 ^ Mathf.RoundToInt(uv.x * 1000000f);
+            signature = signature * 397 ^ Mathf.RoundToInt(uv.y * 1000000f);
+            signature = signature * 397 ^ Mathf.RoundToInt(uv.width * 1000000f);
+            signature = signature * 397 ^ Mathf.RoundToInt(uv.height * 1000000f);
+
+            source = new RoomTextureSource(
+                atlas,
+                uv,
+                width,
+                height,
+                signature,
+                element.name);
             return true;
         }
     }
@@ -152,6 +204,60 @@ internal static class WorldMapLegacyRoomSourceService
             if (page.subNodes[i] is RoomPanel panel &&
                 panel.roomRep?.room != null)
                 PanelIndex[panel.roomRep.room.index] = panel;
+        }
+    }
+
+    private static bool TryFindAtlasElement(
+        string elementName,
+        out FAtlasElement element)
+    {
+        element = null;
+        try
+        {
+            if (!atlasLookupResolved)
+            {
+                atlasLookupResolved = true;
+                BindingFlags flags =
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.Static;
+
+                FieldInfo field =
+                    typeof(Futile).GetField("atlasManager", flags);
+                atlasManager = field?.GetValue(null);
+                if (atlasManager == null)
+                {
+                    PropertyInfo property =
+                        typeof(Futile).GetProperty("atlasManager", flags);
+                    atlasManager = property?.GetValue(null, null);
+                }
+
+                if (atlasManager != null)
+                {
+                    atlasElementLookup =
+                        atlasManager.GetType().GetMethod(
+                            "GetElementWithName",
+                            BindingFlags.Public |
+                            BindingFlags.NonPublic |
+                            BindingFlags.Instance,
+                            null,
+                            new[] { typeof(string) },
+                            null);
+                }
+            }
+
+            if (atlasManager == null || atlasElementLookup == null)
+                return false;
+
+            element =
+                atlasElementLookup.Invoke(
+                    atlasManager,
+                    new object[] { elementName }) as FAtlasElement;
+            return element != null;
+        }
+        catch
+        {
+            return false;
         }
     }
 

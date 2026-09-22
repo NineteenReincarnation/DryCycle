@@ -17,13 +17,15 @@ internal sealed class RoomThumbnailResource
             Rect uv,
             float pixelWidth,
             float pixelHeight,
-            int signature)
+            int signature,
+            string persistentElementName)
         {
             Texture = texture;
             Uv = uv;
             PixelWidth = pixelWidth;
             PixelHeight = pixelHeight;
             Signature = signature;
+            PersistentElementName = persistentElementName ?? string.Empty;
         }
 
         internal Texture2D Texture { get; }
@@ -31,6 +33,7 @@ internal sealed class RoomThumbnailResource
         internal float PixelWidth { get; }
         internal float PixelHeight { get; }
         internal int Signature { get; }
+        internal string PersistentElementName { get; }
 
         internal bool IsValid =>
             Texture != null &&
@@ -56,7 +59,8 @@ internal sealed class RoomThumbnailResource
             source.Uv,
             source.Width,
             source.Height,
-            source.Signature);
+            source.Signature,
+            source.PersistentElementName);
 
         if (!descriptor.IsValid)
         {
