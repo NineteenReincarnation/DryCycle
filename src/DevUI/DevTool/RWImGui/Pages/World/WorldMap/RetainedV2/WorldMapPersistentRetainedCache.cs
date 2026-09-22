@@ -36,6 +36,15 @@ internal static class WorldMapPersistentRetainedCache
     internal static int ValidatedRoomCount =>
         enabled ? validRooms.Count : 0;
 
+    internal static int StagedRouteCount =>
+        enabled ? routes.Count : 0;
+
+    internal static bool RoomValidationComplete =>
+        enabled && roomValidationComplete;
+
+    internal static bool TopologyRejected =>
+        enabled && topologyRejected;
+
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;

@@ -22,8 +22,11 @@ phase percentage below 100%.
 - **Phase 8.3 — 100%**: initial room-source capture is guard-band visible-first; rooms needed by the current retained surface are promoted ahead of the region-wide queue without duplicating caches or changing authoring order.
 - **Phase 8.4 — 100%**: semantic raster fallback no longer performs new readbacks during whole-region structure publication; cached enhancement can be republished freely, while priority/background passes authorize at most one new GetPixels/ReadPixels operation per Unity frame and interaction authorizes none.
 - **Phase 8.5 — 100%**: readable MapTex raster processing is split into bounded main-thread capture plus worker classification/run construction; at most two new pixel captures start per frame, two workers process pure CPU raster data, stale region/source/request results are discarded, and main-thread commits are bounded.
+- **Connection hardening — 100%**: route readiness is per-connection, diagonal direct fallback is retired, nearby rooms use Compact routing, routing obstacles are retained/incremental, and stale pre-policy routes cannot be reused.
+- **Persistent Cache V3 — 100%**: V2 geometry caches remain readable; validated thumbnail atlas identities and retained world-space routes survive process restarts; route restore is full-topology validated and bounded so cache misses fail open to normal routing; shutdown flushes the asynchronous writer.
+- **Final hardening — 100%**: V3 binary round-trip/V2 migration/corruption/flush tests run in Guard; diagnostics expose cache-validation state; optional RWImGUI frontend changes remain subject to the real local high-fidelity build.
 
-Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
+Retained V2 owns the normal World Map presentation path. If the retained surface cannot present, room rendering uses the visible immediate compatibility renderer. Connections never fall back to an A-to-B diagonal: a built retained route is drawn immediately from its immutable points, while an unbuilt route uses an orthogonal preview until the retained route is ready.
 
 ## Engineering boundaries
 
@@ -344,9 +347,10 @@ are rebuilt only after route data changes, never because the viewport moved.
 
 `WorldMapRouteSpatialIndex` stores retained route bounds/segments in world-space cells.
 
-Connection hover now converts the mouse position to map-world coordinates and queries only nearby
-route cells. Once the complete V2 route set is committed, legacy screen-space route hit-testing and
-`WorldConnectionOverlay` drawing are removed from the active frame path.
+Connection hover converts the mouse position to map-world coordinates and queries nearby retained
+route cells. Readiness is per connection: routes already committed to the retained surface use the
+world-space spatial index, while only not-yet-retained connections use the same orthogonal immediate
+preview path that is visible on screen.
 
 Selection, delete semantics and endpoint authoring commands remain the existing backend command
 paths. V2 replaces presentation/hit-testing only.
@@ -363,16 +367,14 @@ route resources.
 Pan/zoom uses `WorldMapViewTransformMailbox`, a tiny lock-free tuple handoff. It does not copy room
 or connection dictionaries and cannot dirty retained geometry.
 
-### Explicit migration fallback
+### Progressive per-connection presentation
 
-V2 connection presentation becomes authoritative only after every connection in the main-thread
-scene has a committed world-space route. Until then, the existing connection presentation remains
-visible. This avoids partial maps during incremental route construction without treating an
-incomplete V2 route set as success.
-
-Once V2 reports a complete route set, the legacy connection renderer/router is no longer called for
-that frame. This is the first runtime retirement of that legacy hot path; physical file removal is
-reserved for Phase 7 after all remaining consumers are audited.
+Connection presentation is not gated by a region-wide "all routes complete" switch. The retained
+surface publishes the exact connection IDs it contains. A route that is already built but has not
+landed in the next RenderTexture is drawn immediately from immutable retained route points; a route
+that has not been built yet receives a cheap orthogonal preview. Each connection therefore promotes
+independently without hiding already-finished retained routes or reactivating a legacy screen-space
+router.
 
 ## Phase 7 implementation
 
@@ -414,9 +416,9 @@ resource lifetime.
 The old `WorldConnectionOverlay` BepInEx plugin and screen-space route renderer are removed.
 
 When the V2 surface is available, retained route meshes own presentation and
-`WorldMapRouteSpatialIndex` owns hover selection. If the surface is unavailable, the existing
-simple direct-line ImGui fallback remains local to `WorldMapView`; it does not start a second
-router/cache system.
+`WorldMapRouteSpatialIndex` owns hover selection. If a connection is not yet present in the
+surface, `WorldMapView` draws either its already-built retained polyline or an orthogonal preview.
+The old diagonal direct-line fallback and the old screen-space router/cache system are retired.
 
 ### Legacy GPU World Map retired
 
@@ -627,9 +629,10 @@ Connection presentation no longer uses an all-or-nothing region gate. The retain
 the exact route IDs committed into that surface. Each connection then resolves independently:
 
 - committed retained route -> show the orthogonal/bridge/compact route from the surface;
-- route still queued/not yet committed -> draw only that connection's direct compatibility stroke;
-- once its route is committed, the fallback disappears for that connection without waiting for the
-  rest of the region.
+- route built but not yet committed to the surface -> draw that exact retained polyline immediately;
+- route not built yet -> draw a cheap orthogonal preview;
+- once its route is committed, the immediate preview disappears for that connection without waiting
+  for the rest of the region.
 
 Hover/hit testing follows the same committed-ID set, so the interactive path matches what is
 actually visible rather than what merely exists in the main-thread route cache.
@@ -669,15 +672,31 @@ V3 adds two validated retained-frontend payloads:
   Unity Texture2D object. After the core room-file stamp validates, Retained V2 resolves the current
   atlas element directly and binds its live texture/UV before falling back to RoomPanel discovery.
 - **connection routes** store world-space polyline points, endpoint metadata, room names/positions,
-  route kind and routing-policy version. They remain staged until both endpoint room source stamps
-  are known valid. A changed room file, topology mismatch, moved room or routing-policy bump rejects
-  only the affected route and schedules normal routing.
+  route kind and routing-policy version. They remain staged until the initial room-source audit has
+  completed and the full scene topology fingerprint matches. Missing/invalid room cache data,
+  topology changes, moved rooms or a routing-policy bump reject cached routes and fail open to normal
+  routing; the restore queue cannot remain permanently Pending.
 
 Thumbnail/route mutations mark the core persistent snapshot dirty, so one atomic V3 file owns both
 geometry and retained frontend metadata without creating a reverse core dependency.
 
 The shutdown path now forces a final snapshot and waits for the background writer queue to drain
 before disabling Retained V2. Normal saves remain debounced and asynchronous.
+
+### Final validation
+
+`tests/WorldMapPersistentCache.Tests` links the production V3 cache implementation directly and is
+run by Build Safety. It covers V3 room/thumbnail/route round-trip, V2 fallback loading, truncated
+cache rejection, wrong-context rejection, future-version rejection and writer Flush/temp cleanup.
+
+GitHub Build Safety intentionally cannot perform the real Rain World/RWImGUI semantic build because
+those game/workshop assemblies are not fabricated in CI. After changes under the optional RWImGUI
+frontends, run:
+
+`powershell -ExecutionPolicy Bypass -File Guard/tools/local-build.ps1`
+
+That build compiles the backend and both optional frontends against the installed Rain World and
+RWImGUI assemblies in an isolated non-deploying output directory.
 
 ## Legacy retirement policy
 

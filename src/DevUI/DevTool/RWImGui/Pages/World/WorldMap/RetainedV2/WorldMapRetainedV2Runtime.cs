@@ -425,14 +425,14 @@ internal static class WorldMapRetainedV2Runtime
     {
         ImGui.SameLine(0f, 12f);
         ImGui.TextDisabled(
-            "· V2 P7 scene " +
+            "· WorldMap retained " +
             RenderSceneState.Rooms.Count + "/" +
             RenderSceneState.Connections.Count);
 
         if (!ImGui.IsItemHovered()) return;
 
         ImGui.BeginTooltip();
-        ImGui.TextUnformatted("World Map Retained V2 · Phase 7");
+        ImGui.TextUnformatted("World Map Retained V2 · hardened + cache V3");
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(
@@ -447,7 +447,19 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted(
             "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
             " · surface " + PresentedRouteCount +
-            " · complete " + RetainedConnectionsReady);
+            " · route-set complete " + RetainedConnectionsReady);
+        ImGui.TextUnformatted(
+            "persistent cache v3: validated rooms " +
+            WorldMapPersistentRetainedCache.ValidatedRoomCount +
+            " · staged routes " +
+            WorldMapPersistentRetainedCache.StagedRouteCount +
+            " · source audit " +
+            (WorldMapPersistentRetainedCache.RoomValidationComplete
+                ? "complete"
+                : "pending") +
+            (WorldMapPersistentRetainedCache.TopologyRejected
+                ? " · topology rejected"
+                : string.Empty));
         ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
             " · visible " + visibleRooms.Count);
