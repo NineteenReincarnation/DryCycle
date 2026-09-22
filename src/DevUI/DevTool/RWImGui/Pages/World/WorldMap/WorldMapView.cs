@@ -870,7 +870,21 @@ internal static class WorldMapView
             FindConnection(
                 snapshot,
                 connectionId);
-        if (connection == null ||
+        if (connection == null)
+            return;
+
+        EditorMapRoomSnapshot fromRoom =
+            FindRoom(
+                snapshot,
+                connection.FromRoomIndex);
+        EditorMapRoomSnapshot toRoom =
+            FindRoom(
+                snapshot,
+                connection.ToRoomIndex);
+        if (fromRoom == null ||
+            toRoom == null ||
+            !IsLayerVisible(fromRoom.Layer) ||
+            !IsLayerVisible(toRoom.Layer) ||
             !BuildImmediateConnectionPath(
                 snapshot,
                 connection,
@@ -911,69 +925,6 @@ internal static class WorldMapView
             coreThickness,
             connection.Direction,
             connection.Ambiguous);
-
-        DrawFocusedConnectionEndpoints(
-            draw,
-            snapshot,
-            canvasMin,
-            connection);
-    }
-
-    private static void DrawFocusedConnectionEndpoints(
-        ImDrawListPtr draw,
-        EditorMapPresentationSnapshot snapshot,
-        Num.Vector2 canvasMin,
-        EditorMapConnectionSnapshot connection)
-    {
-        if (connection == null)
-            return;
-
-        uint shadow =
-            ImGui.GetColorU32(ImGuiCol.WindowBg);
-        uint color =
-            ShortcutGold(true);
-
-        EditorMapRoomSnapshot from =
-            FindRoom(
-                snapshot,
-                connection.FromRoomIndex);
-        if (from != null &&
-            IsLayerVisible(from.Layer) &&
-            connection.FromNodeIndex >= 0)
-        {
-            DrawShortcutSocket(
-                draw,
-                EndpointPosition(
-                    from,
-                    connection.FromNodeIndex,
-                    canvasMin),
-                shadow,
-                color,
-                connected: true,
-                emphasized: true);
-        }
-
-        if (connection.ToNodeIndex < 0)
-            return;
-
-        EditorMapRoomSnapshot to =
-            FindRoom(
-                snapshot,
-                connection.ToRoomIndex);
-        if (to == null ||
-            !IsLayerVisible(to.Layer))
-            return;
-
-        DrawShortcutSocket(
-            draw,
-            EndpointPosition(
-                to,
-                connection.ToNodeIndex,
-                canvasMin),
-            shadow,
-            color,
-            connected: true,
-            emphasized: true);
     }
 
     private static void DrawExitPorts(
