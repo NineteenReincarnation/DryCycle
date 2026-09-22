@@ -30,6 +30,7 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly WorldMapDirtySet mainThreadDirty = new();
     private static readonly List<int> geometryChangedRooms = new();
     private static readonly List<string> routeChanged = new();
+    private static readonly List<int> sourcePriorityRooms = new();
     private static readonly List<int> visibleRooms = new();
     private static readonly List<string> visibleRoutes = new();
     private static WorldMapDirtySet lastDirty = new();
@@ -128,6 +129,30 @@ internal static class WorldMapRetainedV2Runtime
 
             if (mainThreadDirty.TopologyChanged || mainThreadDirty.FullRebuild)
                 Volatile.Write(ref retainedConnectionsReady, 0);
+        }
+
+        if (session?.ToolMode == EditorToolMode.Map &&
+            snapshot?.Available == true &&
+            MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
+            MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
+        {
+            // Promote guard-band rooms ahead of the region-wide initial queue. This changes only
+            // processing order; the retained store remains the single owner of room resources.
+            Surface.Initialize(log);
+            Surface.GetRenderWorldBounds(
+                MainSceneState.ViewTransform,
+                out Num.Vector2 priorityMin,
+                out Num.Vector2 priorityMax);
+            SpatialIndex.Query(
+                priorityMin,
+                priorityMax,
+                Volatile.Read(ref activeLayerMask),
+                sourcePriorityRooms);
+            RoomResources.Prioritize(sourcePriorityRooms);
+        }
+        else
+        {
+            sourcePriorityRooms.Clear();
         }
 
         RoomResources.UpdateMainThread(session, snapshot, MainSceneState);
@@ -316,6 +341,7 @@ internal static class WorldMapRetainedV2Runtime
         mainThreadDirty.Clear();
         geometryChangedRooms.Clear();
         routeChanged.Clear();
+        sourcePriorityRooms.Clear();
         visibleRooms.Clear();
         visibleRoutes.Clear();
         Volatile.Write(ref retainedConnectionsReady, 0);
@@ -345,7 +371,8 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
-            " · thumbnails " + RoomResources.CommittedThumbnailCount);
+            " · thumbnails " + RoomResources.CommittedThumbnailCount +
+            " · source-priority " + sourcePriorityRooms.Count);
         ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +

@@ -31,6 +31,8 @@ internal sealed class WorldMapRoomResourceStore
     private const int SourceAuditIntervalFrames = 8;
 
     private readonly Dictionary<int, RoomResource> rooms = new();
+    private readonly Queue<int> visiblePriorityQueue = new();
+    private readonly HashSet<int> visiblePriorityQueued = new();
     private readonly Queue<int> priorityQueue = new();
     private readonly HashSet<int> queued = new();
     private readonly HashSet<int> geometryChanged = new();
@@ -71,6 +73,22 @@ internal sealed class WorldMapRoomResourceStore
         geometryChanged.Clear();
     }
 
+    internal void Prioritize(IReadOnlyList<int> roomIndices)
+    {
+        if (roomIndices == null) return;
+
+        for (int i = 0; i < roomIndices.Count; i++)
+        {
+            int roomIndex = roomIndices[i];
+            if (roomIndex < 0 || !NeedsPriorityRefresh(roomIndex))
+                continue;
+
+            queued.Add(roomIndex);
+            if (visiblePriorityQueued.Add(roomIndex))
+                visiblePriorityQueue.Enqueue(roomIndex);
+        }
+    }
+
     internal void ApplyDirty(WorldMapScene scene, WorldMapDirtySet dirty)
     {
         if (dirty == null) return;
@@ -80,6 +98,7 @@ internal sealed class WorldMapRoomResourceStore
             if (rooms.Remove(roomIndex))
                 AdvanceRevision();
             queued.Remove(roomIndex);
+            visiblePriorityQueued.Remove(roomIndex);
         }
 
         if (dirty.FullRebuild)
@@ -134,10 +153,24 @@ internal sealed class WorldMapRoomResourceStore
         int budget = IdleRoomsPerFrame;
         DrainBuildResults(budget);
 
+        while (budget > 0 && visiblePriorityQueue.Count > 0)
+        {
+            int roomIndex = visiblePriorityQueue.Dequeue();
+            visiblePriorityQueued.Remove(roomIndex);
+            if (!queued.Remove(roomIndex))
+                continue;
+
+            ProcessRoom(page, scene, roomIndex);
+            budget--;
+        }
+
         while (budget > 0 && priorityQueue.Count > 0)
         {
             int roomIndex = priorityQueue.Dequeue();
-            queued.Remove(roomIndex);
+            if (!queued.Remove(roomIndex))
+                continue;
+
+            visiblePriorityQueued.Remove(roomIndex);
             ProcessRoom(page, scene, roomIndex);
             budget--;
         }
@@ -162,6 +195,8 @@ internal sealed class WorldMapRoomResourceStore
     internal void Reset()
     {
         rooms.Clear();
+        visiblePriorityQueue.Clear();
+        visiblePriorityQueued.Clear();
         priorityQueue.Clear();
         queued.Clear();
         geometryChanged.Clear();
@@ -245,6 +280,18 @@ internal sealed class WorldMapRoomResourceStore
             unchecked { resource.GeometryGeneration++; }
             AdvanceRevision();
         });
+    }
+
+    private bool NeedsPriorityRefresh(int roomIndex)
+    {
+        if (!rooms.TryGetValue(roomIndex, out RoomResource resource))
+            return true;
+
+        if (!resource.Thumbnail.HasCommitted)
+            return true;
+
+        return resource.GeometryGeneration <= 0 &&
+               resource.RequestedVisualStamp == int.MinValue;
     }
 
     private void Enqueue(int roomIndex)

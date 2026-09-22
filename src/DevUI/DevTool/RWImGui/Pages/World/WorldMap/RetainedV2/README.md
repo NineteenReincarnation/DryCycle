@@ -19,6 +19,7 @@ phase percentage below 100%.
 - **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; geometry visual caches invalidate from publication generations instead of Unity frame polling; interaction cooldown handoff is thread-safe and Unity-Time-free; fallback rooms use the visible Air tone rather than a near-black FrameBg; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
 - **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface through verified AddImage UVs instead of calling Camera.Render; interaction settle performs one exact render, and guard exhaustion falls back visibly rather than stretching/clamping stale pixels.
 - **Phase 8.2 — 100%**: viewport, room-drag and linking interaction cooldowns are tracked independently; pure pan/zoom/linking run with zero route-build budget while room drag retains a small incident-route budget, and source/geometry/shortcut work remains frozen for every active interaction class.
+- **Phase 8.3 — 100%**: initial room-source capture is guard-band visible-first; rooms needed by the current retained surface are promoted ahead of the region-wide queue without duplicating caches or changing authoring order.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
 
@@ -299,6 +300,14 @@ discarded before commit. Original worker exceptions are logged.
 `WorldMapRoomResourceStore` still captures live MapTex descriptors on the main thread through the
 legacy compatibility boundary, but expensive pure geometry construction is scheduled to workers.
 The main thread commits only a bounded number of completed immutable blobs per frame.
+
+The region-wide initial queue is now **visible-first**. Before room-source capture runs,
+`WorldMapRetainedV2Runtime` queries the same guarded world extent used by the off-screen surface and
+promotes incomplete rooms in that extent ahead of the ordinary queue. Promotion changes queue order
+only: it does not create another resource store, does not duplicate textures, and stale duplicate
+queue entries are skipped without consuming the per-frame room budget. A visible room with a
+committed thumbnail and an in-flight geometry worker is not repeatedly re-polled merely because it
+remains on screen.
 
 ### Visible/local GPU synchronization
 
