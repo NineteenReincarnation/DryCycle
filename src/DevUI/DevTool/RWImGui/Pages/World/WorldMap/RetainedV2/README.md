@@ -21,6 +21,7 @@ phase percentage below 100%.
 - **Phase 8.2 — 100%**: viewport, room-drag and linking interaction cooldowns are tracked independently; pure pan/zoom/linking run with zero route-build budget while room drag retains a small incident-route budget, and source/geometry/shortcut work remains frozen for every active interaction class.
 - **Phase 8.3 — 100%**: initial room-source capture is guard-band visible-first; rooms needed by the current retained surface are promoted ahead of the region-wide queue without duplicating caches or changing authoring order.
 - **Phase 8.4 — 100%**: semantic raster fallback no longer performs new readbacks during whole-region structure publication; cached enhancement can be republished freely, while priority/background passes authorize at most one new GetPixels/ReadPixels operation per Unity frame and interaction authorizes none.
+- **Phase 8.5 — 100%**: readable MapTex raster processing is split into bounded main-thread capture plus worker classification/run construction; at most two new pixel captures start per frame, two workers process pure CPU raster data, stale region/source/request results are discarded, and main-thread commits are bounded.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
 
@@ -501,6 +502,15 @@ Pan/zoom, room-drag and linking interaction suppress new fallback readbacks comp
 
 This keeps base MapTex thumbnails independent from semantic classification: a room can be visible
 from its committed texture while detailed terrain runs arrive later.
+
+Readable textures use the same principle. Unity's `Texture2D.GetPixels` capture remains on the main
+thread, but the capture budget is reduced to **two new rasters per frame**. The captured `Color[]`
+is then handed to a two-worker pure CPU scheduler that performs color classification and horizontal
+run construction without touching Unity objects. Worker results carry both a region generation and
+a per-room request version; results from an old region, invalidated room, superseded texture or
+changed dimensions are discarded before commit. The main thread commits at most four completed
+raster builds per frame and performs persistence/publication only after revalidating the current
+texture source.
 
 ### Final source-thread boundary
 

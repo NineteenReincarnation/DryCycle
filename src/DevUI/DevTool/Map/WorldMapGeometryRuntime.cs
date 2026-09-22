@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.TerrainExt.QuicksandZone;
@@ -114,7 +116,9 @@ internal static partial class MapRoomGeometryPresentationHub
     // Opening a large region must never synchronously decode every minimap/RoomSettings file.
     // Cheap room bounds appear immediately; detailed raster and authored terrain are filled in
     // incrementally with the current/selected room receiving first priority.
-    private const int RasterLoadsPerFrame = 10;
+    private const int RasterLoadsPerFrame = 2;
+    private const int RasterBuildCommitsPerFrame = 4;
+    private const int MaxRasterBuildWorkers = 2;
     private const int UnloadedCurveLoadsPerFrame = 3;
     private const int BackgroundRoomsPerFrame = 24;
     private const int StructureSyncIntervalFrames = 120;
@@ -133,6 +137,10 @@ internal static partial class MapRoomGeometryPresentationHub
         internal int RasterWidth;
         internal int RasterHeight;
         internal bool RasterInitialized;
+        internal int RasterRequestedSourceKey = int.MinValue;
+        internal int RasterRequestedWidth;
+        internal int RasterRequestedHeight;
+        internal int RasterRequestVersion;
         internal int NextRasterPollFrame;
         internal int NodeFingerprint;
         internal bool NodesInitialized;
@@ -166,9 +174,37 @@ internal static partial class MapRoomGeometryPresentationHub
         internal bool Water { get; }
     }
 
+    private sealed class RasterBuildRequest
+    {
+        internal int RoomIndex;
+        internal int SourceKey;
+        internal int Width;
+        internal int Height;
+        internal int RequestVersion;
+        internal int Generation;
+        internal Color[] Pixels;
+    }
+
+    private sealed class RasterBuildResult
+    {
+        internal int RoomIndex;
+        internal int SourceKey;
+        internal int Width;
+        internal int Height;
+        internal int RequestVersion;
+        internal int Generation;
+        internal EditorMapRectSnapshot[] Runs = Array.Empty<EditorMapRectSnapshot>();
+        internal Exception Error;
+    }
+
     private static readonly Dictionary<int, CacheEntry> cache = new();
     private static readonly object publishedGate = new();
     private static readonly Dictionary<int, EditorMapRoomVisualSnapshot> published = new();
+    private static readonly object rasterBuildGate = new();
+    private static readonly Queue<RasterBuildRequest> rasterBuildPending = new();
+    private static readonly ConcurrentQueue<RasterBuildResult> rasterBuildCompleted = new();
+    private static int rasterBuildActiveWorkers;
+    private static int rasterBuildGeneration;
     private static int publishedGeneration;
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
@@ -223,6 +259,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (structureDue)
             SynchronizeStructure(page);
 
+        DrainRasterBuildResults(RasterBuildCommitsPerFrame);
         rasterLoadsRemaining = RasterLoadsPerFrame;
         curveLoadsRemaining = UnloadedCurveLoadsPerFrame;
 
@@ -240,6 +277,10 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
         entry.RasterInitialized = false;
+        entry.RasterRequestedSourceKey = int.MinValue;
+        entry.RasterRequestedWidth = 0;
+        entry.RasterRequestedHeight = 0;
+        unchecked { entry.RasterRequestVersion++; }
         entry.CurvesInitialized = false;
         entry.NodesInitialized = false;
         entry.NextRasterPollFrame = 0;
@@ -253,6 +294,7 @@ internal static partial class MapRoomGeometryPresentationHub
     internal static void Clear()
     {
         PersistentBeforeClear();
+        ResetRasterBuildScheduler();
         cache.Clear();
         lock (publishedGate) published.Clear();
         Interlocked.Increment(ref publishedGeneration);
@@ -268,6 +310,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void ResetRegion(string nextRegion)
     {
+        ResetRasterBuildScheduler();
         cache.Clear();
         lock (publishedGate) published.Clear();
         Interlocked.Increment(ref publishedGeneration);
@@ -445,55 +488,219 @@ internal static partial class MapRoomGeometryPresentationHub
             return false;
         }
 
+        if (entry.RasterRequestedSourceKey == source.SourceKey &&
+            entry.RasterRequestedWidth == source.Width &&
+            entry.RasterRequestedHeight == source.Height)
+            return false;
+
         if (!allowDecode) return false;
         if (!TryReadMapPixels(source, out Color[] pixels)) return false;
 
-        PixelClassification[] classified = new PixelClassification[pixels.Length];
-        for (int i = 0; i < pixels.Length; i++)
-            classified[i] = ClassifyPixel(pixels[i]);
+        unchecked { entry.RasterRequestVersion++; }
+        entry.RasterRequestedSourceKey = source.SourceKey;
+        entry.RasterRequestedWidth = source.Width;
+        entry.RasterRequestedHeight = source.Height;
 
+        ScheduleRasterBuild(
+            entry.RoomIndex,
+            source,
+            entry.RasterRequestVersion,
+            pixels);
+        return true;
+    }
+
+    private static void ScheduleRasterBuild(
+        int roomIndex,
+        RasterSourceInfo source,
+        int requestVersion,
+        Color[] pixels)
+    {
+        lock (rasterBuildGate)
+        {
+            rasterBuildPending.Enqueue(new RasterBuildRequest
+            {
+                RoomIndex = roomIndex,
+                SourceKey = source.SourceKey,
+                Width = source.Width,
+                Height = source.Height,
+                RequestVersion = requestVersion,
+                Generation = rasterBuildGeneration,
+                Pixels = pixels
+            });
+            StartRasterWorkersLocked();
+        }
+    }
+
+    private static void StartRasterWorkersLocked()
+    {
+        while (rasterBuildActiveWorkers < MaxRasterBuildWorkers &&
+               rasterBuildPending.Count > 0)
+        {
+            RasterBuildRequest request = rasterBuildPending.Dequeue();
+            rasterBuildActiveWorkers++;
+            Task.Run(() => ExecuteRasterBuild(request));
+        }
+    }
+
+    private static void ExecuteRasterBuild(RasterBuildRequest request)
+    {
+        RasterBuildResult result = new()
+        {
+            RoomIndex = request.RoomIndex,
+            SourceKey = request.SourceKey,
+            Width = request.Width,
+            Height = request.Height,
+            RequestVersion = request.RequestVersion,
+            Generation = request.Generation
+        };
+
+        try
+        {
+            result.Runs = BuildRasterRuns(
+                request.Pixels,
+                request.Width,
+                request.Height);
+        }
+        catch (Exception error)
+        {
+            result.Error = error;
+        }
+        finally
+        {
+            request.Pixels = null;
+            rasterBuildCompleted.Enqueue(result);
+            lock (rasterBuildGate)
+            {
+                rasterBuildActiveWorkers = Math.Max(0, rasterBuildActiveWorkers - 1);
+                StartRasterWorkersLocked();
+            }
+        }
+    }
+
+    private static void DrainRasterBuildResults(int maxResults)
+    {
+        int drained = 0;
+        while (drained < Math.Max(0, maxResults) &&
+               rasterBuildCompleted.TryDequeue(out RasterBuildResult result))
+        {
+            drained++;
+
+            if (result.Generation != Volatile.Read(ref rasterBuildGeneration) ||
+                !cache.TryGetValue(result.RoomIndex, out CacheEntry entry) ||
+                entry.RasterRequestVersion != result.RequestVersion ||
+                entry.RasterRequestedSourceKey != result.SourceKey ||
+                entry.RasterRequestedWidth != result.Width ||
+                entry.RasterRequestedHeight != result.Height)
+                continue;
+
+            entry.RasterRequestedSourceKey = int.MinValue;
+            entry.RasterRequestedWidth = 0;
+            entry.RasterRequestedHeight = 0;
+
+            if (result.Error != null)
+            {
+                global::DryCycle.Plugin.Logger?.LogError(
+                    "WorldMap raster worker failed for room " +
+                    result.RoomIndex + ": " + result.Error);
+                continue;
+            }
+
+            if (!TryGetRasterSourceInfo(entry.RoomRep, out RasterSourceInfo currentSource) ||
+                currentSource.SourceKey != result.SourceKey ||
+                currentSource.Width != result.Width ||
+                currentSource.Height != result.Height)
+                continue;
+
+            entry.RasterSourceKey = result.SourceKey;
+            entry.RasterWidth = result.Width;
+            entry.RasterHeight = result.Height;
+            entry.RasterInitialized = true;
+            entry.NextRasterPollFrame =
+                Time.frameCount +
+                RasterPollIntervalFrames +
+                Math.Abs(entry.RoomIndex % 37);
+            entry.WidthTiles = Math.Max(1f, result.Width);
+            entry.HeightTiles = Math.Max(1f, result.Height);
+            entry.BaseRasterRuns =
+                result.Runs ?? Array.Empty<EditorMapRectSnapshot>();
+            entry.Revision++;
+            PersistentOnRasterRebuilt(entry, entry.RoomRep, currentSource);
+            Publish(entry, allowRasterReadback: false);
+        }
+    }
+
+    private static EditorMapRectSnapshot[] BuildRasterRuns(
+        Color[] pixels,
+        int width,
+        int height)
+    {
+        if (pixels == null || width <= 0 || height <= 0 ||
+            pixels.Length != width * height)
+            return Array.Empty<EditorMapRectSnapshot>();
+
+        PixelClassification[] row = new PixelClassification[width];
         List<EditorMapRectSnapshot> baseRuns = new();
         List<EditorMapRectSnapshot> waterRuns = new();
-        for (int y = 0; y < source.Height; y++)
+
+        for (int y = 0; y < height; y++)
         {
+            int rowOffset = y * width;
+            for (int x = 0; x < width; x++)
+                row[x] = ClassifyPixel(pixels[rowOffset + x]);
+
             int x = 0;
-            while (x < source.Width)
+            while (x < width)
             {
-                EditorMapGeometryKind kind = classified[y * source.Width + x].Kind;
+                EditorMapGeometryKind kind = row[x].Kind;
                 int start = x++;
-                while (x < source.Width && classified[y * source.Width + x].Kind == kind)
+                while (x < width && row[x].Kind == kind)
                     x++;
-                baseRuns.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, kind));
+                baseRuns.Add(
+                    new EditorMapRectSnapshot(
+                        start,
+                        y,
+                        x - start,
+                        1f,
+                        kind));
             }
 
             x = 0;
-            while (x < source.Width)
+            while (x < width)
             {
-                if (!classified[y * source.Width + x].Water)
+                if (!row[x].Water)
                 {
                     x++;
                     continue;
                 }
 
                 int start = x++;
-                while (x < source.Width && classified[y * source.Width + x].Water)
+                while (x < width && row[x].Water)
                     x++;
-                waterRuns.Add(new EditorMapRectSnapshot(start, y, x - start, 1f, EditorMapGeometryKind.Water));
+                waterRuns.Add(
+                    new EditorMapRectSnapshot(
+                        start,
+                        y,
+                        x - start,
+                        1f,
+                        EditorMapGeometryKind.Water));
             }
         }
 
         baseRuns.AddRange(waterRuns);
-        entry.RasterSourceKey = source.SourceKey;
-        entry.RasterWidth = source.Width;
-        entry.RasterHeight = source.Height;
-        entry.RasterInitialized = true;
-        entry.NextRasterPollFrame = Time.frameCount + RasterPollIntervalFrames + Math.Abs(entry.RoomIndex % 37);
-        entry.WidthTiles = Math.Max(1f, source.Width);
-        entry.HeightTiles = Math.Max(1f, source.Height);
-        entry.BaseRasterRuns = baseRuns.ToArray();
-        entry.Revision++;
-        PersistentOnRasterRebuilt(entry, roomRep, source);
-        return true;
+        return baseRuns.ToArray();
+    }
+
+    private static void ResetRasterBuildScheduler()
+    {
+        lock (rasterBuildGate)
+        {
+            unchecked { rasterBuildGeneration++; }
+            rasterBuildPending.Clear();
+        }
+
+        while (rasterBuildCompleted.TryDequeue(out _))
+        {
+        }
     }
 
     private static bool TryGetRasterSourceInfo(
@@ -574,9 +781,9 @@ internal static partial class MapRoomGeometryPresentationHub
         if (color.b >= 0.28f)
         {
             Color unblended = new(
-                Mathf.Clamp01(color.r / 0.7f),
-                Mathf.Clamp01(color.g / 0.7f),
-                Mathf.Clamp01((color.b - 0.3f) / 0.7f));
+                Clamp01(color.r / 0.7f),
+                Clamp01(color.g / 0.7f),
+                Clamp01((color.b - 0.3f) / 0.7f));
             if (TryClassifyVanillaMapColor(unblended, out kind))
                 return new PixelClassification(kind, true);
         }
@@ -593,6 +800,9 @@ internal static partial class MapRoomGeometryPresentationHub
 
         return new PixelClassification(EditorMapGeometryKind.Structure, false);
     }
+
+    private static float Clamp01(float value) =>
+        value <= 0f ? 0f : value >= 1f ? 1f : value;
 
     private static bool TryClassifyVanillaMapColor(Color color, out EditorMapGeometryKind kind)
     {
