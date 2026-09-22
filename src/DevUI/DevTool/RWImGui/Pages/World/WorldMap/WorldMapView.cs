@@ -232,10 +232,14 @@ internal static class WorldMapView
             viewportInteraction = true;
         }
 
-        // Navigation is latency-sensitive. Enter the interaction budget before any room/shortcut
-        // presentation work so the current frame, not only the next one, receives the cheap path.
-        if (viewportInteraction || draggingRoom >= 0 || linkingRoom >= 0)
-            WorldMapBackgroundBudget.NoteInteraction();
+        // Interaction classes are published before any room/shortcut presentation work so the
+        // current frame, not only the next one, receives the correct background budget.
+        WorldMapInteractionKind interactionKind = WorldMapInteractionKind.None;
+        if (viewportInteraction) interactionKind |= WorldMapInteractionKind.Viewport;
+        if (draggingRoom >= 0) interactionKind |= WorldMapInteractionKind.RoomDrag;
+        if (linkingRoom >= 0) interactionKind |= WorldMapInteractionKind.Linking;
+        if (interactionKind != WorldMapInteractionKind.None)
+            WorldMapBackgroundBudget.NoteInteraction(interactionKind);
 
         WorldMapRetainedV2Runtime.Synchronize(
             snapshot,

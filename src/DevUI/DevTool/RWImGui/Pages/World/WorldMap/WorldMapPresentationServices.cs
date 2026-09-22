@@ -330,9 +330,19 @@ internal static class WorldMapUpdateThrottle
     }
 }
 
+[Flags]
+internal enum WorldMapInteractionKind
+{
+    None = 0,
+    Viewport = 1,
+    RoomDrag = 2,
+    Linking = 4
+}
+
 /// <summary>
-/// Main-thread background work budget. Interactive navigation gets priority over source recovery and
-/// compatibility scanning; stable frames advance those jobs at a bounded cadence.
+/// Main-thread background work budget. Interaction kinds are tracked independently so pure viewport
+/// navigation can freeze route/source work while room dragging still receives a bounded route budget.
+/// Stable frames advance background jobs at their normal bounded cadence.
 /// </summary>
 internal static class WorldMapBackgroundBudget
 {
@@ -346,7 +356,9 @@ internal static class WorldMapBackgroundBudget
     private static int lastShortcutSweepFrame = -1000;
     private static string geometryRegion = string.Empty;
     private static string shortcutRegion = string.Empty;
-    private static long interactionUntilTimestamp;
+    private static long viewportUntilTimestamp;
+    private static long roomDragUntilTimestamp;
+    private static long linkingUntilTimestamp;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -366,28 +378,45 @@ internal static class WorldMapBackgroundBudget
     }
 
     internal static bool InteractionActive =>
-        enabled &&
-        Stopwatch.GetTimestamp() <= Interlocked.Read(ref interactionUntilTimestamp);
+        ViewportInteractionActive ||
+        RoomDragInteractionActive ||
+        LinkingInteractionActive;
 
-    internal static void NoteInteraction()
+    internal static bool ViewportInteractionActive =>
+        enabled && TimestampActive(ref viewportUntilTimestamp);
+
+    internal static bool RoomDragInteractionActive =>
+        enabled && TimestampActive(ref roomDragUntilTimestamp);
+
+    internal static bool LinkingInteractionActive =>
+        enabled && TimestampActive(ref linkingUntilTimestamp);
+
+    internal static void NoteInteraction(WorldMapInteractionKind kind)
     {
-        if (!enabled) return;
+        if (!enabled || kind == WorldMapInteractionKind.None) return;
 
         long cooldown =
             Math.Max(
                 1L,
                 Stopwatch.Frequency * InteractionCooldownMilliseconds / 1000L);
         long target = Stopwatch.GetTimestamp() + cooldown;
-        while (true)
-        {
-            long current = Interlocked.Read(ref interactionUntilTimestamp);
-            if (current >= target) return;
-            if (Interlocked.CompareExchange(
-                    ref interactionUntilTimestamp,
-                    target,
-                    current) == current)
-                return;
-        }
+
+        if ((kind & WorldMapInteractionKind.Viewport) != 0)
+            ExtendUntil(ref viewportUntilTimestamp, target);
+        if ((kind & WorldMapInteractionKind.RoomDrag) != 0)
+            ExtendUntil(ref roomDragUntilTimestamp, target);
+        if ((kind & WorldMapInteractionKind.Linking) != 0)
+            ExtendUntil(ref linkingUntilTimestamp, target);
+    }
+
+    internal static int RouteBuildBudget(int idleBudget, int roomDragBudget)
+    {
+        if (!enabled) return Math.Max(0, idleBudget);
+        if (RoomDragInteractionActive)
+            return Math.Max(0, roomDragBudget);
+        if (ViewportInteractionActive || LinkingInteractionActive)
+            return 0;
+        return Math.Max(0, idleBudget);
     }
 
     internal static bool AllowSourceRecovery() =>
@@ -440,12 +469,28 @@ internal static class WorldMapBackgroundBudget
         return true;
     }
 
+    private static bool TimestampActive(ref long timestamp) =>
+        Stopwatch.GetTimestamp() <= Interlocked.Read(ref timestamp);
+
+    private static void ExtendUntil(ref long timestamp, long target)
+    {
+        while (true)
+        {
+            long current = Interlocked.Read(ref timestamp);
+            if (current >= target) return;
+            if (Interlocked.CompareExchange(ref timestamp, target, current) == current)
+                return;
+        }
+    }
+
     private static void ResetState()
     {
         lastGeometrySweepFrame = -1000;
         lastShortcutSweepFrame = -1000;
         geometryRegion = string.Empty;
         shortcutRegion = string.Empty;
-        Interlocked.Exchange(ref interactionUntilTimestamp, 0L);
+        Interlocked.Exchange(ref viewportUntilTimestamp, 0L);
+        Interlocked.Exchange(ref roomDragUntilTimestamp, 0L);
+        Interlocked.Exchange(ref linkingUntilTimestamp, 0L);
     }
 }

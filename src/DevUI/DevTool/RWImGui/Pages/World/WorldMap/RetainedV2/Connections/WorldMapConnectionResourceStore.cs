@@ -110,9 +110,10 @@ internal sealed class WorldMapConnectionResourceStore
     {
         if (scene == null || queue.Count == 0) return;
 
-        int budget = WorldMapBackgroundBudget.InteractionActive
-            ? InteractiveRoutesPerFrame
-            : IdleRoutesPerFrame;
+        int budget = WorldMapBackgroundBudget.RouteBuildBudget(
+            IdleRoutesPerFrame,
+            InteractiveRoutesPerFrame);
+        if (budget <= 0) return;
 
         buildBatch.Clear();
         while (budget > 0 && queue.Count > 0)

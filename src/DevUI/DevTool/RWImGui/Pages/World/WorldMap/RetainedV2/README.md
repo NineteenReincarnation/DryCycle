@@ -18,6 +18,7 @@ phase percentage below 100%.
 - **Phase 7 — 100%**: final responsibility consolidation, legacy GPU/routed-overlay retirement and removal of obsolete Map performance compatibility paths.
 - **Post-refactor cleanup — 100%**: Phase 0 runtime benchmark/probe instrumentation retired; overlays reuse retained spatial indexes; stable frames reuse the existing off-screen surface; live MapPage/texture/file source work runs only on the Unity main-thread pump and Draw consumes published snapshots; geometry visual caches invalidate from publication generations instead of Unity frame polling; interaction cooldown handoff is thread-safe and Unity-Time-free; fallback rooms use the visible Air tone rather than a near-black FrameBg; Map source/visual compatibility services use the single Bridge lifecycle instead of separate BepInEx plugin shells.
 - **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface through verified AddImage UVs instead of calling Camera.Render; interaction settle performs one exact render, and guard exhaustion falls back visibly rather than stretching/clamping stale pixels.
+- **Phase 8.2 — 100%**: viewport, room-drag and linking interaction cooldowns are tracked independently; pure pan/zoom/linking run with zero route-build budget while room drag retains a small incident-route budget, and source/geometry/shortcut work remains frozen for every active interaction class.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
 
@@ -549,13 +550,17 @@ requested canvas size after cooldown.
 
 ### Interaction freeze
 
-While pan/zoom/room-drag interaction is active, non-urgent snapshot publication, geometry priming,
-shortcut texture scans, exact-shortcut file parsing, source recovery and room-resource commits are
-paused. Retained last-known-good geometry/thumbnails stay authoritative until the interaction
-cooldown ends.
+Viewport pan/zoom, room dragging and connection linking now publish separate atomic interaction
+cooldowns. Non-urgent snapshot publication, geometry priming, shortcut texture scans,
+exact-shortcut file parsing, source recovery and room-resource commits remain paused for **all**
+active interaction classes. Retained last-known-good geometry/thumbnails stay authoritative until
+the relevant cooldowns expire.
 
-Connection routes remain incrementally editable for actual room movement, but pure pan/zoom does not
-enqueue route work.
+Route construction is stricter: pure viewport navigation and linking receive a **zero** route-build
+budget, so queued A*/orthogonal work cannot steal an interaction frame. Room dragging remains the
+one exception because incident routes must follow the authored room position; it receives the
+existing small interactive route budget. Once all interaction cooldowns expire the normal idle route
+budget resumes.
 
 ### Post-refactor overlay locality
 
