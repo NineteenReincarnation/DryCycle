@@ -245,22 +245,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
         Num.Vector2[] path = route.Points ?? Array.Empty<Num.Vector2>();
         if (path.Length < 2) return null;
 
-        int crossingCount =
-            resources.Crossings.Count;
-        int estimatedVertices =
-            Math.Min(
-                65536,
-                crossingCount * 36);
-
-        List<Vector3> vertices =
-            new(estimatedVertices);
-        List<Color32> colors =
-            new(estimatedVertices);
-        List<int> indices =
-            new(
-                Math.Min(
-                    98304,
-                    crossingCount * 54));
+        List<Vector3> vertices = new();
+        List<Color32> colors = new();
+        List<int> indices = new();
 
         Color32 shadow = new(4, 5, 7, 238);
         Color32 core = RouteColor(route);
@@ -331,9 +318,22 @@ internal sealed class WorldMapRetainedConnectionRenderer
             resources.Crossings.Count == 0)
             return null;
 
-        List<Vector3> vertices = new();
-        List<Color32> colors = new();
-        List<int> indices = new();
+        int crossingCount =
+            resources.Crossings.Count;
+        int estimatedVertices =
+            Math.Min(
+                65536,
+                crossingCount * 36);
+
+        List<Vector3> vertices =
+            new(estimatedVertices);
+        List<Color32> colors =
+            new(estimatedVertices);
+        List<int> indices =
+            new(
+                Math.Min(
+                    98304,
+                    crossingCount * 54));
 
         Color32 mask = new(4, 5, 7, 255);
         Color32 bridgeShadow = new(4, 5, 7, 238);
