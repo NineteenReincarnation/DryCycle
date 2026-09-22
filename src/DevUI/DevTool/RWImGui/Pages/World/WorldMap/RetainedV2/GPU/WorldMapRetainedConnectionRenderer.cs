@@ -116,14 +116,25 @@ internal sealed class WorldMapRetainedConnectionRenderer
         for (int i = 0; i < stale.Count; i++)
             RemoveRoute(stale[i]);
 
-        if (crossingRevision != resources.Revision)
+        if (!resources.CrossingsCurrent)
         {
-            ReplaceMesh(crossingFilter, BuildCrossingMesh(resources));
-            crossingRevision = resources.Revision;
+            if (crossingObject != null)
+                crossingObject.SetActive(false);
         }
+        else
+        {
+            if (crossingRevision != resources.CrossingRevision)
+            {
+                ReplaceMesh(
+                    crossingFilter,
+                    BuildCrossingMesh(resources));
+                crossingRevision = resources.CrossingRevision;
+            }
 
-        if (crossingObject != null)
-            crossingObject.SetActive(true);
+            if (crossingObject != null)
+                crossingObject.SetActive(
+                    resources.Crossings.Count > 0);
+        }
 
         return true;
     }
@@ -299,87 +310,96 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private static Mesh BuildCrossingMesh(
         WorldMapConnectionResourceStore resources)
     {
-        if (resources == null || resources.Routes.Count < 2)
+        if (resources == null ||
+            resources.Crossings.Count == 0)
             return null;
-
-        List<ConnectionRouteResource> routes =
-            new(resources.Routes.Values);
-        routes.Sort((a, b) =>
-            string.CompareOrdinal(a.ConnectionId, b.ConnectionId));
 
         List<Vector3> vertices = new();
         List<Color32> colors = new();
         List<int> indices = new();
 
         Color32 mask = new(4, 5, 7, 255);
+        Color32 bridgeShadow = new(4, 5, 7, 238);
 
-        for (int i = 0; i < routes.Count; i++)
+        for (int i = 0; i < resources.Crossings.Count; i++)
         {
-            Num.Vector2[] a = routes[i]?.Points ?? Array.Empty<Num.Vector2>();
-            if (a.Length < 2) continue;
+            WorldMapCrossingMark mark =
+                resources.Crossings[i];
 
-            for (int j = i + 1; j < routes.Count; j++)
+            if (!resources.TryGet(
+                    mark.OverRouteId,
+                    out ConnectionRouteResource overRoute))
+                continue;
+
+            Num.Vector2 tangent =
+                Normalize(mark.Tangent);
+            if (tangent.LengthSquared() < 0.5f)
+                continue;
+
+            Num.Vector2 point = mark.Point;
+            Num.Vector2 normal =
+                new(-tangent.Y, tangent.X);
+
+            AddThickSegment(
+                vertices,
+                colors,
+                indices,
+                point - tangent * (CrossingRadius + 2.5f),
+                point + tangent * (CrossingRadius + 2.5f),
+                ShadowHalfWidth + 1.4f,
+                mask,
+                -0.02f);
+
+            Color32 core = RouteColor(overRoute);
+
+            const int arcSegments = 6;
+            Num.Vector2 previous =
+                point - tangent * CrossingRadius;
+
+            for (int segment = 1; segment <= arcSegments; segment++)
             {
-                ConnectionRouteResource overRoute = routes[j];
-                Num.Vector2[] b = overRoute?.Points ?? Array.Empty<Num.Vector2>();
-                if (b.Length < 2) continue;
+                float t = segment / (float)arcSegments;
+                float along =
+                    (-1f + t * 2f) *
+                    CrossingRadius;
+                float rise =
+                    (float)Math.Sin(Math.PI * t) *
+                    CrossingRise;
 
-                for (int ai = 0; ai < a.Length - 1; ai++)
-                {
-                    for (int bi = 0; bi < b.Length - 1; bi++)
-                    {
-                        if (!TrySegmentIntersection(
-                                a[ai],
-                                a[ai + 1],
-                                b[bi],
-                                b[bi + 1],
-                                out Num.Vector2 point))
-                            continue;
+                Num.Vector2 current =
+                    point +
+                    tangent * along +
+                    normal * rise;
 
-                        Num.Vector2 tangent = Normalize(b[bi + 1] - b[bi]);
-                        if (tangent.LengthSquared() < 0.5f) continue;
+                AddThickSegment(
+                    vertices,
+                    colors,
+                    indices,
+                    previous,
+                    current,
+                    ShadowHalfWidth,
+                    bridgeShadow,
+                    -0.055f);
 
-                        AddThickSegment(
-                            vertices,
-                            colors,
-                            indices,
-                            point - tangent * (CrossingRadius + 2f),
-                            point + tangent * (CrossingRadius + 2f),
-                            ShadowHalfWidth + 1.2f,
-                            mask,
-                            -0.02f);
+                AddThickSegment(
+                    vertices,
+                    colors,
+                    indices,
+                    previous,
+                    current,
+                    CoreHalfWidth,
+                    core,
+                    -0.08f);
 
-                        Num.Vector2 normal = new(-tangent.Y, tangent.X);
-                        Num.Vector2 p0 = point - tangent * CrossingRadius;
-                        Num.Vector2 p1 = point + normal * CrossingRise;
-                        Num.Vector2 p2 = point + tangent * CrossingRadius;
-                        Color32 core = RouteColor(overRoute);
-
-                        AddThickSegment(
-                            vertices,
-                            colors,
-                            indices,
-                            p0,
-                            p1,
-                            CoreHalfWidth,
-                            core,
-                            -0.06f);
-                        AddThickSegment(
-                            vertices,
-                            colors,
-                            indices,
-                            p1,
-                            p2,
-                            CoreHalfWidth,
-                            core,
-                            -0.06f);
-                    }
-                }
+                previous = current;
             }
         }
 
-        if (indices.Count == 0) return null;
-        Mesh mesh = NewMesh("DryCycle WorldMap V2 Crossings");
+        if (indices.Count == 0)
+            return null;
+
+        Mesh mesh =
+            NewMesh("DryCycle WorldMap V2 Crossings");
         mesh.vertices = vertices.ToArray();
         mesh.colors32 = colors.ToArray();
         mesh.triangles = indices.ToArray();
@@ -666,34 +686,6 @@ internal sealed class WorldMapRetainedConnectionRenderer
         return length;
     }
 
-    private static bool TrySegmentIntersection(
-        Num.Vector2 a,
-        Num.Vector2 b,
-        Num.Vector2 c,
-        Num.Vector2 d,
-        out Num.Vector2 point)
-    {
-        point = default;
-        Num.Vector2 r = b - a;
-        Num.Vector2 s = d - c;
-        float denominator = Cross(r, s);
-        if (Math.Abs(denominator) < 0.001f) return false;
-
-        Num.Vector2 ca = c - a;
-        float t = Cross(ca, s) / denominator;
-        float u = Cross(ca, r) / denominator;
-        if (t <= 0.04f || t >= 0.96f || u <= 0.04f || u >= 0.96f)
-            return false;
-
-        Num.Vector2 rt = Normalize(r);
-        Num.Vector2 st = Normalize(s);
-        if (Math.Abs(Cross(rt, st)) < 0.35f)
-            return false;
-
-        point = a + r * t;
-        return true;
-    }
-
     private void HideVisible()
     {
         foreach (string id in visiblePrevious)
@@ -744,9 +736,6 @@ internal sealed class WorldMapRetainedConnectionRenderer
         float length = value.Length();
         return length <= 0.0001f ? Num.Vector2.Zero : value / length;
     }
-
-    private static float Cross(Num.Vector2 a, Num.Vector2 b) =>
-        a.X * b.Y - a.Y * b.X;
 
     private static Color32 RouteColor(ConnectionRouteResource route)
     {

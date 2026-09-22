@@ -750,6 +750,31 @@ Routing policy is bumped to **v5**, invalidating v4 persistent routes. The old
 
 Crossing bridge presentation and endpoint pair markers remain later phases.
 
+### Multi-Lane Routing V2 · Phase 3 — Crossing bridge semantics
+
+Phase 3 makes orthogonal route crossings visually explicit without changing routing geometry:
+
+- the old GPU-renderer O(route² × segment²) crossing scan is retired;
+- a retained `WorldMapRouteCrossingResolver` spatially buckets final route segments and compares only
+  local horizontal/vertical candidates;
+- collinear/shared corridors are ignored (Phase 2 owns those), as are route self-crossings;
+- the first/last two terminal segments and intersections too close to segment/route endpoints are
+  excluded, preventing bridges beside room sockets or on ordinary bends;
+- over/under ownership is deterministic by connection ID, so the same crossing does not flip between
+  frames; arrow direction remains independent from bridge orientation;
+- the over-route is rendered as a smooth six-segment arch with an underpass mask, making
+  "crosses here" visually distinct from "connects here";
+- crossing marks are immutable derived presentation data owned by the connection resource store;
+  the GPU renderer consumes marks only and performs no topology search;
+- progressive cold-start route batches defer crossing detection until the current route queue drains;
+- active room dragging hides stale crossing marks and defers global corridor/crossing convergence
+  until the existing interaction cooldown expires.
+
+Pan, zoom and stable frames perform zero crossing detection. Crossing data is derived from current
+`Points`, is not persisted, and therefore requires no cache-format or routing-policy bump.
+
+Endpoint pair markers remain the next phase.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

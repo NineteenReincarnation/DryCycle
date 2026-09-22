@@ -37,9 +37,15 @@ internal sealed class WorldMapConnectionResourceStore
         new();
     private bool routingObstacleSnapshotDirty = true;
     private bool corridorLayoutDirty = true;
+    private bool crossingLayoutDirty = true;
+    private WorldMapCrossingMark[] crossings = Array.Empty<WorldMapCrossingMark>();
+    private long crossingRevision;
     private long revision;
 
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
+    internal IReadOnlyList<WorldMapCrossingMark> Crossings => crossings;
+    internal long CrossingRevision => crossingRevision;
+    internal bool CrossingsCurrent => !crossingLayoutDirty;
     internal int Count => routes.Count;
     internal int PendingCount => queue.Count;
     internal long Revision => revision;
@@ -89,6 +95,7 @@ internal sealed class WorldMapConnectionResourceStore
             if (routes.Remove(id))
             {
                 corridorLayoutDirty = true;
+                crossingLayoutDirty = true;
                 routeChanged.Add(id);
                 unchecked { revision++; }
                 MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
@@ -108,6 +115,7 @@ internal sealed class WorldMapConnectionResourceStore
             RebuildLanePlan(scene, roomResources);
             RebuildRoutingObstacles(scene, roomResources);
             corridorLayoutDirty = true;
+            crossingLayoutDirty = true;
             EnqueueAll(scene);
             return;
         }
@@ -157,7 +165,9 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapRoomResourceStore roomResources)
     {
         if (scene == null ||
-            (queue.Count == 0 && !corridorLayoutDirty))
+            (queue.Count == 0 &&
+             !corridorLayoutDirty &&
+             !crossingLayoutDirty))
             return;
 
         int budget = WorldMapBackgroundBudget.RouteBuildBudget(
@@ -168,7 +178,14 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (queue.Count == 0)
         {
-            ApplyCorridorLanes();
+            if (WorldMapBackgroundBudget.RoomDragInteractionActive)
+                return;
+
+            if (corridorLayoutDirty)
+                ApplyCorridorLanes();
+            else if (crossingLayoutDirty)
+                RebuildCrossings();
+
             return;
         }
 
@@ -207,6 +224,7 @@ internal sealed class WorldMapConnectionResourceStore
                         : 1L;
                 routes[id] = restoredRoute;
                 corridorLayoutDirty = true;
+                crossingLayoutDirty = true;
                 routeSetChanged = true;
                 routeChanged.Add(id);
                 unchecked { revision++; }
@@ -219,6 +237,7 @@ internal sealed class WorldMapConnectionResourceStore
                 if (routes.Remove(id))
                 {
                     corridorLayoutDirty = true;
+                    crossingLayoutDirty = true;
                     routeChanged.Add(id);
                     unchecked { revision++; }
                     MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
@@ -256,6 +275,7 @@ internal sealed class WorldMapConnectionResourceStore
 
             routes[connection.Id] = route;
             corridorLayoutDirty = true;
+            crossingLayoutDirty = true;
             routeSetChanged = true;
             routeChanged.Add(connection.Id);
             unchecked { revision++; }
@@ -285,6 +305,9 @@ internal sealed class WorldMapConnectionResourceStore
         routingObstacleSnapshot.Clear();
         routingObstacleSnapshotDirty = true;
         corridorLayoutDirty = true;
+        crossingLayoutDirty = true;
+        crossings = Array.Empty<WorldMapCrossingMark>();
+        crossingRevision = 0L;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
@@ -308,6 +331,7 @@ internal sealed class WorldMapConnectionResourceStore
             if (routes.Remove(stale[i]))
             {
                 corridorLayoutDirty = true;
+                crossingLayoutDirty = true;
                 routeChanged.Add(stale[i]);
                 unchecked { revision++; }
             }
@@ -383,6 +407,30 @@ internal sealed class WorldMapConnectionResourceStore
             GetRoutingObstacleSnapshot(),
             routeChanged,
             ref revision);
+
+        crossingLayoutDirty = true;
+
+        // During progressive cold-start batches, crossings are presentation sugar and may wait until
+        // all currently queued base routes exist. This avoids rebuilding the crossing index 24 routes
+        // at a time across a large region.
+        if (queue.Count == 0)
+            RebuildCrossings();
+    }
+
+    private void RebuildCrossings()
+    {
+        if (!crossingLayoutDirty)
+            return;
+
+        crossings =
+            WorldMapRouteCrossingResolver.Build(routes);
+        crossingLayoutDirty = false;
+
+        unchecked
+        {
+            crossingRevision++;
+            revision++;
+        }
     }
 
     private readonly struct TerminalEndpoint
