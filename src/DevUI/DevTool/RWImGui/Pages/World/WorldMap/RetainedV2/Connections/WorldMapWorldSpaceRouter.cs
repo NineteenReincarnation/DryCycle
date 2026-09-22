@@ -156,6 +156,9 @@ internal static class WorldMapWorldSpaceRouter
                 Direction = connection.Direction,
                 Ambiguous = connection.Ambiguous,
                 Kind = route.Kind,
+                BasePoints = route.Points == null
+                    ? Array.Empty<Num.Vector2>()
+                    : (Num.Vector2[])route.Points.Clone(),
                 Points = route.Points == null
                     ? Array.Empty<Num.Vector2>()
                     : (Num.Vector2[])route.Points.Clone(),

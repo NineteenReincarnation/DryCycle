@@ -186,7 +186,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 4;
+    private const int RoutingPolicyVersion = 5;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -198,8 +198,6 @@ internal static class WorldMapOrthogonalRouter
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
     private const int MaxGridExtent = 112;
-    private const float ParallelLaneSpacing = 18f;
-    private const float MinimumSharedRun = 24f;
 
     private static readonly Dictionary<string, CachedRoute> cache = new(StringComparer.Ordinal);
     private static int generation;
@@ -286,198 +284,8 @@ internal static class WorldMapOrthogonalRouter
             RegisterOccupancy(route, occupancy);
         }
 
-        SeparateSharedCorridors(result, requests, obstacles);
         PruneCache();
         return result;
-    }
-
-    private static void SeparateSharedCorridors(
-        Route[] routes,
-        IReadOnlyList<Request> requests,
-        List<Obstacle> obstacles)
-    {
-        // The normal router deliberately keeps endpoints stable, so unrelated links can still pick
-        // the same long straight corridor. Split only the shared middle run into a parallel dogleg:
-        // sockets and junctions stay fixed, while the visible/hit-test path gets its own lane.
-        for (int routeIndex = 1; routeIndex < routes.Length; routeIndex++)
-        {
-            Route original = routes[routeIndex];
-            if (original?.Kind == RouteKind.Compact)
-                continue;
-
-            Num.Vector2[] points = original?.Points;
-            if (points == null || points.Length < 2) continue;
-
-            bool changed = false;
-            int adjustments = 0;
-            while (adjustments < 12)
-            {
-                bool adjustedThisPass = false;
-                for (int segment = 0; segment < points.Length - 1; segment++)
-                {
-                    Num.Vector2 a = points[segment];
-                    Num.Vector2 b = points[segment + 1];
-                    bool vertical = Math.Abs(a.X - b.X) < 0.01f;
-                    if (!vertical && Math.Abs(a.Y - b.Y) >= 0.01f) continue;
-
-                    int first = segment;
-                    int last = segment + 1;
-                    float coordinate = vertical ? a.X : a.Y;
-                    while (first > 0 && OnAxis(points[first - 1], vertical, coordinate)) first--;
-                    while (last < points.Length - 1 && OnAxis(points[last + 1], vertical, coordinate)) last++;
-
-                    Num.Vector2 runStart = points[first];
-                    Num.Vector2 runEnd = points[last];
-                    if (!SharesCorridor(runStart, runEnd, routes, routeIndex)) continue;
-                    if (!TrySeparateCorridor(
-                            points,
-                            first,
-                            last,
-                            vertical,
-                            routes,
-                            routeIndex,
-                            requests[routeIndex],
-                            original,
-                            obstacles,
-                            out Num.Vector2[] separated))
-                        continue;
-
-                    points = Simplify(separated);
-                    changed = true;
-                    adjustedThisPass = true;
-                    adjustments++;
-                    break;
-                }
-
-                if (!adjustedThisPass) break;
-            }
-
-            if (!changed) continue;
-            Route separatedRoute = Clone(original);
-            separatedRoute.Points = points;
-            routes[routeIndex] = separatedRoute;
-        }
-    }
-
-    private static bool TrySeparateCorridor(
-        Num.Vector2[] points,
-        int first,
-        int last,
-        bool vertical,
-        Route[] routes,
-        int routeIndex,
-        Request request,
-        Route original,
-        List<Obstacle> obstacles,
-        out Num.Vector2[] separated)
-    {
-        separated = null;
-        Num.Vector2 runStart = points[first];
-        Num.Vector2 runEnd = points[last];
-        Num.Vector2 delta = runEnd - runStart;
-        float runLength = delta.Length();
-        if (runLength < MinimumSharedRun) return false;
-
-        Num.Vector2 tangent = delta / Math.Max(0.001f, runLength);
-        float startShoulder = first == 0 ? PortNeck + 8f : 10f;
-        float endShoulder = last == points.Length - 1 ? PortNeck + 8f : 10f;
-        if (runLength - startShoulder - endShoulder < MinimumSharedRun) return false;
-
-        Num.Vector2 shoulderStart = runStart + tangent * startShoulder;
-        Num.Vector2 shoulderEnd = runEnd - tangent * endShoulder;
-        Num.Vector2 axisNormal = vertical ? new Num.Vector2(1f, 0f) : new Num.Vector2(0f, 1f);
-
-        for (int lane = 1; lane <= 8; lane++)
-        {
-            for (int side = -1; side <= 1; side += 2)
-            {
-                Num.Vector2 offset = axisNormal * (side * lane * ParallelLaneSpacing);
-                Num.Vector2 shiftedStart = shoulderStart + offset;
-                Num.Vector2 shiftedEnd = shoulderEnd + offset;
-                if (SharesCorridor(shiftedStart, shiftedEnd, routes, routeIndex)) continue;
-
-                Num.Vector2[] candidate = BuildCorridorDogleg(
-                    points,
-                    first,
-                    last,
-                    shoulderStart,
-                    shiftedStart,
-                    shiftedEnd,
-                    shoulderEnd);
-                candidate = Simplify(candidate);
-                if (!RouteClear(candidate, request.StartRoom, request.EndRoom, obstacles)) continue;
-                if (Num.Vector2.Dot(candidate[1] - candidate[0], original.StartDirection) <= 0f ||
-                    Num.Vector2.Dot(candidate[candidate.Length - 2] - candidate[candidate.Length - 1], original.EndDirection) <= 0f)
-                    continue;
-
-                separated = candidate;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static Num.Vector2[] BuildCorridorDogleg(
-        Num.Vector2[] source,
-        int first,
-        int last,
-        Num.Vector2 shoulderStart,
-        Num.Vector2 shiftedStart,
-        Num.Vector2 shiftedEnd,
-        Num.Vector2 shoulderEnd)
-    {
-        List<Num.Vector2> result = new(source.Length + 6);
-        for (int i = 0; i <= first; i++) AppendDistinct(result, source[i]);
-        AppendDistinct(result, shoulderStart);
-        AppendDistinct(result, shiftedStart);
-        AppendDistinct(result, shiftedEnd);
-        AppendDistinct(result, shoulderEnd);
-        AppendDistinct(result, source[last]);
-        for (int i = last + 1; i < source.Length; i++) AppendDistinct(result, source[i]);
-        return result.ToArray();
-    }
-
-    private static void AppendDistinct(List<Num.Vector2> points, Num.Vector2 point)
-    {
-        if (points.Count == 0 || Num.Vector2.DistanceSquared(points[points.Count - 1], point) >= 0.25f)
-            points.Add(point);
-    }
-
-    private static bool OnAxis(Num.Vector2 point, bool vertical, float coordinate) =>
-        Math.Abs((vertical ? point.X : point.Y) - coordinate) < 0.01f;
-
-    private static bool SharesCorridor(Num.Vector2 a, Num.Vector2 b, Route[] routes, int count)
-    {
-        bool vertical = Math.Abs(a.X - b.X) < 0.01f;
-        if (!vertical && Math.Abs(a.Y - b.Y) >= 0.01f) return false;
-
-        float min = vertical ? Math.Min(a.Y, b.Y) : Math.Min(a.X, b.X);
-        float max = vertical ? Math.Max(a.Y, b.Y) : Math.Max(a.X, b.X);
-        if (max - min < MinimumSharedRun) return false;
-        float coordinate = vertical ? a.X : a.Y;
-
-        for (int i = 0; i < count; i++)
-        {
-            Num.Vector2[] other = routes[i]?.Points;
-            if (other == null) continue;
-            for (int p = 0; p < other.Length - 1; p++)
-            {
-                Num.Vector2 c = other[p];
-                Num.Vector2 d = other[p + 1];
-                bool otherVertical = Math.Abs(c.X - d.X) < 0.01f;
-                bool otherHorizontal = Math.Abs(c.Y - d.Y) < 0.01f;
-                if (vertical ? !otherVertical : !otherHorizontal) continue;
-                if (Math.Abs((vertical ? c.X : c.Y) - coordinate) >= ParallelLaneSpacing - 0.01f) continue;
-
-                float otherMin = vertical ? Math.Min(c.Y, d.Y) : Math.Min(c.X, d.X);
-                float otherMax = vertical ? Math.Max(c.Y, d.Y) : Math.Max(c.X, d.X);
-                if (Math.Min(max, otherMax) - Math.Max(min, otherMin) >= MinimumSharedRun)
-                    return true;
-            }
-        }
-
-        return false;
     }
 
     internal static void Clear()
@@ -865,7 +673,7 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2[] points,
         int startRoom,
         int endRoom,
-        List<Obstacle> obstacles)
+        IReadOnlyList<Obstacle> obstacles)
     {
         for (int p = 0; p < points.Length - 1; p++)
         {
@@ -1440,7 +1248,18 @@ internal static class WorldMapOrthogonalRouter
         }
     }
 
-    private static bool RouteClear(Num.Vector2[] points, int startRoom, int endRoom, List<Obstacle> obstacles)
+    internal static bool IsDerivedRouteClear(
+        Num.Vector2[] points,
+        int startRoom,
+        int endRoom,
+        IReadOnlyList<Obstacle> obstacles) =>
+        RouteClear(points, startRoom, endRoom, obstacles);
+
+    private static bool RouteClear(
+        Num.Vector2[] points,
+        int startRoom,
+        int endRoom,
+        IReadOnlyList<Obstacle> obstacles)
     {
         if (points == null || points.Length < 2) return false;
         for (int i = 1; i < points.Length - 2; i++)

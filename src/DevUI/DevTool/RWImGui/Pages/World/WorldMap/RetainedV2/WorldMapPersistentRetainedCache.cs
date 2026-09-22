@@ -189,6 +189,7 @@ internal static class WorldMapPersistentRetainedCache
             Direction = connection.Direction,
             Ambiguous = stored.Ambiguous,
             Kind = (WorldMapOrthogonalRouter.RouteKind)stored.Kind,
+            BasePoints = (Num.Vector2[])points.Clone(),
             Points = points,
             StartDirection = new Num.Vector2(stored.StartDirectionX, stored.StartDirectionY),
             EndDirection = new Num.Vector2(stored.EndDirectionX, stored.EndDirectionY)
@@ -245,16 +246,28 @@ internal static class WorldMapPersistentRetainedCache
                  in WorldMapRetainedV2Runtime.Routes.Routes)
         {
             ConnectionRouteResource route = pair.Value;
-            if (route?.Points == null ||
-                route.Points.Length < 2 ||
+            Num.Vector2[] persistentPoints =
+                route?.BasePoints != null &&
+                route.BasePoints.Length >= 2
+                    ? route.BasePoints
+                    : route?.Points;
+
+            if (persistentPoints == null ||
+                persistentPoints.Length < 2 ||
                 !scene.TryGetConnection(pair.Key, out WorldMapScene.ConnectionNode connection) ||
                 !scene.TryGetRoom(connection.FromRoomIndex, out WorldMapScene.RoomNode fromRoom) ||
                 !scene.TryGetRoom(connection.ToRoomIndex, out WorldMapScene.RoomNode toRoom))
                 continue;
 
-            EditorMapPointSnapshot[] points = new EditorMapPointSnapshot[route.Points.Length];
+            EditorMapPointSnapshot[] points =
+                new EditorMapPointSnapshot[persistentPoints.Length];
             for (int i = 0; i < points.Length; i++)
-                points[i] = new EditorMapPointSnapshot(route.Points[i].X, route.Points[i].Y);
+            {
+                points[i] =
+                    new EditorMapPointSnapshot(
+                        persistentPoints[i].X,
+                        persistentPoints[i].Y);
+            }
 
             snapshot.Routes.Add(new MapViewPersistentRoute
             {

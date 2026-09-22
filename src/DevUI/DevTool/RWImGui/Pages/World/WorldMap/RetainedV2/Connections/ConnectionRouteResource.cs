@@ -15,7 +15,13 @@ internal sealed class ConnectionRouteResource
     internal WorldConnectionDirection Direction;
     internal bool Ambiguous;
     internal WorldMapOrthogonalRouter.RouteKind Kind;
+
+    // BasePoints is the immutable single-route result from the orthogonal router. Points is the
+    // retained presentation path after global corridor-lane derivation. Keeping both prevents lane
+    // offsets from accumulating across incremental rebuilds or persistent-cache restores.
+    internal Num.Vector2[] BasePoints = Array.Empty<Num.Vector2>();
     internal Num.Vector2[] Points = Array.Empty<Num.Vector2>();
+
     internal Num.Vector2 StartDirection;
     internal Num.Vector2 EndDirection;
     internal long Revision;

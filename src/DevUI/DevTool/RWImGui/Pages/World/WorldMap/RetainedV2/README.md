@@ -719,6 +719,32 @@ Close-room Compact links intentionally keep their short direct behavior. Phase 1
 departure/arrival readability of longer routes; corridor lane allocation, crossing bridges and
 endpoint pair markers remain later phases.
 
+### Multi-Lane Routing V2 · Phase 2 — Corridor lane allocation
+
+Phase 2 moves shared-corridor separation out of the per-batch orthogonal router and into a global
+retained derived-layout pass:
+
+- the orthogonal router now emits immutable **BasePoints** only; it no longer performs opportunistic
+  "move the next overlapping route" post-processing inside the current 8/24-route build batch;
+- the connection resource store sees the complete retained route set and groups long, collinear,
+  overlapping middle segments into deterministic corridor components;
+- each component sorts connection IDs ordinally and assigns symmetric parallel lanes, so lane order
+  stays stable across frames and incremental route batches;
+- two terminal segments at each end are protected from corridor shifting, preserving Phase 1 socket
+  fan-out and immediate visual traceability from a room exit;
+- lane spacing is adaptive (10 px preferred, 5.5 px minimum) and has no fixed connection-count cap;
+- every derived lane path is revalidated against the retained room obstacles. If the shifted path
+  would cross a room, that route falls back to its correct BasePoints instead of forcing the lane;
+- **BasePoints** are what Persistent Cache V3 stores. On restore the global allocator derives the
+  current corridor layout once, preventing repeated startup/incremental lane offsets from stacking;
+- corridor reflow runs only when route membership or base geometry changes. Stable frames, pan and
+  zoom perform zero corridor allocation work.
+
+Routing policy is bumped to **v5**, invalidating v4 persistent routes. The old
+`SeparateSharedCorridors()` batch-local implementation is retired.
+
+Crossing bridge presentation and endpoint pair markers remain later phases.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

@@ -36,6 +36,7 @@ internal sealed class WorldMapConnectionResourceStore
     private readonly List<WorldMapOrthogonalRouter.Obstacle> routingObstacleSnapshot =
         new();
     private bool routingObstacleSnapshotDirty = true;
+    private bool corridorLayoutDirty = true;
     private long revision;
 
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
@@ -87,6 +88,7 @@ internal sealed class WorldMapConnectionResourceStore
         {
             if (routes.Remove(id))
             {
+                corridorLayoutDirty = true;
                 routeChanged.Add(id);
                 unchecked { revision++; }
                 MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
@@ -105,6 +107,7 @@ internal sealed class WorldMapConnectionResourceStore
             dependencies.Rebuild(scene);
             RebuildLanePlan(scene, roomResources);
             RebuildRoutingObstacles(scene, roomResources);
+            corridorLayoutDirty = true;
             EnqueueAll(scene);
             return;
         }
@@ -153,13 +156,23 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapScene scene,
         WorldMapRoomResourceStore roomResources)
     {
-        if (scene == null || queue.Count == 0) return;
+        if (scene == null ||
+            (queue.Count == 0 && !corridorLayoutDirty))
+            return;
 
         int budget = WorldMapBackgroundBudget.RouteBuildBudget(
             IdleRoutesPerFrame,
             InteractiveRoutesPerFrame);
-        if (budget <= 0) return;
+        if (budget <= 0)
+            return;
 
+        if (queue.Count == 0)
+        {
+            ApplyCorridorLanes();
+            return;
+        }
+
+        bool routeSetChanged = false;
         buildBatch.Clear();
         int scanCount = queue.Count;
         int scanned = 0;
@@ -193,6 +206,8 @@ internal sealed class WorldMapConnectionResourceStore
                         ? oldRoute.Revision + 1L
                         : 1L;
                 routes[id] = restoredRoute;
+                corridorLayoutDirty = true;
+                routeSetChanged = true;
                 routeChanged.Add(id);
                 unchecked { revision++; }
                 budget--;
@@ -209,16 +224,18 @@ internal sealed class WorldMapConnectionResourceStore
             budget--;
         }
 
-        if (buildBatch.Count == 0) return;
-
         Dictionary<string, ConnectionRouteResource> rebuilt =
-            WorldMapWorldSpaceRouter.Build(
-                scene,
-                roomResources,
-                buildBatch,
-                laneOffsets,
-                terminalFanouts,
-                GetRoutingObstacleSnapshot());
+            null;
+
+        if (buildBatch.Count > 0)
+            rebuilt =
+                WorldMapWorldSpaceRouter.Build(
+                    scene,
+                    roomResources,
+                    buildBatch,
+                    laneOffsets,
+                    terminalFanouts,
+                    GetRoutingObstacleSnapshot());
 
         for (int i = 0; i < buildBatch.Count; i++)
         {
@@ -232,10 +249,15 @@ internal sealed class WorldMapConnectionResourceStore
                 route.Revision = 1L;
 
             routes[connection.Id] = route;
+            corridorLayoutDirty = true;
+            routeSetChanged = true;
             routeChanged.Add(connection.Id);
             unchecked { revision++; }
             MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
         }
+
+        if (routeSetChanged || corridorLayoutDirty)
+            ApplyCorridorLanes();
     }
 
     internal void Reset()
@@ -251,6 +273,7 @@ internal sealed class WorldMapConnectionResourceStore
         routingObstacles.Clear();
         routingObstacleSnapshot.Clear();
         routingObstacleSnapshotDirty = true;
+        corridorLayoutDirty = true;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
@@ -273,6 +296,7 @@ internal sealed class WorldMapConnectionResourceStore
         {
             if (routes.Remove(stale[i]))
             {
+                corridorLayoutDirty = true;
                 routeChanged.Add(stale[i]);
                 unchecked { revision++; }
             }
@@ -335,6 +359,19 @@ internal sealed class WorldMapConnectionResourceStore
         routingObstacleSnapshot.Sort((a, b) => a.RoomIndex.CompareTo(b.RoomIndex));
         routingObstacleSnapshotDirty = false;
         return routingObstacleSnapshot;
+    }
+
+    private void ApplyCorridorLanes()
+    {
+        if (!corridorLayoutDirty)
+            return;
+
+        corridorLayoutDirty = false;
+        WorldMapCorridorLaneAllocator.Apply(
+            routes,
+            GetRoutingObstacleSnapshot(),
+            routeChanged,
+            ref revision);
     }
 
     private readonly struct TerminalEndpoint
