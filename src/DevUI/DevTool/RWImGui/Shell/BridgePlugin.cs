@@ -281,6 +281,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("world map exact shortcuts", WorldMapExactShortcuts.Disable);
         SafeFrontendCleanup("world map raster readback fallback", WorldMapRasterReadbackFallback.Disable);
         SafeFrontendCleanup("world map background budget", WorldMapBackgroundBudget.Disable);
+        SafeFrontendCleanup(
+            "world map persistent cache flush",
+            MapRoomGeometryPresentationHub.FlushPersistentCache);
         SafeFrontendCleanup("world map update throttle", WorldMapUpdateThrottle.Disable);
         SafeFrontendCleanup("world map retained v2 runtime", WorldMapRetainedV2Runtime.Disable);
         SafeFrontendCleanup("world map presentation correctness", WorldMapPresentationCorrectness.Disable);

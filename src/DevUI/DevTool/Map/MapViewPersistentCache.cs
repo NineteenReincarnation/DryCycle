@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using BepInEx;
 using UnityEngine;
@@ -64,17 +65,54 @@ internal sealed class MapViewPersistentRoom
     internal int SettingsFingerprint;
     internal float WidthTiles = 12f;
     internal float HeightTiles = 6f;
+
+    // V3 frontend hint. This never owns a Unity texture; it is only a stable Futile atlas-element
+    // identity plus the descriptor observed when the cache was written.
+    internal string ThumbnailElementName = string.Empty;
+    internal float ThumbnailUvX;
+    internal float ThumbnailUvY;
+    internal float ThumbnailUvWidth;
+    internal float ThumbnailUvHeight;
+    internal float ThumbnailPixelWidth;
+    internal float ThumbnailPixelHeight;
+
     internal EditorMapRectSnapshot[] BaseRasterRuns = Array.Empty<EditorMapRectSnapshot>();
     internal EditorMapRectSnapshot[] TerrainFillRuns = Array.Empty<EditorMapRectSnapshot>();
     internal EditorMapPolylineSnapshot[] Curves = Array.Empty<EditorMapPolylineSnapshot>();
     internal EditorMapNodeVisualSnapshot[] Nodes = Array.Empty<EditorMapNodeVisualSnapshot>();
 }
 
+internal sealed class MapViewPersistentRoute
+{
+    internal string ConnectionId = string.Empty;
+    internal int FromRoomIndex;
+    internal int FromNodeIndex;
+    internal int ToRoomIndex;
+    internal int ToNodeIndex;
+    internal string FromRoomName = string.Empty;
+    internal string ToRoomName = string.Empty;
+    internal int Direction;
+    internal bool Ambiguous;
+    internal int PolicyVersion;
+    internal int Kind;
+    internal float FromRoomX;
+    internal float FromRoomY;
+    internal float ToRoomX;
+    internal float ToRoomY;
+    internal float StartDirectionX;
+    internal float StartDirectionY;
+    internal float EndDirectionX;
+    internal float EndDirectionY;
+    internal EditorMapPointSnapshot[] Points = Array.Empty<EditorMapPointSnapshot>();
+}
+
 internal sealed class MapViewPersistentSnapshot
 {
+    internal int FormatVersion;
     internal string ContextKey = string.Empty;
     internal long TemplateFingerprint;
     internal readonly List<MapViewPersistentRoom> Rooms = new();
+    internal readonly List<MapViewPersistentRoute> Routes = new();
 }
 
 /// <summary>
@@ -93,69 +131,131 @@ internal static class MapViewPersistentCacheStore
     }
 
     private const int CacheMagic = 0x44434D56; // DCMV
-    // v2 drops geometry snapshots created before the retained-cache feedback-loop fix. File stamps
-    // cannot prove those raster runs are semantically valid, so a one-time rebuild is safer.
-    private const int CacheVersion = 2;
+    private const int LegacyCacheVersion = 2;
+    internal const int CurrentCacheVersion = 3;
     private const long MaxCacheBytes = 256L * 1024L * 1024L;
     private const int MaxRooms = 4096;
     private const int MaxRectsPerRoom = 500000;
     private const int MaxCurvesPerRoom = 20000;
     private const int MaxPointsPerCurve = 200000;
     private const int MaxNodesPerRoom = 8192;
+    private const int MaxRoutes = 16384;
+    private const int MaxRoutePoints = 4096;
 
     private static readonly object writeSync = new();
     private static readonly Queue<WriteRequest> writeQueue = new();
     private static bool writerRunning;
 
-    internal static string ResolveCachePath(string contextKey)
+    internal static string ResolveCachePath(string contextKey) =>
+        ResolveCachePath(contextKey, CurrentCacheVersion);
+
+    private static string ResolveCachePath(string contextKey, int version)
     {
-        string fileName = "map-view-v" + CacheVersion + "-" + StableHash(contextKey).ToString("x16") + ".bin";
+        string fileName =
+            "map-view-v" + version + "-" +
+            StableHash(contextKey).ToString("x16") +
+            ".bin";
         try
         {
-            return Path.Combine(Paths.CachePath, "DryCycle", "DevTool", "MapView", fileName);
+            return Path.Combine(
+                Paths.CachePath,
+                "DryCycle",
+                "DevTool",
+                "MapView",
+                fileName);
         }
         catch
         {
-            return Path.Combine(Application.persistentDataPath, "DryCycle", "MapView", fileName);
+            return Path.Combine(
+                Application.persistentDataPath,
+                "DryCycle",
+                "MapView",
+                fileName);
         }
     }
 
-    internal static MapViewPersistentSnapshot Load(string path, string expectedContextKey)
+    internal static MapViewPersistentSnapshot Load(
+        string path,
+        string expectedContextKey)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        string sourcePath = path;
+        if (!File.Exists(sourcePath))
+        {
+            string legacyPath =
+                ResolveCachePath(
+                    expectedContextKey,
+                    LegacyCacheVersion);
+            if (!File.Exists(legacyPath))
+                return null;
+            sourcePath = legacyPath;
+        }
 
         try
         {
-            FileInfo info = new(path);
-            if (info.Length <= 0L || info.Length > MaxCacheBytes) return null;
+            FileInfo info = new(sourcePath);
+            if (info.Length <= 0L || info.Length > MaxCacheBytes)
+                return null;
 
-            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using FileStream stream = new(
+                sourcePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read);
             using BinaryReader reader = new(stream);
-            if (reader.ReadInt32() != CacheMagic || reader.ReadInt32() != CacheVersion) return null;
+
+            if (reader.ReadInt32() != CacheMagic)
+                return null;
+
+            int version = reader.ReadInt32();
+            if (version < LegacyCacheVersion ||
+                version > CurrentCacheVersion)
+                return null;
 
             string contextKey = reader.ReadString();
-            if (!string.Equals(contextKey, expectedContextKey ?? string.Empty, StringComparison.Ordinal)) return null;
+            if (!string.Equals(
+                    contextKey,
+                    expectedContextKey ?? string.Empty,
+                    StringComparison.Ordinal))
+                return null;
 
             MapViewPersistentSnapshot snapshot = new()
             {
+                FormatVersion = version,
                 ContextKey = contextKey,
                 TemplateFingerprint = reader.ReadInt64()
             };
 
-            int roomCount = ReadSafeCount(reader, MaxRooms);
+            int roomCount =
+                ReadSafeCount(reader, MaxRooms);
             for (int i = 0; i < roomCount; i++)
-                snapshot.Rooms.Add(ReadRoom(reader));
+                snapshot.Rooms.Add(
+                    ReadRoom(reader, version));
+
+            if (version >= 3)
+            {
+                int routeCount =
+                    ReadSafeCount(reader, MaxRoutes);
+                for (int i = 0; i < routeCount; i++)
+                    snapshot.Routes.Add(ReadRoute(reader));
+            }
+
             return snapshot;
         }
         catch (Exception error)
         {
             global::DryCycle.Plugin.Logger?.LogWarning(
-                "WorldMap persistent cache ignored because it is invalid: " + error.Message);
+                "WorldMap persistent cache ignored because it is invalid: " +
+                error.Message);
             return null;
         }
     }
 
-    internal static void QueueWrite(string path, MapViewPersistentSnapshot snapshot)
+    internal static void QueueWrite(
+        string path,
+        MapViewPersistentSnapshot snapshot)
     {
         if (string.IsNullOrWhiteSpace(path) || snapshot == null) return;
 
@@ -169,6 +269,34 @@ internal static class MapViewPersistentCacheStore
         Task.Run(WriterLoop);
     }
 
+    internal static bool Flush(int timeoutMilliseconds = 5000)
+    {
+        DateTime deadline =
+            DateTime.UtcNow.AddMilliseconds(
+                Math.Max(1, timeoutMilliseconds));
+
+        lock (writeSync)
+        {
+            while (writerRunning || writeQueue.Count > 0)
+            {
+                double remaining =
+                    (deadline - DateTime.UtcNow).TotalMilliseconds;
+                if (remaining <= 0d)
+                    return false;
+
+                Monitor.Wait(
+                    writeSync,
+                    Math.Max(
+                        1,
+                        (int)Math.Min(
+                            int.MaxValue,
+                            remaining)));
+            }
+        }
+
+        return true;
+    }
+
     private static void WriterLoop()
     {
         while (true)
@@ -179,6 +307,7 @@ internal static class MapViewPersistentCacheStore
                 if (writeQueue.Count == 0)
                 {
                     writerRunning = false;
+                    Monitor.PulseAll(writeSync);
                     return;
                 }
                 request = writeQueue.Dequeue();
@@ -213,7 +342,9 @@ internal static class MapViewPersistentCacheStore
         }
     }
 
-    private static MapViewPersistentRoom ReadRoom(BinaryReader reader)
+    private static MapViewPersistentRoom ReadRoom(
+        BinaryReader reader,
+        int version)
     {
         MapViewPersistentRoom room = new()
         {
@@ -232,11 +363,60 @@ internal static class MapViewPersistentCacheStore
             HeightTiles = reader.ReadSingle()
         };
 
+        if (version >= 3)
+        {
+            room.ThumbnailElementName = reader.ReadString();
+            room.ThumbnailUvX = reader.ReadSingle();
+            room.ThumbnailUvY = reader.ReadSingle();
+            room.ThumbnailUvWidth = reader.ReadSingle();
+            room.ThumbnailUvHeight = reader.ReadSingle();
+            room.ThumbnailPixelWidth = reader.ReadSingle();
+            room.ThumbnailPixelHeight = reader.ReadSingle();
+        }
+
         room.BaseRasterRuns = ReadRects(reader);
         room.TerrainFillRuns = ReadRects(reader);
         room.Curves = ReadCurves(reader);
         room.Nodes = ReadNodes(reader);
         return room;
+    }
+
+    private static MapViewPersistentRoute ReadRoute(
+        BinaryReader reader)
+    {
+        MapViewPersistentRoute route = new()
+        {
+            ConnectionId = reader.ReadString(),
+            FromRoomIndex = reader.ReadInt32(),
+            FromNodeIndex = reader.ReadInt32(),
+            ToRoomIndex = reader.ReadInt32(),
+            ToNodeIndex = reader.ReadInt32(),
+            FromRoomName = reader.ReadString(),
+            ToRoomName = reader.ReadString(),
+            Direction = reader.ReadInt32(),
+            Ambiguous = reader.ReadBoolean(),
+            PolicyVersion = reader.ReadInt32(),
+            Kind = reader.ReadInt32(),
+            FromRoomX = reader.ReadSingle(),
+            FromRoomY = reader.ReadSingle(),
+            ToRoomX = reader.ReadSingle(),
+            ToRoomY = reader.ReadSingle(),
+            StartDirectionX = reader.ReadSingle(),
+            StartDirectionY = reader.ReadSingle(),
+            EndDirectionX = reader.ReadSingle(),
+            EndDirectionY = reader.ReadSingle()
+        };
+
+        int pointCount =
+            ReadSafeCount(reader, MaxRoutePoints);
+        route.Points =
+            new EditorMapPointSnapshot[pointCount];
+        for (int i = 0; i < pointCount; i++)
+            route.Points[i] =
+                new EditorMapPointSnapshot(
+                    reader.ReadSingle(),
+                    reader.ReadSingle());
+        return route;
     }
 
     private static MapViewFileStamp ReadStamp(BinaryReader reader) =>
@@ -304,12 +484,17 @@ internal static class MapViewPersistentCacheStore
             using (BinaryWriter writer = new(stream))
             {
                 writer.Write(CacheMagic);
-                writer.Write(CacheVersion);
+                writer.Write(CurrentCacheVersion);
                 writer.Write(snapshot.ContextKey ?? string.Empty);
                 writer.Write(snapshot.TemplateFingerprint);
                 writer.Write(snapshot.Rooms.Count);
                 for (int i = 0; i < snapshot.Rooms.Count; i++)
                     WriteRoom(writer, snapshot.Rooms[i]);
+
+                writer.Write(snapshot.Routes.Count);
+                for (int i = 0; i < snapshot.Routes.Count; i++)
+                    WriteRoute(writer, snapshot.Routes[i]);
+
                 writer.Flush();
             }
 
@@ -352,10 +537,60 @@ internal static class MapViewPersistentCacheStore
         writer.Write(room.SettingsFingerprint);
         writer.Write(room.WidthTiles);
         writer.Write(room.HeightTiles);
+
+        writer.Write(room.ThumbnailElementName ?? string.Empty);
+        writer.Write(room.ThumbnailUvX);
+        writer.Write(room.ThumbnailUvY);
+        writer.Write(room.ThumbnailUvWidth);
+        writer.Write(room.ThumbnailUvHeight);
+        writer.Write(room.ThumbnailPixelWidth);
+        writer.Write(room.ThumbnailPixelHeight);
+
         WriteRects(writer, room.BaseRasterRuns);
         WriteRects(writer, room.TerrainFillRuns);
         WriteCurves(writer, room.Curves);
         WriteNodes(writer, room.Nodes);
+    }
+
+    private static void WriteRoute(
+        BinaryWriter writer,
+        MapViewPersistentRoute route)
+    {
+        route ??= new MapViewPersistentRoute();
+
+        writer.Write(route.ConnectionId ?? string.Empty);
+        writer.Write(route.FromRoomIndex);
+        writer.Write(route.FromNodeIndex);
+        writer.Write(route.ToRoomIndex);
+        writer.Write(route.ToNodeIndex);
+        writer.Write(route.FromRoomName ?? string.Empty);
+        writer.Write(route.ToRoomName ?? string.Empty);
+        writer.Write(route.Direction);
+        writer.Write(route.Ambiguous);
+        writer.Write(route.PolicyVersion);
+        writer.Write(route.Kind);
+        writer.Write(route.FromRoomX);
+        writer.Write(route.FromRoomY);
+        writer.Write(route.ToRoomX);
+        writer.Write(route.ToRoomY);
+        writer.Write(route.StartDirectionX);
+        writer.Write(route.StartDirectionY);
+        writer.Write(route.EndDirectionX);
+        writer.Write(route.EndDirectionY);
+
+        EditorMapPointSnapshot[] points =
+            route.Points ?? Array.Empty<EditorMapPointSnapshot>();
+        if (points.Length > MaxRoutePoints)
+            throw new InvalidDataException(
+                "WorldMap route cache point count exceeds limit: " +
+                points.Length);
+
+        writer.Write(points.Length);
+        for (int i = 0; i < points.Length; i++)
+        {
+            writer.Write(points[i].X);
+            writer.Write(points[i].Y);
+        }
     }
 
     private static void WriteStamp(BinaryWriter writer, MapViewFileStamp stamp)

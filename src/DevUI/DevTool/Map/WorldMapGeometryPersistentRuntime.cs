@@ -48,6 +48,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private static void PersistentBeforeRegionReset()
     {
         PersistentTryScheduleSave(force: true);
+        WorldMapFrontendBridge.ClearPersistentState();
         persistentRooms.Clear();
         persistentEntryStates.Clear();
     }
@@ -63,7 +64,9 @@ internal static partial class MapRoomGeometryPresentationHub
         persistentDirtyAt = 0f;
 
         MapViewPersistentSnapshot snapshot =
-            MapViewPersistentCacheStore.Load(persistentCachePath, persistentContextKey);
+            MapViewPersistentCacheStore.Load(
+                persistentCachePath,
+                persistentContextKey);
         if (snapshot == null) return;
 
         loadedTemplateFingerprint = snapshot.TemplateFingerprint;
@@ -74,13 +77,32 @@ internal static partial class MapRoomGeometryPresentationHub
             persistentRooms[room.RoomName] = room;
         }
 
+        WorldMapFrontendBridge.RestorePersistentSnapshot(snapshot);
+
+        if (snapshot.FormatVersion <
+            MapViewPersistentCacheStore.CurrentCacheVersion)
+        {
+            // Keep v2 geometry data hot, then migrate it to v3 in the background instead of forcing
+            // a one-time cold rebuild merely because frontend metadata was added.
+            persistentDirty = true;
+            persistentDirtyAt =
+                Time.realtimeSinceStartup -
+                PersistentSaveDebounceSeconds -
+                1f;
+        }
+
         global::DryCycle.Plugin.Logger?.LogInfo(
-            "WorldMap persistent cache loaded (" + persistentRooms.Count + " rooms).");
+            "WorldMap persistent cache loaded (" +
+            persistentRooms.Count +
+            " rooms, format v" +
+            snapshot.FormatVersion +
+            ").");
     }
 
     private static void PersistentBeforeClear()
     {
         PersistentTryScheduleSave(force: true);
+        WorldMapFrontendBridge.ClearPersistentState();
         persistentRooms.Clear();
         persistentEntryStates.Clear();
         persistentWorld = null;
@@ -124,6 +146,10 @@ internal static partial class MapRoomGeometryPresentationHub
 
         if (roomValid)
         {
+            WorldMapFrontendBridge.RestorePersistentRoom(
+                entry.RoomIndex,
+                stored);
+
             entry.WidthTiles = Math.Max(1f, stored.WidthTiles);
             entry.HeightTiles = Math.Max(1f, stored.HeightTiles);
 
@@ -378,7 +404,20 @@ internal static partial class MapRoomGeometryPresentationHub
             });
         }
 
+        WorldMapFrontendBridge.CapturePersistentSnapshot(snapshot);
+        snapshot.FormatVersion =
+            MapViewPersistentCacheStore.CurrentCacheVersion;
         return snapshot;
+    }
+
+    internal static void FlushPersistentCache()
+    {
+        PersistentTryScheduleSave(force: true);
+        if (!MapViewPersistentCacheStore.Flush())
+        {
+            global::DryCycle.Plugin.Logger?.LogWarning(
+                "WorldMap persistent cache flush timed out during shutdown.");
+        }
     }
 
     private static PersistentEntryState GetPersistentEntryState(int roomIndex)
