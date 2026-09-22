@@ -6,8 +6,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
 /// Derives stable parallel lanes for overlapping middle corridors across the complete retained route
-/// set. It never owns authoring state and never runs for pan/zoom; ConnectionResourceStore invokes it
-/// only after route membership/base geometry changes.
+/// set. Phase 4 extends Phase 2 with bundle continuity: corridor components that carry at least two
+/// of the same routes share one stable lane-slot plan, so branch-outs do not make the remaining
+/// routes jump inward merely because a local component has fewer members.
 /// </summary>
 internal static class WorldMapCorridorLaneAllocator
 {
@@ -46,8 +47,20 @@ internal static class WorldMapCorridorLaneAllocator
         internal ConnectionRouteResource Route;
         internal int SegmentIndex;
         internal bool Vertical;
+        internal float Coordinate;
         internal float Min;
         internal float Max;
+    }
+
+    private sealed class CorridorComponent
+    {
+        internal int Id;
+        internal bool Vertical;
+        internal float Coordinate;
+        internal float Min;
+        internal float Max;
+        internal readonly List<SegmentRef> Segments = new();
+        internal readonly List<string> RouteIds = new();
     }
 
     private const float CoordinateBucketSize = 4f;
@@ -69,22 +82,92 @@ internal static class WorldMapCorridorLaneAllocator
         List<string> routeIds = new(routes.Keys);
         routeIds.Sort(StringComparer.Ordinal);
 
-        Dictionary<BucketKey, List<SegmentRef>> buckets = new();
+        Dictionary<BucketKey, List<SegmentRef>> buckets =
+            BuildBuckets(routes, routeIds);
+        List<CorridorComponent> components =
+            BuildComponents(buckets);
+
         Dictionary<string, float[]> offsetsByRoute =
-            new(StringComparer.Ordinal);
+            BuildContinuityOffsets(components);
+
+        for (int i = 0; i < routeIds.Count; i++)
+        {
+            string routeId = routeIds[i];
+            ConnectionRouteResource route = routes[routeId];
+            Num.Vector2[] basePoints = BasePoints(route);
+            if (basePoints == null || basePoints.Length < 2)
+                continue;
+
+            Num.Vector2[] candidate;
+            if (offsetsByRoute.TryGetValue(
+                    routeId,
+                    out float[] offsets))
+            {
+                candidate =
+                    BuildLanePath(
+                        basePoints,
+                        offsets);
+
+                if (candidate.Length < 2 ||
+                    !WorldMapOrthogonalRouter.IsDerivedRouteClear(
+                        candidate,
+                        route.FromRoomIndex,
+                        route.ToRoomIndex,
+                        obstacles))
+                {
+                    if (PathsEquivalent(
+                            route.Points,
+                            basePoints))
+                        continue;
+
+                    candidate =
+                        (Num.Vector2[])basePoints.Clone();
+                }
+            }
+            else
+            {
+                if (PathsEquivalent(
+                        route.Points,
+                        basePoints))
+                    continue;
+
+                candidate =
+                    (Num.Vector2[])basePoints.Clone();
+            }
+
+            if (PathsEquivalent(route.Points, candidate))
+                continue;
+
+            route.Points = candidate;
+            route.Revision =
+                Math.Max(
+                    1L,
+                    route.Revision + 1L);
+            changedIds?.Add(routeId);
+            unchecked { storeRevision++; }
+        }
+    }
+
+    private static Dictionary<BucketKey, List<SegmentRef>> BuildBuckets(
+        Dictionary<string, ConnectionRouteResource> routes,
+        List<string> routeIds)
+    {
+        Dictionary<BucketKey, List<SegmentRef>> buckets =
+            new();
 
         for (int r = 0; r < routeIds.Count; r++)
         {
             string routeId = routeIds[r];
             ConnectionRouteResource route = routes[routeId];
             Num.Vector2[] points = BasePoints(route);
+
             if (route?.Kind == WorldMapOrthogonalRouter.RouteKind.Compact ||
                 points == null ||
                 points.Length < 6)
                 continue;
 
-            // Keep two terminal segments untouched at each end. Phase 1 owns those segments and
-            // guarantees that room sockets remain visually traceable into the shared routing field.
+            // Phase 1 owns the terminal fan-out. Keep two segments untouched at both ends so
+            // corridor continuity can never pull a socket back into the shared bundle.
             int firstEligible = 2;
             int lastEligible = points.Length - 4;
             if (lastEligible < firstEligible)
@@ -141,86 +224,65 @@ internal static class WorldMapCorridorLaneAllocator
                         Route = route,
                         SegmentIndex = segment,
                         Vertical = vertical,
+                        Coordinate = coordinate,
                         Min = min,
                         Max = max
                     });
             }
         }
 
-        foreach (List<SegmentRef> bucket in buckets.Values)
-            AssignBucket(bucket, offsetsByRoute);
-
-        for (int i = 0; i < routeIds.Count; i++)
-        {
-            string routeId = routeIds[i];
-            ConnectionRouteResource route = routes[routeId];
-            Num.Vector2[] basePoints = BasePoints(route);
-            if (basePoints == null || basePoints.Length < 2)
-                continue;
-
-            Num.Vector2[] candidate;
-            if (offsetsByRoute.TryGetValue(
-                    routeId,
-                    out float[] offsets))
-            {
-                candidate =
-                    BuildLanePath(
-                        basePoints,
-                        offsets);
-                if (candidate.Length < 2 ||
-                    !WorldMapOrthogonalRouter.IsDerivedRouteClear(
-                        candidate,
-                        route.FromRoomIndex,
-                        route.ToRoomIndex,
-                        obstacles))
-                {
-                    if (PathsEquivalent(
-                            route.Points,
-                            basePoints))
-                        continue;
-
-                    candidate =
-                        (Num.Vector2[])basePoints.Clone();
-                }
-            }
-            else
-            {
-                if (PathsEquivalent(
-                        route.Points,
-                        basePoints))
-                    continue;
-
-                candidate =
-                    (Num.Vector2[])basePoints.Clone();
-            }
-
-            if (PathsEquivalent(route.Points, candidate))
-                continue;
-
-            route.Points = candidate;
-            route.Revision =
-                Math.Max(
-                    1L,
-                    route.Revision + 1L);
-            changedIds?.Add(routeId);
-            unchecked { storeRevision++; }
-        }
+        return buckets;
     }
 
-    private static void AssignBucket(
+    private static List<CorridorComponent> BuildComponents(
+        Dictionary<BucketKey, List<SegmentRef>> buckets)
+    {
+        List<CorridorComponent> components = new();
+        if (buckets == null || buckets.Count == 0)
+            return components;
+
+        List<BucketKey> keys = new(buckets.Keys);
+        keys.Sort(
+            (a, b) =>
+            {
+                int axis = a.Vertical.CompareTo(b.Vertical);
+                if (axis != 0) return axis;
+                return a.Coordinate.CompareTo(b.Coordinate);
+            });
+
+        for (int k = 0; k < keys.Count; k++)
+        {
+            List<SegmentRef> bucket =
+                buckets[keys[k]];
+            BuildBucketComponents(
+                bucket,
+                components);
+        }
+
+        components.Sort(CompareComponents);
+        for (int i = 0; i < components.Count; i++)
+            components[i].Id = i;
+
+        return components;
+    }
+
+    private static void BuildBucketComponents(
         List<SegmentRef> bucket,
-        Dictionary<string, float[]> offsetsByRoute)
+        List<CorridorComponent> output)
     {
         if (bucket == null || bucket.Count < 2)
             return;
+
+        bucket.Sort(CompareSegments);
 
         int count = bucket.Count;
         int[] parent = new int[count];
         for (int i = 0; i < count; i++)
             parent[i] = i;
 
-        // Buckets are deliberately tiny (same axis + ~4 world-pixel coordinate). Pairwise union is
-        // cheaper than maintaining a global interval tree and runs only when route geometry changes.
+        // Same-axis buckets remain intentionally local. Transitive overlap is useful here: if A
+        // overlaps B and B overlaps C, all three belong to one visible corridor even if A and C do
+        // not share the complete run.
         for (int i = 0; i < count; i++)
         {
             SegmentRef a = bucket[i];
@@ -243,54 +305,222 @@ internal static class WorldMapCorridorLaneAllocator
             }
         }
 
-        Dictionary<int, List<SegmentRef>> components =
+        Dictionary<int, List<SegmentRef>> grouped =
             new();
         for (int i = 0; i < count; i++)
         {
             int root = Find(parent, i);
-            if (!components.TryGetValue(
+            if (!grouped.TryGetValue(
                     root,
-                    out List<SegmentRef> component))
+                    out List<SegmentRef> group))
             {
-                component = new List<SegmentRef>();
-                components.Add(root, component);
+                group = new List<SegmentRef>();
+                grouped.Add(root, group);
             }
-            component.Add(bucket[i]);
+            group.Add(bucket[i]);
         }
 
-        foreach (List<SegmentRef> component
-                 in components.Values)
+        foreach (List<SegmentRef> group in grouped.Values)
         {
             HashSet<string> unique =
                 new(StringComparer.Ordinal);
-            for (int i = 0; i < component.Count; i++)
-                unique.Add(component[i].RouteId);
+            for (int i = 0; i < group.Count; i++)
+                unique.Add(group[i].RouteId);
 
             if (unique.Count < 2)
                 continue;
 
-            List<string> ids = new(unique);
-            ids.Sort(StringComparer.Ordinal);
+            CorridorComponent component =
+                new()
+                {
+                    Vertical = group[0].Vertical,
+                    Coordinate = AverageCoordinate(group),
+                    Min = float.MaxValue,
+                    Max = float.MinValue
+                };
 
-            float spacing =
-                AdaptiveSpacing(ids.Count);
-            float center =
-                (ids.Count - 1) * 0.5f;
-
-            Dictionary<string, float> routeOffsets =
-                new(StringComparer.Ordinal);
-            for (int i = 0; i < ids.Count; i++)
+            for (int i = 0; i < group.Count; i++)
             {
-                routeOffsets[ids[i]] =
-                    (i - center) * spacing;
+                SegmentRef segment = group[i];
+                component.Segments.Add(segment);
+                component.Min =
+                    Math.Min(
+                        component.Min,
+                        segment.Min);
+                component.Max =
+                    Math.Max(
+                        component.Max,
+                        segment.Max);
             }
 
-            for (int i = 0; i < component.Count; i++)
+            component.RouteIds.AddRange(unique);
+            component.RouteIds.Sort(StringComparer.Ordinal);
+            output.Add(component);
+        }
+    }
+
+    private static Dictionary<string, float[]> BuildContinuityOffsets(
+        List<CorridorComponent> components)
+    {
+        Dictionary<string, float[]> offsetsByRoute =
+            new(StringComparer.Ordinal);
+
+        if (components == null || components.Count == 0)
+            return offsetsByRoute;
+
+        int[] parent =
+            new int[components.Count];
+        for (int i = 0; i < parent.Length; i++)
+            parent[i] = i;
+
+        // Build component adjacency through routes instead of O(component²) comparison. A single
+        // shared route does not define a bundle: requiring two shared routes prevents one long
+        // connection from merging unrelated corridor systems into a huge sparse lane group.
+        Dictionary<string, List<int>> componentsByRoute =
+            new(StringComparer.Ordinal);
+        for (int c = 0; c < components.Count; c++)
+        {
+            List<string> ids =
+                components[c].RouteIds;
+            for (int r = 0; r < ids.Count; r++)
+            {
+                string id = ids[r];
+                if (!componentsByRoute.TryGetValue(
+                        id,
+                        out List<int> members))
+                {
+                    members = new List<int>();
+                    componentsByRoute.Add(
+                        id,
+                        members);
+                }
+                members.Add(c);
+            }
+        }
+
+        Dictionary<long, int> sharedRouteCounts =
+            new();
+        foreach (List<int> members
+                 in componentsByRoute.Values)
+        {
+            if (members.Count < 2)
+                continue;
+
+            members.Sort();
+            for (int i = 0; i < members.Count; i++)
+            {
+                for (int j = i + 1; j < members.Count; j++)
+                {
+                    long key =
+                        PairKey(
+                            members[i],
+                            members[j]);
+                    sharedRouteCounts.TryGetValue(
+                        key,
+                        out int shared);
+                    sharedRouteCounts[key] =
+                        shared + 1;
+                }
+            }
+        }
+
+        foreach (KeyValuePair<long, int> pair
+                 in sharedRouteCounts)
+        {
+            if (pair.Value < 2)
+                continue;
+
+            DecodePairKey(
+                pair.Key,
+                out int a,
+                out int b);
+            Union(parent, a, b);
+        }
+
+        Dictionary<int, List<CorridorComponent>> continuityGroups =
+            new();
+        for (int i = 0; i < components.Count; i++)
+        {
+            int root = Find(parent, i);
+            if (!continuityGroups.TryGetValue(
+                    root,
+                    out List<CorridorComponent> group))
+            {
+                group = new List<CorridorComponent>();
+                continuityGroups.Add(root, group);
+            }
+            group.Add(components[i]);
+        }
+
+        List<List<CorridorComponent>> orderedGroups =
+            new(continuityGroups.Values);
+        orderedGroups.Sort(CompareContinuityGroups);
+
+        for (int g = 0; g < orderedGroups.Count; g++)
+            AssignContinuityGroup(
+                orderedGroups[g],
+                offsetsByRoute);
+
+        return offsetsByRoute;
+    }
+
+    private static void AssignContinuityGroup(
+        List<CorridorComponent> components,
+        Dictionary<string, float[]> offsetsByRoute)
+    {
+        if (components == null || components.Count == 0)
+            return;
+
+        components.Sort(CompareComponents);
+
+        HashSet<string> unique =
+            new(StringComparer.Ordinal);
+        for (int c = 0; c < components.Count; c++)
+        {
+            List<string> ids =
+                components[c].RouteIds;
+            for (int r = 0; r < ids.Count; r++)
+                unique.Add(ids[r]);
+        }
+
+        if (unique.Count < 2)
+            return;
+
+        // One slot table is authoritative for the whole bundle. If B/C peel off after a four-lane
+        // corridor, A/D keep the outer slots instead of snapping inward to a newly centred two-lane
+        // corridor. Empty slots are deliberate visual memory, not wasted state.
+        List<string> slotIds = new(unique);
+        slotIds.Sort(StringComparer.Ordinal);
+
+        float spacing =
+            AdaptiveSpacing(slotIds.Count);
+        float center =
+            (slotIds.Count - 1) * 0.5f;
+
+        Dictionary<string, float> slots =
+            new(StringComparer.Ordinal);
+        for (int i = 0; i < slotIds.Count; i++)
+        {
+            slots[slotIds[i]] =
+                (i - center) * spacing;
+        }
+
+        for (int c = 0; c < components.Count; c++)
+        {
+            CorridorComponent component =
+                components[c];
+
+            for (int s = 0;
+                 s < component.Segments.Count;
+                 s++)
             {
                 SegmentRef segment =
-                    component[i];
-                float offset =
-                    routeOffsets[segment.RouteId];
+                    component.Segments[s];
+
+                if (!slots.TryGetValue(
+                        segment.RouteId,
+                        out float offset))
+                    continue;
 
                 if (!offsetsByRoute.TryGetValue(
                         segment.RouteId,
@@ -365,6 +595,8 @@ internal static class WorldMapCorridorLaneAllocator
 
             if (previousVertical != nextVertical)
             {
+                // At a 90° bundle turn, the same global slot maps from horizontal Y offset to
+                // vertical X offset. Their intersection is the explicit continuous lane corner.
                 float x =
                     previousVertical
                         ? previousB.X + previousOffset
@@ -479,6 +711,95 @@ internal static class WorldMapCorridorLaneAllocator
         return route?.Points;
     }
 
+    private static int CompareSegments(
+        SegmentRef a,
+        SegmentRef b)
+    {
+        int route =
+            string.CompareOrdinal(
+                a?.RouteId,
+                b?.RouteId);
+        if (route != 0) return route;
+
+        int segment =
+            (a?.SegmentIndex ?? -1)
+                .CompareTo(
+                    b?.SegmentIndex ?? -1);
+        if (segment != 0) return segment;
+
+        return (a?.Coordinate ?? 0f)
+            .CompareTo(
+                b?.Coordinate ?? 0f);
+    }
+
+    private static int CompareComponents(
+        CorridorComponent a,
+        CorridorComponent b)
+    {
+        if (ReferenceEquals(a, b)) return 0;
+        if (a == null) return -1;
+        if (b == null) return 1;
+
+        int axis =
+            a.Vertical.CompareTo(b.Vertical);
+        if (axis != 0) return axis;
+
+        int coordinate =
+            a.Coordinate.CompareTo(
+                b.Coordinate);
+        if (coordinate != 0) return coordinate;
+
+        int min =
+            a.Min.CompareTo(b.Min);
+        if (min != 0) return min;
+
+        int max =
+            a.Max.CompareTo(b.Max);
+        if (max != 0) return max;
+
+        string aRoute =
+            a.RouteIds.Count > 0
+                ? a.RouteIds[0]
+                : string.Empty;
+        string bRoute =
+            b.RouteIds.Count > 0
+                ? b.RouteIds[0]
+                : string.Empty;
+        return string.CompareOrdinal(
+            aRoute,
+            bRoute);
+    }
+
+    private static int CompareContinuityGroups(
+        List<CorridorComponent> a,
+        List<CorridorComponent> b)
+    {
+        CorridorComponent aa =
+            a != null && a.Count > 0
+                ? a[0]
+                : null;
+        CorridorComponent bb =
+            b != null && b.Count > 0
+                ? b[0]
+                : null;
+        return CompareComponents(aa, bb);
+    }
+
+    private static float AverageCoordinate(
+        List<SegmentRef> segments)
+    {
+        if (segments == null || segments.Count == 0)
+            return 0f;
+
+        double total = 0d;
+        for (int i = 0; i < segments.Count; i++)
+            total += segments[i].Coordinate;
+
+        return (float)(
+            total /
+            segments.Count);
+    }
+
     private static float AdaptiveSpacing(int count)
     {
         if (count <= 1)
@@ -523,5 +844,26 @@ internal static class WorldMapCorridorLaneAllocator
         int rootB = Find(parent, b);
         if (rootA != rootB)
             parent[rootB] = rootA;
+    }
+
+    private static long PairKey(int a, int b)
+    {
+        int min = Math.Min(a, b);
+        int max = Math.Max(a, b);
+        return ((long)(uint)min << 32) |
+               (uint)max;
+    }
+
+    private static void DecodePairKey(
+        long key,
+        out int a,
+        out int b)
+    {
+        a =
+            unchecked(
+                (int)(uint)(key >> 32));
+        b =
+            unchecked(
+                (int)(uint)key);
     }
 }

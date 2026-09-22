@@ -716,8 +716,8 @@ Phase 1 introduces stable terminal lanes without replacing the retained router:
 - routing policy is bumped to v4 so pre-fan-out persistent routes are rejected automatically.
 
 Close-room Compact links intentionally keep their short direct behavior. Phase 1 changes the
-departure/arrival readability of longer routes; corridor lane allocation, crossing bridges and
-endpoint pair markers remain later phases.
+departure/arrival readability of longer routes; corridor lane allocation and crossing semantics are
+handled by later retained phases.
 
 ### Multi-Lane Routing V2 · Phase 2 — Corridor lane allocation
 
@@ -748,7 +748,7 @@ retained derived-layout pass:
 Routing policy is bumped to **v5**, invalidating v4 persistent routes. The old
 `SeparateSharedCorridors()` batch-local implementation is retired.
 
-Crossing bridge presentation and endpoint pair markers remain later phases.
+Crossing bridge presentation and global bundle continuity remain later phases.
 
 ### Multi-Lane Routing V2 · Phase 3 — Crossing bridge semantics
 
@@ -773,7 +773,35 @@ Phase 3 makes orthogonal route crossings visually explicit without changing rout
 Pan, zoom and stable frames perform zero crossing detection. Crossing data is derived from current
 `Points`, is not persisted, and therefore requires no cache-format or routing-policy bump.
 
-Endpoint pair markers remain the next phase.
+Global bundle/lane continuity remains the next phase.
+
+### Multi-Lane Routing V2 · Phase 4 — Global lane continuity
+
+Phase 4 rejects endpoint-code matching as a primary readability mechanism. The route geometry itself
+must preserve correspondence:
+
+- Phase 2 corridor components are now retained as explicit intermediate groups before offsets are
+  assigned;
+- components sharing at least **two** connection IDs are unioned into one continuity bundle, including
+  perpendicular components across a 90-degree turn;
+- each bundle owns one deterministic slot table for the union of its routes;
+- when routes branch out, surviving routes keep their previous slots instead of re-centering into the
+  newly smaller local corridor; empty slots deliberately preserve visual continuity;
+- a single route cannot merge otherwise unrelated corridor systems into one giant sparse bundle:
+  continuity union requires two shared routes;
+- at orthogonal bundle turns the same slot maps directly between horizontal Y-offset and vertical
+  X-offset, producing a continuous lane corner rather than a lane reorder;
+- component, group and route ordering are deterministic, so incremental route batches and dictionary
+  iteration order cannot change the visible slot assignment;
+- the existing obstacle validation remains authoritative: a continuity-derived path that would cross
+  a room falls back to its correct BasePoints rather than sacrificing route correctness.
+
+The continuity graph is derived only when corridor layout is dirty. Stable frames, pan, zoom and
+hover perform zero continuity work; active room dragging still defers the global convergence through
+the existing interaction cooldown.
+
+Endpoint pair codes are intentionally not part of the normal map presentation. Line geometry,
+fan-out, lane continuity and crossing semantics remain the primary connection language.
 
 ## Legacy retirement policy
 
