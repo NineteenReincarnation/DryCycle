@@ -790,9 +790,6 @@ internal static class WorldWorkspaceView
 
     private static void DrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
     {
-        if (WorldSubregionSelector.Draw(snapshot, room))
-            return;
-
         if (inspectorRoom != room.RoomIndex)
         {
             inspectorRoom = room.RoomIndex;
@@ -814,20 +811,35 @@ internal static class WorldWorkspaceView
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("地图", "MAP"));
         DrawRoomLayerButtons(room);
 
-        string subregionLabel =
-            WorldInspectorReadability.PrepareField(
-                DevToolUiSettings.T("子区域", "Subregion"),
-                "WorldRoomSubregion");
-        string subregion = inspectorSubregion;
-        bool changed =
-            ImGui.InputText(
-                subregionLabel,
-                ref subregion,
-                128);
-        inspectorSubregion = subregion;
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SetRoomSubregion, roomIndex: room.RoomIndex, text: subregion));
-        else if (!changed && !ImGui.IsAnyItemActive()) inspectorSubregion = room.Subregion ?? string.Empty;
+        if (!WorldSubregionSelector.DrawField(snapshot, room))
+        {
+            string subregionLabel =
+                WorldInspectorReadability.PrepareField(
+                    DevToolUiSettings.T("子区域", "Subregion"),
+                    "WorldRoomSubregion");
+            string subregion = inspectorSubregion;
+            bool changed =
+                ImGui.InputText(
+                    subregionLabel,
+                    ref subregion,
+                    128);
+            inspectorSubregion = subregion;
+            if (ImGui.IsItemDeactivatedAfterEdit())
+            {
+                MapEditorCommandQueue.Enqueue(
+                    new MapEditorCommand(
+                        MapEditorCommandKind.SetRoomSubregion,
+                        roomIndex: room.RoomIndex,
+                        text: subregion));
+            }
+            else if (!changed &&
+                     !ImGui.IsAnyItemActive())
+            {
+                inspectorSubregion =
+                    room.Subregion ??
+                    string.Empty;
+            }
+        }
 
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
         DrawRoomAttractions(room);
