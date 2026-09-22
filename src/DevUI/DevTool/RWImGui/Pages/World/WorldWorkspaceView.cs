@@ -570,6 +570,22 @@ internal static class WorldWorkspaceView
         float eased =
             reveal * reveal *
             (3f - 2f * reveal);
+
+        float y0 = top + 2f;
+        float y1 = bottom - 2f;
+
+        // Stable-frame fast path: the normal resting splitter is one line and one style lookup.
+        // All "glass" composition work exists only while hover/drag animation is visible.
+        if (!dragging && eased <= 0.002f)
+        {
+            draw.AddLine(
+                new Num.Vector2(x, y0),
+                new Num.Vector2(x, y1),
+                ImGui.GetColorU32(ImGuiCol.Separator),
+                1.25f);
+            return;
+        }
+
         float glassWidth =
             1.5f +
             eased *
@@ -581,8 +597,6 @@ internal static class WorldWorkspaceView
                 1f,
                 half);
 
-        Num.Vector4 separator =
-            ImGui.GetStyleColorVec4(ImGuiCol.Separator);
         Num.Vector4 accent =
             ImGui.GetStyleColorVec4(
                 dragging
@@ -627,16 +641,6 @@ internal static class WorldWorkspaceView
                 accent.Z,
                 0.48f +
                 eased * 0.42f);
-        Num.Vector4 resting =
-            new(
-                separator.X,
-                separator.Y,
-                separator.Z,
-                0.72f);
-
-        float y0 = top + 2f;
-        float y1 = bottom - 2f;
-
         if (eased > 0.002f)
         {
             // Layered translucent surfaces mimic Apple's frosted-glass depth without performing
@@ -683,10 +687,7 @@ internal static class WorldWorkspaceView
         draw.AddLine(
             new Num.Vector2(x, y0),
             new Num.Vector2(x, y1),
-            ImGui.GetColorU32(
-                eased > 0.002f
-                    ? core
-                    : resting),
+            ImGui.GetColorU32(core),
             coreThickness);
     }
 
