@@ -308,7 +308,7 @@ internal static partial class MapRoomGeometryPresentationHub
             PersistentTryRestore(entry, page.world, room, panel.roomRep);
             RefreshDimensions(entry, panel.roomRep);
             RefreshNodes(entry, panel.roomRep, force: !entry.NodesInitialized);
-            Publish(entry);
+            Publish(entry, allowRasterReadback: false);
         }
 
         if (cache.Count != alive.Count)
@@ -342,7 +342,7 @@ internal static partial class MapRoomGeometryPresentationHub
             rasterLoadsRemaining = Math.Max(0, rasterLoadsRemaining - 1);
         if (RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
             curveLoadsRemaining = Math.Max(0, curveLoadsRemaining - 1);
-        Publish(entry);
+        Publish(entry, allowRasterReadback: true);
     }
 
     private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
@@ -371,7 +371,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
                 curveLoadsRemaining--;
 
-            Publish(entry);
+            Publish(entry, allowRasterReadback: true);
         }
     }
 
@@ -1287,7 +1287,7 @@ internal static partial class MapRoomGeometryPresentationHub
         return CompactRasterRuns(merged);
     }
 
-    private static void Publish(CacheEntry entry)
+    private static void Publish(CacheEntry entry, bool allowRasterReadback)
     {
         if (entry.PublishedRevision != entry.Revision)
         {
@@ -1304,10 +1304,14 @@ internal static partial class MapRoomGeometryPresentationHub
             entry.PublishedRevision = entry.Revision;
         }
 
-        // Raster fallback may touch Unity textures/RenderTexture. Keep that work on the main-thread
-        // prime path, then publish a detached snapshot for RWImGUI Draw to consume.
+        // Cached raster enhancement is always reusable, but only priority/background passes may
+        // authorize a new synchronous readback. Structure synchronization therefore stays cheap
+        // even when it republishes every room in a newly opened region.
         EditorMapRoomVisualSnapshot snapshot =
-            WorldMapFrontendBridge.EnhanceRaster(entry.RoomIndex, entry.Snapshot) ??
+            WorldMapFrontendBridge.EnhanceRaster(
+                entry.RoomIndex,
+                entry.Snapshot,
+                allowRasterReadback) ??
             EditorMapRoomVisualSnapshot.Empty;
 
         bool changed;

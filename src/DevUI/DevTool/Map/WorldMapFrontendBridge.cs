@@ -14,7 +14,7 @@ internal static class WorldMapFrontendBridge
 {
     private static Func<EditorSession, bool> shouldPublish;
     private static Func<EditorSession, bool> shouldPrimeGeometry;
-    private static Func<int, EditorMapRoomVisualSnapshot, EditorMapRoomVisualSnapshot> enhanceRaster;
+    private static Func<int, EditorMapRoomVisualSnapshot, bool, EditorMapRoomVisualSnapshot> enhanceRaster;
     private static Func<global::World, bool> shouldProcessGeometryBackground;
 
     internal static bool ShouldPublish(EditorSession session) =>
@@ -25,8 +25,11 @@ internal static class WorldMapFrontendBridge
 
     internal static EditorMapRoomVisualSnapshot EnhanceRaster(
         int roomIndex,
-        EditorMapRoomVisualSnapshot original) =>
-        enhanceRaster?.Invoke(roomIndex, original) ?? original ?? EditorMapRoomVisualSnapshot.Empty;
+        EditorMapRoomVisualSnapshot original,
+        bool allowReadback) =>
+        enhanceRaster?.Invoke(roomIndex, original, allowReadback) ??
+        original ??
+        EditorMapRoomVisualSnapshot.Empty;
 
     internal static bool ShouldProcessGeometryBackground(global::World world) =>
         shouldProcessGeometryBackground?.Invoke(world) ?? true;
@@ -50,11 +53,11 @@ internal static class WorldMapFrontendBridge
     }
 
     internal static void RegisterRasterEnhancer(
-        Func<int, EditorMapRoomVisualSnapshot, EditorMapRoomVisualSnapshot> callback) =>
+        Func<int, EditorMapRoomVisualSnapshot, bool, EditorMapRoomVisualSnapshot> callback) =>
         enhanceRaster = callback;
 
     internal static void UnregisterRasterEnhancer(
-        Func<int, EditorMapRoomVisualSnapshot, EditorMapRoomVisualSnapshot> callback)
+        Func<int, EditorMapRoomVisualSnapshot, bool, EditorMapRoomVisualSnapshot> callback)
     {
         if (Delegate.Equals(enhanceRaster, callback))
             enhanceRaster = null;

@@ -20,6 +20,7 @@ phase percentage below 100%.
 - **Phase 8.1 — 100%**: active view-only pan/zoom reprojects the committed guarded surface through verified AddImage UVs instead of calling Camera.Render; interaction settle performs one exact render, and guard exhaustion falls back visibly rather than stretching/clamping stale pixels.
 - **Phase 8.2 — 100%**: viewport, room-drag and linking interaction cooldowns are tracked independently; pure pan/zoom/linking run with zero route-build budget while room drag retains a small incident-route budget, and source/geometry/shortcut work remains frozen for every active interaction class.
 - **Phase 8.3 — 100%**: initial room-source capture is guard-band visible-first; rooms needed by the current retained surface are promoted ahead of the region-wide queue without duplicating caches or changing authoring order.
+- **Phase 8.4 — 100%**: semantic raster fallback no longer performs new readbacks during whole-region structure publication; cached enhancement can be republished freely, while priority/background passes authorize at most one new GetPixels/ReadPixels operation per Unity frame and interaction authorizes none.
 
 Retained V2 now owns the normal World Map presentation path. The remaining immediate-mode room/direct-link drawing is an explicit compatibility fallback when the verified RenderTexture -> RWImGUI bridge cannot present the V2 surface or when an interaction temporarily moves beyond the committed reprojection guard band.
 
@@ -455,7 +456,9 @@ legacy presentation:
 - `WorldMapLegacyRoomSourceService` resolves vanilla `RoomPanel/MapTex` texture descriptors for
   the V2 room resource store. GPU-cache/source-hash responsibilities have been removed from it.
 - `WorldMapRasterReadbackFallback` supplies semantic raster data only when the atlas cannot be read
-  through the normal CPU path.
+  through the normal CPU path. Whole-region structure publication may reuse cached enhancement but
+  cannot start a new readback; priority/background publication is capped to one new readback per
+  Unity frame and all interaction classes suppress new readbacks entirely.
 
 `WorldMapLegacyVisualGuard` also remains while vanilla `MapPage` is kept alive as a data source;
 its dependency is the frontend bridge, not the retired GPU renderer.
@@ -482,6 +485,22 @@ readback, room mesh rebuild or route mesh rebuild.
 
 Base room thumbnails remain committed independently from zoom and are never replaced by a black LOD
 placeholder.
+
+### Bounded semantic raster readback
+
+The geometry hub now distinguishes **republishing** a room snapshot from **authorizing a new raster
+readback**. `SynchronizeStructure()` can still rebuild room indexes and publish dimensions/nodes for
+an entire region, but those publishes pass `allowRasterReadback = false`. If the frontend already
+has a cached semantic raster for the same texture identity it is reused; otherwise the lightweight
+snapshot is published immediately.
+
+Current/selected-room and bounded background passes may authorize readback. The frontend fallback
+then enforces a second hard limit of **one new readback per Unity frame**. A failed readback still
+consumes that frame's budget because the GPU/CPU synchronization cost has already occurred.
+Pan/zoom, room-drag and linking interaction suppress new fallback readbacks completely.
+
+This keeps base MapTex thumbnails independent from semantic classification: a room can be visible
+from its committed texture while detailed terrain runs arrive later.
 
 ### Final source-thread boundary
 

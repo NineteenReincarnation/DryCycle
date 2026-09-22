@@ -51,12 +51,16 @@ internal static class WorldMapRasterReadbackFallback
         internal bool Water { get; }
     }
 
+    private const int MaxNewReadbacksPerFrame = 1;
+
     private static readonly Dictionary<int, CachedRaster> cache = new();
     private static readonly HashSet<int> loggedFailures = new();
 
     private static ManualLogSource log;
     private static bool enabled;
     private static string cachedRegion = string.Empty;
+    private static int readbackBudgetFrame = -1;
+    private static int newReadbacksThisFrame;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -73,11 +77,16 @@ internal static class WorldMapRasterReadbackFallback
         cache.Clear();
         loggedFailures.Clear();
         cachedRegion = string.Empty;
+        readbackBudgetFrame = -1;
+        newReadbacksThisFrame = 0;
         enabled = false;
         log = null;
     }
 
-    internal static EditorMapRoomVisualSnapshot Enhance(int roomIndex, EditorMapRoomVisualSnapshot original)
+    internal static EditorMapRoomVisualSnapshot Enhance(
+        int roomIndex,
+        EditorMapRoomVisualSnapshot original,
+        bool allowReadback)
     {
         original ??= EditorMapRoomVisualSnapshot.Empty;
         if (!enabled || original.DetailedRasterAvailable) return original;
@@ -103,6 +112,11 @@ internal static class WorldMapRasterReadbackFallback
 
         if (!cache.TryGetValue(roomIndex, out CachedRaster cached) || cached.Key != source.Key)
         {
+            if (!allowReadback ||
+                WorldMapBackgroundBudget.InteractionActive ||
+                !TryAcquireReadbackBudget())
+                return original;
+
             if (!TryReadPixels(source, out Color[] pixels))
             {
                 if (loggedFailures.Add(roomIndex))
@@ -129,6 +143,22 @@ internal static class WorldMapRasterReadbackFallback
             Curves = original.Curves ?? Array.Empty<EditorMapPolylineSnapshot>(),
             Nodes = original.Nodes ?? Array.Empty<EditorMapNodeVisualSnapshot>()
         };
+    }
+
+    private static bool TryAcquireReadbackBudget()
+    {
+        int frame = Time.frameCount;
+        if (readbackBudgetFrame != frame)
+        {
+            readbackBudgetFrame = frame;
+            newReadbacksThisFrame = 0;
+        }
+
+        if (newReadbacksThisFrame >= MaxNewReadbacksPerFrame)
+            return false;
+
+        newReadbacksThisFrame++;
+        return true;
     }
 
     private static bool TryGetRasterSource(
