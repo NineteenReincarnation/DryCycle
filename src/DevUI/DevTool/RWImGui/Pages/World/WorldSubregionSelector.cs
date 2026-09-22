@@ -100,24 +100,9 @@ internal static class WorldSubregionSelector
             DevToolUiSettings.T("子区域", "Subregion"),
             true);
 
-        string deleteLabel =
-            DevToolUiSettings.T("删除", "Delete");
-        float spacing =
-            Math.Max(
-                4f,
-                ImGui.GetStyle().ItemSpacing.X);
-        float deleteWidth =
-            DevToolWidgets.ButtonWidth(deleteLabel);
-        float available =
-            Math.Max(
-                1f,
-                ImGui.GetContentRegionAvail().X);
-        float selectorWidth =
-            Math.Max(
-                96f,
-                available - deleteWidth - spacing);
+        bool requestDeleteConfirmation = false;
 
-        ImGui.SetNextItemWidth(selectorWidth);
+        ImGui.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(
                 "##WorldRoomSubregionSelector",
                 preview))
@@ -173,26 +158,34 @@ internal static class WorldSubregionSelector
                     ImGui.SetItemDefaultFocus();
             }
 
+            if (current.Length > 0)
+            {
+                ImGui.Separator();
+
+                Num.Vector4 danger =
+                    ImGui.GetStyleColorVec4(ImGuiCol.PlotHistogram);
+                ImGui.PushStyleColor(
+                    ImGuiCol.Text,
+                    danger);
+
+                if (ImGui.Selectable(
+                        DevToolUiSettings.T(
+                            "删除当前子区域…",
+                            "Delete current subregion…") +
+                        "##WorldDeleteSubregion"))
+                {
+                    pendingDeleteSubregion = current;
+                    requestDeleteConfirmation = true;
+                }
+
+                ImGui.PopStyleColor();
+            }
+
             ImGui.EndCombo();
         }
 
-        ImGui.SameLine(0f, spacing);
-
-        bool canDelete = current.Length > 0;
-        if (!canDelete)
-            ImGui.BeginDisabled();
-
-        if (DevToolWidgets.ActionButton(
-                deleteLabel,
-                "WorldDeleteSubregion",
-                DevToolButtonTone.Danger))
-        {
-            pendingDeleteSubregion = current;
+        if (requestDeleteConfirmation)
             ImGui.OpenPopup(DeletePopupId);
-        }
-
-        if (!canDelete)
-            ImGui.EndDisabled();
     }
 
     private static void DrawInlineCreate(
