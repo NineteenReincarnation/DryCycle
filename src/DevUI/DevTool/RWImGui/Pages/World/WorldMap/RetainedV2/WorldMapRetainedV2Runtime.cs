@@ -148,14 +148,17 @@ internal static class WorldMapRetainedV2Runtime
                 priorityMax,
                 Volatile.Read(ref activeLayerMask),
                 sourcePriorityRooms);
-            RoomResources.Prioritize(sourcePriorityRooms);
         }
         else
         {
             sourcePriorityRooms.Clear();
         }
 
-        RoomResources.UpdateMainThread(session, snapshot, MainSceneState);
+        RoomResources.UpdateMainThread(
+            session,
+            snapshot,
+            MainSceneState,
+            sourcePriorityRooms);
         RoomResources.DrainGeometryChanges(geometryChangedRooms);
         if (geometryChangedRooms.Count > 0)
         {

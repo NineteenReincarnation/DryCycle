@@ -120,7 +120,8 @@ internal sealed class WorldMapRoomResourceStore
     internal void UpdateMainThread(
         EditorSession session,
         EditorMapPresentationSnapshot snapshot,
-        WorldMapScene scene)
+        WorldMapScene scene,
+        IReadOnlyList<int> sourcePriorityRooms)
     {
         if (session?.ToolMode != EditorToolMode.Map ||
             session.Owner?.activePage is not MapPage page ||
@@ -144,6 +145,10 @@ internal sealed class WorldMapRoomResourceStore
             auditRooms = snapshotRooms;
             auditCursor = 0;
         }
+
+        // Region reset happens above, so first-open visible promotion cannot be discarded by the
+        // store's own lifecycle reset.
+        Prioritize(sourcePriorityRooms);
 
         // Navigation/room drag owns the frame budget. Keep committed thumbnails/geometry stable
         // and resume source capture/build commits after the interaction cooldown.
