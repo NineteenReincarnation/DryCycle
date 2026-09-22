@@ -1275,7 +1275,7 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 b,
         int startRoom,
         int endRoom,
-        List<Obstacle> obstacles)
+        IReadOnlyList<Obstacle> obstacles)
     {
         for (int i = 0; i < obstacles.Count; i++)
         {

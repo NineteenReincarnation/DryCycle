@@ -30,8 +30,14 @@ internal static class WorldMapCorridorLaneAllocator
             obj is BucketKey other &&
             Equals(other);
 
-        public override int GetHashCode() =>
-            HashCode.Combine(Vertical, Coordinate);
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (Coordinate * 397) ^
+                       (Vertical ? 1 : 0);
+            }
+        }
     }
 
     private sealed class SegmentRef
