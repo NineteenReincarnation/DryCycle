@@ -466,6 +466,12 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted(
             "spatial routes: " + RouteSpatialIndex.Count +
             " · visible " + visibleRoutes.Count);
+        ImGui.TextUnformatted(
+            "crossings: " + ConnectionResources.Crossings.Count +
+            " · checks " + ConnectionResources.CrossingCandidateChecks +
+            (ConnectionResources.CrossingBudgetLimited
+                ? " · density budget active"
+                : string.Empty));
         ImGui.TextUnformatted("scene revision: " + RenderSceneState.SceneRevision);
         ImGui.TextUnformatted("view revision: " + RenderSceneState.ViewRevision);
         ImGui.TextUnformatted("scene delta backlog: " + SceneTransfer.PendingCount);

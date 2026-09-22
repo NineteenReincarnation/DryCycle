@@ -73,6 +73,7 @@ internal static class WorldMapCorridorLaneAllocator
 
         internal float[] Offsets { get; }
         internal bool[] Assigned { get; }
+        internal byte DensityTier;
     }
 
     private const float CoordinateBucketSize = 4f;
@@ -80,6 +81,14 @@ internal static class WorldMapCorridorLaneAllocator
     private const float PreferredLaneSpacing = 10f;
     private const float MinimumLaneSpacing = 5.5f;
     private const float TargetLaneSpan = 72f;
+
+    // Dense bundles are visually split into stable banks. The lane order never changes; a wider
+    // gutter every eight lanes gives the eye a grouping landmark without endpoint codes/colors.
+    private const int DenseBankThreshold = 12;
+    private const int DenseBankCapacity = 8;
+    private const float DenseLaneSpacing = 6.25f;
+    private const float DenseBankGutter = 9f;
+
     private const float PointEpsilonSquared = 0.04f;
 
     internal static void Apply(
@@ -110,11 +119,15 @@ internal static class WorldMapCorridorLaneAllocator
             if (basePoints == null || basePoints.Length < 2)
                 continue;
 
-            Num.Vector2[] candidate;
+            Num.Vector2[] candidate = basePoints;
+            byte densityTier = 0;
+
             if (lanePlans.TryGetValue(
                     routeId,
                     out RouteLanePlan lanePlan))
             {
+                densityTier = lanePlan.DensityTier;
+
                 Num.Vector2[] continuityCandidate =
                     BuildLanePath(
                         basePoints,
@@ -128,17 +141,7 @@ internal static class WorldMapCorridorLaneAllocator
                         route.ToRoomIndex,
                         obstacles);
 
-                if (!continuityClear)
-                {
-                    if (PathsEquivalent(
-                            route.Points,
-                            basePoints))
-                        continue;
-
-                    candidate =
-                        (Num.Vector2[])basePoints.Clone();
-                }
-                else
+                if (continuityClear)
                 {
                     candidate = continuityCandidate;
 
@@ -160,21 +163,26 @@ internal static class WorldMapCorridorLaneAllocator
                     }
                 }
             }
-            else
-            {
-                if (PathsEquivalent(
-                        route.Points,
-                        basePoints))
-                    continue;
 
-                candidate =
-                    (Num.Vector2[])basePoints.Clone();
-            }
+            bool pathChanged =
+                !PathsEquivalent(
+                    route.Points,
+                    candidate);
+            bool densityChanged =
+                route.DensityTier != densityTier;
 
-            if (PathsEquivalent(route.Points, candidate))
+            if (!pathChanged && !densityChanged)
                 continue;
 
-            route.Points = candidate;
+            if (pathChanged)
+            {
+                route.Points =
+                    ReferenceEquals(candidate, basePoints)
+                        ? (Num.Vector2[])basePoints.Clone()
+                        : candidate;
+            }
+
+            route.DensityTier = densityTier;
             route.Revision =
                 Math.Max(
                     1L,
@@ -528,18 +536,17 @@ internal static class WorldMapCorridorLaneAllocator
         List<string> slotIds = new(unique);
         slotIds.Sort(StringComparer.Ordinal);
 
-        float spacing =
-            AdaptiveSpacing(slotIds.Count);
-        float center =
-            (slotIds.Count - 1) * 0.5f;
+        float[] slotOffsets =
+            BuildStableSlotOffsets(
+                slotIds.Count);
+        byte densityTier =
+            DensityTierForCount(
+                slotIds.Count);
 
         Dictionary<string, float> slots =
             new(StringComparer.Ordinal);
         for (int i = 0; i < slotIds.Count; i++)
-        {
-            slots[slotIds[i]] =
-                (i - center) * spacing;
-        }
+            slots[slotIds[i]] = slotOffsets[i];
 
         for (int c = 0; c < components.Count; c++)
         {
@@ -573,6 +580,9 @@ internal static class WorldMapCorridorLaneAllocator
                         segment.RouteId,
                         plan);
                 }
+
+                if (densityTier > plan.DensityTier)
+                    plan.DensityTier = densityTier;
 
                 if ((uint)segment.SegmentIndex <
                     (uint)plan.Offsets.Length)
@@ -836,6 +846,60 @@ internal static class WorldMapCorridorLaneAllocator
         return (float)(
             total /
             segments.Count);
+    }
+
+    private static float[] BuildStableSlotOffsets(int count)
+    {
+        float[] offsets =
+            new float[Math.Max(0, count)];
+        if (count <= 1)
+            return offsets;
+
+        if (count <= DenseBankThreshold)
+        {
+            float spacing =
+                AdaptiveSpacing(count);
+            float center =
+                (count - 1) * 0.5f;
+
+            for (int i = 0; i < count; i++)
+                offsets[i] = (i - center) * spacing;
+
+            return offsets;
+        }
+
+        // Do not compress an arbitrary number of routes into one visually uniform wall. Stable
+        // ordinal slots are divided into banks of eight with a small additional gutter between
+        // banks. The gap is presentation structure, not a new route/topology relationship.
+        float cursor = 0f;
+        offsets[0] = 0f;
+
+        for (int i = 1; i < count; i++)
+        {
+            cursor += DenseLaneSpacing;
+            if (i % DenseBankCapacity == 0)
+                cursor += DenseBankGutter;
+
+            offsets[i] = cursor;
+        }
+
+        float midpoint =
+            (offsets[0] +
+             offsets[count - 1]) *
+            0.5f;
+        for (int i = 0; i < count; i++)
+            offsets[i] -= midpoint;
+
+        return offsets;
+    }
+
+    private static byte DensityTierForCount(int count)
+    {
+        if (count >= 24)
+            return 2;
+        if (count > DenseBankThreshold)
+            return 1;
+        return 0;
     }
 
     private static float AdaptiveSpacing(int count)

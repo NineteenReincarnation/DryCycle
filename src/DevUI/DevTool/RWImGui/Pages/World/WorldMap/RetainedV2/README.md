@@ -856,6 +856,36 @@ Phase 6 adds interaction focus without making interaction responsible for topolo
 Viewport navigation may still draw a selected route overlay because it is only a small transformed
 polyline; no retained geometry is regenerated.
 
+### Multi-Lane Routing V2 · Phase 7 — Extreme-density policy
+
+Phase 7 hardens the first six readability phases for 8/16/32+ connection clusters:
+
+- continuity bundles up to 12 routes retain the normal adaptive spacing policy;
+- larger bundles keep the same deterministic route order but are split visually into stable
+  **eight-lane banks**; a small extra gutter between banks gives the eye recurring grouping
+  landmarks instead of one uniform wall of lines;
+- same-room-pair base lane offsets use the same dense-bank structure, and very dense terminal fan-out
+  adds a small depth break every eight endpoints;
+- bank gaps are derived presentation geometry only. They do not create topology, labels, colors or
+  endpoint codes, and obstacle validation can still reject any unsafe shifted route;
+- routes record a non-persistent density tier. Dense single-direction routes render only one
+  direction arrow, and dense/extreme arrows scale down while bidirectional routes retain one arrow
+  for each direction;
+- crossing detection is spatially bounded to 4096 unique segment-pair checks per 96-unit cell,
+  128 bridge marks per cell and 1024 marks globally per convergence;
+- when a dense cell exceeds the bridge budget, selection is deterministic and route-diverse: each
+  over-route receives one opportunity before any route consumes several bridge slots;
+- dense crossing marks use a three-segment bridge arch instead of the normal six-segment arch,
+  preserving the crossing/non-connection semantic at roughly half the bridge geometry cost;
+- the retained crossing mesh enables 32-bit indices when necessary as a final safety net, although
+  the normal density budget keeps expected vertex counts below that threshold;
+- budget activation and candidate-check counts are exposed in the existing WorldMap retained
+  diagnostics tooltip rather than silently hiding an extreme-density fallback.
+
+All density work remains inside route/corridor convergence. Stable frames, pan/zoom and Phase 6
+hover/selection continue to perform zero density/crossing topology work; focus cost stays bounded to
+the one or two focused route polylines.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.

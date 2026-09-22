@@ -29,6 +29,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private const float ArrowSize = 13f;
     private const float CrossingRadius = 7f;
     private const float CrossingRise = 5.5f;
+    private const float DenseCrossingRadius = 5.7f;
+    private const float DenseCrossingRise = 4.2f;
 
     private readonly Dictionary<string, RouteObject> routeObjects =
         new(StringComparer.Ordinal);
@@ -243,9 +245,22 @@ internal sealed class WorldMapRetainedConnectionRenderer
         Num.Vector2[] path = route.Points ?? Array.Empty<Num.Vector2>();
         if (path.Length < 2) return null;
 
-        List<Vector3> vertices = new();
-        List<Color32> colors = new();
-        List<int> indices = new();
+        int crossingCount =
+            resources.Crossings.Count;
+        int estimatedVertices =
+            Math.Min(
+                65536,
+                crossingCount * 36);
+
+        List<Vector3> vertices =
+            new(estimatedVertices);
+        List<Color32> colors =
+            new(estimatedVertices);
+        List<int> indices =
+            new(
+                Math.Min(
+                    98304,
+                    crossingCount * 54));
 
         Color32 shadow = new(4, 5, 7, 238);
         Color32 core = RouteColor(route);
@@ -295,11 +310,13 @@ internal sealed class WorldMapRetainedConnectionRenderer
             indices,
             path,
             route.Direction,
+            route.DensityTier,
             shadow,
             core);
 
         if (indices.Count == 0) return null;
         Mesh mesh = NewMesh("DryCycle WorldMap V2 Route");
+        EnsureIndexFormat(mesh, vertices.Count);
         mesh.vertices = vertices.ToArray();
         mesh.colors32 = colors.ToArray();
         mesh.triangles = indices.ToArray();
@@ -339,32 +356,43 @@ internal sealed class WorldMapRetainedConnectionRenderer
             Num.Vector2 point = mark.Point;
             Num.Vector2 normal =
                 new(-tangent.Y, tangent.X);
+            float radius =
+                mark.Dense
+                    ? DenseCrossingRadius
+                    : CrossingRadius;
+            float riseHeight =
+                mark.Dense
+                    ? DenseCrossingRise
+                    : CrossingRise;
 
             AddThickSegment(
                 vertices,
                 colors,
                 indices,
-                point - tangent * (CrossingRadius + 2.5f),
-                point + tangent * (CrossingRadius + 2.5f),
+                point - tangent * (radius + 2.5f),
+                point + tangent * (radius + 2.5f),
                 ShadowHalfWidth + 1.4f,
                 mask,
                 -0.02f);
 
             Color32 core = RouteColor(overRoute);
 
-            const int arcSegments = 6;
+            int arcSegments =
+                mark.Dense ? 3 : 6;
             Num.Vector2 previous =
-                point - tangent * CrossingRadius;
+                point - tangent * radius;
 
             for (int segment = 1; segment <= arcSegments; segment++)
             {
-                float t = segment / (float)arcSegments;
+                float t =
+                    segment /
+                    (float)arcSegments;
                 float along =
                     (-1f + t * 2f) *
-                    CrossingRadius;
+                    radius;
                 float rise =
                     (float)Math.Sin(Math.PI * t) *
-                    CrossingRise;
+                    riseHeight;
 
                 Num.Vector2 current =
                     point +
@@ -400,6 +428,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
         Mesh mesh =
             NewMesh("DryCycle WorldMap V2 Crossings");
+        EnsureIndexFormat(mesh, vertices.Count);
         mesh.vertices = vertices.ToArray();
         mesh.colors32 = colors.ToArray();
         mesh.triangles = indices.ToArray();
@@ -487,11 +516,19 @@ internal sealed class WorldMapRetainedConnectionRenderer
         List<int> indices,
         Num.Vector2[] path,
         WorldConnectionDirection direction,
+        byte densityTier,
         Color32 shadow,
         Color32 core)
     {
         float length = PathLength(path);
         if (length < 24f) return;
+
+        float arrowScale =
+            densityTier >= 2
+                ? 0.68f
+                : densityTier == 1
+                    ? 0.82f
+                    : 1f;
 
         if (direction == WorldConnectionDirection.Bidirectional)
         {
@@ -502,6 +539,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 path,
                 0.35f,
                 reverse: true,
+                arrowScale,
                 shadow,
                 core);
             AddArrowAt(
@@ -511,12 +549,20 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 path,
                 0.65f,
                 reverse: false,
+                arrowScale,
                 shadow,
                 core);
             return;
         }
 
-        int count = length >= 360f ? 3 : length >= 190f ? 2 : 1;
+        int count =
+            densityTier > 0
+                ? 1
+                : length >= 360f
+                    ? 3
+                    : length >= 190f
+                        ? 2
+                        : 1;
         bool reverse = direction == WorldConnectionDirection.BToA;
         for (int i = 0; i < count; i++)
         {
@@ -528,6 +574,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 path,
                 fraction,
                 reverse,
+                arrowScale,
                 shadow,
                 core);
         }
@@ -540,6 +587,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         Num.Vector2[] path,
         float fraction,
         bool reverse,
+        float sizeScale,
         Color32 shadow,
         Color32 core)
     {
@@ -560,7 +608,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
             point,
             tangent,
             normal,
-            ArrowSize + 4f,
+            ArrowSize * sizeScale + 4f,
             shadow,
             -0.08f);
         AddArrowTriangle(
@@ -570,7 +618,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
             point,
             tangent,
             normal,
-            ArrowSize,
+            ArrowSize * sizeScale,
             core,
             -0.10f);
     }
@@ -727,6 +775,18 @@ internal sealed class WorldMapRetainedConnectionRenderer
             name = name,
             hideFlags = HideFlags.HideAndDontSave
         };
+
+    private static void EnsureIndexFormat(
+        Mesh mesh,
+        int vertexCount)
+    {
+        if (mesh == null ||
+            vertexCount <= 65535)
+            return;
+
+        mesh.indexFormat =
+            UnityEngine.Rendering.IndexFormat.UInt32;
+    }
 
     private static Vector3 ToUnity(Num.Vector2 point, float z) =>
         new(point.X, -point.Y, z - 1f);

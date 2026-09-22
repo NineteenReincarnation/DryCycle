@@ -24,5 +24,10 @@ internal sealed class ConnectionRouteResource
 
     internal Num.Vector2 StartDirection;
     internal Num.Vector2 EndDirection;
+
+    // Derived presentation density only. 0 = normal, 1 = dense, 2 = extreme.
+    // It is recomputed by the corridor allocator and is never authoring/persistent data.
+    internal byte DensityTier;
+
     internal long Revision;
 }

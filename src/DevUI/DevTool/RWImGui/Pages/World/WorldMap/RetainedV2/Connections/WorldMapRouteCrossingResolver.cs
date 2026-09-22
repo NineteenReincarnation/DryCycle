@@ -10,23 +10,50 @@ internal readonly struct WorldMapCrossingMark
         string overRouteId,
         string underRouteId,
         Num.Vector2 point,
-        Num.Vector2 tangent)
+        Num.Vector2 tangent,
+        bool dense)
     {
         OverRouteId = overRouteId ?? string.Empty;
         UnderRouteId = underRouteId ?? string.Empty;
         Point = point;
         Tangent = tangent;
+        Dense = dense;
     }
 
     internal string OverRouteId { get; }
     internal string UnderRouteId { get; }
     internal Num.Vector2 Point { get; }
     internal Num.Vector2 Tangent { get; }
+    internal bool Dense { get; }
+}
+
+internal readonly struct WorldMapCrossingResolveResult
+{
+    internal WorldMapCrossingResolveResult(
+        WorldMapCrossingMark[] marks,
+        bool budgetLimited,
+        int candidateChecks)
+    {
+        Marks = marks ?? Array.Empty<WorldMapCrossingMark>();
+        BudgetLimited = budgetLimited;
+        CandidateChecks = Math.Max(0, candidateChecks);
+    }
+
+    internal WorldMapCrossingMark[] Marks { get; }
+    internal bool BudgetLimited { get; }
+    internal int CandidateChecks { get; }
+
+    internal static WorldMapCrossingResolveResult Empty =>
+        new(
+            Array.Empty<WorldMapCrossingMark>(),
+            false,
+            0);
 }
 
 /// <summary>
-/// Detects semantic route crossings from the final retained route geometry. Detection is spatially
-/// bucketed and runs only after route/corridor layout changes. It never participates in pan/zoom.
+/// Detects semantic route crossings from final retained route geometry. Phase 7 keeps dense maps
+/// bounded: spatial cells own deterministic candidate budgets and dense bridge marks use a cheaper
+/// presentation LOD. Stable frames/pan/zoom never execute this resolver.
 /// </summary>
 internal static class WorldMapRouteCrossingResolver
 {
@@ -53,11 +80,17 @@ internal static class WorldMapRouteCrossingResolver
     private const float BridgeShoulder = 13f;
     private const float RouteEndpointClearance = 30f;
 
-    internal static WorldMapCrossingMark[] Build(
+    private const int DenseCellPairThreshold = 96;
+    private const int MaxUniquePairChecksPerCell = 4096;
+    private const int MaxMarksPerCell = 128;
+    private const int MaxDenseMarksPerOverRoutePerCell = 8;
+    private const int MaxTotalMarks = 1024;
+
+    internal static WorldMapCrossingResolveResult Build(
         IReadOnlyDictionary<string, ConnectionRouteResource> routes)
     {
         if (routes == null || routes.Count < 2)
-            return Array.Empty<WorldMapCrossingMark>();
+            return WorldMapCrossingResolveResult.Empty;
 
         List<string> routeIds = new(routes.Keys);
         routeIds.Sort(StringComparer.Ordinal);
@@ -75,8 +108,6 @@ internal static class WorldMapRouteCrossingResolver
             if (points == null || points.Length < 6)
                 continue;
 
-            // Protect the two terminal segments on each side. Phase 1 owns those and a "bridge"
-            // beside a room socket is more confusing than a plain crossing.
             int firstEligible = 2;
             int lastEligible = points.Length - 4;
             if (lastEligible < firstEligible)
@@ -87,15 +118,21 @@ internal static class WorldMapRouteCrossingResolver
                 Num.Vector2 a = points[i];
                 Num.Vector2 b = points[i + 1];
 
-                bool vertical = Math.Abs(a.X - b.X) < AxisEpsilon;
-                bool horizontal = Math.Abs(a.Y - b.Y) < AxisEpsilon;
+                bool vertical =
+                    Math.Abs(a.X - b.X) < AxisEpsilon;
+                bool horizontal =
+                    Math.Abs(a.Y - b.Y) < AxisEpsilon;
                 if (!vertical && !horizontal)
                     continue;
 
                 float min =
-                    vertical ? Math.Min(a.Y, b.Y) : Math.Min(a.X, b.X);
+                    vertical
+                        ? Math.Min(a.Y, b.Y)
+                        : Math.Min(a.X, b.X);
                 float max =
-                    vertical ? Math.Max(a.Y, b.Y) : Math.Max(a.X, b.X);
+                    vertical
+                        ? Math.Max(a.Y, b.Y)
+                        : Math.Max(a.X, b.X);
                 if (max - min <= BridgeShoulder * 2f)
                     continue;
 
@@ -116,19 +153,54 @@ internal static class WorldMapRouteCrossingResolver
         }
 
         if (cells.Count == 0)
-            return Array.Empty<WorldMapCrossingMark>();
+            return WorldMapCrossingResolveResult.Empty;
 
         HashSet<long> checkedPairs = new();
         List<WorldMapCrossingMark> marks = new();
+        List<WorldMapCrossingMark> localMarks = new();
+        bool budgetLimited = false;
+        int candidateChecks = 0;
 
-        foreach (CellBucket cell in cells.Values)
+        List<long> cellKeys = new(cells.Keys);
+        cellKeys.Sort();
+
+        for (int c = 0; c < cellKeys.Count; c++)
         {
-            for (int v = 0; v < cell.Verticals.Count; v++)
+            if (marks.Count >= MaxTotalMarks)
             {
-                SegmentRef vertical = cell.Verticals[v];
-                for (int h = 0; h < cell.Horizontals.Count; h++)
+                budgetLimited = true;
+                break;
+            }
+
+            CellBucket cell = cells[cellKeys[c]];
+            long potentialPairs =
+                (long)cell.Verticals.Count *
+                cell.Horizontals.Count;
+            if (potentialPairs <= 0)
+                continue;
+
+            bool dense =
+                potentialPairs >=
+                DenseCellPairThreshold;
+
+            localMarks.Clear();
+            int cellChecks = 0;
+            bool stopCell = false;
+
+            for (int v = 0;
+                 v < cell.Verticals.Count &&
+                 !stopCell;
+                 v++)
+            {
+                SegmentRef vertical =
+                    cell.Verticals[v];
+
+                for (int h = 0;
+                     h < cell.Horizontals.Count;
+                     h++)
                 {
-                    SegmentRef horizontal = cell.Horizontals[h];
+                    SegmentRef horizontal =
+                        cell.Horizontals[h];
 
                     if (string.Equals(
                             vertical.RouteId,
@@ -136,9 +208,23 @@ internal static class WorldMapRouteCrossingResolver
                             StringComparison.Ordinal))
                         continue;
 
-                    long pairKey = PairKey(vertical.Id, horizontal.Id);
+                    long pairKey =
+                        PairKey(
+                            vertical.Id,
+                            horizontal.Id);
                     if (!checkedPairs.Add(pairKey))
                         continue;
+
+                    if (cellChecks >=
+                        MaxUniquePairChecksPerCell)
+                    {
+                        budgetLimited = true;
+                        stopCell = true;
+                        break;
+                    }
+
+                    cellChecks++;
+                    candidateChecks++;
 
                     if (!TryCross(
                             vertical,
@@ -148,6 +234,7 @@ internal static class WorldMapRouteCrossingResolver
 
                     SegmentRef over;
                     SegmentRef under;
+
                     if (string.CompareOrdinal(
                             vertical.RouteId,
                             horizontal.RouteId) >= 0)
@@ -161,45 +248,158 @@ internal static class WorldMapRouteCrossingResolver
                         under = vertical;
                     }
 
-                    // Canonical tangent keeps the bridge bow stable even if connection direction is
-                    // reversed. Direction is communicated by arrows, not by which side the hump uses.
                     Num.Vector2 tangent =
                         over.Vertical
                             ? new Num.Vector2(0f, 1f)
                             : new Num.Vector2(1f, 0f);
 
-                    marks.Add(
+                    localMarks.Add(
                         new WorldMapCrossingMark(
                             over.RouteId,
                             under.RouteId,
                             point,
-                            tangent));
+                            tangent,
+                            dense));
                 }
             }
+
+            if (localMarks.Count == 0)
+                continue;
+
+            int remaining =
+                MaxTotalMarks -
+                marks.Count;
+            int cellLimit =
+                Math.Min(
+                    MaxMarksPerCell,
+                    remaining);
+
+            if (localMarks.Count <= cellLimit)
+            {
+                marks.AddRange(localMarks);
+                continue;
+            }
+
+            budgetLimited = true;
+            AppendBudgetedCellMarks(
+                localMarks,
+                marks,
+                cellLimit);
         }
 
         if (marks.Count == 0)
-            return Array.Empty<WorldMapCrossingMark>();
+        {
+            return new WorldMapCrossingResolveResult(
+                Array.Empty<WorldMapCrossingMark>(),
+                budgetLimited,
+                candidateChecks);
+        }
 
         marks.Sort(CompareMarks);
-        return marks.ToArray();
+
+        return new WorldMapCrossingResolveResult(
+            marks.ToArray(),
+            budgetLimited,
+            candidateChecks);
+    }
+
+    private static void AppendBudgetedCellMarks(
+        List<WorldMapCrossingMark> candidates,
+        List<WorldMapCrossingMark> output,
+        int limit)
+    {
+        if (candidates == null ||
+            candidates.Count == 0 ||
+            output == null ||
+            limit <= 0)
+            return;
+
+        candidates.Sort(CompareBudgetPriority);
+
+        bool[] selected =
+            new bool[candidates.Count];
+        Dictionary<string, int> overRouteCounts =
+            new(StringComparer.Ordinal);
+        HashSet<string> representedOverRoutes =
+            new(StringComparer.Ordinal);
+        int added = 0;
+
+        // First pass preserves route diversity: one bridge per over-route before any route consumes
+        // several slots in this dense cell.
+        for (int i = 0;
+             i < candidates.Count &&
+             added < limit;
+             i++)
+        {
+            WorldMapCrossingMark mark =
+                candidates[i];
+
+            if (!representedOverRoutes.Add(
+                    mark.OverRouteId))
+                continue;
+
+            output.Add(mark);
+            selected[i] = true;
+            overRouteCounts[mark.OverRouteId] = 1;
+            added++;
+        }
+
+        // Second pass fills the local budget but prevents one route from owning the whole crossing
+        // mesh in a dense grid.
+        for (int i = 0;
+             i < candidates.Count &&
+             added < limit;
+             i++)
+        {
+            if (selected[i])
+                continue;
+
+            WorldMapCrossingMark mark =
+                candidates[i];
+            overRouteCounts.TryGetValue(
+                mark.OverRouteId,
+                out int count);
+
+            if (count >=
+                MaxDenseMarksPerOverRoutePerCell)
+                continue;
+
+            output.Add(mark);
+            overRouteCounts[mark.OverRouteId] =
+                count + 1;
+            added++;
+        }
     }
 
     private static void AddToCells(
         Dictionary<long, CellBucket> cells,
         SegmentRef segment)
     {
-        int fixedCell = FloorCell(segment.Fixed);
-        int minCell = FloorCell(segment.Min);
-        int maxCell = FloorCell(segment.Max);
+        int fixedCell =
+            FloorCell(segment.Fixed);
+        int minCell =
+            FloorCell(segment.Min);
+        int maxCell =
+            FloorCell(segment.Max);
 
-        for (int axisCell = minCell; axisCell <= maxCell; axisCell++)
+        for (int axisCell = minCell;
+             axisCell <= maxCell;
+             axisCell++)
         {
-            int x = segment.Vertical ? fixedCell : axisCell;
-            int y = segment.Vertical ? axisCell : fixedCell;
-            long key = CellKey(x, y);
+            int x =
+                segment.Vertical
+                    ? fixedCell
+                    : axisCell;
+            int y =
+                segment.Vertical
+                    ? axisCell
+                    : fixedCell;
+            long key =
+                CellKey(x, y);
 
-            if (!cells.TryGetValue(key, out CellBucket cell))
+            if (!cells.TryGetValue(
+                    key,
+                    out CellBucket cell))
             {
                 cell = new CellBucket();
                 cells.Add(key, cell);
@@ -222,14 +422,19 @@ internal static class WorldMapRouteCrossingResolver
                 vertical.Fixed,
                 horizontal.Fixed);
 
-        if (point.Y <= vertical.Min + BridgeShoulder ||
-            point.Y >= vertical.Max - BridgeShoulder ||
-            point.X <= horizontal.Min + BridgeShoulder ||
-            point.X >= horizontal.Max - BridgeShoulder)
+        if (point.Y <=
+                vertical.Min + BridgeShoulder ||
+            point.Y >=
+                vertical.Max - BridgeShoulder ||
+            point.X <=
+                horizontal.Min + BridgeShoulder ||
+            point.X >=
+                horizontal.Max - BridgeShoulder)
             return false;
 
         float endpointClearanceSquared =
-            RouteEndpointClearance * RouteEndpointClearance;
+            RouteEndpointClearance *
+            RouteEndpointClearance;
 
         if (NearRouteEndpoint(
                 vertical.RoutePoints,
@@ -254,10 +459,12 @@ internal static class WorldMapRouteCrossingResolver
 
         return Num.Vector2.DistanceSquared(
                    point,
-                   points[0]) < clearanceSquared ||
+                   points[0]) <
+               clearanceSquared ||
                Num.Vector2.DistanceSquared(
                    point,
-                   points[points.Length - 1]) < clearanceSquared;
+                   points[points.Length - 1]) <
+               clearanceSquared;
     }
 
     private static int CompareMarks(
@@ -268,29 +475,97 @@ internal static class WorldMapRouteCrossingResolver
             string.CompareOrdinal(
                 a.OverRouteId,
                 b.OverRouteId);
-        if (route != 0) return route;
+        if (route != 0)
+            return route;
 
-        int x = a.Point.X.CompareTo(b.Point.X);
-        if (x != 0) return x;
+        int x =
+            a.Point.X.CompareTo(b.Point.X);
+        if (x != 0)
+            return x;
 
-        int y = a.Point.Y.CompareTo(b.Point.Y);
-        if (y != 0) return y;
+        int y =
+            a.Point.Y.CompareTo(b.Point.Y);
+        if (y != 0)
+            return y;
 
         return string.CompareOrdinal(
             a.UnderRouteId,
             b.UnderRouteId);
     }
 
+    private static int CompareBudgetPriority(
+        WorldMapCrossingMark a,
+        WorldMapCrossingMark b)
+    {
+        uint ah = StablePriority(a);
+        uint bh = StablePriority(b);
+
+        int priority = ah.CompareTo(bh);
+        if (priority != 0)
+            return priority;
+
+        return CompareMarks(a, b);
+    }
+
+    private static uint StablePriority(
+        WorldMapCrossingMark mark)
+    {
+        unchecked
+        {
+            uint hash = 2166136261u;
+            HashString(
+                ref hash,
+                mark.OverRouteId);
+            HashString(
+                ref hash,
+                mark.UnderRouteId);
+
+            hash =
+                (hash ^
+                 (uint)(int)Math.Round(
+                     mark.Point.X * 4f)) *
+                16777619u;
+            hash =
+                (hash ^
+                 (uint)(int)Math.Round(
+                     mark.Point.Y * 4f)) *
+                16777619u;
+
+            return hash;
+        }
+    }
+
+    private static void HashString(
+        ref uint hash,
+        string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return;
+
+        unchecked
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                hash =
+                    (hash ^ value[i]) *
+                    16777619u;
+            }
+        }
+    }
+
     private static int FloorCell(float value) =>
-        (int)Math.Floor(value / CellSize);
+        (int)Math.Floor(
+            value / CellSize);
 
     private static long CellKey(int x, int y) =>
-        ((long)(uint)x << 32) | (uint)y;
+        ((long)(uint)x << 32) |
+        (uint)y;
 
     private static long PairKey(int a, int b)
     {
         int min = Math.Min(a, b);
         int max = Math.Max(a, b);
-        return ((long)(uint)min << 32) | (uint)max;
+        return ((long)(uint)min << 32) |
+               (uint)max;
     }
 }

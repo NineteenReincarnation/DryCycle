@@ -19,6 +19,11 @@ internal sealed class WorldMapConnectionResourceStore
     private const float MinimumTerminalLaneSpacing = 6f;
     private const float PairLaneTargetSpan = 72f;
     private const float TerminalLaneTargetSpan = 72f;
+    private const int DenseLaneBankThreshold = 12;
+    private const int DenseLaneBankCapacity = 8;
+    private const float DensePairLaneSpacing = 6.25f;
+    private const float DensePairBankGutter = 9f;
+    private const float DenseTerminalDepthGap = 10f;
 
     private readonly Dictionary<string, ConnectionRouteResource> routes =
         new(StringComparer.Ordinal);
@@ -39,6 +44,8 @@ internal sealed class WorldMapConnectionResourceStore
     private bool corridorLayoutDirty = true;
     private bool crossingLayoutDirty = true;
     private WorldMapCrossingMark[] crossings = Array.Empty<WorldMapCrossingMark>();
+    private bool crossingBudgetLimited;
+    private int crossingCandidateChecks;
     private long crossingRevision;
     private long revision;
 
@@ -46,6 +53,8 @@ internal sealed class WorldMapConnectionResourceStore
     internal IReadOnlyList<WorldMapCrossingMark> Crossings => crossings;
     internal long CrossingRevision => crossingRevision;
     internal bool CrossingsCurrent => !crossingLayoutDirty;
+    internal bool CrossingBudgetLimited => crossingBudgetLimited;
+    internal int CrossingCandidateChecks => crossingCandidateChecks;
     internal int Count => routes.Count;
     internal int PendingCount => queue.Count;
     internal long Revision => revision;
@@ -307,6 +316,8 @@ internal sealed class WorldMapConnectionResourceStore
         corridorLayoutDirty = true;
         crossingLayoutDirty = true;
         crossings = Array.Empty<WorldMapCrossingMark>();
+        crossingBudgetLimited = false;
+        crossingCandidateChecks = 0;
         crossingRevision = 0L;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
@@ -422,8 +433,14 @@ internal sealed class WorldMapConnectionResourceStore
         if (!crossingLayoutDirty)
             return;
 
-        crossings =
+        WorldMapCrossingResolveResult resolved =
             WorldMapRouteCrossingResolver.Build(routes);
+
+        crossings = resolved.Marks;
+        crossingBudgetLimited =
+            resolved.BudgetLimited;
+        crossingCandidateChecks =
+            resolved.CandidateChecks;
         crossingLayoutDirty = false;
 
         unchecked
@@ -498,21 +515,16 @@ internal sealed class WorldMapConnectionResourceStore
         foreach (List<string> ids in groups.Values)
         {
             ids.Sort(StringComparer.Ordinal);
-            float spacing =
-                AdaptiveLaneSpacing(
-                    ids.Count,
-                    PreferredPairLaneSpacing,
-                    MinimumPairLaneSpacing,
-                    PairLaneTargetSpan);
-            float center =
-                (ids.Count - 1) * 0.5f;
+            float[] offsets =
+                BuildPairLaneOffsets(
+                    ids.Count);
 
             for (int i = 0; i < ids.Count; i++)
             {
-                // Do not clamp offsets to a fixed maximum. Clamping made the 8th+ connection share
-                // a visual lane again, which is exactly the ambiguity this phase is removing.
+                // Do not clamp offsets to a fixed maximum. Dense same-room-pair links instead gain
+                // stable eight-lane bank gutters so high counts remain visually grouped.
                 laneOffsets[ids[i]] =
-                    (i - center) * spacing;
+                    offsets[i];
             }
         }
     }
@@ -606,6 +618,13 @@ internal sealed class WorldMapConnectionResourceStore
                 float extraDepth =
                     i * spacing;
 
+                if (endpoints.Count > DenseLaneBankThreshold)
+                {
+                    extraDepth +=
+                        (i / DenseLaneBankCapacity) *
+                        DenseTerminalDepthGap;
+                }
+
                 terminalFanouts.TryGetValue(
                     endpoint.ConnectionId,
                     out WorldMapWorldSpaceRouter.TerminalFanout current);
@@ -698,6 +717,47 @@ internal sealed class WorldMapConnectionResourceStore
         if (direction.X > 0.5f) return 1;
         if (direction.Y < -0.5f) return 2;
         return 3;
+    }
+
+    private static float[] BuildPairLaneOffsets(int count)
+    {
+        float[] offsets =
+            new float[Math.Max(0, count)];
+        if (count <= 1)
+            return offsets;
+
+        if (count <= DenseLaneBankThreshold)
+        {
+            float spacing =
+                AdaptiveLaneSpacing(
+                    count,
+                    PreferredPairLaneSpacing,
+                    MinimumPairLaneSpacing,
+                    PairLaneTargetSpan);
+            float center =
+                (count - 1) * 0.5f;
+
+            for (int i = 0; i < count; i++)
+                offsets[i] = (i - center) * spacing;
+
+            return offsets;
+        }
+
+        float cursor = 0f;
+        for (int i = 1; i < count; i++)
+        {
+            cursor += DensePairLaneSpacing;
+            if (i % DenseLaneBankCapacity == 0)
+                cursor += DensePairBankGutter;
+            offsets[i] = cursor;
+        }
+
+        float midpoint =
+            offsets[count - 1] * 0.5f;
+        for (int i = 0; i < count; i++)
+            offsets[i] -= midpoint;
+
+        return offsets;
     }
 
     private static float AdaptiveLaneSpacing(
