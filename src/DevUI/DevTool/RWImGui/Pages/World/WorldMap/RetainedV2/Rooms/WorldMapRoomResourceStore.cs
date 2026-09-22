@@ -28,6 +28,7 @@ internal sealed class WorldMapRoomResourceStore
     }
 
     private const int IdleRoomsPerFrame = 6;
+    private const int HotStartRoomsPerFrame = 24;
     private const int SourceAuditIntervalFrames = 8;
 
     private readonly Dictionary<int, RoomResource> rooms = new();
@@ -155,7 +156,10 @@ internal sealed class WorldMapRoomResourceStore
         if (WorldMapBackgroundBudget.InteractionActive)
             return;
 
-        int budget = IdleRoomsPerFrame;
+        int budget =
+            WorldMapPersistentRetainedCache.ValidatedRoomCount > 0
+                ? HotStartRoomsPerFrame
+                : IdleRoomsPerFrame;
         DrainBuildResults(budget);
 
         while (budget > 0 && visiblePriorityQueue.Count > 0)

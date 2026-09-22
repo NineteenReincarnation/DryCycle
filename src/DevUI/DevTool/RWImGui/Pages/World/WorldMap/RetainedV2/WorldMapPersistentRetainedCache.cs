@@ -28,6 +28,9 @@ internal static class WorldMapPersistentRetainedCache
     private static ManualLogSource log;
     private static bool enabled;
 
+    internal static int ValidatedRoomCount =>
+        enabled ? validRooms.Count : 0;
+
     internal static void Enable(ManualLogSource logger)
     {
         if (enabled) return;
