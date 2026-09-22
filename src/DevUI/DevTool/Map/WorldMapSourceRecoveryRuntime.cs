@@ -115,7 +115,7 @@ internal static partial class MapRoomGeometryPresentationHub
             if (roomRep?.texture != null || roomRep?.mapTex != null)
             {
                 RefreshDimensions(entry, roomRep);
-                Publish(entry);
+                Publish(entry, allowRasterReadback: false);
                 sourceDimensionsResolved.Add(roomIndex);
                 continue;
             }
@@ -185,7 +185,7 @@ internal static partial class MapRoomGeometryPresentationHub
         entry.CurvesInitialized = false;
         entry.Revision++;
         PersistentMarkDirty();
-        Publish(entry);
+        Publish(entry, allowRasterReadback: false);
     }
 
     private static void ApplyPreparedRoomDimensions(global::Room room)
@@ -420,6 +420,6 @@ internal static partial class MapRoomGeometryPresentationHub
         RefreshDimensions(entry, roomRep);
         RefreshNodes(entry, roomRep, force: true);
         entry.NextRasterPollFrame = 0;
-        Publish(entry);
+        Publish(entry, allowRasterReadback: false);
     }
 }

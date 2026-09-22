@@ -645,8 +645,8 @@ internal static partial class MapRoomGeometryPresentationHub
         for (int y = 0; y < height; y++)
         {
             int rowOffset = y * width;
-            for (int x = 0; x < width; x++)
-                row[x] = ClassifyPixel(pixels[rowOffset + x]);
+            for (int column = 0; column < width; column++)
+                row[column] = ClassifyPixel(pixels[rowOffset + column]);
 
             int x = 0;
             while (x < width)
