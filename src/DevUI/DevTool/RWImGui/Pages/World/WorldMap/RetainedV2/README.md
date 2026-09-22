@@ -738,7 +738,12 @@ retained derived-layout pass:
 - **BasePoints** are what Persistent Cache V3 stores. On restore the global allocator derives the
   current corridor layout once, preventing repeated startup/incremental lane offsets from stacking;
 - corridor reflow runs only when route membership or base geometry changes. Stable frames, pan and
-  zoom perform zero corridor allocation work.
+  zoom perform zero corridor allocation work;
+- active room dragging keeps only its bounded incident BasePoints rebuilds on the hot path; global
+  corridor reflow is deferred through the existing interaction cooldown and converges once after the
+  drag settles;
+- routes with no effective lane change take a no-allocation fast path instead of cloning their
+  complete point array during every global reflow.
 
 Routing policy is bumped to **v5**, invalidating v4 persistent routes. The old
 `SeparateSharedCorridors()` batch-local implementation is retired.

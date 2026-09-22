@@ -216,7 +216,13 @@ internal sealed class WorldMapConnectionResourceStore
 
             if (!scene.TryGetConnection(id, out WorldMapScene.ConnectionNode connection))
             {
-                routes.Remove(id);
+                if (routes.Remove(id))
+                {
+                    corridorLayoutDirty = true;
+                    routeChanged.Add(id);
+                    unchecked { revision++; }
+                    MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
+                }
                 continue;
             }
 
@@ -257,7 +263,12 @@ internal sealed class WorldMapConnectionResourceStore
         }
 
         if (routeSetChanged || corridorLayoutDirty)
-            ApplyCorridorLanes();
+        {
+            // Room dragging keeps only incident base-route rebuilds on the hot path. Global corridor
+            // reflow is deferred until the interaction cooldown expires, then converges once.
+            if (!WorldMapBackgroundBudget.RoomDragInteractionActive)
+                ApplyCorridorLanes();
+        }
     }
 
     internal void Reset()

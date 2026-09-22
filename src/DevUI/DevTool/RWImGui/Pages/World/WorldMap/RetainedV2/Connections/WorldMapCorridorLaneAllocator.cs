@@ -174,12 +174,22 @@ internal static class WorldMapCorridorLaneAllocator
                         route.ToRoomIndex,
                         obstacles))
                 {
+                    if (PathsEquivalent(
+                            route.Points,
+                            basePoints))
+                        continue;
+
                     candidate =
                         (Num.Vector2[])basePoints.Clone();
                 }
             }
             else
             {
+                if (PathsEquivalent(
+                        route.Points,
+                        basePoints))
+                    continue;
+
                 candidate =
                     (Num.Vector2[])basePoints.Clone();
             }
