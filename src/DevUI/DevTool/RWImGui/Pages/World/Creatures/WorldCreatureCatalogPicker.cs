@@ -677,6 +677,36 @@ internal static class WorldCreatureCatalogPicker
         DrawCenteredId(draw, id, pos, width, height - 27f);
     }
 
+    internal static bool DrawInlineIcon(
+        ImDrawListPtr draw,
+        string creatureId,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize)
+    {
+        if (draw.NativePtr == null ||
+            string.IsNullOrWhiteSpace(creatureId) ||
+            areaSize.X <= 0f ||
+            areaSize.Y <= 0f)
+            return false;
+
+        // Inline spawn rows share the same prepared icon cache and main-thread work queue as the
+        // catalog popup. Merely showing the room inspector must not start a second icon pipeline.
+        catalogRequested = true;
+        TryGetIconForRender(
+            creatureId,
+            out IconRaster icon,
+            out IconState state);
+        DrawIcon(
+            draw,
+            icon,
+            state,
+            areaPos,
+            areaSize);
+        return state == IconState.Ready &&
+               icon != null &&
+               icon.Available;
+    }
+
     private static void DrawIcon(
         ImDrawListPtr draw,
         IconRaster icon,

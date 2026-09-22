@@ -64,8 +64,8 @@ internal static class WorldCreatureSpawnInspector
     private static readonly List<string> timelineCatalog = new();
     private static int timelineCatalogFingerprint = -1;
     private static WorldCreatureSpawnRecord[] presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
-    private static string[] presentedLabels = Array.Empty<string>();
-    private static string[] presentedSpawnData = Array.Empty<string>();
+    private static string[] presentedCreatureText = Array.Empty<string>();
+    private static string[] presentedSecondaryText = Array.Empty<string>();
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -83,8 +83,8 @@ internal static class WorldCreatureSpawnInspector
         timelineCatalog.Clear();
         timelineCatalogFingerprint = -1;
         presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
-        presentedLabels = Array.Empty<string>();
-        presentedSpawnData = Array.Empty<string>();
+        presentedCreatureText = Array.Empty<string>();
+        presentedSecondaryText = Array.Empty<string>();
         log = null;
     }
 
@@ -150,65 +150,329 @@ internal static class WorldCreatureSpawnInspector
             DevToolUiSettings.T("已放置 ", "Placed ") + existing.Length +
             DevToolUiSettings.T(" 个生成项", " spawn entrie(s)"));
 
-        float deleteWidth = ImGui.CalcTextSize(DevToolUiSettings.T("删除", "Delete")).X + 22f;
+        string deleteLabel =
+            DevToolUiSettings.T("删除", "Delete");
+        float deleteWidth =
+            ImGui.CalcTextSize(deleteLabel).X +
+            ImGui.GetStyle().FramePadding.X * 2f +
+            8f;
+        float spacing =
+            Math.Max(
+                6f,
+                ImGui.GetStyle().ItemSpacing.X);
+
         for (int i = 0; i < existing.Length; i++)
         {
             WorldCreatureSpawnRecord spawn = existing[i];
             ImGui.PushID(spawn.Id);
 
-            bool editing = editingSpawnId == spawn.Id;
-            if (ImGui.Selectable(presentedLabels[i], editing))
+            float available =
+                Math.Max(
+                    1f,
+                    ImGui.GetContentRegionAvail().X);
+            float rowWidth =
+                Math.Max(
+                    92f,
+                    available - deleteWidth - spacing);
+            bool hasSecondary =
+                !string.IsNullOrEmpty(
+                    presentedSecondaryText[i]);
+            float lineHeight =
+                ImGui.GetTextLineHeight();
+            float iconSize =
+                Math.Max(
+                    20f,
+                    Math.Min(
+                        30f,
+                        lineHeight * 0.92f));
+            float rowHeight =
+                Math.Max(
+                    iconSize + 8f,
+                    hasSecondary
+                        ? lineHeight * 2f + 10f
+                        : lineHeight + 10f);
+
+            bool editing =
+                editingSpawnId == spawn.Id;
+            if (ImGui.Selectable(
+                    "##CreatureSpawnRow",
+                    editing,
+                    ImGuiSelectableFlags.None,
+                    new Num.Vector2(
+                        rowWidth,
+                        rowHeight)))
                 LoadSpawn(spawn);
 
-            if (presentedSpawnData[i].Length > 0)
-            {
-                ImGui.Indent();
-                DevToolWidgets.MutedText(presentedSpawnData[i], true);
-                ImGui.Unindent();
-            }
+            Num.Vector2 rowMin =
+                ImGui.GetItemRectMin();
+            Num.Vector2 rowMax =
+                ImGui.GetItemRectMax();
+            DrawSpawnRow(
+                spawn,
+                presentedCreatureText[i],
+                presentedSecondaryText[i],
+                rowMin,
+                rowMax,
+                iconSize);
 
-            ImGui.SameLine();
-            float targetX = ImGui.GetCursorPosX() + Math.Max(0f, ImGui.GetContentRegionAvail().X - deleteWidth);
-            ImGui.SetCursorPosX(targetX);
+            ImGui.SameLine(0f, spacing);
             if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("删除", "Delete"),
+                    deleteLabel,
                     "DeleteCreatureSpawn",
                     DevToolButtonTone.Danger))
             {
-                if (WorldTextRegistry.TryDeleteCreatureSpawn(snapshot.RegionName, spawn.Id, out string error))
+                if (WorldTextRegistry.TryDeleteCreatureSpawn(
+                        snapshot.RegionName,
+                        spawn.Id,
+                        out string error))
                 {
-                    if (editingSpawnId == spawn.Id) ResetForm(room);
-                    SetStatus(DevToolUiSettings.T(
-                        "已删除生成项并刷新实时预览。",
-                        "Spawner deleted and live preview refreshed."), true);
+                    if (editingSpawnId == spawn.Id)
+                        ResetForm(room);
+                    SetStatus(
+                        DevToolUiSettings.T(
+                            "已删除生成项并刷新实时预览。",
+                            "Spawner deleted and live preview refreshed."),
+                        true);
                 }
                 else
                 {
                     SetStatus(error, false);
                 }
             }
+
             ImGui.PopID();
         }
     }
 
-    private static void EnsurePresentation(WorldCreatureSpawnRecord[] existing)
+    private static void EnsurePresentation(
+        WorldCreatureSpawnRecord[] existing)
     {
-        if (ReferenceEquals(existing, presentedSpawns) && presentedLabels.Length == existing.Length) return;
+        if (ReferenceEquals(existing, presentedSpawns) &&
+            presentedCreatureText.Length == existing.Length)
+            return;
+
         presentedSpawns = existing;
-        presentedLabels = new string[existing.Length];
-        presentedSpawnData = new string[existing.Length];
+        presentedCreatureText =
+            new string[existing.Length];
+        presentedSecondaryText =
+            new string[existing.Length];
+
         for (int i = 0; i < existing.Length; i++)
         {
             WorldCreatureSpawnRecord spawn = existing[i];
+            string creature =
+                string.IsNullOrWhiteSpace(spawn.Creature)
+                    ? "?"
+                    : spawn.Creature;
+            if (spawn.Amount > 1)
+                creature += " ×" + spawn.Amount;
+            presentedCreatureText[i] = creature;
+
             string scope = SpawnScope(spawn);
-            string label = "#" + spawn.DenNode + "  " + spawn.Creature;
-            if (spawn.Amount > 1) label += " ×" + spawn.Amount;
-            if (scope.Length > 0) label += "  ·  " + scope;
-            presentedLabels[i] = label + "##CreatureSpawn";
-            presentedSpawnData[i] = string.IsNullOrEmpty(spawn.SpawnData)
-                ? string.Empty
-                : "{" + spawn.SpawnData + "}";
+            string data =
+                string.IsNullOrEmpty(spawn.SpawnData)
+                    ? string.Empty
+                    : "{" + spawn.SpawnData + "}";
+            presentedSecondaryText[i] =
+                scope.Length > 0 && data.Length > 0
+                    ? scope + "  ·  " + data
+                    : scope.Length > 0
+                        ? scope
+                        : data;
         }
+    }
+
+    private static void DrawSpawnRow(
+        WorldCreatureSpawnRecord spawn,
+        string creatureText,
+        string secondaryText,
+        Num.Vector2 rowMin,
+        Num.Vector2 rowMax,
+        float iconSize)
+    {
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+        ImGuiStylePtr style =
+            ImGui.GetStyle();
+        float padX =
+            Math.Max(
+                5f,
+                style.FramePadding.X);
+        float centerY =
+            (rowMin.Y + rowMax.Y) * 0.5f;
+        float primaryHeight =
+            ImGui.GetTextLineHeight();
+
+        Num.Vector2 pipePos =
+            new(
+                rowMin.X + padX,
+                centerY - iconSize * 0.5f);
+        DrawCreaturePipeIcon(
+            draw,
+            pipePos,
+            iconSize);
+
+        string denText =
+            "#" + spawn.DenNode;
+        float denX =
+            pipePos.X +
+            iconSize +
+            5f;
+        Num.Vector2 denSize =
+            ImGui.CalcTextSize(denText);
+        float primaryY =
+            secondaryText.Length > 0
+                ? rowMin.Y + 4f
+                : centerY - primaryHeight * 0.5f;
+        draw.AddText(
+            new Num.Vector2(
+                denX,
+                primaryY),
+            ImGui.GetColorU32(ImGuiCol.Text),
+            denText);
+
+        float creatureIconX =
+            denX +
+            denSize.X +
+            10f;
+        Num.Vector2 creatureIconPos =
+            new(
+                creatureIconX,
+                centerY - iconSize * 0.5f);
+        WorldCreatureCatalogPicker.DrawInlineIcon(
+            draw,
+            spawn.Creature,
+            creatureIconPos,
+            new Num.Vector2(
+                iconSize,
+                iconSize));
+
+        float creatureTextX =
+            creatureIconX +
+            iconSize +
+            5f;
+        float maxTextRight =
+            rowMax.X - padX;
+        string shown =
+            FitSpawnRowText(
+                creatureText ?? string.Empty,
+                Math.Max(
+                    12f,
+                    maxTextRight - creatureTextX));
+        draw.AddText(
+            new Num.Vector2(
+                creatureTextX,
+                primaryY),
+            ImGui.GetColorU32(ImGuiCol.Text),
+            shown);
+
+        if (!string.IsNullOrEmpty(secondaryText))
+        {
+            float secondaryY =
+                primaryY +
+                primaryHeight +
+                2f;
+            string secondaryShown =
+                FitSpawnRowText(
+                    secondaryText,
+                    Math.Max(
+                        12f,
+                        maxTextRight - denX));
+            draw.AddText(
+                new Num.Vector2(
+                    denX,
+                    secondaryY),
+                ImGui.GetColorU32(
+                    ImGuiCol.TextDisabled),
+                secondaryShown);
+        }
+    }
+
+    private static void DrawCreaturePipeIcon(
+        ImDrawListPtr draw,
+        Num.Vector2 pos,
+        float size)
+    {
+        // Compact visual language matching the map's creature-pipe meaning: bright green casing
+        // around a dark opening. It is procedural so it never depends on another texture/atlas.
+        uint green =
+            ImGui.GetColorU32(
+                new Num.Vector4(
+                    0.20f,
+                    0.88f,
+                    0.33f,
+                    1f));
+        uint dark =
+            ImGui.GetColorU32(
+                new Num.Vector4(
+                    0.035f,
+                    0.07f,
+                    0.045f,
+                    0.96f));
+
+        float radius =
+            Math.Max(
+                3f,
+                size * 0.18f);
+        Num.Vector2 max =
+            pos + new Num.Vector2(size, size);
+        draw.AddRectFilled(
+            pos,
+            max,
+            green,
+            radius);
+        float inset =
+            Math.Max(
+                3f,
+                size * 0.20f);
+        draw.AddRectFilled(
+            pos + new Num.Vector2(inset, inset),
+            max - new Num.Vector2(inset, inset),
+            dark,
+            Math.Max(2f, radius * 0.62f));
+
+        // Small mouth marks make the symbol read as a pipe rather than a generic green square.
+        float mark =
+            Math.Max(
+                1.5f,
+                size * 0.075f);
+        float cy =
+            pos.Y + size * 0.5f;
+        draw.AddCircleFilled(
+            new Num.Vector2(
+                pos.X + inset * 0.52f,
+                cy),
+            mark,
+            dark);
+        draw.AddCircleFilled(
+            new Num.Vector2(
+                max.X - inset * 0.52f,
+                cy),
+            mark,
+            dark);
+    }
+
+    private static string FitSpawnRowText(
+        string value,
+        float maxWidth)
+    {
+        value ??= string.Empty;
+        if (maxWidth <= 0f ||
+            ImGui.CalcTextSize(value).X <= maxWidth)
+            return value;
+
+        const string ellipsis = "…";
+        int length = value.Length;
+        while (length > 1)
+        {
+            string candidate =
+                value.Substring(0, --length) +
+                ellipsis;
+            if (ImGui.CalcTextSize(candidate).X <= maxWidth)
+                return candidate;
+        }
+
+        return ellipsis;
     }
 
     private static void DrawEditor(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
