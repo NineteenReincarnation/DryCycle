@@ -10,6 +10,10 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Xml.Linq" />
-    <Compile Include="../../src/DevUI/DevTool/Map/Cartography/*.cs" Exclude="../../src/DevUI/DevTool/Map/Cartography/CartographyRuntime.cs" Link="Production/%(Filename)%(Extension)" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Compile Include="../../src/DevUI/DevTool/Map/PlayerMap/RoomMapGeometry.cs" Link="Production/RoomMapGeometry.cs" />
+    <Compile Include="../../src/DevUI/DevTool/World/WorldDocument.cs" Link="Production/WorldDocument.cs" />
+    <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" />
+    <Compile Include="../../src/DevUI/DevTool/Map/Cartography/*.cs" Exclude="../../src/DevUI/DevTool/Map/Cartography/CartographyRuntime*.cs;../../src/DevUI/DevTool/Map/Cartography/CartographyGameAssets.cs" Link="Production/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

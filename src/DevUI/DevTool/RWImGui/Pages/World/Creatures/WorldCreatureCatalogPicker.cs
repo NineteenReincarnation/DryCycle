@@ -677,7 +677,7 @@ internal static class WorldCreatureCatalogPicker
         DrawCenteredId(draw, id, pos, width, height - 27f);
     }
 
-    internal static bool DrawInlineIcon(
+    internal static unsafe bool DrawInlineIcon(
         ImDrawListPtr draw,
         string creatureId,
         Num.Vector2 areaPos,

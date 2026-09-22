@@ -12,7 +12,7 @@ using System.Xml;
 
 namespace DryCycle.DevUI.DevTool.Map.Cartography;
 
-internal enum CartographyExportFormat { Png, Svg, LayerPngZip }
+internal enum CartographyExportFormat { Png, Svg, LayerPngZip, Psd, ImageMap }
 
 internal sealed class CartographyExportResult
 {
@@ -27,7 +27,7 @@ internal static class CartographyExporter
     internal const long MaxPixels = 32L * 1024 * 1024;
     internal const int MaxDimension = 16384;
 
-    internal static CartographyRect OutputBounds(CartographyDocument document, CartographyScene scene) => scene.Bounds.Inflate(document.Padding);
+    internal static CartographyRect OutputBounds(CartographyDocument document, CartographyScene scene) => document.Options.ExportArea ? new CartographyRect(document.Options.AreaX, document.Options.AreaY, document.Options.AreaWidth, document.Options.AreaHeight) : scene.Bounds.Inflate(document.Padding);
 
     internal static void Dimensions(CartographyDocument document, CartographyScene scene, out int width, out int height)
     {
@@ -44,7 +44,7 @@ internal static class CartographyExporter
         if (scene.Errors.Length != 0) throw new InvalidOperationException("Visible room terrain is incomplete: " + string.Join("; ", scene.Errors.Take(8)));
         if (scene.Nodes.Length == 0) throw new InvalidOperationException("There are no visible objects to export.");
         if (!Enum.IsDefined(typeof(CartographyExportFormat), format)) throw new InvalidOperationException("Unknown export format.");
-        string extension = format == CartographyExportFormat.Png ? ".png" : format == CartographyExportFormat.Svg ? ".svg" : ".zip";
+        string extension = format == CartographyExportFormat.Png ? ".png" : format == CartographyExportFormat.Svg ? ".svg" : format == CartographyExportFormat.Psd ? ".psd" : format == CartographyExportFormat.ImageMap ? ".json" : ".zip";
         if (!string.Equals(System.IO.Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Choose a " + extension + " output path.");
         Dimensions(document, scene, out int width, out int height);
@@ -52,6 +52,8 @@ internal static class CartographyExporter
         {
             if (format == CartographyExportFormat.Svg) WriteSvg(stream, document, scene, width, height);
             else if (format == CartographyExportFormat.Png) WritePng(stream, document, scene, width, height, null);
+            else if (format == CartographyExportFormat.Psd) CartographyLayerExport.WritePsd(stream, document, scene, width, height);
+            else if (format == CartographyExportFormat.ImageMap) CartographyLayerExport.WriteImageMap(stream, document, scene, width, height);
             else
             {
                 using ZipArchive archive = new(stream, ZipArchiveMode.Create, true);
@@ -81,7 +83,13 @@ internal static class CartographyExporter
 
     private static void WritePng(Stream output, CartographyDocument document, CartographyScene scene, int width, int height, string layerId)
     {
-        using Bitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
+        using Bitmap bitmap = RenderBitmap(document, scene, width, height, layerId);
+        bitmap.Save(output, ImageFormat.Png);
+    }
+
+    internal static Bitmap RenderBitmap(CartographyDocument document, CartographyScene scene, int width, int height, string layerId)
+    {
+        Bitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
         using Graphics graphics = Graphics.FromImage(bitmap);
         graphics.Clear(layerId != null || document.Transparent ? Color.Transparent : ToColor(document.Background));
         graphics.CompositingMode = CompositingMode.SourceOver;
@@ -100,6 +108,17 @@ internal static class CartographyExporter
                 using Pen pen = new(brush, shape.Stroke) { DashStyle = shape.Dashed ? DashStyle.Dash : DashStyle.Solid };
                 switch (shape.Kind)
                 {
+                    case CartographyPrimitiveKind.Image:
+                        using (Bitmap image = shape.Raster.Bitmap())
+                        using (ImageAttributes attributes = new())
+                        {
+                            ColorMatrix tint = new() { Matrix00 = (shape.Color >> 16 & 255) / 255f, Matrix11 = (shape.Color >> 8 & 255) / 255f, Matrix22 = (shape.Color & 255) / 255f, Matrix33 = (shape.Color >> 24) / 255f };
+                            attributes.SetColorMatrix(tint);
+                            graphics.InterpolationMode = shape.Text.Length > 0 ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
+                            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                            graphics.DrawImage(image, new[] { new PointF(r.X,r.Y), new PointF(r.Right,r.Y), new PointF(r.X,r.Bottom) }, new RectangleF(0,0,image.Width,image.Height), GraphicsUnit.Pixel, attributes);
+                        }
+                        break;
                     case CartographyPrimitiveKind.Fill:
                         graphics.SmoothingMode = SmoothingMode.None;
                         graphics.FillRectangle(brush, r.X, r.Y, r.Width, r.Height);
@@ -120,7 +139,7 @@ internal static class CartographyExporter
                 }
             }
         }
-        bitmap.Save(output, ImageFormat.Png);
+        return bitmap;
     }
 
     private static void WriteSvg(Stream output, CartographyDocument document, CartographyScene scene, int width, int height)
@@ -147,6 +166,16 @@ internal static class CartographyExporter
 
     private static void SvgPrimitive(XmlWriter xml, CartographyPrimitive shape, string font)
     {
+        if (shape.Kind == CartographyPrimitiveKind.Image)
+        {
+            xml.WriteStartElement("image", "http://www.w3.org/2000/svg");
+            Attr(xml,"x",shape.Rect.X); Attr(xml,"y",shape.Rect.Y); Attr(xml,"width",shape.Rect.Width); Attr(xml,"height",shape.Rect.Height);
+            Attr(xml,"opacity",(shape.Color>>24)/255f);
+            xml.WriteAttributeString("href","data:image/png;base64,"+Convert.ToBase64String(shape.Raster.Png()));
+            if(shape.Text.Length>0)xml.WriteElementString("title",shape.Text);
+            xml.WriteEndElement(); return;
+        }
+
         CartographyRect r = shape.Rect;
         string tag = shape.Kind == CartographyPrimitiveKind.Line ? "line" : shape.Kind == CartographyPrimitiveKind.Ellipse ? "ellipse" : shape.Kind == CartographyPrimitiveKind.Text ? "text" : "rect";
         xml.WriteStartElement(tag, "http://www.w3.org/2000/svg");

@@ -18,9 +18,10 @@ internal sealed class CartographyPresentation
     internal bool Dirty, Exporting;
     internal CartographyDocument Document;
     internal CartographyScene Scene;
+    internal CartographySource Source;
 }
 
-internal static class CartographyRuntime
+internal static partial class CartographyRuntime
 {
     private sealed class Workspace
     {
@@ -63,9 +64,10 @@ internal static class CartographyRuntime
     internal static void Enqueue(CartographyCommand command)
     {
         if (command == null) return;
-        if (command.Kind == CartographyCommandKind.Save || command.Kind == CartographyCommandKind.Export || command.Kind == CartographyCommandKind.Open)
+        if (command.Kind == CartographyCommandKind.Save || command.Kind == CartographyCommandKind.Export || command.Kind == CartographyCommandKind.Open || command.Kind == CartographyCommandKind.SelectRegion || command.Kind == CartographyCommandKind.ImportCornifer)
             CommitDrafts();
         // The caller transfers values, never mutable view drafts, to the backend queue.
+        command.Items = command.Items?.Select(i => i.Clone()).ToArray() ?? Array.Empty<CartographyItem>();
         command.Ids = command.Ids?.ToArray() ?? Array.Empty<string>();
         command.Item = command.Item?.Clone(); command.Layer = command.Layer?.Clone(); command.Style = command.Style?.Clone();
         Commands.Enqueue(command);
@@ -105,53 +107,7 @@ internal static class CartographyRuntime
 
         if (active && session?.ToolMode == EditorToolMode.Map && session.World != null)
         {
-            PlayerMapPresentationSnapshot player = PlayerMapWorkspaceRuntime.GetPresentation(session);
-            EditorMapPresentationSnapshot world = MapEditorPresentationHub.Current;
-            if (player.Available && world.Available && player.RegionName == session.World.name && world.RegionName == player.RegionName)
-            {
-                try
-                {
-                    string identity = Identity(session);
-                    if (!Documents.TryGetValue(identity, out Workspace workspace))
-                    {
-                        workspace = new Workspace { Identity = identity, Path = ProjectPath(identity, player.RegionName) };
-                        workspace.History.ActivateDocument(new EditorDocumentKey(EditorDocumentKind.RegionMap, "Cartography:" + identity));
-                        Documents.Add(identity, workspace);
-                        workspace.Source = Source(player, world, workspace);
-                        try
-                        {
-                            if (File.Exists(workspace.Path))
-                            {
-                                byte[] bytes = File.ReadAllBytes(workspace.Path);
-                                string text = System.Text.Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
-                                workspace.Document = CartographyStorage.Deserialize(text, identity);
-                                workspace.DiskHash = CartographyStorage.HashBytes(bytes);
-                                workspace.SavedText = CartographyStorage.Serialize(workspace.Document);
-                            }
-                            else workspace.Document = workspace.Source.CreateDocument(identity, player.RegionName);
-                            workspace.AuthorText = CartographyStorage.Serialize(workspace.Document);
-                        }
-                        catch (Exception error) { workspace.LoadFailed = true; Report(workspace, "Project load failed; original file retained / 项目读取失败，已保留原文件", error); }
-                    }
-                    bool switched = !ReferenceEquals(current, workspace) || !ReferenceEquals(currentSession, session);
-                    current = workspace; currentSession = session;
-                    if (switched) EditorRevisionHub.Mark(session, EditorRevisionKind.Shell);
-                    if (!ReferenceEquals(workspace.ObservedPlayer, player) || !ReferenceEquals(workspace.ObservedWorld, world))
-                    {
-                        workspace.Source = Source(player, world, workspace);
-                        workspace.ObservedPlayer = player; workspace.ObservedWorld = world;
-                        if (workspace.Document != null) workspace.Scene = CartographySceneBuilder.Build(workspace.Document, workspace.Source, workspace.SceneCache);
-                        Publish(workspace);
-                    }
-                    else if (switched) Publish(workspace);
-                }
-                catch (Exception error)
-                {
-                    Plugin.Logger?.LogError("Cartography initialization failed: " + error);
-                    presentation = new CartographyPresentation { Status = error.Message };
-                }
-            }
-            else presentation = new CartographyPresentation { Status = "Waiting for current region geometry / 正在准备当前区域地形" };
+            ProcessSources(session);
         }
         FlushCommands();
     }
@@ -180,6 +136,12 @@ internal static class CartographyRuntime
         bool success = true;
         while (Commands.TryDequeue(out CartographyCommand command))
         {
+            if (command.Kind == CartographyCommandKind.SelectRegion || command.Kind == CartographyCommandKind.ImportCornifer)
+            {
+                try { independentRegion = true; RequestSource(command.LayerId, command.Item?.Text ?? "White", command.Path, command.Kind == CartographyCommandKind.ImportCornifer); }
+                catch (Exception error) { sourceStatus = error.Message; Plugin.Logger?.LogError("Cartography source request failed: " + error); if(current!=null){current.Status=error.Message;Publish(current);}else presentation=new CartographyPresentation{Status=error.Message}; }
+                continue;
+            }
             if (command.DocumentId == null || !Documents.TryGetValue(command.DocumentId, out Workspace workspace))
             { Plugin.Logger?.LogWarning("Cartography command has no loaded target document."); success = false; continue; }
             // In particular, a failed staged edit must not be followed by "Saved" or a successful
@@ -195,7 +157,7 @@ internal static class CartographyRuntime
                     CartographyEditing.SameLayer(workspace.Document.Layer(command.Layer.Id), command.Layer)) continue;
                 if (!batchRevisions.TryGetValue(workspace, out long batchRevision)) batchRevisions[workspace] = batchRevision = workspace.Revision;
                 if (command.Revision != batchRevision) throw new InvalidOperationException("The map changed while this edit was in progress. Please repeat the edit / 编辑期间地图已变更，请重试。");
-                if (command.Kind == CartographyCommandKind.Open) { Open(workspace, command.Path); batchRevisions[workspace] = workspace.Revision; continue; }
+                if (command.Kind == CartographyCommandKind.Open || command.Kind == CartographyCommandKind.SelectRegion || command.Kind == CartographyCommandKind.ImportCornifer) { Open(workspace, command.Path); batchRevisions[workspace] = workspace.Revision; continue; }
                 if (workspace.LoadFailed || workspace.Document == null) throw new InvalidOperationException("Repair the project file before editing; it has not been overwritten.");
                 if (command.Kind == CartographyCommandKind.Save)
                 {
@@ -203,6 +165,13 @@ internal static class CartographyRuntime
                     continue;
                 }
                 if (command.Kind == CartographyCommandKind.Export) { Export(workspace, command); continue; }
+                if (command.Kind == CartographyCommandKind.AddImage)
+                {
+                    CartographyItem image = command.Item?.Clone() ?? new CartographyItem { Kind = CartographyItemKind.Image, LayerId = "notes" };
+                    image.Appearance.Image = CartographyAssets.ImportImage(command.Path);
+                    CartographyRaster raster = CartographyAssets.Image(image.Appearance.Image); image.Width = raster.Width; image.Height = raster.Height;
+                    command.Kind = CartographyCommandKind.Add; command.Item = image;
+                }
                 CartographyDocument before = workspace.Document;
                 CartographyDocument after = CartographyEditing.Apply(before, workspace.Source, command);
                 if (CartographyStorage.Serialize(before) == CartographyStorage.Serialize(after)) continue;
@@ -282,7 +251,7 @@ internal static class CartographyRuntime
 
     private static void Publish(Workspace workspace) => presentation = new CartographyPresentation
     {
-        Identity = workspace.Identity, Revision = workspace.Revision, Document = workspace.Document?.Clone(), Scene = workspace.Scene,
+        Identity = workspace.Identity, Revision = workspace.Revision, Document = workspace.Document?.Clone(), Scene = workspace.Scene, Source = workspace.Source,
         ProjectPath = workspace.Path, ExportPath = workspace.ExportPath, Dirty = workspace.Dirty, Exporting = workspace.Export != null, Status = workspace.Status
     };
 

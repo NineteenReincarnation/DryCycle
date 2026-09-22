@@ -598,14 +598,13 @@ internal static class WorldWorkspaceView
                 half);
 
         Num.Vector4 accent =
-            ImGui.GetStyleColorVec4(
-                dragging
+            ImGui.GetStyle().Colors[(int)(dragging
                     ? ImGuiCol.HeaderActive
-                    : ImGuiCol.HeaderHovered);
+                    : ImGuiCol.HeaderHovered)];
         Num.Vector4 background =
-            ImGui.GetStyleColorVec4(ImGuiCol.WindowBg);
+            ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
         Num.Vector4 text =
-            ImGui.GetStyleColorVec4(ImGuiCol.Text);
+            ImGui.GetStyle().Colors[(int)ImGuiCol.Text];
 
         float glassAlpha =
             0.10f +
@@ -1883,9 +1882,9 @@ internal static class WorldWorkspaceView
             if (selected)
             {
                 Num.Vector4 selectedColor =
-                    ImGui.GetStyleColorVec4(ImGuiCol.HeaderActive);
+                    ImGui.GetStyle().Colors[(int)ImGuiCol.HeaderActive];
                 Num.Vector4 hoveredColor =
-                    ImGui.GetStyleColorVec4(ImGuiCol.HeaderHovered);
+                    ImGui.GetStyle().Colors[(int)ImGuiCol.HeaderHovered];
                 ImGui.PushStyleColor(ImGuiCol.Button, selectedColor);
                 ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hoveredColor);
                 ImGui.PushStyleColor(ImGuiCol.ButtonActive, selectedColor);

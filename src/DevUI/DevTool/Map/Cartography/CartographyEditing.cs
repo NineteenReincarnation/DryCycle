@@ -7,7 +7,8 @@ namespace DryCycle.DevUI.DevTool.Map.Cartography;
 internal enum CartographyCommandKind
 {
     Move, Add, UpdateItem, Delete, Duplicate, AssignLayer, Align,
-    AddLayer, UpdateLayer, MoveLayer, DeleteLayer, Style, AddMissingRooms, Save, Export, Open
+    AddLayer, UpdateLayer, MoveLayer, DeleteLayer, Style, AddMissingRooms, Save, Export, Open,
+    AlignPorts, Paste, AddImage, SelectRegion, ImportCornifer
 }
 
 // A command names the document and revision observed by the frontend. A delayed release from an old
@@ -25,6 +26,7 @@ internal sealed class CartographyCommand
     internal CartographyLayer Layer;
     internal CartographyDocument Style = null;
     internal string Path = string.Empty;
+    internal CartographyItem[] Items = Array.Empty<CartographyItem>();
 }
 
 internal static class CartographyEditing
@@ -32,7 +34,9 @@ internal static class CartographyEditing
     internal static bool SameItem(CartographyItem a, CartographyItem b) => a != null && b != null &&
         a.Id == b.Id && a.Kind == b.Kind && a.LayerId == b.LayerId && a.Room == b.Room && a.Text == b.Text &&
         a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height && a.Size == b.Size &&
-        a.Stroke == b.Stroke && a.Color == b.Color && a.Visible == b.Visible && a.Marker == b.Marker;
+        a.Stroke == b.Stroke && a.Color == b.Color && a.Visible == b.Visible && a.Marker == b.Marker &&
+        CartographyRecord.Key(a.Appearance) == CartographyRecord.Key(b.Appearance) &&
+        a.Points.Count == b.Points.Count && a.Points.Zip(b.Points, (p,q) => p.X == q.X && p.Y == q.Y).All(same => same);
 
     internal static bool SameLayer(CartographyLayer a, CartographyLayer b) => a != null && b != null &&
         a.Id == b.Id && a.Name == b.Name && a.Visible == b.Visible && a.Locked == b.Locked && a.Opacity == b.Opacity;
@@ -45,7 +49,12 @@ internal static class CartographyEditing
         switch (command.Kind)
         {
             case CartographyCommandKind.Move:
-                foreach (CartographyItem item in targets) { item.X += command.X; item.Y += command.Y; }
+                foreach (CartographyItem item in targets.Where(i => !ids.Contains(i.Appearance.ParentId)))
+                {
+                    if (item.Kind == CartographyItemKind.Connection)
+                    { foreach (CartographyPoint p in item.Points) { p.X += command.X; p.Y += command.Y; } }
+                    else { item.X += command.X; item.Y += command.Y; }
+                }
                 break;
             case CartographyCommandKind.Add:
                 if (command.Item == null || command.Item.Kind == CartographyItemKind.Room) throw new InvalidOperationException("Choose an annotation tool.");
@@ -60,13 +69,38 @@ internal static class CartographyEditing
                 next.Items[next.Items.IndexOf(current)] = command.Item.Clone();
                 break;
             case CartographyCommandKind.Delete:
-                next.Items.RemoveAll(item => targets.Contains(item));
+                // Keep source connections as hidden author overrides; rebuilding geometry must not resurrect them.
+                foreach (CartographyItem target in targets.Where(i => i.Kind == CartographyItemKind.Connection)) target.Visible = false;
+                HashSet<string> deleted = new(targets.Where(i => i.Kind != CartographyItemKind.Connection).Select(i => i.Id));
+                bool grew;
+                do { grew = false; foreach (CartographyItem child in next.Items) if (deleted.Contains(child.Appearance.ParentId)) grew |= deleted.Add(child.Id); } while (grew);
+                next.Items.RemoveAll(item => deleted.Contains(item.Id));
                 break;
             case CartographyCommandKind.Duplicate:
-                foreach (CartographyItem item in targets.Where(item => item.Kind != CartographyItemKind.Room))
+                foreach (CartographyItem item in targets.Where(item => item.Kind != CartographyItemKind.Room && item.Kind != CartographyItemKind.Connection))
                 {
                     CartographyItem copy = item.Clone(); copy.Id = Guid.NewGuid().ToString("N"); copy.X += 20; copy.Y += 20;
                     next.Items.Add(copy);
+                }
+                break;
+            case CartographyCommandKind.Paste:
+                RequireEditableLayer(next, command.LayerId);
+                foreach (CartographyItem item in command.Items.Where(i => i.Kind != CartographyItemKind.Room && i.Kind != CartographyItemKind.Connection))
+                {
+                    CartographyItem copy = item.Clone(); copy.Id = Guid.NewGuid().ToString("N"); copy.LayerId = command.LayerId;
+                    copy.Appearance.ParentId = ""; copy.X += command.X; copy.Y += command.Y; next.Items.Add(copy);
+                }
+                break;
+            case CartographyCommandKind.AlignPorts:
+                foreach (CartographyItem route in targets.Where(i => i.Kind == CartographyItemKind.Connection))
+                {
+                    CartographyItem a = next.Items.Find(i => i.Kind == CartographyItemKind.Room && i.Room == route.Appearance.From);
+                    CartographyItem b = next.Items.Find(i => i.Kind == CartographyItemKind.Room && i.Room == route.Appearance.To);
+                    if (a == null || b == null || !next.Editable(b)) throw new InvalidOperationException("Both endpoint rooms must be visible; the destination must be unlocked.");
+                    CartographySceneBuilder.Port(a, route.Appearance.FromPort, source, out float ax, out float ay);
+                    CartographySceneBuilder.Port(b, route.Appearance.ToPort, source, out float bx, out float by);
+                    if (command.Integer == 0) b.Y += ay - by; else b.X += ax - bx;
+                    route.Points.Clear(); route.Appearance.Route = CartographyRouteMode.Straight;
                 }
                 break;
             case CartographyCommandKind.AssignLayer:
@@ -105,6 +139,7 @@ internal static class CartographyEditing
                 next.Background = style.Background; next.Terrain = style.Terrain; next.Water = style.Water; next.Connections = style.Connections;
                 next.ShowRoomNames = style.ShowRoomNames; next.ShowConnections = style.ShowConnections;
                 next.Transparent = style.Transparent; next.CropSolid = style.CropSolid; next.ExportScale = style.ExportScale; next.Padding = style.Padding;
+                next.Options = style.Options.Clone(); next.Palettes.Clear(); next.Palettes.AddRange(style.Palettes.Select(p => p.Clone()));
                 break;
             case CartographyCommandKind.AddMissingRooms:
                 source.AddMissingRooms(next);

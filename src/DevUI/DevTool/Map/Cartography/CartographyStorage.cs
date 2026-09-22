@@ -23,16 +23,18 @@ internal static class CartographyStorage
             new XElement("layers", document.Layers.Select(layer => new XElement("layer", A("id", layer.Id), A("name", layer.Name), A("visible", layer.Visible), A("locked", layer.Locked), A("opacity", layer.Opacity)))),
             new XElement("objects", document.Items.Select(item => new XElement("object", A("id", item.Id), A("kind", item.Kind), A("layer", item.LayerId), A("room", item.Room),
                 A("x", item.X), A("y", item.Y), A("width", item.Width), A("height", item.Height), A("size", item.Size), A("stroke", item.Stroke), A("color", item.Color),
-                A("visible", item.Visible), A("marker", item.Marker), new XElement("text", item.Text)))));
+                A("visible", item.Visible), A("marker", item.Marker), new XElement("text", item.Text), CartographyRecord.Write("appearance", item.Appearance),
+                new XElement("points", item.Points.Select(p => CartographyRecord.Write("point", p)))))),
+            CartographyRecord.Write("options", document.Options), new XElement("palettes", document.Palettes.Select(p => CartographyRecord.Write("palette", p))));
         return root.ToString(SaveOptions.DisableFormatting);
     }
 
     internal static CartographyDocument Deserialize(string xml, string identity)
     {
         using StringReader text = new(xml);
-        using XmlReader reader = XmlReader.Create(text, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 16 * 1024 * 1024 });
+        using XmlReader reader = XmlReader.Create(text, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 64 * 1024 * 1024 });
         XElement root = XElement.Load(reader);
-        if (root.Name != "cartography" || Int(root, "version") != CartographyDocument.FormatVersion)
+        if (root.Name != "cartography" || Int(root, "version") < 1 || Int(root, "version") > CartographyDocument.FormatVersion)
             throw new InvalidDataException("Unsupported cartography document version; the original file was preserved.");
         if (Str(root, "identity") != identity) throw new InvalidDataException("This map belongs to a different source/campaign.");
         CartographyDocument document = new()
@@ -52,6 +54,16 @@ internal static class CartographyStorage
                 Size = Float(item, "size"), Stroke = Float(item, "stroke"), Color = UInt(item, "color"), Visible = Bool(item, "visible"),
                 Marker = (CartographyMarker)Enum.Parse(typeof(CartographyMarker), Str(item, "marker")), Text = item.Element("text")?.Value ?? string.Empty
             });
+        CartographyRecord.Read(root.Element("options"), document.Options);
+        foreach (XElement p in root.Element("palettes")?.Elements("palette") ?? Enumerable.Empty<XElement>())
+        { CartographyPalette palette = new(); CartographyRecord.Read(p, palette); document.Palettes.Add(palette); }
+        foreach (XElement element in root.Element("objects").Elements("object"))
+        {
+            CartographyItem item = document.Items.Find(i => i.Id == Str(element, "id"));
+            CartographyRecord.Read(element.Element("appearance"), item.Appearance);
+            foreach (XElement p in element.Element("points")?.Elements("point") ?? Enumerable.Empty<XElement>())
+            { CartographyPoint point = new(); CartographyRecord.Read(p, point); item.Points.Add(point); }
+        }
         document.Validate();
         return document;
     }

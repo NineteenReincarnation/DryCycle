@@ -61,17 +61,17 @@ internal sealed class WorldMapTextureBridge
         ImDrawListPtr draw,
         Texture texture,
         Num.Vector2 min,
-        Num.Vector2 max)
+        Num.Vector2 max, uint tint = uint.MaxValue, bool? flipY = null)
     {
         lock (gate)
-            return TryPresentCore(draw, texture, min, max);
+            return TryPresentCore(draw, texture, min, max, tint, flipY);
     }
 
     private bool TryPresentCore(
         ImDrawListPtr draw,
         Texture texture,
         Num.Vector2 min,
-        Num.Vector2 max)
+        Num.Vector2 max, uint tint, bool? flipY)
     {
         if (!resolved) Resolve();
         if (acquireMethod == null || addImageMethod == null || texture == null)
@@ -105,7 +105,7 @@ internal sealed class WorldMapTextureBridge
                 addImageMethod,
                 registeredId,
                 min,
-                max);
+                max, tint, flipY ?? SystemInfo.graphicsUVStartsAtTop);
             object boxedDraw = draw;
             addImageMethod.Invoke(boxedDraw, args);
             error = string.Empty;
@@ -376,7 +376,7 @@ internal sealed class WorldMapTextureBridge
         MethodInfo method,
         object textureId,
         Num.Vector2 min,
-        Num.Vector2 max)
+        Num.Vector2 max, uint tint, bool flipY)
     {
         ParameterInfo[] parameters = method.GetParameters();
         object[] args = new object[parameters.Length];
@@ -396,11 +396,11 @@ internal sealed class WorldMapTextureBridge
                 if (vectorOrdinal == 0) args[i] = min;
                 else if (vectorOrdinal == 1) args[i] = max;
                 else if (vectorOrdinal == 2)
-                    args[i] = SystemInfo.graphicsUVStartsAtTop
+                    args[i] = flipY
                         ? new Num.Vector2(0f, 1f)
                         : Num.Vector2.Zero;
                 else if (vectorOrdinal == 3)
-                    args[i] = SystemInfo.graphicsUVStartsAtTop
+                    args[i] = flipY
                         ? new Num.Vector2(1f, 0f)
                         : Num.Vector2.One;
                 else
@@ -409,6 +409,7 @@ internal sealed class WorldMapTextureBridge
                 continue;
             }
 
+            if (type == typeof(uint)) { args[i] = tint; continue; }
             if (parameters[i].IsOptional)
             {
                 args[i] = parameters[i].DefaultValue;

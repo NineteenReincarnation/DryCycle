@@ -5,8 +5,8 @@ using System.Linq;
 namespace DryCycle.DevUI.DevTool.Map.Cartography;
 
 // Author data only. Room tiles, resolved connections, selection and render caches never enter this model.
-internal enum CartographyItemKind { Room, Text, Marker, Line, Box }
-internal enum CartographyMarker { Pin, Shelter, Gate, Pearl, Danger }
+internal enum CartographyItemKind { Room, Text, Marker, Line, Box, Connection, Image }
+internal enum CartographyMarker { Pin, Shelter, Gate, Pearl, Danger, Sprite, AncientShelter, Trader, Outpost, Treasury, Echo, Broadcast, Vista, Token, Slugcat, Diamond }
 internal enum CartographyAlignment { Left, CenterX, Right, Top, CenterY, Bottom, DistributeX, DistributeY }
 
 internal readonly struct CartographyRect
@@ -53,12 +53,19 @@ internal sealed class CartographyItem
     public uint Color = 0xFFF2D9A6; // AARRGGBB, independent of renderer packing.
     public bool Visible = true;
     public CartographyMarker Marker;
-    internal CartographyItem Clone() => (CartographyItem)MemberwiseClone();
+    public CartographyAppearance Appearance = new();
+    public List<CartographyPoint> Points = new();
+    internal CartographyItem Clone()
+    {
+        CartographyItem copy = (CartographyItem)MemberwiseClone();
+        copy.Appearance = Appearance.Clone(); copy.Points = Points.Select(p => p.Clone()).ToList();
+        return copy;
+    }
 }
 
 internal sealed class CartographyDocument
 {
-    internal const int FormatVersion = 1;
+    internal const int FormatVersion = 2;
     public string Identity = string.Empty;
     public string Region = string.Empty;
     public string Title = string.Empty;
@@ -75,6 +82,8 @@ internal sealed class CartographyDocument
     public int Padding = 32;
     public readonly List<CartographyLayer> Layers = new(); // Back to front.
     public readonly List<CartographyItem> Items = new();
+    public CartographyOptions Options = new();
+    public readonly List<CartographyPalette> Palettes = new();
 
     internal CartographyDocument Clone()
     {
@@ -87,6 +96,7 @@ internal sealed class CartographyDocument
         };
         copy.Layers.AddRange(Layers.Select(layer => layer.Clone()));
         copy.Items.AddRange(Items.Select(item => item.Clone()));
+        copy.Options = Options.Clone(); copy.Palettes.AddRange(Palettes.Select(p => p.Clone()));
         return copy;
     }
 
@@ -95,6 +105,12 @@ internal sealed class CartographyDocument
 
     internal void Validate()
     {
+        CartographyRecord.Validate(Options);
+        RequireRange(Options.WaterOpacity, 0, 1, "water opacity");
+        RequireRange(Options.BorderSize, 0, 32, "border");
+        if (Options.ExportArea && (Options.AreaWidth <= 0 || Options.AreaHeight <= 0)) throw new InvalidOperationException("Export area must have positive dimensions.");
+        if (Palettes.Count > 256 || Palettes.Select(p => p.Name).Distinct().Count() != Palettes.Count) throw new InvalidOperationException("Invalid subregion palettes.");
+        foreach (CartographyPalette palette in Palettes) CartographyRecord.Validate(palette);
         if (string.IsNullOrWhiteSpace(Identity) || Identity.Length > 4096 || string.IsNullOrWhiteSpace(Region))
             throw new InvalidOperationException("The cartography document has no valid source identity.");
         if (Title == null || Title.Length > 512 || string.IsNullOrWhiteSpace(FontFamily) || FontFamily.Length > 128)
@@ -113,6 +129,12 @@ internal sealed class CartographyDocument
         HashSet<string> rooms = new(StringComparer.OrdinalIgnoreCase);
         foreach (CartographyItem item in Items)
         {
+            CartographyRecord.Validate(item.Appearance);
+            RequireRange(item.Appearance.Opacity, 0, 1, "object opacity");
+            RequireRange(item.Appearance.Outline, 0, 32, "outline");
+            RequireRange(item.Appearance.Scale, .1f, 10, "object scale");
+            if (item.Points.Count > 4096) throw new InvalidOperationException("Too many route points.");
+            foreach (CartographyPoint point in item.Points) { RequireRange(point.X, -1000000, 1000000, "route X"); RequireRange(point.Y, -1000000, 1000000, "route Y"); }
             if (string.IsNullOrWhiteSpace(item.Id) || !ids.Add(item.Id) || !layerIds.Contains(item.LayerId) ||
                 !Enum.IsDefined(typeof(CartographyItemKind), item.Kind) || !Enum.IsDefined(typeof(CartographyMarker), item.Marker))
                 throw new InvalidOperationException("Invalid object identity, kind or layer reference.");
@@ -126,6 +148,16 @@ internal sealed class CartographyDocument
             RequireRange(item.Height, -100000, 100000, "height");
             RequireRange(item.Size, 4, 256, "text/icon size");
             RequireRange(item.Stroke, 0.25f, 32, "stroke");
+        }
+        foreach (CartographyItem item in Items.Where(i => i.Appearance.ParentId.Length > 0))
+        {
+            HashSet<string> chain = new() { item.Id };
+            CartographyItem parent = item;
+            while (parent.Appearance.ParentId.Length > 0)
+            {
+                parent = Items.Find(i => i.Id == parent.Appearance.ParentId) ?? throw new InvalidOperationException("Missing parent object.");
+                if (!chain.Add(parent.Id)) throw new InvalidOperationException("Object parent cycle.");
+            }
         }
         RequireRange(ExportScale, 0.25f, 8, "export scale");
         if (Padding < 0 || Padding > 1024) throw new InvalidOperationException("Invalid export padding.");
@@ -161,6 +193,9 @@ internal sealed class CartographyRoomSource
     internal string Error = string.Empty;
     internal CartographyTileRun[] Runs = Array.Empty<CartographyTileRun>();
     internal Dictionary<int, CartographyRect> Ports = new();
+    internal string Subregion = "", Tags = "", Settings = "";
+    internal byte[] Terrain = Array.Empty<byte>();
+    internal List<CartographyPoint[]> Shortcuts = new();
 }
 
 internal sealed class CartographyConnectionSource
@@ -174,6 +209,8 @@ internal sealed class CartographySource
 {
     internal readonly Dictionary<string, CartographyRoomSource> Rooms = new(StringComparer.OrdinalIgnoreCase);
     internal readonly List<CartographyConnectionSource> Connections = new();
+    internal readonly List<CartographyItem> Decorations = new();
+    internal readonly List<CartographyPalette> Palettes = new();
 
     internal CartographyDocument CreateDocument(string identity, string region)
     {
@@ -181,6 +218,7 @@ internal sealed class CartographySource
         document.Layers.Add(new CartographyLayer { Id = "links", Name = "Connections / 连线" });
         for (int i = 0; i < 3; i++) document.Layers.Add(new CartographyLayer { Id = "rooms" + i, Name = "Rooms / 房间 L" + i });
         document.Layers.Add(new CartographyLayer { Id = "notes", Name = "Annotations / 标注" });
+        document.Palettes.AddRange(Palettes.Select(p => p.Clone()));
         AddMissingRooms(document);
         return document;
     }
@@ -194,7 +232,18 @@ internal sealed class CartographySource
             string layer = "rooms" + room.Layer;
             if (document.Layer(layer) == null) layer = document.Layers.First(candidate => candidate.Id != "links").Id;
             document.Items.Add(new CartographyItem { Id = "room:" + room.Name, Kind = CartographyItemKind.Room,
-                LayerId = layer, Room = room.Name, X = room.X, Y = room.Y, Visible = !room.Disabled });
+                LayerId = layer, Room = room.Name, X = room.X, Y = room.Y, Visible = !room.Disabled,
+                Appearance = new CartographyAppearance { Subregion = room.Subregion } });
         }
+        foreach (CartographyConnectionSource link in Connections)
+        {
+            string id = ConnectionId(link);
+            if (document.Items.Any(i => i.Id == id)) continue;
+            document.Items.Add(new CartographyItem { Id = id, Kind = CartographyItemKind.Connection, LayerId = "links", Color = document.Connections,
+                Appearance = new CartographyAppearance { From = link.From, To = link.To, FromPort = link.FromPort, ToPort = link.ToPort, Dashed = true, Shade = true, Outline = 1 } });
+        }
+        foreach (CartographyItem decoration in Decorations)
+            if (!document.Items.Any(i => i.Id == decoration.Id) && (decoration.Appearance.ParentId.Length == 0 || document.Items.Any(i => i.Id == decoration.Appearance.ParentId))) document.Items.Add(decoration.Clone());
     }
+    internal static string ConnectionId(CartographyConnectionSource c) => "link:" + c.From + ":" + c.FromPort + ":" + c.To + ":" + c.ToPort;
 }

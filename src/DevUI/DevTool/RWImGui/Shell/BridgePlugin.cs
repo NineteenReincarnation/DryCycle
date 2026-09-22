@@ -143,6 +143,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         // V2 resources capture only after the live-source pumps above have published detached data.
         WorldMapRetainedV2Runtime.UpdateMainThread();
+        CartographyCanvasImages.UpdateMainThread();
 
         EnsureCreatureCatalogRuntime();
         if (ownsCreatureCatalogRuntime)

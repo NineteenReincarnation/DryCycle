@@ -7,7 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using DryCycle.DevUI.DevTool.Map.Cartography;
 
-internal static class Program
+internal static partial class Program
 {
     private static int assertions;
     private static string output;
@@ -18,7 +18,8 @@ internal static class Program
         Directory.CreateDirectory(output);
         try
         {
-            Authoring(); Persistence(); Rendering(); IncrementalScene();
+            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity();
+            if (args.Length > 1) CorniferRegion(args[1]);
             Console.WriteLine("PASS: " + assertions + " assertions; production authoring / atomic persistence / PNG, SVG and layer export.");
             Console.WriteLine("Visual fixture: " + Path.Combine(output, "cartography-preview.png"));
             return 0;
@@ -69,7 +70,7 @@ internal static class Program
         Check(CartographyStorage.Serialize(loaded) == xml, "All editable properties and CJK text round trip.");
         Check(!xml.Contains("<Runs") && !xml.Contains("terrain is not ready"), "Derived source/cache data must stay out of the author file.");
         Throws(() => CartographyStorage.Deserialize(xml, "other-source|Survivor"), "Wrong-source import must be rejected.");
-        Throws(() => CartographyStorage.Deserialize(xml.Replace("version=\"1\"", "version=\"999\""), document.Identity), "Future documents cannot be silently downgraded.");
+        Throws(() => CartographyStorage.Deserialize(xml.Replace("version=\"" + CartographyDocument.FormatVersion + "\"", "version=\"999\""), document.Identity), "Future documents cannot be silently downgraded.");
         Throws(() => CartographyStorage.Deserialize("<!DOCTYPE x [<!ENTITY e SYSTEM 'file:///C:/Windows/win.ini'>]>" + xml, document.Identity), "External entities must be refused.");
         string path = Path.Combine(output, "author-" + Guid.NewGuid().ToString("N") + ".xml");
         string firstHash = CartographyStorage.Save(path, document, null);
@@ -187,7 +188,7 @@ internal static class Program
             bool first = name == "SU_A01";
             CartographyRoomSource room = new() { Name = name, Ready = true, Width = first ? 20 : 28, Height = first ? 14 : 18, X = first ? 0 : 180, Y = first ? 0 : 40, Layer = first ? 0 : 1 };
             room.Runs = Enumerable.Range(0, room.Height).Select(y => new CartographyTileRun(0, y, room.Width, y == 0 || y == room.Height - 1 ? 2 : 0, !first && y < 5)).ToArray();
-            room.Ports[0] = new CartographyRect(first ? 19 : 0, first ? 7 : 9, 0, 0);
+            room.Ports[0] = new CartographyRect(first ? 19.5f : .5f, first ? 7.5f : 9.5f, 0, 0);
             source.Rooms[name] = room;
         }
         source.Connections.Add(new CartographyConnectionSource { From = "SU_A01", To = "SU_A02", FromPort = 0, ToPort = 0 });
