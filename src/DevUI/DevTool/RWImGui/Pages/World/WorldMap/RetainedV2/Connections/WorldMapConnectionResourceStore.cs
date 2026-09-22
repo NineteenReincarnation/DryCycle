@@ -82,6 +82,7 @@ internal sealed class WorldMapConnectionResourceStore
             {
                 routeChanged.Add(id);
                 unchecked { revision++; }
+                MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
             }
             queued.Remove(id);
         }
@@ -150,10 +151,43 @@ internal sealed class WorldMapConnectionResourceStore
         if (budget <= 0) return;
 
         buildBatch.Clear();
-        while (budget > 0 && queue.Count > 0)
+        int scanCount = queue.Count;
+        int scanned = 0;
+        while (budget > 0 &&
+               queue.Count > 0 &&
+               scanned < scanCount)
         {
             string id = queue.Dequeue();
-            queued.Remove(id);
+            scanned++;
+
+            WorldMapPersistentRouteRestoreResult restore =
+                WorldMapPersistentRetainedCache.TryRestoreRoute(
+                    scene,
+                    id,
+                    out ConnectionRouteResource restoredRoute);
+
+            if (restore == WorldMapPersistentRouteRestoreResult.Pending)
+            {
+                queue.Enqueue(id);
+                continue;
+            }
+
+            if (!queued.Remove(id))
+                continue;
+
+            if (restore == WorldMapPersistentRouteRestoreResult.Restored)
+            {
+                restoredRoute.Revision =
+                    routes.TryGetValue(id, out ConnectionRouteResource oldRoute)
+                        ? oldRoute.Revision + 1L
+                        : 1L;
+                routes[id] = restoredRoute;
+                routeChanged.Add(id);
+                unchecked { revision++; }
+                budget--;
+                continue;
+            }
+
             if (!scene.TryGetConnection(id, out WorldMapScene.ConnectionNode connection))
             {
                 routes.Remove(id);
@@ -188,6 +222,7 @@ internal sealed class WorldMapConnectionResourceStore
             routes[connection.Id] = route;
             routeChanged.Add(connection.Id);
             unchecked { revision++; }
+            MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
         }
     }
 

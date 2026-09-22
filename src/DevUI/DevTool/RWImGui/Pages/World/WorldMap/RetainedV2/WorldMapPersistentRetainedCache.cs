@@ -21,6 +21,7 @@ internal static class WorldMapPersistentRetainedCache
 {
     private static readonly Dictionary<int, MapViewPersistentRoom> validRooms = new();
     private static readonly HashSet<int> invalidRooms = new();
+    private static readonly HashSet<int> consumedThumbnailHints = new();
     private static readonly Dictionary<string, MapViewPersistentRoute> routes =
         new(StringComparer.Ordinal);
 
@@ -63,6 +64,7 @@ internal static class WorldMapPersistentRetainedCache
     {
         source = default;
         if (!enabled ||
+            consumedThumbnailHints.Contains(roomIndex) ||
             !validRooms.TryGetValue(roomIndex, out MapViewPersistentRoom room) ||
             string.IsNullOrWhiteSpace(room.ThumbnailElementName))
             return false;
@@ -72,7 +74,7 @@ internal static class WorldMapPersistentRetainedCache
                 out source))
             return false;
 
-        validRooms.Remove(roomIndex);
+        consumedThumbnailHints.Add(roomIndex);
         return true;
     }
 
@@ -267,6 +269,7 @@ internal static class WorldMapPersistentRetainedCache
     {
         validRooms.Clear();
         invalidRooms.Clear();
+        consumedThumbnailHints.Clear();
         routes.Clear();
     }
 

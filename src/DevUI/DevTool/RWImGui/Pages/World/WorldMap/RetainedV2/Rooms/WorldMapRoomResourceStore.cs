@@ -245,14 +245,28 @@ internal sealed class WorldMapRoomResourceStore
                 resource.RequestedVisualStamp = int.MinValue;
         }
 
-        if (WorldMapLegacyRoomSourceService.TryGetRoomTexture(
+        bool resolvedPersistent =
+            !resource.Thumbnail.HasCommitted &&
+            WorldMapPersistentRetainedCache.TryResolveThumbnail(
+                roomIndex,
+                out WorldMapLegacyRoomSourceService.RoomTextureSource source);
+
+        bool resolvedLive =
+            resolvedPersistent ||
+            WorldMapLegacyRoomSourceService.TryGetRoomTexture(
                 page,
                 roomIndex,
-                out WorldMapLegacyRoomSourceService.RoomTextureSource source))
+                out source);
+
+        if (resolvedLive)
         {
             if (resource.Thumbnail.Stage(source) &&
                 resource.Thumbnail.CommitPending())
+            {
                 AdvanceRevision();
+                if (!string.IsNullOrEmpty(source.PersistentElementName))
+                    MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
+            }
         }
         else
         {

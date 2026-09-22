@@ -658,6 +658,27 @@ inflated obstacle snapshot instead of rebuilding room bounds for the whole regio
 The orthogonal route cache is retained for 32 build generations instead of being discarded after
 two batches, avoiding cache churn on large regions.
 
+### Persistent Cache V3 hot start
+
+The MapView cache is now a V3 container and remains backward-readable from V2. Existing V2 geometry
+payloads are loaded and migrated in the background instead of forcing a cold rebuild.
+
+V3 adds two validated retained-frontend payloads:
+
+- **thumbnail source hints** store a Futile atlas-element identity and the last descriptor, never a
+  Unity Texture2D object. After the core room-file stamp validates, Retained V2 resolves the current
+  atlas element directly and binds its live texture/UV before falling back to RoomPanel discovery.
+- **connection routes** store world-space polyline points, endpoint metadata, room names/positions,
+  route kind and routing-policy version. They remain staged until both endpoint room source stamps
+  are known valid. A changed room file, topology mismatch, moved room or routing-policy bump rejects
+  only the affected route and schedules normal routing.
+
+Thumbnail/route mutations mark the core persistent snapshot dirty, so one atomic V3 file owns both
+geometry and retained frontend metadata without creating a reverse core dependency.
+
+The shutdown path now forces a final snapshot and waits for the background writer queue to drain
+before disabling Retained V2. Normal saves remain debounced and asynchronous.
+
 ## Legacy retirement policy
 
 Legacy code does **not** have to wait until the entire V2 project is finished.
