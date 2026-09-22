@@ -634,6 +634,17 @@ the exact route IDs committed into that surface. Each connection then resolves i
 Hover/hit testing follows the same committed-ID set, so the interactive path matches what is
 actually visible rather than what merely exists in the main-thread route cache.
 
+The old diagonal compatibility stroke is now retired. If a retained route has already been built but
+has not yet landed in the next RenderTexture commit, Draw reads its immutable points from the
+thread-safe route spatial index and renders that exact polyline immediately. If no retained route
+exists yet, the temporary preview is still orthogonal: aligned ports use a straight axis segment,
+same-axis ports use a short midpoint corridor, and perpendicular ports use a single elbow. Therefore
+the user never sees an A-to-B diagonal line while waiting for the retained router.
+
+The orthogonal cache carries a routing-policy version. Routes produced before the Compact policy (or
+after any future policy-version bump) cannot pass TryReuse merely because their old path is still
+collision-free.
+
 The router also has a **Compact** fast path for nearby room pairs. If room bounds or exit mouths are
 close and the short Manhattan candidates do not cross a third-party room, the router chooses the
 lowest-cost direct/one-bend/mid-corridor path. Start/end room obstacle inflation is deliberately

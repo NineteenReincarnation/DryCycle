@@ -145,6 +145,33 @@ internal sealed class WorldMapRouteSpatialIndex
         }
     }
 
+    internal bool TryGetPoints(
+        string id,
+        out Num.Vector2[] points)
+    {
+        points = null;
+        if (string.IsNullOrEmpty(id))
+            return false;
+
+        gate.EnterReadLock();
+        try
+        {
+            if (!entries.TryGetValue(id, out Entry entry) ||
+                entry?.Points == null ||
+                entry.Points.Length < 2)
+                return false;
+
+            // Route point arrays are immutable after Upsert. Returning the retained reference avoids
+            // per-frame allocations on the ImGui Draw path.
+            points = entry.Points;
+            return true;
+        }
+        finally
+        {
+            gate.ExitReadLock();
+        }
+    }
+
     internal bool TryHit(
         Num.Vector2 point,
         float radius,

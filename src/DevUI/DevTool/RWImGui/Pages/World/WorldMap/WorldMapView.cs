@@ -37,6 +37,7 @@ internal static class WorldMapView
     private static readonly Dictionary<int, Num.Vector2> localPositions = new();
     private static readonly List<int> retainedVisibleRoomIds = new();
     private static readonly List<int> retainedHoverRoomIds = new();
+    private static readonly List<Num.Vector2> connectionPathScratch = new(12);
     private static long localPositionRevision;
     private static EditorMapRoomSnapshot[] synchronizedPositionRooms;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
@@ -79,6 +80,7 @@ internal static class WorldMapView
         localPositions.Clear();
         retainedVisibleRoomIds.Clear();
         retainedHoverRoomIds.Clear();
+        connectionPathScratch.Clear();
         localPositionRevision = 0L;
         synchronizedPositionRooms = null;
         hoverRoomLookup.Clear();
@@ -734,20 +736,45 @@ internal static class WorldMapView
         bool skipRetainedRoutes)
     {
         WorldMapRenderOrder.UseConnections(draw);
-        EditorMapConnectionSnapshot[] connections = snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        EditorMapConnectionSnapshot[] connections =
+            snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
+        Num.Vector2 canvasMax = canvasMin + canvasSize;
+
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
-            if (skipRetainedRoutes &&
-                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
-                    connection?.ConnectionId))
+            if (connection == null)
                 continue;
 
-            if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
-            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 42f)) continue;
+            if (skipRetainedRoutes &&
+                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
+                    connection.ConnectionId))
+                continue;
 
-            bool selected = string.Equals(selectedConnectionId, connection.ConnectionId, StringComparison.Ordinal);
-            bool hovered = string.Equals(hoveredConnectionId, connection.ConnectionId, StringComparison.Ordinal);
+            if (!BuildImmediateConnectionPath(
+                    snapshot,
+                    connection,
+                    canvasMin,
+                    connectionPathScratch))
+                continue;
+
+            if (!PathNearCanvas(
+                    connectionPathScratch,
+                    canvasMin,
+                    canvasMax,
+                    42f))
+                continue;
+
+            bool selected =
+                string.Equals(
+                    selectedConnectionId,
+                    connection.ConnectionId,
+                    StringComparison.Ordinal);
+            bool hovered =
+                string.Equals(
+                    hoveredConnectionId,
+                    connection.ConnectionId,
+                    StringComparison.Ordinal);
             uint core = selected || hovered
                 ? ConnectionColor(connection.Direction)
                 : connection.Ambiguous
@@ -755,12 +782,16 @@ internal static class WorldMapView
                     : ConnectionColor(connection.Direction);
             uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
 
-            float coreThickness = selected ? 4.8f : hovered ? 4.2f : connection.Direction == WorldConnectionDirection.Bidirectional ? 3.4f : 3.2f;
-            float shadowThickness = coreThickness + (selected || hovered ? 5.6f : 4.8f);
-            DrawConnectionStroke(
+            float coreThickness =
+                selected ? 4.8f :
+                hovered ? 4.2f :
+                connection.Direction == WorldConnectionDirection.Bidirectional ? 3.4f : 3.2f;
+            float shadowThickness =
+                coreThickness + (selected || hovered ? 5.6f : 4.8f);
+
+            DrawConnectionPathStroke(
                 draw,
-                a,
-                b,
+                connectionPathScratch,
                 shadow,
                 core,
                 shadowThickness,
@@ -768,8 +799,18 @@ internal static class WorldMapView
                 connection.Direction,
                 connection.Ambiguous);
 
-            if (connection.Ambiguous)
-                draw.AddText((a + b) * 0.5f + new Num.Vector2(8f, -20f), core, "?");
+            if (connection.Ambiguous &&
+                TryPointOnPath(
+                    connectionPathScratch,
+                    0.5f,
+                    out Num.Vector2 labelPoint,
+                    out Num.Vector2 _))
+            {
+                draw.AddText(
+                    labelPoint + new Num.Vector2(8f, -20f),
+                    core,
+                    "?");
+            }
         }
     }
 
@@ -1191,17 +1232,240 @@ internal static class WorldMapView
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
-            if (skipRetainedRoutes &&
-                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
-                    connection?.ConnectionId))
+            if (connection == null)
                 continue;
 
-            if (!TryConnectionSegment(snapshot, connection, canvasMin, out Num.Vector2 a, out Num.Vector2 b)) continue;
-            if (!SegmentNearCanvas(a, b, canvasMin, canvasMin + canvasSize, 30f)) continue;
-            float distanceSq = DistanceToSegmentSquared(mouse, a, b);
-            if (distanceSq > thresholdSq || best != null && distanceSq >= best.DistanceSq) continue;
-            best = new EdgeHit { Connection = connection, DistanceSq = distanceSq };
+            if (skipRetainedRoutes &&
+                WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
+                    connection.ConnectionId))
+                continue;
+
+            if (!BuildImmediateConnectionPath(
+                    snapshot,
+                    connection,
+                    canvasMin,
+                    connectionPathScratch))
+                continue;
+
+            if (!PathNearCanvas(
+                    connectionPathScratch,
+                    canvasMin,
+                    canvasMin + canvasSize,
+                    30f))
+                continue;
+
+            float distanceSq =
+                DistanceToPathSquared(
+                    mouse,
+                    connectionPathScratch);
+            if (distanceSq > thresholdSq ||
+                best != null && distanceSq >= best.DistanceSq)
+                continue;
+
+            best = new EdgeHit
+            {
+                Connection = connection,
+                DistanceSq = distanceSq
+            };
         }
+        return best;
+    }
+
+    private static bool BuildImmediateConnectionPath(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapConnectionSnapshot connection,
+        Num.Vector2 canvasMin,
+        List<Num.Vector2> output)
+    {
+        output.Clear();
+        if (connection == null ||
+            connection.FromNodeIndex < 0 ||
+            connection.ToNodeIndex < 0)
+            return false;
+
+        if (WorldMapRetainedV2Runtime.TryGetConnectionRoutePoints(
+                connection.ConnectionId,
+                out Num.Vector2[] retainedPoints) &&
+            retainedPoints != null &&
+            retainedPoints.Length >= 2)
+        {
+            for (int i = 0; i < retainedPoints.Length; i++)
+                AppendDistinct(
+                    output,
+                    ToScreen(canvasMin, retainedPoints[i]));
+            return output.Count >= 2;
+        }
+
+        EditorMapRoomSnapshot roomA =
+            FindRoom(snapshot, connection.FromRoomIndex);
+        EditorMapRoomSnapshot roomB =
+            FindRoom(snapshot, connection.ToRoomIndex);
+        if (roomA == null ||
+            roomB == null ||
+            !IsLayerVisible(roomA.Layer) ||
+            !IsLayerVisible(roomB.Layer))
+            return false;
+
+        Num.Vector2 a =
+            EndpointPosition(
+                roomA,
+                connection.FromNodeIndex,
+                canvasMin);
+        Num.Vector2 b =
+            connection.ToNodeIndex >= 0
+                ? EndpointPosition(
+                    roomB,
+                    connection.ToNodeIndex,
+                    canvasMin)
+                : RoomCenter(roomB, canvasMin);
+
+        EditorMapRoomVisualSnapshot visualA =
+            WorldMapPresentationIndex.GetRoomVisual(roomA.RoomIndex);
+        EditorMapRoomVisualSnapshot visualB =
+            WorldMapPresentationIndex.GetRoomVisual(roomB.RoomIndex);
+        GetRoomRect(
+            roomA,
+            visualA,
+            canvasMin,
+            out Num.Vector2 aMin,
+            out Num.Vector2 aMax);
+        GetRoomRect(
+            roomB,
+            visualB,
+            canvasMin,
+            out Num.Vector2 bMin,
+            out Num.Vector2 bMax);
+
+        Num.Vector2 dirA =
+            InferScreenPortDirection(a, aMin, aMax);
+        Num.Vector2 dirB =
+            InferScreenPortDirection(b, bMin, bMax);
+
+        AppendDistinct(output, a);
+
+        if (Math.Abs(a.X - b.X) <= 0.5f ||
+            Math.Abs(a.Y - b.Y) <= 0.5f)
+        {
+            AppendDistinct(output, b);
+            return true;
+        }
+
+        bool aHorizontal = Math.Abs(dirA.X) > 0.5f;
+        bool bHorizontal = Math.Abs(dirB.X) > 0.5f;
+
+        if (aHorizontal && bHorizontal)
+        {
+            float midX = (a.X + b.X) * 0.5f;
+            AppendDistinct(
+                output,
+                new Num.Vector2(midX, a.Y));
+            AppendDistinct(
+                output,
+                new Num.Vector2(midX, b.Y));
+        }
+        else if (!aHorizontal && !bHorizontal)
+        {
+            float midY = (a.Y + b.Y) * 0.5f;
+            AppendDistinct(
+                output,
+                new Num.Vector2(a.X, midY));
+            AppendDistinct(
+                output,
+                new Num.Vector2(b.X, midY));
+        }
+        else if (aHorizontal)
+        {
+            AppendDistinct(
+                output,
+                new Num.Vector2(b.X, a.Y));
+        }
+        else
+        {
+            AppendDistinct(
+                output,
+                new Num.Vector2(a.X, b.Y));
+        }
+
+        AppendDistinct(output, b);
+        return output.Count >= 2;
+    }
+
+    private static Num.Vector2 InferScreenPortDirection(
+        Num.Vector2 point,
+        Num.Vector2 roomMin,
+        Num.Vector2 roomMax)
+    {
+        float left = Math.Abs(point.X - roomMin.X);
+        float right = Math.Abs(roomMax.X - point.X);
+        float top = Math.Abs(point.Y - roomMin.Y);
+        float bottom = Math.Abs(roomMax.Y - point.Y);
+        float best =
+            Math.Min(
+                Math.Min(left, right),
+                Math.Min(top, bottom));
+
+        if (best == left)
+            return new Num.Vector2(-1f, 0f);
+        if (best == right)
+            return new Num.Vector2(1f, 0f);
+        if (best == top)
+            return new Num.Vector2(0f, -1f);
+        return new Num.Vector2(0f, 1f);
+    }
+
+    private static void AppendDistinct(
+        List<Num.Vector2> points,
+        Num.Vector2 point)
+    {
+        if (points.Count == 0 ||
+            Num.Vector2.DistanceSquared(
+                points[points.Count - 1],
+                point) >= 0.25f)
+            points.Add(point);
+    }
+
+    private static bool PathNearCanvas(
+        IReadOnlyList<Num.Vector2> points,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasMax,
+        float margin)
+    {
+        if (points == null || points.Count < 2)
+            return false;
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            if (SegmentNearCanvas(
+                    points[i],
+                    points[i + 1],
+                    canvasMin,
+                    canvasMax,
+                    margin))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static float DistanceToPathSquared(
+        Num.Vector2 point,
+        IReadOnlyList<Num.Vector2> points)
+    {
+        float best = float.MaxValue;
+        if (points == null)
+            return best;
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            float distance =
+                DistanceToSegmentSquared(
+                    point,
+                    points[i],
+                    points[i + 1]);
+            if (distance < best)
+                best = distance;
+        }
+
         return best;
     }
 
@@ -1434,6 +1698,207 @@ internal static class WorldMapView
             new Num.Vector2(point.X + half - notchDepth, point.Y - notchHalf),
             new Num.Vector2(point.X + half + 0.5f, point.Y + notchHalf),
             shadow);
+    }
+
+    private static void DrawConnectionPathStroke(
+        ImDrawListPtr draw,
+        IReadOnlyList<Num.Vector2> points,
+        uint shadow,
+        uint core,
+        float shadowThickness,
+        float coreThickness,
+        WorldConnectionDirection direction,
+        bool dashed)
+    {
+        if (points == null || points.Count < 2)
+            return;
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            Num.Vector2 a = points[i];
+            Num.Vector2 b = points[i + 1];
+            if (dashed)
+            {
+                DrawDashedLine(
+                    draw,
+                    a,
+                    b,
+                    shadow,
+                    shadowThickness,
+                    10f,
+                    6f);
+                DrawDashedLine(
+                    draw,
+                    a,
+                    b,
+                    core,
+                    coreThickness,
+                    10f,
+                    6f);
+            }
+            else
+            {
+                draw.AddLine(
+                    a,
+                    b,
+                    shadow,
+                    shadowThickness);
+                draw.AddLine(
+                    a,
+                    b,
+                    core,
+                    coreThickness);
+            }
+        }
+
+        float length = PathLength(points);
+        if (length < 25f)
+            return;
+
+        if (direction == WorldConnectionDirection.Bidirectional)
+        {
+            DrawArrowOnPath(
+                draw,
+                points,
+                0.35f,
+                reverse: true,
+                shadow,
+                core,
+                coreThickness);
+            DrawArrowOnPath(
+                draw,
+                points,
+                0.65f,
+                reverse: false,
+                shadow,
+                core,
+                coreThickness);
+            return;
+        }
+
+        int count =
+            length >= 360f ? 3 :
+            length >= 190f ? 2 : 1;
+        bool reverse =
+            direction == WorldConnectionDirection.BToA;
+        for (int i = 0; i < count; i++)
+        {
+            DrawArrowOnPath(
+                draw,
+                points,
+                (i + 1f) / (count + 1f),
+                reverse,
+                shadow,
+                core,
+                coreThickness);
+        }
+    }
+
+    private static void DrawArrowOnPath(
+        ImDrawListPtr draw,
+        IReadOnlyList<Num.Vector2> points,
+        float fraction,
+        bool reverse,
+        uint shadow,
+        uint core,
+        float coreThickness)
+    {
+        if (!TryPointOnPath(
+                points,
+                fraction,
+                out Num.Vector2 point,
+                out Num.Vector2 tangent))
+            return;
+
+        if (reverse)
+            tangent = -tangent;
+
+        float size =
+            Math.Max(
+                13f,
+                Math.Min(
+                    15.5f,
+                    11f + coreThickness * 0.60f));
+        DrawArrowHead(
+            draw,
+            point,
+            tangent,
+            shadow,
+            core,
+            size);
+    }
+
+    private static bool TryPointOnPath(
+        IReadOnlyList<Num.Vector2> points,
+        float fraction,
+        out Num.Vector2 point,
+        out Num.Vector2 tangent)
+    {
+        point = Num.Vector2.Zero;
+        tangent = Num.Vector2.Zero;
+        if (points == null || points.Count < 2)
+            return false;
+
+        float total = PathLength(points);
+        if (total <= 0.001f)
+            return false;
+
+        float target =
+            total * Math.Max(0f, Math.Min(1f, fraction));
+        float walked = 0f;
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            Num.Vector2 a = points[i];
+            Num.Vector2 b = points[i + 1];
+            Num.Vector2 delta = b - a;
+            float length = delta.Length();
+            if (length <= 0.001f)
+                continue;
+
+            if (walked + length >= target)
+            {
+                float t =
+                    (target - walked) / length;
+                point =
+                    Num.Vector2.Lerp(a, b, t);
+                tangent =
+                    delta / length;
+                return true;
+            }
+
+            walked += length;
+        }
+
+        Num.Vector2 last =
+            points[points.Count - 1];
+        Num.Vector2 before =
+            points[points.Count - 2];
+        Num.Vector2 finalDelta =
+            last - before;
+        float finalLength =
+            finalDelta.Length();
+        if (finalLength <= 0.001f)
+            return false;
+
+        point = last;
+        tangent = finalDelta / finalLength;
+        return true;
+    }
+
+    private static float PathLength(
+        IReadOnlyList<Num.Vector2> points)
+    {
+        float total = 0f;
+        if (points == null)
+            return total;
+
+        for (int i = 0; i < points.Count - 1; i++)
+            total +=
+                Num.Vector2.Distance(
+                    points[i],
+                    points[i + 1]);
+        return total;
     }
 
     private static void DrawConnectionStroke(

@@ -318,6 +318,17 @@ internal static class WorldMapRetainedV2Runtime
     internal static int PresentedRouteCount =>
         Volatile.Read(ref presentedRouteIds)?.Count ?? 0;
 
+    internal static bool TryGetConnectionRoutePoints(
+        string connectionId,
+        out Num.Vector2[] points)
+    {
+        points = null;
+        return enabled &&
+               RouteSpatialIndex.TryGetPoints(
+                   connectionId,
+                   out points);
+    }
+
     internal static bool TryHitConnection(
         Num.Vector2 worldPoint,
         float worldRadius,

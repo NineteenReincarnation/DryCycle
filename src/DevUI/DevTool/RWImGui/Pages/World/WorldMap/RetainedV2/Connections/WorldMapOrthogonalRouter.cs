@@ -79,6 +79,7 @@ internal static class WorldMapOrthogonalRouter
         internal Num.Vector2 StartDirection;
         internal Num.Vector2 EndDirection;
         internal float LaneOffset;
+        internal int PolicyVersion;
         internal int LastSeenGeneration;
     }
 
@@ -171,6 +172,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
+    private const int RoutingPolicyVersion = 3;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
     private const float BendPenalty = 0.72f;
@@ -254,6 +256,7 @@ internal static class WorldMapOrthogonalRouter
                         StartDirection = request.StartDirection,
                         EndDirection = request.EndDirection,
                         LaneOffset = request.LaneOffset,
+                        PolicyVersion = RoutingPolicyVersion,
                         LastSeenGeneration = generation
                     };
                 }
@@ -612,7 +615,10 @@ internal static class WorldMapOrthogonalRouter
         out Route route)
     {
         route = null;
-        if (cached?.Route?.Points == null || cached.Route.Points.Length < 2) return false;
+        if (cached?.Route?.Points == null ||
+            cached.Route.Points.Length < 2 ||
+            cached.PolicyVersion != RoutingPolicyVersion)
+            return false;
         if (Num.Vector2.DistanceSquared(cached.Start, request.Start) > 0.25f ||
             Num.Vector2.DistanceSquared(cached.End, request.End) > 0.25f ||
             Num.Vector2.DistanceSquared(cached.StartDirection, request.StartDirection) > 0.01f ||
