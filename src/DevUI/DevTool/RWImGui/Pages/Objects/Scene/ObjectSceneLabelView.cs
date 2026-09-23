@@ -12,9 +12,18 @@ internal static class ObjectSceneLabelView
     private const float PaddingY = 3f;
     private const float Gap = 3f;
     private const double HoverDelaySeconds = 0.12;
-    private const float FarWorldUnitsPerPixel = 2.35f;
-    private const float MidWorldUnitsPerPixel = 1.45f;
+    private const float MidZoomEnter = 1.55f;
+    private const float MidZoomExit = 1.30f;
+    private const float FarZoomEnter = 2.50f;
+    private const float FarZoomExit = 2.20f;
     private const float SpatialCellSize = 96f;
+
+    private enum SemanticZoomBand
+    {
+        Near,
+        Mid,
+        Far
+    }
 
     private sealed class Label
     {
@@ -40,6 +49,8 @@ internal static class ObjectSceneLabelView
     private static int hoveredIndex = -1;
     private static int pendingHoverIndex = -1;
     private static double pendingHoverSince;
+    private static SemanticZoomBand semanticZoomBand;
+    private static bool semanticZoomInitialized;
 
     internal static bool OwnsMouse { get; private set; }
 
@@ -86,6 +97,8 @@ internal static class ObjectSceneLabelView
         hoveredIndex = -1;
         pendingHoverIndex = -1;
         pendingHoverSince = 0d;
+        semanticZoomBand = SemanticZoomBand.Near;
+        semanticZoomInitialized = false;
         OwnsMouse = false;
         ObjectSceneVisibilityState.Reset();
     }
@@ -99,6 +112,8 @@ internal static class ObjectSceneLabelView
             Nearly(cachedDisplay.X, display.X) && Nearly(cachedDisplay.Y, display.Y))
             return;
 
+        UpdateSemanticZoomBand(viewport, display);
+
         labels.Clear();
         placed.Clear();
         occupancy.Clear();
@@ -107,7 +122,7 @@ internal static class ObjectSceneLabelView
             EditorObjectSnapshot item = objects[i];
             if (item == null) continue;
             ObjectSceneVisibility visibility = ObjectSceneVisibilityState.Resolve(item);
-            if (visibility == ObjectSceneVisibility.Hidden || !PassesSemanticZoom(item, visibility, viewport, display))
+            if (visibility == ObjectSceneVisibility.Hidden || !PassesSemanticZoom(item, visibility))
                 continue;
 
             Num.Vector2 anchor = WorldToScreen(item.X, item.Y, viewport, display);
@@ -369,27 +384,51 @@ internal static class ObjectSceneLabelView
         ObjectSceneVisibilityState.SetHoveredIndex(index);
     }
 
-    private static bool PassesSemanticZoom(
-        EditorObjectSnapshot item,
-        ObjectSceneVisibility visibility,
-        EditorViewportSnapshot viewport,
-        Num.Vector2 display)
+    private static void UpdateSemanticZoomBand(EditorViewportSnapshot viewport, Num.Vector2 display)
     {
-        // Selection and explicit hover are never culled. Normal labels progressively reduce density
-        // as more world space is packed into each screen pixel; this keeps overview zooms readable
-        // without changing RoomSettings or the user's category visibility choices.
-        if (visibility is ObjectSceneVisibility.Selected or ObjectSceneVisibility.Hovered)
-            return true;
-
         float unitsPerPixelX = viewport.Width / Math.Max(1f, display.X);
         float unitsPerPixelY = viewport.Height / Math.Max(1f, display.Y);
         float unitsPerPixel = Math.Max(unitsPerPixelX, unitsPerPixelY);
 
-        if (unitsPerPixel >= FarWorldUnitsPerPixel)
-            return item.Importance >= 2;
-        if (unitsPerPixel >= MidWorldUnitsPerPixel)
-            return item.Importance >= 1;
-        return true;
+        if (!semanticZoomInitialized)
+        {
+            semanticZoomBand = unitsPerPixel >= FarZoomEnter
+                ? SemanticZoomBand.Far
+                : unitsPerPixel >= MidZoomEnter
+                    ? SemanticZoomBand.Mid
+                    : SemanticZoomBand.Near;
+            semanticZoomInitialized = true;
+            return;
+        }
+
+        semanticZoomBand = semanticZoomBand switch
+        {
+            SemanticZoomBand.Near when unitsPerPixel >= FarZoomEnter => SemanticZoomBand.Far,
+            SemanticZoomBand.Near when unitsPerPixel >= MidZoomEnter => SemanticZoomBand.Mid,
+            SemanticZoomBand.Mid when unitsPerPixel >= FarZoomEnter => SemanticZoomBand.Far,
+            SemanticZoomBand.Mid when unitsPerPixel <= MidZoomExit => SemanticZoomBand.Near,
+            SemanticZoomBand.Far when unitsPerPixel <= MidZoomExit => SemanticZoomBand.Near,
+            SemanticZoomBand.Far when unitsPerPixel <= FarZoomExit => SemanticZoomBand.Mid,
+            _ => semanticZoomBand
+        };
+    }
+
+    private static bool PassesSemanticZoom(
+        EditorObjectSnapshot item,
+        ObjectSceneVisibility visibility)
+    {
+        // Explicit user intent must beat density reduction. Search results, the focused category,
+        // selection and hover stay discoverable at every zoom level.
+        if (visibility is ObjectSceneVisibility.Selected or ObjectSceneVisibility.Hovered ||
+            ObjectSceneVisibilityState.IsExplicitlyEmphasized(item))
+            return true;
+
+        return semanticZoomBand switch
+        {
+            SemanticZoomBand.Far => item.Importance >= 2,
+            SemanticZoomBand.Mid => item.Importance >= 1,
+            _ => true
+        };
     }
 
     private static bool Nearly(float a, float b) => Math.Abs(a - b) <= 0.01f;
