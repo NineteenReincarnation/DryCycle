@@ -620,9 +620,14 @@ public static class DevToolObjectApi
         return definition;
     }
 
-    public static void RegisterObjectDescriptor(ObjectDescriptor descriptor)
+    public static void RegisterObjectDescriptor(ObjectDescriptor descriptor, int priority = 0)
     {
-        ObjectCatalog.RegisterDescriptor(descriptor);
+        ObjectCatalog.RegisterDescriptor(descriptor, priority);
+    }
+
+    public static bool UnregisterObjectDescriptor(ObjectDescriptor descriptor)
+    {
+        return ObjectCatalog.UnregisterDescriptor(descriptor);
     }
 }
 
