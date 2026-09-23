@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -27,5 +28,49 @@ internal static class ObjectPresentationIdentity
         {
             Value = Interlocked.Increment(ref nextId)
         }).Value;
+    }
+
+    internal static PlacedObject Resolve(List<PlacedObject> items, int fallbackIndex, long stableId)
+    {
+        if (items == null) return null;
+
+        if (stableId != 0L)
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                PlacedObject candidate = items[i];
+                if (candidate != null &&
+                    Ids.TryGetValue(candidate, out IdentityBox box) &&
+                    box.Value == stableId)
+                    return candidate;
+            }
+            return null;
+        }
+
+        return fallbackIndex >= 0 && fallbackIndex < items.Count
+            ? items[fallbackIndex]
+            : null;
+    }
+
+    internal static int ResolveIndex(List<PlacedObject> items, int fallbackIndex, long stableId)
+    {
+        if (items == null) return -1;
+
+        if (stableId != 0L)
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                PlacedObject candidate = items[i];
+                if (candidate != null &&
+                    Ids.TryGetValue(candidate, out IdentityBox box) &&
+                    box.Value == stableId)
+                    return i;
+            }
+            return -1;
+        }
+
+        return fallbackIndex >= 0 && fallbackIndex < items.Count
+            ? fallbackIndex
+            : -1;
     }
 }
