@@ -1,5 +1,5 @@
 param(
-    [string]$RainWorldDir = "D:\Application\Steam\steamapps\common\Rain World",
+    [string]$RainWorldDir = "D:\Steam\steamapps\common\Rain World",
     [string]$RWImGuiPluginDir = ""
 )
 
