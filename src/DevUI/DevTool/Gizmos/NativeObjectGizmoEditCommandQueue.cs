@@ -85,7 +85,32 @@ public static class NativeObjectGizmoEditCommandQueue
 
     private static void ProcessOne(EditorSession session, NativeObjectGizmoEditCommand command)
     {
-        if (session?.ToolMode != EditorToolMode.Objects)
+        if (session == null)
+            return;
+
+        // Deactivation can enqueue Cancel after ToolMode has already switched away from Objects.
+        // Cancel belongs to the transaction lifecycle, not to the currently visible page, so it
+        // must be allowed to drain off-page. It also has to clear the transaction even when the
+        // target temporarily cannot be resolved by its former collection index.
+        if (command.Kind == NativeObjectGizmoEditKind.Cancel)
+        {
+            if (string.IsNullOrEmpty(command.HandleId))
+                return;
+
+            string cancelKey = TransactionKey(command.ObjectIndex, command.StableId, command.HandleId);
+            if (!EditorContinuousTransactionHub.Cancel(session, cancelKey))
+                return;
+
+            PlacedObject restoredTarget = ObjectAt(session, command.ObjectIndex, command.StableId);
+            if (restoredTarget != null)
+            {
+                NativeObjectRuntimeReconciler.RefreshAfterMutation(session, restoredTarget);
+                MarkChanged(session, restoredTarget);
+            }
+            return;
+        }
+
+        if (session.ToolMode != EditorToolMode.Objects)
             return;
 
         PlacedObject target = ObjectAt(session, command.ObjectIndex, command.StableId);
@@ -145,13 +170,6 @@ public static class NativeObjectGizmoEditCommandQueue
                     NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(session, target);
                 break;
 
-            case NativeObjectGizmoEditKind.Cancel:
-                if (EditorContinuousTransactionHub.Cancel(session, transactionKey))
-                {
-                    NativeObjectRuntimeReconciler.RefreshAfterMutation(session, target);
-                    MarkChanged(session, target);
-                }
-                break;
         }
     }
 
