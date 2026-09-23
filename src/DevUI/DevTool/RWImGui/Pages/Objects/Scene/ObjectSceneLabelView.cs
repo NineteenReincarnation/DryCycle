@@ -14,6 +14,7 @@ internal static class ObjectSceneLabelView
     private const double HoverDelaySeconds = 0.12;
     private const float FarWorldUnitsPerPixel = 2.35f;
     private const float MidWorldUnitsPerPixel = 1.45f;
+    private const float SpatialCellSize = 96f;
 
     private sealed class Label
     {
@@ -28,6 +29,7 @@ internal static class ObjectSceneLabelView
 
     private static readonly List<Label> labels = new();
     private static readonly List<Label> placed = new();
+    private static readonly Dictionary<long, List<Label>> occupancy = new();
     private static EditorObjectSnapshot[] cachedObjects;
     private static long cachedVisibilityRevision = -1;
     private static float cameraX = float.NaN;
@@ -85,6 +87,7 @@ internal static class ObjectSceneLabelView
     {
         labels.Clear();
         placed.Clear();
+        occupancy.Clear();
         cachedObjects = null;
         cachedVisibilityRevision = -1;
         cameraX = cameraY = cameraWidth = cameraHeight = float.NaN;
@@ -107,6 +110,7 @@ internal static class ObjectSceneLabelView
 
         labels.Clear();
         placed.Clear();
+        occupancy.Clear();
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
@@ -143,6 +147,7 @@ internal static class ObjectSceneLabelView
         {
             Place(labels[i], display);
             placed.Add(labels[i]);
+            RegisterOccupancy(labels[i]);
         }
 
         placed.Sort((a, b) =>
@@ -200,16 +205,56 @@ internal static class ObjectSceneLabelView
 
     private static bool Overlaps(Num.Vector2 min, Num.Vector2 max)
     {
-        for (int i = 0; i < placed.Count; i++)
+        int minCellX = Cell(min.X - Gap);
+        int maxCellX = Cell(max.X + Gap);
+        int minCellY = Cell(min.Y - Gap);
+        int maxCellY = Cell(max.Y + Gap);
+
+        for (int y = minCellY; y <= maxCellY; y++)
         {
-            Label other = placed[i];
-            if (max.X + Gap < other.Min.X || min.X - Gap > other.Max.X ||
-                max.Y + Gap < other.Min.Y || min.Y - Gap > other.Max.Y)
-                continue;
-            return true;
+            for (int x = minCellX; x <= maxCellX; x++)
+            {
+                if (!occupancy.TryGetValue(CellKey(x, y), out List<Label> bucket))
+                    continue;
+
+                for (int i = 0; i < bucket.Count; i++)
+                {
+                    Label other = bucket[i];
+                    if (max.X + Gap < other.Min.X || min.X - Gap > other.Max.X ||
+                        max.Y + Gap < other.Min.Y || min.Y - Gap > other.Max.Y)
+                        continue;
+                    return true;
+                }
+            }
         }
         return false;
     }
+
+    private static void RegisterOccupancy(Label label)
+    {
+        int minCellX = Cell(label.Min.X - Gap);
+        int maxCellX = Cell(label.Max.X + Gap);
+        int minCellY = Cell(label.Min.Y - Gap);
+        int maxCellY = Cell(label.Max.Y + Gap);
+
+        for (int y = minCellY; y <= maxCellY; y++)
+        {
+            for (int x = minCellX; x <= maxCellX; x++)
+            {
+                long key = CellKey(x, y);
+                if (!occupancy.TryGetValue(key, out List<Label> bucket))
+                {
+                    bucket = new List<Label>(4);
+                    occupancy.Add(key, bucket);
+                }
+                bucket.Add(label);
+            }
+        }
+    }
+
+    private static int Cell(float value) => (int)Math.Floor(value / SpatialCellSize);
+
+    private static long CellKey(int x, int y) => ((long)x << 32) ^ (uint)y;
 
     private static void DrawLabel(ImDrawListPtr draw, Label label)
     {
