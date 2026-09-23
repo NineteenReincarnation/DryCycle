@@ -18,7 +18,7 @@ internal static class ObjectMarqueeSelectionView
 
     private static bool armed;
     private static bool dragging;
-    private static bool gridVisible = true;
+    private static bool gridVisible;
     private static float gridStep = 20f;
     private static Num.Vector2 start;
     private static Num.Vector2 current;
@@ -54,7 +54,7 @@ internal static class ObjectMarqueeSelectionView
         ImGuiIOPtr io = ImGui.GetIO();
         ObjectSceneProjectionPolicy.Update(viewport, display);
 
-        if (gridVisible)
+        if (gridVisible && (snapshot.Inspector?.SelectionCount ?? 0) > 0)
             DrawGrid(viewport, display, gridStep);
 
         if (!armed && !dragging)
@@ -113,7 +113,7 @@ internal static class ObjectMarqueeSelectionView
     internal static void ResetRetainedState()
     {
         Reset();
-        gridVisible = true;
+        gridVisible = false;
         gridStep = 20f;
     }
 
