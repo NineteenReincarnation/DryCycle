@@ -30,7 +30,7 @@
 
     <GameModRootDir Condition="'$(GameModRootDir)' == '' and '$(RainWorldDir)' != ''">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/Ancient Site</GameModRootDir>
     <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(GameModRootDir)' != ''">$(GameModRootDir)/newest/plugins</GameModOutputDir>
-    <GameModAssetsDir Condition="'$(GameModAssetsDir)' == '' and '$(GameModRootDir)' != ''">$(GameModAssetsDir)</GameModAssetsDir>
+    <GameModAssetsDir Condition="'$(GameModAssetsDir)' == '' and '$(GameModRootDir)' != ''">$(GameModRootDir)/assets/drycycle</GameModAssetsDir>
 
     <OutputPath Condition="'$(DeployToGame)' == 'true'">$(GameModOutputDir)</OutputPath>
   </PropertyGroup>
