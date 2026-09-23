@@ -112,7 +112,7 @@ PwnIteratorGraphics 使用白色面部、深色椭圆眼、额头大小圆环、
 本机核对的房间路径：
 
 ```text
-D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/ParchedWilderness/world/pwn-rooms/PWN_AI.txt
+D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/ParchedWilderness/world/pwn-rooms/PWN_AI.txt
 ```
 
 房间为 48×36 格。使用现有安全生成位置算法，当前文件生成于 `(470, 350)`；角色所有网格顶点位于空腔中。没有修改房间、调色板或世界连接。当前 world/pwn/world_pwn.txt 将 PWN_AI 标为 DISCONNECTED，游戏内验收需从已有房间测试或跳转入口进入。
