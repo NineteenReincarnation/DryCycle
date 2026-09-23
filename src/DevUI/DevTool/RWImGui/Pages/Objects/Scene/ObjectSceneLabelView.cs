@@ -149,7 +149,7 @@ internal static class ObjectSceneLabelView
         labels.Sort((a, b) =>
         {
             int p = b.Priority.CompareTo(a.Priority);
-            return p != 0 ? p : a.Item.Index.CompareTo(b.Item.Index);
+            return p != 0 ? p : CompareStableIdentity(a.Item, b.Item);
         });
 
         for (int i = 0; i < labels.Count; i++)
@@ -162,7 +162,7 @@ internal static class ObjectSceneLabelView
         placed.Sort((a, b) =>
         {
             int p = a.Priority.CompareTo(b.Priority);
-            return p != 0 ? p : a.Item.Index.CompareTo(b.Item.Index);
+            return p != 0 ? p : CompareStableIdentity(a.Item, b.Item);
         });
 
         cachedObjects = objects;
@@ -343,6 +343,18 @@ internal static class ObjectSceneLabelView
         draw.AddRectFilled(min, max, bg, 4f);
         draw.AddRect(min, max, border, 4f, ImDrawFlags.None, strong ? 1.2f : 1f);
         draw.AddText(min + new Num.Vector2(PaddingX, PaddingY), text, label.Text);
+    }
+
+    private static int CompareStableIdentity(EditorObjectSnapshot a, EditorObjectSnapshot b)
+    {
+        long aId = a?.StableId ?? 0L;
+        long bId = b?.StableId ?? 0L;
+        if (aId != 0L || bId != 0L)
+        {
+            int stable = aId.CompareTo(bId);
+            if (stable != 0) return stable;
+        }
+        return (a?.Index ?? -1).CompareTo(b?.Index ?? -1);
     }
 
     private static int Priority(EditorObjectSnapshot item, ObjectSceneVisibility visibility)
