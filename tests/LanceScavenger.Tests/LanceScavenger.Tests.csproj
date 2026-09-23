@@ -7,7 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <RainWorldDir Condition="'$(RainWorldDir)' == ''">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+    <RainWorldDir Condition="'$(RainWorldDir)' == ''">D:/Steam/steamapps/common/Rain World</RainWorldDir>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/DryCycle.csproj" AdditionalProperties="DeployToGame=false;BuildRWImGuiBridge=false" />
