@@ -15,6 +15,8 @@ internal static class ObjectSceneLabelView
     private const float FarWorldUnitsPerPixel = 2.35f;
     private const float MidWorldUnitsPerPixel = 1.45f;
     private const float SpatialCellSize = 96f;
+    private const float ClusterRadiusPixels = 18f;
+    private const float ClusterExpandPadding = 5f;
 
     private sealed class Label
     {
@@ -25,11 +27,14 @@ internal static class ObjectSceneLabelView
         internal Num.Vector2 Max;
         internal ObjectSceneVisibility Visibility;
         internal int Priority;
+        internal List<EditorObjectSnapshot> ClusterItems;
+        internal bool IsCluster => ClusterItems != null && ClusterItems.Count > 1;
     }
 
     private static readonly List<Label> labels = new();
     private static readonly List<Label> placed = new();
     private static readonly Dictionary<long, List<Label>> occupancy = new();
+    private static readonly Dictionary<long, List<Label>> clusterBuckets = new();
     private static EditorObjectSnapshot[] cachedObjects;
     private static long cachedVisibilityRevision = -1;
     private static float cameraX = float.NaN;
@@ -78,6 +83,16 @@ internal static class ObjectSceneLabelView
             return;
 
         OwnsMouse = true;
+        if (hit.IsCluster)
+        {
+            // A collapsed cluster selects its representative. Hovering expands the stack on the
+            // next retained layout, where every member becomes an independent text hit target.
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                io.KeyCtrl ? EditorUiCommandKind.ToggleObjectSelection : EditorUiCommandKind.SelectObject,
+                index: hit.Item.Index));
+            return;
+        }
+
         EditorUiCommandQueue.Enqueue(new EditorUiCommand(
             io.KeyCtrl ? EditorUiCommandKind.ToggleObjectSelection : EditorUiCommandKind.SelectObject,
             index: hit.Item.Index));
@@ -88,6 +103,7 @@ internal static class ObjectSceneLabelView
         labels.Clear();
         placed.Clear();
         occupancy.Clear();
+        clusterBuckets.Clear();
         cachedObjects = null;
         cachedVisibilityRevision = -1;
         cameraX = cameraY = cameraWidth = cameraHeight = float.NaN;
@@ -111,6 +127,7 @@ internal static class ObjectSceneLabelView
         labels.Clear();
         placed.Clear();
         occupancy.Clear();
+        clusterBuckets.Clear();
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
@@ -125,7 +142,7 @@ internal static class ObjectSceneLabelView
 
             string text = string.IsNullOrWhiteSpace(item.DisplayName) ? item.Type : item.DisplayName;
             Num.Vector2 size = ImGui.CalcTextSize(text) + new Num.Vector2(PaddingX * 2f, PaddingY * 2f);
-            labels.Add(new Label
+            Label label = new()
             {
                 Item = item,
                 Text = text,
@@ -134,8 +151,12 @@ internal static class ObjectSceneLabelView
                 Max = anchor + size,
                 Visibility = visibility,
                 Priority = Priority(item, visibility)
-            });
+            };
+            if (!TryMergeCluster(label))
+                labels.Add(label);
         }
+
+        FinalizeClusters();
 
         labels.Sort((a, b) =>
         {
@@ -164,6 +185,96 @@ internal static class ObjectSceneLabelView
         cameraHeight = viewport.Height;
         cachedDisplay = display;
     }
+
+    private static bool TryMergeCluster(Label candidate)
+    {
+        if (candidate.Visibility is ObjectSceneVisibility.Selected or ObjectSceneVisibility.Hovered)
+            return false;
+
+        int cx = ClusterCell(candidate.Anchor.X);
+        int cy = ClusterCell(candidate.Anchor.Y);
+        for (int y = cy - 1; y <= cy + 1; y++)
+        {
+            for (int x = cx - 1; x <= cx + 1; x++)
+            {
+                if (!clusterBuckets.TryGetValue(CellKey(x, y), out List<Label> bucket))
+                    continue;
+                for (int i = 0; i < bucket.Count; i++)
+                {
+                    Label root = bucket[i];
+                    if ((root.Anchor - candidate.Anchor).LengthSquared() > ClusterRadiusPixels * ClusterRadiusPixels)
+                        continue;
+                    root.ClusterItems ??= new List<EditorObjectSnapshot> { root.Item };
+                    root.ClusterItems.Add(candidate.Item);
+                    root.Priority = Math.Max(root.Priority, candidate.Priority);
+                    return true;
+                }
+            }
+        }
+
+        long key = CellKey(cx, cy);
+        if (!clusterBuckets.TryGetValue(key, out List<Label> ownBucket))
+        {
+            ownBucket = new List<Label>(4);
+            clusterBuckets.Add(key, ownBucket);
+        }
+        ownBucket.Add(candidate);
+        return false;
+    }
+
+    private static void FinalizeClusters()
+    {
+        for (int i = 0; i < labels.Count; i++)
+        {
+            Label label = labels[i];
+            if (!label.IsCluster) continue;
+
+            bool expand = false;
+            for (int m = 0; m < label.ClusterItems.Count; m++)
+            {
+                EditorObjectSnapshot member = label.ClusterItems[m];
+                if (member.Selected || member.Index == ObjectSceneVisibilityState.HoveredIndex)
+                {
+                    expand = true;
+                    break;
+                }
+            }
+
+            if (expand)
+            {
+                List<EditorObjectSnapshot> members = label.ClusterItems;
+                label.ClusterItems = null;
+                label.Text = string.IsNullOrWhiteSpace(label.Item.DisplayName) ? label.Item.Type : label.Item.DisplayName;
+                Num.Vector2 rootSize = ImGui.CalcTextSize(label.Text) + new Num.Vector2(PaddingX * 2f, PaddingY * 2f);
+                label.Max = label.Min + rootSize;
+                for (int m = 1; m < members.Count; m++)
+                {
+                    EditorObjectSnapshot member = members[m];
+                    ObjectSceneVisibility visibility = ObjectSceneVisibilityState.Resolve(member);
+                    string text = string.IsNullOrWhiteSpace(member.DisplayName) ? member.Type : member.DisplayName;
+                    Num.Vector2 size = ImGui.CalcTextSize(text) + new Num.Vector2(PaddingX * 2f, PaddingY * 2f);
+                    labels.Add(new Label
+                    {
+                        Item = member,
+                        Text = text,
+                        Anchor = label.Anchor + new Num.Vector2(0f, m * ClusterExpandPadding),
+                        Min = label.Anchor,
+                        Max = label.Anchor + size,
+                        Visibility = visibility,
+                        Priority = Priority(member, visibility)
+                    });
+                }
+                continue;
+            }
+
+            label.Text = (string.IsNullOrWhiteSpace(label.Item.DisplayName) ? label.Item.Type : label.Item.DisplayName) +
+                         "  +" + (label.ClusterItems.Count - 1) + " objects";
+            Num.Vector2 clusterSize = ImGui.CalcTextSize(label.Text) + new Num.Vector2(PaddingX * 2f, PaddingY * 2f);
+            label.Max = label.Min + clusterSize;
+        }
+    }
+
+    private static int ClusterCell(float value) => (int)Math.Floor(value / ClusterRadiusPixels);
 
     private static void Place(Label label, Num.Vector2 display)
     {
