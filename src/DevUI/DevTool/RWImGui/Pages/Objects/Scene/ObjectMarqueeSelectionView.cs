@@ -150,7 +150,8 @@ internal static class ObjectMarqueeSelectionView
             {
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.ToggleObjectSelection,
-                    index: item.Index));
+                    index: item.Index,
+                    stableId: item.StableId));
                 continue;
             }
 
@@ -160,7 +161,8 @@ internal static class ObjectMarqueeSelectionView
 
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.ToggleObjectSelection,
-                index: item.Index));
+                index: item.Index,
+                stableId: item.StableId));
         }
     }
 
