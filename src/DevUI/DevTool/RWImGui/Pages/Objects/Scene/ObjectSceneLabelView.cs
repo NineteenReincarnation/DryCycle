@@ -334,6 +334,10 @@ internal static class ObjectSceneLabelView
         double now = ImGui.GetTime();
         if (pendingHoverIndex != index)
         {
+            // Do not leave the previous label visually hot while the pointer settles on another
+            // candidate. The new candidate still waits for the debounce before expanding.
+            if (hoveredIndex >= 0)
+                SetHover(-1);
             pendingHoverIndex = index;
             pendingHoverSince = now;
             return;
