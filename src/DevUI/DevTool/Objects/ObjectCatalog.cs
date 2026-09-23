@@ -28,9 +28,15 @@ public sealed class ObjectDescriptor
         int importance = 0)
     {
         Type = type ?? throw new ArgumentNullException(nameof(type));
-        DisplayName = displayName ?? type.value ?? "Unknown";
-        Category = category ?? "Unsorted";
-        Source = source ?? "Registered Object";
+        DisplayName = string.IsNullOrWhiteSpace(displayName)
+            ? type.value ?? "Unknown"
+            : displayName.Trim();
+        Category = string.IsNullOrWhiteSpace(category)
+            ? "Unsorted"
+            : category.Trim();
+        Source = string.IsNullOrWhiteSpace(source)
+            ? "Registered Object"
+            : source.Trim();
         Tags = tags == null
             ? Array.Empty<string>()
             : tags.Where(tag => !string.IsNullOrWhiteSpace(tag))
@@ -246,34 +252,52 @@ public static class ObjectCatalog
     private static string GuessCategory(string name)
     {
         string lower = name?.ToLowerInvariant() ?? string.Empty;
+        if (lower.Contains("connection") || lower.Contains("link")) return "Connections";
+        if (lower.Contains("trigger") || lower.Contains("gate")) return "Triggers";
+        if (lower.Contains("spline") || lower.Contains("path")) return "Paths";
         if (lower.Contains("light") || lower.Contains("sun") || lower.Contains("dark")) return "Lighting";
         if (lower.Contains("sound") || lower.Contains("ambient") || lower.Contains("music")) return "Sound";
-        if (lower.Contains("water") || lower.Contains("steam") || lower.Contains("wind")) return "Environment";
-        if (lower.Contains("zone") || lower.Contains("rect") || lower.Contains("filter")) return "Zones";
-        if (lower.Contains("creature") || lower.Contains("scav") || lower.Contains("bat") || lower.Contains("lizard")) return "Creatures";
-        if (lower.Contains("decal") || lower.Contains("projected") || lower.Contains("cosmetic")) return "Decoration";
+        if (lower.Contains("water") || lower.Contains("steam") || lower.Contains("wind") ||
+            lower.Contains("flow") || lower.Contains("geyser") || lower.Contains("fog"))
+            return "Environment";
+        if (lower.Contains("zone") || lower.Contains("rect") || lower.Contains("filter") ||
+            lower.Contains("area") || lower.Contains("cutoff"))
+            return "Zones";
+        if (lower.Contains("creature") || lower.Contains("scav") || lower.Contains("bat") ||
+            lower.Contains("lizard") || lower.Contains("spawn"))
+            return "Creatures";
+        if (lower.Contains("decal") || lower.Contains("projected") || lower.Contains("cosmetic"))
+            return "Decoration";
         return "Unsorted";
     }
 
     private static ObjectPresentationKind GuessPresentationKind(string name)
     {
         string lower = name?.ToLowerInvariant() ?? string.Empty;
-        if (lower.Contains("spline") || lower.Contains("path")) return ObjectPresentationKind.Path;
+        if (lower.Contains("connection") || lower.Contains("link"))
+            return ObjectPresentationKind.Connection;
+        if (lower.Contains("spline") || lower.Contains("path"))
+            return ObjectPresentationKind.Path;
         if (lower.Contains("rect") || lower.Contains("zone") || lower.Contains("area") || lower.Contains("cutoff"))
             return ObjectPresentationKind.Area;
         if (lower.Contains("flow") || lower.Contains("wind") || lower.Contains("jet") || lower.Contains("direction"))
             return ObjectPresentationKind.Directional;
         if (lower.Contains("light") || lower.Contains("radius") || lower.Contains("circle") || lower.Contains("spot"))
             return ObjectPresentationKind.Radius;
-        if (lower.Contains("connection") || lower.Contains("link")) return ObjectPresentationKind.Connection;
+        if (lower.Contains("fog") || lower.Contains("field") || lower.Contains("volume"))
+            return ObjectPresentationKind.Volume;
         return ObjectPresentationKind.Point;
     }
 
     private static int GuessImportance(string name)
     {
         string lower = name?.ToLowerInvariant() ?? string.Empty;
-        if (lower.Contains("trigger") || lower.Contains("gate") || lower.Contains("connection")) return 2;
-        if (lower.Contains("zone") || lower.Contains("path") || lower.Contains("light")) return 1;
+        if (lower.Contains("trigger") || lower.Contains("gate") ||
+            lower.Contains("connection") || lower.Contains("link"))
+            return 2;
+        if (lower.Contains("zone") || lower.Contains("path") ||
+            lower.Contains("spline") || lower.Contains("light"))
+            return 1;
         return 0;
     }
 
