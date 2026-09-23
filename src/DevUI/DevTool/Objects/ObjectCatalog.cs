@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DryCycle.DevUI.DevTool.Factories;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
@@ -233,11 +234,14 @@ public static class ObjectCatalog
     {
         string name = SplitPascal(type.value);
         string category = GuessCategory(type.value);
+        string source = GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), type.value)
+            ? "Rain World"
+            : "Unattributed Registry";
         return new ObjectDescriptor(
             type,
             name,
             category,
-            "Rain World registry",
+            source,
             GuessTags(type.value),
             GuessPresentationKind(type.value),
             GuessImportance(type.value));
