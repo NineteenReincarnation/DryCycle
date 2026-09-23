@@ -19,6 +19,7 @@
     <DryCycleWeatherBundleSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather</DryCycleWeatherBundleSource>
     <DryCycleWeatherBundleVersionSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather.version.txt</DryCycleWeatherBundleVersionSource>
     <DryCycleUnityEditor Condition="'$(DryCycleUnityEditor)' == '' and '$(UNITY_EDITOR)' != ''">$(UNITY_EDITOR)</DryCycleUnityEditor>
+    <DryCycleShaderBuildLog Condition="'$(DryCycleShaderBuildLog)' == ''">$(MSBuildProjectDirectory)/obj/unity-shader-build.log</DryCycleShaderBuildLog>
   </PropertyGroup>
 
   <!-- RainWorldDir is the single local-install source of truth. Game/mod deployment paths
@@ -169,9 +170,18 @@
           Condition="'$(BuildDryCycleAssets)' == 'true'">
     <Error Condition="'$(DryCycleUnityEditor)' == ''"
            Text="BuildDryCycleAssets=true requires DryCycleUnityEditor (or UNITY_EDITOR) to point at Unity.exe." />
+    <Error Condition="'$(DryCycleUnityEditor)' != '' and !Exists('$(DryCycleUnityEditor)')"
+           Text="Unity Editor not found: $(DryCycleUnityEditor). Update DryCycleUnityEditor or UNITY_EDITOR after reinstalling Unity." />
     <Error Condition="!Exists('$(DryCycleShaderProjectDir)/Assets/Editor/BuildDryCycleWeatherBundle.cs')"
            Text="DryCycle shader project is missing: $(DryCycleShaderProjectDir)" />
-    <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile -" />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(DryCycleShaderBuildLog)'))" />
+    <Message Importance="high" Text="Unity shader build log: $(DryCycleShaderBuildLog)" />
+    <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile &quot;$(DryCycleShaderBuildLog)&quot;"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="DryCycleShaderBuildExitCode" />
+    </Exec>
+    <Error Condition="'$(DryCycleShaderBuildExitCode)' != '0'"
+           Text="Unity shader build failed with exit code $(DryCycleShaderBuildExitCode). See $(DryCycleShaderBuildLog)." />
   </Target>
 
   <Target Name="DeployLanceScavengerAtlases" AfterTargets="PostBuildEvent"

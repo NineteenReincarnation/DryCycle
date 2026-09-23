@@ -73,6 +73,24 @@ The resulting files are written directly to:
 
 ## Command-line build
 
+From the repository root, build both shader bundles and deploy them together with the DLLs:
+
+```powershell
+.\scripts\Build-Shaders.ps1
+# For a custom Unity installation:
+.\scripts\Build-Shaders.ps1 -UnityEditor 'E:/Application/Unity/Editor/Unity.exe'
+```
+
+The script reads the required editor version from `ProjectSettings/ProjectVersion.txt`,
+checks `UNITY_EDITOR` or the matching standard Unity Hub installation, and reports a
+missing editor before starting the build. It also finds the standard .NET SDK when
+the current terminal has not refreshed its PATH after installation.
+
+Shader bundles are built into the repository's `mod/assets/drycycle` directory and
+deployed to `D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/assets/drycycle`.
+DLLs go to the same mod's `newest/plugins` directory. Use `-RainWorldDir` to select
+another game installation. The data folder is `RainWorld_Data` (one directory).
+
 The C# project has an optional MSBuild bridge:
 
 ```powershell
@@ -82,6 +100,11 @@ dotnet build .\src\DryCycle.csproj -c Release `
 ```
 
 You can also set the `UNITY_EDITOR` environment variable instead of passing `DryCycleUnityEditor`.
+
+Unity must have an active editor license before a batch build can run. The build
+writes Unity's diagnostic log to `src/obj/unity-shader-build.log` and fails with
+the editor's exit code if compilation or startup fails. Override
+`DryCycleShaderBuildLog` to choose another log path.
 
 A normal Release build automatically copies an existing bundle and its version sidecar into the active Ancient Site mod at `assets/drycycle/`. If no bundle exists, the build emits a warning. Fog uses its compatibility renderer; HeatWave still retains its built-in `LevelHeat` primary deformation while the custom atmosphere pass is unavailable.
 
