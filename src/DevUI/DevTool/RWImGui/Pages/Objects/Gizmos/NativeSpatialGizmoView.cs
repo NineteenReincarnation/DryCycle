@@ -47,9 +47,12 @@ internal static class NativeSpatialGizmoView
         for (int i = 0; i < snapshot.SceneObjects.Length; i++)
         {
             EditorObjectSnapshot item = snapshot.SceneObjects[i];
-            if (item == null) continue;
+            if (item == null || !item.Selected) continue;
+
+            // Text labels are the normal object identity/hit surface. A point is retained only for
+            // selected objects, where it is an explicit position-edit handle rather than an icon.
             Num.Vector2 p = WorldToScreen(viewport, display, item.X, item.Y);
-            DrawPoint(draw, p, item.Selected);
+            DrawPoint(draw, p, selected: true);
             float distance = DistanceSquared(mouse, p);
             if (distance < nearestDistance && distance <= HitRadius * HitRadius)
             {
