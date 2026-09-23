@@ -14,41 +14,11 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class ObjectSceneWorkspaceView
 {
-    private sealed class ObjectSceneRow : IDevToolExplorerListItem
-    {
-        internal EditorObjectSnapshot Item;
-        internal string Category;
-        internal string Label;
-        internal string TooltipText;
-
-        public string StableId => "CenterSceneObject:" + (Item?.StableId ?? 0L);
-        public string PrimaryText => Label ?? string.Empty;
-        public string SecondaryText => string.Empty;
-        public string StatusText => string.Empty;
-        public string Tooltip => TooltipText ?? string.Empty;
-    }
-
-    private sealed class ObjectSceneGroup
-    {
-        internal string Source;
-        internal DevToolSourceMark SourceMark;
-        internal readonly List<ObjectSceneRow> Rows = new();
-    }
-
     private static readonly float[] GridSteps = { 10f, 20f, 40f };
 
     private static string search = string.Empty;
-    private static int selectionAnchor = -1;
     private static long selectionAnchorStableId;
     private static int gridStepIndex = 1;
-
-    private static EditorObjectSnapshot[] projectedObjects;
-    private static string projectedSearch = string.Empty;
-    private static bool projectedChinese;
-    private static readonly Dictionary<string, ObjectSceneGroup> GroupsBySource =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static readonly List<ObjectSceneGroup> ProjectedGroups = new();
-    private static int projectedMatchCount;
 
     private static string observedSearch;
     private static string normalizedSearch = string.Empty;
@@ -61,16 +31,9 @@ internal static class ObjectSceneWorkspaceView
 
     internal static void ResetRetainedState()
     {
-        projectedObjects = null;
-        projectedSearch = string.Empty;
-        projectedChinese = false;
-        GroupsBySource.Clear();
-        ProjectedGroups.Clear();
-        projectedMatchCount = 0;
         search = string.Empty;
         observedSearch = null;
         normalizedSearch = string.Empty;
-        selectionAnchor = -1;
         selectionAnchorStableId = 0L;
         gridStepIndex = 1;
         statusObjectCount = -1;
@@ -84,8 +47,6 @@ internal static class ObjectSceneWorkspaceView
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
-
-        ReconcileSelectionAnchor(objects);
 
         DevToolWidgets.MutedText(GetStatusText(objects.Length, selectedCount));
 
@@ -227,41 +188,42 @@ internal static class ObjectSceneWorkspaceView
         ImGui.Separator();
         ImGui.Spacing();
 
-        EnsureProjection(objects);
+        ObjectSceneListProjectionSnapshot projection =
+            ObjectSceneListProjection.Get(objects, SearchQuery());
 
         ImGuiIOPtr io = ImGui.GetIO();
-        for (int sourceIndex = 0; sourceIndex < ProjectedGroups.Count; sourceIndex++)
+        ObjectSceneProjectedCategory[] categories = projection.Categories;
+        for (int categoryIndex = 0; categoryIndex < categories.Length; categoryIndex++)
         {
-            ObjectSceneGroup group = ProjectedGroups[sourceIndex];
-            DevToolWidgets.SourceHeader(group.SourceMark, 1.34f, 1f);
+            ObjectSceneProjectedCategory category = categories[categoryIndex];
+            if (categoryIndex > 0) ImGui.Spacing();
 
-            string lastCategory = null;
-            List<ObjectSceneRow> rows = group.Rows;
+            ObjectSceneFilterControls.DrawCategoryHeader(
+                category.Category,
+                "CenterScene");
+
+            List<ObjectSceneProjectedRow> rows = category.Rows;
             for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
             {
-                ObjectSceneRow row = rows[rowIndex];
+                ObjectSceneProjectedRow row = rows[rowIndex];
                 EditorObjectSnapshot item = row.Item;
-
-                if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
-                {
-                    lastCategory = row.Category;
-                    ObjectSceneFilterControls.DrawCategoryHeader(
-                        row.Category,
-                        "Center:" + group.Source);
-                }
-
                 if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
                     continue;
 
-                if (io.KeyShift && selectionAnchor >= 0)
+                if (io.KeyShift && selectionAnchorStableId != 0L)
                 {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.SelectObjectRange,
-                        index: item.Index,
-                        secondaryIndex: selectionAnchor,
-                        flag: io.KeyCtrl,
-                        stableId: item.StableId,
-                        secondaryStableId: selectionAnchorStableId));
+                    if (!ObjectSceneListProjection.EnqueueRangeSelection(
+                            projection,
+                            selectionAnchorStableId,
+                            item.StableId,
+                            io.KeyCtrl))
+                    {
+                        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                            EditorUiCommandKind.SelectObject,
+                            item.Index,
+                            stableId: item.StableId));
+                        selectionAnchorStableId = item.StableId;
+                    }
                 }
                 else if (io.KeyCtrl)
                 {
@@ -269,7 +231,6 @@ internal static class ObjectSceneWorkspaceView
                         EditorUiCommandKind.ToggleObjectSelection,
                         item.Index,
                         stableId: item.StableId));
-                    selectionAnchor = item.Index;
                     selectionAnchorStableId = item.StableId;
                 }
                 else
@@ -278,39 +239,13 @@ internal static class ObjectSceneWorkspaceView
                         EditorUiCommandKind.SelectObject,
                         item.Index,
                         stableId: item.StableId));
-                    selectionAnchor = item.Index;
                     selectionAnchorStableId = item.StableId;
                 }
             }
         }
 
-        if (projectedMatchCount == 0)
+        if (projection.MatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
-    }
-
-    private static void ReconcileSelectionAnchor(EditorObjectSnapshot[] objects)
-    {
-        if (selectionAnchorStableId == 0L)
-        {
-            if (selectionAnchor < 0 || selectionAnchor >= objects.Length)
-                selectionAnchor = -1;
-            return;
-        }
-
-        if (selectionAnchor >= 0 &&
-            selectionAnchor < objects.Length &&
-            objects[selectionAnchor]?.StableId == selectionAnchorStableId)
-            return;
-
-        selectionAnchor = -1;
-        for (int i = 0; i < objects.Length; i++)
-        {
-            if (objects[i]?.StableId != selectionAnchorStableId) continue;
-            selectionAnchor = i;
-            return;
-        }
-
-        selectionAnchorStableId = 0L;
     }
 
     private static void DrawAlignButton(
@@ -340,74 +275,6 @@ internal static class ObjectSceneWorkspaceView
         statusChinese = chinese;
         statusValid = true;
         return statusText;
-    }
-
-    private static void EnsureProjection(EditorObjectSnapshot[] objects)
-    {
-        string query = SearchQuery();
-        bool chinese = DevToolUiSettings.IsChinese;
-
-        if (ReferenceEquals(projectedObjects, objects) &&
-            string.Equals(projectedSearch, query, StringComparison.Ordinal) &&
-            projectedChinese == chinese)
-            return;
-
-        ProjectedGroups.Clear();
-        GroupsBySource.Clear();
-        projectedMatchCount = 0;
-
-        for (int i = 0; i < objects.Length; i++)
-        {
-            EditorObjectSnapshot item = objects[i];
-            if (item == null || !ObjectSceneVisibilityState.MatchesQuery(item, query)) continue;
-
-            string source = string.IsNullOrWhiteSpace(item.Source)
-                ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                : item.Source;
-            string category = string.IsNullOrWhiteSpace(item.Category)
-                ? DevToolUiSettings.T("未分类", "Unsorted")
-                : item.Category;
-            string displayName = string.IsNullOrWhiteSpace(item.DisplayName)
-                ? item.Type
-                : item.DisplayName;
-
-            if (!GroupsBySource.TryGetValue(source, out ObjectSceneGroup group))
-            {
-                group = new ObjectSceneGroup
-                {
-                    Source = source,
-                    SourceMark = DevToolSourcePresentation.FromLabel(source)
-                };
-                GroupsBySource.Add(source, group);
-                ProjectedGroups.Add(group);
-            }
-
-            group.Rows.Add(new ObjectSceneRow
-            {
-                Item = item,
-                Category = category,
-                Label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")",
-                TooltipText = source + " · " + item.Type + " · " + category
-            });
-            projectedMatchCount++;
-        }
-
-        for (int i = 0; i < ProjectedGroups.Count; i++)
-        {
-            ProjectedGroups[i].Rows.Sort((a, b) =>
-            {
-                int category = string.Compare(a.Category, b.Category, StringComparison.OrdinalIgnoreCase);
-                if (category != 0) return category;
-                long aId = a.Item?.StableId ?? 0L;
-                long bId = b.Item?.StableId ?? 0L;
-                int stable = aId.CompareTo(bId);
-                return stable != 0 ? stable : (a.Item?.Index ?? -1).CompareTo(b.Item?.Index ?? -1);
-            });
-        }
-
-        projectedObjects = objects;
-        projectedSearch = query;
-        projectedChinese = chinese;
     }
 
     private static string SearchQuery()
