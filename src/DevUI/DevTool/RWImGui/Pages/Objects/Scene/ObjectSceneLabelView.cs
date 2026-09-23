@@ -77,7 +77,8 @@ internal static class ObjectSceneLabelView
         OwnsMouse = true;
         EditorUiCommandQueue.Enqueue(new EditorUiCommand(
             io.KeyCtrl ? EditorUiCommandKind.ToggleObjectSelection : EditorUiCommandKind.SelectObject,
-            index: hit.Item.Index));
+            index: hit.Item.Index,
+            stableId: hit.Item.StableId));
     }
 
     internal static void ResetRetainedState()
