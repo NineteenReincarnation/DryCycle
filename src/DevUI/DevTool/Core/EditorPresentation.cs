@@ -12,6 +12,7 @@ namespace DryCycle.DevUI.DevTool.Core;
 public sealed class EditorObjectSnapshot
 {
     public int Index { get; init; }
+    public long StableId { get; init; }
     public string Type { get; init; }
     public string DisplayName { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
