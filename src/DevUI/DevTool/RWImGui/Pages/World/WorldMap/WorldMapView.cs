@@ -136,12 +136,6 @@ internal static class WorldMapView
         ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
         ImGui.SameLine();
         ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
-        ImGui.SameLine(0f, 14f);
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("适配", "Fit"), "WorldMapFit", DevToolButtonTone.Subtle))
-            fitRequested = true;
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton("100%", "WorldMapZoom100", DevToolButtonTone.Subtle))
-            zoom = 1f;
 
         if (!compact) ImGui.SameLine(0f, 16f);
         else ImGui.Spacing();

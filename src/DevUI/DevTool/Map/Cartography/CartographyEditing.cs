@@ -26,6 +26,7 @@ internal sealed class CartographyCommand
     internal CartographyLayer Layer;
     internal CartographyDocument Style = null;
     internal string Path = string.Empty;
+    internal bool RefreshSource = false;
     internal CartographyItem[] Items = Array.Empty<CartographyItem>();
 }
 

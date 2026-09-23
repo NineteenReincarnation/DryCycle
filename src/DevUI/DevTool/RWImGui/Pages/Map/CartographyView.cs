@@ -35,14 +35,23 @@ internal static partial class CartographyView
 
     internal static void Leave()
     {
-        CommitDraft();
-        CommitLayer();
-        SaveStyle();
+        LeaveDrafts();
+        CartographyRuntime.SetActive(false);
+    }
+
+    private static void FinishGesture()
+    {
         // Release a live drag before hiding the view so author movement is not silently lost.
         if (dragging && observed != null && delta.LengthSquared() > 0.001f)
             Send(CartographyCommandKind.Move, command => { command.Ids = Selection.ToArray(); command.X = delta.X; command.Y = delta.Y; command.Revision = gestureRevision; });
+        if (routeGesture != null && observed != null)
+        {
+            CartographyItem completed = routeGesture;
+            Send(CartographyCommandKind.UpdateItem, command => { command.Item = completed; command.Revision = routeRevision; });
+        }
+        routeGesture = null;
+        routeHandle = -1;
         dragging = marquee = false; delta = default;
-        CartographyRuntime.SetActive(false);
     }
 
     internal static void Draw(EditorPresentationSnapshot editor)
@@ -58,8 +67,7 @@ internal static partial class CartographyView
         }
         if (observed?.Identity != snapshot.Identity)
         {
-            Leave();
-            CartographyRuntime.SetActive(true);
+            LeaveDrafts();
             Selection.Clear(); selectedItem = pendingSelection = string.Empty; draft = null; layerDraft = null; styleDraft = null;
             activeLayer = "notes"; fit = true; fitSelection = false;
             string directory = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), "Exports");

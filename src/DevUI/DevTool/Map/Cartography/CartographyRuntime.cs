@@ -3,10 +3,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
-using DryCycle.DevUI.DevTool.Map.PlayerMap;
 
 namespace DryCycle.DevUI.DevTool.Map.Cartography;
 
@@ -29,14 +29,12 @@ internal static partial class CartographyRuntime
         internal CartographyDocument Document;
         internal CartographySource Source;
         internal CartographyScene Scene;
-        internal readonly CartographySceneCache SceneCache = new();
-        internal readonly Dictionary<string, RoomMapBakeSnapshot> Bakes = new(StringComparer.OrdinalIgnoreCase);
+        internal CartographySceneCache SceneCache = new();
+        internal long LastUsed;
         internal long Revision = 1;
         internal string Status = string.Empty, ExportPath = string.Empty;
         internal readonly EditorHistoryService History = new(64);
         internal Task<CartographyExportResult> Export;
-        internal PlayerMapPresentationSnapshot ObservedPlayer;
-        internal EditorMapPresentationSnapshot ObservedWorld;
         internal bool LoadFailed;
         internal bool Dirty => Document != null && AuthorText != SavedText;
     }
@@ -49,7 +47,6 @@ internal static partial class CartographyRuntime
     private static Workspace current;
     private static EditorSession currentSession;
     private static global::World observedWorld;
-    private static string observedIdentity;
     private static volatile bool active;
     private static volatile CartographyPresentation presentation = CartographyPresentation.Empty;
 
@@ -59,7 +56,11 @@ internal static partial class CartographyRuntime
         !EditorUiModeState.UseVanilla && !EditorUiModeState.OverlayHidden;
     internal static EditorHistoryService HistoryFor(EditorSession session) => ActiveFor(session) && current != null ? current.History : session?.History;
 
-    internal static void SetActive(bool value) => active = value;
+    internal static void SetActive(bool value)
+    {
+        if (value && !active) Interlocked.Exchange(ref followPlayerRequested, 1);
+        active = value;
+    }
 
     internal static void Enqueue(CartographyCommand command)
     {
@@ -125,7 +126,7 @@ internal static partial class CartographyRuntime
         // Already released drag/inspector commands belong to named retained documents; commit them
         // before closing the frontend. No dirty author state is reset here.
         CommitDrafts(); FlushCommands();
-        active = false; currentSession = null; observedWorld = null; observedIdentity = null;
+        active = false; currentSession = null; observedWorld = null;
         presentation = CartographyPresentation.Empty;
     }
 
@@ -138,8 +139,8 @@ internal static partial class CartographyRuntime
         {
             if (command.Kind == CartographyCommandKind.SelectRegion || command.Kind == CartographyCommandKind.ImportCornifer)
             {
-                try { independentRegion = true; RequestSource(command.LayerId, command.Item?.Text ?? "White", command.Path, command.Kind == CartographyCommandKind.ImportCornifer); }
-                catch (Exception error) { sourceStatus = error.Message; Plugin.Logger?.LogError("Cartography source request failed: " + error); if(current!=null){current.Status=error.Message;Publish(current);}else presentation=new CartographyPresentation{Status=error.Message}; }
+                try { RequestSource(command.LayerId, command.Item?.Text, command.Path, command.Kind == CartographyCommandKind.ImportCornifer, command.RefreshSource); }
+                catch (Exception error) { SourceFailure(error); success = false; }
                 continue;
             }
             if (command.DocumentId == null || !Documents.TryGetValue(command.DocumentId, out Workspace workspace))
@@ -259,47 +260,6 @@ internal static partial class CartographyRuntime
     { workspace.Status = message + ": " + error.Message; Plugin.Logger?.LogError(message + ": " + error); }
     private static void Log(string message) => Plugin.Logger?.LogWarning(message);
 
-    private static string Identity(EditorSession session)
-    {
-        if (ReferenceEquals(observedWorld, session.World) && observedIdentity != null) return observedIdentity;
-        string source = AssetManager.ResolveFilePath("World" + Path.DirectorySeparatorChar + session.World.name + Path.DirectorySeparatorChar + "world_" + session.World.name + ".txt");
-        observedWorld = session.World;
-        return observedIdentity = Path.GetFullPath(source).ToLowerInvariant() + "|" + session.World.name + "|" +
-            (session.World.game?.StoryCharacter?.value ?? "default") + "|" + (session.World.game?.TimelinePoint?.value ?? "default");
-    }
-
     private static string ProjectPath(string identity, string region) => Path.Combine(BepInEx.Paths.ConfigPath, "DryCycle", "Cartography",
         new string(region.Where(char.IsLetterOrDigit).ToArray()) + "-" + CartographyStorage.HashText(identity).Substring(0, 16) + ".xml");
-
-    private static CartographySource Source(PlayerMapPresentationSnapshot player, EditorMapPresentationSnapshot world, Workspace workspace)
-    {
-        CartographySource source = new();
-        Dictionary<int, string> names = new();
-        foreach (PlayerMapRoomSnapshot room in player.Rooms)
-        {
-            RoomMapBakeSnapshot bake = room.Bake;
-            names[room.RoomIndex] = room.Name;
-            if (workspace.Source != null && workspace.Source.Rooms.TryGetValue(room.Name, out CartographyRoomSource previous) &&
-                workspace.Bakes.TryGetValue(room.Name, out RoomMapBakeSnapshot oldBake) &&
-                ReferenceEquals(oldBake.Runs, bake.Runs) && ReferenceEquals(oldBake.NodeAnchors, bake.NodeAnchors) && oldBake.Status == bake.Status &&
-                oldBake.Error == bake.Error && oldBake.Width == bake.Width && oldBake.Height == bake.Height &&
-                previous.Layer == room.Layer && previous.Disabled == room.Disabled && previous.X == room.EffectivePosition.x && previous.Y == room.EffectivePosition.y)
-            { source.Rooms[room.Name] = previous; continue; }
-            CartographyRoomSource entry = new()
-            {
-                Name = room.Name, Layer = room.Layer, X = room.EffectivePosition.x, Y = room.EffectivePosition.y,
-                Width = bake.Width, Height = bake.Height, Ready = bake.Status == RoomMapBakeStatus.Ready, Disabled = room.Disabled, Error = bake.Error,
-                Runs = bake.Runs.Select(run => new CartographyTileRun(run.X, run.Y, run.Length, (int)run.Kind, run.Water)).ToArray()
-            };
-            foreach (RoomMapNodeAnchorSnapshot port in bake.NodeAnchors) entry.Ports[port.NodeIndex] = new CartographyRect(port.EntranceX, port.EntranceY, 0, 0);
-            source.Rooms[room.Name] = entry; workspace.Bakes[room.Name] = bake;
-        }
-        foreach (EditorMapConnectionSnapshot connection in world.Connections)
-        {
-            if (!names.TryGetValue(connection.FromRoomIndex, out string from) || !names.TryGetValue(connection.ToRoomIndex, out string to)) continue;
-            source.Connections.Add(new CartographyConnectionSource { From = from, To = to, FromPort = connection.FromNodeIndex, ToPort = connection.ToNodeIndex, Ambiguous = connection.Ambiguous });
-        }
-        foreach (string name in workspace.Bakes.Keys.Where(name => !source.Rooms.ContainsKey(name)).ToArray()) workspace.Bakes.Remove(name);
-        return source;
-    }
 }

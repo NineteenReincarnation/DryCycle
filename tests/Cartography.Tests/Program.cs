@@ -18,8 +18,9 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
-            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity();
-            if (args.Length > 1) CorniferRegion(args[1]);
+            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity(); RegionLoading(); RuntimeLoading();
+            if (args.Length > 2 && args[1] == "--game") GameRegions(args[2]);
+            else if (args.Length > 1) CorniferRegion(args[1]);
             Console.WriteLine("PASS: " + assertions + " assertions; production authoring / atomic persistence / PNG, SVG and layer export.");
             Console.WriteLine("Visual fixture: " + Path.Combine(output, "cartography-preview.png"));
             return 0;
@@ -98,10 +99,11 @@ internal static partial class Program
         CartographySceneNode connection = scene.Nodes.First(node => node.FromId != null);
         Check(Math.Abs(connection.FromX - 28.5f) < .01f, "Room-local source port X is translated exactly once.");
         Check(Math.Abs(connection.FromY + 1.5f) < .01f, "Room-local source port Y flips only once.");
-        source.Connections[0].ToPort = 99;
-        CartographyScene unresolved = CartographySceneBuilder.Build(document, source);
-        Check(unresolved.Warnings.Length == 1 && unresolved.Nodes.First(node => node.FromId != null).Primitives.All(primitive => primitive.Dashed), "Unresolved endpoints must remain visibly approximate.");
-        source.Connections[0].ToPort = 0;
+        CartographyDocument missingPort = document.Clone();
+        missingPort.Items.First(item => item.Kind == CartographyItemKind.Connection).Appearance.ToPort = 99;
+        CartographyScene unresolved = CartographySceneBuilder.Build(missingPort, source);
+        CartographySceneNode unresolvedLink = unresolved.Nodes.First(node => node.FromId != null);
+        Check(unresolved.Warnings.Length == 1 && unresolvedLink.Ambiguous && unresolvedLink.Primitives.Any(primitive => primitive.Dashed), "Unresolved authored endpoints must remain visibly approximate (outlines and endpoint markers are separate primitives).");
         source.Rooms["SU_A02"].Ready = false;
         CartographyScene incomplete = CartographySceneBuilder.Build(document, source);
         Check(incomplete.Errors.Length == 1, "Missing visible terrain is reported.");

@@ -9,33 +9,81 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static partial class CartographyView
 {
-    private static string regionChoice="CC",campaignChoice="White",installationPath="",importPath="",imagePath="",iconSearch="";
+    private static string importPath = "", imagePath = "", iconSearch = "", regionSearch = "";
     private static bool sourcePanel;
+
     private static void SourcePicker()
     {
-        if(ImGui.Button(T("选择区域 / 角色 / 安装", "Region / campaign / installation")))sourcePanel=!sourcePanel;
-        ImGui.SameLine();ImGui.TextDisabled(CartographyRuntime.LoadingSource?T("正在后台载入…","Loading in background…"):T("区域切换会保留未保存的制图项目","Switching regions retains unsaved compositions"));
-        if(!sourcePanel)return;
-        ImGui.SetNextItemWidth(140);
-        if(ImGui.BeginCombo(T("区域##AtlasRegion","Region##AtlasRegion"),regionChoice))
-        {foreach(string r in CartographyRuntime.Regions)if(ImGui.Selectable(r,r==regionChoice))regionChoice=r;ImGui.EndCombo();}
-        ImGui.SameLine();ImGui.SetNextItemWidth(130);
-        if(ImGui.BeginCombo(T("角色##AtlasCampaign","Campaign##AtlasCampaign"),campaignChoice))
-        {foreach(string r in CartographyRegionLoader.Campaigns)if(ImGui.Selectable(r,r==campaignChoice))campaignChoice=r;ImGui.EndCombo();}
-        ImGui.SameLine();if(CartographyRuntime.LoadingSource)ImGui.BeginDisabled();
-        if(ImGui.Button(T("载入 / 刷新区域","Load / refresh region")))
-        {LeaveDrafts();CartographyRuntime.Enqueue(new CartographyCommand{Kind=CartographyCommandKind.SelectRegion,LayerId=regionChoice,Item=new CartographyItem{Text=campaignChoice},Path=installationPath});}
-        if(CartographyRuntime.LoadingSource)ImGui.EndDisabled();
-        ImGui.SetNextItemWidth(400);ImGui.InputTextWithHint("##AtlasInstall",T("游戏安装目录；留空使用当前游戏和已启用 Mod","Installation; empty uses this game and enabled mods"),ref installationPath,1024);
-        if(importPath.Length==0)importPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"Cornifer","state.json");
-        ImGui.SetNextItemWidth(400);ImGui.InputText("Cornifer state.json##AtlasImport",ref importPath,1024);
-        ImGui.SameLine();if(CartographyRuntime.LoadingSource)ImGui.BeginDisabled();
-        if(ImGui.Button(T("导入 Cornifer 存档","Import Cornifer state")))
-        {LeaveDrafts();CartographyRuntime.Enqueue(new CartographyCommand{Kind=CartographyCommandKind.ImportCornifer,Path=importPath});}
-        if(CartographyRuntime.LoadingSource)ImGui.EndDisabled();
+        CartographySourcePicker state = CartographyRuntime.SourcePicker;
+        bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
+        CartographyRegionOption selected = state.Regions.FirstOrDefault(region => region.Code == state.Region);
+        string label = selected?.Label(chinese) ?? (state.Region.Length == 0 ? T("正在获取当前区域…", "Finding current region…") : state.Region);
+        ImGui.SetNextItemWidth(Math.Max(180, Math.Min(360, ImGui.GetContentRegionAvail().X - 20)));
+        if (ImGui.BeginCombo(T("区域##AtlasRegion", "Region##AtlasRegion"), label))
+        {
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("##AtlasRegionSearch", T("搜索缩写或全称", "Search code or full name"), ref regionSearch, 160);
+            foreach (CartographyRegionOption region in state.Regions)
+            {
+                string text = region.Label(chinese);
+                if (regionSearch.Length > 0 && text.IndexOf(regionSearch, StringComparison.OrdinalIgnoreCase) < 0 &&
+                    region.Name.IndexOf(regionSearch, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (ImGui.Selectable(text + "##" + region.Code, region.Code == state.Region))
+                    SelectSource(region.Code, state.Campaign);
+            }
+            ImGui.EndCombo();
+        }
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(T("当前玩家区域", "Player region")));
+        if (ImGui.Button(T("当前玩家区域##AtlasPlayerRegion", "Player region##AtlasPlayerRegion")))
+            SelectSource(null, null);
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(T("刷新", "Refresh")));
+        if (ImGui.Button(T("刷新##AtlasRefresh", "Refresh##AtlasRefresh")))
+            SelectSource(state.Region, state.Campaign, true);
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(T("高级", "Advanced")));
+        if (ImGui.Button(T("高级##AtlasSourceOptions", "Advanced##AtlasSourceOptions"))) sourcePanel = !sourcePanel;
+        if (state.Loading)
+            ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域…", "Preparing map in background; you can select another region…"));
+        if (state.Failed)
+            ImGui.TextWrapped(T("区域载入失败，原有制图已保留：", "Region load failed; existing composition retained: ") + state.Status);
+
+        if (sourcePanel)
+        {
+            ImGui.TextDisabled(T("角色影响区域布局；切换区域会保留未保存的修改。", "Campaign affects layouts. Switching regions retains unsaved edits."));
+            ImGui.SetNextItemWidth(180);
+            if (ImGui.BeginCombo(T("角色##AtlasCampaign", "Campaign##AtlasCampaign"), CampaignLabel(state.Campaign)))
+            {
+                foreach (string campaign in CartographyRegionLoader.Campaigns)
+                    if (ImGui.Selectable(CampaignLabel(campaign) + "##" + campaign, campaign == state.Campaign))
+                        SelectSource(state.Region, campaign);
+                ImGui.EndCombo();
+            }
+            ImGui.SetNextItemWidth(Math.Min(500, ImGui.GetContentRegionAvail().X));
+            ImGui.InputTextWithHint("##AtlasImport", T("可选：Cornifer 存档 state.json 的路径", "Optional: path to a Cornifer state.json"), ref importPath, 1024);
+            if (ImGui.Button(T("导入 Cornifer 存档", "Import Cornifer state")))
+            {
+                LeaveDrafts();
+                CartographyRuntime.Enqueue(new CartographyCommand { Kind = CartographyCommandKind.ImportCornifer, Path = importPath });
+            }
+        }
         ImGui.Separator();
     }
-    private static void LeaveDrafts(){CommitDraft();CommitLayer();SaveStyle();}
+
+    private static string CampaignLabel(string campaign) => campaign switch
+    {
+        "White" => T("求生者", "Survivor"), "Yellow" => T("僧侣", "Monk"), "Red" => T("猎手", "Hunter"),
+        "Gourmand" => T("饕餮", "Gourmand"), "Artificer" => T("工匠", "Artificer"), "Rivulet" => T("溪流", "Rivulet"),
+        "Spear" => T("矛大师", "Spearmaster"), "Saint" => T("圣徒", "Saint"), "Inv" => T("？？？", "???"),
+        "Watcher" => T("观望者", "Watcher"), _ => campaign
+    };
+
+    private static void SelectSource(string region, string campaign, bool refresh = false)
+    {
+        LeaveDrafts();
+        CartographyRuntime.Enqueue(new CartographyCommand { Kind = CartographyCommandKind.SelectRegion,
+            LayerId = region, Item = campaign == null ? null : new CartographyItem { Text = campaign }, RefreshSource = refresh });
+    }
+
+    private static void LeaveDrafts() { CommitDraft(); CommitLayer(); SaveStyle(); FinishGesture(); }
     private static void ExtraToolbar()
     {
         ImGui.SameLine();if(ImGui.Button(T("导出选区","Export area"))){CommitDraft();tool=Tool.ExportArea;}
