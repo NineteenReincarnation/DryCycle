@@ -249,7 +249,9 @@ internal static class ObjectSceneWorkspaceView
                 if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
                 {
                     lastCategory = row.Category;
-                    ObjectSceneFilterControls.DrawCategoryHeader(row.Category, "Center");
+                    ObjectSceneFilterControls.DrawCategoryHeader(
+                        row.Category,
+                        "Center:" + group.Source);
                 }
 
                 if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
