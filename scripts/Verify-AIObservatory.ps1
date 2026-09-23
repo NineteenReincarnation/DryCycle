@@ -1,11 +1,16 @@
 param(
     [string]$RainWorldDir = "D:/Steam/steamapps/common/Rain World",
-    [string]$GameModOutputDir = "D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins",
+    [string]$GameModOutputDir = "",
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$RainWorldDir = [System.IO.Path]::GetFullPath($RainWorldDir)
+if ([string]::IsNullOrWhiteSpace($GameModOutputDir)) {
+    $GameModOutputDir = Join-Path $RainWorldDir "RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins"
+}
+$GameModOutputDir = [System.IO.Path]::GetFullPath($GameModOutputDir)
 $project = Join-Path $repoRoot "src/DryCycle.csproj"
 $buildProps = Join-Path $repoRoot "src/Directory.Build.props"
 
@@ -116,13 +121,23 @@ if (-not $SkipBuild) {
 
 Write-Host "`nChecking deployed Observatory runtime..." -ForegroundColor Cyan
 $hardRequired = @(
-    "DryCycle.dll",
-    "ImGui.NET.dll",
-    "cimgui.dll"
+    "DryCycle.dll"
 )
 foreach ($file in $hardRequired) {
     Require-File (Join-Path $GameModOutputDir $file) "Observatory runtime file '$file'"
     Write-Host "  OK  $file" -ForegroundColor Green
+}
+
+$forbiddenLocalRwImGuiRuntime = @(
+    "rain-world-imgui-api.dll",
+    "ImGui.NET.dll",
+    "cimgui.dll"
+)
+foreach ($file in $forbiddenLocalRwImGuiRuntime) {
+    $path = Join-Path $GameModOutputDir $file
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        throw "Stale local RWImGui runtime must not live beside DryCycle.dll: $path"
+    }
 }
 
 # RuntimeDetour is intentionally referenced from BepInEx/core and MUST NOT be copied
