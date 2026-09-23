@@ -187,6 +187,26 @@ public static class ObjectCatalog
         return cached;
     }
 
+    public static bool TryGet(PlacedObject.Type type, out ObjectDescriptor descriptor) =>
+        TryGet(type?.value, out descriptor);
+
+    public static bool TryGet(string typeName, out ObjectDescriptor descriptor)
+    {
+        descriptor = null;
+        if (string.IsNullOrEmpty(typeName)) return false;
+        IReadOnlyList<ObjectDescriptor> all = GetAll();
+        for (int i = 0; i < all.Count; i++)
+        {
+            ObjectDescriptor candidate = all[i];
+            if (string.Equals(candidate?.Type?.value, typeName, StringComparison.Ordinal))
+            {
+                descriptor = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static IEnumerable<ObjectDescriptor> Search(string query)
     {
         IReadOnlyList<ObjectDescriptor> all = GetAll();
