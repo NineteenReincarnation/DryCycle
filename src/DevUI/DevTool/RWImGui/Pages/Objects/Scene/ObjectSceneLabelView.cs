@@ -14,6 +14,7 @@ internal static class ObjectSceneLabelView
     private const float HitPadding = 4f;
     private const double HoverDelaySeconds = 0.12;
     private const float SpatialCellSize = 96f;
+    private const float PanReuseFraction = 0.30f;
 
     private sealed class Label
     {
@@ -54,14 +55,15 @@ internal static class ObjectSceneLabelView
         }
 
         EnsureLayout(snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>(), viewport, display);
+        Num.Vector2 layoutDelta = LayoutToCurrentDelta(viewport, display);
 
         ImGuiIOPtr io = ImGui.GetIO();
-        Label hit = HitTest(io.MousePos);
+        Label hit = HitTest(io.MousePos - layoutDelta);
         UpdateHover(hit?.Item.Index ?? -1);
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
         for (int i = 0; i < placed.Count; i++)
-            DrawLabel(draw, placed[i]);
+            DrawLabel(draw, placed[i], layoutDelta);
 
         if (hit == null || io.WantCaptureMouse || NativeObjectGizmoView.OwnsMouse ||
             NativeSpatialGizmoView.OwnsMouse || !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -93,10 +95,17 @@ internal static class ObjectSceneLabelView
     private static void EnsureLayout(EditorObjectSnapshot[] objects, EditorViewportSnapshot viewport, Num.Vector2 display)
     {
         long revision = ObjectSceneVisibilityState.Revision;
-        if (ReferenceEquals(cachedObjects, objects) && cachedVisibilityRevision == revision &&
-            Nearly(cameraX, viewport.CameraX) && Nearly(cameraY, viewport.CameraY) &&
-            Nearly(cameraWidth, viewport.Width) && Nearly(cameraHeight, viewport.Height) &&
-            Nearly(cachedDisplay.X, display.X) && Nearly(cachedDisplay.Y, display.Y))
+        bool projectionStable =
+            ReferenceEquals(cachedObjects, objects) &&
+            cachedVisibilityRevision == revision &&
+            Nearly(cameraWidth, viewport.Width) &&
+            Nearly(cameraHeight, viewport.Height) &&
+            Nearly(cachedDisplay.X, display.X) &&
+            Nearly(cachedDisplay.Y, display.Y);
+
+        if (projectionStable &&
+            Math.Abs(cameraX - viewport.CameraX) <= viewport.Width * PanReuseFraction &&
+            Math.Abs(cameraY - viewport.CameraY) <= viewport.Height * PanReuseFraction)
             return;
 
         ObjectSceneProjectionPolicy.Update(viewport, display);
@@ -113,7 +122,10 @@ internal static class ObjectSceneLabelView
                 continue;
 
             Num.Vector2 anchor = WorldToScreen(item.X, item.Y, viewport, display);
-            if (anchor.X < -120f || anchor.X > display.X + 120f || anchor.Y < -40f || anchor.Y > display.Y + 40f)
+            float marginX = display.X * PanReuseFraction + 120f;
+            float marginY = display.Y * PanReuseFraction + 40f;
+            if (anchor.X < -marginX || anchor.X > display.X + marginX ||
+                anchor.Y < -marginY || anchor.Y > display.Y + marginY)
                 continue;
 
             string text = string.IsNullOrWhiteSpace(item.DisplayName) ? item.Type : item.DisplayName;
@@ -285,7 +297,7 @@ internal static class ObjectSceneLabelView
 
     private static long CellKey(int x, int y) => ((long)x << 32) ^ (uint)y;
 
-    private static void DrawLabel(ImDrawListPtr draw, Label label)
+    private static void DrawLabel(ImDrawListPtr draw, Label label, Num.Vector2 layoutDelta)
     {
         ObjectSceneVisibility visibility = ObjectSceneVisibilityState.Resolve(label.Item);
         float alpha = visibility switch
@@ -304,13 +316,16 @@ internal static class ObjectSceneLabelView
         uint text = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.92f, 0.95f, 0.98f, alpha));
         uint leader = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.68f, 0.78f, 0.88f, strong ? 0.58f : 0.15f * alpha));
 
+        Num.Vector2 anchor = label.Anchor + layoutDelta;
+        Num.Vector2 min = label.Min + layoutDelta;
+        Num.Vector2 max = label.Max + layoutDelta;
         Num.Vector2 nearest = new(
-            Math.Max(label.Min.X, Math.Min(label.Anchor.X, label.Max.X)),
-            Math.Max(label.Min.Y, Math.Min(label.Anchor.Y, label.Max.Y)));
-        draw.AddLine(label.Anchor, nearest, leader, strong ? 1.2f : 1f);
-        draw.AddRectFilled(label.Min, label.Max, bg, 4f);
-        draw.AddRect(label.Min, label.Max, border, 4f, ImDrawFlags.None, strong ? 1.2f : 1f);
-        draw.AddText(label.Min + new Num.Vector2(PaddingX, PaddingY), text, label.Text);
+            Math.Max(min.X, Math.Min(anchor.X, max.X)),
+            Math.Max(min.Y, Math.Min(anchor.Y, max.Y)));
+        draw.AddLine(anchor, nearest, leader, strong ? 1.2f : 1f);
+        draw.AddRectFilled(min, max, bg, 4f);
+        draw.AddRect(min, max, border, 4f, ImDrawFlags.None, strong ? 1.2f : 1f);
+        draw.AddText(min + new Num.Vector2(PaddingX, PaddingY), text, label.Text);
     }
 
     private static int Priority(EditorObjectSnapshot item, ObjectSceneVisibility visibility)
@@ -336,6 +351,18 @@ internal static class ObjectSceneLabelView
         min.X = Math.Max(2f, Math.Min(Math.Max(2f, display.X - size.X - 2f), min.X));
         min.Y = Math.Max(2f, Math.Min(Math.Max(2f, display.Y - size.Y - 2f), min.Y));
         max = min + size;
+    }
+
+    private static Num.Vector2 LayoutToCurrentDelta(EditorViewportSnapshot viewport, Num.Vector2 display)
+    {
+        if (float.IsNaN(cameraX) || float.IsNaN(cameraY))
+            return default;
+
+        float scaleX = display.X / Math.Max(1f, viewport.Width);
+        float scaleY = display.Y / Math.Max(1f, viewport.Height);
+        return new Num.Vector2(
+            (cameraX - viewport.CameraX) * scaleX,
+            (viewport.CameraY - cameraY) * scaleY);
     }
 
     private static Num.Vector2 WorldToScreen(float x, float y, EditorViewportSnapshot viewport, Num.Vector2 display)
