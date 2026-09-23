@@ -98,11 +98,15 @@ internal static class ObjectSceneVisibilityState
     internal static ObjectSceneVisibility Resolve(EditorObjectSnapshot item)
     {
         if (item == null) return ObjectSceneVisibility.Hidden;
+
+        // Selection is explicit editing intent and remains visible even if the category was hidden,
+        // so the user never loses the active target. Hover is weaker: it must never resurrect an
+        // object that search/focus/category policy has already made Ghost or Hidden.
         if (item.Selected) return ObjectSceneVisibility.Selected;
-        if (item.StableId != 0L && item.StableId == hoveredStableId) return ObjectSceneVisibility.Hovered;
 
         ObjectCategoryVisibility categoryMode = GetCategoryMode(item.Category);
-        if (categoryMode == ObjectCategoryVisibility.Hidden) return ObjectSceneVisibility.Hidden;
+        if (categoryMode == ObjectCategoryVisibility.Hidden)
+            return ObjectSceneVisibility.Hidden;
 
         if (searchQuery.Length > 0 && !MatchesQuery(item, searchQuery))
             return ObjectSceneVisibility.Ghost;
@@ -111,9 +115,13 @@ internal static class ObjectSceneVisibilityState
             !string.Equals(NormalizeCategory(item.Category), focusedCategory, StringComparison.OrdinalIgnoreCase))
             return ObjectSceneVisibility.Ghost;
 
-        return categoryMode == ObjectCategoryVisibility.Ghost
-            ? ObjectSceneVisibility.Ghost
-            : ObjectSceneVisibility.Normal;
+        if (categoryMode == ObjectCategoryVisibility.Ghost)
+            return ObjectSceneVisibility.Ghost;
+
+        if (item.StableId != 0L && item.StableId == hoveredStableId)
+            return ObjectSceneVisibility.Hovered;
+
+        return ObjectSceneVisibility.Normal;
     }
 
     internal static bool IsInteractive(EditorObjectSnapshot item)
