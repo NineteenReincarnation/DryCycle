@@ -28,7 +28,8 @@ public readonly struct NativeObjectGizmoEditCommand
         float y = 0f,
         int segmentIndex = -1,
         float curveT = 0f,
-        bool snap = false)
+        bool snap = false,
+        long stableId = 0L)
     {
         Kind = kind;
         ObjectIndex = objectIndex;
@@ -38,6 +39,7 @@ public readonly struct NativeObjectGizmoEditCommand
         SegmentIndex = segmentIndex;
         CurveT = curveT;
         Snap = snap;
+        StableId = stableId;
     }
 
     public NativeObjectGizmoEditKind Kind { get; }
@@ -48,6 +50,7 @@ public readonly struct NativeObjectGizmoEditCommand
     public int SegmentIndex { get; }
     public float CurveT { get; }
     public bool Snap { get; }
+    public long StableId { get; }
 }
 
 /// <summary>
@@ -85,7 +88,7 @@ public static class NativeObjectGizmoEditCommandQueue
         if (session?.ToolMode != EditorToolMode.Objects)
             return;
 
-        PlacedObject target = ObjectAt(session, command.ObjectIndex);
+        PlacedObject target = ObjectAt(session, command.ObjectIndex, command.StableId);
         if (target == null)
             return;
 
@@ -112,7 +115,7 @@ public static class NativeObjectGizmoEditCommandQueue
         if (string.IsNullOrEmpty(command.HandleId))
             return;
 
-        string transactionKey = TransactionKey(command.ObjectIndex, command.HandleId);
+        string transactionKey = TransactionKey(command.ObjectIndex, command.StableId, command.HandleId);
         switch (command.Kind)
         {
             case NativeObjectGizmoEditKind.Begin:
@@ -626,13 +629,12 @@ public static class NativeObjectGizmoEditCommandQueue
         ObjectPresentationChangeHintHub.MarkMember(session, target);
     }
 
-    private static PlacedObject ObjectAt(EditorSession session, int index) =>
-        session?.RoomSettings?.placedObjects != null &&
-        index >= 0 &&
-        index < session.RoomSettings.placedObjects.Count
-            ? session.RoomSettings.placedObjects[index]
-            : null;
+    private static PlacedObject ObjectAt(EditorSession session, int index, long stableId = 0L) =>
+        ObjectPresentationIdentity.Resolve(session?.RoomSettings?.placedObjects, index, stableId);
 
-    private static string TransactionKey(int objectIndex, string handleId) =>
-        "NativeObjectGizmo:" + objectIndex + ":" + handleId;
+    private static string TransactionKey(int objectIndex, long stableId, string handleId)
+    {
+        long address = stableId != 0L ? stableId : objectIndex;
+        return "NativeObjectGizmo:" + address + ":" + handleId;
+    }
 }
