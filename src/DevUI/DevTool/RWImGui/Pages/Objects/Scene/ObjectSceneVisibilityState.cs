@@ -90,8 +90,9 @@ internal static class ObjectSceneVisibilityState
     internal static void SetHoveredIndex(int index)
     {
         if (hoveredIndex == index) return;
+        // Hover is transient interaction state. It must not invalidate retained label layout;
+        // otherwise the hovered label can move under the pointer when its priority changes.
         hoveredIndex = index;
-        revision++;
     }
 
     internal static ObjectSceneVisibility Resolve(EditorObjectSnapshot item)
