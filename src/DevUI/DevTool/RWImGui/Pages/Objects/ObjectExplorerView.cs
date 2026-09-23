@@ -216,7 +216,7 @@ internal static class ObjectExplorerView
             {
                 CategoryRun run = categoryRuns[categoryIndex];
                 if (categoryIndex > 0) ImGui.Spacing();
-                ObjectSceneFilterControls.DrawCategoryHeader(run.Category, "Browser");
+                DevToolWidgets.MutedText(run.Category);
 
                 using DevToolListClipper clipper = new(run.Count);
                 while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
@@ -394,7 +394,7 @@ internal static class ObjectExplorerView
             for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
             {
                 CategoryRun run = categoryRuns[categoryIndex];
-                DevToolWidgets.MutedText(run.Category);
+                ObjectSceneFilterControls.DrawCategoryHeader(run.Category, "BrowserScene");
 
                 using DevToolListClipper clipper = new(run.Count);
                 while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
