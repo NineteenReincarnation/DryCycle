@@ -104,6 +104,13 @@ public static class ObjectCatalog
     private static Dictionary<string, ObjectDescriptor> cachedByType;
     private static int cachedTypeCount = -1;
     private static long registrationOrder;
+    private static long revision = 1;
+
+    /// <summary>
+    /// Changes whenever descriptor metadata can produce a different catalog projection.
+    /// Presentation snapshots observe this revision independently from the PlacedObject type count.
+    /// </summary>
+    public static long Revision => revision;
 
     public static void RegisterDescriptor(ObjectDescriptor descriptor, int priority = 0)
     {
@@ -219,6 +226,7 @@ public static class ObjectCatalog
         cached = null;
         cachedByType = null;
         cachedTypeCount = -1;
+        unchecked { revision++; }
     }
 
     private static ObjectDescriptor CreateDefault(PlacedObject.Type type)
