@@ -394,7 +394,9 @@ internal static class ObjectExplorerView
             for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
             {
                 CategoryRun run = categoryRuns[categoryIndex];
-                ObjectSceneFilterControls.DrawCategoryHeader(run.Category, "BrowserScene");
+                ObjectSceneFilterControls.DrawCategoryHeader(
+                    run.Category,
+                    "BrowserScene:" + group.Source);
 
                 using DevToolListClipper clipper = new(run.Count);
                 while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
