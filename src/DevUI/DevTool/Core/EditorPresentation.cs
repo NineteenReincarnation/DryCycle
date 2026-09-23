@@ -80,6 +80,7 @@ public static partial class EditorPresentationHub
     private static volatile EditorPresentationSnapshot current = EditorPresentationSnapshot.Empty;
     private static EditorObjectTypeSnapshot[] libraryCache = Array.Empty<EditorObjectTypeSnapshot>();
     private static int libraryTypeCount = -1;
+    private static long libraryCatalogRevision = -1;
 
     private static EditorSession observedSession;
     private static global::Room observedRoom;
@@ -100,6 +101,7 @@ public static partial class EditorPresentationHub
     private static int observedObjectCount = -1;
     private static int observedSelectionCount = -1;
     private static PlacedObject observedPrimarySelection;
+    private static long observedObjectCatalogRevision;
 
     public static EditorPresentationSnapshot Current => current;
     internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
@@ -158,7 +160,12 @@ public static partial class EditorPresentationHub
         int selectionCount = objectWorkspace ? session.Selection.Count : 0;
         PlacedObject primarySelection = objectWorkspace ? session.Selection.PrimaryPlacedObject : null;
         int typeCount = objectWorkspace ? ExtEnum<PlacedObject.Type>.values.Count : libraryTypeCount;
-        bool libraryStale = objectWorkspace && (libraryTypeCount != typeCount || libraryCache.Length == 0);
+        long objectCatalogRevision = objectWorkspace ? ObjectCatalog.Revision : observedObjectCatalogRevision;
+        bool libraryStale = objectWorkspace &&
+            (libraryTypeCount != typeCount ||
+             libraryCache.Length == 0 ||
+             libraryCatalogRevision != objectCatalogRevision);
+        bool catalogChanged = objectWorkspace && observedObjectCatalogRevision != objectCatalogRevision;
         string placementType = session.PlacementType ?? string.Empty;
 
         bool sameIdentity =
@@ -216,12 +223,24 @@ public static partial class EditorPresentationHub
                 stableObjectContext &&
                 !modelChanged &&
                 !selectionChanged &&
-                !legacyVisibilityChanged;
+                !legacyVisibilityChanged &&
+                !catalogChanged;
 
             if (objectPayloadStable)
             {
                 scene = current.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
                 inspector = current.Inspector ?? new EditorInspectorSnapshot();
+            }
+            else if (catalogChanged)
+            {
+                // Descriptor metadata is presentation input, not RoomSettings model data. A catalog
+                // revision can change labels/categories/source/semantic importance without changing
+                // PlacedObject count or Objects revision, so refresh the detached payload explicitly.
+                // Descriptor registration is rare; prefer one authoritative full capture over trying
+                // to merge stale metadata with a simultaneous model/selection update.
+                scene = CaptureObjectScene(session, live);
+                inspector = CaptureObjectInspector(session, live, selectionCount, primarySelection);
+                objectFullCapture = true;
             }
             else
             {
@@ -299,6 +318,7 @@ public static partial class EditorPresentationHub
         observedObjectCount = objectCount;
         observedSelectionCount = selectionCount;
         observedPrimarySelection = primarySelection;
+        observedObjectCatalogRevision = objectCatalogRevision;
 
         if (objectWorkspace)
         {
@@ -339,12 +359,14 @@ public static partial class EditorPresentationHub
         observedObjectCount = -1;
         observedSelectionCount = -1;
         observedPrimarySelection = null;
+        observedObjectCatalogRevision = 0L;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
     internal static void InvalidateObjectLibrary()
     {
         libraryTypeCount = -1;
+        libraryCatalogRevision = -1;
         libraryCache = Array.Empty<EditorObjectTypeSnapshot>();
     }
 
@@ -370,6 +392,7 @@ public static partial class EditorPresentationHub
         }
         libraryCache = next;
         libraryTypeCount = typeCount;
+        libraryCatalogRevision = ObjectCatalog.Revision;
     }
 }
 
