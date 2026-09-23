@@ -60,8 +60,10 @@ internal static class ObjectSceneLabelView
         ImGuiIOPtr io = ImGui.GetIO();
         bool pointerBlocked =
             io.WantCaptureMouse ||
+            FloatingWindowSnap.OwnsMouse ||
             NativeObjectGizmoView.OwnsMouse ||
-            NativeSpatialGizmoView.OwnsMouse;
+            NativeSpatialGizmoView.OwnsMouse ||
+            ObjectMarqueeSelectionView.OwnsMouse;
         Label hit = pointerBlocked
             ? null
             : HitTest(io.MousePos - layoutDelta);
