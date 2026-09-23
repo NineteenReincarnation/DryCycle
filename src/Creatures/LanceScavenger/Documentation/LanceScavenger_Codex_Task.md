@@ -245,7 +245,7 @@ Lance Scavenger 使用**完整面具**，不是半面具。
 用户已经准备好正式资源，Windows 本地路径为：
 
 ```text
-D:\Application\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\Ancient Site\atlas\LanceScavenger
+D:\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\Ancient Site\atlas\LanceScavenger
 ```
 
 目录中的核心文件为：
