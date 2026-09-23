@@ -8,7 +8,7 @@
 
 - 使用 PR #47 当前 head 编译出的 `DryCycle.dll` 与 `DryCycle.DevTool.RWImGui.dll`。
 - RWImGui 使用 Workshop `3417372413` 的插件目录：
-  `D:/Application/Steam/steamapps/workshop/content/312520/3417372413/plugins`
+  `D:/Steam/steamapps/workshop/content/312520/3417372413/plugins`
 - `rain-world-imgui-api.dll` 与配套 `ImGui.NET.dll` 必须来自同一套实际安装。
 - 测试前保留一份房间/World 文件备份，Save 验收不得拿唯一工作副本做破坏性测试。
 - 先关闭与 DevTool 无关的临时 debug overlay；需要验证 Generic DevInterface fallback 时再开启目标第三方 Mod。
