@@ -58,7 +58,13 @@ internal static class ObjectSceneLabelView
         Num.Vector2 layoutDelta = LayoutToCurrentDelta(viewport, display);
 
         ImGuiIOPtr io = ImGui.GetIO();
-        Label hit = HitTest(io.MousePos - layoutDelta);
+        bool pointerBlocked =
+            io.WantCaptureMouse ||
+            NativeObjectGizmoView.OwnsMouse ||
+            NativeSpatialGizmoView.OwnsMouse;
+        Label hit = pointerBlocked
+            ? null
+            : HitTest(io.MousePos - layoutDelta);
         UpdateHover(hit?.Item.StableId ?? 0L);
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
@@ -70,8 +76,7 @@ internal static class ObjectSceneLabelView
             DrawLabel(draw, label, layoutDelta);
         }
 
-        if (hit == null || io.WantCaptureMouse || NativeObjectGizmoView.OwnsMouse ||
-            NativeSpatialGizmoView.OwnsMouse || !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        if (hit == null || pointerBlocked || !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             return;
 
         OwnsMouse = true;
