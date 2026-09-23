@@ -174,7 +174,7 @@ internal static class ObjectMarqueeSelectionView
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            if (item == null) continue;
+            if (item == null || !ObjectSceneVisibilityState.IsInteractive(item)) continue;
             Num.Vector2 point = WorldToScreen(item.X, item.Y, viewport, display);
             if ((point - mouse).LengthSquared() <= limitSq)
                 return true;
