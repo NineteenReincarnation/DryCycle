@@ -347,11 +347,7 @@ internal static class ObjectExplorerView
     {
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
-        if (sceneSelectionAnchor >= objects.Length)
-        {
-            sceneSelectionAnchor = -1;
-            sceneSelectionAnchorStableId = 0L;
-        }
+        ReconcileSceneSelectionAnchor(objects);
 
         DevToolWidgets.MutedText(GetSceneStatusText(objects.Length, selectedCount));
 
@@ -444,6 +440,31 @@ internal static class ObjectExplorerView
 
         if (sceneMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
+    }
+
+    private static void ReconcileSceneSelectionAnchor(EditorObjectSnapshot[] objects)
+    {
+        if (sceneSelectionAnchorStableId == 0L)
+        {
+            if (sceneSelectionAnchor < 0 || sceneSelectionAnchor >= objects.Length)
+                sceneSelectionAnchor = -1;
+            return;
+        }
+
+        if (sceneSelectionAnchor >= 0 &&
+            sceneSelectionAnchor < objects.Length &&
+            objects[sceneSelectionAnchor]?.StableId == sceneSelectionAnchorStableId)
+            return;
+
+        sceneSelectionAnchor = -1;
+        for (int i = 0; i < objects.Length; i++)
+        {
+            if (objects[i]?.StableId != sceneSelectionAnchorStableId) continue;
+            sceneSelectionAnchor = i;
+            return;
+        }
+
+        sceneSelectionAnchorStableId = 0L;
     }
 
     private static void EnsureSceneProjection(EditorObjectSnapshot[] objects)
