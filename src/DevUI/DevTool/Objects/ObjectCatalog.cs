@@ -101,6 +101,7 @@ public static class ObjectCatalog
 
     private static readonly List<Registration> registrations = new();
     private static List<ObjectDescriptor> cached;
+    private static Dictionary<string, ObjectDescriptor> cachedByType;
     private static int cachedTypeCount = -1;
     private static long registrationOrder;
 
@@ -184,6 +185,14 @@ public static class ObjectCatalog
 
         cachedTypeCount = typeCount;
         cached = descriptors;
+        cachedByType = new Dictionary<string, ObjectDescriptor>(descriptors.Count, StringComparer.Ordinal);
+        for (int i = 0; i < descriptors.Count; i++)
+        {
+            ObjectDescriptor descriptor = descriptors[i];
+            string typeName = descriptor?.Type?.value;
+            if (!string.IsNullOrEmpty(typeName))
+                cachedByType[typeName] = descriptor;
+        }
         return cached;
     }
 
@@ -194,17 +203,8 @@ public static class ObjectCatalog
     {
         descriptor = null;
         if (string.IsNullOrEmpty(typeName)) return false;
-        IReadOnlyList<ObjectDescriptor> all = GetAll();
-        for (int i = 0; i < all.Count; i++)
-        {
-            ObjectDescriptor candidate = all[i];
-            if (string.Equals(candidate?.Type?.value, typeName, StringComparison.Ordinal))
-            {
-                descriptor = candidate;
-                return true;
-            }
-        }
-        return false;
+        GetAll();
+        return cachedByType != null && cachedByType.TryGetValue(typeName, out descriptor);
     }
 
     public static IEnumerable<ObjectDescriptor> Search(string query)
@@ -217,6 +217,7 @@ public static class ObjectCatalog
     public static void Invalidate()
     {
         cached = null;
+        cachedByType = null;
         cachedTypeCount = -1;
     }
 
