@@ -216,7 +216,7 @@ internal static class ObjectExplorerView
             {
                 CategoryRun run = categoryRuns[categoryIndex];
                 if (categoryIndex > 0) ImGui.Spacing();
-                DevToolWidgets.MutedText(run.Category);
+                ObjectSceneFilterControls.DrawCategoryHeader(run.Category, "Browser");
 
                 using DevToolListClipper clipper = new(run.Count);
                 while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
@@ -376,6 +376,7 @@ internal static class ObjectExplorerView
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText("##DevToolSceneSearch", ref sceneSearch, 128);
         ObjectSceneVisibilityState.SetSearchQuery(sceneSearch);
+        ObjectSceneFilterControls.DrawFocusSummary("Browser");
 
         ImGui.Spacing();
         ImGui.Separator();
