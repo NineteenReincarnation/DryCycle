@@ -225,18 +225,7 @@ internal static class ObjectSceneWorkspaceView
         ImGui.InputText("##CenterSceneObjectSearch", ref search, 128);
         ObjectSceneVisibilityState.SetSearchQuery(search);
 
-        if (!string.IsNullOrEmpty(ObjectSceneVisibilityState.FocusedCategory))
-        {
-            ImGui.Spacing();
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T("聚焦: ", "Focus: ") + ObjectSceneVisibilityState.FocusedCategory);
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("清除", "Clear"),
-                    "ObjectSceneClearFocus",
-                    DevToolButtonTone.Subtle))
-                ObjectSceneVisibilityState.ClearFocus();
-        }
+        ObjectSceneFilterControls.DrawFocusSummary("Center");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -260,7 +249,7 @@ internal static class ObjectSceneWorkspaceView
                 if (!string.Equals(lastCategory, row.Category, StringComparison.Ordinal))
                 {
                     lastCategory = row.Category;
-                    DrawCategoryControls(row.Category);
+                    ObjectSceneFilterControls.DrawCategoryHeader(row.Category, "Center");
                 }
 
                 if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
@@ -299,36 +288,6 @@ internal static class ObjectSceneWorkspaceView
 
         if (projectedMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
-    }
-
-    private static void DrawCategoryControls(string category)
-    {
-        ObjectCategoryVisibility mode = ObjectSceneVisibilityState.GetCategoryMode(category);
-        string state = mode switch
-        {
-            ObjectCategoryVisibility.Ghost => DevToolUiSettings.T("弱显", "Ghost"),
-            ObjectCategoryVisibility.Hidden => DevToolUiSettings.T("隐藏", "Hidden"),
-            _ => DevToolUiSettings.T("正常", "Normal")
-        };
-
-        DevToolWidgets.MutedText(category);
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                state,
-                "ObjectCategoryVisibility##" + category,
-                mode == ObjectCategoryVisibility.Normal ? DevToolButtonTone.Subtle : DevToolButtonTone.Normal))
-            ObjectSceneVisibilityState.CycleCategoryMode(category);
-
-        ImGui.SameLine();
-        bool focused = string.Equals(
-            ObjectSceneVisibilityState.FocusedCategory,
-            category,
-            StringComparison.OrdinalIgnoreCase);
-        if (DevToolWidgets.ActionButton(
-                focused ? DevToolUiSettings.T("取消聚焦", "Unfocus") : DevToolUiSettings.T("聚焦", "Focus"),
-                "ObjectCategoryFocus##" + category,
-                focused ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            ObjectSceneVisibilityState.SetFocusedCategory(category);
     }
 
     private static void DrawAlignButton(
