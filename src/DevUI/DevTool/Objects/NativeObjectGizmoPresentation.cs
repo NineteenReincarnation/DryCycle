@@ -46,6 +46,7 @@ public sealed class EditorObjectGizmoSnapshot
     public static readonly EditorObjectGizmoSnapshot Empty = new();
 
     public int ObjectIndex { get; init; } = -1;
+    public long ObjectStableId { get; init; }
     public EditorObjectGizmoHandleSnapshot[] Handles { get; init; } = Array.Empty<EditorObjectGizmoHandleSnapshot>();
     public EditorObjectLineSegmentSnapshot[] Lines { get; init; } = Array.Empty<EditorObjectLineSegmentSnapshot>();
     public EditorObjectBezierSegmentSnapshot[] BezierSegments { get; init; } = Array.Empty<EditorObjectBezierSegmentSnapshot>();
@@ -301,6 +302,7 @@ internal static class NativeObjectGizmoPresentation
         return new EditorObjectGizmoSnapshot
         {
             ObjectIndex = objectIndex,
+            ObjectStableId = ObjectPresentationIdentity.Get(target),
             Handles = handles.ToArray(),
             Lines = lines.ToArray(),
             BezierSegments = beziers.ToArray()
