@@ -146,7 +146,7 @@ This is still a source-level prototype and should be re-tested in the local Rain
 The project targets **.NET Framework 4.8** and compiles against the installed Rain World assemblies. SlugBase is not needed to compile.
 
 ```powershell
-dotnet build .\DryCycle.sln -c Release -p:RainWorldDir="D:/Application/Steam/steamapps/common/Rain World"
+dotnet build .\DryCycle.sln -c Release -p:RainWorldDir="D:/Steam/steamapps/common/Rain World"
 ```
 
 DryCycle references only:
@@ -164,7 +164,7 @@ RainWorld_Data/Managed/Unity.Mathematics.dll
 Output path on the current development machine:
 
 ```text
-D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins/DryCycle.dll
+D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins/DryCycle.dll
 ```
 
 ## Iterator Framework
