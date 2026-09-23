@@ -164,7 +164,7 @@ def require(condition, message):
 
 # Direct deployment-write sanity check: obvious writes to the real game/mod tree must be gated by
 # DeployToGame=true. This is deliberately not a complete MSBuild data-flow proof.
-deployment_tokens = ("$(GameModOutputDir)", "$(GameModRootDir)")
+deployment_tokens = ("$(GameModOutputDir)", "$(GameModRootDir)", "$(GameModAssetsDir)")
 write_tags = {"Copy", "Delete", "MakeDir", "Exec", "MSBuild"}
 
 def deployment_gate(condition):
