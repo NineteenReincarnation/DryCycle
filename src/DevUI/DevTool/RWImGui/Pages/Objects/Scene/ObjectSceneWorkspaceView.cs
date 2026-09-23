@@ -78,7 +78,6 @@ internal static class ObjectSceneWorkspaceView
         statusChinese = false;
         statusValid = false;
         statusText = string.Empty;
-        ObjectSceneVisibilityState.Reset();
     }
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
