@@ -111,6 +111,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
         // their own retained caches so document switches cannot leave stale search/focus/hover state.
         ObjectSceneVisibilityState.Reset();
         ObjectSceneProjectionPolicy.Reset();
+        ObjectSceneListProjection.Reset();
 
         NativeSpatialGizmoView.ResetRetainedState();
         NativeObjectGizmoView.ResetRetainedState();
