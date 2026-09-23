@@ -153,7 +153,7 @@
 ```powershell
 dotnet build .\tests\IteratorFramework.Tests\IteratorFramework.Tests.csproj -c Release -p:DeployToGame=false -v minimal
 New-Item -ItemType Directory -Force .\artifacts\iterator-framework | Out-Null
-& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Application/Steam/steamapps/common/Rain World" > .\artifacts\iterator-framework\phase6-tests.log 2>&1
+& .\tests\IteratorFramework.Tests\bin\Release\net48\IteratorFramework.Tests.exe "D:/Steam/steamapps/common/Rain World" > .\artifacts\iterator-framework\phase6-tests.log 2>&1
 ```
 
 该构建会同时生成主项目。其他机器可传入 `-p:RainWorldDir="游戏目录"`，运行测试时传入同一个目录。测试项目默认关闭游戏部署；只编译主项目时同样应传入 `-p:DeployToGame=false` 以生成本地产物。
