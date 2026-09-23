@@ -124,14 +124,6 @@ internal static class ObjectSceneVisibilityState
         return ObjectSceneVisibility.Normal;
     }
 
-    internal static bool IsInteractive(EditorObjectSnapshot item)
-    {
-        ObjectSceneVisibility state = Resolve(item);
-        return state == ObjectSceneVisibility.Normal ||
-               state == ObjectSceneVisibility.Hovered ||
-               state == ObjectSceneVisibility.Selected;
-    }
-
     internal static void Reset()
     {
         CategoryModes.Clear();
