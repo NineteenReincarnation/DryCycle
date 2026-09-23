@@ -196,6 +196,7 @@ public static partial class EditorPresentationHub
         {
             HasSelection = singleSelection,
             ObjectIndex = selectedIndex,
+            ObjectStableId = singleSelection ? ObjectPresentationIdentity.Get(selected) : 0L,
             SelectionCount = selectionCount,
             Type = selectionCount > 1 ? selectionCount + " Objects" : selected?.type?.value ?? string.Empty,
             X = selected?.pos.x ?? 0f,
