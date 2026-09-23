@@ -98,6 +98,7 @@ internal static class ObjectSceneLabelView
         hoveredStableId = 0L;
         pendingHoverStableId = 0L;
         pendingHoverSince = 0d;
+        ObjectSceneVisibilityState.SetHoveredStableId(0L);
         OwnsMouse = false;
     }
 
