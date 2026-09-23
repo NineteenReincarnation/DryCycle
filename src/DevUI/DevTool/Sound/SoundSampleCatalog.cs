@@ -204,12 +204,14 @@ internal static class SoundSampleCatalog
         {
             if (TryIdentifyMod(resolved, owners, out ModManager.Mod mod)) return FromMod(sample, mod);
             if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc)) return FromMod(sample, officialDlc);
-            return Vanilla(sample);
+            return IsBaseGamePath(resolved) ? Vanilla(sample) : Unknown(sample);
         }
         if (knownAvailable)
         {
             if (TryIdentifyOfficialDlcBySample(sample, officialOwners, out ModManager.Mod officialDlc)) return FromMod(sample, officialDlc);
-            return Vanilla(sample);
+            // The merged catalogue proves availability, not provenance. Do not silently turn a
+            // provenance miss into Vanilla; that is exactly how DLC content was mislabelled.
+            return Unknown(sample);
         }
         return Missing(sample);
     }
@@ -227,6 +229,15 @@ internal static class SoundSampleCatalog
         Sample = sample,
         SourceKind = EditorSoundSourceKind.Vanilla,
         SourceName = "Vanilla",
+        SourceId = string.Empty,
+        Available = true
+    };
+
+    private static EditorSoundSampleSnapshot Unknown(string sample) => new()
+    {
+        Sample = sample ?? string.Empty,
+        SourceKind = EditorSoundSourceKind.Unknown,
+        SourceName = "Unknown",
         SourceId = string.Empty,
         Available = true
     };
@@ -309,6 +320,25 @@ internal static class SoundSampleCatalog
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         try { return Path.GetFileName(value.Trim()) ?? string.Empty; }
         catch { return value.Trim(); }
+    }
+
+    private static bool IsBaseGamePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        // The local LoadedSoundEffects tree is a genuine base-game source. Resolved loose paths
+        // outside every active mod and outside mergedmods are likewise base-game assets.
+        if (path.StartsWith("./Assets/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(".\\Assets\\", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (IsMergedModsPath(path)) return false;
+        for (int i = ModManager.ActiveMods.Count - 1; i >= 0; i--)
+        {
+            ModManager.Mod mod = ModManager.ActiveMods[i];
+            if (mod == null) continue;
+            if (IsUnder(path, mod.TargetedPath) || IsUnder(path, mod.NewestPath) || IsUnder(path, mod.path))
+                return false;
+        }
+        return true;
     }
 
     private static bool IsMergedModsPath(string path)
