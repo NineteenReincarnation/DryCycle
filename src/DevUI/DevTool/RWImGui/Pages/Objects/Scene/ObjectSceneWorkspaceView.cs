@@ -21,7 +21,7 @@ internal static class ObjectSceneWorkspaceView
         internal string Label;
         internal string TooltipText;
 
-        public string StableId => "CenterSceneObject:" + (Item?.Index ?? -1);
+        public string StableId => "CenterSceneObject:" + (Item?.StableId ?? 0L);
         public string PrimaryText => Label ?? string.Empty;
         public string SecondaryText => string.Empty;
         public string StatusText => string.Empty;
