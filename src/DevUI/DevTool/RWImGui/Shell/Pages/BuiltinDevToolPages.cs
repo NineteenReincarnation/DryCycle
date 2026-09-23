@@ -31,6 +31,8 @@ internal sealed class RoomDevToolPage : DevToolFrontendPageBase
 
 internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 {
+    private string activeDocument = string.Empty;
+
     public override string Id => "objects";
     public override EditorToolMode Mode => EditorToolMode.Objects;
     public override int NavigationOrder => 200;
@@ -44,6 +46,8 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
+        EnsureDocument(snapshot);
+
         // Scene mouse priority is intentional: semantic handles own clicks before the generic
         // object-position point, and marquee selection receives only otherwise-unclaimed room space.
         NativeObjectGizmoView.Draw(snapshot, display);
@@ -75,6 +79,27 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     protected override void OnReset()
     {
+        activeDocument = string.Empty;
+        ResetObjectFrontendState();
+    }
+
+    private void EnsureDocument(EditorPresentationSnapshot snapshot)
+    {
+        string document = snapshot?.Document ?? string.Empty;
+        if (string.Equals(activeDocument, document, StringComparison.Ordinal))
+            return;
+
+        activeDocument = document;
+        ResetObjectFrontendState();
+    }
+
+    private static void ResetObjectFrontendState()
+    {
+        // Shared scene policy has one lifecycle owner: the Objects page. Child views reset only
+        // their own retained caches so document switches cannot leave stale search/focus/hover state.
+        ObjectSceneVisibilityState.Reset();
+        ObjectSceneProjectionPolicy.Reset();
+
         NativeSpatialGizmoView.ResetRetainedState();
         NativeObjectGizmoView.ResetRetainedState();
         ObjectMarqueeSelectionView.ResetRetainedState();
