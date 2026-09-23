@@ -40,13 +40,15 @@ public readonly struct NativeGizmoCommand
         NativeGizmoTargetKind target,
         int index,
         float x = 0f,
-        float y = 0f)
+        float y = 0f,
+        long stableId = 0L)
     {
         Kind = kind;
         Target = target;
         Index = index;
         X = x;
         Y = y;
+        StableId = stableId;
     }
 
     public NativeGizmoCommandKind Kind { get; }
@@ -54,6 +56,7 @@ public readonly struct NativeGizmoCommand
     public int Index { get; }
     public float X { get; }
     public float Y { get; }
+    public long StableId { get; }
 }
 
 public static class NativeGizmoCommandQueue
@@ -85,12 +88,12 @@ public static class NativeGizmoCommandQueue
                         if (committed && command.Target == NativeGizmoTargetKind.ObjectPosition)
                             NativeObjectRuntimeReconciler.FinalizeInteractiveMutation(
                                 session,
-                                ObjectAt(session, command.Index));
+                                ObjectAt(session, command.Index, command.StableId));
                         break;
                     }
                     case NativeGizmoCommandKind.Cancel:
                         EditorContinuousTransactionHub.Cancel(session, Key(command));
-                        MarkChanged(session, command.Target, command.Index);
+                        MarkChanged(session, command.Target, command.Index, command.StableId);
                         break;
                 }
             }
@@ -116,7 +119,7 @@ public static class NativeGizmoCommandQueue
         {
             case NativeGizmoTargetKind.ObjectPosition:
             {
-                PlacedObject target = ObjectAt(session, command.Index);
+                PlacedObject target = ObjectAt(session, command.Index, command.StableId);
                 if (target != null) session.Selection.SelectOnly(target);
                 break;
             }
@@ -140,14 +143,16 @@ public static class NativeGizmoCommandQueue
 
         if (command.Target == NativeGizmoTargetKind.ObjectPosition)
         {
-            PlacedObject objectTarget = ObjectAt(session, command.Index);
+            PlacedObject objectTarget = ObjectAt(session, command.Index, command.StableId);
             NativeObjectRuntimeReconciler.PrepareForMutation(session, objectTarget);
         }
 
         IEditorStateSnapshot before = command.Target switch
         {
             NativeGizmoTargetKind.ObjectPosition =>
-                SinglePlacedObjectStateSnapshot.Capture(session.RoomSettings, ObjectAt(session, command.Index)),
+                SinglePlacedObjectStateSnapshot.Capture(
+                    session.RoomSettings,
+                    ObjectAt(session, command.Index, command.StableId)),
             NativeGizmoTargetKind.SoundPosition or
             NativeGizmoTargetKind.SoundRadius or
             NativeGizmoTargetKind.SoundDirection =>
@@ -169,7 +174,12 @@ public static class NativeGizmoCommandQueue
 
         bool changed = command.Target switch
         {
-            NativeGizmoTargetKind.ObjectPosition => SetObjectPosition(session, command.Index, command.X, command.Y),
+            NativeGizmoTargetKind.ObjectPosition => SetObjectPosition(
+                session,
+                command.Index,
+                command.StableId,
+                command.X,
+                command.Y),
             NativeGizmoTargetKind.SoundPosition => SetSoundPosition(session, command.Index, command.X, command.Y),
             NativeGizmoTargetKind.SoundRadius => SetSoundRadius(session, command.Index, command.X),
             NativeGizmoTargetKind.SoundDirection => SetSoundDirection(session, command.Index, command.X, command.Y),
@@ -179,12 +189,17 @@ public static class NativeGizmoCommandQueue
         };
 
         if (changed)
-            MarkChanged(session, command.Target, command.Index);
+            MarkChanged(session, command.Target, command.Index, command.StableId);
     }
 
-    private static bool SetObjectPosition(EditorSession session, int index, float x, float y)
+    private static bool SetObjectPosition(
+        EditorSession session,
+        int index,
+        long stableId,
+        float x,
+        float y)
     {
-        PlacedObject target = ObjectAt(session, index);
+        PlacedObject target = ObjectAt(session, index, stableId);
         if (target == null) return false;
         Vector2 next = new(x, y);
         if ((target.pos - next).sqrMagnitude <= 0.000001f) return false;
@@ -247,13 +262,17 @@ public static class NativeGizmoCommandQueue
         return true;
     }
 
-    private static void MarkChanged(EditorSession session, NativeGizmoTargetKind target, int index)
+    private static void MarkChanged(
+        EditorSession session,
+        NativeGizmoTargetKind target,
+        int index,
+        long stableId = 0L)
     {
         switch (target)
         {
             case NativeGizmoTargetKind.ObjectPosition:
                 EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
-                ObjectPresentationChangeHintHub.MarkMember(session, ObjectAt(session, index));
+                ObjectPresentationChangeHintHub.MarkMember(session, ObjectAt(session, index, stableId));
                 break;
             case NativeGizmoTargetKind.SoundPosition:
             case NativeGizmoTargetKind.SoundRadius:
@@ -269,10 +288,8 @@ public static class NativeGizmoCommandQueue
         }
     }
 
-    private static PlacedObject ObjectAt(EditorSession session, int index) =>
-        session?.RoomSettings?.placedObjects != null && index >= 0 && index < session.RoomSettings.placedObjects.Count
-            ? session.RoomSettings.placedObjects[index]
-            : null;
+    private static PlacedObject ObjectAt(EditorSession session, int index, long stableId = 0L) =>
+        ObjectPresentationIdentity.Resolve(session?.RoomSettings?.placedObjects, index, stableId);
 
     private static AmbientSound SoundAt(EditorSession session, int index) =>
         session?.RoomSettings?.ambientSounds != null && index >= 0 && index < session.RoomSettings.ambientSounds.Count
@@ -284,8 +301,13 @@ public static class NativeGizmoCommandQueue
             ? session.RoomSettings.triggers[index]
             : null;
 
-    private static string Key(NativeGizmoCommand command) =>
-        "NativeGizmo:" + (int)command.Target + ":" + command.Index;
+    private static string Key(NativeGizmoCommand command)
+    {
+        long address = command.Target == NativeGizmoTargetKind.ObjectPosition && command.StableId != 0L
+            ? command.StableId
+            : command.Index;
+        return "NativeGizmo:" + (int)command.Target + ":" + address;
+    }
 
     private static string Label(NativeGizmoTargetKind target) => target switch
     {
