@@ -62,7 +62,8 @@ internal static class ObjectMarqueeSelectionView
                 ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow) ||
                 FloatingWindowSnap.OwnsMouse ||
                 NativeObjectGizmoView.OwnsMouse ||
-                NativeSpatialGizmoView.OwnsMouse)
+                NativeSpatialGizmoView.OwnsMouse ||
+                ObjectSceneLabelView.OwnsMouse)
                 return;
 
             Num.Vector2 mouse = io.MousePos;
