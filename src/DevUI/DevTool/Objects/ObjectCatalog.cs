@@ -4,6 +4,18 @@ using System.Linq;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
+public enum ObjectPresentationKind
+{
+    Point,
+    Radius,
+    Area,
+    Directional,
+    Path,
+    Connection,
+    Volume,
+    Complex
+}
+
 public sealed class ObjectDescriptor
 {
     public ObjectDescriptor(
@@ -11,7 +23,9 @@ public sealed class ObjectDescriptor
         string displayName,
         string category,
         string source,
-        IEnumerable<string> tags = null)
+        IEnumerable<string> tags = null,
+        ObjectPresentationKind presentationKind = ObjectPresentationKind.Point,
+        int importance = 0)
     {
         Type = type ?? throw new ArgumentNullException(nameof(type));
         DisplayName = displayName ?? type.value ?? "Unknown";
@@ -22,6 +36,8 @@ public sealed class ObjectDescriptor
             : tags.Where(tag => !string.IsNullOrWhiteSpace(tag))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+        PresentationKind = presentationKind;
+        Importance = importance;
     }
 
     public PlacedObject.Type Type { get; }
@@ -29,6 +45,8 @@ public sealed class ObjectDescriptor
     public string Category { get; }
     public string Source { get; }
     public IReadOnlyList<string> Tags { get; }
+    public ObjectPresentationKind PresentationKind { get; }
+    public int Importance { get; }
 
     public bool Matches(string query)
     {
@@ -186,7 +204,14 @@ public static class ObjectCatalog
     {
         string name = SplitPascal(type.value);
         string category = GuessCategory(type.value);
-        return new ObjectDescriptor(type, name, category, "Rain World registry", GuessTags(type.value));
+        return new ObjectDescriptor(
+            type,
+            name,
+            category,
+            "Rain World registry",
+            GuessTags(type.value),
+            GuessPresentationKind(type.value),
+            GuessImportance(type.value));
     }
 
     private static string GuessCategory(string name)
@@ -199,6 +224,28 @@ public static class ObjectCatalog
         if (lower.Contains("creature") || lower.Contains("scav") || lower.Contains("bat") || lower.Contains("lizard")) return "Creatures";
         if (lower.Contains("decal") || lower.Contains("projected") || lower.Contains("cosmetic")) return "Decoration";
         return "Unsorted";
+    }
+
+    private static ObjectPresentationKind GuessPresentationKind(string name)
+    {
+        string lower = name?.ToLowerInvariant() ?? string.Empty;
+        if (lower.Contains("spline") || lower.Contains("path")) return ObjectPresentationKind.Path;
+        if (lower.Contains("rect") || lower.Contains("zone") || lower.Contains("area") || lower.Contains("cutoff"))
+            return ObjectPresentationKind.Area;
+        if (lower.Contains("flow") || lower.Contains("wind") || lower.Contains("jet") || lower.Contains("direction"))
+            return ObjectPresentationKind.Directional;
+        if (lower.Contains("light") || lower.Contains("radius") || lower.Contains("circle") || lower.Contains("spot"))
+            return ObjectPresentationKind.Radius;
+        if (lower.Contains("connection") || lower.Contains("link")) return ObjectPresentationKind.Connection;
+        return ObjectPresentationKind.Point;
+    }
+
+    private static int GuessImportance(string name)
+    {
+        string lower = name?.ToLowerInvariant() ?? string.Empty;
+        if (lower.Contains("trigger") || lower.Contains("gate") || lower.Contains("connection")) return 2;
+        if (lower.Contains("zone") || lower.Contains("path") || lower.Contains("light")) return 1;
+        return 0;
     }
 
     private static IEnumerable<string> GuessTags(string name)
