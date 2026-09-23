@@ -203,20 +203,40 @@ internal static class ObjectSceneWorkspaceView
                 "CenterScene");
 
             List<ObjectSceneProjectedRow> rows = category.Rows;
-            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            using DevToolListClipper clipper = new(rows.Count);
+            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
             {
-                ObjectSceneProjectedRow row = rows[rowIndex];
-                EditorObjectSnapshot item = row.Item;
-                if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
-                    continue;
-
-                if (io.KeyShift && selectionAnchorStableId != 0L)
+                for (int rowIndex = firstVisible; rowIndex < lastVisibleExclusive; rowIndex++)
                 {
-                    if (!ObjectSceneListProjection.EnqueueRangeSelection(
-                            projection,
-                            selectionAnchorStableId,
-                            item.StableId,
-                            io.KeyCtrl))
+                    ObjectSceneProjectedRow row = rows[rowIndex];
+                    EditorObjectSnapshot item = row.Item;
+                    if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
+                        continue;
+
+                    if (io.KeyShift && selectionAnchorStableId != 0L)
+                    {
+                        if (!ObjectSceneListProjection.EnqueueRangeSelection(
+                                projection,
+                                selectionAnchorStableId,
+                                item.StableId,
+                                io.KeyCtrl))
+                        {
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                                EditorUiCommandKind.SelectObject,
+                                item.Index,
+                                stableId: item.StableId));
+                            selectionAnchorStableId = item.StableId;
+                        }
+                    }
+                    else if (io.KeyCtrl)
+                    {
+                        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                            EditorUiCommandKind.ToggleObjectSelection,
+                            item.Index,
+                            stableId: item.StableId));
+                        selectionAnchorStableId = item.StableId;
+                    }
+                    else
                     {
                         EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                             EditorUiCommandKind.SelectObject,
@@ -224,22 +244,6 @@ internal static class ObjectSceneWorkspaceView
                             stableId: item.StableId));
                         selectionAnchorStableId = item.StableId;
                     }
-                }
-                else if (io.KeyCtrl)
-                {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.ToggleObjectSelection,
-                        item.Index,
-                        stableId: item.StableId));
-                    selectionAnchorStableId = item.StableId;
-                }
-                else
-                {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                        EditorUiCommandKind.SelectObject,
-                        item.Index,
-                        stableId: item.StableId));
-                    selectionAnchorStableId = item.StableId;
                 }
             }
         }
