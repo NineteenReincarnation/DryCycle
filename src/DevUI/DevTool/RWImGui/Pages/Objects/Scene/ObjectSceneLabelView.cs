@@ -11,6 +11,9 @@ internal static class ObjectSceneLabelView
     private const float PaddingX = 6f;
     private const float PaddingY = 3f;
     private const float Gap = 3f;
+    private const double HoverDelaySeconds = 0.12;
+    private const float FarWorldUnitsPerPixel = 2.35f;
+    private const float MidWorldUnitsPerPixel = 1.45f;
 
     private sealed class Label
     {
@@ -33,6 +36,8 @@ internal static class ObjectSceneLabelView
     private static float cameraHeight = float.NaN;
     private static Num.Vector2 cachedDisplay;
     private static int hoveredIndex = -1;
+    private static int pendingHoverIndex = -1;
+    private static double pendingHoverSince;
 
     internal static bool OwnsMouse { get; private set; }
 
@@ -60,7 +65,7 @@ internal static class ObjectSceneLabelView
                 break;
             }
         }
-        SetHover(hit?.Item.Index ?? -1);
+        UpdateHover(hit?.Item.Index ?? -1);
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
         for (int i = 0; i < placed.Count; i++)
@@ -85,6 +90,8 @@ internal static class ObjectSceneLabelView
         cameraX = cameraY = cameraWidth = cameraHeight = float.NaN;
         cachedDisplay = default;
         hoveredIndex = -1;
+        pendingHoverIndex = -1;
+        pendingHoverSince = 0d;
         OwnsMouse = false;
         ObjectSceneVisibilityState.Reset();
     }
@@ -105,7 +112,8 @@ internal static class ObjectSceneLabelView
             EditorObjectSnapshot item = objects[i];
             if (item == null) continue;
             ObjectSceneVisibility visibility = ObjectSceneVisibilityState.Resolve(item);
-            if (visibility == ObjectSceneVisibility.Hidden) continue;
+            if (visibility == ObjectSceneVisibility.Hidden || !PassesSemanticZoom(item, visibility, viewport, display))
+                continue;
 
             Num.Vector2 anchor = WorldToScreen(item.X, item.Y, viewport, display);
             if (anchor.X < -120f || anchor.X > display.X + 120f || anchor.Y < -40f || anchor.Y > display.Y + 40f)
@@ -262,11 +270,65 @@ internal static class ObjectSceneLabelView
         return new Num.Vector2(nx * display.X, display.Y - ny * display.Y);
     }
 
+    private static void UpdateHover(int index)
+    {
+        if (index < 0)
+        {
+            pendingHoverIndex = -1;
+            pendingHoverSince = 0d;
+            SetHover(-1);
+            return;
+        }
+
+        if (index == hoveredIndex)
+        {
+            pendingHoverIndex = -1;
+            return;
+        }
+
+        double now = ImGui.GetTime();
+        if (pendingHoverIndex != index)
+        {
+            pendingHoverIndex = index;
+            pendingHoverSince = now;
+            return;
+        }
+
+        if (now - pendingHoverSince < HoverDelaySeconds)
+            return;
+
+        pendingHoverIndex = -1;
+        SetHover(index);
+    }
+
     private static void SetHover(int index)
     {
         if (hoveredIndex == index) return;
         hoveredIndex = index;
         ObjectSceneVisibilityState.SetHoveredIndex(index);
+    }
+
+    private static bool PassesSemanticZoom(
+        EditorObjectSnapshot item,
+        ObjectSceneVisibility visibility,
+        EditorViewportSnapshot viewport,
+        Num.Vector2 display)
+    {
+        // Selection and explicit hover are never culled. Normal labels progressively reduce density
+        // as more world space is packed into each screen pixel; this keeps overview zooms readable
+        // without changing RoomSettings or the user's category visibility choices.
+        if (visibility is ObjectSceneVisibility.Selected or ObjectSceneVisibility.Hovered)
+            return true;
+
+        float unitsPerPixelX = viewport.Width / Math.Max(1f, display.X);
+        float unitsPerPixelY = viewport.Height / Math.Max(1f, display.Y);
+        float unitsPerPixel = Math.Max(unitsPerPixelX, unitsPerPixelY);
+
+        if (unitsPerPixel >= FarWorldUnitsPerPixel)
+            return item.Importance >= 2;
+        if (unitsPerPixel >= MidWorldUnitsPerPixel)
+            return item.Importance >= 1;
+        return true;
     }
 
     private static bool Nearly(float a, float b) => Math.Abs(a - b) <= 0.01f;
