@@ -39,6 +39,7 @@ internal static class ObjectSceneWorkspaceView
 
     private static string search = string.Empty;
     private static int selectionAnchor = -1;
+    private static long selectionAnchorStableId;
     private static int gridStepIndex = 1;
 
     private static EditorObjectSnapshot[] projectedObjects;
@@ -70,6 +71,7 @@ internal static class ObjectSceneWorkspaceView
         observedSearch = null;
         normalizedSearch = string.Empty;
         selectionAnchor = -1;
+        selectionAnchorStableId = 0L;
         gridStepIndex = 1;
         statusObjectCount = -1;
         statusSelectionCount = -1;
@@ -85,7 +87,10 @@ internal static class ObjectSceneWorkspaceView
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
 
         if (selectionAnchor >= objects.Length)
+        {
             selectionAnchor = -1;
+            selectionAnchorStableId = 0L;
+        }
 
         DevToolWidgets.MutedText(GetStatusText(objects.Length, selectedCount));
 
@@ -268,17 +273,27 @@ internal static class ObjectSceneWorkspaceView
                         EditorUiCommandKind.SelectObjectRange,
                         index: item.Index,
                         secondaryIndex: selectionAnchor,
-                        flag: io.KeyCtrl));
+                        flag: io.KeyCtrl,
+                        stableId: item.StableId,
+                        secondaryStableId: selectionAnchorStableId));
                 }
                 else if (io.KeyCtrl)
                 {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.ToggleObjectSelection,
+                        item.Index,
+                        stableId: item.StableId));
                     selectionAnchor = item.Index;
+                    selectionAnchorStableId = item.StableId;
                 }
                 else
                 {
-                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.SelectObject,
+                        item.Index,
+                        stableId: item.StableId));
                     selectionAnchor = item.Index;
+                    selectionAnchorStableId = item.StableId;
                 }
             }
         }
