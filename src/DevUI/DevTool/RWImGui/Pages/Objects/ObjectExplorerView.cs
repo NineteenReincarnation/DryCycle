@@ -151,6 +151,8 @@ internal static class ObjectExplorerView
         bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
         if (!sceneInBrowser)
             sceneTab = false;
+        else if (!sceneTab)
+            ObjectSceneVisibilityState.SetSearchQuery(string.Empty);
 
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("资源库", "Library"),
@@ -486,22 +488,6 @@ internal static class ObjectExplorerView
             if (group.Rows.Count == 0)
                 SceneGroups.Add(group);
 
-            int rowIndex = group.Rows.Count;
-            if (group.CategoryRuns.Count == 0 ||
-                !string.Equals(group.CategoryRuns[group.CategoryRuns.Count - 1].Category, category, StringComparison.Ordinal))
-            {
-                group.CategoryRuns.Add(new CategoryRun
-                {
-                    Category = category,
-                    Start = rowIndex,
-                    Count = 1
-                });
-            }
-            else
-            {
-                group.CategoryRuns[group.CategoryRuns.Count - 1].Count++;
-            }
-
             group.Rows.Add(new SceneObjectRow
             {
                 Item = item,
@@ -510,6 +496,43 @@ internal static class ObjectExplorerView
                 TooltipText = source + " · " + item.Type + " · " + category
             });
             sceneMatchCount++;
+        }
+
+        for (int i = 0; i < SceneGroups.Count; i++)
+        {
+            SceneObjectGroup group = SceneGroups[i];
+            group.Rows.Sort((a, b) =>
+            {
+                int category = string.Compare(a.Category, b.Category, StringComparison.OrdinalIgnoreCase);
+                if (category != 0) return category;
+                long aId = a.Item?.StableId ?? 0L;
+                long bId = b.Item?.StableId ?? 0L;
+                int stable = aId.CompareTo(bId);
+                return stable != 0 ? stable : (a.Item?.Index ?? -1).CompareTo(b.Item?.Index ?? -1);
+            });
+
+            group.CategoryRuns.Clear();
+            for (int rowIndex = 0; rowIndex < group.Rows.Count; rowIndex++)
+            {
+                string category = group.Rows[rowIndex].Category;
+                if (group.CategoryRuns.Count == 0 ||
+                    !string.Equals(
+                        group.CategoryRuns[group.CategoryRuns.Count - 1].Category,
+                        category,
+                        StringComparison.Ordinal))
+                {
+                    group.CategoryRuns.Add(new CategoryRun
+                    {
+                        Category = category,
+                        Start = rowIndex,
+                        Count = 1
+                    });
+                }
+                else
+                {
+                    group.CategoryRuns[group.CategoryRuns.Count - 1].Count++;
+                }
+            }
         }
 
         projectedSceneObjects = objects;
