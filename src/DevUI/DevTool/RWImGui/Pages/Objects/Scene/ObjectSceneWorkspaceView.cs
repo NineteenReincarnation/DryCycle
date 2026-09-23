@@ -411,6 +411,19 @@ internal static class ObjectSceneWorkspaceView
             projectedMatchCount++;
         }
 
+        for (int i = 0; i < ProjectedGroups.Count; i++)
+        {
+            ProjectedGroups[i].Rows.Sort((a, b) =>
+            {
+                int category = string.Compare(a.Category, b.Category, StringComparison.OrdinalIgnoreCase);
+                if (category != 0) return category;
+                long aId = a.Item?.StableId ?? 0L;
+                long bId = b.Item?.StableId ?? 0L;
+                int stable = aId.CompareTo(bId);
+                return stable != 0 ? stable : (a.Item?.Index ?? -1).CompareTo(b.Item?.Index ?? -1);
+            });
+        }
+
         projectedObjects = objects;
         projectedSearch = query;
         projectedChinese = chinese;
