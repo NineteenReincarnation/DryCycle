@@ -9,13 +9,13 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <GameModOutputDir Condition="'$(GameModOutputDir)' == ''">D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <GameModOutputDir Condition="'$(GameModOutputDir)' == ''">D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
     <OutputPath>$(GameModOutputDir)</OutputPath>
   </PropertyGroup>
 
   <PropertyGroup>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
-    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Steam/steamapps/common/Rain World')">D:/Steam/steamapps/common/Rain World</RainWorldDir>
 
     <!-- Steam Workshop installs often expose the published mod root directly as the item
          directory, while release ZIPs contain a nested rwimgui/ folder. Support both. -->
