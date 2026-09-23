@@ -63,7 +63,12 @@ internal static class ObjectSceneLabelView
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
         for (int i = 0; i < placed.Count; i++)
-            DrawLabel(draw, placed[i], layoutDelta);
+        {
+            Label label = placed[i];
+            if (!IntersectsDisplay(label, layoutDelta, display))
+                continue;
+            DrawLabel(draw, label, layoutDelta);
+        }
 
         if (hit == null || io.WantCaptureMouse || NativeObjectGizmoView.OwnsMouse ||
             NativeSpatialGizmoView.OwnsMouse || !ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -173,11 +178,16 @@ internal static class ObjectSceneLabelView
     private static void Place(Label label, Num.Vector2 display)
     {
         Num.Vector2 size = label.Max - label.Min;
+        bool clampToViewport =
+            label.Anchor.X >= 0f && label.Anchor.X <= display.X &&
+            label.Anchor.Y >= 0f && label.Anchor.Y <= display.Y;
+
         for (int i = 0; i < 8; i++)
         {
             Num.Vector2 min = label.Anchor + PlacementOffset(i, size);
             Num.Vector2 max = min + size;
-            Clamp(ref min, ref max, display);
+            if (clampToViewport)
+                Clamp(ref min, ref max, display);
             if (!Overlaps(min, max))
             {
                 label.Min = min;
@@ -192,7 +202,8 @@ internal static class ObjectSceneLabelView
         {
             Num.Vector2 min = label.Anchor + new Num.Vector2(8f, 8f + row * (size.Y + Gap));
             Num.Vector2 max = min + size;
-            Clamp(ref min, ref max, display);
+            if (clampToViewport)
+                Clamp(ref min, ref max, display);
             fallbackMin = min;
             fallbackMax = max;
             if (!Overlaps(min, max))
@@ -296,6 +307,13 @@ internal static class ObjectSceneLabelView
     private static int Cell(float value) => (int)Math.Floor(value / SpatialCellSize);
 
     private static long CellKey(int x, int y) => ((long)x << 32) ^ (uint)y;
+
+    private static bool IntersectsDisplay(Label label, Num.Vector2 layoutDelta, Num.Vector2 display)
+    {
+        Num.Vector2 min = label.Min + layoutDelta;
+        Num.Vector2 max = label.Max + layoutDelta;
+        return max.X >= 0f && min.X <= display.X && max.Y >= 0f && min.Y <= display.Y;
+    }
 
     private static void DrawLabel(ImDrawListPtr draw, Label label, Num.Vector2 layoutDelta)
     {
