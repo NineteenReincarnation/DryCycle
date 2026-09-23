@@ -194,7 +194,10 @@ public static partial class EditorPresentationHub
 
         return new EditorInspectorSnapshot
         {
-            HasSelection = singleSelection,
+            // Multi-selection has a real inspector payload (shared properties, group transform and
+            // selection actions). HasSelection therefore means "one or more", while features that
+            // require a concrete target continue to use singleSelection below.
+            HasSelection = selectionCount > 0,
             ObjectIndex = selectedIndex,
             ObjectStableId = singleSelection ? ObjectPresentationIdentity.Get(selected) : 0L,
             SelectionCount = selectionCount,
