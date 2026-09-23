@@ -48,6 +48,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
         // object-position point, and marquee selection receives only otherwise-unclaimed room space.
         NativeObjectGizmoView.Draw(snapshot, display);
         NativeSpatialGizmoView.DrawObjects(snapshot, display);
+        ObjectSceneLabelView.Draw(snapshot, display);
         ObjectMarqueeSelectionView.Draw(snapshot, display);
     }
 
@@ -77,6 +78,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
         NativeSpatialGizmoView.ResetRetainedState();
         NativeObjectGizmoView.ResetRetainedState();
         ObjectMarqueeSelectionView.ResetRetainedState();
+        ObjectSceneLabelView.ResetRetainedState();
         ObjectExplorerView.ResetRetainedState();
         ObjectSceneWorkspaceView.ResetRetainedState();
         ObjectInspectorView.ResetRetainedState();
