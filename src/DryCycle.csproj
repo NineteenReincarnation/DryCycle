@@ -13,7 +13,7 @@
          compile/CI validation to use the exact Rain World references without requiring
          a writable Windows game installation as the build output directory. -->
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
-    <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(DeployToGame)' == 'true'">D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
+    <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(DeployToGame)' == 'true'">D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
     <GameModRootDir Condition="'$(GameModRootDir)' == '' and '$(GameModOutputDir)' != ''">$(GameModOutputDir)/../..</GameModRootDir>
     <OutputPath Condition="'$(DeployToGame)' == 'true'">$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
@@ -28,7 +28,7 @@
        The second line is a convenience fallback for the current development machine. -->
   <PropertyGroup>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
-    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Application/Steam/steamapps/common/Rain World')">D:/Application/Steam/steamapps/common/Rain World</RainWorldDir>
+    <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Steam/steamapps/common/Rain World')">D:/Steam/steamapps/common/Rain World</RainWorldDir>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -135,7 +135,7 @@
   </ItemGroup>
 
   <Target Name="ValidateRainWorldDir" BeforeTargets="ResolveReferences">
-    <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Application/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
+    <Error Condition="'$(RainWorldDir)' == ''" Text="RainWorldDir is not set. Pass -p:RainWorldDir=&quot;D:/Steam/steamapps/common/Rain World&quot; or set the RainWorldDir environment variable." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/BepInEx.dll')" Text="BepInEx.dll not found under $(RainWorldDir)/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/MonoMod.Utils.dll')" Text="Iterator Framework requires the MonoMod.Utils.dll shipped in RainWorldDir/BepInEx/core." />
     <Error Condition="!Exists('$(RainWorldDir)/BepInEx/core/Mono.Cecil.dll')" Text="Iterator Framework requires the Mono.Cecil.dll shipped in RainWorldDir/BepInEx/core." />
