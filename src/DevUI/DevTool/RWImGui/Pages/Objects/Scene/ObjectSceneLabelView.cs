@@ -161,17 +161,9 @@ internal static class ObjectSceneLabelView
     private static void Place(Label label, Num.Vector2 display)
     {
         Num.Vector2 size = label.Max - label.Min;
-        Num.Vector2[] offsets =
+        for (int i = 0; i < 8; i++)
         {
-            new(8f, -size.Y * 0.5f), new(8f, 8f), new(8f, -size.Y - 8f),
-            new(-size.X - 8f, -size.Y * 0.5f), new(-size.X - 8f, 8f),
-            new(-size.X - 8f, -size.Y - 8f), new(-size.X * 0.5f, 10f),
-            new(-size.X * 0.5f, -size.Y - 10f)
-        };
-
-        for (int i = 0; i < offsets.Length; i++)
-        {
-            Num.Vector2 min = label.Anchor + offsets[i];
+            Num.Vector2 min = label.Anchor + PlacementOffset(i, size);
             Num.Vector2 max = min + size;
             Clamp(ref min, ref max, display);
             if (!Overlaps(min, max))
@@ -182,11 +174,15 @@ internal static class ObjectSceneLabelView
             }
         }
 
+        Num.Vector2 fallbackMin = label.Anchor + new Num.Vector2(8f, 8f);
+        Num.Vector2 fallbackMax = fallbackMin + size;
         for (int row = 0; row < 16; row++)
         {
             Num.Vector2 min = label.Anchor + new Num.Vector2(8f, 8f + row * (size.Y + Gap));
             Num.Vector2 max = min + size;
             Clamp(ref min, ref max, display);
+            fallbackMin = min;
+            fallbackMax = max;
             if (!Overlaps(min, max))
             {
                 label.Min = min;
@@ -194,7 +190,25 @@ internal static class ObjectSceneLabelView
                 return;
             }
         }
+
+        // Dense scenes can exhaust the bounded search before the dedicated cluster phase runs.
+        // Keep a deterministic clamped fallback instead of silently leaving the label at its raw
+        // anchor, which would create an accidental pile-up with no relationship to layout policy.
+        label.Min = fallbackMin;
+        label.Max = fallbackMax;
     }
+
+    private static Num.Vector2 PlacementOffset(int index, Num.Vector2 size) => index switch
+    {
+        0 => new Num.Vector2(8f, -size.Y * 0.5f),
+        1 => new Num.Vector2(8f, 8f),
+        2 => new Num.Vector2(8f, -size.Y - 8f),
+        3 => new Num.Vector2(-size.X - 8f, -size.Y * 0.5f),
+        4 => new Num.Vector2(-size.X - 8f, 8f),
+        5 => new Num.Vector2(-size.X - 8f, -size.Y - 8f),
+        6 => new Num.Vector2(-size.X * 0.5f, 10f),
+        _ => new Num.Vector2(-size.X * 0.5f, -size.Y - 10f)
+    };
 
     private static Label HitTest(Num.Vector2 point)
     {
