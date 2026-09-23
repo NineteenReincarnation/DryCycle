@@ -92,6 +92,7 @@ public static partial class EditorPresentationHub
         return new EditorObjectSnapshot
         {
             Index = index,
+            StableId = ObjectPresentationIdentity.Get(item),
             Type = typeName,
             DisplayName = descriptor?.DisplayName ?? typeName,
             Category = descriptor?.Category ?? "Unsorted",
@@ -127,6 +128,7 @@ public static partial class EditorPresentationHub
                 : new EditorObjectSnapshot
                 {
                     Index = row.Index,
+                    StableId = row.StableId,
                     Type = row.Type,
                     DisplayName = row.DisplayName,
                     Category = row.Category,
