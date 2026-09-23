@@ -10,6 +10,7 @@ public enum EditorSoundSourceKind
     Watcher,
     Dlc,
     Mod,
+    Unknown,
     Missing
 }
 
