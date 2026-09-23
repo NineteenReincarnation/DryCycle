@@ -103,7 +103,7 @@ internal static class ObjectSceneVisibilityState
         ObjectCategoryVisibility categoryMode = GetCategoryMode(item.Category);
         if (categoryMode == ObjectCategoryVisibility.Hidden) return ObjectSceneVisibility.Hidden;
 
-        if (searchQuery.Length > 0 && !Matches(item, searchQuery))
+        if (searchQuery.Length > 0 && !MatchesQuery(item, searchQuery))
             return ObjectSceneVisibility.Ghost;
 
         if (focusedCategory.Length > 0 &&
@@ -132,13 +132,31 @@ internal static class ObjectSceneVisibilityState
         revision++;
     }
 
-    private static bool Matches(EditorObjectSnapshot item, string query) =>
-        Contains(item.Type, query) ||
-        Contains(item.DisplayName, query) ||
-        Contains(item.Category, query) ||
-        Contains(item.Source, query) ||
-        Fuzzy(item.Type, query) ||
-        Fuzzy(item.DisplayName, query);
+    internal static bool MatchesQuery(EditorObjectSnapshot item, string query)
+    {
+        if (item == null) return false;
+        if (string.IsNullOrWhiteSpace(query)) return true;
+        return Contains(item.Type, query) ||
+               Contains(item.DisplayName, query) ||
+               Contains(item.Category, query) ||
+               Contains(item.Source, query) ||
+               Fuzzy(item.Type, query) ||
+               Fuzzy(item.DisplayName, query);
+    }
+
+    internal static bool IsSearchMatch(EditorObjectSnapshot item) =>
+        searchQuery.Length > 0 && MatchesQuery(item, searchQuery);
+
+    internal static bool IsFocusedCategory(EditorObjectSnapshot item) =>
+        item != null &&
+        focusedCategory.Length > 0 &&
+        string.Equals(
+            NormalizeCategory(item.Category),
+            focusedCategory,
+            StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsExplicitlyEmphasized(EditorObjectSnapshot item) =>
+        IsSearchMatch(item) || IsFocusedCategory(item);
 
     private static bool Contains(string value, string query) =>
         !string.IsNullOrEmpty(value) &&
