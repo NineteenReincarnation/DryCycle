@@ -36,12 +36,20 @@ internal static class ObjectPresentationIdentity
 
         if (stableId != 0L)
         {
+            // Normal command frames keep the snapshot index. Validate that address first so drag
+            // updates remain O(1); only a real collection reorder pays the recovery scan.
+            if (fallbackIndex >= 0 && fallbackIndex < items.Count)
+            {
+                PlacedObject fast = items[fallbackIndex];
+                if (HasId(fast, stableId))
+                    return fast;
+            }
+
             for (int i = 0; i < items.Count; i++)
             {
+                if (i == fallbackIndex) continue;
                 PlacedObject candidate = items[i];
-                if (candidate != null &&
-                    Ids.TryGetValue(candidate, out IdentityBox box) &&
-                    box.Value == stableId)
+                if (HasId(candidate, stableId))
                     return candidate;
             }
             return null;
@@ -58,12 +66,14 @@ internal static class ObjectPresentationIdentity
 
         if (stableId != 0L)
         {
+            if (fallbackIndex >= 0 && fallbackIndex < items.Count &&
+                HasId(items[fallbackIndex], stableId))
+                return fallbackIndex;
+
             for (int i = 0; i < items.Count; i++)
             {
-                PlacedObject candidate = items[i];
-                if (candidate != null &&
-                    Ids.TryGetValue(candidate, out IdentityBox box) &&
-                    box.Value == stableId)
+                if (i == fallbackIndex) continue;
+                if (HasId(items[i], stableId))
                     return i;
             }
             return -1;
@@ -73,4 +83,9 @@ internal static class ObjectPresentationIdentity
             ? fallbackIndex
             : -1;
     }
+
+    private static bool HasId(PlacedObject item, long stableId) =>
+        item != null &&
+        Ids.TryGetValue(item, out IdentityBox box) &&
+        box.Value == stableId;
 }
