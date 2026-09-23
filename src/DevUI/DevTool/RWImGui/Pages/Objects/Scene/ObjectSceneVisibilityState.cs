@@ -30,13 +30,13 @@ internal static class ObjectSceneVisibilityState
 
     private static string focusedCategory = string.Empty;
     private static string searchQuery = string.Empty;
-    private static int hoveredIndex = -1;
+    private static long hoveredStableId;
     private static long revision = 1;
 
     internal static long Revision => revision;
     internal static string FocusedCategory => focusedCategory;
     internal static string SearchQuery => searchQuery;
-    internal static int HoveredIndex => hoveredIndex;
+    internal static long HoveredStableId => hoveredStableId;
 
     internal static ObjectCategoryVisibility GetCategoryMode(string category)
     {
@@ -87,19 +87,19 @@ internal static class ObjectSceneVisibilityState
         revision++;
     }
 
-    internal static void SetHoveredIndex(int index)
+    internal static void SetHoveredStableId(long stableId)
     {
-        if (hoveredIndex == index) return;
+        if (hoveredStableId == stableId) return;
         // Hover is transient interaction state. It must not invalidate retained label layout;
         // otherwise the hovered label can move under the pointer when its priority changes.
-        hoveredIndex = index;
+        hoveredStableId = stableId;
     }
 
     internal static ObjectSceneVisibility Resolve(EditorObjectSnapshot item)
     {
         if (item == null) return ObjectSceneVisibility.Hidden;
         if (item.Selected) return ObjectSceneVisibility.Selected;
-        if (item.Index == hoveredIndex) return ObjectSceneVisibility.Hovered;
+        if (item.StableId != 0L && item.StableId == hoveredStableId) return ObjectSceneVisibility.Hovered;
 
         ObjectCategoryVisibility categoryMode = GetCategoryMode(item.Category);
         if (categoryMode == ObjectCategoryVisibility.Hidden) return ObjectSceneVisibility.Hidden;
@@ -129,7 +129,7 @@ internal static class ObjectSceneVisibilityState
         CategoryModes.Clear();
         focusedCategory = string.Empty;
         searchQuery = string.Empty;
-        hoveredIndex = -1;
+        hoveredStableId = 0L;
         revision++;
     }
 
