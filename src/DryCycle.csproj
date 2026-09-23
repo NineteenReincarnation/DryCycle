@@ -13,9 +13,6 @@
          compile/CI validation to use the exact Rain World references without requiring
          a writable Windows game installation as the build output directory. -->
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
-    <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(DeployToGame)' == 'true'">D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins</GameModOutputDir>
-    <GameModRootDir Condition="'$(GameModRootDir)' == '' and '$(GameModOutputDir)' != ''">$(GameModOutputDir)/../..</GameModRootDir>
-    <OutputPath Condition="'$(DeployToGame)' == 'true'">$(GameModOutputDir)</OutputPath>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
 
     <DryCycleShaderProjectDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderProjectDir>
@@ -24,11 +21,18 @@
     <DryCycleUnityEditor Condition="'$(DryCycleUnityEditor)' == '' and '$(UNITY_EDITOR)' != ''">$(UNITY_EDITOR)</DryCycleUnityEditor>
   </PropertyGroup>
 
-  <!-- RainWorldDir can be supplied as an environment variable or MSBuild property.
-       The second line is a convenience fallback for the current development machine. -->
+  <!-- RainWorldDir is the single local-install source of truth. Game/mod deployment paths
+       derive from it so moving Steam libraries cannot leave DLL and assets targeting different installs.
+       Any property may still be overridden explicitly for CI or unusual local layouts. -->
   <PropertyGroup>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and '$(RainWorldPath)' != ''">$(RainWorldPath)</RainWorldDir>
     <RainWorldDir Condition="'$(RainWorldDir)' == '' and Exists('D:/Steam/steamapps/common/Rain World')">D:/Steam/steamapps/common/Rain World</RainWorldDir>
+
+    <GameModRootDir Condition="'$(GameModRootDir)' == '' and '$(RainWorldDir)' != ''">$(RainWorldDir)/RainWorld_Data/StreamingAssets/mods/Ancient Site</GameModRootDir>
+    <GameModOutputDir Condition="'$(GameModOutputDir)' == '' and '$(GameModRootDir)' != ''">$(GameModRootDir)/newest/plugins</GameModOutputDir>
+    <GameModAssetsDir Condition="'$(GameModAssetsDir)' == '' and '$(GameModRootDir)' != ''">$(GameModAssetsDir)</GameModAssetsDir>
+
+    <OutputPath Condition="'$(DeployToGame)' == 'true'">$(GameModOutputDir)</OutputPath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -150,8 +154,11 @@
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.UnityWebRequestWWWModule.dll')" Text="UnityEngine.UnityWebRequestWWWModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed. External MP3/OGG/WAV coroutine loading requires Rain World's WWW module." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/UnityEngine.InputLegacyModule.dll')" Text="UnityEngine.InputLegacyModule.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
     <Error Condition="!Exists('$(RainWorldDir)/RainWorld_Data/Managed/Unity.Mathematics.dll')" Text="Unity.Mathematics.dll not found under $(RainWorldDir)/RainWorld_Data/Managed." />
+    <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModRootDir)' == ''" Text="DeployToGame=true requires GameModRootDir." />
+    <Error Condition="'$(DeployToGame)' == 'true' and !Exists('$(GameModRootDir)')" Text="DryCycle mod root not found: $(GameModRootDir)" />
     <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModOutputDir)' == ''" Text="DeployToGame=true requires GameModOutputDir." />
     <Error Condition="'$(DeployToGame)' == 'true' and !Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
+    <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModAssetsDir)' == ''" Text="DeployToGame=true requires GameModAssetsDir." />
   </Target>
 
   <!-- Optional one-command shader build. Keep it opt-in because the Unity Editor is
@@ -195,24 +202,24 @@
     <!-- Deploy the platform-specific weather shader bundle and the editor-version
          sidecar produced alongside it. The sidecar lets runtime logs distinguish an
          algorithm/render bug from an AssetBundle editor/player compatibility problem. -->
-    <MakeDir Directories="$(GameModRootDir)/assets/drycycle" />
+    <MakeDir Directories="$(GameModAssetsDir)" />
     <Copy Condition="Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures"
-      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycyclecreatures" SkipUnchangedFiles="true" />
+      DestinationFiles="$(GameModAssetsDir)/drycyclecreatures" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures.version.txt')"
       SourceFiles="$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures.version.txt"
-      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycyclecreatures.version.txt" SkipUnchangedFiles="true" />
+      DestinationFiles="$(GameModAssetsDir)/drycyclecreatures.version.txt" SkipUnchangedFiles="true" />
     <Warning Condition="!Exists('$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycyclecreatures')"
       Text="MantleCrab creature bundle missing. Procedural CPU appearance fallback will be used." />
     <Copy
       Condition="Exists('$(DryCycleWeatherBundleSource)')"
       SourceFiles="$(DryCycleWeatherBundleSource)"
-      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycycleweather"
+      DestinationFiles="$(GameModAssetsDir)/drycycleweather"
       SkipUnchangedFiles="true" />
     <Copy
       Condition="Exists('$(DryCycleWeatherBundleVersionSource)')"
       SourceFiles="$(DryCycleWeatherBundleVersionSource)"
-      DestinationFiles="$(GameModRootDir)/assets/drycycle/drycycleweather.version.txt"
+      DestinationFiles="$(GameModAssetsDir)/drycycleweather.version.txt"
       SkipUnchangedFiles="true" />
     <Warning
       Condition="!Exists('$(DryCycleWeatherBundleSource)')"
