@@ -94,8 +94,6 @@ internal static class ObjectSceneLabelView
         pendingHoverStableId = 0L;
         pendingHoverSince = 0d;
         OwnsMouse = false;
-        ObjectSceneProjectionPolicy.Reset();
-        ObjectSceneVisibilityState.Reset();
     }
 
     private static void EnsureLayout(EditorObjectSnapshot[] objects, EditorViewportSnapshot viewport, Num.Vector2 display)
