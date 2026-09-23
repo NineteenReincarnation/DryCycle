@@ -39,6 +39,7 @@ public sealed class EditorInspectorSnapshot
 {
     public bool HasSelection { get; init; }
     public int ObjectIndex { get; init; } = -1;
+    public long ObjectStableId { get; init; }
     public int SelectionCount { get; init; }
     public string Type { get; init; } = string.Empty;
     public float X { get; init; }
@@ -443,7 +444,9 @@ public readonly struct EditorUiCommand
         float y = 0f,
         bool flag = false,
         EditorToolMode mode = EditorToolMode.Room,
-        EditorPropertyValue propertyValue = default)
+        EditorPropertyValue propertyValue = default,
+        long stableId = 0L,
+        long secondaryStableId = 0L)
     {
         Kind = kind;
         Index = index;
@@ -454,6 +457,8 @@ public readonly struct EditorUiCommand
         Flag = flag;
         Mode = mode;
         PropertyValue = propertyValue;
+        StableId = stableId;
+        SecondaryStableId = secondaryStableId;
     }
 
     public EditorUiCommandKind Kind { get; }
@@ -465,6 +470,8 @@ public readonly struct EditorUiCommand
     public bool Flag { get; }
     public EditorToolMode Mode { get; }
     public EditorPropertyValue PropertyValue { get; }
+    public long StableId { get; }
+    public long SecondaryStableId { get; }
 }
 
 public static class EditorUiCommandQueue
@@ -487,7 +494,7 @@ public static class EditorUiCommandQueue
                 long historyBeforeCommand = session.History.Revision;
                 long selectionBefore = session.Selection.Revision;
                 int objectCountBefore = session.RoomSettings?.placedObjects?.Count ?? 0;
-                PlacedObject commandTarget = ResolveObject(session, command.Index);
+                PlacedObject commandTarget = ResolveObject(session, command.Index, command.StableId);
                 int selectionCountBefore = session.Selection.Count;
                 PlacedObject primaryBefore = session.Selection.PrimaryPlacedObject;
 
@@ -626,16 +633,20 @@ public static class EditorUiCommandQueue
                 session.SetToolMode(command.Mode);
                 return false;
             case EditorUiCommandKind.SelectObject:
-                session.Selection.SelectOnly(ResolveObject(session, command.Index));
+                session.Selection.SelectOnly(ResolveObject(session, command.Index, command.StableId));
                 return false;
             case EditorUiCommandKind.ToggleObjectSelection:
-                session.Selection.Toggle(ResolveObject(session, command.Index));
+                session.Selection.Toggle(ResolveObject(session, command.Index, command.StableId));
                 return false;
             case EditorUiCommandKind.SelectObjectRange:
-                session.Selection.SelectRange(session.RoomSettings?.placedObjects, command.SecondaryIndex, command.Index, command.Flag);
+                session.Selection.SelectRange(
+                    session.RoomSettings?.placedObjects,
+                    ResolveObjectIndex(session, command.SecondaryIndex, command.SecondaryStableId),
+                    ResolveObjectIndex(session, command.Index, command.StableId),
+                    command.Flag);
                 return false;
             case EditorUiCommandKind.DeleteObject:
-                return EditorActions.DeleteObject(session, ResolveObject(session, command.Index));
+                return EditorActions.DeleteObject(session, ResolveObject(session, command.Index, command.StableId));
             case EditorUiCommandKind.DeleteSelection:
                 return EditorActions.DeleteSelection(session);
             case EditorUiCommandKind.DuplicateSelection:
@@ -655,7 +666,7 @@ public static class EditorUiCommandQueue
                 session.CancelPlacement();
                 return false;
             case EditorUiCommandKind.SetObjectPosition:
-                return EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index), new Vector2(command.X, command.Y));
+                return EditorActions.SetObjectPosition(session, ResolveObject(session, command.Index, command.StableId), new Vector2(command.X, command.Y));
             case EditorUiCommandKind.SetSelectionPosition:
                 return EditorActions.SetSelectionPrimaryPosition(session, new Vector2(command.X, command.Y));
             case EditorUiCommandKind.SnapSelectionToGrid:
@@ -667,23 +678,23 @@ public static class EditorUiCommandQueue
                 return Enum.IsDefined(typeof(ObjectSelectionDistribution), command.Index) &&
                        EditorActions.DistributeSelection(session, (ObjectSelectionDistribution)command.Index);
             case EditorUiCommandKind.SetObjectProperty:
-                return EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue);
+                return EditorActions.SetObjectProperty(session, ResolveObject(session, command.Index, command.StableId), command.Text, command.PropertyValue);
             case EditorUiCommandKind.SetSelectionProperty:
                 return EditorActions.SetSelectionProperty(session, command.Text, command.PropertyValue);
             case EditorUiCommandKind.InvokeLegacyButton:
-                return EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index), command.Text);
+                return EditorActions.InvokeLegacyButton(session, ResolveObject(session, command.Index, command.StableId), command.Text);
             case EditorUiCommandKind.SetLegacySlider:
-                return EditorActions.SetLegacySlider(session, ResolveObject(session, command.Index), command.Text, command.X);
+                return EditorActions.SetLegacySlider(session, ResolveObject(session, command.Index, command.StableId), command.Text, command.X);
             case EditorUiCommandKind.ResetLegacySlider:
-                return EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index), command.Text);
+                return EditorActions.ResetLegacySlider(session, ResolveObject(session, command.Index, command.StableId), command.Text);
             case EditorUiCommandKind.SetLegacyText:
-                return EditorActions.SetLegacyText(session, ResolveObject(session, command.Index), command.Text, command.PropertyValue.Text);
+                return EditorActions.SetLegacyText(session, ResolveObject(session, command.Index, command.StableId), command.Text, command.PropertyValue.Text);
             case EditorUiCommandKind.SetLegacyDirection:
-                return EditorActions.SetLegacyDirection(session, ResolveObject(session, command.Index), command.Text, command.X, command.Y);
+                return EditorActions.SetLegacyDirection(session, ResolveObject(session, command.Index, command.StableId), command.Text, command.X, command.Y);
             case EditorUiCommandKind.SetLegacyColor:
                 return EditorActions.SetLegacyColor(
                     session,
-                    ResolveObject(session, command.Index),
+                    ResolveObject(session, command.Index, command.StableId),
                     command.Text,
                     command.PropertyValue.X,
                     command.PropertyValue.Y,
@@ -714,9 +725,13 @@ public static class EditorUiCommandQueue
         EditorUiCommandKind.SetLegacyDirection or
         EditorUiCommandKind.SetLegacyColor;
 
-    private static PlacedObject ResolveObject(EditorSession session, int index)
+    private static PlacedObject ResolveObject(EditorSession session, int index, long stableId = 0L)
     {
-        List<PlacedObject> objects = session?.RoomSettings?.placedObjects;
-        return objects != null && index >= 0 && index < objects.Count ? objects[index] : null;
+        return ObjectPresentationIdentity.Resolve(session?.RoomSettings?.placedObjects, index, stableId);
+    }
+
+    private static int ResolveObjectIndex(EditorSession session, int index, long stableId = 0L)
+    {
+        return ObjectPresentationIdentity.ResolveIndex(session?.RoomSettings?.placedObjects, index, stableId);
     }
 }
