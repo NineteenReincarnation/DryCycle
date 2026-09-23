@@ -78,6 +78,17 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
         DevToolUiSettings.T(" · 已选 ", " · Selected ") + state.CountB +
         (state.Flag ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + state.TextA : string.Empty);
 
+    protected override void OnDeactivate()
+    {
+        // Page switches happen after ToolMode has changed. Frontend gesture state must be retired
+        // immediately, but scene filters/search are intentionally retained for a return to the same
+        // document. The queued backend Cancel commands are allowed to complete off-page.
+        NativeSpatialGizmoView.ResetRetainedState();
+        NativeObjectGizmoView.ResetRetainedState();
+        ObjectMarqueeSelectionView.Reset();
+        ObjectSceneLabelView.ResetRetainedState();
+    }
+
     protected override void OnReset()
     {
         activeDocument = string.Empty;
