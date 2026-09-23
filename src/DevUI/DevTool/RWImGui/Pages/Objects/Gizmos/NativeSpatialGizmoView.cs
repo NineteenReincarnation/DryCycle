@@ -24,6 +24,7 @@ internal static class NativeSpatialGizmoView
         internal bool Active;
         internal NativeGizmoTargetKind Target;
         internal int Index;
+        internal long StableId;
         internal float CenterWorldX;
         internal float CenterWorldY;
     }
@@ -70,7 +71,8 @@ internal static class NativeSpatialGizmoView
             nearest?.X ?? 0f,
             nearest?.Y ?? 0f,
             viewport,
-            display);
+            display,
+            nearest?.StableId ?? 0L);
     }
 
     internal static void DrawSound(EditorSoundPresentationSnapshot snapshot, Num.Vector2 display)
@@ -202,7 +204,8 @@ internal static class NativeSpatialGizmoView
             NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
                 NativeGizmoCommandKind.Cancel,
                 drag.Target,
-                drag.Index));
+                drag.Index,
+                stableId: drag.StableId));
         drag = default;
         claimedMouseThisFrame = false;
         cachedObjectSource = null;
@@ -233,7 +236,8 @@ internal static class NativeSpatialGizmoView
         float worldX,
         float worldY,
         EditorViewportSnapshot viewport,
-        Num.Vector2 display)
+        Num.Vector2 display,
+        long stableId = 0L)
     {
         if (drag.Active)
         {
@@ -248,15 +252,17 @@ internal static class NativeSpatialGizmoView
         NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
             NativeGizmoCommandKind.Select,
             target,
-            index));
-        BeginDrag(target, index, worldX, worldY);
+            index,
+            stableId: stableId));
+        BeginDrag(target, index, worldX, worldY, stableId);
     }
 
     private static void BeginDrag(
         NativeGizmoTargetKind target,
         int index,
         float centerWorldX,
-        float centerWorldY)
+        float centerWorldY,
+        long stableId = 0L)
     {
         claimedMouseThisFrame = true;
         drag = new DragState
@@ -264,13 +270,15 @@ internal static class NativeSpatialGizmoView
             Active = true,
             Target = target,
             Index = index,
+            StableId = stableId,
             CenterWorldX = centerWorldX,
             CenterWorldY = centerWorldY
         };
         NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
             NativeGizmoCommandKind.Begin,
             target,
-            index));
+            index,
+            stableId: stableId));
     }
 
     private static void ContinuePositionDrag(EditorViewportSnapshot viewport, Num.Vector2 display)
@@ -286,7 +294,8 @@ internal static class NativeSpatialGizmoView
                 drag.Target,
                 drag.Index,
                 world.X,
-                world.Y));
+                world.Y,
+                stableId: drag.StableId));
         }
 
         CommitIfReleased();
@@ -371,7 +380,8 @@ internal static class NativeSpatialGizmoView
         NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
             NativeGizmoCommandKind.Cancel,
             drag.Target,
-            drag.Index));
+            drag.Index,
+            stableId: drag.StableId));
         drag = default;
         return true;
     }
@@ -382,7 +392,8 @@ internal static class NativeSpatialGizmoView
         NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
             NativeGizmoCommandKind.Commit,
             drag.Target,
-            drag.Index));
+            drag.Index,
+            stableId: drag.StableId));
         drag = default;
     }
 
