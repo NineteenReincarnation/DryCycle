@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Gizmos;
 using DryCycle.DevUI.DevTool.Sound;
@@ -29,6 +30,8 @@ internal static class NativeSpatialGizmoView
 
     private static DragState drag;
     private static bool claimedMouseThisFrame;
+    private static EditorObjectSnapshot[] cachedObjectSource;
+    private static readonly List<EditorObjectSnapshot> selectedObjectCache = new();
 
     internal static bool OwnsMouse => drag.Active || claimedMouseThisFrame;
     internal static bool IsDragging => drag.Active;
@@ -44,10 +47,10 @@ internal static class NativeSpatialGizmoView
         Num.Vector2 mouse = ImGui.GetIO().MousePos;
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
 
-        for (int i = 0; i < snapshot.SceneObjects.Length; i++)
+        IReadOnlyList<EditorObjectSnapshot> selectedObjects = GetSelectedObjects(snapshot.SceneObjects);
+        for (int i = 0; i < selectedObjects.Count; i++)
         {
-            EditorObjectSnapshot item = snapshot.SceneObjects[i];
-            if (item == null || !item.Selected) continue;
+            EditorObjectSnapshot item = selectedObjects[i];
 
             // Text labels are the normal object identity/hit surface. A point is retained only for
             // selected objects, where it is an explicit position-edit handle rather than an icon.
@@ -202,6 +205,26 @@ internal static class NativeSpatialGizmoView
                 drag.Index));
         drag = default;
         claimedMouseThisFrame = false;
+        cachedObjectSource = null;
+        selectedObjectCache.Clear();
+    }
+
+    private static IReadOnlyList<EditorObjectSnapshot> GetSelectedObjects(EditorObjectSnapshot[] source)
+    {
+        if (ReferenceEquals(cachedObjectSource, source))
+            return selectedObjectCache;
+
+        cachedObjectSource = source;
+        selectedObjectCache.Clear();
+        if (source == null) return selectedObjectCache;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorObjectSnapshot item = source[i];
+            if (item?.Selected == true)
+                selectedObjectCache.Add(item);
+        }
+        return selectedObjectCache;
     }
 
     private static void HandlePointInteraction(
