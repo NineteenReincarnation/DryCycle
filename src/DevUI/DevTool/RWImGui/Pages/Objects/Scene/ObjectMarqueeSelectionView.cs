@@ -52,6 +52,7 @@ internal static class ObjectMarqueeSelectionView
         }
 
         ImGuiIOPtr io = ImGui.GetIO();
+        ObjectSceneProjectionPolicy.Update(viewport, display);
 
         if (gridVisible)
             DrawGrid(viewport, display, gridStep);
@@ -139,7 +140,7 @@ internal static class ObjectMarqueeSelectionView
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            if (item == null || !ObjectSceneVisibilityState.IsInteractive(item)) continue;
+            if (item == null || !ObjectSceneProjectionPolicy.IsInteractive(item)) continue;
 
             Num.Vector2 point = WorldToScreen(item.X, item.Y, viewport, display);
             if (point.X < minX || point.X > maxX || point.Y < minY || point.Y > maxY)
@@ -174,7 +175,7 @@ internal static class ObjectMarqueeSelectionView
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            if (item == null || !ObjectSceneVisibilityState.IsInteractive(item)) continue;
+            if (item == null || !ObjectSceneProjectionPolicy.IsInteractive(item)) continue;
             Num.Vector2 point = WorldToScreen(item.X, item.Y, viewport, display);
             if ((point - mouse).LengthSquared() <= limitSq)
                 return true;
