@@ -243,6 +243,13 @@ public static partial class EditorPresentationHub
                 // PlacedObject count or Objects revision, so refresh the detached payload explicitly.
                 // Descriptor registration is rare; prefer one authoritative full capture over trying
                 // to merge stale metadata with a simultaneous model/selection update.
+                //
+                // If the model also changed this frame, consume its semantic hint now. The full
+                // capture already subsumes that change; leaving the hint queued would let a later
+                // unrelated Objects revision consume stale member/collection semantics.
+                if (modelChanged)
+                    _ = ObjectPresentationChangeHintHub.Consume(session);
+
                 scene = CaptureObjectScene(session, live);
                 inspector = CaptureObjectInspector(session, live, selectionCount, primarySelection);
                 objectFullCapture = true;
