@@ -50,7 +50,7 @@ internal static class ObjectExplorerView
         internal string Label;
         internal string TooltipText;
 
-        public string StableId => "SceneObject:" + (Item?.Index ?? -1);
+        public string StableId => "SceneObject:" + (Item?.StableId ?? 0L);
         public string PrimaryText => Label ?? string.Empty;
         public string SecondaryText => string.Empty;
         public string StatusText => string.Empty;
@@ -71,6 +71,7 @@ internal static class ObjectExplorerView
     private static string sceneSearch = string.Empty;
     private static bool sceneTab;
     private static int sceneSelectionAnchor = -1;
+    private static long sceneSelectionAnchorStableId;
 
     private static EditorObjectTypeSnapshot[] projectedObjectLibrary;
     private static string projectedObjectSearch = string.Empty;
@@ -82,12 +83,7 @@ internal static class ObjectExplorerView
     private static string observedObjectSearch;
     private static string normalizedObjectSearch = string.Empty;
 
-    private static EditorObjectTypeSnapshot[] indexedMetadataLibrary;
-    private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType =
-        new(StringComparer.Ordinal);
-
     private static EditorObjectSnapshot[] projectedSceneObjects;
-    private static EditorObjectTypeSnapshot[] projectedSceneLibrary;
     private static string projectedSceneSearch = string.Empty;
     private static bool projectedSceneChinese;
     private static readonly Dictionary<string, SceneObjectGroup> SceneGroupsBySource =
@@ -122,9 +118,6 @@ internal static class ObjectExplorerView
         observedObjectSearch = null;
         normalizedObjectSearch = string.Empty;
 
-        indexedMetadataLibrary = null;
-        MetadataByType.Clear();
-
         foreach (SceneObjectGroup group in SceneGroupsBySource.Values)
         {
             group.Rows.Clear();
@@ -133,7 +126,6 @@ internal static class ObjectExplorerView
         SceneGroupsBySource.Clear();
         SceneGroups.Clear();
         projectedSceneObjects = null;
-        projectedSceneLibrary = null;
         projectedSceneSearch = string.Empty;
         projectedSceneChinese = false;
         sceneMatchCount = 0;
@@ -144,6 +136,7 @@ internal static class ObjectExplorerView
         sceneSearch = string.Empty;
         sceneTab = false;
         sceneSelectionAnchor = -1;
+        sceneSelectionAnchorStableId = 0L;
         sceneStatusObjectCount = -1;
         sceneStatusSelectionCount = -1;
         sceneStatusChinese = false;
@@ -163,7 +156,11 @@ internal static class ObjectExplorerView
                 DevToolUiSettings.T("资源库", "Library"),
                 "ObjectsLibraryTab",
                 sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
+        {
             sceneTab = false;
+            if (sceneInBrowser)
+                ObjectSceneVisibilityState.SetSearchQuery(string.Empty);
+        }
 
         if (sceneInBrowser)
         {
@@ -349,7 +346,10 @@ internal static class ObjectExplorerView
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
         if (sceneSelectionAnchor >= objects.Length)
+        {
             sceneSelectionAnchor = -1;
+            sceneSelectionAnchorStableId = 0L;
+        }
 
         DevToolWidgets.MutedText(GetSceneStatusText(objects.Length, selectedCount));
 
@@ -373,12 +373,13 @@ internal static class ObjectExplorerView
         DevToolWidgets.MutedText(DevToolUiSettings.T("搜索场景物件", "Search scene objects"));
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText("##DevToolSceneSearch", ref sceneSearch, 128);
+        ObjectSceneVisibilityState.SetSearchQuery(sceneSearch);
 
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
-        EnsureSceneProjection(snapshot, objects);
+        EnsureSceneProjection(objects);
         ImGuiIOPtr io = ImGui.GetIO();
         for (int sourceIndex = 0; sourceIndex < SceneGroups.Count; sourceIndex++)
         {
@@ -409,17 +410,27 @@ internal static class ObjectExplorerView
                                 EditorUiCommandKind.SelectObjectRange,
                                 index: item.Index,
                                 secondaryIndex: sceneSelectionAnchor,
-                                flag: io.KeyCtrl));
+                                flag: io.KeyCtrl,
+                                stableId: item.StableId,
+                                secondaryStableId: sceneSelectionAnchorStableId));
                         }
                         else if (io.KeyCtrl)
                         {
-                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleObjectSelection, item.Index));
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                                EditorUiCommandKind.ToggleObjectSelection,
+                                item.Index,
+                                stableId: item.StableId));
                             sceneSelectionAnchor = item.Index;
+                            sceneSelectionAnchorStableId = item.StableId;
                         }
                         else
                         {
-                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SelectObject, item.Index));
+                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                                EditorUiCommandKind.SelectObject,
+                                item.Index,
+                                stableId: item.StableId));
                             sceneSelectionAnchor = item.Index;
+                            sceneSelectionAnchorStableId = item.StableId;
                         }
                     }
                 }
@@ -430,18 +441,15 @@ internal static class ObjectExplorerView
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
     }
 
-    private static void EnsureSceneProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
+    private static void EnsureSceneProjection(EditorObjectSnapshot[] objects)
     {
-        EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
         string normalizedSearch = NormalizeSceneSearch();
         bool chinese = DevToolUiSettings.IsChinese;
         if (ReferenceEquals(projectedSceneObjects, objects) &&
-            ReferenceEquals(projectedSceneLibrary, library) &&
             string.Equals(projectedSceneSearch, normalizedSearch, StringComparison.Ordinal) &&
             projectedSceneChinese == chinese)
             return;
 
-        EnsureMetadataIndex(library);
         foreach (SceneObjectGroup cached in SceneGroupsBySource.Values)
         {
             cached.Rows.Clear();
@@ -453,19 +461,18 @@ internal static class ObjectExplorerView
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            if (item == null) continue;
-            MetadataByType.TryGetValue(item.Type ?? string.Empty, out EditorObjectTypeSnapshot metadata);
-            if (!MatchesSceneObject(item, metadata, normalizedSearch)) continue;
+            if (item == null || !ObjectSceneVisibilityState.MatchesQuery(item, normalizedSearch))
+                continue;
 
-            string source = string.IsNullOrWhiteSpace(metadata?.Source)
+            string source = string.IsNullOrWhiteSpace(item.Source)
                 ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                : metadata.Source;
-            string category = string.IsNullOrWhiteSpace(metadata?.Category)
+                : item.Source;
+            string category = string.IsNullOrWhiteSpace(item.Category)
                 ? DevToolUiSettings.T("未分类", "Unsorted")
-                : metadata.Category;
-            string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
+                : item.Category;
+            string displayName = string.IsNullOrWhiteSpace(item.DisplayName)
                 ? item.Type
-                : metadata.DisplayName;
+                : item.DisplayName;
 
             if (!SceneGroupsBySource.TryGetValue(source, out SceneObjectGroup group))
             {
@@ -506,33 +513,8 @@ internal static class ObjectExplorerView
         }
 
         projectedSceneObjects = objects;
-        projectedSceneLibrary = library;
         projectedSceneSearch = normalizedSearch;
         projectedSceneChinese = chinese;
-    }
-
-    private static void EnsureMetadataIndex(EditorObjectTypeSnapshot[] library)
-    {
-        if (ReferenceEquals(indexedMetadataLibrary, library)) return;
-        MetadataByType.Clear();
-        for (int i = 0; i < library.Length; i++)
-        {
-            EditorObjectTypeSnapshot metadata = library[i];
-            if (metadata == null || string.IsNullOrEmpty(metadata.Type)) continue;
-            MetadataByType[metadata.Type] = metadata;
-        }
-        indexedMetadataLibrary = library;
-    }
-
-    private static bool MatchesSceneObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
-    {
-        if (string.IsNullOrEmpty(query)) return true;
-        return Contains(item.Type, query) ||
-               Contains(metadata?.DisplayName, query) ||
-               Contains(metadata?.Source, query) ||
-               Contains(metadata?.Category, query) ||
-               Fuzzy(item.Type, query) ||
-               Fuzzy(metadata?.DisplayName, query);
     }
 
     private static string GetSceneStatusText(int objectCount, int selectedCount)
