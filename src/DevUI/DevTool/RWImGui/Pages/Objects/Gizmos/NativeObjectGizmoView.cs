@@ -22,6 +22,7 @@ internal static class NativeObjectGizmoView
     {
         internal bool Active;
         internal int ObjectIndex;
+        internal long ObjectStableId;
         internal string HandleId;
     }
 
@@ -61,7 +62,9 @@ internal static class NativeObjectGizmoView
             return;
         }
 
-        if (drag.Active && drag.ObjectIndex != gizmo.ObjectIndex)
+        if (drag.Active &&
+            ((drag.ObjectStableId != 0L && drag.ObjectStableId != gizmo.ObjectStableId) ||
+             (drag.ObjectStableId == 0L && drag.ObjectIndex != gizmo.ObjectIndex)))
         {
             CancelDrag();
             return;
@@ -94,7 +97,8 @@ internal static class NativeObjectGizmoView
                 NativeObjectGizmoEditKind.InsertCurvePoint,
                 gizmo.ObjectIndex,
                 segmentIndex: nearestCurve.SegmentIndex,
-                curveT: nearestCurve.T));
+                curveT: nearestCurve.T,
+                stableId: gizmo.ObjectStableId));
             return;
         }
 
@@ -104,7 +108,8 @@ internal static class NativeObjectGizmoView
             NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
                 NativeObjectGizmoEditKind.RemoveHandle,
                 gizmo.ObjectIndex,
-                handleId: nearestHandle.Id));
+                handleId: nearestHandle.Id,
+                stableId: gizmo.ObjectStableId));
             return;
         }
 
@@ -116,13 +121,15 @@ internal static class NativeObjectGizmoView
         {
             Active = true,
             ObjectIndex = gizmo.ObjectIndex,
+            ObjectStableId = gizmo.ObjectStableId,
             HandleId = nearestHandle.Id
         };
 
         NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
             NativeObjectGizmoEditKind.Begin,
             drag.ObjectIndex,
-            drag.HandleId));
+            drag.HandleId,
+            stableId: drag.ObjectStableId));
     }
 
     internal static void ResetRetainedState()
@@ -154,7 +161,8 @@ internal static class NativeObjectGizmoView
                 drag.HandleId,
                 world.X,
                 world.Y,
-                snap: io.KeyShift));
+                snap: io.KeyShift,
+                stableId: drag.ObjectStableId));
         }
 
         if (!ImGui.IsMouseReleased(ImGuiMouseButton.Left))
@@ -163,7 +171,8 @@ internal static class NativeObjectGizmoView
         NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
             NativeObjectGizmoEditKind.Commit,
             drag.ObjectIndex,
-            drag.HandleId));
+            drag.HandleId,
+            stableId: drag.ObjectStableId));
         drag = default;
     }
 
@@ -347,7 +356,8 @@ internal static class NativeObjectGizmoView
             NativeObjectGizmoEditCommandQueue.Enqueue(new NativeObjectGizmoEditCommand(
                 NativeObjectGizmoEditKind.Cancel,
                 drag.ObjectIndex,
-                drag.HandleId));
+                drag.HandleId,
+                stableId: drag.ObjectStableId));
         }
         drag = default;
     }
