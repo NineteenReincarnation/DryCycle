@@ -42,11 +42,8 @@ internal static class ObjectSceneWorkspaceView
     private static int gridStepIndex = 1;
 
     private static EditorObjectSnapshot[] projectedObjects;
-    private static EditorObjectTypeSnapshot[] projectedLibrary;
     private static string projectedSearch = string.Empty;
     private static bool projectedChinese;
-    private static readonly Dictionary<string, EditorObjectTypeSnapshot> MetadataByType =
-        new(StringComparer.Ordinal);
     private static readonly Dictionary<string, ObjectSceneGroup> GroupsBySource =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<ObjectSceneGroup> ProjectedGroups = new();
@@ -64,10 +61,8 @@ internal static class ObjectSceneWorkspaceView
     internal static void ResetRetainedState()
     {
         projectedObjects = null;
-        projectedLibrary = null;
         projectedSearch = string.Empty;
         projectedChinese = false;
-        MetadataByType.Clear();
         GroupsBySource.Clear();
         ProjectedGroups.Clear();
         projectedMatchCount = 0;
@@ -243,7 +238,7 @@ internal static class ObjectSceneWorkspaceView
         ImGui.Separator();
         ImGui.Spacing();
 
-        EnsureProjection(snapshot, objects);
+        EnsureProjection(objects);
 
         ImGuiIOPtr io = ImGui.GetIO();
         for (int sourceIndex = 0; sourceIndex < ProjectedGroups.Count; sourceIndex++)
@@ -351,29 +346,15 @@ internal static class ObjectSceneWorkspaceView
         return statusText;
     }
 
-    private static void EnsureProjection(EditorPresentationSnapshot snapshot, EditorObjectSnapshot[] objects)
+    private static void EnsureProjection(EditorObjectSnapshot[] objects)
     {
-        EditorObjectTypeSnapshot[] library = snapshot.ObjectLibrary ?? Array.Empty<EditorObjectTypeSnapshot>();
         string query = SearchQuery();
         bool chinese = DevToolUiSettings.IsChinese;
 
-        bool libraryChanged = !ReferenceEquals(projectedLibrary, library);
-        if (!libraryChanged &&
-            ReferenceEquals(projectedObjects, objects) &&
+        if (ReferenceEquals(projectedObjects, objects) &&
             string.Equals(projectedSearch, query, StringComparison.Ordinal) &&
             projectedChinese == chinese)
             return;
-
-        if (libraryChanged)
-        {
-            MetadataByType.Clear();
-            for (int i = 0; i < library.Length; i++)
-            {
-                EditorObjectTypeSnapshot metadata = library[i];
-                if (metadata == null || string.IsNullOrEmpty(metadata.Type)) continue;
-                MetadataByType[metadata.Type] = metadata;
-            }
-        }
 
         ProjectedGroups.Clear();
         GroupsBySource.Clear();
@@ -382,19 +363,17 @@ internal static class ObjectSceneWorkspaceView
         for (int i = 0; i < objects.Length; i++)
         {
             EditorObjectSnapshot item = objects[i];
-            if (item == null) continue;
-            MetadataByType.TryGetValue(item.Type ?? string.Empty, out EditorObjectTypeSnapshot metadata);
-            if (!MatchesObject(item, metadata, query)) continue;
+            if (item == null || !ObjectSceneVisibilityState.MatchesQuery(item, query)) continue;
 
-            string source = string.IsNullOrWhiteSpace(metadata?.Source)
+            string source = string.IsNullOrWhiteSpace(item.Source)
                 ? DevToolUiSettings.T("未知来源", "Unknown Source")
-                : metadata.Source;
-            string category = string.IsNullOrWhiteSpace(metadata?.Category)
+                : item.Source;
+            string category = string.IsNullOrWhiteSpace(item.Category)
                 ? DevToolUiSettings.T("未分类", "Unsorted")
-                : metadata.Category;
-            string displayName = string.IsNullOrWhiteSpace(metadata?.DisplayName)
+                : item.Category;
+            string displayName = string.IsNullOrWhiteSpace(item.DisplayName)
                 ? item.Type
-                : metadata.DisplayName;
+                : item.DisplayName;
 
             if (!GroupsBySource.TryGetValue(source, out ObjectSceneGroup group))
             {
@@ -418,7 +397,6 @@ internal static class ObjectSceneWorkspaceView
         }
 
         projectedObjects = objects;
-        projectedLibrary = library;
         projectedSearch = query;
         projectedChinese = chinese;
     }
@@ -432,26 +410,4 @@ internal static class ObjectSceneWorkspaceView
         return normalizedSearch;
     }
 
-    private static bool MatchesObject(EditorObjectSnapshot item, EditorObjectTypeSnapshot metadata, string query)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return true;
-        return Contains(item.Type, query) ||
-               Contains(metadata?.DisplayName, query) ||
-               Contains(metadata?.Source, query) ||
-               Contains(metadata?.Category, query) ||
-               Fuzzy(item.Type, query) ||
-               Fuzzy(metadata?.DisplayName, query);
-    }
-
-    private static bool Contains(string value, string query) =>
-        !string.IsNullOrEmpty(value) && value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
-
-    private static bool Fuzzy(string value, string query)
-    {
-        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(query)) return false;
-        int q = 0;
-        for (int i = 0; i < value.Length && q < query.Length; i++)
-            if (char.ToUpperInvariant(value[i]) == char.ToUpperInvariant(query[q])) q++;
-        return q == query.Length;
-    }
 }
