@@ -11,6 +11,7 @@ internal static class ObjectSceneLabelView
     private const float PaddingX = 6f;
     private const float PaddingY = 3f;
     private const float Gap = 3f;
+    private const float HitPadding = 4f;
     private const double HoverDelaySeconds = 0.12;
     private const float MidZoomEnter = 1.55f;
     private const float MidZoomExit = 1.30f;
@@ -220,7 +221,7 @@ internal static class ObjectSceneLabelView
         {
             Label candidate = bucket[i];
             if (!ObjectSceneVisibilityState.IsInteractive(candidate.Item) ||
-                !Contains(candidate, point, 4f) ||
+                !Contains(candidate, point, HitPadding) ||
                 candidate.Priority < bestPriority)
                 continue;
 
@@ -259,10 +260,11 @@ internal static class ObjectSceneLabelView
 
     private static void RegisterOccupancy(Label label)
     {
-        int minCellX = Cell(label.Min.X - Gap);
-        int maxCellX = Cell(label.Max.X + Gap);
-        int minCellY = Cell(label.Min.Y - Gap);
-        int maxCellY = Cell(label.Max.Y + Gap);
+        float indexPadding = Math.Max(Gap, HitPadding);
+        int minCellX = Cell(label.Min.X - indexPadding);
+        int maxCellX = Cell(label.Max.X + indexPadding);
+        int minCellY = Cell(label.Min.Y - indexPadding);
+        int maxCellY = Cell(label.Max.Y + indexPadding);
 
         for (int y = minCellY; y <= maxCellY; y++)
         {
