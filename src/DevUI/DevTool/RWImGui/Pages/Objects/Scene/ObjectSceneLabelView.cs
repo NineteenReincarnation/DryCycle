@@ -37,8 +37,8 @@ internal static class ObjectSceneLabelView
     private static float cameraWidth = float.NaN;
     private static float cameraHeight = float.NaN;
     private static Num.Vector2 cachedDisplay;
-    private static int hoveredIndex = -1;
-    private static int pendingHoverIndex = -1;
+    private static long hoveredStableId;
+    private static long pendingHoverStableId;
     private static double pendingHoverSince;
 
     internal static bool OwnsMouse { get; private set; }
@@ -59,7 +59,7 @@ internal static class ObjectSceneLabelView
 
         ImGuiIOPtr io = ImGui.GetIO();
         Label hit = HitTest(io.MousePos - layoutDelta);
-        UpdateHover(hit?.Item.Index ?? -1);
+        UpdateHover(hit?.Item.StableId ?? 0L);
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
         for (int i = 0; i < placed.Count; i++)
@@ -89,8 +89,8 @@ internal static class ObjectSceneLabelView
         cachedVisibilityRevision = -1;
         cameraX = cameraY = cameraWidth = cameraHeight = float.NaN;
         cachedDisplay = default;
-        hoveredIndex = -1;
-        pendingHoverIndex = -1;
+        hoveredStableId = 0L;
+        pendingHoverStableId = 0L;
         pendingHoverSince = 0d;
         OwnsMouse = false;
         ObjectSceneProjectionPolicy.Reset();
@@ -390,30 +390,30 @@ internal static class ObjectSceneLabelView
         return new Num.Vector2(nx * display.X, display.Y - ny * display.Y);
     }
 
-    private static void UpdateHover(int index)
+    private static void UpdateHover(long stableId)
     {
-        if (index < 0)
+        if (stableId == 0L)
         {
-            pendingHoverIndex = -1;
+            pendingHoverStableId = 0L;
             pendingHoverSince = 0d;
-            SetHover(-1);
+            SetHover(0L);
             return;
         }
 
-        if (index == hoveredIndex)
+        if (stableId == hoveredStableId)
         {
-            pendingHoverIndex = -1;
+            pendingHoverStableId = 0L;
             return;
         }
 
         double now = ImGui.GetTime();
-        if (pendingHoverIndex != index)
+        if (pendingHoverStableId != stableId)
         {
             // Do not leave the previous label visually hot while the pointer settles on another
             // candidate. The new candidate still waits for the debounce before expanding.
-            if (hoveredIndex >= 0)
-                SetHover(-1);
-            pendingHoverIndex = index;
+            if (hoveredStableId != 0L)
+                SetHover(0L);
+            pendingHoverStableId = stableId;
             pendingHoverSince = now;
             return;
         }
@@ -421,15 +421,15 @@ internal static class ObjectSceneLabelView
         if (now - pendingHoverSince < HoverDelaySeconds)
             return;
 
-        pendingHoverIndex = -1;
-        SetHover(index);
+        pendingHoverStableId = 0L;
+        SetHover(stableId);
     }
 
-    private static void SetHover(int index)
+    private static void SetHover(long stableId)
     {
-        if (hoveredIndex == index) return;
-        hoveredIndex = index;
-        ObjectSceneVisibilityState.SetHoveredIndex(index);
+        if (hoveredStableId == stableId) return;
+        hoveredStableId = stableId;
+        ObjectSceneVisibilityState.SetHoveredStableId(stableId);
     }
 
     private static bool Nearly(float a, float b) => Math.Abs(a - b) <= 0.01f;
