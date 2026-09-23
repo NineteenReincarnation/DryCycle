@@ -206,7 +206,7 @@ internal static class ObjectSceneLabelView
         for (int i = 0; i < bucket.Count; i++)
         {
             Label candidate = bucket[i];
-            if (!ObjectSceneVisibilityState.IsInteractive(candidate.Item) ||
+            if (!ObjectSceneProjectionPolicy.IsInteractive(candidate.Item) ||
                 !Contains(candidate, point, HitPadding) ||
                 candidate.Priority < bestPriority)
                 continue;
@@ -273,7 +273,8 @@ internal static class ObjectSceneLabelView
 
     private static void DrawLabel(ImDrawListPtr draw, Label label)
     {
-        float alpha = label.Visibility switch
+        ObjectSceneVisibility visibility = ObjectSceneVisibilityState.Resolve(label.Item);
+        float alpha = visibility switch
         {
             ObjectSceneVisibility.Ghost => 0.24f,
             ObjectSceneVisibility.Normal => 0.72f,
@@ -283,7 +284,7 @@ internal static class ObjectSceneLabelView
         };
         if (alpha <= 0f) return;
 
-        bool strong = label.Visibility is ObjectSceneVisibility.Hovered or ObjectSceneVisibility.Selected;
+        bool strong = visibility is ObjectSceneVisibility.Hovered or ObjectSceneVisibility.Selected;
         uint bg = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.035f, 0.045f, 0.055f, strong ? 0.82f : 0.46f * alpha));
         uint border = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.55f, 0.76f, 0.92f, strong ? 0.92f : 0.25f * alpha));
         uint text = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.92f, 0.95f, 0.98f, alpha));
