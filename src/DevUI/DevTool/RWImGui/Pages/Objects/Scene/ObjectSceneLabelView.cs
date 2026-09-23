@@ -62,16 +62,7 @@ internal static class ObjectSceneLabelView
         EnsureLayout(snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>(), viewport, display);
 
         ImGuiIOPtr io = ImGui.GetIO();
-        Label hit = null;
-        for (int i = placed.Count - 1; i >= 0; i--)
-        {
-            Label candidate = placed[i];
-            if (ObjectSceneVisibilityState.IsInteractive(candidate.Item) && Contains(candidate, io.MousePos, 4f))
-            {
-                hit = candidate;
-                break;
-            }
-        }
+        Label hit = HitTest(io.MousePos);
         UpdateHover(hit?.Item.Index ?? -1);
 
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
@@ -312,6 +303,36 @@ internal static class ObjectSceneLabelView
                 return;
             }
         }
+    }
+
+    private static Label HitTest(Num.Vector2 point)
+    {
+        int cx = Cell(point.X);
+        int cy = Cell(point.Y);
+        Label best = null;
+        int bestPriority = int.MinValue;
+
+        for (int y = cy - 1; y <= cy + 1; y++)
+        {
+            for (int x = cx - 1; x <= cx + 1; x++)
+            {
+                if (!occupancy.TryGetValue(CellKey(x, y), out List<Label> bucket))
+                    continue;
+
+                for (int i = 0; i < bucket.Count; i++)
+                {
+                    Label candidate = bucket[i];
+                    if (!ObjectSceneVisibilityState.IsInteractive(candidate.Item) ||
+                        !Contains(candidate, point, 4f) ||
+                        candidate.Priority < bestPriority)
+                        continue;
+
+                    best = candidate;
+                    bestPriority = candidate.Priority;
+                }
+            }
+        }
+        return best;
     }
 
     private static bool Overlaps(Num.Vector2 min, Num.Vector2 max)
