@@ -333,10 +333,30 @@ internal static class ObjectSceneLabelView
         if (alpha <= 0f) return;
 
         bool strong = visibility is ObjectSceneVisibility.Hovered or ObjectSceneVisibility.Selected;
-        uint bg = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.035f, 0.045f, 0.055f, strong ? 0.82f : 0.46f * alpha));
-        uint border = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.55f, 0.76f, 0.92f, strong ? 0.92f : 0.25f * alpha));
-        uint text = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.92f, 0.95f, 0.98f, alpha));
-        uint leader = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.68f, 0.78f, 0.88f, strong ? 0.58f : 0.15f * alpha));
+        float backgroundAlpha = strong
+            ? 0.82f
+            : visibility == ObjectSceneVisibility.Normal
+                ? 0.16f
+                : 0.05f;
+        float borderAlpha = strong
+            ? 0.92f
+            : visibility == ObjectSceneVisibility.Normal
+                ? 0.08f
+                : 0f;
+        float leaderAlpha = strong
+            ? 0.58f
+            : visibility == ObjectSceneVisibility.Normal
+                ? 0.09f
+                : 0.03f;
+
+        uint bg = ImGui.ColorConvertFloat4ToU32(
+            new Num.Vector4(0.035f, 0.045f, 0.055f, backgroundAlpha));
+        uint border = ImGui.ColorConvertFloat4ToU32(
+            new Num.Vector4(0.55f, 0.76f, 0.92f, borderAlpha));
+        uint text = ImGui.ColorConvertFloat4ToU32(
+            new Num.Vector4(0.92f, 0.95f, 0.98f, alpha));
+        uint leader = ImGui.ColorConvertFloat4ToU32(
+            new Num.Vector4(0.68f, 0.78f, 0.88f, leaderAlpha));
 
         Num.Vector2 anchor = label.Anchor + layoutDelta;
         Num.Vector2 min = label.Min + layoutDelta;
@@ -344,9 +364,12 @@ internal static class ObjectSceneLabelView
         Num.Vector2 nearest = new(
             Math.Max(min.X, Math.Min(anchor.X, max.X)),
             Math.Max(min.Y, Math.Min(anchor.Y, max.Y)));
+
         draw.AddLine(anchor, nearest, leader, strong ? 1.2f : 1f);
-        draw.AddRectFilled(min, max, bg, 4f);
-        draw.AddRect(min, max, border, 4f, ImDrawFlags.None, strong ? 1.2f : 1f);
+        if (backgroundAlpha > 0f)
+            draw.AddRectFilled(min, max, bg, 4f);
+        if (borderAlpha > 0f)
+            draw.AddRect(min, max, border, 4f, ImDrawFlags.None, strong ? 1.2f : 1f);
         draw.AddText(min + new Num.Vector2(PaddingX, PaddingY), text, label.Text);
     }
 
