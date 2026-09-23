@@ -104,6 +104,7 @@ public static partial class EditorPresentationHub
     private static int observedSelectionCount = -1;
     private static PlacedObject observedPrimarySelection;
     private static long observedObjectCatalogRevision;
+    private static int observedObjectTypeCount = -1;
 
     public static EditorPresentationSnapshot Current => current;
     internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
@@ -167,7 +168,9 @@ public static partial class EditorPresentationHub
             (libraryTypeCount != typeCount ||
              libraryCache.Length == 0 ||
              libraryCatalogRevision != objectCatalogRevision);
-        bool catalogChanged = objectWorkspace && observedObjectCatalogRevision != objectCatalogRevision;
+        bool catalogChanged = objectWorkspace &&
+            (observedObjectCatalogRevision != objectCatalogRevision ||
+             observedObjectTypeCount != typeCount);
         string placementType = session.PlacementType ?? string.Empty;
 
         bool sameIdentity =
@@ -321,6 +324,7 @@ public static partial class EditorPresentationHub
         observedSelectionCount = selectionCount;
         observedPrimarySelection = primarySelection;
         observedObjectCatalogRevision = objectCatalogRevision;
+        observedObjectTypeCount = typeCount;
 
         if (objectWorkspace)
         {
@@ -362,6 +366,7 @@ public static partial class EditorPresentationHub
         observedSelectionCount = -1;
         observedPrimarySelection = null;
         observedObjectCatalogRevision = 0L;
+        observedObjectTypeCount = -1;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
