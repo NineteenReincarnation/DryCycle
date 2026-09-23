@@ -1,6 +1,6 @@
 param(
-    [string]$RainWorldDir = "D:/Application/Steam/steamapps/common/Rain World",
-    [string]$GameModOutputDir = "D:/Application/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins",
+    [string]$RainWorldDir = "D:/Steam/steamapps/common/Rain World",
+    [string]$GameModOutputDir = "D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins",
     [switch]$SkipBuild
 )
 
