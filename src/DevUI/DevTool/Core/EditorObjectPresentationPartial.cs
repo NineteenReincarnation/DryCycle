@@ -85,14 +85,24 @@ public static partial class EditorPresentationHub
         return result;
     }
 
-    private static EditorObjectSnapshot CaptureObjectRow(EditorSession session, PlacedObject item, int index) => new()
+    private static EditorObjectSnapshot CaptureObjectRow(EditorSession session, PlacedObject item, int index)
     {
-        Index = index,
-        Type = item?.type?.value ?? "Unknown",
-        X = item?.pos.x ?? 0f,
-        Y = item?.pos.y ?? 0f,
-        Selected = session?.Selection.Contains(item) == true
-    };
+        string typeName = item?.type?.value ?? "Unknown";
+        ObjectCatalog.TryGet(typeName, out ObjectDescriptor descriptor);
+        return new EditorObjectSnapshot
+        {
+            Index = index,
+            Type = typeName,
+            DisplayName = descriptor?.DisplayName ?? typeName,
+            Category = descriptor?.Category ?? "Unsorted",
+            Source = descriptor?.Source ?? "Unknown Source",
+            PresentationKind = descriptor?.PresentationKind ?? ObjectPresentationKind.Point,
+            Importance = descriptor?.Importance ?? 0,
+            X = item?.pos.x ?? 0f,
+            Y = item?.pos.y ?? 0f,
+            Selected = session?.Selection.Contains(item) == true
+        };
+    }
 
     private static EditorObjectSnapshot[] PatchObjectSelection(
         EditorSession session,
@@ -118,6 +128,11 @@ public static partial class EditorPresentationHub
                 {
                     Index = row.Index,
                     Type = row.Type,
+                    DisplayName = row.DisplayName,
+                    Category = row.Category,
+                    Source = row.Source,
+                    PresentationKind = row.PresentationKind,
+                    Importance = row.Importance,
                     X = row.X,
                     Y = row.Y,
                     Selected = selected
