@@ -82,8 +82,9 @@ internal static class ObjectSceneProjectionPolicy
 
         return band switch
         {
+            // Mid zoom keeps every object discoverable; later text-detail policy may shorten labels.
+            // Only the far overview removes low-importance objects from the scene projection.
             ObjectSceneSemanticZoomBand.Far => item.Importance >= 2,
-            ObjectSceneSemanticZoomBand.Mid => item.Importance >= 1,
             _ => true
         };
     }
