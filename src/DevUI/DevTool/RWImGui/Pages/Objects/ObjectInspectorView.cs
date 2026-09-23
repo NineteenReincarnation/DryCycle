@@ -456,7 +456,8 @@ internal static class ObjectInspectorView
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
-                text: control.Path));
+                text: control.Path,
+                stableId: inspector.ObjectStableId));
         }
 
         if (!string.IsNullOrWhiteSpace(control.ValueText))
@@ -473,7 +474,8 @@ internal static class ObjectInspectorView
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
-                text: control.Path));
+                text: control.Path,
+                stableId: inspector.ObjectStableId));
     }
 
     private static void DrawLegacySlider(EditorInspectorSnapshot inspector, LegacyBinding binding)
@@ -493,7 +495,8 @@ internal static class ObjectInspectorView
                 EditorUiCommandKind.SetLegacySlider,
                 inspector.ObjectIndex,
                 text: control.Path,
-                x: edit.Value));
+                x: edit.Value,
+                stableId: inspector.ObjectStableId));
         }
 
         if (!string.IsNullOrWhiteSpace(control.ValueText))
@@ -514,7 +517,8 @@ internal static class ObjectInspectorView
                 EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                     EditorUiCommandKind.ResetLegacySlider,
                     inspector.ObjectIndex,
-                    text: control.Path));
+                    text: control.Path,
+                    stableId: inspector.ObjectStableId));
             }
         }
     }
@@ -546,7 +550,8 @@ internal static class ObjectInspectorView
                     EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                         EditorUiCommandKind.InvokeLegacyButton,
                         inspector.ObjectIndex,
-                        text: action));
+                        text: action,
+                        stableId: inspector.ObjectStableId));
                 }
             }
             if (selected) ImGui.SetItemDefaultFocus();
@@ -568,13 +573,15 @@ internal static class ObjectInspectorView
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
-                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, -step)));
+                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, -step),
+                stableId: inspector.ObjectStableId));
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton("+", binding.IntegerMoreId, DevToolButtonTone.Normal))
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(
                 EditorUiCommandKind.InvokeLegacyButton,
                 inspector.ObjectIndex,
-                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, step)));
+                text: LegacyDevInterfaceBridge.IntegerAction(control.Path, step),
+                stableId: inspector.ObjectStableId));
 
         if (ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T(
@@ -596,7 +603,8 @@ internal static class ObjectInspectorView
                 EditorUiCommandKind.SetLegacyText,
                 inspector.ObjectIndex,
                 text: control.Path,
-                propertyValue: new EditorPropertyValue(EditorPropertyKind.String, text: value)));
+                propertyValue: new EditorPropertyValue(EditorPropertyKind.String, text: value),
+                stableId: inspector.ObjectStableId));
         }
         else if (!changed && !ImGui.IsItemActive())
         {
@@ -619,7 +627,8 @@ internal static class ObjectInspectorView
                 inspector.ObjectIndex,
                 text: control.Path,
                 x: value.X,
-                y: value.Y));
+                y: value.Y,
+                stableId: inspector.ObjectStableId));
         }
         else if (!changed && !ImGui.IsItemActive())
         {
@@ -653,7 +662,8 @@ internal static class ObjectInspectorView
                     x: value.X,
                     y: value.Y,
                     z: value.Z,
-                    w: value.W)));
+                    w: value.W),
+                stableId: inspector.ObjectStableId));
         }
         else if (!changed && !ImGui.IsItemActive())
         {
@@ -703,7 +713,10 @@ internal static class ObjectInspectorView
                 "DeleteObject",
                 DevToolButtonTone.Danger,
                 true))
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.DeleteObject, inspector.ObjectIndex));
+            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                EditorUiCommandKind.DeleteObject,
+                inspector.ObjectIndex,
+                stableId: inspector.ObjectStableId));
     }
 
     private static void EnsurePropertyBindings(EditorInspectorSnapshot inspector, EditorPropertySnapshot[] properties)
@@ -866,7 +879,8 @@ internal static class ObjectInspectorView
             kind,
             inspector.ObjectIndex,
             x: positionX,
-            y: positionY));
+            y: positionY,
+            stableId: inspector.SelectionCount == 1 ? inspector.ObjectStableId : 0L));
     }
 
     private static void SendProperty(EditorInspectorSnapshot inspector, string key, EditorPropertyValue value)
@@ -879,7 +893,8 @@ internal static class ObjectInspectorView
             kind,
             inspector.ObjectIndex,
             text: key,
-            propertyValue: value));
+            propertyValue: value,
+            stableId: inspector.SelectionCount == 1 ? inspector.ObjectStableId : 0L));
     }
 
     private static void SynchronizePosition(EditorInspectorSnapshot inspector)
