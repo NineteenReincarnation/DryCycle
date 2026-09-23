@@ -13,6 +13,11 @@ public sealed class EditorObjectSnapshot
 {
     public int Index { get; init; }
     public string Type { get; init; }
+    public string DisplayName { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string Source { get; init; } = string.Empty;
+    public ObjectPresentationKind PresentationKind { get; init; }
+    public int Importance { get; init; }
     public float X { get; init; }
     public float Y { get; init; }
     public bool Selected { get; init; }
