@@ -318,8 +318,13 @@ internal static class SoundFileNameCatalog
     private static void AddModProvenanceRoots(string root, ModManager.Mod mod)
     {
         if (string.IsNullOrWhiteSpace(root) || mod == null) return;
+        // Rain World mods/DLCs may expose assets either directly or through the standard
+        // modify/ overlay. AssetManager merges both forms, so provenance must inspect both too.
+        // Missing the modify/ roots caused official DLC samples to fall through as Vanilla.
         AddProvenanceRoot(root, "loadedsoundeffects/ambient", mod);
         AddProvenanceRoot(root, "soundeffects/ambient", mod);
+        AddProvenanceRoot(root, "modify/loadedsoundeffects/ambient", mod);
+        AddProvenanceRoot(root, "modify/soundeffects/ambient", mod);
     }
 
     private static bool StepProvenanceRoots()
