@@ -85,11 +85,7 @@ internal static class ObjectSceneWorkspaceView
         EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
         int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
 
-        if (selectionAnchor >= objects.Length)
-        {
-            selectionAnchor = -1;
-            selectionAnchorStableId = 0L;
-        }
+        ReconcileSelectionAnchor(objects);
 
         DevToolWidgets.MutedText(GetStatusText(objects.Length, selectedCount));
 
@@ -290,6 +286,31 @@ internal static class ObjectSceneWorkspaceView
 
         if (projectedMatchCount == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
+    }
+
+    private static void ReconcileSelectionAnchor(EditorObjectSnapshot[] objects)
+    {
+        if (selectionAnchorStableId == 0L)
+        {
+            if (selectionAnchor < 0 || selectionAnchor >= objects.Length)
+                selectionAnchor = -1;
+            return;
+        }
+
+        if (selectionAnchor >= 0 &&
+            selectionAnchor < objects.Length &&
+            objects[selectionAnchor]?.StableId == selectionAnchorStableId)
+            return;
+
+        selectionAnchor = -1;
+        for (int i = 0; i < objects.Length; i++)
+        {
+            if (objects[i]?.StableId != selectionAnchorStableId) continue;
+            selectionAnchor = i;
+            return;
+        }
+
+        selectionAnchorStableId = 0L;
     }
 
     private static void DrawAlignButton(
