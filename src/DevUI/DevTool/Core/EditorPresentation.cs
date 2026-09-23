@@ -25,6 +25,8 @@ public sealed class EditorObjectTypeSnapshot
     public string Category { get; init; }
     public string Source { get; init; }
     public string[] Tags { get; init; }
+    public ObjectPresentationKind PresentationKind { get; init; }
+    public int Importance { get; init; }
 }
 
 public sealed class EditorInspectorSnapshot
@@ -356,7 +358,9 @@ public static partial class EditorPresentationHub
                 DisplayName = descriptor.DisplayName,
                 Category = descriptor.Category,
                 Source = descriptor.Source,
-                Tags = tags
+                Tags = tags,
+                PresentationKind = descriptor.PresentationKind,
+                Importance = descriptor.Importance
             };
         }
         libraryCache = next;
