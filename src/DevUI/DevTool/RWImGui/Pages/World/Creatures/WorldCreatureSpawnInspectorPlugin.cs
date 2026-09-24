@@ -59,7 +59,6 @@ internal static class WorldCreatureSpawnInspector
     private static TimelineMode timelineMode = TimelineMode.All;
     private static string timelineFilter = string.Empty;
     private static string lastStatus = string.Empty;
-    private static bool lastStatusSuccess = true;
 
     private static readonly List<string> timelineCatalog = new();
     private static int timelineCatalogFingerprint = -1;
@@ -564,8 +563,7 @@ internal static class WorldCreatureSpawnInspector
         if (!string.IsNullOrEmpty(lastStatus))
         {
             ImGui.Spacing();
-            if (lastStatusSuccess) DevToolWidgets.MutedText(lastStatus, true);
-            else ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), lastStatus);
+            ImGui.TextColored(new Num.Vector4(0.92f, 0.42f, 0.42f, 1f), lastStatus);
         }
     }
 
@@ -817,7 +815,9 @@ internal static class WorldCreatureSpawnInspector
 
     private static void SetStatus(string message, bool success)
     {
-        lastStatus = message ?? string.Empty;
-        lastStatusSuccess = success;
+        // Successful edits already update the live preview immediately; a persistent success
+        // paragraph only adds noise to the inspector. Keep failures visible because they are
+        // actionable and otherwise easy to miss.
+        lastStatus = success ? string.Empty : message ?? string.Empty;
     }
 }

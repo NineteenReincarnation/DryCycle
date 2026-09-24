@@ -1325,11 +1325,6 @@ internal static class WorldWorkspaceView
 
         WorldCreatureSpawnInspector.DrawIntegrated(snapshot, room);
         DrawRoomAttractions(room);
-
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("世界连接", "WORLD LINKS"));
-        DrawRoomConnections(snapshot, room.RoomIndex);
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("节点", "NODES"));
-        DrawRoomNodes(snapshot, room);
     }
 
     private static void DrawRoomAttractions(EditorMapRoomSnapshot room)
@@ -1474,45 +1469,6 @@ internal static class WorldWorkspaceView
             roomIndex: roomIndex,
             text: attraction,
             key: creatureId));
-    }
-
-    private static void DrawRoomConnections(EditorMapPresentationSnapshot snapshot, int roomIndex)
-    {
-        EnsureConnectionRows(snapshot);
-        int count = 0;
-        for (int i = 0; i < connectionExplorerRows.Length; i++)
-        {
-            ConnectionExplorerRow row = connectionExplorerRows[i];
-            EditorMapConnectionSnapshot connection = row.Connection;
-            if (connection.FromRoomIndex != roomIndex && connection.ToRoomIndex != roomIndex) continue;
-            count++;
-            ImGui.PushID(i);
-            bool clicked = ImGui.Selectable(row.Label);
-            ImGui.PopID();
-            if (clicked) SelectConnection(connection);
-        }
-        if (count == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有区域内连接。", "No in-region links."));
-    }
-
-    private static void DrawRoomNodes(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
-    {
-        EditorMapRoomNodeSnapshot[] nodes = room.Nodes ?? Array.Empty<EditorMapRoomNodeSnapshot>();
-        if (nodes.Length == 0)
-        {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("没有节点数据。", "No node data."));
-            return;
-        }
-
-        for (int i = 0; i < nodes.Length; i++)
-        {
-            EditorMapRoomNodeSnapshot node = nodes[i];
-            string target = node.ConnectedRoomIndex >= 0
-                ? FindRoom(snapshot, node.ConnectedRoomIndex)?.Name ?? node.ConnectedRoomIndex.ToString()
-                : DevToolUiSettings.T("未连接", "Disconnected");
-            string line = node.NodeIndex + " · " + node.Type;
-            if (node.Exit) line += "  ->  " + target;
-            ImGui.TextUnformatted(line);
-        }
     }
 
     private static void DrawConnectionInspector(EditorMapPresentationSnapshot snapshot, EditorMapConnectionSnapshot connection)
