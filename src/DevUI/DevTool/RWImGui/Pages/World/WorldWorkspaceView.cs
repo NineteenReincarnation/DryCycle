@@ -737,6 +737,8 @@ internal static class WorldWorkspaceView
             if (!RoomMatchesSearch(row)) continue;
             visible++;
 
+            string status = WorldRoomStatusText(room);
+            string detail = WorldRoomDetailText(room);
             bool clicked = DevToolRoomExplorerEntry.Draw(
                 "WorldRoom:" + room.RoomIndex,
                 room.Name,
