@@ -314,7 +314,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // live and the safe registration guard correctly refuses mutation, leaving Chinese as '?'.
         global::DryCycle.StartupDiagnostics.Optional(
             "BridgePlugin/RainWorld.Start/PrepareDevToolFontContext",
-            DevToolFrontend.PrepareFontContextDuringSynchronousStart);
+            () =>
+            {
+                _ = DevToolFrontend.PrepareFontContextDuringSynchronousStart();
+            });
 
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
