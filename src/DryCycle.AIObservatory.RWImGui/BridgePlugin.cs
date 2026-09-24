@@ -173,8 +173,9 @@ internal static class ObservatoryFrontend
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static int contextActivationFailureLogged;
+    private static int rwimguiPresentObserved;
+    private static int backendUnavailableLogged;
     private static bool contextAttached;
-    private static float nextContextRetryAt;
     private static volatile bool visible;
     private static bool cjkFontResolved;
     private static ImFontPtr cjkFont;
@@ -187,7 +188,8 @@ internal static class ObservatoryFrontend
     internal static void ResetNativeReadinessFromMainThread()
     {
         contextAttached = false;
-        nextContextRetryAt = 0f;
+        Interlocked.Exchange(ref rwimguiPresentObserved, 0);
+        Interlocked.Exchange(ref backendUnavailableLogged, 0);
         Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
@@ -209,11 +211,23 @@ internal static class ObservatoryFrontend
         if (contextAttached)
             return;
 
-        float now = UnityEngine.Time.realtimeSinceStartup;
-        if (now < nextContextRetryAt)
-            return;
+        if (Volatile.Read(ref rwimguiPresentObserved) == 0)
+        {
+            AIDebugPresentationHub.SetCaptureState(false, false);
 
-        EnsureInputContextFromMainThread(now);
+            if (Interlocked.Exchange(ref backendUnavailableLogged, 1) == 0)
+            {
+                log?.LogWarning(
+                    "DryCycle AI Observatory is waiting for a healthy RWImGUI Present. " +
+                    "No native context calls will be attempted. Unity graphics device='" +
+                    UnityEngine.SystemInfo.graphicsDeviceName +
+                    "'.");
+            }
+
+            return;
+        }
+
+        EnsureInputContextFromMainThread();
     }
 
     // This callback deliberately performs no ImGui drawing and no context switching. The
@@ -223,6 +237,9 @@ internal static class ObservatoryFrontend
     // with a native ImGui/RWImGUI failure. Keep this callback as a minimal heartbeat only.
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
+        Interlocked.Exchange(ref rwimguiPresentObserved, 1);
+        Interlocked.Exchange(ref backendUnavailableLogged, 0);
+
         if (!Enabled)
             return;
 
@@ -235,14 +252,13 @@ internal static class ObservatoryFrontend
         }
     }
 
-    private static void EnsureInputContextFromMainThread(float now)
+    private static void EnsureInputContextFromMainThread()
     {
         try
         {
             if (ImGUIAPI.HasContext)
             {
                 AIDebugPresentationHub.SetCaptureState(false, false);
-                nextContextRetryAt = now + 0.25f;
 
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
                 {
@@ -263,7 +279,6 @@ internal static class ObservatoryFrontend
 
             ImGUIAPI.SwitchContext(context);
             contextAttached = true;
-            nextContextRetryAt = 0f;
             Interlocked.Exchange(ref contextBusyLogged, 0);
             Interlocked.Exchange(ref contextActivationFailureLogged, 0);
 
@@ -279,7 +294,6 @@ internal static class ObservatoryFrontend
             contextAttached = false;
             AIDebugPresentationHub.SetCaptureState(false, false);
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
-            nextContextRetryAt = now + 1.0f;
 
             if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
             {
@@ -306,7 +320,6 @@ internal static class ObservatoryFrontend
         finally
         {
             contextAttached = false;
-            nextContextRetryAt = 0f;
             AIDebugPresentationHub.SetCaptureState(false, false);
         }
     }
@@ -315,7 +328,6 @@ internal static class ObservatoryFrontend
     {
         contextAttached = false;
         inputContext = null;
-        nextContextRetryAt = 0f;
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 

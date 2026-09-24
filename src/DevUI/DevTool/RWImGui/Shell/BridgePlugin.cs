@@ -380,8 +380,9 @@ internal static class DevToolFrontend
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static int contextActivationFailureLogged;
+    private static int rwimguiPresentObserved;
+    private static int backendUnavailableLogged;
     private static bool contextAttached;
-    private static float nextContextRetryAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -397,7 +398,8 @@ internal static class DevToolFrontend
     internal static void ResetNativeReadinessFromMainThread()
     {
         contextAttached = false;
-        nextContextRetryAt = 0f;
+        Interlocked.Exchange(ref rwimguiPresentObserved, 0);
+        Interlocked.Exchange(ref backendUnavailableLogged, 0);
         Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
@@ -428,19 +430,38 @@ internal static class DevToolFrontend
         if (contextAttached)
             return;
 
-        float now = UnityEngine.Time.realtimeSinceStartup;
-        if (now < nextContextRetryAt)
-            return;
+        // Do not call any native-backed RWImGUI context API unless its Present callback has run.
+        // The user's crash log shows RWImGUI failing D3D11CreateDeviceAndSwapChain with
+        // DXGI_ERROR_UNSUPPORTED while Unity is on "Microsoft Basic Render Driver". In that state
+        // HasContext/SwitchContext can terminate the process rather than throwing managed errors.
+        if (Volatile.Read(ref rwimguiPresentObserved) == 0)
+        {
+            EditorInputRouter.SetFrontendCapture(false, false, false);
 
-        EnsureContext(now);
+            if (Interlocked.Exchange(ref backendUnavailableLogged, 1) == 0)
+            {
+                log?.LogWarning(
+                    "DryCycle DevTool New UI is waiting for a healthy RWImGUI Present. " +
+                    "No native context calls will be attempted. Unity graphics device='" +
+                    UnityEngine.SystemInfo.graphicsDeviceName +
+                    "'.");
+            }
+
+            return;
+        }
+
+        EnsureContext();
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        // Intentionally empty. Context ownership is managed from Unity's main thread.
+        // This is the only native-health signal we trust. AddAlwaysCallback reaching Present means
+        // RWImGUI completed enough of its D3D11 path for consumer context APIs to be used safely.
+        Interlocked.Exchange(ref rwimguiPresentObserved, 1);
+        Interlocked.Exchange(ref backendUnavailableLogged, 0);
     }
 
-    private static void EnsureContext(float now)
+    private static void EnsureContext()
     {
         try
         {
@@ -451,7 +472,6 @@ internal static class DevToolFrontend
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
-                nextContextRetryAt = now + 0.25f;
 
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
                 {
@@ -471,7 +491,6 @@ internal static class DevToolFrontend
 
             ImGUIAPI.SwitchContext(context);
             contextAttached = true;
-            nextContextRetryAt = 0f;
 
             // Register fonts only after our own context is active and before its first Render.
             if (!DevToolFontCatalog.RegistrationAttempted)
@@ -484,10 +503,6 @@ internal static class DevToolFrontend
         {
             contextAttached = false;
             EditorInputRouter.SetFrontendCapture(false, false, false);
-
-            // A broken/busy native frontend must never become a per-frame exception/log loop.
-            // Retry at low frequency so the game remains responsive and can recover later.
-            nextContextRetryAt = now + 1.0f;
 
             if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
             {
@@ -514,7 +529,6 @@ internal static class DevToolFrontend
         finally
         {
             contextAttached = false;
-            nextContextRetryAt = 0f;
             EditorInputRouter.SetFrontendCapture(false, false, false);
         }
     }
@@ -523,7 +537,6 @@ internal static class DevToolFrontend
     {
         contextAttached = false;
         inputContext = null;
-        nextContextRetryAt = 0f;
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
