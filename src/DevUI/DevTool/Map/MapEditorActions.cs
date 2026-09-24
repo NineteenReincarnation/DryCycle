@@ -21,6 +21,37 @@ internal static class MapEditorActions
         state.SelectedRoomIndex = next;
     }
 
+    internal static bool SwitchCurrentRoom(EditorSession session, int roomIndex)
+    {
+        global::DevInterface.DevUI owner = session?.Owner;
+        RainWorldGame game = owner?.game;
+        global::World world = game?.world;
+        if (owner == null || game == null || world == null)
+            return false;
+
+        AbstractRoom target = world.GetAbstractRoom(roomIndex);
+        if (target == null)
+            return false;
+
+        if (target.realizedRoom == null)
+            world.ActivateRoom(target);
+
+        global::Room nextRoom = target.realizedRoom;
+        if (nextRoom == null)
+            return false;
+
+        // Current Room is navigation state, not author data: never push it into map history.
+        // Keep DevUI and the game's primary room camera on the same realized room.
+        if (!ReferenceEquals(owner.room, nextRoom))
+        {
+            if (game.cameras != null && game.cameras.Length > 0 && game.cameras[0] != null)
+                game.cameras[0].ChangeRoom(nextRoom, 0);
+            owner.room = nextRoom;
+        }
+
+        return true;
+    }
+
     internal static bool SetRoomPosition(EditorSession session, int roomIndex, EditorPropertyValue value)
     {
         if (value.Kind != EditorPropertyKind.Vector2) return false;

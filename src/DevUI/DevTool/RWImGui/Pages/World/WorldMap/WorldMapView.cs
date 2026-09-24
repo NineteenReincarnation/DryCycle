@@ -50,6 +50,7 @@ internal static class WorldMapView
     private static Num.Vector2 pan;
     private static float zoom = 1f;
     private static bool fitRequested = true;
+    private static int focusRoomRequested = -1;
     private static bool showConnections = true;
     private static bool showPortLabels = true;
     private static bool showSubregionLabels = true;
@@ -75,6 +76,12 @@ internal static class WorldMapView
         hoveredConnectionId = string.Empty;
     }
 
+    internal static void FocusRoom(int roomIndex)
+    {
+        focusRoomRequested = roomIndex;
+        fitRequested = false;
+    }
+
     internal static void ResetRetainedState()
     {
         localPositions.Clear();
@@ -91,6 +98,7 @@ internal static class WorldMapView
         pan = Num.Vector2.Zero;
         zoom = 1f;
         fitRequested = true;
+        focusRoomRequested = -1;
         showConnections = true;
         showPortLabels = true;
         showSubregionLabels = true;
@@ -203,7 +211,14 @@ internal static class WorldMapView
         bool canvasHovered = ImGui.IsItemHovered();
         ImGuiIOPtr io = ImGui.GetIO();
 
-        if (fitRequested)
+        if (focusRoomRequested >= 0)
+        {
+            int roomIndex = focusRoomRequested;
+            focusRoomRequested = -1;
+            fitRequested = false;
+            FocusRoomOnCanvas(snapshot, canvasSize, roomIndex);
+        }
+        else if (fitRequested)
         {
             Fit(snapshot, canvasSize);
             fitRequested = false;
@@ -2419,6 +2434,29 @@ internal static class WorldMapView
     {
         if (!string.IsNullOrEmpty(selectedConnectionId) && FindConnection(snapshot, selectedConnectionId) == null)
             selectedConnectionId = string.Empty;
+    }
+
+    private static void FocusRoomOnCanvas(
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasSize,
+        int roomIndex)
+    {
+        EditorMapRoomSnapshot room = FindRoom(snapshot, roomIndex);
+        if (room == null)
+            return;
+
+        if (room.Layer >= 0 && room.Layer < layerVisible.Length)
+            layerVisible[room.Layer] = true;
+
+        EditorMapRoomVisualSnapshot visual = WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex);
+        Num.Vector2 position = GetPosition(room);
+        Num.Vector2 size = new(
+            Math.Max(1f, visual.WidthTiles) * TileDisplaySize,
+            Math.Max(1f, visual.HeightTiles) * TileDisplaySize);
+        Num.Vector2 center = position + size * 0.5f;
+
+        // Preserve the developer's zoom level; double-click is navigation, not a zoom reset.
+        pan = canvasSize * 0.5f - center * zoom;
     }
 
     private static void Fit(EditorMapPresentationSnapshot snapshot, Num.Vector2 canvasSize)

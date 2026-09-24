@@ -710,6 +710,7 @@ public static class MapEditorPresentationHub
 public enum MapEditorCommandKind
 {
     SelectRoom,
+    SwitchCurrentRoom,
     SetRoomPosition,
     SetRoomLayer,
     SetRoomSubregion,
@@ -755,6 +756,9 @@ public static class MapEditorCommandQueue
                 {
                     case MapEditorCommandKind.SelectRoom:
                         MapEditorActions.SelectRoom(session, command.RoomIndex);
+                        break;
+                    case MapEditorCommandKind.SwitchCurrentRoom:
+                        MapEditorActions.SwitchCurrentRoom(session, command.RoomIndex);
                         break;
                     case MapEditorCommandKind.SetRoomPosition:
                         MapEditorActions.SetRoomPosition(session, command.RoomIndex, command.Value);

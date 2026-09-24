@@ -747,14 +747,17 @@ internal static class WorldWorkspaceView
                 detail,
                 WorldRoomStatusColor(room),
                 selectionKind == SelectionKind.Room && room.RoomIndex == snapshot.SelectedRoomIndex,
+                out bool doubleClicked,
                 WorldRoomTooltip(room));
-            if (!clicked) continue;
+            if (!clicked && !doubleClicked) continue;
 
             selectionKind = SelectionKind.Room;
             selectedSubregion = string.Empty;
             ClearConnectionSelection();
             lastObservedRoomIndex = room.RoomIndex;
             SelectRoom(room.RoomIndex);
+            if (doubleClicked)
+                ActivateCurrentRoomFromExplorer(room.RoomIndex);
         }
         if (visible == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."), true);
     }
@@ -884,14 +887,17 @@ internal static class WorldWorkspaceView
                         WorldRoomDetailText(room),
                         WorldRoomStatusColor(room),
                         selectionKind == SelectionKind.Room && room.RoomIndex == snapshot.SelectedRoomIndex,
+                        out bool doubleClicked,
                         WorldRoomTooltip(room));
-                    if (!clicked) continue;
+                    if (!clicked && !doubleClicked) continue;
 
                     selectionKind = SelectionKind.Room;
                     selectedSubregion = string.Empty;
                     ClearConnectionSelection();
                     lastObservedRoomIndex = room.RoomIndex;
                     SelectRoom(room.RoomIndex);
+                    if (doubleClicked)
+                        ActivateCurrentRoomFromExplorer(room.RoomIndex);
                 }
 
                 if (visibleRooms == 0)
@@ -1955,6 +1961,15 @@ internal static class WorldWorkspaceView
 
     private static void SelectRoom(int roomIndex) =>
         MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex));
+
+    private static void ActivateCurrentRoomFromExplorer(int roomIndex)
+    {
+        MapEditorCommandQueue.Enqueue(
+            new MapEditorCommand(
+                MapEditorCommandKind.SwitchCurrentRoom,
+                roomIndex));
+        WorldMapView.FocusRoom(roomIndex);
+    }
 
     private static void DrawRoomLayerButtons(EditorMapRoomSnapshot room)
     {

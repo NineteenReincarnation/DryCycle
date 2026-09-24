@@ -159,7 +159,28 @@ internal static class DevToolRoomExplorerEntry
             detailText,
             statusText,
             tooltip);
-        return Draw(item, layerText, statusColor, selected, height);
+        return Draw(item, layerText, statusColor, selected, out _, height);
+    }
+
+    internal static bool Draw(
+        string id,
+        string roomName,
+        string layerText,
+        string statusText,
+        string detailText,
+        uint statusColor,
+        bool selected,
+        out bool doubleClicked,
+        string tooltip = null,
+        float height = DefaultHeight)
+    {
+        DevToolExplorerListItem item = new(
+            id,
+            roomName,
+            detailText,
+            statusText,
+            tooltip);
+        return Draw(item, layerText, statusColor, selected, out doubleClicked, height);
     }
 
     /// <summary>
@@ -171,6 +192,16 @@ internal static class DevToolRoomExplorerEntry
         string trailingText,
         uint statusColor,
         bool selected,
+        float height = DefaultHeight)
+        where TItem : IDevToolExplorerListItem =>
+        Draw(item, trailingText, statusColor, selected, out _, height);
+
+    internal static bool Draw<TItem>(
+        TItem item,
+        string trailingText,
+        uint statusColor,
+        bool selected,
+        out bool doubleClicked,
         float height = DefaultHeight)
         where TItem : IDevToolExplorerListItem
     {
@@ -255,6 +286,7 @@ internal static class DevToolRoomExplorerEntry
         }
 
         bool hovered = ImGui.IsItemHovered();
+        doubleClicked = hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
         ImGui.PopID();
 
         string tooltip = item.Tooltip;
