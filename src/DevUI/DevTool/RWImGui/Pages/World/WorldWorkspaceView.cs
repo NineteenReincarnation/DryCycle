@@ -850,7 +850,13 @@ internal static class WorldWorkspaceView
 
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.FramePadding;
             if (selected) flags |= ImGuiTreeNodeFlags.Selected;
-            bool open = ImGui.TreeNodeEx(summary.Label, flags);
+
+            string treeLabel = BuildResponsiveSubregionLabel(summary, out bool labelClipped);
+            bool open = ImGui.TreeNodeEx(treeLabel, flags);
+            bool groupHovered = ImGui.IsItemHovered();
+
+            if (groupHovered && labelClipped)
+                DevToolTooltip.Show(summary.DisplayName + " · " + summary.CountText);
 
             if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
             {
@@ -898,6 +904,30 @@ internal static class WorldWorkspaceView
 
         if (visibleGroups == 0)
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的子区域或房间。", "No matching subregions or rooms."), true);
+    }
+
+    private static string BuildResponsiveSubregionLabel(SubregionSummary summary, out bool clipped)
+    {
+        string suffix = "  ·  " + summary.CountText;
+        float available = Math.Max(0f, ImGui.GetContentRegionAvail().X);
+        ImGuiStylePtr style = ImGui.GetStyle();
+
+        // TreeNode owns the arrow/bullet area inside the same content width. Reserve it explicitly,
+        // then always preserve the room count and ellipsize only the authored subregion name.
+        float treeChrome = ImGui.GetFrameHeight() + style.FramePadding.X * 2f + style.ItemSpacing.X;
+        float suffixWidth = ImGui.CalcTextSize(suffix).X;
+        float nameWidth = Math.Max(0f, available - treeChrome - suffixWidth - 4f);
+        string visibleName = DevToolResponsiveText.Ellipsize(summary.DisplayName, nameWidth, out clipped);
+
+        if (visibleName.Length == 0)
+        {
+            // Extremely narrow panels still show a meaningful row instead of drawing text under
+            // the right edge. The full name remains available through the hover tooltip.
+            visibleName = "…";
+            clipped = true;
+        }
+
+        return visibleName + suffix;
     }
 
     private static void DrawConnectionExplorer(EditorMapPresentationSnapshot snapshot)
