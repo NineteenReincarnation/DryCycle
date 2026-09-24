@@ -49,9 +49,7 @@ internal static class DevToolUiSettings
     private static DevToolScenePlacement scenePlacement = DevToolScenePlacement.Center;
     private static float chineseFontSize = DefaultChineseFontSize;
     private static float englishFontSize = DefaultFontSize;
-    private static int chineseFontWeight = DefaultChineseFontWeight;
     private static int englishFontWeight = DefaultFontWeight;
-    private static string chineseFontFamily = DevToolFontCatalog.DefaultChineseFamily;
 
     internal static DevToolUiLanguage Language => language;
 
@@ -75,20 +73,17 @@ internal static class DevToolUiSettings
 
     internal static int FontWeight
     {
-        get => IsChinese ? chineseFontWeight : englishFontWeight;
+        get => IsChinese ? DefaultChineseFontWeight : englishFontWeight;
         set
         {
-            if (IsChinese) chineseFontWeight = value;
-            else englishFontWeight = value;
+            if (!IsChinese) englishFontWeight = value;
         }
     }
 
     internal static string ChineseFontFamily
     {
-        get => chineseFontFamily;
-        set => chineseFontFamily = string.IsNullOrWhiteSpace(value)
-            ? DevToolFontCatalog.DefaultChineseFamily
-            : value.Trim();
+        get => DevToolFontCatalog.DefaultChineseFamily;
+        set { }
     }
 
     internal static Num.Vector4 TextColor { get; set; } = DefaultTextColor;
@@ -106,9 +101,7 @@ internal static class DevToolUiSettings
     {
         chineseFontSize = DefaultChineseFontSize;
         englishFontSize = DefaultFontSize;
-        chineseFontWeight = DefaultChineseFontWeight;
         englishFontWeight = DefaultFontWeight;
-        chineseFontFamily = DevToolFontCatalog.DefaultChineseFamily;
         TextColor = DefaultTextColor;
         DisabledTextColor = DefaultDisabledTextColor;
     }

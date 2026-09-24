@@ -79,17 +79,22 @@ internal static class FontSettingsWindow
                 Math.Min(Math.Max(430f, display.Y - 16f), 430f * Math.Min(1.35f, nextScale))));
         }
 
-        int weight = DevToolUiSettings.FontWeight;
-        if (ImGui.SliderInt(
-                DevToolUiSettings.T("字重##DevToolFontWeight", "Weight##DevToolFontWeight"),
-                ref weight,
-                100,
-                900))
+        if (DevToolUiSettings.IsChinese)
         {
-            // Font families normally expose weights in 100-point steps. Snap the requested value
-            // so selection is deterministic while dragging the slider.
-            weight = Math.Max(100, Math.Min(900, ((weight + 50) / 100) * 100));
-            DevToolUiSettings.FontWeight = weight;
+            ImGui.TextDisabled("字重：Medium (500)");
+        }
+        else
+        {
+            int weight = DevToolUiSettings.FontWeight;
+            if (ImGui.SliderInt(
+                    "Weight##DevToolFontWeight",
+                    ref weight,
+                    100,
+                    900))
+            {
+                weight = Math.Max(100, Math.Min(900, ((weight + 50) / 100) * 100));
+                DevToolUiSettings.FontWeight = weight;
+            }
         }
 
         string fontName = DevToolFrontend.ResolvedFontName;
@@ -164,81 +169,28 @@ internal static class FontSettingsWindow
 
     private static void DrawChineseFontSelector()
     {
-        string[] families = DevToolFontCatalog.GetAvailableChineseFamilies();
-        string selectedFamily = DevToolUiSettings.ChineseFontFamily;
-        if (families.Length > 0)
-        {
-            bool selectedAvailable = false;
-            for (int i = 0; i < families.Length; i++)
-            {
-                if (!string.Equals(
-                        families[i],
-                        selectedFamily,
-                        StringComparison.OrdinalIgnoreCase))
-                    continue;
-                selectedAvailable = true;
-                break;
-            }
-
-            if (!selectedAvailable)
-            {
-                selectedFamily = families[0];
-                DevToolUiSettings.ChineseFontFamily =
-                    selectedFamily;
-            }
-        }
-
-        int localFontFiles = DevToolFontCatalog.CountLocalFontFiles();
         int registeredLocalFaces = DevToolFontCatalog.RegisteredLocalFaceCount;
-        int localChineseFaces = DevToolFontCatalog.CountSelectableLocalChineseFaces();
 
         DevToolWidgets.MutedText("中文字体");
-        ImGui.SetNextItemWidth(-1f);
-        if (ImGui.BeginCombo("##DevToolChineseFontFamily", selectedFamily))
-        {
-            for (int i = 0; i < families.Length; i++)
-            {
-                string family = families[i];
-                bool selected = string.Equals(family, selectedFamily, StringComparison.OrdinalIgnoreCase);
-                if (ImGui.Selectable(family + "##DevToolChineseFamily" + i, selected))
-                    DevToolUiSettings.ChineseFontFamily = family;
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
-
-        if (families.Length == 0)
-        {
-            ImGui.TextWrapped(
-                "DryCycle 的独立 DevTool 字体 Atlas 中没有可用的简体中文字体。请检查 ui/fonts 下的 HarmonyOS_Sans_SC_*.ttf。"
-            );
-        }
-        else
-        {
-            ImGui.TextDisabled($"可选 {families.Length} 个字体族 | 本地中文字体面 {localChineseFaces} 个 | 默认 HarmonyOS Sans SC Medium");
-        }
+        ImGui.TextDisabled("HarmonyOS Sans SC Medium");
+        ImGui.TextDisabled(DevToolFontCatalog.ChineseFontFileName);
 
         DevToolWidgets.MutedText("字体目录");
         ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 | DevTool Context 已注册 {registeredLocalFaces} 个 | 可用于中文 {localChineseFaces} 个");
 
-        if (DevToolFontCatalog.RegistrationAttempted && !DevToolFontCatalog.RegistrationSucceeded)
+        if (!DevToolFontCatalog.RegistrationSucceeded)
         {
             ImGui.TextWrapped("注册状态：" + DevToolFontCatalog.RegistrationMessage);
         }
-        else if (registeredLocalFaces > 0 && localChineseFaces == 0)
-        {
-            ImGui.TextWrapped(
-                "本地字体已经加入 Atlas，但没有一个包含所需的简体中文字形。HarmonyOS Sans 请使用 HarmonyOS_Sans_SC_*.ttf；HarmonyOS_Sans_*.ttf 是通用西文字体，不是简中字体。"
-            );
-        }
-        else if (localChineseFaces > 0)
+        else
         {
             ImGui.TextDisabled(
-                "同一字体族的 Regular / Medium / Bold 等会合并为一个字体族条目；使用下面的字重滑块切换具体字体面。选择字体族或字重后下一帧立即生效。"
-            );
+                "固定中文字体已加载 | DevTool Context 已注册 " +
+                registeredLocalFaces +
+                " 个字体面");
         }
 
         ImGui.Spacing();
     }
+
 }

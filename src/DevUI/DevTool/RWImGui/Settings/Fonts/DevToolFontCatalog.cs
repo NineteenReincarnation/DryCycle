@@ -15,9 +15,10 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static unsafe class DevToolFontCatalog
 {
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
+    internal const string ChineseFontFileName = "HarmonyOS_Sans_SC_Medium.ttf";
     internal const string UbuntuMonoFamily = "Ubuntu Mono";
 
-    private const int MaxLocalFontFaces = 1;
+    private const int FixedChineseFontWeight = 500;
     private const long MaxLocalFontBytes = 64L * 1024L * 1024L;
 
     private sealed class RegisteredFace
@@ -97,9 +98,6 @@ internal static unsafe class DevToolFontCatalog
                 return false;
             }
 
-            // RWImGui ships a modified ImGui.NET binding where ImFontAtlas.TexID is ulong
-            // rather than System.IntPtr. Compare against the binding's actual zero value so this
-            // frontend compiles against the DLL that Rain World loads at runtime.
             if (io.Fonts.Locked || io.Fonts.TexID != 0UL)
             {
                 registrationMessage = "The DevTool font atlas is already locked or uploaded; local fonts were not modified.";
@@ -109,118 +107,83 @@ internal static unsafe class DevToolFontCatalog
                 return false;
             }
 
-            string directory = FontDirectory;
-            if (!Directory.Exists(directory))
+            string fontPath = Path.Combine(FontDirectory, ChineseFontFileName);
+            cachedLocalFontFileCount = File.Exists(fontPath) ? 1 : 0;
+
+            if (!File.Exists(fontPath))
             {
-                cachedLocalFontFileCount = 0;
-                registrationMessage = "Font directory not found: " + directory;
-                log?.LogWarning("DryCycle DevTool font directory not found: " + directory);
+                registrationMessage = "Required Chinese font not found: " + fontPath;
+                log?.LogWarning(
+                    "DryCycle DevTool Chinese font is missing. Expected exactly: " + fontPath);
                 return false;
             }
 
-            string[] files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly);
-            Array.Sort(files, CompareFontFilesForRegistration);
+            if (!TryValidateFontFile(fontPath, out string validationError))
+            {
+                registrationMessage = "Required Chinese font failed validation: " + validationError;
+                log?.LogWarning(
+                    "DryCycle DevTool rejected required Chinese font '" +
+                    ChineseFontFileName +
+                    "': " +
+                    validationError);
+                return false;
+            }
 
             IntPtr chineseGlyphRanges =
                 GetExtendedChineseGlyphRanges(
                     io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
-            int added = 0;
-            int eligibleFiles = 0;
 
-            int rejectedFiles = 0;
-
-            for (int i = 0; i < files.Length; i++)
+            ImFontPtr font;
+            try
             {
-                string file = files[i];
-                string extension = Path.GetExtension(file);
-                if (!IsFontExtension(extension)) continue;
-                eligibleFiles++;
-
-                string fullPath = Path.GetFullPath(file);
-                string fileName = Path.GetFileName(file);
-                string faceName = Path.GetFileNameWithoutExtension(file);
-                string family = FamilyFromName(faceName);
-
-                // English deliberately uses RWImGui's context default font. Local atlas entries are
-                // reserved for CJK fallback only, so unrelated Latin/dev fonts can never multiply
-                // atlas size or first-open cost.
-                bool chineseFace = IsChineseFamilyName(family, fileName);
-                if (!chineseFace) continue;
-
-                if (added >= MaxLocalFontFaces)
-                {
-                    log?.LogInfo(
-                        $"DryCycle DevTool bounded local CJK registration at {MaxLocalFontFaces} face(s). " +
-                        "Additional local CJK font files were left untouched.");
-                    break;
-                }
-
-                if (!TryValidateFontFile(fullPath, out string validationError))
-                {
-                    rejectedFiles++;
-                    log?.LogWarning(
-                        "DryCycle DevTool rejected local font '" + fileName + "': " + validationError);
-                    continue;
-                }
-
-                if (!RegisteredPaths.Add(fullPath)) continue;
-
-                ImFontPtr font;
-                try
-                {
-                    font = io.Fonts.AddFontFromFileTTF(
-                        fullPath,
-                        DevToolUiSettings.ReferenceFontSize,
-                        default,
-                        chineseGlyphRanges);
-                }
-                catch (Exception error)
-                {
-                    RegisteredPaths.Remove(fullPath);
-                    log?.LogWarning(
-                        "DryCycle DevTool could not register font '" + fileName + "': " + error.Message);
-                    continue;
-                }
-
-                if (font.NativePtr == null)
-                {
-                    RegisteredPaths.Remove(fullPath);
-                    log?.LogWarning("DryCycle DevTool font returned a null ImFont: " + fileName);
-                    continue;
-                }
-
-                RegisteredFaces.Add(new RegisteredFace
-                {
-                    Font = font,
-                    FileName = fileName,
-                    Family = family,
-                    Weight = InferWeight(faceName),
-                    ChineseCapable = true
-                });
-                added++;
+                font = io.Fonts.AddFontFromFileTTF(
+                    Path.GetFullPath(fontPath),
+                    DevToolUiSettings.ReferenceFontSize,
+                    default,
+                    chineseGlyphRanges);
+            }
+            catch (Exception error)
+            {
+                registrationMessage = "Required Chinese font could not be added: " + error.Message;
+                log?.LogWarning(
+                    "DryCycle DevTool could not register required Chinese font '" +
+                    ChineseFontFileName +
+                    "': " +
+                    error);
+                return false;
             }
 
-            cachedLocalFontFileCount = eligibleFiles;
-            cachedSelectableLocalChineseFaces = -1;
-            cachedChineseFamilies = null;
-            registrationSucceeded = added > 0;
-            registrationMessage = registrationSucceeded
-                ? $"Registered {added} validated local CJK font face(s)."
-                : $"Found {eligibleFiles} local font file(s), but no validated CJK face was registered" +
-                  (rejectedFiles > 0 ? $" ({rejectedFiles} rejected)." : ".");
-
-            if (registrationSucceeded)
+            if (font.NativePtr == null)
             {
-                log?.LogInfo(
-                    $"DryCycle DevTool registered {added} local font face(s) into its dedicated " +
-                    $"consumer atlas from {directory}. RWImGUI's shared atlas was not modified.");
-            }
-            else
-            {
-                log?.LogWarning("DryCycle DevTool found no local font face that could be registered from: " + directory);
+                registrationMessage = "Required Chinese font returned a null ImFont.";
+                log?.LogWarning(
+                    "DryCycle DevTool required Chinese font returned a null ImFont: " +
+                    ChineseFontFileName);
+                return false;
             }
 
-            return registrationSucceeded;
+            RegisteredFaces.Clear();
+            RegisteredPaths.Clear();
+            RegisteredPaths.Add(Path.GetFullPath(fontPath));
+            RegisteredFaces.Add(new RegisteredFace
+            {
+                Font = font,
+                FileName = ChineseFontFileName,
+                Family = DefaultChineseFamily,
+                Weight = FixedChineseFontWeight,
+                ChineseCapable = true
+            });
+
+            cachedSelectableLocalChineseFaces = 1;
+            cachedChineseFamilies = new[] { DefaultChineseFamily };
+            registrationSucceeded = true;
+            registrationMessage = "Registered fixed Chinese font: " + ChineseFontFileName + ".";
+
+            log?.LogInfo(
+                "DryCycle DevTool registered fixed Chinese font '" +
+                ChineseFontFileName +
+                "' into its dedicated consumer atlas.");
+            return true;
         }
         catch (Exception error)
         {
@@ -247,26 +210,10 @@ internal static unsafe class DevToolFontCatalog
     internal static string[] GetAvailableChineseFamilies()
     {
         if (cachedChineseFamilies != null) return cachedChineseFamilies;
-
-        // Only DryCycle-registered local faces participate in the Chinese selector. Do not scan
-        // RWImGui's preloaded primary font here: a Latin font such as FiraCode may expose atlas
-        // placeholder entries for CJK codepoints and would otherwise be misclassified as usable.
-        List<string> families = new();
-        for (int i = 0; i < RegisteredFaces.Count; i++)
-        {
-            RegisteredFace face = RegisteredFaces[i];
-            if (!face.ChineseCapable) continue;
-            AddUnique(families, face.Family);
-        }
-
-        families.Sort((a, b) =>
-        {
-            bool aDefault = string.Equals(a, DefaultChineseFamily, StringComparison.OrdinalIgnoreCase);
-            bool bDefault = string.Equals(b, DefaultChineseFamily, StringComparison.OrdinalIgnoreCase);
-            if (aDefault != bDefault) return aDefault ? -1 : 1;
-            return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
-        });
-        cachedChineseFamilies = families.ToArray();
+        cachedChineseFamilies =
+            registrationSucceeded
+                ? new[] { DefaultChineseFamily }
+                : Array.Empty<string>();
         return cachedChineseFamilies;
     }
 
@@ -276,17 +223,16 @@ internal static unsafe class DevToolFontCatalog
 
         try
         {
-            if (!Directory.Exists(FontDirectory)) return cachedLocalFontFileCount = 0;
-            string[] files = Directory.GetFiles(FontDirectory, "*.*", SearchOption.TopDirectoryOnly);
-            int count = 0;
-            for (int i = 0; i < files.Length; i++)
-                if (IsFontExtension(Path.GetExtension(files[i]))) count++;
-            cachedLocalFontFileCount = count;
+            cachedLocalFontFileCount =
+                File.Exists(Path.Combine(FontDirectory, ChineseFontFileName))
+                    ? 1
+                    : 0;
         }
         catch
         {
             cachedLocalFontFileCount = 0;
         }
+
         return cachedLocalFontFileCount;
     }
 
