@@ -376,6 +376,7 @@ internal static class DevToolFrontend
     private static int drawFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
+    private static int rwimguiFrameObserved;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -479,12 +480,24 @@ internal static class DevToolFrontend
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        // Keep the Always callback intentionally empty. Interactive drawing belongs to the
-        // RWImGui context Render lifecycle.
+        // This callback is the first positive proof that RWImGUI reached a healthy native Present
+        // loop. Main-thread context switching is forbidden until this has happened; otherwise a
+        // failed D3D11 initialization can leave the managed API loaded while native bindings are
+        // unusable, and HasContext/SwitchContext may terminate the process.
+        Interlocked.Exchange(ref rwimguiFrameObserved, 1);
     }
 
     private static void EnsureContext()
     {
+        // Never enter RWImGUI native context APIs until its Present callback has run at least once.
+        // If RWImGUI initialization failed, the DevTool frontend simply stays unavailable instead
+        // of turning an optional UI failure into a whole-game startup/native crash.
+        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+        {
+            EditorInputRouter.SetFrontendCapture(false, false, false);
+            return;
+        }
+
         try
         {
             DevToolInputContext context = inputContext;
