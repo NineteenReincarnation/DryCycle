@@ -926,8 +926,8 @@ internal static class WorldWorkspaceView
 
         const float leftPadding = 8f;
         const float arrowGap = 8f;
-        const float rightPadding = 8f;
-        const float compactThreshold = 300f;
+        const float rightPadding = 5f;
+        const float badgeGap = 6f;
         const float twoLineThreshold = 270f;
 
         bool persistedOpen = ExpandedSubregions.Contains(summary.Name);
@@ -939,16 +939,17 @@ internal static class WorldWorkspaceView
 
         string badgeText = summary.CountText;
         float badgeTextWidth = ImGui.CalcTextSize(badgeText).X;
-        float badgeWidth = badgeTextWidth + 12f;
+        float badgeWidth = badgeTextWidth + 10f;
         float fullNameWidth = ImGui.CalcTextSize(summary.DisplayName).X;
 
-        // C: the count is secondary. Show the badge only when the complete name still fits.
+        // C: the count is secondary, but do not impose a coarse width threshold. If the complete
+        // name plus a compact badge physically fits, show it. This uses the real measured widths,
+        // so narrow-but-short labels such as "None" keep their count instead of losing it early.
         bool showCountBadge =
-            available >= compactThreshold &&
-            nameStart + fullNameWidth + 10f + badgeWidth + rightPadding <= available;
+            nameStart + fullNameWidth + badgeGap + badgeWidth + rightPadding <= available;
 
         float nameRight = available - rightPadding -
-                          (showCountBadge ? badgeWidth + 10f : 0f);
+                          (showCountBadge ? badgeWidth + badgeGap : 0f);
         float nameWidth = Math.Max(1f, nameRight - nameStart);
 
         // D: in very narrow explorers, spend vertical space instead of destroying the name.
