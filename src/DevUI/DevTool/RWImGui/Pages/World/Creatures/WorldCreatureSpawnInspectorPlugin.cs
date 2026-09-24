@@ -63,6 +63,7 @@ internal static class WorldCreatureSpawnInspector
 
     private static readonly List<string> timelineCatalog = new();
     private static int timelineCatalogFingerprint = -1;
+    private static WorldCreatureSpawnRecord[] presentedSpawnSource = Array.Empty<WorldCreatureSpawnRecord>();
     private static WorldCreatureSpawnRecord[] presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
     private static string[] presentedCreatureText = Array.Empty<string>();
     private static string[] presentedSecondaryText = Array.Empty<string>();
@@ -82,6 +83,7 @@ internal static class WorldCreatureSpawnInspector
         editingSpawnId = -1;
         timelineCatalog.Clear();
         timelineCatalogFingerprint = -1;
+        presentedSpawnSource = Array.Empty<WorldCreatureSpawnRecord>();
         presentedSpawns = Array.Empty<WorldCreatureSpawnRecord>();
         presentedCreatureText = Array.Empty<string>();
         presentedSecondaryText = Array.Empty<string>();
@@ -146,6 +148,7 @@ internal static class WorldCreatureSpawnInspector
         }
 
         EnsurePresentation(existing);
+        WorldCreatureSpawnRecord[] displaySpawns = presentedSpawns;
         DevToolWidgets.MutedText(
             DevToolUiSettings.T("已放置 ", "Placed ") + existing.Length +
             DevToolUiSettings.T(" 个生成项", " spawn entrie(s)"));
@@ -161,9 +164,9 @@ internal static class WorldCreatureSpawnInspector
                 6f,
                 ImGui.GetStyle().ItemSpacing.X);
 
-        for (int i = 0; i < existing.Length; i++)
+        for (int i = 0; i < displaySpawns.Length; i++)
         {
-            WorldCreatureSpawnRecord spawn = existing[i];
+            WorldCreatureSpawnRecord spawn = displaySpawns[i];
             ImGui.PushID(spawn.Id);
 
             float available =
@@ -247,19 +250,35 @@ internal static class WorldCreatureSpawnInspector
     private static void EnsurePresentation(
         WorldCreatureSpawnRecord[] existing)
     {
-        if (ReferenceEquals(existing, presentedSpawns) &&
+        if (ReferenceEquals(existing, presentedSpawnSource) &&
             presentedCreatureText.Length == existing.Length)
             return;
 
-        presentedSpawns = existing;
-        presentedCreatureText =
-            new string[existing.Length];
-        presentedSecondaryText =
-            new string[existing.Length];
+        presentedSpawnSource = existing;
+        presentedSpawns = (WorldCreatureSpawnRecord[])existing.Clone();
+        Array.Sort(
+            presentedSpawns,
+            static (a, b) =>
+            {
+                if (ReferenceEquals(a, b)) return 0;
+                if (a == null) return 1;
+                if (b == null) return -1;
 
-        for (int i = 0; i < existing.Length; i++)
+                int denOrder = a.DenNode.CompareTo(b.DenNode);
+                if (denOrder != 0) return denOrder;
+
+                // Keep multiple spawns in the same pipe deterministic without changing registry data.
+                return a.Id.CompareTo(b.Id);
+            });
+
+        presentedCreatureText =
+            new string[presentedSpawns.Length];
+        presentedSecondaryText =
+            new string[presentedSpawns.Length];
+
+        for (int i = 0; i < presentedSpawns.Length; i++)
         {
-            WorldCreatureSpawnRecord spawn = existing[i];
+            WorldCreatureSpawnRecord spawn = presentedSpawns[i];
             string creature =
                 string.IsNullOrWhiteSpace(spawn.Creature)
                     ? "?"
