@@ -379,7 +379,9 @@ internal static class DevToolFrontend
     private static int drawFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
-    private static int rwimguiFrameObserved;
+    private static int contextActivationFailureLogged;
+    private static bool contextAttached;
+    private static float nextContextRetryAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -394,7 +396,9 @@ internal static class DevToolFrontend
 
     internal static void ResetNativeReadinessFromMainThread()
     {
-        Interlocked.Exchange(ref rwimguiFrameObserved, 0);
+        contextAttached = false;
+        nextContextRetryAt = 0f;
+        Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
@@ -409,51 +413,56 @@ internal static class DevToolFrontend
 
     internal static void SetVisibleFromMainThread(bool value)
     {
+        bool wasVisible = visible;
         visible = value;
+
         if (!value)
         {
-            ReleaseContext();
+            if (contextAttached || wasVisible)
+                ReleaseContext();
+
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
         }
 
-        EnsureContext();
+        if (contextAttached)
+            return;
+
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextContextRetryAt)
+            return;
+
+        EnsureContext(now);
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        // This callback is the first positive proof that RWImGUI reached a healthy native Present
-        // loop. Main-thread context switching is forbidden until this has happened; otherwise a
-        // failed D3D11 initialization can leave the managed API loaded while native bindings are
-        // unusable, and HasContext/SwitchContext may terminate the process.
-        Interlocked.Exchange(ref rwimguiFrameObserved, 1);
+        // Intentionally empty. Context ownership is managed from Unity's main thread.
     }
 
-    private static void EnsureContext()
+    private static void EnsureContext(float now)
     {
-        // Never enter RWImGUI native context APIs until its Present callback has run at least once.
-        // If RWImGUI initialization failed, the DevTool frontend simply stays unavailable instead
-        // of turning an optional UI failure into a whole-game startup/native crash.
-        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
-        {
-            EditorInputRouter.SetFrontendCapture(false, false, false);
-            return;
-        }
-
         try
         {
-            DevToolInputContext context = inputContext;
-            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
-                return;
-
+            // This path runs only when the rebuilt DevTool is actually visible, i.e. well after
+            // RainWorld.Start. Do not gate it on the Always callback: some RWImGUI builds can keep
+            // consumer contexts usable even when that callback is unavailable, and the old gate
+            // permanently prevented New UI from opening.
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
+                nextContextRetryAt = now + 0.25f;
+
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
-                    log?.LogWarning("DevTool UI is waiting because another RWImGui context owns input.");
+                {
+                    log?.LogWarning(
+                        "DevTool UI is waiting because another RWImGui context owns input.");
+                }
+
                 return;
             }
 
+            DevToolInputContext context = inputContext;
             if (context == null)
             {
                 context = new DevToolInputContext();
@@ -461,38 +470,61 @@ internal static class DevToolFrontend
             }
 
             ImGUIAPI.SwitchContext(context);
+            contextAttached = true;
+            nextContextRetryAt = 0f;
 
-            // This context is owned exclusively by DryCycle and has not rendered yet. Register local
-            // fonts here instead of mutating RWImGUI's shared/default context during startup.
+            // Register fonts only after our own context is active and before its first Render.
             if (!DevToolFontCatalog.RegistrationAttempted)
                 DevToolFontCatalog.TryRegisterLocalFonts(log);
 
             Interlocked.Exchange(ref contextBusyLogged, 0);
+            Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         }
         catch (Exception error)
         {
+            contextAttached = false;
             EditorInputRouter.SetFrontendCapture(false, false, false);
-            log?.LogWarning("DevTool RWImGui context activation failed: " + error.Message);
+
+            // A broken/busy native frontend must never become a per-frame exception/log loop.
+            // Retry at low frequency so the game remains responsive and can recover later.
+            nextContextRetryAt = now + 1.0f;
+
+            if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
+            {
+                log?.LogWarning(
+                    "DevTool RWImGui context activation failed; retrying at low frequency: " +
+                    error.Message);
+            }
         }
     }
 
     private static void ReleaseContext()
     {
-        // CurrentContext/SwitchContext are native-backed. If RWImGUI never reached a healthy
-        // Present after its D3D11 initialization, even a cleanup read can terminate the process.
-        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+        if (!contextAttached)
             return;
 
         try
         {
-            DevToolInputContext context = inputContext;
-            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
-                ImGUIAPI.SwitchContext(null);
+            ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
         {
             log?.LogWarning("DevTool RWImGui context release failed: " + error.Message);
         }
+        finally
+        {
+            contextAttached = false;
+            nextContextRetryAt = 0f;
+            EditorInputRouter.SetFrontendCapture(false, false, false);
+        }
+    }
+
+    internal static void NotifyContextDestroyedFromRwImGui()
+    {
+        contextAttached = false;
+        inputContext = null;
+        nextContextRetryAt = 0f;
+        EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
@@ -772,7 +804,7 @@ internal sealed class DevToolInputContext : IMGUIContext
 
     public override void OnDestroyed()
     {
-        EditorInputRouter.SetFrontendCapture(false, false, false);
+        DevToolFrontend.NotifyContextDestroyedFromRwImGui();
     }
 }
 

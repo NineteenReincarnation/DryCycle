@@ -172,7 +172,9 @@ internal static class ObservatoryFrontend
     private static int contextBusyLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
-    private static int rwimguiFrameObserved;
+    private static int contextActivationFailureLogged;
+    private static bool contextAttached;
+    private static float nextContextRetryAt;
     private static volatile bool visible;
     private static bool cjkFontResolved;
     private static ImFontPtr cjkFont;
@@ -184,22 +186,34 @@ internal static class ObservatoryFrontend
 
     internal static void ResetNativeReadinessFromMainThread()
     {
-        Interlocked.Exchange(ref rwimguiFrameObserved, 0);
+        contextAttached = false;
+        nextContextRetryAt = 0f;
+        Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
     internal static void SetVisibleFromMainThread(bool value)
     {
+        bool wasVisible = visible;
         visible = value;
 
         if (!Enabled || !value)
         {
-            ReleaseInputContext();
+            if (contextAttached || wasVisible)
+                ReleaseInputContext();
+
             AIDebugPresentationHub.SetCaptureState(false, false);
             return;
         }
 
-        EnsureInputContextFromMainThread();
+        if (contextAttached)
+            return;
+
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextContextRetryAt)
+            return;
+
+        EnsureInputContextFromMainThread(now);
     }
 
     // This callback deliberately performs no ImGui drawing and no context switching. The
@@ -209,10 +223,6 @@ internal static class ObservatoryFrontend
     // with a native ImGui/RWImGUI failure. Keep this callback as a minimal heartbeat only.
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        // Reaching this callback proves RWImGUI completed enough of its native Present path for
-        // CurrentContext/HasContext/SwitchContext to be safe to touch from the Unity thread.
-        Interlocked.Exchange(ref rwimguiFrameObserved, 1);
-
         if (!Enabled)
             return;
 
@@ -225,31 +235,26 @@ internal static class ObservatoryFrontend
         }
     }
 
-    private static void EnsureInputContextFromMainThread()
+    private static void EnsureInputContextFromMainThread(float now)
     {
-        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
-        {
-            AIDebugPresentationHub.SetCaptureState(false, false);
-            return;
-        }
-
         try
         {
-            ObservatoryInputContext context = inputContext;
-            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context)) return;
-
-            // Never steal another RWImGUI consumer's active context. Once that context is
-            // released, the next Unity Update will acquire ours automatically.
             if (ImGUIAPI.HasContext)
             {
                 AIDebugPresentationHub.SetCaptureState(false, false);
+                nextContextRetryAt = now + 0.25f;
+
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
+                {
                     log?.LogWarning(
                         "DryCycle AI Observatory is visible, but another RWImGUI context currently owns input. " +
-                        "Close that RWImGUI menu/window and the Observatory will acquire input on the next frame.");
+                        "Close that RWImGUI menu/window and the Observatory will retry automatically.");
+                }
+
                 return;
             }
 
+            ObservatoryInputContext context = inputContext;
             if (context == null)
             {
                 context = new ObservatoryInputContext();
@@ -257,36 +262,61 @@ internal static class ObservatoryFrontend
             }
 
             ImGUIAPI.SwitchContext(context);
+            contextAttached = true;
+            nextContextRetryAt = 0f;
             Interlocked.Exchange(ref contextBusyLogged, 0);
+            Interlocked.Exchange(ref contextActivationFailureLogged, 0);
+
             if (Interlocked.Exchange(ref inputContextLogged, 1) == 0)
+            {
                 log?.LogInfo(
                     "DryCycle RWImGUI Observatory input context activated on the Unity main thread. " +
                     "RWImGUI will call ObservatoryInputContext.Render during Present.");
+            }
         }
         catch (Exception error)
         {
+            contextAttached = false;
             AIDebugPresentationHub.SetCaptureState(false, false);
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
-            if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
-                log?.LogError("DryCycle RWImGUI Observatory context activation failed: " + error);
+            nextContextRetryAt = now + 1.0f;
+
+            if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
+            {
+                log?.LogError(
+                    "DryCycle RWImGUI Observatory context activation failed; retrying at low frequency: " +
+                    error);
+            }
         }
     }
 
     internal static void ReleaseInputContext()
     {
-        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+        if (!contextAttached)
             return;
 
         try
         {
-            ObservatoryInputContext context = inputContext;
-            if (context != null && ReferenceEquals(ImGUIAPI.CurrentContext, context))
-                ImGUIAPI.SwitchContext(null);
+            ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
         {
             log?.LogWarning("DryCycle RWImGUI Observatory input context release failed: " + error.Message);
         }
+        finally
+        {
+            contextAttached = false;
+            nextContextRetryAt = 0f;
+            AIDebugPresentationHub.SetCaptureState(false, false);
+        }
+    }
+
+    internal static void NotifyContextDestroyedFromRwImGui()
+    {
+        contextAttached = false;
+        inputContext = null;
+        nextContextRetryAt = 0f;
+        AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
@@ -400,6 +430,6 @@ internal sealed class ObservatoryInputContext : IMGUIContext
 
     public override void OnDestroyed()
     {
-        AIDebugPresentationHub.SetCaptureState(false, false);
+        ObservatoryFrontend.NotifyContextDestroyedFromRwImGui();
     }
 }
