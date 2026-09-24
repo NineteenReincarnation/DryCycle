@@ -155,14 +155,18 @@ public sealed class BridgePlugin : BaseUnityPlugin
             EditorInputRouter.SetFrontendAttached(nativeFrontendReady);
         }
 
-        // If the native renderer is unavailable, always leave the original DevUI usable.
-        if (!nativeFrontendReady && !EditorUiModeState.UseVanilla)
+        bool sessionLiveNow = DevToolSessionHub.IsCurrentSessionLive;
+
+        // Only fall back once DevTools is actually open. Doing this during ordinary game startup
+        // would permanently change the user's preferred mode before RWImGUI had a chance to reach
+        // its first Present on otherwise healthy systems.
+        if (!nativeFrontendReady && sessionLiveNow && !EditorUiModeState.UseVanilla)
             EditorUiModeState.SetVanilla(true);
 
         bool rebuiltFrontendWorkActive =
             nativeFrontendReady &&
             !EditorUiModeState.UseVanilla &&
-            DevToolSessionHub.IsCurrentSessionLive;
+            sessionLiveNow;
 
         if (rebuiltFrontendWorkActive)
         {
