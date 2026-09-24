@@ -41,11 +41,15 @@ internal static class WorldCreatureSpawnInspector
         Exclude
     }
 
-    private static readonly string[] KnownSpawnTags =
+    private static readonly string[] ToggleSpawnTags =
     {
         "Night", "PreCycle", "Winter", "Ignorecycle", "AlternateForm", "Lavasafe",
-        "TentacleImmune", "Voidsea", "Ripple", "Slayer", "Seed:0", "RotType:0", "NamedAttr:"
+        "TentacleImmune", "Voidsea", "Ripple", "Slayer"
     };
+
+    private const string SeedTagPrefix = "Seed:";
+    private const string RotTypeTagPrefix = "RotType:";
+    private const string NamedAttrTagPrefix = "NamedAttr:";
 
     private static ManualLogSource log;
     private static bool enabled;
@@ -573,30 +577,48 @@ internal static class WorldCreatureSpawnInspector
             WorldInspectorReadability.PrepareField(
                 DevToolUiSettings.T("Spawn 标签", "Spawn tags"),
                 "CreatureSpawnTags");
-        ImGui.InputText(
-            spawnTagsLabel,
-            ref spawnTags,
-            512);
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T(
-                "花括号内部内容，例如 Night,PreCycle,Seed:12。未知标签原样保留给 Mod。",
-                "Contents inside {...}, e.g. Night,PreCycle,Seed:12. Unknown tags are preserved for mods."));
 
-        string tagPresetLabel =
-            WorldInspectorReadability.PrepareField(
-                DevToolUiSettings.T("快速添加标签", "Add tag preset"),
-                "CreatureSpawnTagPreset");
         if (ImGui.BeginCombo(
-                tagPresetLabel,
-                DevToolUiSettings.T("选择…", "Select…")))
+                spawnTagsLabel,
+                SpawnTagSummary()))
         {
-            for (int i = 0; i < KnownSpawnTags.Length; i++)
+            for (int i = 0; i < ToggleSpawnTags.Length; i++)
             {
-                string tag = KnownSpawnTags[i];
-                if (ImGui.Selectable(tag + "##SpawnTagPreset" + i)) AddTag(tag);
+                string tag = ToggleSpawnTags[i];
+                bool enabled = CsvContains(spawnTags, tag);
+                if (ImGui.Checkbox(tag + "##SpawnTagToggle" + i, ref enabled))
+                    SetCsvToken(ref spawnTags, tag, enabled);
             }
+
+            ImGui.Separator();
+
+            DrawIntegerSpawnTag(
+                DevToolUiSettings.T("随机种子", "Seed"),
+                SeedTagPrefix,
+                "SpawnTagSeed");
+            DrawIntegerSpawnTag(
+                DevToolUiSettings.T("腐化类型", "Rot type"),
+                RotTypeTagPrefix,
+                "SpawnTagRotType");
+            DrawNamedSpawnTag();
+
+            string custom = UnknownSpawnTags();
+            if (!string.IsNullOrEmpty(custom))
+            {
+                ImGui.Separator();
+                DevToolWidgets.MutedText(
+                    DevToolUiSettings.T("保留的 Mod 标签", "Preserved mod tags"),
+                    true);
+                ImGui.TextWrapped(custom);
+            }
+
             ImGui.EndCombo();
         }
+
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "直接勾选生成标签。未识别的 Mod 自定义标签会在编辑时原样保留。",
+                "Select spawn tags directly. Unrecognized mod-defined tags are preserved while editing."));
     }
 
     private static void DrawTimelineEditor()
@@ -615,36 +637,52 @@ internal static class WorldCreatureSpawnInspector
             ImGui.EndCombo();
         }
 
-        if (timelineMode == TimelineMode.All) return;
+        if (timelineMode == TimelineMode.All)
+            return;
 
         string timelineFilterLabel =
             WorldInspectorReadability.PrepareField(
                 DevToolUiSettings.T("时间线 / 角色标签", "Timeline / character tags"),
                 "CreatureTimelineFilter");
-        ImGui.InputText(
-            timelineFilterLabel,
-            ref timelineFilter,
-            256);
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T(
-                "world.txt 行首条件；逗号分隔，Mod 自定义时间线标签也会原样保留。",
-                "world.txt line-prefix condition; comma-separated mod timeline tags are preserved."));
 
-        string timelinePresetLabel =
-            WorldInspectorReadability.PrepareField(
-                DevToolUiSettings.T("添加已注册标签", "Add registered tag"),
-                "CreatureTimelinePreset");
         if (ImGui.BeginCombo(
-                timelinePresetLabel,
-                DevToolUiSettings.T("选择…", "Select…")))
+                timelineFilterLabel,
+                TimelineTagSummary()))
         {
-            for (int i = 0; i < timelineCatalog.Count; i++)
+            if (timelineCatalog.Count == 0)
             {
-                string value = timelineCatalog[i];
-                if (ImGui.Selectable(value + "##TimelinePreset" + i)) AddTimeline(value);
+                DevToolWidgets.MutedText(
+                    DevToolUiSettings.T("没有已注册的时间线标签。", "No registered timeline tags."),
+                    true);
             }
+            else
+            {
+                for (int i = 0; i < timelineCatalog.Count; i++)
+                {
+                    string value = timelineCatalog[i];
+                    bool selected = CsvContains(timelineFilter, value);
+                    if (ImGui.Checkbox(value + "##TimelineTag" + i, ref selected))
+                        SetCsvToken(ref timelineFilter, value, selected);
+                }
+            }
+
+            string custom = UnknownTimelineTags();
+            if (!string.IsNullOrEmpty(custom))
+            {
+                ImGui.Separator();
+                DevToolWidgets.MutedText(
+                    DevToolUiSettings.T("保留的未注册标签", "Preserved unregistered tags"),
+                    true);
+                ImGui.TextWrapped(custom);
+            }
+
             ImGui.EndCombo();
         }
+
+        if (ImGui.IsItemHovered())
+            DevToolTooltip.Show(DevToolUiSettings.T(
+                "从当前已注册的 Timeline / Slugcat 标签中多选。未注册的 Mod 标签会保留。",
+                "Select from currently registered Timeline / Slugcat tags. Unregistered mod tags are preserved."));
     }
 
     private static void Apply(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
@@ -769,10 +807,7 @@ internal static class WorldCreatureSpawnInspector
     {
         bool selected = timelineMode == mode;
         if (ImGui.Selectable(label + "##TimelineMode" + mode, selected))
-        {
             timelineMode = mode;
-            if (mode == TimelineMode.All) timelineFilter = string.Empty;
-        }
         if (selected) ImGui.SetItemDefaultFocus();
     }
     private static string TimelineModeText(TimelineMode mode) => mode switch
@@ -782,27 +817,240 @@ internal static class WorldCreatureSpawnInspector
         _ => DevToolUiSettings.T("全部", "All")
     };
 
-    private static void AddTag(string tag)
+    private static string SpawnTagSummary()
     {
-        if (string.IsNullOrWhiteSpace(tag) || CsvContains(spawnTags, tag)) return;
-        spawnTags = string.IsNullOrWhiteSpace(spawnTags) ? tag : spawnTags.Trim().TrimEnd(',') + "," + tag;
+        int count = CsvCount(spawnTags);
+        return count == 0
+            ? DevToolUiSettings.T("无", "None")
+            : DevToolUiSettings.T("已选择 ", "Selected ") + count;
     }
 
-    private static void AddTimeline(string value)
+    private static string TimelineTagSummary()
     {
-        if (string.IsNullOrWhiteSpace(value) || CsvContains(timelineFilter, value)) return;
-        timelineFilter = string.IsNullOrWhiteSpace(timelineFilter)
-            ? value
-            : timelineFilter.Trim().TrimEnd(',') + "," + value;
+        int count = CsvCount(timelineFilter);
+        return count == 0
+            ? DevToolUiSettings.T("未选择", "None selected")
+            : DevToolUiSettings.T("已选择 ", "Selected ") + count;
+    }
+
+    private static void DrawIntegerSpawnTag(string label, string prefix, string id)
+    {
+        bool enabled = TryGetPrefixedTag(spawnTags, prefix, out string rawValue);
+        bool nextEnabled = enabled;
+        if (ImGui.Checkbox(label + "##" + id + "Enabled", ref nextEnabled))
+        {
+            if (nextEnabled)
+                SetPrefixedTag(ref spawnTags, prefix, enabled ? rawValue : "0");
+            else
+                RemovePrefixedTag(ref spawnTags, prefix);
+            enabled = nextEnabled;
+        }
+
+        if (!enabled)
+            return;
+
+        int value = 0;
+        int.TryParse(rawValue, out value);
+        ImGui.Indent();
+        if (ImGui.InputInt(DevToolUiSettings.T("值", "Value") + "##" + id + "Value", ref value))
+            SetPrefixedTag(ref spawnTags, prefix, value.ToString());
+        ImGui.Unindent();
+    }
+
+    private static void DrawNamedSpawnTag()
+    {
+        bool enabled = TryGetPrefixedTag(spawnTags, NamedAttrTagPrefix, out string value);
+        bool nextEnabled = enabled;
+        if (ImGui.Checkbox(DevToolUiSettings.T("命名属性", "Named attribute") + "##NamedAttrEnabled", ref nextEnabled))
+        {
+            if (nextEnabled)
+                SetPrefixedTag(ref spawnTags, NamedAttrTagPrefix, value);
+            else
+                RemovePrefixedTag(ref spawnTags, NamedAttrTagPrefix);
+            enabled = nextEnabled;
+        }
+
+        if (!enabled)
+            return;
+
+        ImGui.Indent();
+        string edited = value ?? string.Empty;
+        if (ImGui.InputText(
+                DevToolUiSettings.T("名称", "Name") + "##NamedAttrValue",
+                ref edited,
+                128))
+            SetPrefixedTag(ref spawnTags, NamedAttrTagPrefix, edited);
+        ImGui.Unindent();
+    }
+
+    private static string UnknownSpawnTags()
+    {
+        if (string.IsNullOrWhiteSpace(spawnTags))
+            return string.Empty;
+
+        List<string> unknown = new();
+        string[] parts = spawnTags.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string token = parts[i].Trim();
+            if (token.Length == 0 || IsKnownSpawnTag(token))
+                continue;
+            unknown.Add(token);
+        }
+        return string.Join(", ", unknown);
+    }
+
+    private static string UnknownTimelineTags()
+    {
+        if (string.IsNullOrWhiteSpace(timelineFilter))
+            return string.Empty;
+
+        List<string> unknown = new();
+        string[] parts = timelineFilter.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string token = parts[i].Trim();
+            if (token.Length == 0 || TimelineCatalogContains(token))
+                continue;
+            unknown.Add(token);
+        }
+        return string.Join(", ", unknown);
+    }
+
+    private static bool IsKnownSpawnTag(string token)
+    {
+        for (int i = 0; i < ToggleSpawnTags.Length; i++)
+            if (string.Equals(token, ToggleSpawnTags[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+
+        return token.StartsWith(SeedTagPrefix, StringComparison.OrdinalIgnoreCase) ||
+               token.StartsWith(RotTypeTagPrefix, StringComparison.OrdinalIgnoreCase) ||
+               token.StartsWith(NamedAttrTagPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TimelineCatalogContains(string token)
+    {
+        for (int i = 0; i < timelineCatalog.Count; i++)
+            if (string.Equals(token, timelineCatalog[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    private static int CsvCount(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv))
+            return 0;
+
+        int count = 0;
+        string[] parts = csv.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+            if (!string.IsNullOrWhiteSpace(parts[i]))
+                count++;
+        return count;
     }
 
     private static bool CsvContains(string csv, string value)
     {
-        if (string.IsNullOrWhiteSpace(csv)) return false;
+        if (string.IsNullOrWhiteSpace(csv) || string.IsNullOrWhiteSpace(value))
+            return false;
+
         string[] parts = csv.Split(',');
         for (int i = 0; i < parts.Length; i++)
-            if (string.Equals(parts[i].Trim(), value, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(parts[i].Trim(), value, StringComparison.OrdinalIgnoreCase))
+                return true;
         return false;
+    }
+
+    private static void SetCsvToken(ref string csv, string value, bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        List<string> tokens = ParseCsv(csv);
+        int found = -1;
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if (!string.Equals(tokens[i], value, StringComparison.OrdinalIgnoreCase))
+                continue;
+            found = i;
+            break;
+        }
+
+        if (enabled)
+        {
+            if (found < 0)
+                tokens.Add(value);
+        }
+        else if (found >= 0)
+        {
+            tokens.RemoveAt(found);
+        }
+
+        csv = string.Join(",", tokens);
+    }
+
+    private static bool TryGetPrefixedTag(string csv, string prefix, out string value)
+    {
+        value = string.Empty;
+        if (string.IsNullOrWhiteSpace(csv))
+            return false;
+
+        string[] parts = csv.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string token = parts[i].Trim();
+            if (!token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            value = token.Substring(prefix.Length);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void SetPrefixedTag(ref string csv, string prefix, string value)
+    {
+        List<string> tokens = ParseCsv(csv);
+        string replacement = prefix + (value ?? string.Empty);
+
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if (!tokens[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            tokens[i] = replacement;
+            csv = string.Join(",", tokens);
+            return;
+        }
+
+        tokens.Add(replacement);
+        csv = string.Join(",", tokens);
+    }
+
+    private static void RemovePrefixedTag(ref string csv, string prefix)
+    {
+        List<string> tokens = ParseCsv(csv);
+        for (int i = tokens.Count - 1; i >= 0; i--)
+            if (tokens[i].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                tokens.RemoveAt(i);
+        csv = string.Join(",", tokens);
+    }
+
+    private static List<string> ParseCsv(string csv)
+    {
+        List<string> tokens = new();
+        if (string.IsNullOrWhiteSpace(csv))
+            return tokens;
+
+        string[] parts = csv.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string token = parts[i].Trim();
+            if (token.Length > 0)
+                tokens.Add(token);
+        }
+        return tokens;
     }
 
     private static void AddUnique(List<string> list, string value)
