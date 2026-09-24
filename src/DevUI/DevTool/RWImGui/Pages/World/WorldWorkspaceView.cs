@@ -933,7 +933,9 @@ internal static class WorldWorkspaceView
         bool persistedOpen = ExpandedSubregions.Contains(summary.Name);
         bool open = searching || persistedOpen;
 
-        string arrow = open ? "▼" : "▶";
+        // ASCII-only expand/collapse marks: the game's bundled font does not guarantee
+        // coverage for Unicode triangle glyphs and may render them as '?'.
+        string arrow = open ? "-" : "+";
         float arrowWidth = ImGui.CalcTextSize(arrow).X;
         float nameStart = leftPadding + arrowWidth + arrowGap;
 
@@ -979,7 +981,7 @@ internal static class WorldWorkspaceView
 
             persistedOpen = !persistedOpen;
             open = searching || persistedOpen;
-            arrow = open ? "▼" : "▶";
+            arrow = open ? "-" : "+";
         }
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
