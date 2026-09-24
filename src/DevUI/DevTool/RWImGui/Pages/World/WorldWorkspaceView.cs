@@ -928,7 +928,7 @@ internal static class WorldWorkspaceView
         const float arrowGap = 8f;
         const float rightPadding = 8f;
         const float compactThreshold = 300f;
-        const float twoLineThreshold = 220f;
+        const float twoLineThreshold = 270f;
 
         bool persistedOpen = ExpandedSubregions.Contains(summary.Name);
         bool open = searching || persistedOpen;
@@ -1029,7 +1029,9 @@ internal static class WorldWorkspaceView
                 badgeMin,
                 badgeMax,
                 ImGui.GetColorU32(ImGuiCol.Border),
-                badgeHeight * 0.5f);
+                badgeHeight * 0.5f,
+                ImDrawFlags.None,
+                1f);
             draw.AddText(
                 new Num.Vector2(
                     badgeX + (badgeWidth - badgeTextWidth) * 0.5f,
