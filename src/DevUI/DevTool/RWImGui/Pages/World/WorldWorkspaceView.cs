@@ -157,6 +157,8 @@ internal static class WorldWorkspaceView
     private static bool projectedSubregionChinese;
     private static readonly Dictionary<string, SubregionSummary> SubregionMap = new(StringComparer.Ordinal);
     private static readonly List<SubregionSummary> SubregionSummaries = new();
+    private static readonly HashSet<string> ExpandedSubregions = new(StringComparer.Ordinal);
+    private static string expandedSubregionRegion = string.Empty;
 
     private static EditorMapRoomSnapshot[] projectedIssueRooms;
     private static EditorMapConnectionSnapshot[] projectedIssueConnections;
@@ -261,6 +263,8 @@ internal static class WorldWorkspaceView
         projectedSubregionChinese = false;
         SubregionMap.Clear();
         SubregionSummaries.Clear();
+        ExpandedSubregions.Clear();
+        expandedSubregionRegion = string.Empty;
         projectedIssueRooms = null;
         projectedIssueConnections = null;
         projectedIssueRegion = string.Empty;
@@ -831,6 +835,13 @@ internal static class WorldWorkspaceView
 
     private static void DrawSubregionExplorer(EditorMapPresentationSnapshot snapshot)
     {
+        string regionName = snapshot.RegionName ?? string.Empty;
+        if (!string.Equals(expandedSubregionRegion, regionName, StringComparison.Ordinal))
+        {
+            ExpandedSubregions.Clear();
+            expandedSubregionRegion = regionName;
+        }
+
         List<SubregionSummary> summaries = GetSubregions(snapshot);
         bool searching = SearchQuery().Length > 0;
         int visibleGroups = 0;
@@ -849,19 +860,9 @@ internal static class WorldWorkspaceView
             bool selected = selectionKind == SelectionKind.Subregion &&
                             string.Equals(selectedSubregion, summary.Name, StringComparison.Ordinal);
             ImGui.PushID("Subregion:" + (summary.Name.Length == 0 ? "<None>" : summary.Name));
-            if (searching) ImGui.SetNextItemOpen(true, ImGuiCond.Always);
 
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.FramePadding;
-            if (selected) flags |= ImGuiTreeNodeFlags.Selected;
-
-            string treeLabel = BuildResponsiveSubregionLabel(summary, out bool labelClipped);
-            bool open = ImGui.TreeNodeEx(treeLabel, flags);
-            bool groupHovered = ImGui.IsItemHovered();
-
-            if (groupHovered && labelClipped)
-                DevToolTooltip.Show(summary.DisplayName + " · " + summary.CountText);
-
-            if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
+            bool open = DrawResponsiveSubregionHeader(summary, selected, searching, out bool clickedHeader);
+            if (clickedHeader)
             {
                 selectedSubregion = summary.Name;
                 selectionKind = SelectionKind.Subregion;
@@ -872,6 +873,7 @@ internal static class WorldWorkspaceView
             {
                 int visibleRooms = 0;
                 bool showWholeGroup = groupMatches;
+                ImGui.Indent(18f);
                 for (int r = 0; r < summary.Rooms.Count; r++)
                 {
                     RoomExplorerRow row = summary.Rooms[r];
@@ -902,7 +904,7 @@ internal static class WorldWorkspaceView
 
                 if (visibleRooms == 0)
                     DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."), true);
-                ImGui.TreePop();
+                ImGui.Unindent(18f);
             }
 
             ImGui.PopID();
@@ -912,28 +914,182 @@ internal static class WorldWorkspaceView
             DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的子区域或房间。", "No matching subregions or rooms."), true);
     }
 
-    private static string BuildResponsiveSubregionLabel(SubregionSummary summary, out bool clipped)
+    private static bool DrawResponsiveSubregionHeader(
+        SubregionSummary summary,
+        bool selected,
+        bool searching,
+        out bool clicked)
     {
-        string suffix = "  ·  " + summary.CountText;
-        float available = Math.Max(0f, ImGui.GetContentRegionAvail().X);
         ImGuiStylePtr style = ImGui.GetStyle();
+        float available = Math.Max(1f, ImGui.GetContentRegionAvail().X);
+        float textHeight = ImGui.GetTextLineHeight();
 
-        // TreeNode owns the arrow/bullet area inside the same content width. Reserve it explicitly,
-        // then always preserve the room count and ellipsize only the authored subregion name.
-        float treeChrome = ImGui.GetFrameHeight() + style.FramePadding.X * 2f + style.ItemSpacing.X;
-        float suffixWidth = ImGui.CalcTextSize(suffix).X;
-        float nameWidth = Math.Max(0f, available - treeChrome - suffixWidth - 4f);
-        string visibleName = DevToolResponsiveText.Ellipsize(summary.DisplayName, nameWidth, out clipped);
+        const float leftPadding = 8f;
+        const float arrowGap = 8f;
+        const float rightPadding = 8f;
+        const float compactThreshold = 300f;
+        const float twoLineThreshold = 220f;
 
-        if (visibleName.Length == 0)
+        bool persistedOpen = ExpandedSubregions.Contains(summary.Name);
+        bool open = searching || persistedOpen;
+
+        string arrow = open ? "▼" : "▶";
+        float arrowWidth = ImGui.CalcTextSize(arrow).X;
+        float nameStart = leftPadding + arrowWidth + arrowGap;
+
+        string badgeText = summary.CountText;
+        float badgeTextWidth = ImGui.CalcTextSize(badgeText).X;
+        float badgeWidth = badgeTextWidth + 12f;
+        float fullNameWidth = ImGui.CalcTextSize(summary.DisplayName).X;
+
+        // C: the count is secondary. Show the badge only when the complete name still fits.
+        bool showCountBadge =
+            available >= compactThreshold &&
+            nameStart + fullNameWidth + 10f + badgeWidth + rightPadding <= available;
+
+        float nameRight = available - rightPadding -
+                          (showCountBadge ? badgeWidth + 10f : 0f);
+        float nameWidth = Math.Max(1f, nameRight - nameStart);
+
+        // D: in very narrow explorers, spend vertical space instead of destroying the name.
+        bool useTwoLines =
+            available < twoLineThreshold &&
+            fullNameWidth > nameWidth;
+
+        float rowHeight = useTwoLines
+            ? textHeight * 2f + style.FramePadding.Y * 2f + 4f
+            : Math.Max(ImGui.GetFrameHeight(), textHeight + style.FramePadding.Y * 2f);
+
+        ImGui.InvisibleButton(
+            "##ResponsiveSubregionHeader",
+            new Num.Vector2(available, rowHeight));
+
+        Num.Vector2 min = ImGui.GetItemRectMin();
+        Num.Vector2 max = ImGui.GetItemRectMax();
+        bool hovered = ImGui.IsItemHovered();
+        clicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+
+        if (clicked)
         {
-            // Extremely narrow panels still show a meaningful row instead of drawing text under
-            // the right edge. The full name remains available through the hover tooltip.
-            visibleName = "…";
-            clipped = true;
+            if (persistedOpen)
+                ExpandedSubregions.Remove(summary.Name);
+            else
+                ExpandedSubregions.Add(summary.Name);
+
+            persistedOpen = !persistedOpen;
+            open = searching || persistedOpen;
+            arrow = open ? "▼" : "▶";
         }
 
-        return visibleName + suffix;
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        if (selected || hovered)
+        {
+            ImGuiCol fillCol = selected ? ImGuiCol.Header : ImGuiCol.HeaderHovered;
+            draw.AddRectFilled(min, max, ImGui.GetColorU32(fillCol), 3f);
+        }
+
+        float firstLineY = min.Y + style.FramePadding.Y + (useTwoLines ? 1f : 0f);
+        draw.AddText(
+            new Num.Vector2(min.X + leftPadding, firstLineY),
+            ImGui.GetColorU32(ImGuiCol.Text),
+            arrow);
+
+        BuildSubregionNameLines(
+            summary.DisplayName,
+            nameWidth,
+            useTwoLines,
+            out string firstLine,
+            out string secondLine,
+            out bool clipped);
+
+        Num.Vector2 namePos = new(min.X + nameStart, firstLineY);
+        if (!string.IsNullOrEmpty(firstLine))
+            draw.AddText(namePos, ImGui.GetColorU32(ImGuiCol.Text), firstLine);
+        if (!string.IsNullOrEmpty(secondLine))
+        {
+            draw.AddText(
+                namePos + new Num.Vector2(0f, textHeight + 2f),
+                ImGui.GetColorU32(ImGuiCol.Text),
+                secondLine);
+        }
+
+        if (showCountBadge)
+        {
+            float badgeHeight = textHeight + 4f;
+            float badgeX = max.X - rightPadding - badgeWidth;
+            float badgeY = min.Y + (rowHeight - badgeHeight) * 0.5f;
+            Num.Vector2 badgeMin = new(badgeX, badgeY);
+            Num.Vector2 badgeMax = new(badgeX + badgeWidth, badgeY + badgeHeight);
+            draw.AddRectFilled(
+                badgeMin,
+                badgeMax,
+                ImGui.GetColorU32(ImGuiCol.FrameBg),
+                badgeHeight * 0.5f);
+            draw.AddRect(
+                badgeMin,
+                badgeMax,
+                ImGui.GetColorU32(ImGuiCol.Border),
+                badgeHeight * 0.5f);
+            draw.AddText(
+                new Num.Vector2(
+                    badgeX + (badgeWidth - badgeTextWidth) * 0.5f,
+                    badgeY + 2f),
+                ImGui.GetColorU32(ImGuiCol.TextDisabled),
+                badgeText);
+        }
+
+        // Compact mode intentionally hides the count; hover still exposes the complete metadata.
+        if (hovered && (clipped || !showCountBadge))
+            DevToolTooltip.Show(summary.DisplayName + " · " + summary.CountText);
+
+        return open;
+    }
+
+    private static void BuildSubregionNameLines(
+        string name,
+        float maxWidth,
+        bool twoLines,
+        out string firstLine,
+        out string secondLine,
+        out bool clipped)
+    {
+        name ??= string.Empty;
+        secondLine = string.Empty;
+
+        if (!twoLines)
+        {
+            firstLine = DevToolResponsiveText.Ellipsize(name, maxWidth, out clipped);
+            return;
+        }
+
+        if (ImGui.CalcTextSize(name).X <= maxWidth)
+        {
+            firstLine = name;
+            clipped = false;
+            return;
+        }
+
+        int bestSplit = -1;
+        for (int i = 1; i < name.Length - 1; i++)
+        {
+            if (name[i] != ' ') continue;
+            string candidate = name.Substring(0, i);
+            if (ImGui.CalcTextSize(candidate).X <= maxWidth)
+                bestSplit = i;
+            else
+                break;
+        }
+
+        if (bestSplit <= 0)
+        {
+            firstLine = DevToolResponsiveText.Ellipsize(name, maxWidth, out clipped);
+            return;
+        }
+
+        firstLine = name.Substring(0, bestSplit);
+        string remainder = name.Substring(bestSplit + 1).TrimStart();
+        secondLine = DevToolResponsiveText.Ellipsize(remainder, maxWidth, out bool secondClipped);
+        clipped = secondClipped;
     }
 
     private static void DrawConnectionExplorer(EditorMapPresentationSnapshot snapshot)
