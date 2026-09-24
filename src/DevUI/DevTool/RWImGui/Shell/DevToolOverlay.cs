@@ -80,16 +80,17 @@ internal static class DevToolOverlay
         for (int i = 0; i < pages.Count; i++)
             widest = Math.Max(widest, ImGui.CalcTextSize(pages[i].NavigationLabel).X);
 
-        float defaultWidth = Math.Min(380f, Math.Max(190f, widest + 64f));
-        float defaultHeight = Math.Min(
-            Math.Max(500f, 460f * Math.Max(1f, DevToolUiSettings.UiScale)),
-            Math.Max(260f, display.Y - 32f));
+        float defaultWidth = Math.Min(380f, Math.Max(170f, widest + 48f));
 
         ImGui.SetNextWindowPos(new Num.Vector2(8f, 120f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
+        // Y=0 asks ImGui to auto-fit that axis on first use. Height is content-owned afterwards;
+        // only width remains user-resizable/persistent.
+        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, 0f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(170f, 300f),
-            new Num.Vector2(Math.Min(520f, Math.Max(170f, display.X - 16f)), Math.Max(300f, display.Y - 16f)));
+            new Num.Vector2(140f, 0f),
+            new Num.Vector2(
+                Math.Min(520f, Math.Max(140f, display.X - 16f)),
+                Math.Max(80f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
@@ -128,6 +129,7 @@ internal static class DevToolOverlay
             DevToolWidgets.MutedText(DevToolUiSettings.T(
                 "调试页使用独立工作区。选择上方任一常规工具即可返回。",
                 "Debug uses its own workspace. Select any normal tool above to return."));
+            FitActivityBarHeight(display);
             ImGui.End();
             return;
         }
@@ -148,7 +150,40 @@ internal static class DevToolOverlay
         if (ImGui.IsItemHovered())
             DevToolTooltip.Show(DevToolUiSettings.T("显示/隐藏右栏检查器", "Toggle right Inspector pane"));
 
+        FitActivityBarHeight(display);
         ImGui.End();
+    }
+
+    private static void FitActivityBarHeight(Num.Vector2 display)
+    {
+        ImGuiStylePtr style = ImGui.GetStyle();
+
+        // CursorPosY is window-local and already includes title-bar/content offsets. Adding the
+        // bottom window padding gives the exact content-driven outer height without guessing how
+        // many navigation buttons exist or what UI scale/language is active.
+        float desiredHeight =
+            ImGui.GetCursorPosY() +
+            Math.Max(1f, style.WindowPadding.Y);
+
+        float maxHeight =
+            Math.Max(
+                80f,
+                display.Y -
+                Math.Max(16f, ImGui.GetWindowPos().Y + 8f));
+
+        desiredHeight =
+            Math.Max(
+                ImGui.GetFrameHeight() + style.WindowPadding.Y * 2f,
+                Math.Min(desiredHeight, maxHeight));
+
+        Num.Vector2 current = ImGui.GetWindowSize();
+        if (Math.Abs(current.Y - desiredHeight) <= 0.5f)
+            return;
+
+        // Preserve the developer's current width while making vertical size strictly content-owned.
+        ImGui.SetWindowSize(
+            new Num.Vector2(current.X, desiredHeight),
+            ImGuiCond.Always);
     }
 
     private static void DrawModeButton(IDevToolFrontendPage page, EditorToolMode current)
