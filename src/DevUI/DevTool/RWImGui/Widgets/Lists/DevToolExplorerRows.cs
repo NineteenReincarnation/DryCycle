@@ -1,7 +1,43 @@
+using System;
 using ImGuiNET;
 using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
+
+internal static class DevToolResponsiveText
+{
+    internal static string Ellipsize(string text, float maxWidth, out bool clipped)
+    {
+        text ??= string.Empty;
+        clipped = false;
+        if (text.Length == 0) return string.Empty;
+        if (maxWidth <= 0f)
+        {
+            clipped = true;
+            return string.Empty;
+        }
+        if (ImGui.CalcTextSize(text).X <= maxWidth) return text;
+
+        const string ellipsis = "…";
+        float ellipsisWidth = ImGui.CalcTextSize(ellipsis).X;
+        clipped = true;
+        if (ellipsisWidth > maxWidth) return string.Empty;
+
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int mid = (low + high + 1) / 2;
+            string candidate = text.Substring(0, mid) + ellipsis;
+            if (ImGui.CalcTextSize(candidate).X <= maxWidth)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+
+        return low <= 0 ? ellipsis : text.Substring(0, low) + ellipsis;
+    }
+}
 
 /// <summary>
 /// Data contract for reusable DevTool explorer entries.
@@ -157,37 +193,84 @@ internal static class DevToolRoomExplorerEntry
 
         string primaryText = item.PrimaryText ?? string.Empty;
         Num.Vector2 namePos = min + new Num.Vector2(11f, 5f);
-        draw.AddText(namePos, ImGui.GetColorU32(ImGuiCol.Text), primaryText);
+        const float rightPadding = 8f;
+        const float textGap = 8f;
 
+        float trailingWidth = 0f;
         if (!string.IsNullOrEmpty(trailingText))
         {
             Num.Vector2 trailingSize = ImGui.CalcTextSize(trailingText);
+            trailingWidth = trailingSize.X;
             draw.AddText(
-                new Num.Vector2(max.X - trailingSize.X - 8f, min.Y + 5f),
+                new Num.Vector2(max.X - trailingSize.X - rightPadding, min.Y + 5f),
                 ImGui.GetColorU32(ImGuiCol.TextDisabled),
                 trailingText);
         }
 
+        float primaryRight = max.X - rightPadding -
+                             (trailingWidth > 0f ? trailingWidth + textGap : 0f);
+        string renderedPrimary = DevToolResponsiveText.Ellipsize(
+            primaryText,
+            Math.Max(0f, primaryRight - namePos.X),
+            out bool primaryClipped);
+        if (!string.IsNullOrEmpty(renderedPrimary))
+            draw.AddText(namePos, ImGui.GetColorU32(ImGuiCol.Text), renderedPrimary);
+
         string statusText = item.StatusText ?? string.Empty;
         string secondaryText = item.SecondaryText ?? string.Empty;
         Num.Vector2 metaPos = min + new Num.Vector2(11f, 25f);
-        if (!string.IsNullOrEmpty(statusText))
-            draw.AddText(metaPos, statusColor, statusText);
+        float metaWidth = Math.Max(0f, max.X - rightPadding - metaPos.X);
+        bool metaClipped = false;
 
-        if (!string.IsNullOrEmpty(secondaryText))
+        string renderedStatus = DevToolResponsiveText.Ellipsize(
+            statusText,
+            metaWidth,
+            out bool statusClipped);
+        metaClipped |= statusClipped;
+        float statusWidth = string.IsNullOrEmpty(renderedStatus) ? 0f : ImGui.CalcTextSize(renderedStatus).X;
+        if (!string.IsNullOrEmpty(renderedStatus))
+            draw.AddText(metaPos, statusColor, renderedStatus);
+
+        if (!statusClipped && !string.IsNullOrEmpty(secondaryText))
         {
-            float statusWidth = string.IsNullOrEmpty(statusText) ? 0f : ImGui.CalcTextSize(statusText).X;
-            string prefix = string.IsNullOrEmpty(statusText) ? string.Empty : " · ";
-            draw.AddText(
-                metaPos + new Num.Vector2(statusWidth, 0f),
-                ImGui.GetColorU32(ImGuiCol.TextDisabled),
-                prefix + secondaryText);
+            string prefix = string.IsNullOrEmpty(renderedStatus) ? string.Empty : " · ";
+            float prefixWidth = string.IsNullOrEmpty(prefix) ? 0f : ImGui.CalcTextSize(prefix).X;
+            float secondaryWidth = Math.Max(0f, metaWidth - statusWidth - prefixWidth);
+            string renderedSecondary = DevToolResponsiveText.Ellipsize(
+                secondaryText,
+                secondaryWidth,
+                out bool secondaryClipped);
+            metaClipped |= secondaryClipped;
+            if (!string.IsNullOrEmpty(renderedSecondary))
+            {
+                draw.AddText(
+                    metaPos + new Num.Vector2(statusWidth, 0f),
+                    ImGui.GetColorU32(ImGuiCol.TextDisabled),
+                    prefix + renderedSecondary);
+            }
+        }
+        else if (statusClipped && !string.IsNullOrEmpty(secondaryText))
+        {
+            metaClipped = true;
         }
 
         bool hovered = ImGui.IsItemHovered();
         ImGui.PopID();
 
         string tooltip = item.Tooltip;
+        if (hovered && string.IsNullOrWhiteSpace(tooltip) && (primaryClipped || metaClipped))
+        {
+            tooltip = primaryText;
+            if (!string.IsNullOrEmpty(statusText) || !string.IsNullOrEmpty(secondaryText))
+            {
+                string meta = statusText;
+                if (!string.IsNullOrEmpty(statusText) && !string.IsNullOrEmpty(secondaryText))
+                    meta += " · ";
+                meta += secondaryText;
+                if (!string.IsNullOrEmpty(meta))
+                    tooltip += "\n" + meta;
+            }
+        }
         if (hovered && !string.IsNullOrWhiteSpace(tooltip))
             DevToolTooltip.Show(tooltip);
 
