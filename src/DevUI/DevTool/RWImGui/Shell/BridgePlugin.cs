@@ -51,6 +51,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorUiModeState.SetOverlayHidden", () => EditorUiModeState.SetOverlayHidden(false));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(true));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetLogger", () => DevToolFrontend.SetLogger(Logger));
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/DevToolFrontend.ResetNativeReadiness",
+                DevToolFrontend.ResetNativeReadinessFromMainThread);
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetApplicationFocused", () => DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused));
 
             // The room inspector is composed by the bridge itself, so its authoring sections must share
@@ -389,71 +392,10 @@ internal static class DevToolFrontend
     internal static int ResolvedFontWeight => resolvedFontWeight;
     internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;
 
-    internal static bool PrepareFontContextDuringSynchronousStart()
+    internal static void ResetNativeReadinessFromMainThread()
     {
-        if (DevToolFontCatalog.RegistrationAttempted)
-            return DevToolFontCatalog.RegistrationSucceeded;
-
-        DevToolInputContext context = inputContext;
-        bool switched = false;
-        try
-        {
-            if (ImGUIAPI.HasContext)
-            {
-                log?.LogWarning(
-                    "DryCycle DevTool could not prewarm its font context during RainWorld.Start " +
-                    "because another RWImGui consumer context is active.");
-                return false;
-            }
-
-            if (context == null)
-            {
-                context = new DevToolInputContext();
-                inputContext = context;
-            }
-
-            ImGUIAPI.SwitchContext(context);
-            switched = true;
-
-            bool registered =
-                DevToolFontCatalog.TryRegisterLocalFonts(log);
-            if (registered)
-            {
-                log?.LogInfo(
-                    "DryCycle DevTool prewarmed its dedicated RWImGui font atlas before first Present.");
-            }
-
-            return registered;
-        }
-        catch (Exception error)
-        {
-            global::DryCycle.StartupDiagnostics.Failure(
-                "BridgePlugin/PrepareFontContextDuringSynchronousStart",
-                error);
-            log?.LogWarning(
-                "DryCycle DevTool font-context prewarm failed safely: " +
-                error.Message);
-            return false;
-        }
-        finally
-        {
-            if (switched &&
-                ReferenceEquals(
-                    ImGUIAPI.CurrentContext,
-                    context))
-            {
-                try
-                {
-                    ImGUIAPI.SwitchContext(null);
-                }
-                catch (Exception releaseError)
-                {
-                    log?.LogWarning(
-                        "DryCycle DevTool font prewarm context release failed: " +
-                        releaseError.Message);
-                }
-            }
-        }
+        Interlocked.Exchange(ref rwimguiFrameObserved, 0);
+        EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
     internal static void SetLogger(ManualLogSource value) => log = value;
@@ -536,6 +478,11 @@ internal static class DevToolFrontend
 
     private static void ReleaseContext()
     {
+        // CurrentContext/SwitchContext are native-backed. If RWImGUI never reached a healthy
+        // Present after its D3D11 initialization, even a cleanup read can terminate the process.
+        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+            return;
+
         try
         {
             DevToolInputContext context = inputContext;

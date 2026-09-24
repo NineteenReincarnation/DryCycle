@@ -31,6 +31,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         try
         {
             ObservatoryFrontend.SetLogger(Logger);
+            ObservatoryFrontend.ResetNativeReadinessFromMainThread();
             AIDebugPresentationBridgeStatus.MarkBridgeLoaded(PluginVersion);
             On.RainWorld.OnModsInit += RainWorld_OnModsInit;
             bridgeEnabled = true;
@@ -125,8 +126,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
             log?.LogInfo(
                 "DryCycle RWImGUI AddAlwaysCallback registered directly through RWIMGUI.API.ImGUIAPI. " +
-                $"api={apiVersion}, imgui={imguiVersion}, hasContext={ImGUIAPI.HasContext}. " +
-                "Observatory drawing is owned by its RWImGUI context; press F7 directly.");
+                $"api={apiVersion}, imgui={imguiVersion}. " +
+                "Native context access remains blocked until the first healthy Present callback.");
         }
         catch (Exception error)
         {
@@ -171,6 +172,7 @@ internal static class ObservatoryFrontend
     private static int contextBusyLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
+    private static int rwimguiFrameObserved;
     private static volatile bool visible;
     private static bool cjkFontResolved;
     private static ImFontPtr cjkFont;
@@ -179,6 +181,12 @@ internal static class ObservatoryFrontend
     internal static bool Visible => visible;
 
     internal static void SetLogger(ManualLogSource value) => log = value;
+
+    internal static void ResetNativeReadinessFromMainThread()
+    {
+        Interlocked.Exchange(ref rwimguiFrameObserved, 0);
+        AIDebugPresentationHub.SetCaptureState(false, false);
+    }
 
     internal static void SetVisibleFromMainThread(bool value)
     {
@@ -201,6 +209,10 @@ internal static class ObservatoryFrontend
     // with a native ImGui/RWImGUI failure. Keep this callback as a minimal heartbeat only.
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
+        // Reaching this callback proves RWImGUI completed enough of its native Present path for
+        // CurrentContext/HasContext/SwitchContext to be safe to touch from the Unity thread.
+        Interlocked.Exchange(ref rwimguiFrameObserved, 1);
+
         if (!Enabled)
             return;
 
@@ -215,6 +227,12 @@ internal static class ObservatoryFrontend
 
     private static void EnsureInputContextFromMainThread()
     {
+        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+        {
+            AIDebugPresentationHub.SetCaptureState(false, false);
+            return;
+        }
+
         try
         {
             ObservatoryInputContext context = inputContext;
@@ -256,6 +274,9 @@ internal static class ObservatoryFrontend
 
     internal static void ReleaseInputContext()
     {
+        if (Volatile.Read(ref rwimguiFrameObserved) == 0)
+            return;
+
         try
         {
             ObservatoryInputContext context = inputContext;
