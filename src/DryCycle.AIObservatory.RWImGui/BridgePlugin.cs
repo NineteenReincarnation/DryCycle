@@ -176,6 +176,7 @@ internal static class ObservatoryFrontend
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
     private static bool contextAttached;
+    private static float nextContextAttemptAt;
     private static volatile bool visible;
     private static bool cjkFontResolved;
     private static ImFontPtr cjkFont;
@@ -188,9 +189,11 @@ internal static class ObservatoryFrontend
     internal static void ResetNativeReadinessFromMainThread()
     {
         contextAttached = false;
+        nextContextAttemptAt = 0f;
         Interlocked.Exchange(ref rwimguiPresentObserved, 0);
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
         Interlocked.Exchange(ref contextActivationFailureLogged, 0);
+        ResetCjkFontProjection();
         AIDebugPresentationHub.SetCaptureState(false, false);
     }
 
@@ -227,7 +230,11 @@ internal static class ObservatoryFrontend
             return;
         }
 
-        EnsureInputContextFromMainThread();
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextContextAttemptAt)
+            return;
+
+        EnsureInputContextFromMainThread(now);
     }
 
     // This callback deliberately performs no ImGui drawing and no context switching. The
@@ -252,13 +259,15 @@ internal static class ObservatoryFrontend
         }
     }
 
-    private static void EnsureInputContextFromMainThread()
+    private static void EnsureInputContextFromMainThread(float now)
     {
         try
         {
             if (ImGUIAPI.HasContext)
             {
                 AIDebugPresentationHub.SetCaptureState(false, false);
+
+                nextContextAttemptAt = now + 0.25f;
 
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
                 {
@@ -279,6 +288,7 @@ internal static class ObservatoryFrontend
 
             ImGUIAPI.SwitchContext(context);
             contextAttached = true;
+            nextContextAttemptAt = 0f;
             Interlocked.Exchange(ref contextBusyLogged, 0);
             Interlocked.Exchange(ref contextActivationFailureLogged, 0);
 
@@ -292,6 +302,9 @@ internal static class ObservatoryFrontend
         catch (Exception error)
         {
             contextAttached = false;
+            nextContextAttemptAt = now + 1.0f;
+            inputContext = null;
+            ResetCjkFontProjection();
             AIDebugPresentationHub.SetCaptureState(false, false);
             AIDebugPresentationBridgeStatus.MarkFailure(error.GetType().Name + ": " + error.Message);
 
@@ -320,6 +333,7 @@ internal static class ObservatoryFrontend
         finally
         {
             contextAttached = false;
+            nextContextAttemptAt = 0f;
             AIDebugPresentationHub.SetCaptureState(false, false);
         }
     }
@@ -327,8 +341,18 @@ internal static class ObservatoryFrontend
     internal static void NotifyContextDestroyedFromRwImGui()
     {
         contextAttached = false;
+        nextContextAttemptAt = 0f;
         inputContext = null;
+        ResetCjkFontProjection();
         AIDebugPresentationHub.SetCaptureState(false, false);
+    }
+
+    private static void ResetCjkFontProjection()
+    {
+        cjkFontResolved = false;
+        cjkFont = default;
+        Interlocked.Exchange(ref cjkFontLogged, 0);
+        Interlocked.Exchange(ref cjkFontMissingLogged, 0);
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)

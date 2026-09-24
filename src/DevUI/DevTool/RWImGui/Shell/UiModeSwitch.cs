@@ -24,12 +24,10 @@ internal static class UiModeSwitch
             return;
         }
 
-        // Map needs the largest uninterrupted workspace. Its generic compatibility controls are
-        // embedded directly in the Map inspector, so permanent diagnostic/shortcut windows add no
-        // editing value there and merely cover the graph.
+        // Map needs the largest uninterrupted workspace. Compatibility diagnostics stay hidden
+        // there. The radial shortcut palette is owned once by DevToolOverlay for every tool mode.
         if (snapshot.ToolMode != EditorToolMode.Map)
         {
-            ShortcutWindow.Draw(snapshot, display);
             MigrationCoverageWindow.Draw(display);
         }
 

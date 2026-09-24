@@ -383,6 +383,7 @@ internal static class DevToolFrontend
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
     private static bool contextAttached;
+    private static float nextContextAttemptAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -398,9 +399,11 @@ internal static class DevToolFrontend
     internal static void ResetNativeReadinessFromMainThread()
     {
         contextAttached = false;
+        nextContextAttemptAt = 0f;
         Interlocked.Exchange(ref rwimguiPresentObserved, 0);
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
         Interlocked.Exchange(ref contextActivationFailureLogged, 0);
+        ResetFontProjectionForNewContext();
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
@@ -450,7 +453,11 @@ internal static class DevToolFrontend
             return;
         }
 
-        EnsureContext();
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextContextAttemptAt)
+            return;
+
+        EnsureContext(now);
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
@@ -461,7 +468,7 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
     }
 
-    private static void EnsureContext()
+    private static void EnsureContext(float now)
     {
         try
         {
@@ -472,6 +479,8 @@ internal static class DevToolFrontend
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
+
+                nextContextAttemptAt = now + 0.25f;
 
                 if (Interlocked.Exchange(ref contextBusyLogged, 1) == 0)
                 {
@@ -491,6 +500,7 @@ internal static class DevToolFrontend
 
             ImGUIAPI.SwitchContext(context);
             contextAttached = true;
+            nextContextAttemptAt = 0f;
 
             // Register fonts only after our own context is active and before its first Render.
             if (!DevToolFontCatalog.RegistrationAttempted)
@@ -502,6 +512,9 @@ internal static class DevToolFrontend
         catch (Exception error)
         {
             contextAttached = false;
+            nextContextAttemptAt = now + 1.0f;
+            inputContext = null;
+            ResetFontProjectionForNewContext();
             EditorInputRouter.SetFrontendCapture(false, false, false);
 
             if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
@@ -529,6 +542,7 @@ internal static class DevToolFrontend
         finally
         {
             contextAttached = false;
+            nextContextAttemptAt = 0f;
             EditorInputRouter.SetFrontendCapture(false, false, false);
         }
     }
@@ -536,8 +550,24 @@ internal static class DevToolFrontend
     internal static void NotifyContextDestroyedFromRwImGui()
     {
         contextAttached = false;
+        nextContextAttemptAt = 0f;
         inputContext = null;
+        ResetFontProjectionForNewContext();
         EditorInputRouter.SetFrontendCapture(false, false, false);
+    }
+
+    private static void ResetFontProjectionForNewContext()
+    {
+        activeFont = default;
+        resolvedFontName = string.Empty;
+        resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+        resolvedFontWeightVariantCount = 1;
+        projectedFontLanguage = (DevToolUiLanguage)(-1);
+        projectedFontFamily = string.Empty;
+        projectedFontWeight = int.MinValue;
+        Interlocked.Exchange(ref cjkFontLogged, 0);
+        Interlocked.Exchange(ref cjkFontMissingLogged, 0);
+        DevToolFontCatalog.ResetConsumerContextState();
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)

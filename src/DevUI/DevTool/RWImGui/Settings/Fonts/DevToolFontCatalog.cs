@@ -45,6 +45,27 @@ internal static unsafe class DevToolFontCatalog
     internal static int RegisteredLocalFaceCount => RegisteredFaces.Count;
     internal static string RegistrationMessage => registrationMessage;
 
+    /// <summary>
+    /// Clears only managed bookkeeping for the current consumer atlas. ImFontPtr values are owned
+    /// by RWImGUI's context and become invalid as soon as that context is destroyed. Reusing those
+    /// pointers, or keeping RegisteredPaths populated, makes the next context either skip every font
+    /// or push a stale native pointer.
+    ///
+    /// This method never calls ImGui/RWImGUI native APIs and is therefore safe from OnDestroyed and
+    /// plugin-lifecycle cleanup paths.
+    /// </summary>
+    internal static void ResetConsumerContextState()
+    {
+        RegisteredFaces.Clear();
+        RegisteredPaths.Clear();
+        registrationAttempted = false;
+        registrationSucceeded = false;
+        registrationMessage = "尚未尝试注册本地字体。";
+        cachedChineseFamilies = null;
+        cachedLocalFontFileCount = -1;
+        cachedSelectableLocalChineseFaces = -1;
+    }
+
     internal static string FontDirectory
     {
         get
