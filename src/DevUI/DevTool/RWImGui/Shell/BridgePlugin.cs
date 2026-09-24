@@ -309,16 +309,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
 
-        // The consumer context must receive local fonts before the first DX11 Present uploads its
-        // font texture. Waiting until the developer UI is opened is already too late: TexID is then
-        // live and the safe registration guard correctly refuses mutation, leaving Chinese as '?'.
-        global::DryCycle.StartupDiagnostics.Optional(
-            "BridgePlugin/RainWorld.Start/PrepareDevToolFontContext",
-            () =>
-            {
-                _ = DevToolFrontend.PrepareFontContextDuringSynchronousStart();
-            });
-
+        // Do not touch ImGUIAPI context/font state from RainWorld.Start.
+        // RWImGUI can return from its Start hook even when native D3D11 initialization failed.
+        // Calling HasContext/SwitchContext in that state can cross an uninitialized native binding
+        // and terminate the whole process before a managed exception can be logged.
+        //
+        // Font registration therefore remains deferred to the normal consumer-context lifecycle,
+        // where RWImGUI has already established a usable context. Game startup must always win over
+        // optional DevTool font prewarming.
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
