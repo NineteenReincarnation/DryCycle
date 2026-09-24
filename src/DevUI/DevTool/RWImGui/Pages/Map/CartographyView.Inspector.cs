@@ -18,10 +18,11 @@ internal static partial class CartographyView
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
         // Custom region names can contain Chinese even when the surrounding editor is English.
         ImFontPtr font = default;
-        bool pushedFont = !chinese && state.Regions.Any(region => region.Name.Any(c => c > 255)) &&
+        bool resolvedFont = !chinese && state.Regions.Any(region => region.Name.Any(c => c > 255)) &&
             DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily, DevToolUiSettings.FontWeight,
                 true, out font, out _, out _, out _);
-        if (pushedFont) ImGui.PushFont(font);
+        bool pushedFont = resolvedFont &&
+            DevToolFrontend.TryPushRegisteredFont(font, "Cartography region picker font");
         try { SourcePickerContent(state, chinese); }
         finally { if (pushedFont) ImGui.PopFont(); }
     }

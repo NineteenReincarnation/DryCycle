@@ -60,13 +60,12 @@ internal static partial class CartographyView
         ImGuiIOPtr io = ImGui.GetIO();
         float oldScale = io.FontGlobalScale;
         float oldBaseSize = ImGui.GetFont().FontSize;
-        bool pushedFont = DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily,
+        bool resolvedFont = DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily,
             DevToolUiSettings.FontWeight, true, out ImFontPtr font, out _, out _, out _);
+        bool pushedFont = resolvedFont &&
+            DevToolFrontend.TryPushRegisteredFont(font, "Cartography content font");
         if (pushedFont)
-        {
-            ImGui.PushFont(font);
             io.FontGlobalScale = oldScale * oldBaseSize / Math.Max(1, font.FontSize);
-        }
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(.045f, .06f, .08f, 1));
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Num.Vector4(.10f, .14f, .19f, 1));
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Num.Vector4(.06f, .08f, .11f, 1));

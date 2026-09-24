@@ -788,6 +788,31 @@ internal static class DevToolFrontend
         return 7;
     }
 
+    internal static unsafe bool TryPushRegisteredFont(ImFontPtr font, string usage)
+    {
+        if (font.NativePtr == null)
+            return false;
+
+        try
+        {
+            ImGui.PushFont(font);
+            return true;
+        }
+        catch (Exception error)
+        {
+            if (Interlocked.Exchange(ref fontPushFailureLogged, 1) == 0)
+            {
+                log?.LogWarning(
+                    "DryCycle DevTool could not PushFont for " +
+                    (string.IsNullOrWhiteSpace(usage) ? "a local font" : usage) +
+                    "; falling back to the RWImGui context default font: " +
+                    error.Message);
+            }
+
+            return false;
+        }
+    }
+
     private static unsafe bool TryPushActiveFont()
     {
         DevToolUiLanguage language = DevToolUiSettings.Language;
@@ -895,28 +920,15 @@ internal static class DevToolFrontend
         if (activeFont.NativePtr == null)
             return false;
 
-        try
-        {
-            ImGui.PushFont(activeFont);
+        if (TryPushRegisteredFont(activeFont, "active UI font"))
             return true;
-        }
-        catch (Exception error)
-        {
-            activeFont = default;
-            resolvedFontName = "Default";
-            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
-            resolvedFontWeightVariantCount = 1;
-            DevToolGlyphs.ResetCache();
 
-            if (Interlocked.Exchange(ref fontPushFailureLogged, 1) == 0)
-            {
-                log?.LogWarning(
-                    "DryCycle DevTool rejected the resolved local font during PushFont and " +
-                    "fell back to the RWImGui context default font: " + error.Message);
-            }
-
-            return false;
-        }
+        activeFont = default;
+        resolvedFontName = "Default";
+        resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+        resolvedFontWeightVariantCount = 1;
+        DevToolGlyphs.ResetCache();
+        return false;
     }
 
 }
