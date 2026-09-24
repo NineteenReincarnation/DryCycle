@@ -36,11 +36,12 @@ internal static class NativeMapAuthoringStateHub
         internal string Name = string.Empty;
         internal Vector2 MapPosition;
         internal Vector2 DevPosition;
-        internal int Layer = 1;
+        internal int Layer = MapRoomLayer.Default;
 
         // Last values observed/written through the optional vanilla adapter. They let the bounded
         // compatibility audit distinguish a real third-party RoomPanel mutation from our own mirror.
         internal bool LegacyMirrorValid;
+        internal WeakReference<RoomPanel> LegacyPanel;
         internal Vector2 LegacyMapPosition;
         internal Vector2 LegacyDevPosition;
         internal int LegacyLayer;
@@ -94,14 +95,14 @@ internal static class NativeMapAuthoringStateHub
 
     internal static bool SetLayer(EditorSession session, int roomIndex, int layer)
     {
+        MapRoomLayer.Validate(layer);
         WorldState state = Ensure(session);
         if (state == null || !state.Rooms.TryGetValue(roomIndex, out RoomState room))
             return false;
 
-        int next = Mathf.Clamp(layer, 0, 2);
-        if (room.Layer == next) return false;
+        if (room.Layer == layer) return false;
 
-        room.Layer = next;
+        room.Layer = layer;
         room.PendingLegacyPush = true;
         unchecked { state.Revision++; }
         return true;
@@ -164,7 +165,7 @@ internal static class NativeMapAuthoringStateHub
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool legacy Map mirror refresh failed: " + error.Message);
+            Plugin.Logger?.LogWarning("DevTool legacy Map mirror refresh failed: " + error);
         }
     }
 
@@ -189,8 +190,11 @@ internal static class NativeMapAuthoringStateHub
             if (!state.Rooms.TryGetValue(roomIndex, out RoomState room))
                 continue;
 
-            if (room.PendingLegacyPush)
+            bool samePanel = room.LegacyPanel != null && room.LegacyPanel.TryGetTarget(out RoomPanel previous) && ReferenceEquals(previous, panel);
+            if (room.PendingLegacyPush || !samePanel)
             {
+                // A recreated page is a new projection, not a new authoring source. Reopening it
+                // must not import stale disk values over retained layer/position edits or undo.
                 panel.pos = room.MapPosition;
                 panel.devPos = room.DevPosition;
                 panel.layer = room.Layer;
@@ -250,6 +254,7 @@ internal static class NativeMapAuthoringStateHub
     {
         if (session?.World == null || !ReferenceEquals(session.World, expectedWorld))
             return false;
+        MapRoomLayer.Validate(layer);
 
         WorldState state = Ensure(session);
         if (state == null || !state.Rooms.TryGetValue(roomIndex, out RoomState room))
@@ -260,7 +265,7 @@ internal static class NativeMapAuthoringStateHub
 
         room.MapPosition = mapPosition;
         room.DevPosition = devPosition;
-        room.Layer = Mathf.Clamp(layer, 0, 2);
+        room.Layer = layer;
         room.PendingLegacyPush = true;
         abstractRoom.subregionName = subregion;
         unchecked { state.Revision++; }
@@ -308,7 +313,7 @@ internal static class NativeMapAuthoringStateHub
                 Name = room.name ?? string.Empty,
                 MapPosition = next,
                 DevPosition = next,
-                Layer = 1
+                Layer = MapRoomLayer.Default
             };
 
             next.x += 110f;
@@ -418,6 +423,7 @@ internal static class NativeMapAuthoringStateHub
         room.LegacyDevPosition = panel.devPos;
         room.LegacyLayer = panel.layer;
         room.LegacyMirrorValid = true;
+        room.LegacyPanel = new WeakReference<RoomPanel>(panel);
     }
 
     private static RoomPanel FindRoomPanel(MapPage page, int roomIndex)

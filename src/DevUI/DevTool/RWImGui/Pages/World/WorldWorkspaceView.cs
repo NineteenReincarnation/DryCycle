@@ -778,7 +778,7 @@ internal static class WorldWorkspaceView
             rows[i] = new RoomExplorerRow
             {
                 Room = room,
-                LayerToken = DisplayLayerLabel(room.Layer)
+                LayerToken = MapRoomLayer.Label(room.Layer)
             };
         }
         projectedRoomRowsSource = rooms;
@@ -1039,7 +1039,7 @@ internal static class WorldWorkspaceView
 
         ImGui.TextUnformatted(room.Name);
         ImGui.SameLine();
-        ImGui.TextDisabled(DisplayLayerLabel(room.Layer));
+        ImGui.TextDisabled(MapRoomLayer.Label(room.Layer));
         if (room.CurrentRoom) DevToolWidgets.MutedText(DevToolUiSettings.T("当前镜头房间", "Current camera room"));
         if (room.OffScreenDen) DevToolWidgets.MutedText(DevToolUiSettings.T("屏幕外巢穴", "Off-screen den"));
         if (room.Disabled) DevToolWidgets.MutedText(DevToolUiSettings.T("地图输出隐藏", "Hidden from map output"));
@@ -1571,7 +1571,7 @@ internal static class WorldWorkspaceView
             EditorMapRoomSnapshot room = FindRoom(snapshot, snapshot.SelectedRoomIndex);
             selection = room == null
                 ? snapshot.RegionName
-                : room.Name + " · " + DisplayLayerLabel(room.Layer) +
+                : room.Name + " · " + MapRoomLayer.Label(room.Layer) +
                   (string.IsNullOrEmpty(room.Subregion) ? string.Empty : " · " + room.Subregion);
         }
 
@@ -1872,9 +1872,9 @@ internal static class WorldWorkspaceView
         ImGuiStylePtr style = ImGui.GetStyle();
         float spacing = Math.Max(4f, style.ItemSpacing.X);
         float available = Math.Max(1f, ImGui.GetContentRegionAvail().X);
-        float buttonWidth = Math.Max(42f, (available - spacing * 2f) / 3f);
+        float buttonWidth = Math.Max(42f, (available - spacing * (MapRoomLayer.Count - 1)) / MapRoomLayer.Count);
 
-        for (int layer = 0; layer < 3; layer++)
+        for (int layer = 0; layer < MapRoomLayer.Count; layer++)
         {
             bool selected = room.Layer == layer;
             ImGui.PushID("WorldRoomLayer_" + layer);
@@ -1892,7 +1892,7 @@ internal static class WorldWorkspaceView
 
             bool clicked =
                 ImGui.Button(
-                    "L" + (layer + 1),
+                    MapRoomLayer.Label(layer),
                     new Num.Vector2(buttonWidth, 0f));
 
             if (selected)
@@ -1911,13 +1911,10 @@ internal static class WorldWorkspaceView
                             integer: layer)));
             }
 
-            if (layer < 2)
+            if (layer < MapRoomLayer.Count - 1)
                 ImGui.SameLine(0f, spacing);
         }
     }
-
-    private static string DisplayLayerLabel(int layer) =>
-        "L" + (Math.Max(0, Math.Min(2, layer)) + 1);
 
     private static void EnsureRoomIndex(EditorMapPresentationSnapshot snapshot)
     {

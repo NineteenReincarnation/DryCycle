@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -149,7 +150,7 @@ internal static class PlayerMapMigrationStreamView
         {
             if (layer > 0) ImGui.SameLine();
             bool value = layer < layers.Length && layers[layer];
-            if (ImGui.Checkbox("L" + layer + "##MigrationLayer" + layer, ref value))
+            if (ImGui.Checkbox(MapRoomLayer.Label(layer) + "##MigrationLayer" + layer, ref value))
                 PlayerMapMigrationCommandQueue.Enqueue(new PlayerMapMigrationCommand(
                     PlayerMapMigrationCommandKind.SetLayerEnabled,
                     active.Name,

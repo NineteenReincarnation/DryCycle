@@ -112,11 +112,14 @@ DevTool/
 - 新增内置 [制图工作区](Map/Cartography/README.md)：参考 Cornifer 的制图流程，使用自有作者文档、房间/标注排布、可编辑图层、独立撤销历史及 PNG/SVG/分层图片导出。入口是 Map 内的“制图 / Cartography”，制图修改不回写游戏地图布局。
 
 - 独立中央节点画布，而不是压在房间场景上。
-- 鼠标滚轮缩放、中键平移、Fit Map、层级过滤、房间搜索。
+- 鼠标滚轮缩放、中键平移、层级过滤、房间搜索。
 - 房间连接线直接读取 `AbstractRoom.connections`，不维护第二份世界拓扑。
 - 房间节点拖动只在前端做实时预览，松手后主线程一次提交，因此一次拖动只有一条 Undo。
 - 房间 devPos、Layer、Subregion Inspector。
-- 保存继续使用本体 `MapPage.SaveMapConfig()`；Undo/Redo 使用 Map Document Snapshot。
+- 层级使用地图文件中的原始编号 `0 / 1 / 2`，统一显示为 `L0 / L1 / L2`。画布、Inspector、列表、筛选和 Player Map 共用 `MapRoomLayer`，不在显示时加一。
+- `NativeMapAuthoringStateHub` 持有房间作者层级；编辑、Undo/Redo、World Map 和 Player Map 从同一状态发布。层级变化同时更新 Player Map 缓存版本；重建 RoomPanel 时恢复保留的作者值，不从新面板导入旧磁盘值。
+- Player Map 可见或正在执行渲染任务时，房间作者地形按预算自动扫描，不受 World Map 缩放级别限制。地形就绪由后端更新缩略图和缓存版本，不依赖选中房间；低缩放下仍暂停 World Map 的光栅读取工作。
+- 保存意图经 `MapPage.SaveMapConfig()` 接入统一的 `PlayerMapConfigBuildPipeline`；层级在捕获作者记录时冻结，写出时不再读取可变面板。Undo/Redo 使用 Map Document Snapshot。
 
 ### Dialog
 

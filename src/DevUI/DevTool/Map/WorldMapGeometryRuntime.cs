@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using DryCycle.TerrainExt.QuicksandZone;
 using RWCustom;
 using UnityEngine;
@@ -392,7 +393,11 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
     {
-        if (!WorldMapFrontendBridge.ShouldProcessGeometryBackground(world))
+        // World Map zoom throttles its raster work, but Player Map also consumes this cache's
+        // authored-terrain semantics. Those scans must keep progressing while Player Map is open
+        // (or finishing an explicit render), even when the hidden World Map remains zoomed out.
+        bool processVisuals = WorldMapFrontendBridge.ShouldProcessGeometryBackground(world);
+        if (!processVisuals && !PlayerMapActivityGate.ShouldProcess)
             return;
 
         int count = roomOrder.Count;
@@ -406,17 +411,20 @@ internal static partial class MapRoomGeometryPresentationHub
             if (roomIndex == currentRoom || roomIndex == selectedRoom) continue;
             if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) continue;
 
-            RefreshDimensions(entry, entry.RoomRep);
-            RefreshNodes(entry, entry.RoomRep, force: false);
-            if (rasterLoadsRemaining > 0 &&
-                RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: false))
-                rasterLoadsRemaining--;
+            if (processVisuals)
+            {
+                RefreshDimensions(entry, entry.RoomRep);
+                RefreshNodes(entry, entry.RoomRep, force: false);
+                if (rasterLoadsRemaining > 0 &&
+                    RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: false))
+                    rasterLoadsRemaining--;
+            }
 
             if (curveLoadsRemaining > 0 &&
                 RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
                 curveLoadsRemaining--;
 
-            Publish(entry, allowRasterReadback: true);
+            Publish(entry, allowRasterReadback: processVisuals);
         }
     }
 

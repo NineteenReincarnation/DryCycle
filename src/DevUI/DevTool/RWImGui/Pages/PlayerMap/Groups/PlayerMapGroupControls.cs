@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using ImGuiNET;
 using UnityEngine;
@@ -50,7 +51,7 @@ internal static class PlayerMapGroupLayerControls
             }
 
             if (DevToolWidgets.ActionButton(
-                    "L" + layer,
+                    MapRoomLayer.Label(layer),
                     "PlayerMapGroupLayer" + layer,
                     allOnLayer ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
                 QueueLayerChange(selected, layer);

@@ -46,10 +46,10 @@ internal static class PlayerMapConfigBuildPipeline
 {
     private sealed class RoomRecord
     {
-        internal RoomPanel Panel;
         internal AbstractRoom Room;
         internal Vector2 Canonical;
         internal Vector2 Dev;
+        internal int Layer;
         internal bool Disabled;
     }
 
@@ -194,6 +194,7 @@ internal static class PlayerMapConfigBuildPipeline
         }
         catch (Exception exception)
         {
+            log?.LogError("Player Map config save failed: " + exception);
             error = exception.Message;
             return false;
         }
@@ -208,6 +209,10 @@ internal static class PlayerMapConfigBuildPipeline
         List<RoomRecord> records = new();
         canonAverage = Vector2.zero;
         devAverage = Vector2.zero;
+
+        EditorSession session = DevToolSessionHub.Current;
+        bool native = session != null && ReferenceEquals(session.World, page.world) && ReferenceEquals(session.Owner?.activePage, page);
+        if (native) NativeMapAuthoringStateHub.AuditLegacy(session);
 
         HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
         if (page.world?.DisabledMapRooms != null)
@@ -226,12 +231,15 @@ internal static class PlayerMapConfigBuildPipeline
             AbstractRoom room = panel.roomRep.room;
             if (!state.Rooms.TryGetValue(room.index, out PlayerMapRoomState roomState)) continue;
             Vector2 canonical = PlayerMapWorkspaceRuntime.Effective(roomState, panel);
+            int layer = native && NativeMapAuthoringStateHub.TryGet(session, room.index, out NativeMapRoomAuthoringValue authoring)
+                ? authoring.Layer : panel.layer;
+            MapRoomLayer.Validate(layer);
             records.Add(new RoomRecord
             {
-                Panel = panel,
                 Room = room,
                 Canonical = canonical,
                 Dev = panel.devPos,
+                Layer = layer,
                 Disabled = disabled.Contains(room.name ?? string.Empty)
             });
 
@@ -266,8 +274,7 @@ internal static class PlayerMapConfigBuildPipeline
             lines[name] = name + ": " +
                           F(canonical.x) + "><" + F(canonical.y) + "><" +
                           F(dev.x) + "><" + F(dev.y) + "><" +
-                          Mathf.Clamp(item.Panel.layer, 0, PlayerMapCoordinateSystem.LayerCount - 1)
-                              .ToString(CultureInfo.InvariantCulture) + "><" +
+                          item.Layer.ToString(CultureInfo.InvariantCulture) + "><" +
                           subregion + "><" + item.Room.size.x.ToString(CultureInfo.InvariantCulture) + "><" +
                           item.Room.size.y.ToString(CultureInfo.InvariantCulture);
         }

@@ -24,6 +24,8 @@ internal static partial class Program
             File.WriteAllLines(Path.Combine(folder, roomName.ToLowerInvariant() + ".txt"), room);
         }
         var session = new EditorSession { World = new World { name = "B5" } };
+        File.WriteAllText(Path.Combine(assets, "world", "cc", "displayname.txt"), "Chimney Canopy");
+        session.World.game.rainWorld.inGameTranslator.Translations.Add("Chimney Canopy", "烟囱天棚");
         void Finish()
         {
             Stopwatch timeout = Stopwatch.StartNew();
@@ -39,6 +41,8 @@ internal static partial class Program
         CartographyRuntime.SetActive(true); Finish();
         Check(CartographyRuntime.Presentation.Document.Region == "B5" && CartographyRuntime.SourcePicker.Campaign == "Yellow", "First open uses the player's region and campaign, never CC/White defaults.");
         Check(CartographyRuntime.SourcePicker.Regions.Length == 6, "The selector is populated from available world files.");
+        Check(CartographyRuntime.SourcePicker.Regions.Single(region => region.Code == "CC").Label(true) == "CC · 烟囱天棚", "Localized region labels use the game's translator.");
+        Check(CartographyRuntime.SourcePicker.Regions.Single(region => region.Code == "B5").Label(true) == "B5 · 区域全称 B5", "Custom Chinese names remain intact when no translation exists.");
         var first = CartographyRuntime.Presentation;
         var firstScene = first.Scene;
         CartographyRuntime.Enqueue(new CartographyCommand { Kind = CartographyCommandKind.Move, DocumentId = first.Identity,

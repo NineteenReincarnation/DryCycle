@@ -75,7 +75,7 @@ public static class PlayerMapCoordinateSystem
     public const float CanonPixelsPerTile = 3f;
     public const float WorldToCanonScale = CanonPixelsPerTile / WorldLayoutPixelsPerTile;
     public const int OutputPadding = 10;
-    public const int LayerCount = 3;
+    public const int LayerCount = MapRoomLayer.Count;
 
     public static Vector2 WorldLayoutToCanon(Vector2 worldLayout) => worldLayout * WorldToCanonScale;
     public static Vector2 CanonToWorldLayout(Vector2 canon) => canon / WorldToCanonScale;
@@ -147,7 +147,9 @@ internal sealed class PlayerMapSessionState
     internal long Revision = 1;
     internal bool Dirty;
     internal int ObservedBakeRevision = -1;
+    internal int ObservedTerrainRevision = -1;
     internal int ObservedSelectedRoom = int.MinValue;
+    internal long ObservedAuthoringRevision = -1;
     internal bool Initialized;
     internal PlayerMapPresentationSnapshot Presentation = PlayerMapPresentationSnapshot.Empty;
     internal PlayerMapRenderReport RenderReport = PlayerMapRenderReport.Empty;
@@ -338,11 +340,23 @@ internal static class PlayerMapWorkspaceRuntime
         bool changed = SynchronizeRooms(page, state);
         int selectedRoom = MapEditorPresentationHub.Current?.SelectedRoomIndex ?? -1;
         int bakeRevision = RoomMapBakeCache.Revision;
-        if (changed || state.ObservedBakeRevision != bakeRevision || state.ObservedSelectedRoom != selectedRoom ||
+        long authoringRevision = NativeMapAuthoringStateHub.GetRevision(session);
+        // Authored terrain finishes separately from the room-text bake. Observe its readiness on
+        // the main thread so pending thumbnails advance without selection changes or UI polling.
+        PlayerMapTerrainSemanticRevision.Audit(state.Region, state.Presentation.Rooms, 12);
+        int terrainRevision = PlayerMapTerrainSemanticRevision.Revision;
+        bool authoringChanged = state.ObservedAuthoringRevision != authoringRevision;
+        bool bakeChanged = state.ObservedBakeRevision != bakeRevision || state.ObservedTerrainRevision != terrainRevision;
+        // Placement can remain unchanged while layers or thumbnail readiness change. Publish a new
+        // cache revision in all of those cases without treating background preparation as an edit.
+        if ((authoringChanged || bakeChanged) && !changed) Touch(state, dirty: false);
+        if (changed || bakeChanged || state.ObservedSelectedRoom != selectedRoom || authoringChanged ||
             !state.Presentation.Available)
         {
             state.ObservedBakeRevision = bakeRevision;
+            state.ObservedTerrainRevision = terrainRevision;
             state.ObservedSelectedRoom = selectedRoom;
+            state.ObservedAuthoringRevision = authoringRevision;
             Publish(page, state, selectedRoom);
         }
 
@@ -712,6 +726,8 @@ internal static class PlayerMapWorkspaceRuntime
 
     private static void Publish(MapPage page, PlayerMapSessionState state, int selectedRoom)
     {
+        EditorSession session = DevToolSessionHub.Current;
+        bool native = session != null && ReferenceEquals(session.World, page.world) && ReferenceEquals(session.Owner?.activePage, page);
         HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
         if (page.world?.DisabledMapRooms != null)
         {
@@ -743,7 +759,8 @@ internal static class PlayerMapWorkspaceRuntime
                     Offset = roomState.Offset,
                     AbsolutePosition = roomState.AbsolutePosition,
                     EffectivePosition = Effective(roomState, panel.devPos),
-                    Layer = Mathf.Clamp(panel.layer, 0, 2),
+                    Layer = native && NativeMapAuthoringStateHub.TryGet(session, room.index, out NativeMapRoomAuthoringValue authoring)
+                        ? authoring.Layer : panel.layer,
                     Disabled = disabled.Contains(room.name ?? string.Empty),
                     Selected = selected,
                     Bake = RoomMapBakeCache.GetSnapshot(room.index)

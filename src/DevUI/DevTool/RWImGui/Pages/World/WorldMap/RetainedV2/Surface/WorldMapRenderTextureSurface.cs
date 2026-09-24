@@ -36,6 +36,7 @@ internal sealed class WorldMapRenderTextureSurface
 
     private Camera camera;
     private GameObject cameraObject;
+    private GameObject sceneObject;
 
     // Front texture visible to RWImGUI. "retired" is the previous front retained until the new
     // candidate has actually been accepted by the texture bridge.
@@ -154,7 +155,7 @@ internal sealed class WorldMapRenderTextureSurface
 
     internal bool Render(
         WorldMapViewTransform transform,
-        Action<Camera> prepareScene)
+        Action<Transform> prepareScene)
     {
         if (transform.CanvasSize.X < 2f || transform.CanvasSize.Y < 2f)
             return false;
@@ -229,9 +230,20 @@ internal sealed class WorldMapRenderTextureSurface
         try
         {
             ConfigureCamera(renderTransform, target);
-            prepareScene?.Invoke(camera);
+            prepareScene?.Invoke(sceneObject.transform);
             camera.targetTexture = target;
-            camera.Render();
+            // Layer 31 isolates what this camera sees, not what the gameplay cameras see. Keep
+            // every retained room/route under an inactive parent except during this synchronous
+            // off-screen render. Stable frames and failed renders must leave no scene geometry.
+            sceneObject.SetActive(true);
+            try
+            {
+                camera.Render();
+            }
+            finally
+            {
+                sceneObject.SetActive(false);
+            }
 
             lock (gate)
             {
@@ -417,12 +429,14 @@ internal sealed class WorldMapRenderTextureSurface
     private void ResetAfterPresentationDrained()
     {
         GameObject oldCamera;
+        GameObject oldScene;
 
         lock (gate)
         {
             QueueReleaseLocked(presented);
             QueueReleaseLocked(retired);
             oldCamera = cameraObject;
+            oldScene = sceneObject;
 
             presented = null;
             retired = null;
@@ -444,6 +458,7 @@ internal sealed class WorldMapRenderTextureSurface
 
             camera = null;
             cameraObject = null;
+            sceneObject = null;
             error = string.Empty;
             initialized = false;
         }
@@ -456,6 +471,11 @@ internal sealed class WorldMapRenderTextureSurface
 
         if (oldCamera != null)
             UnityEngine.Object.Destroy(oldCamera);
+        if (oldScene != null)
+        {
+            oldScene.SetActive(false);
+            UnityEngine.Object.Destroy(oldScene);
+        }
 
         log = null;
     }
@@ -736,6 +756,15 @@ internal sealed class WorldMapRenderTextureSurface
 
     private void EnsureCamera()
     {
+        if (sceneObject == null)
+        {
+            sceneObject = new GameObject("DryCycle.WorldMapV2.Scene")
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                layer = RenderLayer
+            };
+            sceneObject.SetActive(false);
+        }
         if (camera != null)
             return;
 

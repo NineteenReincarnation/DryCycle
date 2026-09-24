@@ -272,16 +272,18 @@ internal static class WorldMapRetainedV2Runtime
 
                 if (Surface.Render(
                         view,
-                        _ =>
+                        renderScene =>
                         {
                             RoomRenderer.SynchronizeVisible(
                                 MainSceneState,
                                 RoomResources,
-                                visibleRooms);
+                                visibleRooms,
+                                renderScene);
                             ConnectionRenderer.SynchronizeVisible(
                                 ConnectionResources,
                                 visibleRoutes,
-                                showConnections);
+                                showConnections,
+                                renderScene);
                         }))
                 {
                     lastRenderedViewRevision = viewRevision;

@@ -23,6 +23,7 @@ public sealed class EditorMapRoomSnapshot
     public string Name { get; init; } = string.Empty;
     public float X { get; init; }
     public float Y { get; init; }
+    /// <summary>Authoritative map-config index (0, 1 or 2), shared by all map views.</summary>
     public int Layer { get; init; }
     public string Subregion { get; init; } = string.Empty;
     public bool OffScreenDen { get; init; }
@@ -775,7 +776,7 @@ public static class MapEditorCommandQueue
             }
             catch (Exception error)
             {
-                Plugin.Logger?.LogWarning("DevTool map command failed: " + error.Message);
+                Plugin.Logger?.LogWarning("DevTool map command failed: " + error);
             }
         }
 

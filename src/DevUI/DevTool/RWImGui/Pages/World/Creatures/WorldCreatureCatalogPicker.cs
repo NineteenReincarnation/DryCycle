@@ -178,6 +178,9 @@ internal static class WorldCreatureCatalogPicker
 
     private static readonly object iconSync = new();
     private static readonly Dictionary<string, IconSlot> iconSlots = new(StringComparer.OrdinalIgnoreCase);
+    // World files may use aliases such as Yellow, Mouse or Daddy. Resolve them on the main
+    // thread through WorldLoader, then share the canonical creature's raster and validation.
+    private static readonly Dictionary<string, string> iconAliases = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Queue<string> iconRequests = new();
     private static readonly HashSet<string> queuedIcons = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, AtlasPixels> atlasPixels = new();
@@ -270,6 +273,7 @@ internal static class WorldCreatureCatalogPicker
         lock (iconSync)
         {
             iconSlots.Clear();
+            iconAliases.Clear();
             iconRequests.Clear();
             queuedIcons.Clear();
         }
@@ -324,9 +328,7 @@ internal static class WorldCreatureCatalogPicker
         {
             if (!sandboxScanComplete) break;
             if (!TryDequeueIcon(out string creatureId)) break;
-            CatalogSnapshot snapshot = catalog;
-            if (!snapshot.ById.TryGetValue(creatureId, out CreatureEntry entry) || entry.Type == null)
-                continue;
+            if (!ResolveIconRequestMainThread(creatureId, out CreatureEntry entry)) continue;
 
             bool allowGpu = gpuReadbacks < MaxGpuReadbacksPerFrame;
             IconBuildResult result = BuildIconMainThread(entry, allowGpu, out IconRaster raster, out bool usedGpu);
@@ -367,6 +369,10 @@ internal static class WorldCreatureCatalogPicker
     {
         catalogRequested = true;
         CatalogSnapshot snapshot = catalog;
+        IconState selectedIconState = IconState.Pending;
+        if (!string.IsNullOrWhiteSpace(creatureId) && !string.Equals(creatureId, "NONE", StringComparison.OrdinalIgnoreCase))
+            TryGetIconForRender(creatureId, out _, out selectedIconState);
+        string selectedId = ResolveIconIdForRender(creatureId);
 
         string popupId = "##CreatureCatalogPicker_" + widgetId;
         string current = string.IsNullOrWhiteSpace(creatureId)
@@ -478,7 +484,7 @@ internal static class WorldCreatureCatalogPicker
 
                     DevToolSourceMark mark = DevToolSourcePresentation.FromLabel(group.Label);
                     DevToolSourcePresentation.DrawHeader(mark, 1.36f, 1f);
-                    if (DrawGroupGrid(group, matching, widgetId, creatureId, out string selected))
+                    if (DrawGroupGrid(group, matching, widgetId, selectedId, out string selected))
                     {
                         creatureId = selected;
                         changed = true;
@@ -494,7 +500,7 @@ internal static class WorldCreatureCatalogPicker
 
             if (!string.IsNullOrWhiteSpace(creatureId) &&
                 !string.Equals(creatureId, "NONE", StringComparison.OrdinalIgnoreCase) &&
-                !snapshot.ById.ContainsKey(creatureId))
+                !snapshot.ById.ContainsKey(selectedId) && selectedIconState == IconState.Failed)
             {
                 DevToolSourcePresentation.DrawHeader(
                     DevToolSourcePresentation.FromLabel(DevToolUiSettings.T("缺失 Mod", "MISSING MOD")),
@@ -586,7 +592,7 @@ internal static class WorldCreatureCatalogPicker
             {
                 if (i > start) ImGui.SameLine(0f, spacing);
                 CreatureEntry entry = filtered[i];
-                bool isSelected = string.Equals(current, entry.Id, StringComparison.Ordinal);
+                bool isSelected = string.Equals(current, entry.Id, StringComparison.OrdinalIgnoreCase);
                 if (DrawCreatureCard(entry, widgetId + "_" + group.Key + "_" + i, cardWidth, cardHeight, isSelected))
                 {
                     selected = entry.Id;
@@ -735,7 +741,7 @@ internal static class WorldCreatureCatalogPicker
         }
 
         float scale = Math.Min(areaSize.X / Math.Max(1, icon.Width), areaSize.Y / Math.Max(1, icon.Height));
-        scale = Math.Max(1f, Math.Min(scale, 4f));
+        scale = Math.Min(scale, 4f);
         Num.Vector2 origin = areaPos + new Num.Vector2(
             (areaSize.X - icon.Width * scale) * 0.5f,
             (areaSize.Y - icon.Height * scale) * 0.5f);
@@ -784,6 +790,7 @@ internal static class WorldCreatureCatalogPicker
     {
         lock (iconSync)
         {
+            creatureId = ResolveIconIdForRender(creatureId);
             if (iconSlots.TryGetValue(creatureId, out IconSlot slot))
             {
                 raster = slot.Raster;
@@ -822,7 +829,7 @@ internal static class WorldCreatureCatalogPicker
             while (iconRequests.Count > 0)
             {
                 string candidate = iconRequests.Dequeue();
-                queuedIcons.Remove(candidate);
+                if (!queuedIcons.Remove(candidate)) continue;
                 if (!iconSlots.TryGetValue(candidate, out IconSlot slot)) continue;
                 slot.ValidationQueued = false;
                 creatureId = candidate;
@@ -841,6 +848,42 @@ internal static class WorldCreatureCatalogPicker
             slot.ValidationQueued = true;
             if (queuedIcons.Add(creatureId)) iconRequests.Enqueue(creatureId);
         }
+    }
+
+    private static string ResolveIconIdForRender(string creatureId)
+    {
+        string id = (creatureId ?? string.Empty).Trim();
+        lock (iconSync) return iconAliases.TryGetValue(id, out string canonical) ? canonical : id;
+    }
+
+    private static bool ResolveIconRequestMainThread(string creatureId, out CreatureEntry entry)
+    {
+        CatalogSnapshot snapshot = catalog;
+        if (snapshot.ById.TryGetValue(creatureId, out entry) && entry.Type != null) return true;
+        try
+        {
+            CreatureTemplate.Type type = WorldLoader.CreatureTypeFromString(creatureId);
+            if (type != null && snapshot.ById.TryGetValue(type.value, out CreatureEntry resolved) && resolved.Type != null)
+            {
+                lock (iconSync)
+                {
+                    iconAliases[creatureId] = resolved.Id;
+                    iconSlots.Remove(creatureId);
+                    queuedIcons.Remove(creatureId);
+                }
+                // Reuse a ready canonical raster or queue it exactly once. Alias keys never enter
+                // the persistent icon cache, so source invalidation also covers every alias.
+                TryGetIconForRender(resolved.Id, out _, out _);
+                return false;
+            }
+            log?.LogWarning("Creature catalog cannot resolve world creature '" + creatureId + "'; no registered icon is available.");
+        }
+        catch (Exception error)
+        {
+            log?.LogWarning("Creature catalog could not resolve world creature '" + creatureId + "': " + error);
+        }
+        SetIconFailed(creatureId, string.Empty);
+        return false;
     }
 
     private static void SetIconReady(string creatureId, string sourceFingerprint, IconRaster raster)
@@ -1202,6 +1245,16 @@ internal static class WorldCreatureCatalogPicker
         sandboxUnlockIds.Clear();
         pluginScanIndex = 0;
         sandboxScanIndex = 0;
+        lock (iconSync)
+        {
+            iconAliases.Clear();
+            // Retry unknown names when the registration environment changes, without polling
+            // missing mods every render frame or leaving requests permanently Pending.
+            List<string> failed = new();
+            foreach (var pair in iconSlots)
+                if (pair.Value.State == IconState.Failed) failed.Add(pair.Key);
+            foreach (string id in failed) iconSlots.Remove(id);
+        }
 
         List<string> ids = ExtEnum<CreatureTemplate.Type>.values.entries;
         for (int i = 0; i < ids.Count; i++)

@@ -6,7 +6,7 @@
 
 参考 [Ved-s/Cornifer](https://github.com/Ved-s/Cornifer)，本次阅读的提交是 `db040babba8dab743e4a34ebb188aa10f2faff21`。重点研究了它的 MapObjects、Layer、Connections、选择/拖动、UndoActions 和 Capture 导出流程。Cornifer 的房间、标注、连线、图层分工适合制图，但 DryCycle 使用自己的编辑器会话、烘焙、命令和呈现边界，不能移植它的独立 MonoGame 程序及全局状态。
 
-本实现为 DryCycle 原生代码，不复制 Cornifer 的代码、图标或字体，不调用其程序集，也不安装新插件。范围是完整的**排布 → 标注 → 图层 → 保存 → 图片导出**流程，不宣称兼容 Cornifer 工程文件或覆盖全部旧软件特性。
+本实现为 DryCycle 原生代码，不调用 Cornifer 程序集，也不要求安装其独立程序。范围是完整的**排布 → 标注 → 图层 → 保存 → 图片导出**流程；高级选项提供显式的 Cornifer `state.json` 导入，导入警告会显示在工作区中，不承诺所有旧工程特性完全等价。
 
 | Cornifer 中参考的工作方式 | 在 DryCycle 中的实现 |
 | --- | --- |
@@ -20,7 +20,8 @@
 ## 组件边界
 
 ```text
-PlayerMap 烘焙 + EditorMap 连接快照
+游戏 AssetManager 解析当前启用模组的区域文件
+              ↓ 后台解析 / 地形解码
               ↓ detached source
 CartographyDocument ← CartographyEditing ← 带文档 ID/版本的命令
         ↓                   ↓
@@ -36,7 +37,7 @@ CartographySceneBuilder + CartographySceneCache
 ```
 
 - UI 不写文件，不读 live Room/World，不通过 Hook 或 Detour 调用 DryCycle 自有模块。
-- 初始排布来自玩家地图。之后制图位置独立；世界地图和游戏玩家地图不会被制图操作回写。`补充新房间`只添加新来源，保留已有排布。
+- 初始排布来自所选角色对应的区域地图文件。之后制图位置独立；世界地图和游戏玩家地图不会被制图操作回写。`补充新房间`只添加新来源，保留已有排布。
 - 稳定帧保留源几何和场景；移动一个房间时只替换其视觉节点，连线使用新的端口位置，其余房间/标注可继续复用。平移和缩放只改变视图变换；画布剔除不可见的节点和地形片段。
 - 拖动过程中只平移已有节点、更新相关连线预览；不会每帧重建所有房间地形。一次释放才提交作者数据。
 - 保存、撤销和重做使用已有编辑器统一入口。制图激活时 `Ctrl+S / Ctrl+Z / Ctrl+Y` 操作制图历史，切回世界/玩家地图后恢复原来的历史。
@@ -45,6 +46,9 @@ CartographySceneBuilder + CartographySceneCache
 
 ## 操作
 
+- 打开制图时显示玩家当前区域和角色；上方区域列表可直接选择其他区域，支持搜索缩写或全称，格式为 `B5 · 古代遗址`。名称来自游戏的区域显示名和翻译，保留模组提供的中文名称；中文编辑器使用游戏当前语言的译名，英文编辑器使用原始名称。
+- 普通使用自动读取当前游戏及启用模组，无需设置安装路径。高级选项用于切换角色或显式导入 Cornifer 存档。
+- 区域读取、地形解码和场景准备在后台执行；快速连续选择只显示最后一次请求，失败时保留之前的地图并显示原因。最近四个区域的来源和预览可复用；文件路径、大小或修改时间变化会使缓存失效，`刷新`可强制重新读取。切换和缓存淘汰仅清理派生数据，保留未保存文档及撤销历史。
 - 左键选择/拖动；空白处拖动框选；Shift 加选，Ctrl 减选。
 - 右键或中键平移，滚轮以鼠标为中心缩放；右键取消当前放置工具。
 - 选择文字、图标后点击放置；线条和区域框用拖动确定尺寸。
@@ -72,21 +76,20 @@ BepInEx/config/DryCycle/Cartography/<区域>-<来源身份哈希>.xml
 
 PNG 使用 Rain World 安装中已有的 `System.Drawing.dll` 和 Windows GDI+；无新增第三方运行时包。当前实现和验证目标是本项目的 Windows 游戏安装；其他平台的 GDI+ 后端未验证。
 
-尚未实现的 Cornifer 功能：PSD、Cornifer profile 导入、任意图片叠加、富文本、自动物品图标和手工编辑连接控制点。它们可以继续沿文档/场景边界扩展，不需要复制独立程序的 UI 或持久化逻辑。
+图片叠加、富文本、游戏图集图标和连接控制点编辑均沿现有文档与场景边界实现；Cornifer 的独立窗口和全局状态不进入 DryCycle。
 
 ## 验证
 
-`tests/Cartography.Tests` 直接编译生产模型、编辑器、场景、缓存、持久化和导出代码，验证：事务前快照保留、图层锁定、删除图层的迁移、Unicode XML 往返、外部写入冲突、写入失败保留旧文件、源端口坐标、未就绪地形、真实 PNG alpha、SVG、分层 ZIP、输出限制以及局部缓存失效。
+`tests/Cartography.Tests` 直接编译生产模型、运行时、编辑器历史、场景、缓存、持久化和导出代码，仅替代游戏及 Unity 边界。验证包括区域路径解析、中文全称、当前玩家区域、连续切换、缓存失效与淘汰、未保存修改和撤销保留、刷新期间保存，以及作者文档、文件冲突和图片导出。
 
 编译命令使用工作区 artifacts，避免验证过程自动部署到游戏目录：
 
 ```powershell
-dotnet build src/DryCycle.csproj -c Release -p:DeployToGame=false -p:OutputPath=C:/Users/Float/Desktop/DryCycle/artifacts/cartography/build
-dotnet build src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj -c Release -p:GameModOutputDir=C:/Users/Float/Desktop/DryCycle/artifacts/cartography/build
+$outputDir = Join-Path $PWD 'artifacts/cartography/build'
+dotnet build src/DryCycle.csproj -c Release -p:DeployToGame=false "-p:OutputPath=$outputDir"
+dotnet build src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj -c Release "-p:GameModOutputDir=$outputDir"
 dotnet build tests/Cartography.Tests/Cartography.Tests.csproj -c Release
-& ./tests/Cartography.Tests/bin/Release/net48/Cartography.Tests.exe ./artifacts/cartography/validation
+& ./tests/Cartography.Tests/bin/Release/net48/Cartography.Tests.exe ./artifacts/cartography/validation --game 'D:/Steam/steamapps/common/Rain World'
 ```
 
-托管测试和图片检查不等于游戏内交互验收。游戏内仍需验证：真实区域完整烘焙、Map/制图切换、多选拖动与 Undo、文字输入时 Ctrl+S、DevUI 关闭重开、跨区域恢复，以及后台导出期间继续编辑。
-
-2026-09-22 本地验证：主 DLL、RWImGui 前端和制图验证程序均编译通过，0 警告 / 0 错误；53 项断言通过。已目视检查测试地图导出，并检查透明 PNG 为 8-bit RGBA（PNG color type 6）。构建产物保存在 `artifacts/cartography/build`，未部署到游戏目录。联编同时修复了既有 World Map V2 三处短路表达式未赋值 `out` 参数，以及 BridgePlugin 对已移除呈现类的三处残留引用。
+`--game` 会读取本机 B5、CC、SU 的真实区域文件，解码全部房间、生成场景并导出 PNG；不修改游戏区域文件。托管测试和图片检查不等于游戏内交互验收，游戏内仍需验证字体显示、Map/制图切换、拖动与 Undo、文字输入时 Ctrl+S、DevUI 关闭重开，以及后台导出期间继续编辑。

@@ -16,6 +16,18 @@ internal static partial class CartographyView
     {
         CartographySourcePicker state = CartographyRuntime.SourcePicker;
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
+        // Custom region names can contain Chinese even when the surrounding editor is English.
+        ImFontPtr font = default;
+        bool pushedFont = !chinese && state.Regions.Any(region => region.Name.Any(c => c > 255)) &&
+            DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily, DevToolUiSettings.FontWeight,
+                true, out font, out _, out _, out _);
+        if (pushedFont) ImGui.PushFont(font);
+        try { SourcePickerContent(state, chinese); }
+        finally { if (pushedFont) ImGui.PopFont(); }
+    }
+
+    private static void SourcePickerContent(CartographySourcePicker state, bool chinese)
+    {
         CartographyRegionOption selected = state.Regions.FirstOrDefault(region => region.Code == state.Region);
         string label = selected?.Label(chinese) ?? (state.Region.Length == 0 ? T("正在获取当前区域…", "Finding current region…") : state.Region);
         ImGui.SetNextItemWidth(Math.Max(180, Math.Min(360, ImGui.GetContentRegionAvail().X - 20)));

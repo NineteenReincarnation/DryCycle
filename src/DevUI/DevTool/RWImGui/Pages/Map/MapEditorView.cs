@@ -112,7 +112,7 @@ internal static class MapEditorView
         for (int i = 0; i < LayerVisible.Length; i++)
         {
             bool visible = LayerVisible[i];
-            string label = "L" + i;
+            string label = MapRoomLayer.Label(i);
             if (ImGui.Checkbox(label + "##MapLayerFilter" + i, ref visible))
             {
                 LayerVisible[i] = visible;
@@ -121,7 +121,7 @@ internal static class MapEditorView
             if (i < LayerVisible.Length - 1)
                 DevToolWidgets.SameLineIfFits(
                     ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X +
-                    ImGui.CalcTextSize("L" + (i + 1)).X);
+                    ImGui.CalcTextSize(MapRoomLayer.Label(i + 1)).X);
         }
 
         ImGui.Spacing();
@@ -186,12 +186,12 @@ internal static class MapEditorView
         int layer = room.Layer;
         if (ImGui.BeginCombo(
                 DevToolUiSettings.T("图层##MapInspectorLayer", "Layer##MapInspectorLayer"),
-                "L" + layer))
+                MapRoomLayer.Label(layer)))
         {
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < MapRoomLayer.Count; i++)
             {
                 bool selected = layer == i;
-                if (ImGui.Selectable("L" + i + "##MapLayer" + i, selected))
+                if (ImGui.Selectable(MapRoomLayer.Label(i) + "##MapLayer" + i, selected))
                     MapEditorCommandQueue.Enqueue(new MapEditorCommand(
                         MapEditorCommandKind.SetRoomLayer,
                         roomIndex: room.RoomIndex,
@@ -455,7 +455,7 @@ internal static class MapEditorView
             draw.AddRectFilled(min, max, fill, 4f);
             draw.AddRect(min, max, border, 4f, ImDrawFlags.None, room.Selected ? 2f : 1f);
             draw.AddText(min + new Num.Vector2(7f, 5f), text, room.Name);
-            string meta = "L" + room.Layer;
+            string meta = MapRoomLayer.Label(room.Layer);
             if (!string.IsNullOrEmpty(room.Subregion)) meta += " · " + room.Subregion;
             if (room.OffScreenDen) meta += " · DEN";
             draw.AddText(min + new Num.Vector2(7f, 20f), ImGui.GetColorU32(ImGuiCol.TextDisabled), meta);

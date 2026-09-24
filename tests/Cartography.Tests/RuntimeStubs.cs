@@ -9,7 +9,11 @@ using DryCycle.DevUI.DevTool.Core;
 public sealed class World { public string name; public TestGame game = new(); }
 public sealed class TestGame { public SlugcatStats.Name StoryCharacter = new("Yellow", false), TimelinePoint = new("Yellow", false); public TestRainWorld rainWorld = new(); }
 public sealed class TestRainWorld { public TestTranslator inGameTranslator = new(); }
-public sealed class TestTranslator { public string Translate(string text) => text; }
+public sealed class TestTranslator
+{
+    public readonly Dictionary<string, string> Translations = new();
+    public bool TryTranslate(string text, out string translated) => Translations.TryGetValue(text, out translated);
+}
 public static class SlugcatStats
 {
     public sealed class Name { public string value; public Name(string value, bool register) { this.value = value; } }

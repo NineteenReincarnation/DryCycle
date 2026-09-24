@@ -152,7 +152,7 @@ internal static class WorldMapView
         for (int i = 0; i < layerVisible.Length; i++)
         {
             bool value = layerVisible[i];
-            if (ImGui.Checkbox("L" + i + "##WorldMapLayer" + i, ref value))
+            if (ImGui.Checkbox(MapRoomLayer.Label(i) + "##WorldMapLayer" + i, ref value))
             {
                 layerVisible[i] = value;
                 fitRequested = true;
@@ -723,7 +723,7 @@ internal static class WorldMapView
         draw.AddText(label, text, name);
 
         if (!showSubregionLabels || zoom < 0.75f || string.IsNullOrEmpty(room.Subregion)) return;
-        string meta = "L" + room.Layer + " · " + room.Subregion;
+        string meta = MapRoomLayer.Label(room.Layer) + " · " + room.Subregion;
         if (room.OffScreenDen) meta += " · DEN";
         Num.Vector2 metaSize = ImGui.CalcTextSize(meta);
         draw.AddText(

@@ -53,11 +53,12 @@ internal sealed class WorldMapRetainedRoomRenderer
     internal bool SynchronizeVisible(
         WorldMapScene scene,
         WorldMapRoomResourceStore resources,
-        IReadOnlyList<int> visibleRoomIds)
+        IReadOnlyList<int> visibleRoomIds,
+        Transform renderScene)
     {
         if (scene == null || resources == null || visibleRoomIds == null)
             return false;
-        if (!EnsureResources()) return false;
+        if (!EnsureResources(renderScene)) return false;
 
         visibleNow.Clear();
 
@@ -139,8 +140,9 @@ internal sealed class WorldMapRetainedRoomRenderer
         visiblePrevious.Clear();
     }
 
-    private bool EnsureResources()
+    private bool EnsureResources(Transform renderScene)
     {
+        if (renderScene == null) throw new ArgumentNullException(nameof(renderScene));
         if (root == null)
         {
             root = new GameObject("DryCycle.WorldMapV2.Rooms")
@@ -149,6 +151,8 @@ internal sealed class WorldMapRetainedRoomRenderer
                 layer = WorldMapRenderTextureSurface.RenderLayer
             };
         }
+        if (root.transform.parent != renderScene)
+            root.transform.SetParent(renderScene, false);
 
         if (spriteShader == null)
         {

@@ -246,7 +246,12 @@ internal static partial class CartographyRuntime
             string file = Resolve("world/" + code + "/displayname-" + selectedCampaign + ".txt") ?? Resolve("world/" + code + "/displayname.txt");
             return file == null ? code : File.ReadLines(file).FirstOrDefault() ?? code;
         }
-        string Translate(string name) => string.IsNullOrWhiteSpace(name) ? name : currentSession.World.game?.rainWorld?.inGameTranslator?.Translate(name) ?? name;
+        string Translate(string name)
+        {
+            var translator = currentSession.World.game?.rainWorld?.inGameTranslator;
+            return !string.IsNullOrWhiteSpace(name) && translator != null && translator.TryTranslate(name, out string translated)
+                ? translated : name;
+        }
         CartographyRegionOption[] regions = CartographyRegionFiles.Catalog(List("world", true), Resolve, FullName, Translate);
         picker = new CartographySourcePicker { Regions = regions, Region = region, Campaign = selectedCampaign, PlayerRegion = playerRegion, Loading = true };
         CartographyRegionFiles files = cornifer ? null : CartographyRegionFiles.Capture(region, folder => List(folder, false));

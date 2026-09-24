@@ -12,8 +12,8 @@ namespace DryCycle.DevUI.DevTool.Map.PlayerMap;
 /// snapshots. Derived rooms remain Convert(WorldLayoutPosition) + PlayerMapOffset; Absolute rooms
 /// remain independent.
 ///
-/// Stable frames audit only a small terrain batch. A semantic terrain change causes one full snapshot
-/// projection so curved/custom terrain cannot remain stale in the Player Map preview.
+/// The backend audits terrain in bounded batches and republishes readiness changes. This projection
+/// consumes that revision; drawing the UI does not drive semantic discovery.
 /// </summary>
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency(PlayerMapRuntimePlugin.PluginId, BepInDependency.DependencyFlags.HardDependency)]
@@ -72,7 +72,6 @@ internal static class PlayerMapDerivedLayoutBridge
             !string.Equals(source.RegionName ?? string.Empty, world.RegionName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             return source;
 
-        PlayerMapTerrainSemanticRevision.Audit(source.RegionName, source.Rooms, 12);
         int terrainRevision = PlayerMapTerrainSemanticRevision.Revision;
         PlayerMapRoomSnapshot[] projected = ProjectRooms(source.Rooms, world.Rooms, terrainRevision);
         if (ReferenceEquals(projected, source.Rooms)) return source;

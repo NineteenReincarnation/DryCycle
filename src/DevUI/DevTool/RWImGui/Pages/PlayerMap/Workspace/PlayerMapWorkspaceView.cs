@@ -121,7 +121,7 @@ internal static class PlayerMapWorkspaceView
         for (int i = 0; i < 3; i++)
         {
             bool visible = LayerVisible[i];
-            if (ImGui.Checkbox("L" + i + "##PlayerMapLayer" + i, ref visible))
+            if (ImGui.Checkbox(MapRoomLayer.Label(i) + "##PlayerMapLayer" + i, ref visible))
             {
                 LayerVisible[i] = visible;
                 fitRequested = true;
@@ -178,7 +178,7 @@ internal static class PlayerMapWorkspaceView
             bool clicked = DevToolRoomExplorerEntry.Draw(
                 room.Name,
                 room.Name,
-                "L" + room.Layer,
+                MapRoomLayer.Label(room.Layer),
                 status,
                 placement,
                 RoomStatusColor(room),
@@ -453,7 +453,7 @@ internal static class PlayerMapWorkspaceView
 
         ImGui.TextUnformatted(room.Name);
         ImGui.SameLine();
-        ImGui.TextDisabled("L" + room.Layer);
+        ImGui.TextDisabled(MapRoomLayer.Label(room.Layer));
         ImGui.Separator();
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("位置来源", "PLACEMENT"));
@@ -509,12 +509,12 @@ internal static class PlayerMapWorkspaceView
         }
 
         int layer = room.Layer;
-        if (ImGui.BeginCombo(DevToolUiSettings.T("地图图层##PlayerMapLayerCombo", "Map layer##PlayerMapLayerCombo"), "L" + layer))
+        if (ImGui.BeginCombo(DevToolUiSettings.T("地图图层##PlayerMapLayerCombo", "Map layer##PlayerMapLayerCombo"), MapRoomLayer.Label(layer)))
         {
             for (int i = 0; i < 3; i++)
             {
                 bool selected = i == layer;
-                if (ImGui.Selectable("L" + i, selected))
+                if (ImGui.Selectable(MapRoomLayer.Label(i), selected))
                     PlayerMapCommandQueue.Enqueue(new PlayerMapCommand(PlayerMapCommandKind.SetLayer, roomIndex: room.RoomIndex, integer: i));
                 if (selected) ImGui.SetItemDefaultFocus();
             }

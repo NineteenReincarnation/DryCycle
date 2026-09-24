@@ -68,11 +68,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
     internal bool SynchronizeVisible(
         WorldMapConnectionResourceStore resources,
         IReadOnlyList<string> visibleRouteIds,
-        bool showConnections)
+        bool showConnections,
+        Transform renderScene)
     {
         if (resources == null || visibleRouteIds == null)
             return false;
-        if (!EnsureResources()) return false;
+        if (!EnsureResources(renderScene)) return false;
 
         if (!showConnections)
         {
@@ -191,8 +192,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
         root = null;
     }
 
-    private bool EnsureResources()
+    private bool EnsureResources(Transform renderScene)
     {
+        if (renderScene == null) throw new ArgumentNullException(nameof(renderScene));
         if (root == null)
         {
             root = new GameObject("DryCycle.WorldMapV2.Connections")
@@ -201,6 +203,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 layer = WorldMapRenderTextureSurface.RenderLayer
             };
         }
+        if (root.transform.parent != renderScene)
+            root.transform.SetParent(renderScene, false);
 
         if (shader == null)
         {
