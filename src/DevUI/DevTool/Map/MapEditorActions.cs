@@ -40,13 +40,15 @@ internal static class MapEditorActions
         if (nextRoom == null)
             return false;
 
-        // Current Room is navigation state, not author data: never push it into map history.
-        // Keep DevUI and the game's primary room camera on the same realized room.
+        // DevUI.room is a read-only projection of game.cameras[0].room. Current Room is
+        // navigation state, not author data, so switch the primary camera only and never push
+        // this operation into map history.
         if (!ReferenceEquals(owner.room, nextRoom))
         {
-            if (game.cameras != null && game.cameras.Length > 0 && game.cameras[0] != null)
-                game.cameras[0].ChangeRoom(nextRoom, 0);
-            owner.room = nextRoom;
+            if (game.cameras == null || game.cameras.Length == 0 || game.cameras[0] == null)
+                return false;
+
+            game.cameras[0].ChangeRoom(nextRoom, 0);
         }
 
         return true;
