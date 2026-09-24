@@ -23,34 +23,16 @@ internal static class MapEditorActions
 
     internal static bool SwitchCurrentRoom(EditorSession session, int roomIndex)
     {
-        global::DevInterface.DevUI owner = session?.Owner;
-        RainWorldGame game = owner?.game;
-        global::World world = game?.world;
-        if (owner == null || game == null || world == null)
+        MapEditorState state = MapEditorStateHub.Get(session);
+        if (state == null || !ContainsPublishedRoom(roomIndex))
             return false;
 
-        AbstractRoom target = world.GetAbstractRoom(roomIndex);
-        if (target == null)
-            return false;
+        // This is intentionally UI-only navigation. Do not realize the target room, change any
+        // RoomCamera, move a player, or touch gameplay room ownership.
+        if (state.UiCurrentRoomIndex == roomIndex)
+            return true;
 
-        if (target.realizedRoom == null)
-            world.ActivateRoom(target);
-
-        global::Room nextRoom = target.realizedRoom;
-        if (nextRoom == null)
-            return false;
-
-        // DevUI.room is a read-only projection of game.cameras[0].room. Current Room is
-        // navigation state, not author data, so switch the primary camera only and never push
-        // this operation into map history.
-        if (!ReferenceEquals(owner.room, nextRoom))
-        {
-            if (game.cameras == null || game.cameras.Length == 0 || game.cameras[0] == null)
-                return false;
-
-            game.cameras[0].ChangeRoom(nextRoom, 0);
-        }
-
+        state.UiCurrentRoomIndex = roomIndex;
         return true;
     }
 

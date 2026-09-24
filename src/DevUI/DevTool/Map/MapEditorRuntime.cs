@@ -59,6 +59,10 @@ public sealed class EditorMapPresentationSnapshot
 internal sealed class MapEditorState
 {
     internal int SelectedRoomIndex = -1;
+
+    // -1 means "follow the actual gameplay/dev camera room". Once the mapper explicitly
+    // double-clicks a room, Current Room becomes a detached UI navigation marker.
+    internal int UiCurrentRoomIndex = -1;
 }
 
 internal static class MapEditorStateHub
@@ -138,7 +142,7 @@ public static class MapEditorPresentationHub
         long authoringRevision = NativeMapAuthoringStateHub.GetRevision(session);
         int worldTextRevision = WorldTextRegistry.Revision;
         int worldTopologyRevision = WorldTopologyRegistry.Revision;
-        int currentRoomIndex = session.Room?.abstractRoom?.index ?? -1;
+        int currentRoomIndex = ResolveCurrentRoomIndex(session, world, state);
         int selectedRoomIndex = state?.SelectedRoomIndex ?? -1;
 
         bool sameIdentity =
@@ -297,6 +301,21 @@ public static class MapEditorPresentationHub
         observedSelectedRoomIndex = state.SelectedRoomIndex;
         framesUntilIntegrityAudit = IntegrityAuditInterval;
         retainedValid = true;
+    }
+
+    private static int ResolveCurrentRoomIndex(
+        EditorSession session,
+        global::World world,
+        MapEditorState state)
+    {
+        int uiRoom = state?.UiCurrentRoomIndex ?? -1;
+        if (uiRoom >= 0 && world?.GetAbstractRoom(uiRoom) != null)
+            return uiRoom;
+
+        if (state != null && state.UiCurrentRoomIndex >= 0)
+            state.UiCurrentRoomIndex = -1;
+
+        return session?.Room?.abstractRoom?.index ?? -1;
     }
 
     private static HashSet<string> BuildDisabledSet(global::World world)

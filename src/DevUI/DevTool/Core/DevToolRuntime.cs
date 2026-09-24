@@ -876,8 +876,13 @@ public static class DevToolSessionHub
 
             bool restoreViewState = CanRestoreViewState(previous, ui);
             int previousMapRoom = -1;
+            int previousUiCurrentRoom = -1;
             if (restoreViewState)
-                previousMapRoom = MapEditorStateHub.Get(previous)?.SelectedRoomIndex ?? -1;
+            {
+                MapEditorState previousMapState = MapEditorStateHub.Get(previous);
+                previousMapRoom = previousMapState?.SelectedRoomIndex ?? -1;
+                previousUiCurrentRoom = previousMapState?.UiCurrentRoomIndex ?? -1;
+            }
 
             session = new EditorSession(ui);
             sessions.Add(ui, session);
@@ -888,7 +893,10 @@ public static class DevToolSessionHub
                 session.RestoreViewStateFrom(previous);
                 MapEditorState mapState = MapEditorStateHub.Get(session);
                 if (mapState != null)
+                {
                     mapState.SelectedRoomIndex = previousMapRoom;
+                    mapState.UiCurrentRoomIndex = previousUiCurrentRoom;
+                }
             }
         }
 
