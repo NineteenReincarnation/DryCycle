@@ -40,10 +40,12 @@ internal static class DevToolUiSettings
     // the semi-transparent room view.
     private static readonly Num.Vector4 DefaultDisabledTextColor = new(0.76f, 0.80f, 0.86f, 1f);
 
-    // Chinese is intentionally the default for DryCycle's development workflow. Keep independent
-    // font size/weight preferences for the two language modes so changing CJK typography does not
-    // silently alter the English editor presentation.
-    private static DevToolUiLanguage language = DevToolUiLanguage.Chinese;
+    // English is the startup-safe default. It can render with RWImGui's context default font and
+    // therefore does not depend on an external CJK font file being present or successfully added
+    // to the native font atlas. Chinese remains available as an explicit presentation choice.
+    // Keep independent font size/weight preferences so switching languages does not overwrite the
+    // other language's typography settings.
+    private static DevToolUiLanguage language = DevToolUiLanguage.English;
     private static DevToolScenePlacement scenePlacement = DevToolScenePlacement.Center;
     private static float chineseFontSize = DefaultChineseFontSize;
     private static float englishFontSize = DefaultFontSize;

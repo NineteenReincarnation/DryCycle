@@ -17,7 +17,8 @@ internal static unsafe class DevToolFontCatalog
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
     internal const string UbuntuMonoFamily = "Ubuntu Mono";
 
-    private const int MaxLocalFontFaces = 24;
+    private const int MaxLocalFontFaces = 2;
+    private const long MaxLocalFontBytes = 64L * 1024L * 1024L;
 
     private sealed class RegisteredFace
     {
@@ -32,7 +33,7 @@ internal static unsafe class DevToolFontCatalog
     private static readonly HashSet<string> RegisteredPaths = new(StringComparer.OrdinalIgnoreCase);
     private static bool registrationAttempted;
     private static bool registrationSucceeded;
-    private static string registrationMessage = "尚未尝试注册本地字体。";
+    private static string registrationMessage = "Local font registration has not been attempted.";
 
     // Font files and the ImGui atlas are stable after startup. The settings window is rendered every
     // frame, so never repeat filesystem enumeration or glyph probing there.
@@ -60,7 +61,7 @@ internal static unsafe class DevToolFontCatalog
         RegisteredPaths.Clear();
         registrationAttempted = false;
         registrationSucceeded = false;
-        registrationMessage = "尚未尝试注册本地字体。";
+        registrationMessage = "Local font registration has not been attempted.";
         cachedChineseFamilies = null;
         cachedLocalFontFileCount = -1;
         cachedSelectableLocalChineseFaces = -1;
@@ -91,7 +92,7 @@ internal static unsafe class DevToolFontCatalog
             ImGuiIOPtr io = ImGui.GetIO();
             if (io.Fonts.NativePtr == null)
             {
-                registrationMessage = "RWImGui 字体 Atlas 尚不可用。";
+                registrationMessage = "RWImGui font atlas is unavailable.";
                 log?.LogWarning("DryCycle DevTool skipped local font registration: RWImGui font atlas is unavailable.");
                 return false;
             }
@@ -101,7 +102,7 @@ internal static unsafe class DevToolFontCatalog
             // frontend compiles against the DLL that Rain World loads at runtime.
             if (io.Fonts.Locked || io.Fonts.TexID != 0UL)
             {
-                registrationMessage = "DevTool 独立字体 Atlas 已锁定或已上传纹理，无法再注册本地字体。";
+                registrationMessage = "The DevTool font atlas is already locked or uploaded; local fonts were not modified.";
                 log?.LogWarning(
                     "DryCycle DevTool consumer font atlas was already locked/uploaded before local " +
                     "font registration. The shared RWImGUI atlas was not modified.");
@@ -112,13 +113,13 @@ internal static unsafe class DevToolFontCatalog
             if (!Directory.Exists(directory))
             {
                 cachedLocalFontFileCount = 0;
-                registrationMessage = "字体目录不存在：" + directory;
+                registrationMessage = "Font directory not found: " + directory;
                 log?.LogWarning("DryCycle DevTool font directory not found: " + directory);
                 return false;
             }
 
             string[] files = Directory.GetFiles(directory, "*.*", SearchOption.TopDirectoryOnly);
-            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+            Array.Sort(files, CompareFontFilesForRegistration);
 
             IntPtr chineseGlyphRanges =
                 GetExtendedChineseGlyphRanges(
@@ -128,6 +129,8 @@ internal static unsafe class DevToolFontCatalog
             int added = 0;
             int eligibleFiles = 0;
 
+            int rejectedFiles = 0;
+
             for (int i = 0; i < files.Length; i++)
             {
                 string file = files[i];
@@ -135,32 +138,34 @@ internal static unsafe class DevToolFontCatalog
                 if (!IsFontExtension(extension)) continue;
                 eligibleFiles++;
 
-                if (added >= MaxLocalFontFaces)
-                {
-                    log?.LogWarning(
-                        $"DryCycle DevTool font directory contains more than {MaxLocalFontFaces} font faces. " +
-                        "Extra faces were skipped to keep the shared atlas bounded.");
-                    break;
-                }
-
                 string fullPath = Path.GetFullPath(file);
-                if (!RegisteredPaths.Add(fullPath)) continue;
-
                 string fileName = Path.GetFileName(file);
                 string faceName = Path.GetFileNameWithoutExtension(file);
                 string family = FamilyFromName(faceName);
-                // Decide the language role before the atlas is built. Probing ImFont afterwards is
-                // not reliable on the modified RWImGui binding: fonts loaded with a requested CJK
-                // range can report placeholder glyph entries even when the source face is Latin-only.
-                // That is how FiraCode was incorrectly exposed as a Chinese font and produced '?'.
-                bool chineseFace =
-                    IsChineseFamilyName(
-                        family,
-                        fileName);
-                IntPtr glyphRanges =
-                    chineseFace
-                        ? chineseGlyphRanges
-                        : defaultGlyphRanges;
+
+                // English deliberately uses RWImGui's context default font. Local atlas entries are
+                // reserved for CJK fallback only, so unrelated Latin/dev fonts can never multiply
+                // atlas size or first-open cost.
+                bool chineseFace = IsChineseFamilyName(family, fileName);
+                if (!chineseFace) continue;
+
+                if (added >= MaxLocalFontFaces)
+                {
+                    log?.LogInfo(
+                        $"DryCycle DevTool bounded local CJK registration at {MaxLocalFontFaces} face(s). " +
+                        "Additional local CJK font files were left untouched.");
+                    break;
+                }
+
+                if (!TryValidateFontFile(fullPath, out string validationError))
+                {
+                    rejectedFiles++;
+                    log?.LogWarning(
+                        "DryCycle DevTool rejected local font '" + fileName + "': " + validationError);
+                    continue;
+                }
+
+                if (!RegisteredPaths.Add(fullPath)) continue;
 
                 ImFontPtr font;
                 try
@@ -169,20 +174,20 @@ internal static unsafe class DevToolFontCatalog
                         fullPath,
                         DevToolUiSettings.ReferenceFontSize,
                         default,
-                        glyphRanges);
+                        chineseGlyphRanges);
                 }
                 catch (Exception error)
                 {
                     RegisteredPaths.Remove(fullPath);
                     log?.LogWarning(
-                        "DryCycle DevTool could not register font '" + Path.GetFileName(file) + "': " + error.Message);
+                        "DryCycle DevTool could not register font '" + fileName + "': " + error.Message);
                     continue;
                 }
 
                 if (font.NativePtr == null)
                 {
                     RegisteredPaths.Remove(fullPath);
-                    log?.LogWarning("DryCycle DevTool font returned a null ImFont: " + Path.GetFileName(file));
+                    log?.LogWarning("DryCycle DevTool font returned a null ImFont: " + fileName);
                     continue;
                 }
 
@@ -192,7 +197,7 @@ internal static unsafe class DevToolFontCatalog
                     FileName = fileName,
                     Family = family,
                     Weight = InferWeight(faceName),
-                    ChineseCapable = chineseFace
+                    ChineseCapable = true
                 });
                 added++;
             }
@@ -202,8 +207,9 @@ internal static unsafe class DevToolFontCatalog
             cachedChineseFamilies = null;
             registrationSucceeded = added > 0;
             registrationMessage = registrationSucceeded
-                ? $"安全注册窗口内已加入 {added} 个本地字体面。"
-                : $"目录中检测到 {eligibleFiles} 个字体文件，但没有字体成功加入 Atlas。";
+                ? $"Registered {added} validated local CJK font face(s)."
+                : $"Found {eligibleFiles} local font file(s), but no validated CJK face was registered" +
+                  (rejectedFiles > 0 ? $" ({rejectedFiles} rejected)." : ".");
 
             if (registrationSucceeded)
             {
@@ -220,7 +226,7 @@ internal static unsafe class DevToolFontCatalog
         }
         catch (Exception error)
         {
-            registrationMessage = "本地字体注册失败：" + error.Message;
+            registrationMessage = "Local font registration failed: " + error.Message;
             log?.LogWarning("DryCycle DevTool local font registration failed safely: " + error);
             return false;
         }
@@ -473,6 +479,97 @@ internal static unsafe class DevToolFontCatalog
         if (value.Contains("light")) return 300;
         if (value.Contains("thin")) return 100;
         return 400;
+    }
+
+    private static int CompareFontFilesForRegistration(string left, string right)
+    {
+        int leftPriority = FontRegistrationPriority(left);
+        int rightPriority = FontRegistrationPriority(right);
+        int compare = leftPriority.CompareTo(rightPriority);
+        return compare != 0
+            ? compare
+            : StringComparer.OrdinalIgnoreCase.Compare(left, right);
+    }
+
+    private static int FontRegistrationPriority(string file)
+    {
+        string extension = Path.GetExtension(file);
+        if (!IsFontExtension(extension)) return int.MaxValue;
+
+        string fileName = Path.GetFileName(file);
+        string faceName = Path.GetFileNameWithoutExtension(file);
+        string family = FamilyFromName(faceName);
+        if (!IsChineseFamilyName(family, fileName)) return int.MaxValue;
+
+        string normalizedFamily = NormalizeFamily(family);
+        string selectedFamily = NormalizeFamily(DevToolUiSettings.ChineseFontFamily);
+        string defaultFamily = NormalizeFamily(DefaultChineseFamily);
+
+        int familyRank =
+            string.Equals(normalizedFamily, selectedFamily, StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : string.Equals(normalizedFamily, defaultFamily, StringComparison.OrdinalIgnoreCase)
+                    ? 1
+                    : 2;
+
+        int weightDistance = Math.Abs(InferWeight(faceName) - DevToolUiSettings.DefaultChineseFontWeight);
+        return familyRank * 10000 + weightDistance;
+    }
+
+    private static bool TryValidateFontFile(string path, out string reason)
+    {
+        reason = string.Empty;
+        try
+        {
+            FileInfo info = new(path);
+            if (!info.Exists)
+            {
+                reason = "file no longer exists";
+                return false;
+            }
+
+            if (info.Length < 1024)
+            {
+                reason = "file is too small to be a valid font";
+                return false;
+            }
+
+            if (info.Length > MaxLocalFontBytes)
+            {
+                reason = $"file exceeds the {MaxLocalFontBytes / (1024L * 1024L)} MiB safety limit";
+                return false;
+            }
+
+            byte[] header = new byte[4];
+            using (FileStream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (stream.Read(header, 0, header.Length) != header.Length)
+                {
+                    reason = "font header is truncated";
+                    return false;
+                }
+            }
+
+            bool supported =
+                (header[0] == 0x00 && header[1] == 0x01 && header[2] == 0x00 && header[3] == 0x00) ||
+                (header[0] == (byte)'O' && header[1] == (byte)'T' && header[2] == (byte)'T' && header[3] == (byte)'O') ||
+                (header[0] == (byte)'t' && header[1] == (byte)'t' && header[2] == (byte)'c' && header[3] == (byte)'f') ||
+                (header[0] == (byte)'t' && header[1] == (byte)'r' && header[2] == (byte)'u' && header[3] == (byte)'e') ||
+                (header[0] == (byte)'t' && header[1] == (byte)'y' && header[2] == (byte)'p' && header[3] == (byte)'1');
+
+            if (!supported)
+            {
+                reason = "unrecognized TrueType/OpenType/TTC header";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception error)
+        {
+            reason = error.Message;
+            return false;
+        }
     }
 
     private static void InvalidatePresentationCaches()

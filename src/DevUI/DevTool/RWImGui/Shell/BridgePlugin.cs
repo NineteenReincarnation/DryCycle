@@ -788,11 +788,29 @@ internal static class DevToolFrontend
     private static unsafe bool TryPushActiveFont()
     {
         DevToolUiLanguage language = DevToolUiSettings.Language;
-        string family =
-            language == DevToolUiLanguage.Chinese
-                ? DevToolUiSettings.ChineseFontFamily
-                : DevToolFontCatalog.UbuntuMonoFamily;
         int preferredWeight = DevToolUiSettings.FontWeight;
+
+        // English is the startup-safe path: use the font that RWImGui created for this exact
+        // consumer context. Avoid carrying a local ImFontPtr when no CJK coverage is required.
+        if (language == DevToolUiLanguage.English)
+        {
+            if (projectedFontLanguage != language ||
+                projectedFontWeight != preferredWeight ||
+                projectedFontFamily.Length != 0)
+            {
+                projectedFontLanguage = language;
+                projectedFontFamily = string.Empty;
+                projectedFontWeight = preferredWeight;
+                activeFont = default;
+                resolvedFontName = "Default";
+                resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+                resolvedFontWeightVariantCount = 1;
+            }
+
+            return false;
+        }
+
+        string family = DevToolUiSettings.ChineseFontFamily;
 
         if (projectedFontLanguage != language ||
             projectedFontWeight != preferredWeight ||
