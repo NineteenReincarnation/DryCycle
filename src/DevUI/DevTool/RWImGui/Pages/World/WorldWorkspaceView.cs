@@ -26,9 +26,7 @@ internal static class WorldWorkspaceView
 
     private enum ExplorerMode
     {
-        Rooms,
         Subregions,
-        Connections,
         Issues
     }
 
@@ -54,11 +52,15 @@ internal static class WorldWorkspaceView
 
     private sealed class SubregionSummary
     {
+        // Name is the authored subregion value. Empty means the room has no subregion and is
+        // presented as the synthetic "None" group in the explorer.
         internal string Name = string.Empty;
+        internal string DisplayName = string.Empty;
         internal int Count;
         internal int FirstRoom = -1;
         internal string CountText = string.Empty;
         internal string Label = string.Empty;
+        internal readonly List<RoomExplorerRow> Rooms = new();
     }
 
     private sealed class WorldIssue
@@ -98,7 +100,7 @@ internal static class WorldWorkspaceView
         set => workspaceMode = (WorkspaceMode)Math.Max(0, Math.Min(2, value));
     }
 
-    private static ExplorerMode explorerMode = ExplorerMode.Rooms;
+    private static ExplorerMode explorerMode = ExplorerMode.Subregions;
     private static SelectionKind selectionKind = SelectionKind.Region;
     private static string search = string.Empty;
     private static string selectedSubregion = string.Empty;
@@ -286,6 +288,7 @@ internal static class WorldWorkspaceView
         statusChinese = false;
         statusText = string.Empty;
 
+        explorerMode = ExplorerMode.Subregions;
         selectionKind = SelectionKind.Region;
         selectedSubregion = string.Empty;
         selectedConnectionId = string.Empty;
@@ -693,11 +696,7 @@ internal static class WorldWorkspaceView
     private static void DrawExplorer(EditorMapPresentationSnapshot snapshot)
     {
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("世界浏览器", "WORLD EXPLORER"));
-        DrawExplorerModeButton(ExplorerMode.Rooms, DevToolUiSettings.T("房间", "Rooms"), "WorldExplorerModeRooms");
-        ImGui.SameLine();
-        DrawExplorerModeButton(ExplorerMode.Subregions, DevToolUiSettings.T("子区域", "Subregions"), "WorldExplorerModeSubregions");
-        ImGui.SameLine();
-        DrawExplorerModeButton(ExplorerMode.Connections, DevToolUiSettings.T("连接", "Links"), "WorldExplorerModeConnections");
+        DrawExplorerModeButton(ExplorerMode.Subregions, DevToolUiSettings.T("子区域", "SubRegions"), "WorldExplorerModeSubregions");
         ImGui.SameLine();
         DrawExplorerModeButton(ExplorerMode.Issues, DevToolUiSettings.T("问题", "Issues"), "WorldExplorerModeIssues");
 
@@ -712,14 +711,8 @@ internal static class WorldWorkspaceView
 
         switch (explorerMode)
         {
-            case ExplorerMode.Rooms:
-                DrawRoomExplorer(snapshot);
-                break;
             case ExplorerMode.Subregions:
                 DrawSubregionExplorer(snapshot);
-                break;
-            case ExplorerMode.Connections:
-                DrawConnectionExplorer(snapshot);
                 break;
             case ExplorerMode.Issues:
                 DrawIssueExplorer(snapshot);
@@ -741,9 +734,7 @@ internal static class WorldWorkspaceView
         {
             RoomExplorerRow row = roomExplorerRows[i];
             EditorMapRoomSnapshot room = row.Room;
-            string status = WorldRoomStatusText(room);
-            string detail = WorldRoomDetailText(room);
-            if (!Matches(room.Name, room.Subregion, row.LayerToken) && !Matches(status, detail)) continue;
+            if (!RoomMatchesSearch(row)) continue;
             visible++;
 
             bool clicked = DevToolRoomExplorerEntry.Draw(
@@ -783,6 +774,14 @@ internal static class WorldWorkspaceView
         }
         projectedRoomRowsSource = rooms;
         roomExplorerRows = rows;
+    }
+
+    private static bool RoomMatchesSearch(RoomExplorerRow row)
+    {
+        EditorMapRoomSnapshot room = row.Room;
+        string status = WorldRoomStatusText(room);
+        string detail = WorldRoomDetailText(room);
+        return Matches(room.Name, room.Subregion, row.LayerToken) || Matches(status, detail);
     }
 
     private static string WorldRoomStatusText(EditorMapRoomSnapshot room)
@@ -828,28 +827,75 @@ internal static class WorldWorkspaceView
     private static void DrawSubregionExplorer(EditorMapPresentationSnapshot snapshot)
     {
         List<SubregionSummary> summaries = GetSubregions(snapshot);
-        int visible = 0;
+        bool searching = SearchQuery().Length > 0;
+        int visibleGroups = 0;
+
         for (int i = 0; i < summaries.Count; i++)
         {
             SubregionSummary summary = summaries[i];
-            if (!Matches(summary.Name, summary.CountText)) continue;
-            visible++;
+            bool groupMatches = Matches(summary.DisplayName, summary.CountText);
+            int matchingRooms = 0;
+            for (int r = 0; r < summary.Rooms.Count; r++)
+                if (RoomMatchesSearch(summary.Rooms[r])) matchingRooms++;
+
+            if (!groupMatches && matchingRooms == 0) continue;
+            visibleGroups++;
+
             bool selected = selectionKind == SelectionKind.Subregion &&
                             string.Equals(selectedSubregion, summary.Name, StringComparison.Ordinal);
-            ImGui.PushID(i);
-            bool clicked = ImGui.Selectable(summary.Label, selected);
-            ImGui.PopID();
-            if (!clicked) continue;
-            selectedSubregion = summary.Name;
-            selectionKind = SelectionKind.Subregion;
-            ClearConnectionSelection();
-            if (summary.FirstRoom >= 0)
+            ImGui.PushID("Subregion:" + (summary.Name.Length == 0 ? "<None>" : summary.Name));
+            if (searching) ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags.SpanAvailWidth | ImGuiTreeNodeFlags.FramePadding;
+            if (selected) flags |= ImGuiTreeNodeFlags.Selected;
+            bool open = ImGui.TreeNodeEx(summary.Label, flags);
+
+            if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
             {
-                lastObservedRoomIndex = summary.FirstRoom;
-                SelectRoom(summary.FirstRoom);
+                selectedSubregion = summary.Name;
+                selectionKind = SelectionKind.Subregion;
+                ClearConnectionSelection();
             }
+
+            if (open)
+            {
+                int visibleRooms = 0;
+                bool showWholeGroup = groupMatches;
+                for (int r = 0; r < summary.Rooms.Count; r++)
+                {
+                    RoomExplorerRow row = summary.Rooms[r];
+                    if (!showWholeGroup && !RoomMatchesSearch(row)) continue;
+
+                    EditorMapRoomSnapshot room = row.Room;
+                    visibleRooms++;
+                    bool clicked = DevToolRoomExplorerEntry.Draw(
+                        "WorldSubregionRoom:" + room.RoomIndex,
+                        room.Name,
+                        row.LayerToken,
+                        WorldRoomStatusText(room),
+                        WorldRoomDetailText(room),
+                        WorldRoomStatusColor(room),
+                        selectionKind == SelectionKind.Room && room.RoomIndex == snapshot.SelectedRoomIndex,
+                        WorldRoomTooltip(room));
+                    if (!clicked) continue;
+
+                    selectionKind = SelectionKind.Room;
+                    selectedSubregion = string.Empty;
+                    ClearConnectionSelection();
+                    lastObservedRoomIndex = room.RoomIndex;
+                    SelectRoom(room.RoomIndex);
+                }
+
+                if (visibleRooms == 0)
+                    DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的房间。", "No matching rooms."), true);
+                ImGui.TreePop();
+            }
+
+            ImGui.PopID();
         }
-        if (visible == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的子区域。", "No matching subregions."), true);
+
+        if (visibleGroups == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的子区域或房间。", "No matching subregions or rooms."), true);
     }
 
     private static void DrawConnectionExplorer(EditorMapPresentationSnapshot snapshot)
@@ -994,7 +1040,7 @@ internal static class WorldWorkspaceView
             }
         }
 
-        if (selectionKind == SelectionKind.Subregion && !string.IsNullOrEmpty(selectedSubregion))
+        if (selectionKind == SelectionKind.Subregion)
         {
             DrawSubregionInspector(snapshot);
             return;
@@ -1516,7 +1562,7 @@ internal static class WorldWorkspaceView
         for (int i = 0; i < summaries.Count; i++)
             if (string.Equals(summaries[i].Name, selectedSubregion, StringComparison.Ordinal)) match = summaries[i];
 
-        ImGui.TextUnformatted(selectedSubregion);
+        ImGui.TextUnformatted(match?.DisplayName ?? SubregionDisplayName(selectedSubregion));
         ImGui.Separator();
         DrawMetric(DevToolUiSettings.T("房间", "Rooms"), match?.CountText ?? "0");
         DevToolWidgets.MutedText(
@@ -1564,8 +1610,8 @@ internal static class WorldWorkspaceView
             selection = FindConnection(snapshot, selectedConnectionId) is { } connection
                 ? ConnectionLabel(snapshot, connection)
                 : snapshot.RegionName;
-        else if (selectionKind == SelectionKind.Subregion && !string.IsNullOrEmpty(selectedSubregion))
-            selection = selectedSubregion;
+        else if (selectionKind == SelectionKind.Subregion)
+            selection = SubregionDisplayName(selectedSubregion);
         else
         {
             EditorMapRoomSnapshot room = FindRoom(snapshot, snapshot.SelectedRoomIndex);
@@ -1611,33 +1657,47 @@ internal static class WorldWorkspaceView
         if (ReferenceEquals(projectedSubregionRooms, rooms) && projectedSubregionChinese == chinese)
             return SubregionSummaries;
 
+        EnsureRoomExplorerRows(snapshot);
         SubregionMap.Clear();
         SubregionSummaries.Clear();
-        for (int i = 0; i < rooms.Length; i++)
+        for (int i = 0; i < roomExplorerRows.Length; i++)
         {
-            string key = NormalizeSubregion(rooms[i].Subregion);
+            RoomExplorerRow row = roomExplorerRows[i];
+            EditorMapRoomSnapshot room = row.Room;
+            string key = NormalizeSubregion(room.Subregion);
             if (!SubregionMap.TryGetValue(key, out SubregionSummary summary))
             {
-                summary = new SubregionSummary { Name = key, FirstRoom = rooms[i].RoomIndex };
+                summary = new SubregionSummary
+                {
+                    Name = key,
+                    DisplayName = SubregionDisplayName(key),
+                    FirstRoom = room.RoomIndex
+                };
                 SubregionMap.Add(key, summary);
                 SubregionSummaries.Add(summary);
             }
             summary.Count++;
+            summary.Rooms.Add(row);
         }
         SubregionSummaries.Sort(CompareSubregions);
         for (int i = 0; i < SubregionSummaries.Count; i++)
         {
             SubregionSummary summary = SubregionSummaries[i];
             summary.CountText = summary.Count.ToString();
-            summary.Label = summary.Name + "  ·  " + summary.Count;
+            summary.Label = summary.DisplayName + "  ·  " + summary.Count;
         }
         projectedSubregionRooms = rooms;
         projectedSubregionChinese = chinese;
         return SubregionSummaries;
     }
 
-    private static int CompareSubregions(SubregionSummary a, SubregionSummary b) =>
-        string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+    private static int CompareSubregions(SubregionSummary a, SubregionSummary b)
+    {
+        bool aNone = a.Name.Length == 0;
+        bool bNone = b.Name.Length == 0;
+        if (aNone != bNone) return aNone ? -1 : 1;
+        return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static List<WorldIssue> GetIssues(EditorMapPresentationSnapshot snapshot)
     {
@@ -2016,7 +2076,10 @@ internal static class WorldWorkspaceView
     }
 
     private static string NormalizeSubregion(string value) =>
-        string.IsNullOrWhiteSpace(value) ? DevToolUiSettings.T("未分配", "Unassigned") : value.Trim();
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static string SubregionDisplayName(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "None" : value.Trim();
 
     private static string SearchQuery()
     {
