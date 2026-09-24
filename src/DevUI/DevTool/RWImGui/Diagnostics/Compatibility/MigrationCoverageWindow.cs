@@ -51,7 +51,7 @@ internal static class MigrationCoverageWindow
 
         if (observed == null || observed.TotalTypeCount == 0)
         {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("等待 DevUI 运行时扫描…", "Waiting for runtime DevUI scan…"));
+            DevToolWidgets.MutedText(DevToolUiSettings.T("等待 DevUI 运行时扫描...", "Waiting for runtime DevUI scan..."));
             ImGui.End();
             return;
         }
@@ -77,7 +77,7 @@ internal static class MigrationCoverageWindow
             DevToolWidgets.MutedText(
                 DevToolUiSettings.T("当前页面：", "Current page: ") +
                 (string.IsNullOrEmpty(page) ? "-" : page) +
-                DevToolUiSettings.T(" · 未映射 ", " · unmapped ") + currentUnmapped);
+                DevToolUiSettings.T(" | 未映射 ", " | unmapped ") + currentUnmapped);
 
             if (DevToolWidgets.ActionButton(
                     showMapped
@@ -110,8 +110,8 @@ internal static class MigrationCoverageWindow
         int mapped = Math.Max(0, snapshot.TotalTypeCount - snapshot.UnmappedTypeCount);
         ImGui.TextUnformatted(
             DevToolUiSettings.T("已观察 ", "Observed ") + snapshot.TotalTypeCount +
-            DevToolUiSettings.T(" 项 · 已映射 ", " obligations · mapped ") + mapped +
-            DevToolUiSettings.T(" · 未映射 ", " · unmapped ") + snapshot.UnmappedTypeCount);
+            DevToolUiSettings.T(" 项 | 已映射 ", " obligations | mapped ") + mapped +
+            DevToolUiSettings.T(" | 未映射 ", " | unmapped ") + snapshot.UnmappedTypeCount);
     }
 
     private static void DrawSourceSummaryLine(DevUiMigrationCoverageSnapshot snapshot)
@@ -152,11 +152,11 @@ internal static class MigrationCoverageWindow
             string state = StateLabel(entry.State);
             ImGui.TextWrapped("[" + state + "] " + ShortTypeName(entry.TypeName));
 
-            string id = string.IsNullOrEmpty(entry.ExampleId) ? string.Empty : " · id=" + entry.ExampleId;
-            string note = string.IsNullOrEmpty(entry.AdapterNote) ? string.Empty : " · " + entry.AdapterNote;
+            string id = string.IsNullOrEmpty(entry.ExampleId) ? string.Empty : " | id=" + entry.ExampleId;
+            string note = string.IsNullOrEmpty(entry.AdapterNote) ? string.Empty : " | " + entry.AdapterNote;
             DevToolWidgets.MutedText(
                 ShortTypeName(entry.PageType) + " / " + entry.Context + id +
-                " · x" + entry.InstanceCount + note);
+                " | x" + entry.InstanceCount + note);
         }
 
         ImGui.TreePop();

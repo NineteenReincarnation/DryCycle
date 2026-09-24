@@ -108,7 +108,7 @@ internal static class PlayerMapWorkspaceView
     {
         ImGui.TextUnformatted(DevToolUiSettings.T("玩家地图", "PLAYER MAP"));
         ImGui.SameLine();
-        DevToolWidgets.MutedText(snapshot.RegionName + " · " + snapshot.Rooms.Length +
+        DevToolWidgets.MutedText(snapshot.RegionName + " | " + snapshot.Rooms.Length +
                                  DevToolUiSettings.T(" 个房间", " rooms"));
         ImGui.SameLine(0f, 16f);
 
@@ -429,8 +429,8 @@ internal static class PlayerMapWorkspaceView
         ImGui.TextUnformatted(snapshot.RegionName);
         DevToolWidgets.MutedText(
             DevToolUiSettings.T(
-                "Player Map 默认由 World Layout ×1.5 派生；单房间拖动只记录 Offset，不会反向污染 World Layout。",
-                "Player Map derives from World Layout ×1.5 by default; room drags store offsets without mutating World Layout."),
+                "Player Map 默认由 World Layout x1.5 派生；单房间拖动只记录 Offset，不会反向污染 World Layout。",
+                "Player Map derives from World Layout x1.5 by default; room drags store offsets without mutating World Layout."),
             true);
         DrawMetric("Rooms", snapshot.Rooms.Length.ToString());
         DrawMetric("Def_Mat", snapshot.DefaultMaterials.Length.ToString());
@@ -523,7 +523,7 @@ internal static class PlayerMapWorkspaceView
 
         DevToolWidgets.SectionHeader("ROOM BAKE");
         DrawMetric("Status", room.Bake.Status.ToString());
-        DrawMetric("Size", room.Bake.Width + " × " + room.Bake.Height);
+        DrawMetric("Size", room.Bake.Width + " x " + room.Bake.Height);
         if (!string.IsNullOrWhiteSpace(room.Bake.Error))
             DevToolWidgets.MutedText(room.Bake.Error, true);
     }
@@ -605,14 +605,14 @@ internal static class PlayerMapWorkspaceView
         }
 
         DrawMetric("Result", report.Success ? (report.Exported ? "Exported" : "Preview ready") : "Blocked / Failed");
-        if (report.Width > 0 && report.Height > 0) DrawMetric("Output", report.Width + " × " + report.Height);
+        if (report.Width > 0 && report.Height > 0) DrawMetric("Output", report.Width + " x " + report.Height);
         if (report.IncludedRooms > 0) DrawMetric("Rooms", report.IncludedRooms.ToString());
         if (!string.IsNullOrWhiteSpace(report.OutputPath)) DevToolWidgets.MutedText(report.OutputPath, true);
         if (!string.IsNullOrWhiteSpace(report.Message)) DevToolWidgets.MutedText(report.Message, true);
         for (int i = 0; i < report.Errors.Length; i++)
-            ImGui.TextWrapped("ERROR · " + report.Errors[i]);
+            ImGui.TextWrapped("ERROR | " + report.Errors[i]);
         for (int i = 0; i < report.Warnings.Length; i++)
-            ImGui.TextWrapped("WARN · " + report.Warnings[i]);
+            ImGui.TextWrapped("WARN | " + report.Warnings[i]);
     }
 
     private static void DrawRawPreview(
@@ -775,6 +775,7 @@ internal static class PlayerMapWorkspaceIntegration
     private static bool cartographyActive;
 
     internal static bool Active => enabled && playerMapActive;
+    internal static bool CartographyActive => enabled && cartographyActive;
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -804,14 +805,15 @@ internal static class PlayerMapWorkspaceIntegration
             ExitSpecialView();
         }
 
-        ImGui.SameLine(0f, 8f);
+        ImGui.SameLine(0f, 14f);
         string label = playerMapActive
             ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
             : DevToolUiSettings.T("玩家地图", "Player Map");
-        if (DevToolWidgets.ActionButton(
+        if (DevToolWidgets.ToolbarButton(
                 label,
                 "WorldWorkspacePlayerMap",
-                playerMapActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                DevToolToolbarTone.PlayerMap,
+                playerMapActive))
         {
             if (cartographyActive) CartographyView.Leave();
             cartographyActive = false;
@@ -822,9 +824,12 @@ internal static class PlayerMapWorkspaceIntegration
                 PlayerMapActivityGate.Reset();
         }
 
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("制图", "Cartography"), "WorldWorkspaceCartography",
-                cartographyActive ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        ImGui.SameLine(0f, 6f);
+        if (DevToolWidgets.ToolbarButton(
+                DevToolUiSettings.T("制图", "Cartography"),
+                "WorldWorkspaceCartography",
+                DevToolToolbarTone.Cartography,
+                cartographyActive))
         {
             if (cartographyActive) ExitSpecialView();
             else { playerMapActive = false; cartographyActive = true; WorldWorkspaceView.WorkspaceModeValue = 0; }
@@ -901,19 +906,19 @@ internal static class PlayerMapPreflightPanel
             DrawMetric("Endpoint conflicts", preflight.DuplicateEndpointClaims.ToString());
         DrawMetric("Overlaps", preflight.OverlapPairs.ToString());
         if (preflight.Width > 0 && preflight.Height > 0)
-            DrawMetric("Output", preflight.Width + " × " + preflight.Height);
+            DrawMetric("Output", preflight.Width + " x " + preflight.Height);
 
         int errorLimit = Math.Min(6, preflight.Errors.Length);
         for (int i = 0; i < errorLimit; i++)
-            ImGui.TextWrapped("ERROR · " + preflight.Errors[i]);
+            ImGui.TextWrapped("ERROR | " + preflight.Errors[i]);
         if (preflight.Errors.Length > errorLimit)
-            ImGui.TextDisabled("… +" + (preflight.Errors.Length - errorLimit) + " errors");
+            ImGui.TextDisabled("... +" + (preflight.Errors.Length - errorLimit) + " errors");
 
         int warningLimit = Math.Min(5, preflight.Warnings.Length);
         for (int i = 0; i < warningLimit; i++)
-            ImGui.TextWrapped("WARN · " + preflight.Warnings[i]);
+            ImGui.TextWrapped("WARN | " + preflight.Warnings[i]);
         if (preflight.Warnings.Length > warningLimit)
-            ImGui.TextDisabled("… +" + (preflight.Warnings.Length - warningLimit) + " warnings");
+            ImGui.TextDisabled("... +" + (preflight.Warnings.Length - warningLimit) + " warnings");
     }
 
     private static void DrawMetric(string label, string value)
@@ -978,7 +983,7 @@ internal static class PlayerMapRenderProgressView
         string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
         string units = progress.ReadyRooms.ToString(CultureInfo.InvariantCulture) + " / " +
                        progress.TotalRooms.ToString(CultureInfo.InvariantCulture) + " rooms";
-        ImGui.TextDisabled(percent + "  ·  " + units);
+        ImGui.TextDisabled(percent + "  |  " + units);
         if (!string.IsNullOrWhiteSpace(progress.Detail))
             ImGui.TextWrapped(progress.Detail);
 
@@ -997,7 +1002,7 @@ internal static class PlayerMapRenderProgressView
 
         string percent = (progress.Progress * 100f).ToString("0.0", CultureInfo.InvariantCulture) + "%";
         string stagePercent = (progress.StageProgress * 100f).ToString("0", CultureInfo.InvariantCulture) + "%";
-        ImGui.TextDisabled(percent + "  ·  " + stagePercent + " " + DevToolUiSettings.T("阶段", "stage"));
+        ImGui.TextDisabled(percent + "  |  " + stagePercent + " " + DevToolUiSettings.T("阶段", "stage"));
 
         if (progress.TotalUnits > 1)
         {
@@ -1273,7 +1278,7 @@ internal static class PlayerMapCanvasAuthoring
         int layerHeight = (int)((maxY - minY) / PlayerMapCoordinateSystem.CanonPixelsPerTile) +
                           PlayerMapCoordinateSystem.OutputPadding * 2;
         int height = layerHeight * PlayerMapCoordinateSystem.LayerCount;
-        string label = "Render " + width + " × " + height + "  (" + PlayerMapCoordinateSystem.LayerCount + " layers)";
+        string label = "Render " + width + " x " + height + "  (" + PlayerMapCoordinateSystem.LayerCount + " layers)";
         draw.AddText(min + new Num.Vector2(5f, 4f), color, label);
     }
 

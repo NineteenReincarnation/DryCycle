@@ -1,0 +1,189 @@
+{
+  "version": 4,
+  "targets": {
+    "net48": {
+      "ILRepack.Lib.MSBuild.Task/2.0.46": {
+        "type": "package",
+        "build": {
+          "build/ILRepack.Lib.MSBuild.Task.targets": {}
+        },
+        "buildMultiTargeting": {
+          "buildMultiTargeting/ILRepack.Lib.MSBuild.Task.targets": {}
+        }
+      },
+      "NAudio.Core/2.2.1": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/NAudio.Core.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/NAudio.Core.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "NAudio.Wasapi/2.2.1": {
+        "type": "package",
+        "dependencies": {
+          "NAudio.Core": "2.2.1"
+        },
+        "compile": {
+          "lib/netstandard2.0/NAudio.Wasapi.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/NAudio.Wasapi.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "PolySharp/1.15.0": {
+        "type": "package",
+        "build": {
+          "buildTransitive/PolySharp.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "ILRepack.Lib.MSBuild.Task/2.0.46": {
+      "sha512": "g5a/rQndAn0OczzunFutw3nCzQcfq96i7SYRKV11sc0LO+KN0MDbDHo2znLBK5ZC7duaD1RC62OwlhFlnkPQuQ==",
+      "type": "package",
+      "path": "ilrepack.lib.msbuild.task/2.0.46",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "build/ILRepack.Lib.MSBuild.Task.dll",
+        "build/ILRepack.Lib.MSBuild.Task.targets",
+        "buildMultiTargeting/ILRepack.Lib.MSBuild.Task.targets",
+        "ilrepack.lib.msbuild.task.2.0.46.nupkg.sha512",
+        "ilrepack.lib.msbuild.task.nuspec"
+      ]
+    },
+    "NAudio.Core/2.2.1": {
+      "sha512": "GgkdP6K/7FqXFo7uHvoqGZTJvW4z8g2IffhOO4JHaLzKCdDOUEzVKtveoZkCuUX8eV2HAINqi7VFqlFndrnz/g==",
+      "type": "package",
+      "path": "naudio.core/2.2.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/NAudio.Core.dll",
+        "lib/netstandard2.0/NAudio.Core.xml",
+        "naudio-icon.png",
+        "naudio.core.2.2.1.nupkg.sha512",
+        "naudio.core.nuspec"
+      ]
+    },
+    "NAudio.Wasapi/2.2.1": {
+      "sha512": "lFfXoqacZZe0WqNChJgGYI+XV/n/61LzPHT3C1CJp4khoxeo2sziyX5wzNYWeCMNbsWxFvT3b3iXeY1UYjBhZw==",
+      "type": "package",
+      "path": "naudio.wasapi/2.2.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/NAudio.Wasapi.dll",
+        "lib/netstandard2.0/NAudio.Wasapi.xml",
+        "lib/uap10.0.18362/NAudio.Wasapi.dll",
+        "lib/uap10.0.18362/NAudio.Wasapi.pri",
+        "lib/uap10.0.18362/NAudio.Wasapi.xml",
+        "naudio-icon.png",
+        "naudio.wasapi.2.2.1.nupkg.sha512",
+        "naudio.wasapi.nuspec"
+      ]
+    },
+    "PolySharp/1.15.0": {
+      "sha512": "FbU0El+EEjdpuIX4iDbeS7ki1uzpJPx8vbqOzEtqnl1GZeAGJfq+jCbxeJL2y0EPnUNk8dRnnqR2xnYXg9Tf+g==",
+      "type": "package",
+      "path": "polysharp/1.15.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "analyzers/dotnet/cs/PolySharp.SourceGenerators.dll",
+        "build/PolySharp.targets",
+        "buildTransitive/PolySharp.targets",
+        "icon.png",
+        "polysharp.1.15.0.nupkg.sha512",
+        "polysharp.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net48": [
+      "ILRepack.Lib.MSBuild.Task >= 2.0.46",
+      "NAudio.Wasapi >= 2.2.1",
+      "PolySharp >= 1.15.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\src\\DryCycle.csproj",
+      "projectName": "DryCycle",
+      "projectPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\src\\DryCycle.csproj",
+      "packagesPath": "C:\\Users\\Orrhisk\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\src\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\Orrhisk\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "framework": "net48",
+          "targetAlias": "net48",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.400"
+    },
+    "frameworks": {
+      "net48": {
+        "framework": "net48",
+        "targetAlias": "net48",
+        "dependencies": {
+          "ILRepack.Lib.MSBuild.Task": {
+            "include": "Runtime, Build, Native, ContentFiles, Analyzers",
+            "suppressParent": "All",
+            "target": "Package",
+            "version": "[2.0.46, )"
+          },
+          "NAudio.Wasapi": {
+            "target": "Package",
+            "version": "[2.2.1, )"
+          },
+          "PolySharp": {
+            "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+            "suppressParent": "All",
+            "target": "Package",
+            "version": "[1.15.0, )"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401\\RuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

@@ -596,7 +596,7 @@ internal static class WorldMapPlayerLocator
         string role = string.IsNullOrWhiteSpace(marker.SlugcatId)
             ? DevToolUiSettings.T("未知角色", "Unknown slugcat")
             : marker.SlugcatId;
-        ImGui.TextUnformatted("P" + (marker.PlayerNumber + 1) + " · " + role);
+        ImGui.TextUnformatted("P" + (marker.PlayerNumber + 1) + " | " + role);
         ImGui.TextDisabled(room?.Name ?? marker.RoomIndex.ToString());
         if (marker.HasTilePosition)
             ImGui.TextDisabled($"{marker.TileX:0.0}, {marker.TileY:0.0}");

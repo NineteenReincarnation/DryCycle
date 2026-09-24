@@ -4,6 +4,7 @@
     <LangVersion>13</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UnityEditorDir Condition="'$(UnityEditorDir)' == ''">E:/Application/Unity/Editor</UnityEditorDir>
   </PropertyGroup>
   <ItemGroup>
@@ -11,5 +12,6 @@
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEditor.CoreModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEditor.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="System.Numerics" />
+    <Reference Include="ImGui.NET"><HintPath>D:/Steam/steamapps/workshop/content/312520/3417372413/plugins/ImGui.NET.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

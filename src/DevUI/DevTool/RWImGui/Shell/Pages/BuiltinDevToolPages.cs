@@ -75,8 +75,8 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     protected override string FormatSessionStatus(DevToolPageStatusState state) =>
         DevToolUiSettings.T("物件 ", "Objects ") + state.CountA +
-        DevToolUiSettings.T(" · 已选 ", " · Selected ") + state.CountB +
-        (state.Flag ? DevToolUiSettings.T(" · 放置 ", " · Placing ") + state.TextA : string.Empty);
+        DevToolUiSettings.T(" | 已选 ", " | Selected ") + state.CountB +
+        (state.Flag ? DevToolUiSettings.T(" | 放置 ", " | Placing ") + state.TextA : string.Empty);
 
     protected override void OnDeactivate()
     {
@@ -230,7 +230,7 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
     }
 
     protected override string FormatSessionStatus(DevToolPageStatusState state) =>
-        state.CountA + DevToolUiSettings.T(" 个房间 · ", " rooms · ") + state.TextA;
+        state.CountA + DevToolUiSettings.T(" 个房间 | ", " rooms | ") + state.TextA;
 
     protected override void OnReset()
     {
@@ -266,7 +266,7 @@ internal sealed class DialogDevToolPage : DevToolFrontendPageBase
     }
 
     protected override string FormatSessionStatus(DevToolPageStatusState state) =>
-        state.TextA + " · " + state.CountA + DevToolUiSettings.T(" 个事件", " events");
+        state.TextA + " | " + state.CountA + DevToolUiSettings.T(" 个事件", " events");
 
     protected override void OnReset() => DialogEditorView.ResetRetainedState();
 }

@@ -209,7 +209,7 @@ internal static class InGameFolderPicker
         for (int i = 0; i < entries.Length; i++)
         {
             string root = entries[i];
-            if (ImGui.Selectable("▣  " + root + "##FolderRoot" + i, false))
+            if (ImGui.Selectable(DevToolGlyphs.Root + "  " + root + "##FolderRoot" + i, false))
                 NavigateTo(root);
         }
     }
@@ -229,7 +229,7 @@ internal static class InGameFolderPicker
         {
             string path = entries[i];
             string name = SafeFileName(path);
-            if (ImGui.Selectable("▸  " + name + "##FolderEntry" + i, false))
+            if (ImGui.Selectable(DevToolGlyphs.Branch + "  " + name + "##FolderEntry" + i, false))
                 NavigateTo(path);
         }
     }

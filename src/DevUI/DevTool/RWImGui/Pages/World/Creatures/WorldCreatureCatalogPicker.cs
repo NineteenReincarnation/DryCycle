@@ -376,7 +376,7 @@ internal static class WorldCreatureCatalogPicker
 
         string popupId = "##CreatureCatalogPicker_" + widgetId;
         string current = string.IsNullOrWhiteSpace(creatureId)
-            ? DevToolUiSettings.T("选择生物…", "Choose creature…")
+            ? DevToolUiSettings.T("选择生物...", "Choose creature...")
             : creatureId;
         string fieldLabel =
             string.IsNullOrWhiteSpace(label)
@@ -392,7 +392,7 @@ internal static class WorldCreatureCatalogPicker
         string buttonLabel =
             stackedLabel
                 ? current
-                : fieldLabel + "  ·  " + current;
+                : fieldLabel + "  |  " + current;
 
         bool changed = false;
         if (DevToolWidgets.ActionButton(buttonLabel, "CreatureCatalogOpen_" + widgetId, DevToolButtonTone.Normal, true))
@@ -442,7 +442,7 @@ internal static class WorldCreatureCatalogPicker
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.InputTextWithHint(
                 "##CreatureCatalogSearch_" + widgetId,
-                DevToolUiSettings.T("搜索生物 ID 或 Mod…", "Search creature ID or mod…"),
+                DevToolUiSettings.T("搜索生物 ID 或 Mod...", "Search creature ID or mod..."),
                 ref search,
                 160))
             searchByPicker[popupId] = search;
@@ -469,7 +469,7 @@ internal static class WorldCreatureCatalogPicker
             if (snapshot.Groups.Length == 0)
             {
                 DevToolWidgets.MutedText(
-                    DevToolUiSettings.T("首次建立生物目录缓存…", "Building the creature catalog cache for the first time…"),
+                    DevToolUiSettings.T("首次建立生物目录缓存...", "Building the creature catalog cache for the first time..."),
                     true);
             }
             else
@@ -776,7 +776,7 @@ internal static class WorldCreatureCatalogPicker
     private static string FitText(string value, float maxWidth)
     {
         if (ImGui.CalcTextSize(value).X <= maxWidth) return value;
-        const string ellipsis = "…";
+        const string ellipsis = "...";
         int length = value.Length;
         while (length > 2)
         {

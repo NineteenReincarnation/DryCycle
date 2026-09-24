@@ -519,7 +519,9 @@ internal static class WorldMapExactShortcuts
 
         ImGuiIOPtr io = ImGui.GetIO();
         if (io.WantTextInput) return false;
-        bool requested = ImGui.IsKeyPressed(ImGuiKey.X) || ImGui.IsKeyPressed(ImGuiKey.Delete);
+        bool xRequested = ImGui.IsKeyPressed(ImGuiKey.X);
+        bool deleteRequested = ImGui.IsKeyPressed(ImGuiKey.Delete);
+        bool requested = xRequested || deleteRequested;
         if (!requested || string.IsNullOrEmpty(selected)) return false;
 
         EditorMapConnectionSnapshot connection = FindConnection(snapshot, selected);
@@ -539,6 +541,12 @@ internal static class WorldMapExactShortcuts
             nodeA: connection.FromNodeIndex,
             roomB: roomB.Name,
             nodeB: connection.ToNodeIndex));
+        EditorShortcutFeedback.PublishCustom(
+            "已删除地图连接",
+            "World Map connection deleted",
+            xRequested ? "X" : "Delete",
+            true,
+            EditorShortcutFeedbackVisual.Delete);
         return true;
     }
 

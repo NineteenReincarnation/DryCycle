@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -159,7 +160,16 @@ internal static class FloatingWindowSnap
         // Ctrl+G turns the current marquee selection into a persistent layout group.
         // Text input owns Ctrl+G while an ImGui text field is active.
         if (frameContext.GroupShortcutPressed)
-            CreateGroupFromSelection();
+        {
+            bool grouped =
+                CreateGroupFromSelection();
+            EditorShortcutFeedback.PublishCustom(
+                grouped ? "窗口已编组" : "至少选择两个窗口才能编组",
+                grouped ? "Windows grouped" : "Select at least two windows",
+                "Ctrl+G",
+                grouped,
+                grouped ? EditorShortcutFeedbackVisual.Group : EditorShortcutFeedbackVisual.Warning);
+        }
 
         // Shift + left click/drag is reserved for panel selection. Starting on empty space creates
         // a marquee; starting on a panel toggles that panel in the current selection.

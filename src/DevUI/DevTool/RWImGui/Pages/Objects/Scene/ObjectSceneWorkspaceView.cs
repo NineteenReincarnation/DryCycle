@@ -272,8 +272,8 @@ internal static class ObjectSceneWorkspaceView
             return statusText;
 
         statusText = chinese
-            ? $"已放置 {objectCount} 个物件 · 已选 {selectedCount}"
-            : $"{objectCount} placed · {selectedCount} selected";
+            ? $"已放置 {objectCount} 个物件 | 已选 {selectedCount}"
+            : $"{objectCount} placed | {selectedCount} selected";
         statusObjectCount = objectCount;
         statusSelectionCount = selectedCount;
         statusChinese = chinese;

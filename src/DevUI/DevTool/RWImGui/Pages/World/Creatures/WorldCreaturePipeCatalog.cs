@@ -99,9 +99,9 @@ internal static class WorldCreaturePipeCatalog
 
     internal static string Label(Entry entry)
     {
-        string label = "#" + entry.NodeIndex + " · " + entry.Type;
+        string label = "#" + entry.NodeIndex + " | " + entry.Type;
         if (entry.Unresolved)
-            label += " · " + DevToolUiSettings.T("未定位", "Unresolved");
+            label += " | " + DevToolUiSettings.T("未定位", "Unresolved");
         return label;
     }
 
@@ -112,7 +112,7 @@ internal static class WorldCreaturePipeCatalog
             for (int i = 0; i < entries.Count; i++)
                 if (entries[i].NodeIndex == nodeIndex) return Label(entries[i]);
         }
-        return "#" + nodeIndex + " · " + DevToolUiSettings.T("未定位", "Unresolved");
+        return "#" + nodeIndex + " | " + DevToolUiSettings.T("未定位", "Unresolved");
     }
 
     internal static void Clear() => roomCache.Clear();

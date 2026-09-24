@@ -54,10 +54,30 @@ internal static class DevToolScrollChrome
         bool hovered = ImGui.IsWindowHovered();
         float wheel = hovered ? Math.Abs(io.MouseWheel) : 0f;
 
+        Num.Vector2 hoverWindowPos = ImGui.GetWindowPos();
+        Num.Vector2 hoverWindowSize = ImGui.GetWindowSize();
+        float density = Density(uiScale);
+        float hoverBand = Math.Max(16f, 18f * density);
+        float hoverRight = hoverWindowPos.X + hoverWindowSize.X;
+        bool nearScrollbar =
+            hovered &&
+            io.MousePos.X >= hoverRight - hoverBand &&
+            io.MousePos.X <= hoverRight + 1f &&
+            io.MousePos.Y >= hoverWindowPos.Y &&
+            io.MousePos.Y <= hoverWindowPos.Y + hoverWindowSize.Y;
+
         if (wheel > 0.001f)
         {
             float impulse = Math.Min(1f, 0.62f + wheel * 0.24f);
             state.Activity = Math.Max(state.Activity, impulse);
+        }
+        else if (nearScrollbar)
+        {
+            // Keep the visual thumb expanded while the pointer is approaching the rail. The actual
+            // native ImGui hit target is widened separately by CompactSize(), so this animation is
+            // presentation-only and never reduces drag/click reliability.
+            float approach = 1f - (float)Math.Exp(-18f * dt);
+            state.Activity += (1f - state.Activity) * approach;
         }
         else
         {
@@ -72,7 +92,6 @@ internal static class DevToolScrollChrome
         float scrollMax = ImGui.GetScrollMaxY();
         if (scrollMax <= 0.5f) return;
 
-        float density = Density(uiScale);
         float compact = CompactSize(density);
         float expanded = ExpandedSize(density);
         float width = compact + (expanded - compact) * EaseOutCubic(state.Activity);
@@ -127,9 +146,11 @@ internal static class DevToolScrollChrome
     private static float Density(float uiScale) =>
         Math.Max(0.92f, Math.Min(1.28f, 0.74f + uiScale * 0.20f));
 
-    private static float CompactSize(float density) => 5.8f * density;
+    // The compact size is also ImGui's real mouse hit target. Keep it comfortably above the old
+    // ~3-6 px visual rail so the thumb can be grabbed without pixel hunting, even at 100% UI scale.
+    private static float CompactSize(float density) => Math.Max(10.5f, 11.5f * density);
 
-    private static float ExpandedSize(float density) => 12.8f * density;
+    private static float ExpandedSize(float density) => Math.Max(15.5f, 17.0f * density);
 
     private static float EaseOutCubic(float value)
     {

@@ -38,3 +38,10 @@ mod/plugins/*.pdb
 # OS
 .DS_Store
 Thumbs.db
+# Generated Unity caches inside build-validation projects
+.build-validation/**/UnityProject/Library/
+.build-validation/**/UnityProject/Temp/
+.build-validation/**/UnityProject/Logs/
+.build-validation/**/UnityProject/UserSettings/
+.build-validation/**/UnityProject/obj/
+.build-validation/**/UnityProject/.vs/

@@ -8,7 +8,7 @@ using Num = System.Numerics;
 
 // Executed by a real Unity Editor with graphics enabled. The test loads the deployed frontend;
 // no camera, mesh, material, transform, texture or render call is mocked.
-public static class MapRenderIsolationTests
+public static partial class MapRenderIsolationTests
 {
     private const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
     private static string game, plugins, output;
@@ -41,7 +41,9 @@ public static class MapRenderIsolationTests
             frontend = Assembly.LoadFrom(Path.Combine(plugins, "DryCycle.DevTool.RWImGui.dll"));
             results.Add("GPU: " + SystemInfo.graphicsDeviceType + " / " + SystemInfo.graphicsDeviceName);
             Check(SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null, "A real graphics device is active.");
+            InitializeTextureDevice();
             ExerciseRenderer();
+            ExerciseTexturePresentation();
             results.Add("PASS: " + checks + " real Unity/GPU assertions.");
         }
         catch (Exception error) { exit = 1; results.Add("FAIL: " + error); }
@@ -53,9 +55,7 @@ public static class MapRenderIsolationTests
     private static void ExerciseRenderer()
     {
         object surface = New("WorldMapRenderTextureSurface");
-        // RWImGUI's Present-thread registration is outside this GPU isolation test. All surface
-        // allocation, scene preparation, camera rendering, rollback and teardown remain production.
-        Set(surface, "initialized", true);
+        // The isolated editor uses the same real D3D11 device for RWImGUI's public texture API.
         object scene = New("WorldMapScene"), resources = New("WorldMapRoomResourceStore");
         Invoke(scene, "GetOrCreateRoom", 0);
         object routes = New("WorldMapConnectionResourceStore"), route = New("ConnectionRouteResource");

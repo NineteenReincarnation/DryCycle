@@ -54,8 +54,8 @@ internal static class SoundGroupProblemsWindow
         ImGui.TextColored(
             errors > 0 ? new Num.Vector4(1f, 0.42f, 0.40f, 1f) : new Num.Vector4(1f, 0.72f, 0.36f, 1f),
             DevToolUiSettings.T(
-                $"{errors} 个错误 · {warnings} 个警告",
-                $"{errors} errors · {warnings} warnings"));
+                $"{errors} 个错误 | {warnings} 个警告",
+                $"{errors} errors | {warnings} warnings"));
 
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(

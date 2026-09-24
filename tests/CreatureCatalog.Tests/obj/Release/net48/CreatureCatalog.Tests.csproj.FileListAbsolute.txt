@@ -1,0 +1,11 @@
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\bin\Release\net48\CreatureCatalog.Tests.exe.config
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\bin\Release\net48\CreatureCatalog.Tests.exe
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\bin\Release\net48\CreatureCatalog.Tests.pdb
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.csproj.AssemblyReference.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.AssemblyInfoInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.AssemblyInfo.cs
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.csproj.CoreCompileInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.sourcelink.json
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.exe
+C:\Users\Orrhisk\Desktop\DryCycle\tests\CreatureCatalog.Tests\obj\Release\net48\CreatureCatalog.Tests.pdb

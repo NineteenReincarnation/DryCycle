@@ -148,7 +148,7 @@ internal static class LanceScavengerDebugView
         int count = snapshot.Entries?.Length ?? 0;
         ImGui.TextColored(Accent, DevToolUiSettings.T("长枪拾荒者战斗诊断", "Lance Scavenger Combat Diagnostics"));
         ImGui.SameLine();
-        DevToolWidgets.MutedText("· " + room + " · " + count + DevToolUiSettings.T(" 个体", " units"));
+        DevToolWidgets.MutedText("| " + room + " | " + count + DevToolUiSettings.T(" 个体", " units"));
         ImGui.Spacing();
 
         bool changed = ImGui.Checkbox(
@@ -176,7 +176,7 @@ internal static class LanceScavengerDebugView
         if (entries.Length == 0)
         {
             DevToolWidgets.MutedText(recordingEnabled
-                ? DevToolUiSettings.T("等待长枪拾荒者数据…", "Waiting for Lance Scavenger data...")
+                ? DevToolUiSettings.T("等待长枪拾荒者数据...", "Waiting for Lance Scavenger data...")
                 : DevToolUiSettings.T("记录已关闭。", "Recording is off."));
             return;
         }
@@ -243,9 +243,9 @@ internal static class LanceScavengerDebugView
     private static void DrawDecision(LanceScavengerDebugEntrySnapshot entry)
     {
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("决策", "DECISION"));
-        KeyValue(DevToolUiSettings.T("状态", "State"), LocalizeState(entry.State) + "  ·  " + entry.StateAge + "f");
+        KeyValue(DevToolUiSettings.T("状态", "State"), LocalizeState(entry.State) + "  |  " + entry.StateAge + "f");
         KeyValue(DevToolUiSettings.T("行为", "Behavior"), entry.Behavior);
-        KeyValue(DevToolUiSettings.T("暴力等级", "Violence"), entry.Violence + (entry.Afraid ? DevToolUiSettings.T(" · 恐惧", " · Afraid") : string.Empty));
+        KeyValue(DevToolUiSettings.T("暴力等级", "Violence"), entry.Violence + (entry.Afraid ? DevToolUiSettings.T(" | 恐惧", " | Afraid") : string.Empty));
         KeyValue(DevToolUiSettings.T("目标", "Target"), string.IsNullOrEmpty(entry.Target) ? "-" : entry.Target);
         KeyValue(DevToolUiSettings.T("距离", "Distance"), entry.Distance.ToString("0.0") + " px");
         KeyValue(DevToolUiSettings.T("冷却", "Cooldown"), entry.Cooldown + "f");
@@ -271,7 +271,7 @@ internal static class LanceScavengerDebugView
         KeyValue(DevToolUiSettings.T("当前 BodyChunk", "Current BodyChunk"), Chunk(entry.TargetChunkIndex));
         KeyValue(DevToolUiSettings.T("最佳 BodyChunk", "Best BodyChunk"), Chunk(entry.BestTargetChunkIndex));
         KeyValue(DevToolUiSettings.T("预计命中帧", "Impact frame"), entry.ImpactFrame > 0 ? entry.ImpactFrame + "f" : "-");
-        KeyValue(DevToolUiSettings.T("枪角", "Lance pitch"), entry.LancePitchDegrees.ToString("+0.0;-0.0;0.0") + "°");
+        KeyValue(DevToolUiSettings.T("枪角", "Lance pitch"), entry.LancePitchDegrees.ToString("+0.0;-0.0;0.0") + " deg");
         KeyValue(DevToolUiSettings.T("精确解", "Exact solution"), YesNo(entry.ExactAim));
         KeyValue(DevToolUiSettings.T("瞄准点", "Aim point"), "(" + entry.AimX.ToString("0.0") + ", " + entry.AimY.ToString("0.0") + ")");
     }
@@ -433,15 +433,15 @@ internal static class LanceScavengerDebugView
 
         ImGui.Dummy(size);
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "蓝线 = 预测身体轨迹 · 黄细线 = 预测枪尖轨迹 · 白点 = 当前身体中心 · 黄粗线 = 当前长枪 · 蓝色块 = 当前瞄准 BodyChunk · 橙圈 = 38帧最佳 BodyChunk · 绿十字 = 预测瞄准点",
-            "Blue = predicted body path · thin yellow = predicted tip path · white = current body center · thick yellow = current lance · blue chunk = current target BodyChunk · orange ring = best BodyChunk in 38f · green cross = predicted aim point"));
+            "蓝线 = 预测身体轨迹 | 黄细线 = 预测枪尖轨迹 | 白点 = 当前身体中心 | 黄粗线 = 当前长枪 | 蓝色块 = 当前瞄准 BodyChunk | 橙圈 = 38帧最佳 BodyChunk | 绿十字 = 预测瞄准点",
+            "Blue = predicted body path | thin yellow = predicted tip path | white = current body center | thick yellow = current lance | blue chunk = current target BodyChunk | orange ring = best BodyChunk in 38f | green cross = predicted aim point"));
         DevToolWidgets.MutedText(DevToolUiSettings.T(
             "瞄准点周围：绿圈 = 目标半径 + 实际额外容差；紫圈 = 目标半径 + AI规划额外容差。枪刃自身宽度另算。",
             "Around the aim point: green = target radius + real extra padding; purple = target radius + AI planning padding. Blade width is additional."));
         KeyValue(DevToolUiSettings.T("实际额外容差", "Real extra padding"), "+" + entry.ActualBladeHitPadding.ToString("0.0") + " px");
         KeyValue(DevToolUiSettings.T("AI规划额外容差", "AI planning padding"), "+" + entry.PlanningBladeHitPadding.ToString("0.0") + " px");
         KeyValue(DevToolUiSettings.T("枪刃半宽", "Blade half-width"),
-            entry.BladeShoulderHalfWidth.ToString("0.00") + " → " + entry.BladeTipHalfWidth.ToString("0.00") + " px");
+            entry.BladeShoulderHalfWidth.ToString("0.00") + " -> " + entry.BladeTipHalfWidth.ToString("0.00") + " px");
     }
 
     private static void DrawAimHistory(LanceScavengerDebugEntrySnapshot entry)
@@ -511,8 +511,8 @@ internal static class LanceScavengerDebugView
         ImGui.Dummy(size);
 
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "蓝色带 = 架枪帧 · 绿点 = 当帧有可提交瞄准解 · 红柱 = 硬阻断",
-            "Blue band = brace frame · green dot = commit-capable aim · red mark = hard block"));
+            "蓝色带 = 架枪帧 | 绿点 = 当帧有可提交瞄准解 | 红柱 = 硬阻断",
+            "Blue band = brace frame | green dot = commit-capable aim | red mark = hard block"));
     }
 
     private static void DrawSafety(LanceScavengerDebugEntrySnapshot entry)

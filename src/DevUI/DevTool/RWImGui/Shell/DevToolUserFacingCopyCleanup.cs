@@ -30,7 +30,7 @@ internal static class DevToolUserFacingCopyCleanup
 
         if (text.IndexOf("首次建立生物目录缓存", StringComparison.Ordinal) >= 0 ||
             text.IndexOf("Building the creature catalog cache", StringComparison.OrdinalIgnoreCase) >= 0)
-            return DevToolUiSettings.T("正在载入生物…", "Loading creatures…");
+            return DevToolUiSettings.T("正在载入生物...", "Loading creatures...");
 
         return text;
     }
@@ -97,14 +97,14 @@ internal static class DevToolUserFacingCopyCleanup
         string phaseText = status.Phase switch
         {
             SoundActivationPhase.DiscoveringFileNames =>
-                DevToolUiSettings.T("正在查找可用的环境声音文件…", "Finding available ambient sound files…"),
+                DevToolUiSettings.T("正在查找可用的环境声音文件...", "Finding available ambient sound files..."),
             SoundActivationPhase.IndexingSamples =>
-                DevToolUiSettings.T("正在整理声音列表…", "Preparing the sound list…"),
+                DevToolUiSettings.T("正在整理声音列表...", "Preparing the sound list..."),
             SoundActivationPhase.LoadingGroups =>
-                DevToolUiSettings.T("正在载入音效组…", "Loading sound groups…"),
+                DevToolUiSettings.T("正在载入音效组...", "Loading sound groups..."),
             SoundActivationPhase.Failed =>
                 DevToolUiSettings.T("声音资源载入失败。请查看日志中的具体错误。", "Sound resources could not be loaded. Check the log for details."),
-            _ => DevToolUiSettings.T("正在准备声音编辑器…", "Preparing the Sound editor…")
+            _ => DevToolUiSettings.T("正在准备声音编辑器...", "Preparing the Sound editor...")
         };
 
         ImGui.TextWrapped(phaseText);
@@ -130,8 +130,8 @@ internal static class DevToolUserFacingCopyCleanup
             DevToolUiSettings.T("正在显示声音列表", "PREPARING SOUND LIST"),
             1.22f);
         ImGui.TextWrapped(DevToolUiSettings.T(
-            "正在整理当前声音列表…",
-            "Preparing the current sound list…"));
+            "正在整理当前声音列表...",
+            "Preparing the current sound list..."));
         return true;
     }
 }

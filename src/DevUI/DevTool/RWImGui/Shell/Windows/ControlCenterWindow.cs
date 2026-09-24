@@ -6,75 +6,44 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Unified command / UI / status surface for the rebuilt DevTool.
-/// This replaces the old three-window chrome with one readable control center so
-/// the room remains visible while the developer can still understand state at a glance.
-/// Shortcut discovery is intentionally delegated to ShortcutWindow.
+/// Compact presentation/settings surface for the rebuilt DevTool.
+///
+/// Command controls, room/session status and the EDITING/FOCUS badge intentionally do not live
+/// here. Save/undo/redo and other keyboard actions already have global shortcut feedback, while
+/// page-specific state belongs to the active workspace. Keeping only interface controls avoids
+/// duplicating information and leaves more of the room visible.
 /// </summary>
 internal static class ControlCenterWindow
 {
-    private static readonly Num.Vector4 CardBg = new(0.025f, 0.040f, 0.060f, 0.70f);
-    private static readonly Num.Vector4 CardBorder = new(0.20f, 0.30f, 0.42f, 0.72f);
     private static readonly Num.Vector4 AccentText = new(0.63f, 0.82f, 1.00f, 1f);
-    private static readonly Num.Vector4 BadgeBg = new(0.10f, 0.24f, 0.39f, 0.88f);
-    private static readonly Num.Vector4 BadgeBorder = new(0.30f, 0.58f, 0.92f, 0.95f);
-    private static readonly Num.Vector4 BadgeText = new(0.86f, 0.94f, 1.00f, 1f);
 
-    // ImGui child windows own an independent FontWindowScale. Without setting it explicitly,
-    // text inside cards falls back to 1.0 even when the surrounding DevTool pane is enlarged.
-    // CJK needs a little more body size because its glyphs read smaller at the same nominal scale.
-    private const float CardBodyScaleEnglish = 1.18f;
-    private const float CardBodyScaleChinese = 1.24f;
-    private const float CardTitleBoost = 1.10f;
-
-    private static bool headerModeProjectionValid;
-    private static EditorToolMode projectedHeaderMode;
-    private static bool projectedHeaderChinese;
-    private static string headerModeLabel = string.Empty;
-
-    private static bool placementProjectionValid;
-    private static string projectedPlacementType = string.Empty;
-    private static bool projectedPlacementChinese;
-    private static string placementLabel = string.Empty;
-
-    private static bool commandProjectionValid;
-    private static string projectedUndoSource = string.Empty;
-    private static string projectedRedoSource = string.Empty;
-    private static bool projectedCommandChinese;
-    private static string undoCommandLabel = string.Empty;
-    private static string redoCommandLabel = string.Empty;
+    private const float BodyScaleEnglish = 1.18f;
+    private const float BodyScaleChinese = 1.24f;
+    private const float TitleBoost = 1.10f;
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
 
-        // The frontend's outer layout push scales stock ImGui scrollbars too aggressively at large
-        // typography sizes. Override the active frame with the compact animated DevTool rail before
-        // any of this window's child regions are created.
+        // Keep the compact DevTool scrollbar treatment even though this window normally does not
+        // need to scroll. It matters on very small displays and at extreme font scales.
         DevToolScrollChrome.Apply(ImGui.GetIO(), scale);
 
-        float maxWidth = Math.Max(320f, display.X - 16f);
-        float width = Math.Min(
-            maxWidth,
-            Math.Max(Math.Min(660f, maxWidth), Math.Min(920f * Math.Min(1.18f, scale), display.X * 0.78f)));
-
-        // Height is only an initial seed. Once the window has drawn, FitWindowHeightToContents()
-        // keeps it exactly tall enough for the visible controls. This removes the dead Focus-mode
-        // rectangle and lets the information cards grow with the active language/font size.
-        float defaultHeight = snapshot.FocusMode
-            ? Math.Min(132f, Math.Max(86f, display.Y - 16f))
-            : Math.Min(360f, Math.Max(260f, display.Y - 16f));
-        float defaultX = Math.Max(8f, display.X - width - 8f);
+        float maxWidth = Math.Max(300f, display.X - 16f);
+        float preferredWidth = 430f * Math.Min(1.18f, scale);
+        float width = Math.Min(maxWidth, Math.Max(340f, preferredWidth));
+        float defaultX = 8f;
 
         ImGui.SetNextWindowPos(new Num.Vector2(defaultX, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, defaultHeight), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Num.Vector2(width, 190f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(560f, maxWidth), 72f),
-            new Num.Vector2(maxWidth, Math.Max(96f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(320f, maxWidth), 120f),
+            new Num.Vector2(maxWidth, Math.Max(140f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
-        if (!ImGui.Begin(DevToolUiSettings.T("总控###DevToolControlCenter", "Control Center###DevToolControlCenter"), flags))
+        if (!ImGui.Begin(
+                DevToolUiSettings.T("界面###DevToolControlCenter", "Interface###DevToolControlCenter"),
+                ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
             DrawPerformanceDiagnostics(display);
@@ -82,145 +51,24 @@ internal static class ControlCenterWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("ControlCenter");
+        DrawInterfacePanel();
 
-        DrawHeader(snapshot);
-        ImGui.Spacing();
-        DrawCommandRow(snapshot);
-
-        if (!snapshot.FocusMode)
-        {
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            DrawInformationRow(snapshot);
-        }
-
-        FitWindowHeightToContents(display, snapshot.FocusMode);
+        FitWindowHeightToContents(display);
         ImGui.End();
         DrawPerformanceDiagnostics(display);
     }
 
-    private static void DrawHeader(EditorPresentationSnapshot snapshot)
+    private static void DrawInterfacePanel()
     {
-        string room = CurrentRoom(snapshot);
+        float bodyScale = BodyScale();
+        ImGui.SetWindowFontScale(bodyScale * TitleBoost);
+        ImGui.TextColored(AccentText, DevToolUiSettings.T("界面", "INTERFACE"));
+        ImGui.SetWindowFontScale(bodyScale);
 
-        ImGui.SetWindowFontScale(1.10f);
-        ImGui.TextUnformatted(room);
-        ImGui.SetWindowFontScale(1f);
-        ImGui.SameLine();
-        DevToolWidgets.MutedText(GetHeaderModeLabel(snapshot.ToolMode));
-
-        if (snapshot.PlacementActive)
-        {
-            ImGui.SameLine(0f, 14f);
-            ImGui.TextColored(AccentText, GetPlacementLabel(snapshot.PlacementType));
-        }
-
-        string badge = snapshot.FocusMode
-            ? DevToolUiSettings.T("专注", "FOCUS")
-            : DevToolUiSettings.T("编辑中", "EDITING");
-        float badgeWidth = BadgeWidth(badge);
-        // RWImGui ships a trimmed ImGui.NET surface that does not expose
-        // GetWindowContentRegionMax(). Window width minus the active style padding gives the
-        // same right content edge without depending on that unavailable API.
-        float right = ImGui.GetWindowWidth() - ImGui.GetStyle().WindowPadding.X;
-        float current = ImGui.GetCursorPosX();
-        float badgeX = right - badgeWidth;
-        if (badgeX > current + 8f)
-        {
-            ImGui.SameLine();
-            ImGui.SetCursorPosX(badgeX);
-            DrawBadge(badge);
-        }
-    }
-
-    private static void DrawCommandRow(EditorPresentationSnapshot snapshot)
-    {
-        EnsureCommandLabels(snapshot.UndoLabel, snapshot.RedoLabel);
-
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("保存", "Save"),
-                "ControlCenterSave",
-                DevToolButtonTone.Primary))
-            Send(EditorUiCommandKind.Save);
-
-        ImGui.SameLine();
-        if (!snapshot.CanUndo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(undoCommandLabel, "ControlCenterUndo", DevToolButtonTone.Normal))
-            Send(EditorUiCommandKind.Undo);
-        if (!snapshot.CanUndo) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (!snapshot.CanRedo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(redoCommandLabel, "ControlCenterRedo", DevToolButtonTone.Normal))
-            Send(EditorUiCommandKind.Redo);
-        if (!snapshot.CanRedo) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                snapshot.FocusMode
-                    ? DevToolUiSettings.T("退出专注", "Exit Focus")
-                    : DevToolUiSettings.T("专注", "Focus"),
-                "ControlCenterFocus",
-                snapshot.FocusMode ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            Send(EditorUiCommandKind.ToggleFocus);
-    }
-
-    private static void DrawInformationRow(EditorPresentationSnapshot snapshot)
-    {
-        float available = ImGui.GetContentRegionAvail().X;
-        float gap = Math.Max(8f, ImGui.GetStyle().ItemSpacing.X);
-        bool twoColumns = available >= 560f;
-        float leftWidth = twoColumns ? Math.Max(250f, available * 0.48f) : available;
-
-        // These cards contain only a handful of controls and status rows. Let the child windows
-        // grow vertically to their content instead of giving them a scroll range. This also makes
-        // the SESSION card adapt to wrapped status text and to Chinese/English font differences.
-        ImGuiChildFlags cardFlags = ImGuiChildFlags.Borders |
-                                    ImGuiChildFlags.AutoResizeY |
-                                    ImGuiChildFlags.AlwaysAutoResize;
-
-        PushCardStyle();
-        if (ImGui.BeginChild("##ControlCenterInterface", new Num.Vector2(leftWidth, 0f), cardFlags))
-        {
-            ApplyCardBodyScale();
-            DrawInterfaceCard();
-        }
-        ImGui.EndChild();
-        PopCardStyle();
-
-        if (twoColumns)
-        {
-            ImGui.SameLine(0f, gap);
-            PushCardStyle();
-            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, 0f), cardFlags))
-            {
-                ApplyCardBodyScale();
-                DrawSessionCard(snapshot);
-            }
-            ImGui.EndChild();
-            PopCardStyle();
-        }
-        else
-        {
-            ImGui.Spacing();
-            PushCardStyle();
-            if (ImGui.BeginChild("##ControlCenterSession", new Num.Vector2(0f, 0f), cardFlags))
-            {
-                ApplyCardBodyScale();
-                DrawSessionCard(snapshot);
-            }
-            ImGui.EndChild();
-            PopCardStyle();
-        }
-    }
-
-    private static void DrawInterfaceCard()
-    {
-        DrawCardTitle(DevToolUiSettings.T("界面", "INTERFACE"));
         ImGui.Spacing();
 
-        float keyColumn = CardKeyColumn();
+        float keyColumn = KeyColumn();
+
         DevToolWidgets.MutedText(DevToolUiSettings.T("模式", "Mode"));
         ImGui.SameLine(keyColumn);
         bool vanilla = EditorUiModeState.UseVanilla;
@@ -229,6 +77,7 @@ internal static class ControlCenterWindow
                 "ControlCenterNewUi",
                 vanilla ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             EditorUiModeState.SetVanilla(false);
+
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("原版", "Vanilla"),
@@ -237,6 +86,7 @@ internal static class ControlCenterWindow
             EditorUiModeState.SetVanilla(true);
 
         ImGui.Spacing();
+
         DevToolWidgets.MutedText(DevToolUiSettings.T("语言", "Language"));
         ImGui.SameLine(keyColumn);
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
@@ -245,6 +95,7 @@ internal static class ControlCenterWindow
                 "ControlCenterChinese",
                 chinese ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
+
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 "English",
@@ -255,6 +106,7 @@ internal static class ControlCenterWindow
         if (!DevToolUserFacingCopyCleanup.HideNormalDiagnostics)
         {
             ImGui.Spacing();
+
             DevToolWidgets.MutedText(DevToolUiSettings.T("性能", "Profiling"));
             ImGui.SameLine(keyColumn);
             bool profiling = DevToolPerformanceMonitor.Enabled;
@@ -272,51 +124,16 @@ internal static class ControlCenterWindow
         }
     }
 
-    private static void DrawSessionCard(EditorPresentationSnapshot snapshot)
-    {
-        DrawCardTitle(DevToolUiSettings.T("会话", "SESSION"));
-        ImGui.Spacing();
+    private static float BodyScale() =>
+        DevToolUiSettings.IsChinese ? BodyScaleChinese : BodyScaleEnglish;
 
-        DrawKeyValue(DevToolUiSettings.T("房间", "Room"), CurrentRoom(snapshot));
-        ImGui.Spacing();
-        DrawKeyValue(DevToolUiSettings.T("工具", "Tool"), GetToolLabel(snapshot.ToolMode));
-        ImGui.Spacing();
-
-        DevToolWidgets.MutedText(DevToolUiSettings.T("状态", "Status"));
-        ImGui.SameLine(CardKeyColumn());
-        ImGui.TextWrapped(BuildStatusText(snapshot));
-    }
-
-    private static void DrawKeyValue(string key, string value)
-    {
-        DevToolWidgets.MutedText(key);
-        ImGui.SameLine(CardKeyColumn());
-        ImGui.TextUnformatted(string.IsNullOrEmpty(value) ? "-" : value);
-    }
-
-    private static void ApplyCardBodyScale()
-    {
-        ImGui.SetWindowFontScale(CardBodyScale());
-    }
-
-    private static void DrawCardTitle(string text)
-    {
-        float bodyScale = CardBodyScale();
-        ImGui.SetWindowFontScale(bodyScale * CardTitleBoost);
-        ImGui.TextColored(AccentText, text);
-        ImGui.SetWindowFontScale(bodyScale);
-    }
-
-    private static float CardBodyScale() =>
-        DevToolUiSettings.IsChinese ? CardBodyScaleChinese : CardBodyScaleEnglish;
-
-    private static float CardKeyColumn() =>
+    private static float KeyColumn() =>
         DevToolUiSettings.IsChinese ? 116f : 108f;
 
-    private static void FitWindowHeightToContents(Num.Vector2 display, bool focusMode)
+    private static void FitWindowHeightToContents(Num.Vector2 display)
     {
         ImGuiStylePtr style = ImGui.GetStyle();
-        float minimum = focusMode ? 82f : 180f;
+        float minimum = 126f;
         float maximum = Math.Max(minimum, display.Y - 16f);
         float desired = ImGui.GetCursorPosY() + style.WindowPadding.Y;
         desired = Math.Max(minimum, Math.Min(maximum, desired));
@@ -326,109 +143,6 @@ internal static class ControlCenterWindow
             ImGui.SetWindowSize(new Num.Vector2(current.X, desired), ImGuiCond.Always);
     }
 
-    private static string CurrentRoom(EditorPresentationSnapshot snapshot) =>
-        string.IsNullOrEmpty(snapshot.RoomName) ? snapshot.Document : snapshot.RoomName;
-
-    private static string GetHeaderModeLabel(EditorToolMode mode)
-    {
-        bool chinese = DevToolUiSettings.IsChinese;
-        if (headerModeProjectionValid && projectedHeaderMode == mode && projectedHeaderChinese == chinese)
-            return headerModeLabel;
-
-        projectedHeaderMode = mode;
-        projectedHeaderChinese = chinese;
-        headerModeProjectionValid = true;
-        headerModeLabel = "/ " + GetToolLabel(mode);
-        return headerModeLabel;
-    }
-
-    private static string GetToolLabel(EditorToolMode mode)
-    {
-        if (DevToolPageViewRegistry.TryGet(mode, out IDevToolPageView page))
-            return page.NavigationLabel;
-        return DevToolUiSettings.ToolMode(mode);
-    }
-
-    private static string GetPlacementLabel(string placementType)
-    {
-        string source = placementType ?? string.Empty;
-        bool chinese = DevToolUiSettings.IsChinese;
-        if (placementProjectionValid &&
-            projectedPlacementChinese == chinese &&
-            string.Equals(projectedPlacementType, source, StringComparison.Ordinal))
-            return placementLabel;
-
-        projectedPlacementChinese = chinese;
-        projectedPlacementType = source;
-        placementProjectionValid = true;
-        placementLabel = DevToolUiSettings.T("放置：", "Place: ") + source;
-        return placementLabel;
-    }
-
-    private static void EnsureCommandLabels(string undoSource, string redoSource)
-    {
-        undoSource ??= string.Empty;
-        redoSource ??= string.Empty;
-        bool chinese = DevToolUiSettings.IsChinese;
-        if (commandProjectionValid &&
-            projectedCommandChinese == chinese &&
-            string.Equals(projectedUndoSource, undoSource, StringComparison.Ordinal) &&
-            string.Equals(projectedRedoSource, redoSource, StringComparison.Ordinal))
-            return;
-
-        projectedCommandChinese = chinese;
-        projectedUndoSource = undoSource;
-        projectedRedoSource = redoSource;
-        commandProjectionValid = true;
-        undoCommandLabel = string.IsNullOrEmpty(undoSource)
-            ? DevToolUiSettings.T("撤销", "Undo")
-            : DevToolUiSettings.T("撤销 ", "Undo ") + undoSource;
-        redoCommandLabel = string.IsNullOrEmpty(redoSource)
-            ? DevToolUiSettings.T("重做", "Redo")
-            : DevToolUiSettings.T("重做 ", "Redo ") + redoSource;
-    }
-
-    private static string BuildStatusText(EditorPresentationSnapshot snapshot)
-    {
-        if (DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page))
-            return page.GetSessionStatus(snapshot);
-        return snapshot.Document ?? string.Empty;
-    }
-
-    private static void PushCardStyle()
-    {
-        ImGui.PushStyleColor(ImGuiCol.ChildBg, CardBg);
-        ImGui.PushStyleColor(ImGuiCol.Border, CardBorder);
-        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 5f);
-        ImGui.PushStyleVar(ImGuiStyleVar.ChildBorderSize, 1f);
-    }
-
-    private static void PopCardStyle()
-    {
-        ImGui.PopStyleVar(2);
-        ImGui.PopStyleColor(2);
-    }
-
-    private static float BadgeWidth(string text)
-    {
-        ImGuiStylePtr style = ImGui.GetStyle();
-        return ImGui.CalcTextSize(text).X + style.FramePadding.X * 2.4f;
-    }
-
-    private static void DrawBadge(string text)
-    {
-        ImGuiStylePtr style = ImGui.GetStyle();
-        Num.Vector2 textSize = ImGui.CalcTextSize(text);
-        Num.Vector2 padding = new(style.FramePadding.X * 1.2f, Math.Max(2f, style.FramePadding.Y * 0.65f));
-        Num.Vector2 pos = ImGui.GetCursorScreenPos();
-        Num.Vector2 size = textSize + padding * 2f;
-        ImDrawListPtr draw = ImGui.GetWindowDrawList();
-        draw.AddRectFilled(pos, pos + size, ImGui.GetColorU32(BadgeBg), 5f);
-        draw.AddRect(pos, pos + size, ImGui.GetColorU32(BadgeBorder), 5f);
-        draw.AddText(pos + padding, ImGui.GetColorU32(BadgeText), text);
-        ImGui.Dummy(size);
-    }
-
     private static void DrawPerformanceDiagnostics(Num.Vector2 display)
     {
         if (DevToolUserFacingCopyCleanup.HideNormalDiagnostics)
@@ -436,7 +150,4 @@ internal static class ControlCenterWindow
         if (DevToolPerformanceMonitor.Enabled)
             DevToolPerformanceWindow.Draw(display);
     }
-
-    private static void Send(EditorUiCommandKind kind) =>
-        EditorUiCommandQueue.Enqueue(new EditorUiCommand(kind));
 }

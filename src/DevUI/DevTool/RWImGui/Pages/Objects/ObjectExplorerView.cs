@@ -269,7 +269,7 @@ internal static class ObjectExplorerView
                 Item = item,
                 Category = category,
                 DisplayName = displayName,
-                TooltipText = (item.Source ?? string.Empty) + " · " + item.Type
+                TooltipText = (item.Source ?? string.Empty) + " | " + item.Type
             });
             objectLibraryMatchCount++;
         }
@@ -409,8 +409,8 @@ internal static class ObjectExplorerView
         sceneStatusSelectionCount = selectedCount;
         sceneStatusChinese = chinese;
         sceneStatusText = chinese
-            ? $"已放置 {objectCount} 个物件 · 已选 {selectedCount}"
-            : $"{objectCount} placed · {selectedCount} selected";
+            ? $"已放置 {objectCount} 个物件 | 已选 {selectedCount}"
+            : $"{objectCount} placed | {selectedCount} selected";
         return sceneStatusText;
     }
 

@@ -35,8 +35,9 @@ internal static class DevToolOverlay
         if (!lanceDebugPage)
             page?.DrawBackground(snapshot, display);
 
-        // Control Center is editor chrome rather than page content.
+        // Control Center and the collapsed shortcut orb are shared editor chrome rather than page content.
         ControlCenterWindow.Draw(snapshot, display);
+        ShortcutWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
             DrawActivityBar(snapshot, display);
@@ -68,6 +69,7 @@ internal static class DevToolOverlay
         placementLabelChinese = false;
         placementLabelText = string.Empty;
         lanceDebugPage = false;
+        ShortcutWindow.ResetRetainedState();
         LanceScavengerDebugView.StopCapture();
     }
 

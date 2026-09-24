@@ -227,7 +227,7 @@ internal static class DevToolPerformanceWindow
         ImGui.TextUnformatted(DevToolUiSettings.T("页面切换 / 构造", "Page switch / ctor"));
         DrawAt(LastColumn, FormatMilliseconds(SoundActivationPipeline.LastPageSwitchMilliseconds));
 
-        ImGui.TextUnformatted(DevToolUiSettings.T("点击 → Ready", "Click → Ready"));
+        ImGui.TextUnformatted(DevToolUiSettings.T("点击 -> Ready", "Click -> Ready"));
         DrawAt(LastColumn, FormatMilliseconds(status.ClickToReadyMilliseconds));
 
         ImGui.TextUnformatted(DevToolUiSettings.T("激活单帧峰值", "Activation frame max"));

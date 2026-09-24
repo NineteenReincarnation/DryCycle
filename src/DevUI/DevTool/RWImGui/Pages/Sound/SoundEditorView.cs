@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Objects;
 using DryCycle.DevUI.DevTool.Sound;
 using ImGuiNET;
@@ -205,7 +206,7 @@ internal static class SoundEditorView
 
             if (selected.Inherited) ImGui.EndDisabled();
             if (selected.Inherited)
-                ImGui.TextWrapped(DevToolUiSettings.T("继承声音 · 请修改来源模板，或添加本地覆盖。", "Inherited sound · edit its source template or add a local override."));
+                ImGui.TextWrapped(DevToolUiSettings.T("继承声音 | 请修改来源模板，或添加本地覆盖。", "Inherited sound | edit its source template or add a local override."));
         }
 
         if (selectedIndices.Length <= 1)
@@ -277,7 +278,15 @@ internal static class SoundEditorView
                      global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
 
         if (!ImGui.GetIO().WantTextInput && ctrl && global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.A))
+        {
             SoundWorkspaceState.SelectAll(sounds.Length);
+            EditorShortcutFeedback.PublishCustom(
+                sounds.Length > 0 ? "已全选声音" : "当前没有声音",
+                sounds.Length > 0 ? "All sounds selected" : "No sounds to select",
+                "Ctrl+A",
+                sounds.Length > 0,
+                sounds.Length > 0 ? EditorShortcutFeedbackVisual.Select : EditorShortcutFeedbackVisual.Warning);
+        }
 
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("全选", "Select All"),
@@ -296,7 +305,7 @@ internal static class SoundEditorView
         }
 
         DevToolWidgets.MutedText(
-            DevToolUiSettings.T("单击单选 · Ctrl 追加/取消 · Shift 范围选择 · Ctrl+A 全选", "Click selects · Ctrl toggles · Shift selects a range · Ctrl+A selects all"),
+            DevToolUiSettings.T("单击单选 | Ctrl 追加/取消 | Shift 范围选择 | Ctrl+A 全选", "Click selects | Ctrl toggles | Shift selects a range | Ctrl+A selects all"),
             true);
         ImGui.Separator();
 
@@ -402,8 +411,8 @@ internal static class SoundEditorView
             SceneRows.Add(new SoundSceneRow
             {
                 Sound = sound,
-                SelectedLabel = "☑ " + body,
-                NormalLabel = "☐ " + body
+                SelectedLabel = DevToolGlyphs.CheckedBox + " " + body,
+                NormalLabel = DevToolGlyphs.EmptyBox + " " + body
             });
         }
 
@@ -461,8 +470,8 @@ internal static class SoundEditorView
             return stateText;
 
         stateText = sound.Type;
-        if (sound.Inherited) stateText += chinese ? " · 继承" : " · Inherited";
-        else if (sound.OverWrite) stateText += chinese ? " · 覆盖模板" : " · Overrides template";
+        if (sound.Inherited) stateText += chinese ? " | 继承" : " | Inherited";
+        else if (sound.OverWrite) stateText += chinese ? " | 覆盖模板" : " | Overrides template";
         stateSound = sound;
         stateChinese = chinese;
         return stateText;
@@ -481,7 +490,7 @@ internal static class SoundEditorView
         activeGroupButtonId = id;
         activeGroupButtonName = name;
         activeGroupButtonChinese = chinese;
-        activeGroupButtonText = (chinese ? "加入工作组 · " : "Add to Working Group · ") + name;
+        activeGroupButtonText = (chinese ? "加入工作组 | " : "Add to Working Group | ") + name;
         return activeGroupButtonText;
     }
 

@@ -37,7 +37,8 @@ internal static class ActionToastOverlay
         // testable through the same generic renderer without adding another frontend callback.
         UniversalDevUiMirrorWindow.Draw(display);
 
-        ObserveShortcuts(snapshot, frameContext);
+        // Keyboard shortcuts use the global feedback channel. This legacy toast remains available
+        // for explicit non-shortcut action notifications only.
 
         // Most stable frames have no toast. Keep the common path free of ImGui time queries and
         // fade/layout work until an action actually activates the overlay.
@@ -112,84 +113,11 @@ internal static class ActionToastOverlay
         shortcutKeys = keys ?? string.Empty;
         renderedMessage = string.IsNullOrWhiteSpace(shortcutKeys)
             ? message
-            : message + "  ·  " + shortcutKeys;
+            : message + "  |  " + shortcutKeys;
         warning = isWarning;
         shownAt = ImGui.GetTime();
         toastActive = true;
     }
 
-    private static void ObserveShortcuts(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
-    {
-        // Shortcut acknowledgements only react to key-down edges. On the overwhelmingly common
-        // stable frame no key transitioned down, so avoid crossing into ImGui IO and avoid all
-        // modifier GetKey calls. This also keeps held Ctrl/Command alone at zero polling cost here.
-        if (!frameContext.AnyKeyDown) return;
 
-        if (frameContext.WantTextInput || EditorInputRouter.WantsTextInput) return;
-
-        bool ctrl = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftControl) ||
-                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightControl) ||
-                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftCommand) ||
-                    global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightCommand);
-        if (!ctrl)
-        {
-            if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Tab))
-                Notify(snapshot?.FocusMode == true ? "退出专注" : "进入专注", snapshot?.FocusMode == true ? "Exit Focus" : "Enter Focus", "Tab");
-            return;
-        }
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.S))
-        {
-            Notify("保存", "Save", "Ctrl+S");
-            return;
-        }
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Z))
-        {
-            // Shift is only relevant to Ctrl+Z. Avoid two additional native Unity input queries on
-            // every stable frame where no redo chord is being evaluated.
-            bool shift = global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.LeftShift) ||
-                         global::UnityEngine.Input.GetKey(global::UnityEngine.KeyCode.RightShift);
-            if (shift)
-            {
-                bool canRedo = snapshot?.CanRedo == true;
-                Notify(canRedo ? "重做" : "没有可重做内容", canRedo ? "Redo" : "Nothing to redo", "Ctrl+Shift+Z", !canRedo);
-            }
-            else
-            {
-                bool canUndo = snapshot?.CanUndo == true;
-                Notify(canUndo ? "撤销" : "没有可撤销内容", canUndo ? "Undo" : "Nothing to undo", "Ctrl+Z", !canUndo);
-            }
-            return;
-        }
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.Y))
-        {
-            bool canRedo = snapshot?.CanRedo == true;
-            Notify(canRedo ? "重做" : "没有可重做内容", canRedo ? "Redo" : "Nothing to redo", "Ctrl+Y", !canRedo);
-            return;
-        }
-
-        // These shortcuts are intentionally disabled behind Vanilla presentation, matching the
-        // core input router. Do not show a confirmation for a command that did not actually fire.
-        if (EditorUiModeState.UseVanilla) return;
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.D) && snapshot?.ToolMode == EditorToolMode.Objects)
-        {
-            int selected = snapshot.Inspector?.SelectionCount ?? 0;
-            Notify(selected > 0 ? "复制所选物件" : "没有选中物件", selected > 0 ? "Duplicate selection" : "Nothing selected", "Ctrl+D", selected <= 0);
-            return;
-        }
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.B))
-        {
-            Notify("切换浏览器", "Toggle Browser", "Ctrl+B");
-            return;
-        }
-
-        if (global::UnityEngine.Input.GetKeyDown(global::UnityEngine.KeyCode.I))
-        {
-            Notify("切换检查器", "Toggle Inspector", "Ctrl+I");
-        }
-    }
 }

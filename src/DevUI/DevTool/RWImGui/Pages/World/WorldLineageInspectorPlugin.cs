@@ -166,8 +166,8 @@ internal static class WorldLineageInspector
             WorldLineageRecord lineage = existing[i];
             string label = "#" + lineage.DenNode + "  " + StageSummary(lineage);
             if (!string.IsNullOrEmpty(lineage.TimelineFilter))
-                label += "  ·  " + (lineage.ExcludeTimeline ? "X-" : string.Empty) + lineage.TimelineFilter;
-            if (lineage.NightCreature) label += "  ·  Night";
+                label += "  |  " + (lineage.ExcludeTimeline ? "X-" : string.Empty) + lineage.TimelineFilter;
+            if (lineage.NightCreature) label += "  |  Night";
             presentedLabels[i] = label + "##LineageEntry";
         }
     }
@@ -258,14 +258,14 @@ internal static class WorldLineageInspector
         ImGui.Separator();
         ImGui.TextUnformatted(DevToolUiSettings.T("阶段 ", "Stage ") + (index + 1));
         ImGui.SameLine();
-        if (index > 0 && DevToolWidgets.ActionButton("↑", "LineageStageUp", DevToolButtonTone.Subtle))
+        if (index > 0 && DevToolWidgets.ActionButton(DevToolGlyphs.ArrowUp, "LineageStageUp", DevToolButtonTone.Subtle))
         {
             (stages[index - 1], stages[index]) = (stages[index], stages[index - 1]);
             ImGui.PopID();
             return;
         }
         ImGui.SameLine();
-        if (index + 1 < stages.Count && DevToolWidgets.ActionButton("↓", "LineageStageDown", DevToolButtonTone.Subtle))
+        if (index + 1 < stages.Count && DevToolWidgets.ActionButton(DevToolGlyphs.ArrowDown, "LineageStageDown", DevToolButtonTone.Subtle))
         {
             (stages[index + 1], stages[index]) = (stages[index], stages[index + 1]);
             ImGui.PopID();
@@ -318,7 +318,7 @@ internal static class WorldLineageInspector
                 "LineageTagPreset");
         if (ImGui.BeginCombo(
                 tagPresetLabel,
-                DevToolUiSettings.T("选择…", "Select…")))
+                DevToolUiSettings.T("选择...", "Select...")))
         {
             for (int i = 0; i < SpawnTagPresets.Length; i++)
             {
@@ -362,7 +362,7 @@ internal static class WorldLineageInspector
                 "LineageTimelinePreset");
         if (ImGui.BeginCombo(
                 timelinePresetLabel,
-                DevToolUiSettings.T("选择…", "Select…")))
+                DevToolUiSettings.T("选择...", "Select...")))
         {
             for (int i = 0; i < timelines.Count; i++)
             {
@@ -500,7 +500,7 @@ internal static class WorldLineageInspector
     {
         List<string> names = new();
         for (int i = 0; i < lineage.Stages.Count; i++) names.Add(lineage.Stages[i].Creature);
-        return string.Join(" → ", names);
+        return string.Join(" " + DevToolGlyphs.ArrowRight + " ", names);
     }
 
     private static void DrawTimelineMode(TimelineMode mode, string label)

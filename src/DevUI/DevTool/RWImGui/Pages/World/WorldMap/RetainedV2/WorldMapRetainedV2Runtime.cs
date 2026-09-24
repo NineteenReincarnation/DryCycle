@@ -614,52 +614,52 @@ internal static class WorldMapRetainedV2Runtime
     {
         ImGui.SameLine(0f, 12f);
         ImGui.TextDisabled(
-            "· WorldMap retained " +
+            "| WorldMap retained " +
             RenderSceneState.Rooms.Count + "/" +
             RenderSceneState.Connections.Count);
 
         if (!ImGui.IsItemHovered()) return;
 
         ImGui.BeginTooltip();
-        ImGui.TextUnformatted("World Map Retained V2 · hardened + cache V3");
+        ImGui.TextUnformatted("World Map Retained V2 | hardened + cache V3");
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
-            " · thumbnails " + RoomResources.CommittedThumbnailCount +
-            " · source-priority " + sourcePriorityRooms.Count);
+            " | thumbnails " + RoomResources.CommittedThumbnailCount +
+            " | source-priority " + sourcePriorityRooms.Count);
         ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
-            (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " · " + Surface.Error));
+            (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " | " + Surface.Error));
         ImGui.TextUnformatted("retained room objects: " + RoomRenderer.RetainedRoomCount);
         ImGui.TextUnformatted(
             "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
-            " · surface " + PresentedRouteCount +
-            " · route-set complete " + RetainedConnectionsReady);
+            " | surface " + PresentedRouteCount +
+            " | route-set complete " + RetainedConnectionsReady);
         ImGui.TextUnformatted(
             "persistent cache v3: validated rooms " +
             WorldMapPersistentRetainedCache.ValidatedRoomCount +
-            " · staged routes " +
+            " | staged routes " +
             WorldMapPersistentRetainedCache.StagedRouteCount +
-            " · source audit " +
+            " | source audit " +
             (WorldMapPersistentRetainedCache.RoomValidationComplete
                 ? "complete"
                 : "pending") +
             (WorldMapPersistentRetainedCache.TopologyRejected
-                ? " · topology rejected"
+                ? " | topology rejected"
                 : string.Empty));
         ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
-            " · visible " + visibleRooms.Count);
+            " | visible " + visibleRooms.Count);
         ImGui.TextUnformatted(
             "spatial routes: " + RouteSpatialIndex.Count +
-            " · visible " + visibleRoutes.Count);
+            " | visible " + visibleRoutes.Count);
         ImGui.TextUnformatted(
             "crossings: " + ConnectionResources.Crossings.Count +
-            " · checks " + ConnectionResources.CrossingCandidateChecks +
+            " | checks " + ConnectionResources.CrossingCandidateChecks +
             (ConnectionResources.CrossingBudgetLimited
-                ? " · density budget active"
+                ? " | density budget active"
                 : string.Empty));
         ImGui.TextUnformatted("scene revision: " + RenderSceneState.SceneRevision);
         ImGui.TextUnformatted("view revision: " + RenderSceneState.ViewRevision);

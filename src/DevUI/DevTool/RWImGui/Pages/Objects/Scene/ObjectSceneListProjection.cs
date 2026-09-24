@@ -160,8 +160,8 @@ internal static class ObjectSceneListProjection
                 Item = item,
                 Category = category,
                 Source = source,
-                Label = displayName + "  ·  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")",
-                TooltipText = source + " · " + (item.Type ?? string.Empty) + " · " + category
+                Label = displayName + "  |  (" + item.X.ToString("0") + ", " + item.Y.ToString("0") + ")",
+                TooltipText = source + " | " + (item.Type ?? string.Empty) + " | " + category
             };
             group.Rows.Add(row);
         }

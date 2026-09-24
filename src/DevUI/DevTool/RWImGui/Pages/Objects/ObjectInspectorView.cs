@@ -152,7 +152,7 @@ internal static class ObjectInspectorView
                     : metadata.Category;
                 identityMetadata = metadata;
                 identityChinese = chinese;
-                identitySubtitle = source + "  ·  " + category;
+                identitySubtitle = source + "  |  " + category;
             }
             DevToolWidgets.MutedText(identitySubtitle);
         }
@@ -173,7 +173,7 @@ internal static class ObjectInspectorView
     private static void DrawTransform(EditorInspectorSnapshot inspector)
     {
         DevToolWidgets.SectionHeader(inspector.SelectionCount > 1
-            ? DevToolUiSettings.T("变换 · 组锚点", "TRANSFORM · GROUP ANCHOR")
+            ? DevToolUiSettings.T("变换 | 组锚点", "TRANSFORM | GROUP ANCHOR")
             : DevToolUiSettings.T("变换", "TRANSFORM"));
 
         ImGui.SetNextItemWidth(-1f);

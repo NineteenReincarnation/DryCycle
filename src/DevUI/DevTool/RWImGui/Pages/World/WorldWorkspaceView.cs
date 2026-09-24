@@ -20,8 +20,7 @@ internal static class WorldWorkspaceView
     private enum WorkspaceMode
     {
         WorldMap,
-        WorldData,
-        Validation
+        WorldData
     }
 
     private enum ExplorerMode
@@ -97,7 +96,20 @@ internal static class WorldWorkspaceView
     internal static int WorkspaceModeValue
     {
         get => (int)workspaceMode;
-        set => workspaceMode = (WorkspaceMode)Math.Max(0, Math.Min(2, value));
+        set
+        {
+            // Compatibility migration: the retired Validation workspace used value 2.
+            // Reopen that state as World Map + Issues so validation remains available
+            // without occupying a separate top-level workspace.
+            if (value == 2)
+            {
+                workspaceMode = WorkspaceMode.WorldMap;
+                explorerMode = ExplorerMode.Issues;
+                return;
+            }
+
+            workspaceMode = (WorkspaceMode)Math.Max(0, Math.Min(1, value));
+        }
     }
 
     private static ExplorerMode explorerMode = ExplorerMode.Subregions;
@@ -202,7 +214,7 @@ internal static class WorldWorkspaceView
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(700f, 420f),
             new Num.Vector2(Math.Max(700f, display.X - 8f), Math.Max(420f, display.Y - 8f)));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
+        ImGui.SetNextWindowBgAlpha(PlayerMapWorkspaceIntegration.CartographyActive ? 1f : DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("世界工作区###DevToolWorldWorkspace", "World Workspace###DevToolWorldWorkspace"),
@@ -316,41 +328,56 @@ internal static class WorldWorkspaceView
         ImGui.TextUnformatted(snapshot.RegionName);
         ImGui.SameLine();
         DevToolWidgets.MutedText(GetToolbarRoomCount(snapshot.Rooms?.Length ?? 0));
-        ImGui.SameLine(0f, 18f);
+        ImGui.SameLine(0f, 16f);
 
-        DrawWorkspaceModeButton(WorkspaceMode.WorldMap, DevToolUiSettings.T("世界地图", "World Map"), "WorldWorkspaceModeMap");
-        ImGui.SameLine();
-        DrawWorkspaceModeButton(WorkspaceMode.WorldData, DevToolUiSettings.T("世界数据", "World Data"), "WorldWorkspaceModeData");
-        ImGui.SameLine();
-        DrawWorkspaceModeButton(WorkspaceMode.Validation, DevToolUiSettings.T("验证", "Validation"), "WorldWorkspaceModeValidation");
-
-        ImGui.SameLine(0f, 18f);
+        DrawWorkspaceModeButton(
+            WorkspaceMode.WorldMap,
+            DevToolUiSettings.T("世界地图", "World Map"),
+            "WorldWorkspaceModeMap",
+            DevToolToolbarTone.WorldMap);
+        ImGui.SameLine(0f, 6f);
+        DrawWorkspaceModeButton(
+            WorkspaceMode.WorldData,
+            DevToolUiSettings.T("世界数据", "World Data"),
+            "WorldWorkspaceModeData",
+            DevToolToolbarTone.WorldData);
+        ImGui.SameLine(0f, 16f);
         bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty ||
                         WorldTextRegistry.Dirty || WorldRoomAttractionRegistry.Dirty;
-        if (DevToolWidgets.ActionButton(
+        if (DevToolWidgets.ToolbarButton(
                 anyDirty ? DevToolUiSettings.T("保存修改", "Save Changes") : DevToolUiSettings.T("保存", "Save"),
                 "WorldWorkspaceSave",
-                anyDirty ? DevToolButtonTone.Primary : DevToolButtonTone.Normal))
+                DevToolToolbarTone.Save,
+                anyDirty))
         {
             // Save is a queued Core command. Do not persist individual files here: doing so races the
             // game-thread command and makes the toolbar behave differently from Ctrl/Cmd+S.
             Send(EditorUiCommandKind.Save);
         }
 
-        ImGui.SameLine();
+        ImGui.SameLine(0f, 6f);
         if (!editor.CanUndo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("撤销", "Undo"), "WorldWorkspaceUndo"))
+        if (DevToolWidgets.ToolbarButton(
+                DevToolUiSettings.T("撤销", "Undo"),
+                "WorldWorkspaceUndo",
+                DevToolToolbarTone.History))
             Send(EditorUiCommandKind.Undo);
         if (!editor.CanUndo) ImGui.EndDisabled();
 
-        ImGui.SameLine();
+        ImGui.SameLine(0f, 6f);
         if (!editor.CanRedo) ImGui.BeginDisabled();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("重做", "Redo"), "WorldWorkspaceRedo"))
+        if (DevToolWidgets.ToolbarButton(
+                DevToolUiSettings.T("重做", "Redo"),
+                "WorldWorkspaceRedo",
+                DevToolToolbarTone.History))
             Send(EditorUiCommandKind.Redo);
         if (!editor.CanRedo) ImGui.EndDisabled();
 
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("专注", "Focus"), "WorldWorkspaceFocus", DevToolButtonTone.Subtle))
+        ImGui.SameLine(0f, 8f);
+        if (DevToolWidgets.ToolbarButton(
+                DevToolUiSettings.T("专注", "Focus"),
+                "WorldWorkspaceFocus",
+                DevToolToolbarTone.Focus))
             Send(EditorUiCommandKind.ToggleFocus);
 
         PlayerMapWorkspaceIntegration.DrawToolbar(editor, snapshot);
@@ -363,16 +390,28 @@ internal static class WorldWorkspaceView
             return toolbarRoomCountText;
         toolbarRoomCount = count;
         toolbarRoomCountChinese = chinese;
-        toolbarRoomCountText = chinese ? "· " + count + " 个房间" : "· " + count + " rooms";
+        toolbarRoomCountText = chinese ? "| " + count + " 个房间" : "| " + count + " rooms";
         return toolbarRoomCountText;
     }
 
-    private static void DrawWorkspaceModeButton(WorkspaceMode mode, string label, string id)
+    private static void DrawWorkspaceModeButton(
+        WorkspaceMode mode,
+        string label,
+        string id,
+        DevToolToolbarTone tone)
     {
-        if (DevToolWidgets.ActionButton(
+        bool specialViewActive =
+            PlayerMapWorkspaceIntegration.Active ||
+            PlayerMapWorkspaceIntegration.CartographyActive;
+        bool active =
+            workspaceMode == mode &&
+            !(mode == WorkspaceMode.WorldMap && specialViewActive);
+
+        if (DevToolWidgets.ToolbarButton(
                 label,
                 id,
-                workspaceMode == mode ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                tone,
+                active))
         {
             PlayerMapWorkspaceIntegration.ExitSpecialView();
             workspaceMode = mode;
@@ -702,7 +741,12 @@ internal static class WorldWorkspaceView
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("世界浏览器", "WORLD EXPLORER"));
         DrawExplorerModeButton(ExplorerMode.Subregions, DevToolUiSettings.T("子区域", "SubRegions"), "WorldExplorerModeSubregions");
         ImGui.SameLine();
-        DrawExplorerModeButton(ExplorerMode.Issues, DevToolUiSettings.T("问题", "Issues"), "WorldExplorerModeIssues");
+
+        int issueCount = GetIssues(snapshot).Count;
+        string issuesLabel = DevToolUiSettings.IsChinese
+            ? "问题 " + issueCount
+            : "Issues " + issueCount;
+        DrawExplorerModeButton(ExplorerMode.Issues, issuesLabel, "WorldExplorerModeIssues");
 
         ImGui.Spacing();
         string explorerSearchLabel =
@@ -1045,7 +1089,7 @@ internal static class WorldWorkspaceView
 
         // Compact mode intentionally hides the count; hover still exposes the complete metadata.
         if (hovered && (clipped || !showCountBadge))
-            DevToolTooltip.Show(summary.DisplayName + " · " + summary.CountText);
+            DevToolTooltip.Show(summary.DisplayName + " | " + summary.CountText);
 
         return open;
     }
@@ -1145,6 +1189,28 @@ internal static class WorldWorkspaceView
     private static void DrawIssueExplorer(EditorMapPresentationSnapshot snapshot)
     {
         List<WorldIssue> issues = GetIssues(snapshot);
+        if (issues.Count == 0)
+        {
+            ImGui.TextUnformatted(DevToolUiSettings.T("验证通过", "Validation passed"));
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "当前检查覆盖孤立房间、未分配子区域、重复链接歧义、端点冲突和箭头与 world.txt 实际方向不一致。",
+                    "Checks cover isolated rooms, missing subregions, repeated-link ambiguity, endpoint conflicts and direction mismatches with world.txt."),
+                true);
+            return;
+        }
+
+        ImGui.TextUnformatted(
+            DevToolUiSettings.IsChinese
+                ? "发现 " + issues.Count + " 个问题"
+                : "Found " + issues.Count + " issue(s)");
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T(
+                "区域验证已合并到 Issues；点击房间问题会直接选中对应房间。",
+                "Region validation is merged into Issues; click a room issue to select that room."),
+            true);
+        ImGui.Separator();
+
         int visible = 0;
         for (int i = 0; i < issues.Count; i++)
         {
@@ -1163,8 +1229,9 @@ internal static class WorldWorkspaceView
             }
             if (!string.IsNullOrEmpty(issue.Detail)) DevToolWidgets.MutedText(issue.Detail, true);
         }
-        if (issues.Count == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有发现问题。", "No issues found."), true);
-        else if (visible == 0) DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的问题。", "No matching issues."), true);
+
+        if (visible == 0)
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的问题。", "No matching issues."), true);
     }
 
     private static void DrawCenter(EditorMapPresentationSnapshot snapshot)
@@ -1175,8 +1242,8 @@ internal static class WorldWorkspaceView
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("世界地图", "WORLD MAP"));
                 DevToolWidgets.MutedText(
                     DevToolUiSettings.T(
-                        "拖房间调整地图位置；拖 Exit 创建连接；点击连接后可改 ↔ / → / ←。房间缩略图包含 tile、曲面地形和 DryCycle 自定义地形。",
-                        "Drag rooms to arrange the map; drag Exits to link rooms; select a link to edit ↔ / → / ←. Room thumbnails include tiles, curved terrain and DryCycle custom terrain."),
+                        "拖房间调整地图位置；拖 Exit 创建连接；点击连接后可改 <-> / -> / <-。房间缩略图包含 tile、曲面地形和 DryCycle 自定义地形。",
+                        "Drag rooms to arrange the map; drag Exits to link rooms; select a link to edit <-> / -> / <-. Room thumbnails include tiles, curved terrain and DryCycle custom terrain."),
                     true);
                 WorldMapView.Draw(snapshot);
                 break;
@@ -1184,43 +1251,6 @@ internal static class WorldWorkspaceView
                 DevToolWidgets.PaneTitle(DevToolUiSettings.T("世界数据", "WORLD DATA"));
                 WorldWorkspaceDataView.Draw(snapshot);
                 break;
-            case WorkspaceMode.Validation:
-                DevToolWidgets.PaneTitle(DevToolUiSettings.T("区域验证", "REGION VALIDATION"));
-                DrawValidationCenter(snapshot);
-                break;
-        }
-    }
-
-    private static void DrawValidationCenter(EditorMapPresentationSnapshot snapshot)
-    {
-        List<WorldIssue> issues = GetIssues(snapshot);
-        if (issues.Count == 0)
-        {
-            ImGui.TextUnformatted(DevToolUiSettings.T("验证通过", "Validation passed"));
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T(
-                    "当前检查覆盖孤立房间、未分配子区域、重复链接歧义、端点冲突和箭头与 world.txt 实际方向不一致。",
-                    "Checks cover isolated rooms, missing subregions, repeated-link ambiguity, endpoint conflicts and direction mismatches with world.txt."),
-                true);
-            return;
-        }
-
-        ImGui.TextUnformatted(DevToolUiSettings.IsChinese ? "发现 " + issues.Count + " 个问题" : "Found " + issues.Count + " issue(s)");
-        ImGui.Separator();
-        for (int i = 0; i < issues.Count; i++)
-        {
-            WorldIssue issue = issues[i];
-            ImGui.PushID(i);
-            bool clicked = ImGui.Selectable(issue.Label);
-            ImGui.PopID();
-            if (clicked && issue.RoomIndex >= 0)
-            {
-                selectionKind = SelectionKind.Room;
-                ClearConnectionSelection();
-                lastObservedRoomIndex = issue.RoomIndex;
-                SelectRoom(issue.RoomIndex);
-            }
-            DevToolWidgets.MutedText(issue.Detail, true);
         }
     }
 
@@ -1444,7 +1474,7 @@ internal static class WorldWorkspaceView
                 string label = creatureId +
                                (string.IsNullOrEmpty(effective)
                                    ? string.Empty
-                                   : DevToolUiSettings.T(" · 继承=", " · inherited=") + effective);
+                                   : DevToolUiSettings.T(" | 继承=", " | inherited=") + effective);
                 if (ImGui.Selectable(label + "##AddRoomAttr" + i))
                     QueueRoomAttraction(room.RoomIndex, creatureId, newAttraction);
 
@@ -1644,25 +1674,25 @@ internal static class WorldWorkspaceView
 
     private static void DrawExistingDirectionButtons(string regionName, string edgeId, WorldConnectionDirection current)
     {
-        if (DirectionButton("↔", "WorldDirectionBoth", current == WorldConnectionDirection.Bidirectional))
+        if (DirectionButton(DevToolGlyphs.ArrowBoth, "WorldDirectionBoth", current == WorldConnectionDirection.Bidirectional))
             QueueDirection(regionName, edgeId, WorldConnectionDirection.Bidirectional);
         ImGui.SameLine();
-        if (DirectionButton("→", "WorldDirectionAToB", current == WorldConnectionDirection.AToB))
+        if (DirectionButton(DevToolGlyphs.ArrowRight, "WorldDirectionAToB", current == WorldConnectionDirection.AToB))
             QueueDirection(regionName, edgeId, WorldConnectionDirection.AToB);
         ImGui.SameLine();
-        if (DirectionButton("←", "WorldDirectionBToA", current == WorldConnectionDirection.BToA))
+        if (DirectionButton(DevToolGlyphs.ArrowLeft, "WorldDirectionBToA", current == WorldConnectionDirection.BToA))
             QueueDirection(regionName, edgeId, WorldConnectionDirection.BToA);
     }
 
     private static void DrawMappingDirectionButtons()
     {
-        if (DirectionButton("↔", "WorldDirectionNewBoth", mappingDirection == WorldConnectionDirection.Bidirectional))
+        if (DirectionButton(DevToolGlyphs.ArrowBoth, "WorldDirectionNewBoth", mappingDirection == WorldConnectionDirection.Bidirectional))
             mappingDirection = WorldConnectionDirection.Bidirectional;
         ImGui.SameLine();
-        if (DirectionButton("→", "WorldDirectionNewAToB", mappingDirection == WorldConnectionDirection.AToB))
+        if (DirectionButton(DevToolGlyphs.ArrowRight, "WorldDirectionNewAToB", mappingDirection == WorldConnectionDirection.AToB))
             mappingDirection = WorldConnectionDirection.AToB;
         ImGui.SameLine();
-        if (DirectionButton("←", "WorldDirectionNewBToA", mappingDirection == WorldConnectionDirection.BToA))
+        if (DirectionButton(DevToolGlyphs.ArrowLeft, "WorldDirectionNewBToA", mappingDirection == WorldConnectionDirection.BToA))
             mappingDirection = WorldConnectionDirection.BToA;
     }
 
@@ -1729,10 +1759,10 @@ internal static class WorldWorkspaceView
 
     private static void DrawDirtyHints()
     {
-        if (WorldTextRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("world.txt · 未保存", "world.txt · unsaved"));
-        if (WorldTopologyRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("WorldTopology.json · 未保存", "WorldTopology.json · unsaved"));
-        if (WorldWorkspaceDataView.HasDirtyData) DevToolWidgets.MutedText(DevToolUiSettings.T("世界数据 · 未保存", "World data · unsaved"));
-        if (WorldRoomAttractionRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("Properties.txt · 未保存", "Properties.txt · unsaved"));
+        if (WorldTextRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("world.txt | 未保存", "world.txt | unsaved"));
+        if (WorldTopologyRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("WorldTopology.json | 未保存", "WorldTopology.json | unsaved"));
+        if (WorldWorkspaceDataView.HasDirtyData) DevToolWidgets.MutedText(DevToolUiSettings.T("世界数据 | 未保存", "World data | unsaved"));
+        if (WorldRoomAttractionRegistry.Dirty) DevToolWidgets.MutedText(DevToolUiSettings.T("Properties.txt | 未保存", "Properties.txt | unsaved"));
     }
 
     private static void DrawStatus(EditorMapPresentationSnapshot snapshot)
@@ -1772,22 +1802,19 @@ internal static class WorldWorkspaceView
             EditorMapRoomSnapshot room = FindRoom(snapshot, snapshot.SelectedRoomIndex);
             selection = room == null
                 ? snapshot.RegionName
-                : room.Name + " · " + MapRoomLayer.Label(room.Layer) +
-                  (string.IsNullOrEmpty(room.Subregion) ? string.Empty : " · " + room.Subregion);
+                : room.Name + " | " + MapRoomLayer.Label(room.Layer) +
+                  (string.IsNullOrEmpty(room.Subregion) ? string.Empty : " | " + room.Subregion);
         }
 
-        string mode = workspaceMode switch
-        {
-            WorkspaceMode.WorldMap => DevToolUiSettings.T("世界地图", "World Map"),
-            WorkspaceMode.WorldData => DevToolUiSettings.T("世界数据", "World Data"),
-            _ => DevToolUiSettings.T("验证", "Validation")
-        };
+        string mode = workspaceMode == WorkspaceMode.WorldData
+            ? DevToolUiSettings.T("世界数据", "World Data")
+            : DevToolUiSettings.T("世界地图", "World Map");
         string dirty = string.Empty;
-        if (worldTextDirty) dirty += DevToolUiSettings.T(" · world.txt 未保存", " · world.txt dirty");
-        if (topologyDirty) dirty += DevToolUiSettings.T(" · 拓扑未保存", " · topology dirty");
-        if (worldDataDirty) dirty += DevToolUiSettings.T(" · 世界数据未保存", " · world data dirty");
-        if (propertiesDirty) dirty += DevToolUiSettings.T(" · Properties 未保存", " · Properties dirty");
-        statusText = selection + "   ·   " + mode + "   ·   " + connections.Length +
+        if (worldTextDirty) dirty += DevToolUiSettings.T(" | world.txt 未保存", " | world.txt dirty");
+        if (topologyDirty) dirty += DevToolUiSettings.T(" | 拓扑未保存", " | topology dirty");
+        if (worldDataDirty) dirty += DevToolUiSettings.T(" | 世界数据未保存", " | world data dirty");
+        if (propertiesDirty) dirty += DevToolUiSettings.T(" | Properties 未保存", " | Properties dirty");
+        statusText = selection + "   |   " + mode + "   |   " + connections.Length +
                      DevToolUiSettings.T(" 条连接", " links") + dirty;
 
         statusRooms = rooms;
@@ -1839,7 +1866,7 @@ internal static class WorldWorkspaceView
         {
             SubregionSummary summary = SubregionSummaries[i];
             summary.CountText = summary.Count.ToString();
-            summary.Label = summary.DisplayName + "  ·  " + summary.Count;
+            summary.Label = summary.DisplayName + "  |  " + summary.Count;
         }
         projectedSubregionRooms = rooms;
         projectedSubregionChinese = chinese;
@@ -1919,7 +1946,7 @@ internal static class WorldWorkspaceView
             (roomName, nodeIndex) => FindNode(FindRoom(snapshot, roomName), nodeIndex)?.Exit == true);
         for (int i = 0; i < topologyIssues.Count; i++)
         {
-            AddIssue(-1, "WorldTopology · " + topologyIssues[i].Kind, topologyIssues[i].Message);
+            AddIssue(-1, "WorldTopology | " + topologyIssues[i].Kind, topologyIssues[i].Message);
         }
 
         projectedIssueRooms = rooms;
@@ -1937,7 +1964,7 @@ internal static class WorldWorkspaceView
             RoomIndex = roomIndex,
             Title = title ?? string.Empty,
             Detail = detail ?? string.Empty,
-            Label = "⚠ " + (title ?? string.Empty)
+            Label = DevToolGlyphs.Warning + " " + (title ?? string.Empty)
         });
     }
 

@@ -1,0 +1,45 @@
+--- Region loading
+
+equivalences.txt
+regioncolor.txt (Region.RegionColor)
+Room settings templates
+Threaded region loading
+
+
+--- UI
+
+Use collapsed panels
+Text presets
+Dynamically position diamonds
+Color selection for shortcut types
+Warnings system (2 wide gaps in connections)
+Show available key combos (which were polled duting update call)
+Water color invlerp in color picker
+
+
+--- Future
+
+Add vista point icons when rules are resolved, TravellerA 150 trans
+
+
+--- Fixes/optimizations
+
+Optimize image rendering:
+    RE and use ZIP in PSD
+Fix hack with "To Region" by making a property to manually load/save position data
+Better room selection - check if clicked pixel is transparent
+
+
+--- ---
+
+Paste image
+
+Switch slugcats after region load
++ properties.txt
++ room_settings.txt
++ world_xx.txt
++ map_xx.txt
++ displayname.txt
+
+Exclusive keybinds
+Discord RPC

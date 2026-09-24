@@ -124,8 +124,8 @@ internal static class GroupStatusWindow
             {
                 Id = group.Id,
                 Header = DevToolUiSettings.T(
-                             $"组 {group.Id} · {members.Length} 个窗口",
-                             $"Group {group.Id} · {members.Length} windows") +
+                             $"组 {group.Id} | {members.Length} 个窗口",
+                             $"Group {group.Id} | {members.Length} windows") +
                          "##DevToolGroup" + group.Id,
                 SelectLabel = DevToolUiSettings.T("选中整组##SelectGroup", "Select Group##SelectGroup") + group.Id,
                 DissolveLabel = DevToolUiSettings.T("解散##DissolveGroup", "Dissolve##DissolveGroup") + group.Id,

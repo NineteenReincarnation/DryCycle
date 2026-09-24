@@ -13,6 +13,18 @@ internal enum DevToolButtonTone
     Subtle
 }
 
+internal enum DevToolToolbarTone
+{
+    WorldMap,
+    WorldData,
+    Validation,
+    Save,
+    History,
+    Focus,
+    PlayerMap,
+    Cartography
+}
+
 /// <summary>
 /// Shared visual language for the RWImGui editor.
 /// Keep these widgets deliberately simple so they remain compatible with the
@@ -214,6 +226,87 @@ internal static class DevToolWidgets
         ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(3);
         return pressed;
+    }
+
+    /// <summary>
+    /// Larger, colour-coded button used only by the World Workspace top toolbar.
+    /// The normal state stays dark so the row does not become a rainbow strip; the semantic accent
+    /// lives in the border/underline and becomes a filled surface for the active mode.
+    /// </summary>
+    internal static bool ToolbarButton(
+        string label,
+        string id,
+        DevToolToolbarTone tone,
+        bool active = false)
+    {
+        label = StripInlineShortcutHint(label);
+
+        Num.Vector4 accent = tone switch
+        {
+            DevToolToolbarTone.WorldMap => new Num.Vector4(0.29f, 0.58f, 0.95f, 1f),
+            DevToolToolbarTone.WorldData => new Num.Vector4(0.25f, 0.70f, 0.68f, 1f),
+            DevToolToolbarTone.Validation => new Num.Vector4(0.92f, 0.68f, 0.28f, 1f),
+            DevToolToolbarTone.Save => new Num.Vector4(0.31f, 0.73f, 0.49f, 1f),
+            DevToolToolbarTone.History => new Num.Vector4(0.55f, 0.63f, 0.74f, 1f),
+            DevToolToolbarTone.Focus => new Num.Vector4(0.65f, 0.49f, 0.88f, 1f),
+            DevToolToolbarTone.PlayerMap => new Num.Vector4(0.25f, 0.68f, 0.93f, 1f),
+            DevToolToolbarTone.Cartography => new Num.Vector4(0.91f, 0.57f, 0.26f, 1f),
+            _ => Accent
+        };
+
+        Num.Vector4 normal = active
+            ? new Num.Vector4(accent.X * 0.54f, accent.Y * 0.54f, accent.Z * 0.54f, 0.94f)
+            : new Num.Vector4(0.105f, 0.12f, 0.15f, 0.90f);
+        Num.Vector4 hovered = active
+            ? new Num.Vector4(accent.X * 0.72f, accent.Y * 0.72f, accent.Z * 0.72f, 0.98f)
+            : new Num.Vector4(
+                0.105f + accent.X * 0.22f,
+                0.12f + accent.Y * 0.22f,
+                0.15f + accent.Z * 0.22f,
+                0.96f);
+        Num.Vector4 pressed =
+            new Num.Vector4(accent.X * 0.82f, accent.Y * 0.82f, accent.Z * 0.82f, 1f);
+        Num.Vector4 border = active
+            ? accent
+            : new Num.Vector4(accent.X, accent.Y, accent.Z, 0.68f);
+        Num.Vector4 text = active
+            ? new Num.Vector4(0.97f, 0.985f, 1f, 1f)
+            : new Num.Vector4(0.88f, 0.91f, 0.95f, 1f);
+
+        // Slightly larger than ActionButton: the old top row was visually tidy but too small to
+        // scan and hit quickly. Keep horizontal growth modest so the full toolbar still fits at
+        // common 1080p / narrow-window widths.
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5.5f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, active ? 1.35f : 1f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Num.Vector2(11f, 6.5f));
+        ImGui.PushStyleColor(ImGuiCol.Button, normal);
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, hovered);
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, pressed);
+        ImGui.PushStyleColor(ImGuiCol.Border, border);
+        ImGui.PushStyleColor(ImGuiCol.Text, text);
+
+        ImGui.PushID(id ?? string.Empty);
+        bool pressedButton = ImGui.Button(label ?? string.Empty, Num.Vector2.Zero);
+        ImGui.PopID();
+
+        Num.Vector2 min = ImGui.GetItemRectMin();
+        Num.Vector2 max = ImGui.GetItemRectMax();
+        float underlineHeight = active ? 2.5f : 1.5f;
+        Num.Vector4 underline = active
+            ? accent
+            : new Num.Vector4(accent.X, accent.Y, accent.Z, 0.76f);
+        if (max.X - min.X > 8f && max.Y - min.Y > 4f)
+        {
+            ImGui.GetWindowDrawList().AddRectFilled(
+                new Num.Vector2(min.X + 4f, max.Y - underlineHeight - 1f),
+                new Num.Vector2(max.X - 4f, max.Y - 1f),
+                ImGui.GetColorU32(underline),
+                1f);
+        }
+
+        ImGui.PopStyleColor(5);
+        ImGui.PopStyleVar(3);
+        return pressedButton;
     }
 
     internal static bool ActionButton(string label, string id, DevToolButtonTone tone = DevToolButtonTone.Normal, bool fullWidth = false)

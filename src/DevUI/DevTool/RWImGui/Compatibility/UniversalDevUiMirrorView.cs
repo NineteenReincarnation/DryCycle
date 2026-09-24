@@ -40,7 +40,7 @@ internal static class UniversalDevUiMirrorView
 
         LegacyControlSnapshot[] controls = snapshot.Controls ?? Array.Empty<LegacyControlSnapshot>();
         string title = DevToolUiSettings.T("通用 DevUI 镜像", "UNIVERSAL DEVUI MIRROR") +
-                       "  ·  " + controls.Length;
+                       "  |  " + controls.Length;
         ImGuiTreeNodeFlags flags = snapshot.UnmappedProtocolCount > 0
             ? ImGuiTreeNodeFlags.DefaultOpen
             : ImGuiTreeNodeFlags.None;
@@ -61,8 +61,8 @@ internal static class UniversalDevUiMirrorView
 
         DevUiProtocolInventorySnapshot inventory = DevUiProtocolInventory.Current;
         DevToolWidgets.MutedText(DevToolUiSettings.T(
-            "已加载 DevUINode 类型 " + inventory.ConcreteNodeTypeCount + " · 潜在协议缺口 " + inventory.PotentialGapCount,
-            "Loaded DevUINode types " + inventory.ConcreteNodeTypeCount + " · potential protocol gaps " + inventory.PotentialGapCount));
+            "已加载 DevUINode 类型 " + inventory.ConcreteNodeTypeCount + " | 潜在协议缺口 " + inventory.PotentialGapCount,
+            "Loaded DevUINode types " + inventory.ConcreteNodeTypeCount + " | potential protocol gaps " + inventory.PotentialGapCount));
 
         if (snapshot.UnmappedProtocolCount > 0)
         {
@@ -105,7 +105,7 @@ internal static class UniversalDevUiMirrorView
         {
             DevUiProtocolInventoryEntry gap = gaps[i];
             if (gap == null) continue;
-            ImGui.TextWrapped(gap.AssemblyName + " · " + gap.TypeName);
+            ImGui.TextWrapped(gap.AssemblyName + " | " + gap.TypeName);
             DevToolWidgets.MutedText(gap.Protocol, true);
         }
         if (gaps.Length > limit)

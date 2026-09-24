@@ -149,6 +149,12 @@ internal static class NativeObjectGizmoView
         if (ImGui.IsKeyPressed(ImGuiKey.Escape))
         {
             CancelDrag();
+            EditorShortcutFeedback.PublishCustom(
+                "已取消物件控制点编辑",
+                "Object gizmo edit canceled",
+                "Esc",
+                true,
+                EditorShortcutFeedbackVisual.Cancel);
             return;
         }
 

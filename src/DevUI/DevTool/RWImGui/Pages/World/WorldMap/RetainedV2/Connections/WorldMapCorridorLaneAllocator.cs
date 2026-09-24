@@ -453,7 +453,7 @@ internal static class WorldMapCorridorLaneAllocator
         for (int i = 0; i < parent.Length; i++)
             parent[i] = i;
 
-        // Build component adjacency through routes instead of O(component²) comparison. A single
+        // Build component adjacency through routes instead of O(component^2) comparison. A single
         // shared route does not define a bundle: requiring two shared routes prevents one long
         // connection from merging unrelated corridor systems into a huge sparse lane group.
         Dictionary<string, List<int>> componentsByRoute =
@@ -980,7 +980,7 @@ internal static class WorldMapCorridorLaneAllocator
 
             if (previousVertical != nextVertical)
             {
-                // At a 90° bundle turn, the same global slot maps from horizontal Y offset to
+                // At a 90 deg bundle turn, the same global slot maps from horizontal Y offset to
                 // vertical X offset. Their intersection is the explicit continuous lane corner.
                 float x =
                     previousVertical

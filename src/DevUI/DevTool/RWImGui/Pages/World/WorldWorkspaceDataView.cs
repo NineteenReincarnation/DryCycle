@@ -204,17 +204,17 @@ internal static class WorldWorkspaceDataView
         Num.Vector4 color;
         if (!string.IsNullOrEmpty(error))
         {
-            state = DevToolUiSettings.T("● 加载异常", "● Load error");
+            state = DevToolGlyphs.Warning + " " + DevToolUiSettings.T("加载异常", "Load error");
             color = ErrorColor;
         }
         else if (dirty)
         {
-            state = DevToolUiSettings.T("● 有未保存修改", "● Unsaved changes");
+            state = DevToolGlyphs.Bullet + " " + DevToolUiSettings.T("有未保存修改", "Unsaved changes");
             color = DirtyColor;
         }
         else
         {
-            state = DevToolUiSettings.T("● 已同步", "● Synced");
+            state = DevToolGlyphs.StatusDot + " " + DevToolUiSettings.T("已同步", "Synced");
             color = SyncedColor;
         }
 
@@ -357,8 +357,8 @@ internal static class WorldWorkspaceDataView
         ImGui.TextColored(
             hasProfile ? DirtyColor : TechnicalColor,
             hasProfile
-                ? DevToolUiSettings.T("● 房间覆盖", "● Room override")
-                : DevToolUiSettings.T("● 使用默认值", "● Defaults"));
+                ? DevToolGlyphs.StatusDot + " " + DevToolUiSettings.T("房间覆盖", "Room override")
+                : DevToolGlyphs.StatusDot + " " + DevToolUiSettings.T("使用默认值", "Defaults"));
 
         string resetLabel = DevToolUiSettings.T("恢复默认", "Reset to Defaults");
         float resetWidth = DevToolWidgets.ButtonWidth(resetLabel);
@@ -755,8 +755,8 @@ internal static class WorldWorkspaceDataView
         if (rule != WeatherSpatialRule.Inherit) return string.Empty;
         WeatherSpatialRule fallback = NormalizeEffectiveRule(WeatherSpatialRegistry.GlobalDefault);
         return fallback == WeatherSpatialRule.Allow
-            ? DevToolUiSettings.T("继承 → 全局默认：允许", "Inherit → global default: Allow")
-            : DevToolUiSettings.T("继承 → 全局默认：禁止", "Inherit → global default: Forbidden");
+            ? DevToolUiSettings.T("继承 -> 全局默认：允许", "Inherit -> global default: Allow")
+            : DevToolUiSettings.T("继承 -> 全局默认：禁止", "Inherit -> global default: Forbidden");
     }
 
     private static string RoomInheritanceHint(
@@ -765,8 +765,8 @@ internal static class WorldWorkspaceDataView
     {
         if (roomRule != WeatherSpatialRule.Inherit) return string.Empty;
         return effectiveRegion == WeatherSpatialRule.Allow
-            ? DevToolUiSettings.T("继承 → 区域结果：允许", "Inherit → region result: Allow")
-            : DevToolUiSettings.T("继承 → 区域结果：禁止", "Inherit → region result: Forbidden");
+            ? DevToolUiSettings.T("继承 -> 区域结果：允许", "Inherit -> region result: Allow")
+            : DevToolUiSettings.T("继承 -> 区域结果：禁止", "Inherit -> region result: Forbidden");
     }
 
     private static WeatherFamilyPresentation[] GetWeatherPresentation()
@@ -838,7 +838,7 @@ internal static class WorldWorkspaceDataView
         projectedRoomRuleName = roomName;
         projectedRoomRuleChinese = chinese;
         roomRuleProjectionValid = true;
-        roomRuleLabel = DevToolUiSettings.T("房间 · ", "Room · ") + roomName;
+        roomRuleLabel = DevToolUiSettings.T("房间 | ", "Room | ") + roomName;
         return roomRuleLabel;
     }
 
@@ -865,8 +865,8 @@ internal static class WorldWorkspaceDataView
         projection.Value = value;
         projection.Semantic = semantic;
         projection.Text = percentage
-            ? Math.Round(value * 100f) + "% · " + semantic
-            : value.ToString("0.###") + " · " + semantic;
+            ? Math.Round(value * 100f) + "% | " + semantic
+            : value.ToString("0.###") + " | " + semantic;
         return projection.Text;
     }
 
@@ -962,7 +962,7 @@ internal static class WorldWorkspaceDataView
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("数据警告", "DATA WARNINGS"));
         for (int i = 0; i < warnings.Count; i++)
-            DevToolWidgets.MutedText("• " + warnings[i], true);
+            DevToolWidgets.MutedText(DevToolGlyphs.Bullet + " " + warnings[i], true);
     }
 
     private static void DrawErrorBanner(string message)

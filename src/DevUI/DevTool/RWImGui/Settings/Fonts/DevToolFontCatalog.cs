@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using BepInEx.Logging;
 using ImGuiNET;
 
@@ -26,6 +25,7 @@ internal static unsafe class DevToolFontCatalog
         internal string FileName;
         internal string Family;
         internal int Weight;
+        internal bool ChineseCapable;
     }
 
     private static readonly List<RegisteredFace> RegisteredFaces = new();
@@ -33,7 +33,6 @@ internal static unsafe class DevToolFontCatalog
     private static bool registrationAttempted;
     private static bool registrationSucceeded;
     private static string registrationMessage = "尚未尝试注册本地字体。";
-    private static IntPtr extendedChineseGlyphRanges;
 
     // Font files and the ImGui atlas are stable after startup. The settings window is rendered every
     // frame, so never repeat filesystem enumeration or glyph probing there.
@@ -129,11 +128,14 @@ internal static unsafe class DevToolFontCatalog
                 string fileName = Path.GetFileName(file);
                 string faceName = Path.GetFileNameWithoutExtension(file);
                 string family = FamilyFromName(faceName);
+                // Decide the language role before the atlas is built. Probing ImFont afterwards is
+                // not reliable on the modified RWImGui binding: fonts loaded with a requested CJK
+                // range can report placeholder glyph entries even when the source face is Latin-only.
+                // That is how FiraCode was incorrectly exposed as a Chinese font and produced '?'.
                 bool chineseFace =
-                    !string.Equals(
+                    IsChineseFamilyName(
                         family,
-                        UbuntuMonoFamily,
-                        StringComparison.OrdinalIgnoreCase);
+                        fileName);
                 IntPtr glyphRanges =
                     chineseFace
                         ? chineseGlyphRanges
@@ -168,7 +170,8 @@ internal static unsafe class DevToolFontCatalog
                     Font = font,
                     FileName = fileName,
                     Family = family,
-                    Weight = InferWeight(faceName)
+                    Weight = InferWeight(faceName),
+                    ChineseCapable = chineseFace
                 });
                 added++;
             }
@@ -203,44 +206,13 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Builds one persistent ImGui glyph-range table by extending the Chinese UI range with the
-    /// symbols used by the DevTool itself. GetGlyphRangesChineseSimplifiedCommon intentionally
-    /// keeps the atlas small and does not include arrows/geometric/misc symbols, which previously
-    /// made labels such as ↔ / → / ←, warning signs and room markers render as '?'.
+    /// Keep Simplified Chinese registration on ImGui's proven CJK range.
+    /// Optional UI symbols are selected at render time through DevToolGlyphs and fall back to
+    /// ASCII when the active font does not contain the requested glyph.
     /// </summary>
     private static IntPtr GetExtendedChineseGlyphRanges(IntPtr baseRanges)
     {
-        if (extendedChineseGlyphRanges != IntPtr.Zero) return extendedChineseGlyphRanges;
-        if (baseRanges == IntPtr.Zero) return IntPtr.Zero;
-
-        ushort* source = (ushort*)baseRanges.ToPointer();
-        int baseValueCount = 0;
-        while (source[baseValueCount] != 0)
-        {
-            baseValueCount += 2;
-            if (baseValueCount > 4096) return baseRanges;
-        }
-
-        // ImGui range format is inclusive [start, end] pairs followed by zero.
-        // Keep this bounded to UI-relevant BMP blocks instead of pulling an entire Unicode font.
-        ushort[] extraRanges =
-        {
-            0x2000, 0x206F, // General Punctuation: bullets, ellipsis, separators.
-            0x2190, 0x21FF, // Arrows: ← ↑ → ↓ ↔ and related direction symbols.
-            0x25A0, 0x25FF, // Geometric Shapes: ● ◆ □ etc.
-            0x2600, 0x26FF, // Misc Symbols: ⚠ and status symbols.
-            0x2700, 0x27BF, // Dingbats: check/cross/status marks.
-            0x2B00, 0x2BFF  // Supplemental arrows and UI markers.
-        };
-
-        int valueCount = baseValueCount + extraRanges.Length + 1;
-        extendedChineseGlyphRanges = Marshal.AllocHGlobal(valueCount * sizeof(ushort));
-        ushort* target = (ushort*)extendedChineseGlyphRanges.ToPointer();
-
-        for (int i = 0; i < baseValueCount; i++) target[i] = source[i];
-        for (int i = 0; i < extraRanges.Length; i++) target[baseValueCount + i] = extraRanges[i];
-        target[valueCount - 1] = 0;
-        return extendedChineseGlyphRanges;
+        return baseRanges;
     }
 
     /// <summary>
@@ -251,29 +223,15 @@ internal static unsafe class DevToolFontCatalog
     {
         if (cachedChineseFamilies != null) return cachedChineseFamilies;
 
+        // Only DryCycle-registered local faces participate in the Chinese selector. Do not scan
+        // RWImGui's preloaded primary font here: a Latin font such as FiraCode may expose atlas
+        // placeholder entries for CJK codepoints and would otherwise be misclassified as usable.
         List<string> families = new();
-
         for (int i = 0; i < RegisteredFaces.Count; i++)
         {
             RegisteredFace face = RegisteredFaces[i];
-            if (!IsChineseUiSelectable(face.Font, face.FileName)) continue;
+            if (!face.ChineseCapable) continue;
             AddUnique(families, face.Family);
-        }
-
-        try
-        {
-            ImVector<ImFontPtr> fonts = ImGui.GetIO().Fonts.Fonts;
-            for (int i = 0; i < fonts.Size; i++)
-            {
-                ImFontPtr font = fonts[i];
-                string name = ReadFontName(font, i);
-                if (!IsChineseUiSelectable(font, name)) continue;
-                AddUnique(families, FamilyFromName(name));
-            }
-        }
-        catch
-        {
-            // Keep the font settings window usable if the backend is temporarily between contexts.
         }
 
         families.Sort((a, b) =>
@@ -313,12 +271,71 @@ internal static unsafe class DevToolFontCatalog
 
         int count = 0;
         for (int i = 0; i < RegisteredFaces.Count; i++)
-            if (IsChineseUiSelectable(RegisteredFaces[i].Font, RegisteredFaces[i].FileName)) count++;
+            if (RegisteredFaces[i].ChineseCapable) count++;
         cachedSelectableLocalChineseFaces = count;
         return count;
     }
 
     internal static bool TryResolveRegisteredFace(
+        string family,
+        int preferredWeight,
+        bool requireChinese,
+        out ImFontPtr font,
+        out string name,
+        out int actualWeight,
+        out int variantCount)
+    {
+        if (TryResolveFamily(
+                family,
+                preferredWeight,
+                requireChinese,
+                out font,
+                out name,
+                out actualWeight,
+                out variantCount))
+            return true;
+
+        if (requireChinese &&
+            !string.Equals(
+                NormalizeFamily(family),
+                NormalizeFamily(DefaultChineseFamily),
+                StringComparison.OrdinalIgnoreCase) &&
+            TryResolveFamily(
+                DefaultChineseFamily,
+                preferredWeight,
+                true,
+                out font,
+                out name,
+                out actualWeight,
+                out variantCount))
+            return true;
+
+        if (requireChinese)
+        {
+            for (int i = 0; i < RegisteredFaces.Count; i++)
+            {
+                RegisteredFace face = RegisteredFaces[i];
+                if (!face.ChineseCapable) continue;
+                if (TryResolveFamily(
+                        face.Family,
+                        preferredWeight,
+                        true,
+                        out font,
+                        out name,
+                        out actualWeight,
+                        out variantCount))
+                    return true;
+            }
+        }
+
+        font = default;
+        name = string.Empty;
+        actualWeight = preferredWeight;
+        variantCount = 0;
+        return false;
+    }
+
+    private static bool TryResolveFamily(
         string family,
         int preferredWeight,
         bool requireChinese,
@@ -341,8 +358,7 @@ internal static unsafe class DevToolFontCatalog
                     NormalizeFamily(family),
                     StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (requireChinese &&
-                !SupportsChinese(face.Font))
+            if (requireChinese && !face.ChineseCapable)
                 continue;
 
             variantCount++;
@@ -377,7 +393,14 @@ internal static unsafe class DevToolFontCatalog
 
     internal static bool IsChineseUiSelectable(ImFontPtr font, string candidateName)
     {
-        return SupportsChinese(font);
+        if (font.NativePtr == null) return false;
+        for (int i = 0; i < RegisteredFaces.Count; i++)
+        {
+            RegisteredFace face = RegisteredFaces[i];
+            if (face.Font.NativePtr == font.NativePtr)
+                return face.ChineseCapable;
+        }
+        return false;
     }
 
     internal static bool IsFamilyMatch(string candidateName, string family)
@@ -444,20 +467,44 @@ internal static unsafe class DevToolFontCatalog
                string.Equals(extension, ".ttc", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool SupportsChinese(ImFontPtr font)
+    private static bool IsChineseFamilyName(string family, string fileName)
     {
-        if (font.NativePtr == null) return false;
-        try
+        string value =
+            NormalizeFamily((family ?? string.Empty) + " " + (fileName ?? string.Empty))
+                .ToLowerInvariant();
+
+        // Keep the detector conservative. A false positive is much worse than a false negative:
+        // selecting a Latin-only face for the Chinese UI turns every label into '?'.
+        string[] markers =
         {
-            return font.FindGlyphNoFallback((ushort)'中').NativePtr != null &&
-                   font.FindGlyphNoFallback((ushort)'文').NativePtr != null &&
-                   font.FindGlyphNoFallback((ushort)'房').NativePtr != null &&
-                   font.FindGlyphNoFallback((ushort)'间').NativePtr != null;
-        }
-        catch
-        {
-            return false;
-        }
+            "harmonyossanssc",
+            "notosanssc",
+            "notoserifsc",
+            "notosanscjk",
+            "notoserifcjk",
+            "sourcehansans",
+            "sourcehanserif",
+            "pingfangsc",
+            "microsoftyahei",
+            "simhei",
+            "simsun",
+            "kaiti",
+            "fangsong",
+            "wenquanyi",
+            "lxgwwenkai",
+            "sarasa",
+            "smileysans",
+            "alibabapuhuiti",
+            "misans",
+            "opposans",
+            "droidsansfallback"
+        };
+
+        for (int i = 0; i < markers.Length; i++)
+            if (value.Contains(markers[i]))
+                return true;
+
+        return false;
     }
 
     private static void AddUnique(List<string> values, string value)
@@ -479,21 +526,5 @@ internal static unsafe class DevToolFontCatalog
                token == "medium" || token == "semibold" || token == "demibold" ||
                token == "bold" || token == "extrabold" || token == "ultrabold" ||
                token == "black" || token == "heavy";
-    }
-
-    private static string ReadFontName(ImFontPtr font, int index)
-    {
-        if (font.NativePtr == null || font.NativePtr->ConfigData == null)
-            return "CJK Font " + index;
-
-        byte* name = font.NativePtr->ConfigData->Name;
-        int length = 0;
-        while (length < 80 && name[length] != 0) length++;
-        if (length == 0) return "CJK Font " + index;
-
-        byte[] bytes = new byte[length];
-        for (int i = 0; i < length; i++) bytes[i] = name[i];
-        string value = System.Text.Encoding.UTF8.GetString(bytes).Trim();
-        return string.IsNullOrEmpty(value) ? "CJK Font " + index : value;
     }
 }

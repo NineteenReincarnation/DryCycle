@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using BepInEx;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
@@ -282,6 +283,20 @@ internal static class PlayerMapMultiSelection
             ids,
             values,
             ids.Length == 1 ? "Nudge player-map room" : "Nudge player-map rooms"));
+
+        string direction =
+            dx < 0 ? DevToolGlyphs.ArrowLeft :
+            dx > 0 ? DevToolGlyphs.ArrowRight :
+            dy < 0 ? DevToolGlyphs.ArrowDown : DevToolGlyphs.ArrowUp;
+        string keys =
+            (io.KeyShift ? "Shift+" : string.Empty) +
+            direction;
+        EditorShortcutFeedback.PublishCustom(
+            ids.Length == 1 ? "微调玩家地图房间" : "微调玩家地图房间组",
+            ids.Length == 1 ? "Nudge Player Map room" : "Nudge Player Map rooms",
+            keys,
+            true,
+            EditorShortcutFeedbackVisual.Move);
     }
 
     private static void SynchronizeRegionAndInspector(PlayerMapPresentationSnapshot snapshot)

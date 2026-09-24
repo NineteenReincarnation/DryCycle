@@ -134,9 +134,9 @@ internal static class RelationshipEditorView
 
         ImGui.TextDisabled(DevToolUiSettings.T("生物", "Creature"));
         ImGui.SameLine(nameWidth);
-        ImGui.TextDisabled(snapshot.PrimaryCreature + DevToolUiSettings.T("  →  其他", "  →  Other"));
+        ImGui.TextDisabled(snapshot.PrimaryCreature + "  " + DevToolGlyphs.ArrowRight + "  " + DevToolUiSettings.T("其他", "Other"));
         ImGui.SameLine(nameWidth + relationWidth + 12f);
-        ImGui.TextDisabled(DevToolUiSettings.T("其他  →  ", "Other  →  ") + snapshot.PrimaryCreature);
+        ImGui.TextDisabled(DevToolUiSettings.T("其他", "Other") + "  " + DevToolGlyphs.ArrowRight + "  " + snapshot.PrimaryCreature);
         ImGui.Separator();
 
         EditorRelationshipRowSnapshot[] rows = snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
@@ -201,7 +201,7 @@ internal static class RelationshipEditorView
 
         ImGui.Text(from);
         ImGui.SameLine();
-        ImGui.TextDisabled("→");
+        ImGui.TextDisabled(DevToolGlyphs.ArrowRight);
         ImGui.SameLine();
         ImGui.Text(to);
         ImGui.TextDisabled(relationship.DirectOverride

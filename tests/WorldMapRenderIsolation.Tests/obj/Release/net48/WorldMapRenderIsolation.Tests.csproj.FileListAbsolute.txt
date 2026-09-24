@@ -1,0 +1,10 @@
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\bin\Release\net48\WorldMapRenderIsolation.Tests.dll
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\bin\Release\net48\WorldMapRenderIsolation.Tests.pdb
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.csproj.AssemblyReference.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.AssemblyInfoInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.AssemblyInfo.cs
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.csproj.CoreCompileInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.sourcelink.json
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.dll
+C:\Users\Orrhisk\Desktop\DryCycle\tests\WorldMapRenderIsolation.Tests\obj\Release\net48\WorldMapRenderIsolation.Tests.pdb

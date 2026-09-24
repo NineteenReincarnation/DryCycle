@@ -123,7 +123,7 @@ internal static class PlayerMapMigrationStreamView
         if (active == null) return;
         ImGui.Separator();
         ImGui.TextUnformatted(active.Name);
-        ImGui.TextDisabled(active.Segments.Length + " segment(s) · " + active.Midpoints.Length + " midpoint(s)");
+        ImGui.TextDisabled(active.Segments.Length + " segment(s) | " + active.Midpoints.Length + " midpoint(s)");
 
         DrawVectorEditor("Start", "MigrationStart", active.Start, value => QueueVector(active.Name, PlayerMapMigrationCommandKind.SetStart, value));
         DrawVectorEditor("Start Handle", "MigrationStartHandle", active.StartHandle, value => QueueVector(active.Name, PlayerMapMigrationCommandKind.SetStartHandle, value));

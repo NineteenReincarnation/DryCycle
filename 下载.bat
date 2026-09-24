@@ -7,6 +7,7 @@ rem DryCycle Safe Download
 rem
 rem Purpose:
 rem   - Update local main by fast-forward only.
+rem   - Root helper BAT edits never block download; they are backed up, then auto-synced from Git.
 rem   - Keep local resources outside source/control zones.
 rem   - Detect stale untracked source files instead of compiling them silently.
 rem   - Clear ignored C# build output so Visual Studio cannot reuse stale obj/bin state.
@@ -69,21 +70,120 @@ echo Branch     : %BRANCH%
 echo.
 
 rem ------------------------------------------------------------
-rem 1. Tracked/staged local work must be uploaded first.
-rem Untracked resources outside code zones are intentionally allowed.
+rem 1. Protect real project work. Root helper BAT files are special:
+rem    - Their local edits are backed up first.
+rem    - Git restores them by pathspec, never by decoded filename.
+rem    - This avoids Windows code-page corruption for Chinese BAT names.
 rem ------------------------------------------------------------
-call :section "1. CHECK TRACKED LOCAL WORK"
+call :section "1. BACKUP HELPER BATS / CHECK LOCAL WORK"
 
-git status --short --untracked-files=no > "%TEMP%\drycycle_download_tracked.txt"
-for %%F in ("%TEMP%\drycycle_download_tracked.txt") do set "TRACKED_SIZE=%%~zF"
-if not "!TRACKED_SIZE!"=="0" (
-    echo [SAFE STOP] Tracked or staged local edits exist.
-    echo Commit/upload them first. No files were overwritten.
-    echo.
-    type "%TEMP%\drycycle_download_tracked.txt"
+rem Check real tracked/staged project edits while excluding root-level BAT launchers.
+git diff --quiet -- . ":(exclude,top,glob)*.bat"
+set "WORKTREE_RC=!ERRORLEVEL!"
+if !WORKTREE_RC! GEQ 2 (
+    echo [ERROR] Could not inspect tracked working-tree changes.
+    goto :fail
+)
+
+git diff --cached --quiet -- . ":(exclude,top,glob)*.bat"
+set "INDEX_RC=!ERRORLEVEL!"
+if !INDEX_RC! GEQ 2 (
+    echo [ERROR] Could not inspect staged changes.
+    goto :fail
+)
+
+if not "!WORKTREE_RC!"=="0" goto :protected_work
+if not "!INDEX_RC!"=="0" goto :protected_work
+
+rem Detect root helper BAT changes without ever round-tripping their Unicode names through FOR /F.
+set "HELPER_WORKTREE_RC=0"
+set "HELPER_INDEX_RC=0"
+
+git diff --quiet -- ":(top,glob)*.bat"
+set "HELPER_WORKTREE_RC=!ERRORLEVEL!"
+if !HELPER_WORKTREE_RC! GEQ 2 (
+    echo [ERROR] Could not inspect helper BAT working-tree changes.
+    goto :fail
+)
+
+git diff --cached --quiet -- ":(top,glob)*.bat"
+set "HELPER_INDEX_RC=!ERRORLEVEL!"
+if !HELPER_INDEX_RC! GEQ 2 (
+    echo [ERROR] Could not inspect helper BAT staged changes.
+    goto :fail
+)
+
+if "!HELPER_WORKTREE_RC!"=="0" if "!HELPER_INDEX_RC!"=="0" (
+    echo [OK] No local helper BAT edits.
+    goto :tracked_clean
+)
+
+echo [AUTO] Local root helper BAT edits detected.
+echo [AUTO] Backing them up before synchronization.
+
+set "HELPER_BACKUP=!CD!\_download_backup\helper_bats_%RANDOM%_%RANDOM%"
+mkdir "!HELPER_BACKUP!" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Could not create helper BAT backup folder:
+    echo !HELPER_BACKUP!
+    goto :fail
+)
+
+rem Preserve final working copies plus both unstaged and staged patches.
+copy /y "*.bat" "!HELPER_BACKUP!\" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Could not back up root helper BAT files.
+    goto :fail
+)
+
+git diff --binary -- ":(top,glob)*.bat" > "!HELPER_BACKUP!\worktree.patch"
+if errorlevel 1 (
+    echo [ERROR] Could not save helper BAT working-tree patch.
+    goto :fail
+)
+
+git diff --cached --binary -- ":(top,glob)*.bat" > "!HELPER_BACKUP!\staged.patch"
+if errorlevel 1 (
+    echo [ERROR] Could not save helper BAT staged patch.
+    goto :fail
+)
+
+echo [BACKUP] !HELPER_BACKUP!
+
+rem Restore by Git pathspec. No Chinese filename is decoded by cmd.exe.
+git restore --staged --worktree -- ":(top,glob)*.bat"
+if errorlevel 1 (
+    echo [ERROR] Could not synchronize root helper BAT files.
+    echo [INFO] Your copies are preserved at:
+    echo !HELPER_BACKUP!
+    goto :fail
+)
+
+echo [OK] Helper BAT files synchronized from current HEAD.
+goto :tracked_clean
+
+:protected_work
+echo [SAFE STOP] Real project edits exist and were NOT touched.
+echo Upload/commit them first, then run Download again.
+echo.
+git -c core.quotepath=false status --short --untracked-files=no -- . ":(exclude,top,glob)*.bat"
+goto :done
+
+:tracked_clean
+rem Final tracked/staged verification, still excluding root helper BAT launchers.
+git diff --quiet -- . ":(exclude,top,glob)*.bat"
+if errorlevel 1 (
+    echo [SAFE STOP] Protected working-tree edits remain.
     goto :done
 )
-echo [OK] No tracked/staged local edits.
+
+git diff --cached --quiet -- . ":(exclude,top,glob)*.bat"
+if errorlevel 1 (
+    echo [SAFE STOP] Protected staged edits remain.
+    goto :done
+)
+
+echo [OK] No protected tracked/staged local edits.
 echo.
 
 rem ------------------------------------------------------------
@@ -234,7 +334,6 @@ echo ------------------------------------------------------------
 exit /b 0
 
 :cleanup_temp
-del /q "%TEMP%\drycycle_download_tracked.txt" >nul 2>&1
 del /q "%TEMP%\drycycle_download_untracked_code.txt" >nul 2>&1
 del /q "%TEMP%\drycycle_download_verify_code.txt" >nul 2>&1
 exit /b 0

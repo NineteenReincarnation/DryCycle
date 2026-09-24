@@ -12,7 +12,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>Presentation and gestures only. Every author edit is a document-scoped backend command.</summary>
 internal static partial class CartographyView
 {
-    private enum Tool { Select, Text, Marker, Line, Box, ExportArea }
+    private enum Tool { Select, Route, Text, Marker, Line, Box, ExportArea }
     private static CartographyPresentation observed;
     private static readonly HashSet<string> Selection = new(StringComparer.Ordinal);
     private static string activeLayer = "notes", search = string.Empty, exportPath = string.Empty, copyPath = string.Empty;
@@ -54,13 +54,38 @@ internal static partial class CartographyView
         dragging = marquee = false; delta = default;
     }
 
-    internal static void Draw(EditorPresentationSnapshot editor)
+    internal static unsafe void Draw(EditorPresentationSnapshot editor)
+    {
+        // Layer names, room/subregion names and author text may be Chinese in either UI language.
+        ImGuiIOPtr io = ImGui.GetIO();
+        float oldScale = io.FontGlobalScale;
+        float oldBaseSize = ImGui.GetFont().FontSize;
+        bool pushedFont = DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily,
+            DevToolUiSettings.FontWeight, true, out ImFontPtr font, out _, out _, out _);
+        if (pushedFont)
+        {
+            ImGui.PushFont(font);
+            io.FontGlobalScale = oldScale * oldBaseSize / Math.Max(1, font.FontSize);
+        }
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(.045f, .06f, .08f, 1));
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Num.Vector4(.10f, .14f, .19f, 1));
+        ImGui.PushStyleColor(ImGuiCol.PopupBg, new Num.Vector4(.06f, .08f, .11f, 1));
+        try { DrawContent(editor); }
+        finally
+        {
+            ImGui.PopStyleColor(3);
+            io.FontGlobalScale = oldScale;
+            if (pushedFont) ImGui.PopFont();
+        }
+    }
+
+    private static void DrawContent(EditorPresentationSnapshot editor)
     {
         CartographyPresentation snapshot = CartographyRuntime.Presentation;
         SourcePicker();
         if (snapshot.Document == null || snapshot.Scene == null)
         {
-            ImGui.TextWrapped(snapshot.Status.Length > 0 ? snapshot.Status : T("正在准备制图工作区…", "Preparing cartography workspace…"));
+            ImGui.TextWrapped(snapshot.Status.Length > 0 ? snapshot.Status : T("正在准备制图工作区...", "Preparing cartography workspace..."));
             if (snapshot.Identity.Length > 0 && ImGui.Button(T("重试读取项目", "Retry project load")))
                 CartographyRuntime.Enqueue(new CartographyCommand { DocumentId = snapshot.Identity, Revision = snapshot.Revision, Kind = CartographyCommandKind.Open, Path = snapshot.ProjectPath });
             return;
@@ -68,7 +93,7 @@ internal static partial class CartographyView
         if (observed?.Identity != snapshot.Identity)
         {
             LeaveDrafts();
-            Selection.Clear(); selectedItem = pendingSelection = string.Empty; draft = null; layerDraft = null; styleDraft = null;
+            Selection.Clear(); selectedItem = pendingSelection = string.Empty; selectedRoutePoint = -1; draft = null; layerDraft = null; styleDraft = null;
             activeLayer = "notes"; fit = true; fitSelection = false;
             string directory = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), "Exports");
             exportPath = Path.Combine(directory, snapshot.Document.Region + "-map.png");
@@ -90,9 +115,11 @@ internal static partial class CartographyView
 
         Toolbar(snapshot);
         Num.Vector2 available = ImGui.GetContentRegionAvail();
-        bool explorer = editor.BrowserOpen && available.X >= 700;
-        bool inspector = editor.InspectorOpen && available.X >= 520;
-        float left = explorer ? 220 : 0, right = inspector ? Math.Min(320, available.X * 0.34f) : 0;
+        float em = ImGui.GetFontSize();
+        bool explorer = editor.BrowserOpen && available.X >= em * 48;
+        bool inspector = editor.InspectorOpen && available.X >= em * 30;
+        float left = explorer ? Math.Min(em * 17, available.X * .23f) : 0;
+        float right = inspector ? Math.Min(em * 24, available.X * .35f) : 0;
         float center = Math.Max(180, available.X - left - right - (explorer ? 8 : 0) - (inspector ? 8 : 0));
         if (explorer)
         {
@@ -104,41 +131,65 @@ internal static partial class CartographyView
         if (inspector)
         {
             ImGui.SameLine(0, 8);
-            if (ImGui.BeginChild("##CartographyInspector", new Num.Vector2(0, available.Y), ImGuiChildFlags.Borders)) Inspector(snapshot);
+            if (ImGui.BeginChild("##CartographyInspector", new Num.Vector2(0, available.Y), ImGuiChildFlags.Borders))
+            {
+                ImGui.PushItemWidth(ImGui.GetContentRegionAvail().X * .52f);
+                try { Inspector(snapshot); }
+                finally { ImGui.PopItemWidth(); }
+            }
             ImGui.EndChild();
         }
     }
 
     private static void Toolbar(CartographyPresentation snapshot)
     {
-        ImGui.TextUnformatted(T("制图", "CARTOGRAPHY") + " · " + snapshot.Document.Region + (snapshot.Dirty ? " *" : string.Empty));
-        ImGui.SameLine();
-        if (ImGui.Button(T("适配##AtlasFit", "Fit##AtlasFit"))) { fit = true; fitSelection = false; }
-        ImGui.SameLine();
-        if (ImGui.Button(T("定位选择##AtlasFocus", "Focus selection##AtlasFocus"))) { fit = true; fitSelection = true; }
-        ImGui.SameLine(); ImGui.Checkbox(T("吸附##AtlasSnap", "Snap##AtlasSnap"), ref snap);
-        ImGui.SameLine(); ImGui.SetNextItemWidth(58); ImGui.DragFloat("##AtlasGrid", ref grid, 1, 1, 256, "%.0f");
+        ImGui.TextUnformatted(T("制图", "CARTOGRAPHY") + " | " + snapshot.Document.Region + (snapshot.Dirty ? " *" : string.Empty));
+        Inline(T("定位所选", "Focus selection"));
+        if (ImGui.Button(T("定位所选##AtlasFocus", "Focus selection##AtlasFocus"))) { fit = true; fitSelection = true; }
+        Inline(T("吸附", "Snap"), ImGui.GetFrameHeight());
+        ImGui.Checkbox(T("吸附##AtlasSnap", "Snap##AtlasSnap"), ref snap);
+        Inline("000", ImGui.GetFontSize() * 3);
+        ImGui.SetNextItemWidth(ImGui.GetFontSize() * 3.5f);
+        ImGui.DragFloat("##AtlasGrid", ref grid, 1, 1, 256, "%.0f");
         grid = float.IsNaN(grid) || float.IsInfinity(grid) ? 12 : Math.Max(1, Math.Min(256, grid));
-        ImGui.SameLine(); ImGui.TextDisabled((zoom * 100).ToString("0") + "%");
-        if (ImGui.Button(T("选择##AtlasSelect", "Select##AtlasSelect"))) { CommitDraft(); tool = Tool.Select; }
-        ImGui.SameLine(); if (ImGui.Button(T("文字##AtlasText", "Text##AtlasText"))) { CommitDraft(); tool = Tool.Text; }
-        ImGui.SameLine(); if (ImGui.Button(T("图标##AtlasMarker", "Icon##AtlasMarker"))) { CommitDraft(); tool = Tool.Marker; }
-        ImGui.SameLine(); if (ImGui.Button(T("线条##AtlasLine", "Line##AtlasLine"))) { CommitDraft(); tool = Tool.Line; }
-        ImGui.SameLine(); if (ImGui.Button(T("区域框##AtlasBox", "Box##AtlasBox"))) { CommitDraft(); tool = Tool.Box; }
+        Inline("100%"); ImGui.TextDisabled((zoom * 100).ToString("0") + "%");
+
+        ToolButton(Tool.Select, T("选择", "Select"), false);
+        ToolButton(Tool.Route, T("编辑连线", "Edit connections"));
+        ToolButton(Tool.Text, T("文字", "Text"));
+        ToolButton(Tool.Marker, T("图标", "Icon"));
+        ToolButton(Tool.Line, T("线条", "Line"));
+        ToolButton(Tool.Box, T("区域框", "Box"));
+        Inline(T("导出范围", "Export area"));
         ExtraToolbar();
         if (tool == Tool.Marker)
         {
-            ImGui.SameLine(); ImGui.SetNextItemWidth(90);
             int icon = (int)marker;
+            ImGui.SetNextItemWidth(ImGui.GetFontSize() * 12);
             if (ImGui.Combo("##AtlasIcon", ref icon, string.Join("\0", Enum.GetNames(typeof(CartographyMarker))) + "\0")) marker = (CartographyMarker)icon;
         }
-        ImGui.TextDisabled(tool == Tool.Select ? T("左键拖动 / 框选 · Shift 加选 · Ctrl 减选 · 右键平移 · 滚轮缩放", "Drag / marquee · Shift add · Ctrl subtract · Right drag pan · Wheel zoom") : T("在画布点击放置；线条和区域框需拖动。右键取消。", "Click to place; drag for a line or box. Right click cancels."));
+        ImGui.TextWrapped(tool == Tool.Route
+            ? T("点击连线加拐点并拖动 | Alt+点击 / Delete 删点 | Shift 限制方向 | Esc 取消", "Click a connection to add/drag a bend | Alt-click / Delete removes it | Shift constrains | Esc cancels")
+            : tool == Tool.Select ? T("左键拖动 / 框选 | 点击连线编辑 | Shift 加选 | Ctrl 减选 | 右键平移 | 滚轮缩放", "Drag / marquee | Click connections to edit | Shift add | Ctrl subtract | Right drag pan | Wheel zoom")
+            : T("在画布点击放置；线条和区域框需拖动。右键取消。", "Click to place; drag for a line or box. Right click cancels."));
         ImGui.Separator();
+    }
+
+    private static void Inline(string label, float extra = 0) =>
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(label) + extra);
+
+    private static void ToolButton(Tool value, string label, bool inline = true)
+    {
+        if (inline) Inline(label);
+        bool active = tool == value;
+        if (active) ImGui.PushStyleColor(ImGuiCol.Button, new Num.Vector4(.2f, .43f, .69f, 1));
+        if (ImGui.Button(label + "##AtlasTool" + value)) { CommitDraft(); CancelRoute(); tool = value; }
+        if (active) ImGui.PopStyleColor();
     }
 
     private static void Explorer(CartographyPresentation snapshot)
     {
-        ImGui.TextUnformatted(T("图层（上方在前）", "LAYERS · FRONT TO BACK"));
+        ImGui.TextUnformatted(T("图层（上方在前）", "LAYERS | FRONT TO BACK"));
         if (ImGui.SmallButton(T("添加图层", "Add layer")))
             Send(CartographyCommandKind.AddLayer, command => command.Layer = new CartographyLayer { Name = T("新图层", "New layer") });
         for (int i = snapshot.Document.Layers.Count - 1; i >= 0; i--)
@@ -159,7 +210,7 @@ internal static partial class CartographyView
             string label = ItemName(item);
             if (search.Length > 0 && label.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
             ImGui.PushID(item.Id);
-            if (ImGui.Selectable((item.Visible ? "" : "[—] ") + label, Selection.Contains(item.Id)))
+            if (ImGui.Selectable((item.Visible ? "" : "[-] ") + label, Selection.Contains(item.Id)))
             {
                 Select(item.Id, ImGui.GetIO().KeyShift, ImGui.GetIO().KeyCtrl);
                 CommitLayer(); activeLayer = item.LayerId; layerDraft = null;
@@ -170,6 +221,12 @@ internal static partial class CartographyView
 
     private static void Canvas(CartographyPresentation snapshot)
     {
+        if (CartographyCanvasImages.Error.Length > 0)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Num.Vector4(1, .65f, .3f, 1));
+            ImGui.TextWrapped(T("地图图片上传失败，正在重试：", "Map image upload failed; retrying: ") + CartographyCanvasImages.Error);
+            ImGui.PopStyleColor();
+        }
         Num.Vector2 origin = ImGui.GetCursorScreenPos(), size = ImGui.GetContentRegionAvail();
         if (size.X < 40 || size.Y < 40) return;
         ImGui.InvisibleButton("##AtlasCanvasInput", size, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
@@ -183,13 +240,13 @@ internal static partial class CartographyView
             pan = size / 2 - new Num.Vector2(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2) * zoom;
             fit = false;
         }
-        if (hovered && !dragging && !marquee && Math.Abs(io.MouseWheel) > .001f)
+        if (hovered && !dragging && !marquee && routeGesture == null && Math.Abs(io.MouseWheel) > .001f)
         {
             Num.Vector2 point = (io.MousePos - origin - pan) / zoom;
             zoom = Math.Max(.03f, Math.Min(12, zoom * (float)Math.Pow(1.12, io.MouseWheel)));
             pan = io.MousePos - origin - point * zoom;
         }
-        if (hovered && !dragging && !marquee && (ImGui.IsMouseDragging(ImGuiMouseButton.Right) || ImGui.IsMouseDragging(ImGuiMouseButton.Middle))) pan += io.MouseDelta;
+        if (hovered && !dragging && !marquee && routeGesture == null && (ImGui.IsMouseDragging(ImGuiMouseButton.Right) || ImGui.IsMouseDragging(ImGuiMouseButton.Middle))) pan += io.MouseDelta;
         if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right)) { tool = Tool.Select; dragging = marquee = false; delta = default; }
         Num.Vector2 mouse = (io.MousePos - origin - pan) / zoom;
         CartographyRect viewport = new(-pan.X / zoom, -pan.Y / zoom, size.X / zoom, size.Y / zoom);
@@ -216,7 +273,7 @@ internal static partial class CartographyView
             }
             if (!viewport.Intersects(node.Bounds.Offset(offset.X, offset.Y))) continue;
             foreach (CartographyPrimitive shape in node.Primitives) DrawPrimitive(draw, shape, origin, offset, viewport);
-            if (Selection.Contains(node.Id))
+            if (Selection.Contains(node.Id) && node.FromId == null)
                 draw.AddRect(Screen(origin, node.Bounds.X, node.Bounds.Y, offset), Screen(origin, node.Bounds.Right, node.Bounds.Bottom, offset), 0xFFDCC36C, 0, ImDrawFlags.None, 1.5f);
         }
         if (marquee)
@@ -242,6 +299,7 @@ internal static partial class CartographyView
             CommitDraft();
             startMouse = io.MousePos; marqueeStart = mouse; gestureRevision = snapshot.Revision;
             addSelection = io.KeyShift; subtractSelection = io.KeyCtrl;
+            if (tool == Tool.Route) return;
             if (tool != Tool.Select)
             {
                 if (tool == Tool.Text || tool == Tool.Marker) AddAnnotation(mouse, mouse);
@@ -285,17 +343,66 @@ internal static partial class CartographyView
         // Save and Undo remain owned by EditorInputRouter; these local keys only affect this canvas.
         if (!hovered || io.WantTextInput || ImGui.IsAnyItemActive() || dragging || marquee) return;
         ClipboardKeys(snapshot, mouse, io);
-        if (KeyChord(snapshot.Document.Options.DeleteKey)) Send(CartographyCommandKind.Delete, command => command.Ids = Selection.ToArray());
-        if (KeyChord(snapshot.Document.Options.DuplicateKey)) Send(CartographyCommandKind.Duplicate, command => command.Ids = Selection.ToArray());
+
+        if (KeyChord(snapshot.Document.Options.DeleteKey))
+        {
+            bool available = Selection.Count > 0;
+            if (available)
+                Send(CartographyCommandKind.Delete, command => command.Ids = Selection.ToArray());
+            EditorShortcutFeedback.PublishCustom(
+                available ? "已删除制图元素" : "没有可删除的制图元素",
+                available ? "Cartography items deleted" : "Nothing to delete",
+                snapshot.Document.Options.DeleteKey,
+                available,
+                available ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+        }
+
+        if (KeyChord(snapshot.Document.Options.DuplicateKey))
+        {
+            bool available = Selection.Count > 0;
+            if (available)
+                Send(CartographyCommandKind.Duplicate, command => command.Ids = Selection.ToArray());
+            EditorShortcutFeedback.PublishCustom(
+                available ? "已复制制图元素" : "没有可复制的制图元素",
+                available ? "Cartography items duplicated" : "Nothing to duplicate",
+                snapshot.Document.Options.DuplicateKey,
+                available,
+                available ? EditorShortcutFeedbackVisual.Duplicate : EditorShortcutFeedbackVisual.Warning);
+        }
+
         if (io.KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.A))
-        { Selection.Clear(); foreach (CartographyItem item in snapshot.Document.Items.Where(snapshot.Document.Editable)) Selection.Add(item.Id); }
+        {
+            Selection.Clear();
+            foreach (CartographyItem item in snapshot.Document.Items.Where(snapshot.Document.Editable))
+                Selection.Add(item.Id);
+            bool selected = Selection.Count > 0;
+            EditorShortcutFeedback.PublishCustom(
+                selected ? "已全选可编辑制图元素" : "当前没有可编辑制图元素",
+                selected ? "All editable cartography items selected" : "No editable cartography items",
+                "Ctrl+A",
+                selected,
+                selected ? EditorShortcutFeedbackVisual.Select : EditorShortcutFeedbackVisual.Warning);
+        }
+
         float step = io.KeyShift ? 10 : 1;
         Num.Vector2 nudge = default;
-        if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow)) nudge.X -= step;
-        if (ImGui.IsKeyPressed(ImGuiKey.RightArrow)) nudge.X += step;
-        if (ImGui.IsKeyPressed(ImGuiKey.UpArrow)) nudge.Y -= step;
-        if (ImGui.IsKeyPressed(ImGuiKey.DownArrow)) nudge.Y += step;
-        if (nudge.LengthSquared() > 0) Send(CartographyCommandKind.Move, command => { command.Ids = Selection.ToArray(); command.X = nudge.X; command.Y = nudge.Y; });
+        string nudgeKey = string.Empty;
+        if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow)) { nudge.X -= step; nudgeKey = DevToolGlyphs.ArrowLeft; }
+        if (ImGui.IsKeyPressed(ImGuiKey.RightArrow)) { nudge.X += step; nudgeKey = DevToolGlyphs.ArrowRight; }
+        if (ImGui.IsKeyPressed(ImGuiKey.UpArrow)) { nudge.Y -= step; nudgeKey = DevToolGlyphs.ArrowUp; }
+        if (ImGui.IsKeyPressed(ImGuiKey.DownArrow)) { nudge.Y += step; nudgeKey = DevToolGlyphs.ArrowDown; }
+        if (nudge.LengthSquared() > 0)
+        {
+            bool available = Selection.Count > 0;
+            if (available)
+                Send(CartographyCommandKind.Move, command => { command.Ids = Selection.ToArray(); command.X = nudge.X; command.Y = nudge.Y; });
+            EditorShortcutFeedback.PublishCustom(
+                available ? "微调制图元素" : "没有选中的制图元素",
+                available ? "Nudge cartography items" : "No cartography selection",
+                (io.KeyShift ? "Shift+" : string.Empty) + nudgeKey,
+                available,
+                available ? EditorShortcutFeedbackVisual.Move : EditorShortcutFeedbackVisual.Warning);
+        }
     }
 
     private static void AddAnnotation(Num.Vector2 a, Num.Vector2 b)
@@ -440,14 +547,14 @@ internal static partial class CartographyView
         if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (ImGui.Checkbox(T("透明背景##AtlasTransparent", "Transparent background##AtlasTransparent"), ref styleDraft.Transparent)) { styleDirty = true; SaveStyle(); }
         bool valid = true;
-        try { CartographyExporter.Dimensions(snapshot.Document, snapshot.Scene, out int width, out int height); ImGui.TextDisabled(width + " × " + height + " px"); }
+        try { CartographyExporter.Dimensions(snapshot.Document, snapshot.Scene, out int width, out int height); ImGui.TextDisabled(width + " x " + height + " px"); }
         catch (InvalidOperationException error) { ImGui.TextWrapped(error.Message); valid = false; }
         if (snapshot.Scene.Errors.Length > 0)
         { valid = false; ImGui.TextWrapped(T("以下可见房间尚不可导出：", "Visible rooms awaiting terrain:") + "\n" + string.Join("\n", snapshot.Scene.Errors.Take(4))); }
         if (snapshot.Scene.Warnings.Length > 0) ImGui.TextWrapped(snapshot.Scene.Warnings.Length + T(" 条连接缺少精确端口，以虚线绘制。", " connections use dashed unresolved-port guides."));
         ImGui.SetNextItemWidth(-1); ImGui.InputText("##AtlasExportPath", ref exportPath, 1024);
         if (!valid || snapshot.Exporting) ImGui.BeginDisabled();
-        if (ImGui.Button(snapshot.Exporting ? T("正在导出…", "Exporting…") : T("导出图片##AtlasRender", "Export image##AtlasRender")))
+        if (ImGui.Button(snapshot.Exporting ? T("正在导出...", "Exporting...") : T("导出图片##AtlasRender", "Export image##AtlasRender")))
             Send(CartographyCommandKind.Export, command => { command.Path = exportPath; command.Integer = (int)format; });
         if (!valid || snapshot.Exporting) ImGui.EndDisabled();
         ImGui.TextWrapped(T("制图项目独立保存；Ctrl+S / Ctrl+Z 在此操作当前制图。图层 PNG 使用相同画布。", "This view saves its own project. Ctrl+S / Ctrl+Z target this composition. Layer PNGs share a canvas."));
@@ -457,6 +564,7 @@ internal static partial class CartographyView
     private static void Select(string id, bool add, bool subtract)
     {
         CommitDraft();
+        if (selectedItem != id) selectedRoutePoint = -1;
         if (subtract) Selection.Remove(id);
         else { if (!add) Selection.Clear(); Selection.Add(id); }
         selectedItem = Selection.Contains(id) ? id : Selection.FirstOrDefault() ?? string.Empty;
@@ -515,7 +623,7 @@ internal static partial class CartographyView
         if (shape.Kind == CartographyPrimitiveKind.Line && !ClipLine(ref r, viewport.Offset(-offset.X, -offset.Y).Inflate(shape.Stroke))) return;
         if (shape.Kind != CartographyPrimitiveKind.Line && !viewport.Intersects(r.Offset(offset.X, offset.Y))) return;
         Num.Vector2 a = Screen(origin, r.X, r.Y, offset), b = Screen(origin, r.Right, r.Bottom, offset);
-        uint color = Color(shape.Color); float stroke = Math.Max(.6f, shape.Stroke * zoom);
+        uint color = Color(shape.Color); float stroke = Math.Max(1.15f, shape.Stroke * zoom);
         switch (shape.Kind)
         {
             case CartographyPrimitiveKind.Image: CartographyCanvasImages.Draw(draw, shape, a, b, color); break;
@@ -569,6 +677,6 @@ internal static partial class CartographyView
     }
     private static uint Color(uint argb) => (argb & 0xFF00FF00) | ((argb & 0x00FF0000) >> 16) | ((argb & 0x000000FF) << 16);
     private static Num.Vector2 Screen(Num.Vector2 origin, float x, float y, Num.Vector2 offset) => origin + pan + (new Num.Vector2(x, y) + offset) * zoom;
-    private static string ItemName(CartographyItem item) => item.Kind == CartographyItemKind.Room ? item.Room : item.Kind == CartographyItemKind.Text ? item.Text.Replace('\n', ' ') : item.Kind == CartographyItemKind.Marker ? item.Marker + " " + item.Appearance.Icon : item.Kind == CartographyItemKind.Connection ? item.Appearance.From + " → " + item.Appearance.To : item.Kind.ToString();
+    private static string ItemName(CartographyItem item) => item.Kind == CartographyItemKind.Room ? item.Room : item.Kind == CartographyItemKind.Text ? item.Text.Replace('\n', ' ') : item.Kind == CartographyItemKind.Marker ? item.Marker + " " + item.Appearance.Icon : item.Kind == CartographyItemKind.Connection ? item.Appearance.From + " -> " + item.Appearance.To : item.Kind.ToString();
     private static string T(string chinese, string english) => DevToolUiSettings.T(chinese, english);
 }

@@ -24,12 +24,28 @@ public sealed class WorldCreatureSpawnInspectorPlugin : BaseUnityPlugin
     private void OnEnable() =>
         global::DryCycle.AuxiliaryPluginStartupGuard.Enable(
             PluginName + ".OnEnable",
-            () => WorldCreatureSpawnInspector.Enable(Logger),
-            WorldCreatureSpawnInspector.Disable);
+            () =>
+            {
+                WorldCreatureSpawnInspector.Enable(Logger);
+                WorldTimelineSlugcatIconCatalog.Initialize(Logger);
+            },
+            () =>
+            {
+                WorldTimelineSlugcatIconCatalog.Shutdown();
+                WorldCreatureSpawnInspector.Disable();
+            });
+
+    private void Update() =>
+        WorldTimelineSlugcatIconCatalog.PumpMainThread();
+
     private void OnDisable() =>
         global::DryCycle.AuxiliaryPluginStartupGuard.Disable(
             PluginName + ".OnDisable",
-            WorldCreatureSpawnInspector.Disable);
+            () =>
+            {
+                WorldTimelineSlugcatIconCatalog.Shutdown();
+                WorldCreatureSpawnInspector.Disable();
+            });
 }
 
 internal static class WorldCreatureSpawnInspector
@@ -287,7 +303,7 @@ internal static class WorldCreatureSpawnInspector
                     ? "?"
                     : spawn.Creature;
             if (spawn.Amount > 1)
-                creature += " ×" + spawn.Amount;
+                creature += " x" + spawn.Amount;
             presentedCreatureText[i] = creature;
 
             string scope = SpawnScope(spawn);
@@ -297,7 +313,7 @@ internal static class WorldCreatureSpawnInspector
                     : "{" + spawn.SpawnData + "}";
             presentedSecondaryText[i] =
                 scope.Length > 0 && data.Length > 0
-                    ? scope + "  ·  " + data
+                    ? scope + "  |  " + data
                     : scope.Length > 0
                         ? scope
                         : data;
@@ -483,7 +499,7 @@ internal static class WorldCreatureSpawnInspector
             ImGui.CalcTextSize(value).X <= maxWidth)
             return value;
 
-        const string ellipsis = "…";
+        const string ellipsis = "...";
         int length = value.Length;
         while (length > 1)
         {
@@ -661,7 +677,7 @@ internal static class WorldCreatureSpawnInspector
                 {
                     string value = timelineCatalog[i];
                     bool selected = CsvContains(timelineFilter, value);
-                    if (ImGui.Checkbox(value + "##TimelineTag" + i, ref selected))
+                    if (DrawTimelineTagOption(value, i, ref selected))
                         SetCsvToken(ref timelineFilter, value, selected);
                 }
             }
@@ -683,6 +699,58 @@ internal static class WorldCreatureSpawnInspector
             DevToolTooltip.Show(DevToolUiSettings.T(
                 "从当前已注册的 Timeline / Slugcat 标签中多选。未注册的 Mod 标签会保留。",
                 "Select from currently registered Timeline / Slugcat tags. Unregistered mod tags are preserved."));
+    }
+
+    private static bool DrawTimelineTagOption(
+        string value,
+        int index,
+        ref bool selected)
+    {
+        bool changed = false;
+        float frameHeight = ImGui.GetFrameHeight();
+        float iconSize =
+            Math.Max(
+                16f,
+                Math.Min(
+                    21f,
+                    frameHeight - 3f));
+
+        ImGui.PushID("TimelineTagRow" + index);
+
+        if (ImGui.Checkbox("##Toggle", ref selected))
+            changed = true;
+
+        ImGui.SameLine(0f, 7f);
+        Num.Vector2 iconSlot =
+            ImGui.GetCursorScreenPos();
+        Num.Vector2 iconPos =
+            iconSlot +
+            new Num.Vector2(
+                0f,
+                Math.Max(
+                    0f,
+                    (frameHeight - iconSize) * 0.5f));
+        WorldTimelineSlugcatIconCatalog.Draw(
+            ImGui.GetWindowDrawList(),
+            value,
+            iconPos,
+            iconSize);
+        ImGui.Dummy(
+            new Num.Vector2(
+                iconSize,
+                frameHeight));
+
+        ImGui.SameLine(0f, 7f);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(value ?? string.Empty);
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
+        {
+            selected = !selected;
+            changed = true;
+        }
+
+        ImGui.PopID();
+        return changed;
     }
 
     private static void Apply(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)

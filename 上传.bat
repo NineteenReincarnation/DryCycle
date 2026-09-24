@@ -1,20 +1,20 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title Universal Safe Git Upload
+title Universal Safe Git Upload - ALL FILES
 
 rem ============================================================
-rem Universal Safe Git Upload
+rem Universal Safe Git Upload - ALL FILES
 rem
 rem Goals:
 rem   - Works on the current branch. Nothing is hardcoded to main.
-rem   - Commits every tracked/untracked NON-IGNORED local change.
+rem   - Uploads ALL project/worktree files, including files ignored by .gitignore.
+rem   - Enables Git for Windows long-path support for this repository.
+rem   - Flattens embedded Git working trees while staging so their actual files
+rem     are committed instead of only an embedded-repository gitlink.
+rem   - Root repository .git metadata and nested .git metadata are NOT committed.
 rem   - Never uses reset --hard, git clean, checkout overwrite, or force push.
 rem   - Fetches and merges remote work before pushing.
 rem   - Shows the exact push payload and asks before push.
-rem   - Warns when ignored local files exist: Git will not upload them.
-rem
-rem Ignored files are intentionally local. The matching safe reset script
-rem never runs git clean, so ignored build caches/resources are preserved.
 rem ============================================================
 
 cls
@@ -43,12 +43,28 @@ if errorlevel 1 (
 )
 for /f "delims=" %%U in ('git remote get-url origin') do set "REMOTE_URL=%%U"
 
+rem ------------------------------------------------------------
+rem Long path support
+rem ------------------------------------------------------------
+git config --local core.longpaths true
+if errorlevel 1 (
+    echo [ERROR] Could not enable Git long-path support.
+    goto :fail
+)
+
+set "NESTED_BACKUP=%TEMP%\git_all_upload_nested_%RANDOM%_%RANDOM%"
+set "NESTED_MAP=%TEMP%\git_all_upload_nested_map_%RANDOM%_%RANDOM%.txt"
+set "NESTED_ROOTS=%TEMP%\git_all_upload_nested_roots_%RANDOM%_%RANDOM%.txt"
+set "NESTED_DETACHED=0"
+
 echo ============================================================
-echo Universal Safe Git Upload
+echo Universal Safe Git Upload - ALL FILES
 echo ============================================================
 echo Repository : %REPO%
 echo Branch     : %BRANCH%
 echo Remote     : %REMOTE_URL%
+echo Mode       : ALL FILES, including .gitignore matches
+echo Long paths : enabled for this repository
 echo.
 
 rem ------------------------------------------------------------
@@ -84,38 +100,40 @@ if errorlevel 1 (
 echo.
 
 rem ------------------------------------------------------------
-rem 2. Show everything Git WILL consider for upload.
-rem    Ignored files are reported separately and are never silently implied
-rem    to have been uploaded.
+rem 2. Show upload candidates.
+rem    Normal status and ignored/untracked files are both upload candidates.
 rem ------------------------------------------------------------
-call :section "2. LOCAL CHANGES"
-git status --short --untracked-files=all > "%TEMP%\git_safe_upload_local.txt"
-for %%F in ("%TEMP%\git_safe_upload_local.txt") do set "LOCAL_SIZE=%%~zF"
+call :section "2. LOCAL CHANGES - ALL FILE MODE"
 
-if "!LOCAL_SIZE!"=="0" (
-    echo No uncommitted tracked/non-ignored changes.
-    set "HAS_LOCAL=0"
-) else (
-    type "%TEMP%\git_safe_upload_local.txt"
+git status --short --untracked-files=all > "%TEMP%\git_all_upload_local.txt"
+for %%F in ("%TEMP%\git_all_upload_local.txt") do set "LOCAL_SIZE=%%~zF"
+
+git ls-files --others -i --exclude-standard > "%TEMP%\git_all_upload_ignored.txt"
+for %%F in ("%TEMP%\git_all_upload_ignored.txt") do set "IGNORED_SIZE=%%~zF"
+
+set "HAS_LOCAL=0"
+
+if not "!LOCAL_SIZE!"=="0" (
+    echo Tracked / non-ignored changes:
+    type "%TEMP%\git_all_upload_local.txt"
     set "HAS_LOCAL=1"
+) else (
+    echo No tracked/non-ignored changes.
+)
+
+echo.
+
+if not "!IGNORED_SIZE!"=="0" (
+    echo Ignored files that WILL ALSO be uploaded in ALL FILE mode:
+    type "%TEMP%\git_all_upload_ignored.txt"
+    set "HAS_LOCAL=1"
+) else (
+    echo No ignored untracked files detected.
 )
 echo.
 
-git ls-files --others -i --exclude-standard > "%TEMP%\git_safe_upload_ignored.txt"
-for %%F in ("%TEMP%\git_safe_upload_ignored.txt") do set "IGNORED_SIZE=%%~zF"
-if not "!IGNORED_SIZE!"=="0" (
-    echo [NOTICE] Ignored local files exist.
-    echo They are NOT uploaded by this script because .gitignore explicitly marks them local.
-    echo The safe reset script preserves them and never runs git clean.
-    echo If one of these files must live in Git, remove/fix its ignore rule first, then rerun upload.
-    echo Inspect them with: git status --ignored --short
-    echo.
-)
-
 rem ------------------------------------------------------------
 rem 2.5 Git identity guard
-rem     Prevent commit failure when a fresh machine has no user.name/email.
-rem     Existing user configuration is never overwritten.
 rem ------------------------------------------------------------
 git config user.name >nul 2>&1
 if errorlevel 1 (
@@ -132,28 +150,65 @@ if errorlevel 1 (
     git config user.email "!GIT_DEFAULT_EMAIL!"
     echo [OK] Set local repository user.email to !GIT_DEFAULT_EMAIL!.
 )
-
 echo.
 
 rem ------------------------------------------------------------
-rem 3. Stage and commit all NON-IGNORED local work.
+rem 2.6 Large-file warning.
+rem     GitHub normally rejects individual files >= 100 MiB without Git LFS.
+rem     We warn only; ALL FILE mode does not silently skip them.
+rem ------------------------------------------------------------
+call :section "2.6 LARGE FILE CHECK"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$repo=[IO.Path]::GetFullPath($env:REPO); " ^
+  "$big=Get-ChildItem -LiteralPath $repo -File -Force -Recurse -ErrorAction SilentlyContinue | " ^
+  "Where-Object { $_.FullName -notmatch '[\\/]\.git([\\/]|$)' -and $_.Length -ge 100MB }; " ^
+  "if($big){ Write-Host '[WARNING] Files >= 100 MiB found. GitHub may reject the push:'; " ^
+  "$big | ForEach-Object { '{0,10:N1} MiB  {1}' -f ($_.Length/1MB), $_.FullName } } " ^
+  "else { Write-Host '[OK] No individual worktree file >= 100 MiB found.' }"
+echo.
+
+rem ------------------------------------------------------------
+rem 3. Stage and commit EVERYTHING.
 rem ------------------------------------------------------------
 if "!HAS_LOCAL!"=="1" (
-    call :section "3. COMMIT LOCAL CHANGES"
-    echo git add -A will stage all tracked and non-ignored untracked changes shown above.
+    call :section "3. COMMIT ALL LOCAL FILES"
+    echo This mode uses:
+    echo   git add -f -A -- .
+    echo so .gitignore exclusions are intentionally overridden.
     echo.
-    choice /C YN /N /M "Stage and commit these changes? [Y/N]: "
+    echo Embedded Git working trees are temporarily detached while staging
+    echo so their real files are committed instead of only a gitlink.
+    echo Their .git metadata is restored locally after the commit.
+    echo.
+
+    choice /C YN /N /M "Stage and commit ALL project files? [Y/N]: "
     if errorlevel 2 goto :cancel
 
-    git add -A
+    call :detach_nested_git
     if errorlevel 1 (
-        echo [ERROR] git add -A failed.
+        echo [ERROR] Could not prepare embedded Git working trees. Any moved nested .git metadata was restored.
+        goto :fail
+    )
+
+    rem Remove any previously staged gitlinks for the embedded repositories
+    rem that we are flattening into ordinary files.
+    if exist "%NESTED_ROOTS%" (
+        for /f "usebackq delims=" %%P in ("%NESTED_ROOTS%") do (
+            git rm -r --cached --ignore-unmatch -- "%%P" >nul 2>&1
+        )
+    )
+
+    git add -f -A -- .
+    if errorlevel 1 (
+        echo [ERROR] git add -f -A failed.
         goto :fail
     )
 
     git diff --cached --quiet
     if not errorlevel 1 (
-        echo [INFO] Nothing was staged after git add -A.
+        echo [INFO] Nothing was staged after git add -f -A.
+        call :restore_nested_git
+        if errorlevel 1 goto :fail
     ) else (
         echo.
         echo Staged payload:
@@ -161,23 +216,31 @@ if "!HAS_LOCAL!"=="1" (
         echo.
 
         for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "STAMP=%%T"
-        set "MSG=sync: local changes !STAMP!"
+        set "MSG=sync-all: local files !STAMP!"
+
         git commit -m "!MSG!"
         if errorlevel 1 (
             echo [ERROR] git commit failed. Staged files remain intact.
             goto :fail
         )
-        echo [OK] Local changes committed.
+
+        call :restore_nested_git
+        if errorlevel 1 (
+            echo [ERROR] Commit succeeded, but nested .git metadata could not be fully restored.
+            echo The committed project files are safe. Restore the nested repository metadata manually.
+            goto :fail
+        )
+
+        echo [OK] All project files committed.
     )
 ) else (
-    call :section "3. COMMIT LOCAL CHANGES"
-    echo Nothing new to commit.
+    call :section "3. COMMIT ALL LOCAL FILES"
+    echo Nothing new to commit, including ignored files.
 )
 echo.
 
 rem ------------------------------------------------------------
 rem 4. Merge remote work into local branch.
-rem    No rebase/reset/force is used. Conflicts stop before push.
 rem ------------------------------------------------------------
 if "!REMOTE_EXISTS!"=="1" (
     call :section "4. MERGE REMOTE"
@@ -194,6 +257,7 @@ if "!REMOTE_EXISTS!"=="1" (
         echo Remote commits will be merged before push:
         git log --oneline HEAD.."origin/%BRANCH%"
         echo.
+
         git merge --no-edit "origin/%BRANCH%"
         if errorlevel 1 (
             echo.
@@ -203,7 +267,7 @@ if "!REMOTE_EXISTS!"=="1" (
                 echo Conflict files:
                 git diff --name-only --diff-filter=U
                 echo.
-                echo Resolve them, git add -A, git commit, then run upload again.
+                echo Resolve them, git add -f -A -- ., git commit, then run upload again.
                 goto :fail
             )
             echo [ERROR] Merge failed for a non-conflict reason. Nothing was pushed.
@@ -241,6 +305,7 @@ if "!REMOTE_EXISTS!"=="1" (
     git log --oneline --decorate -n 20
 )
 echo.
+
 choice /C YN /N /M "Push exactly the content shown above? [Y/N]: "
 if errorlevel 2 goto :cancel
 
@@ -277,6 +342,89 @@ echo.
 git status -sb
 goto :done
 
+rem ============================================================
+rem Helper: temporarily move every nested repository's .git
+rem metadata outside the outer repository.
+rem
+rem This makes the outer Git repository see nested working-tree files as
+rem normal files. Root %REPO%\.git is never touched.
+rem ============================================================
+:detach_nested_git
+if exist "%NESTED_MAP%" del /q "%NESTED_MAP%" >nul 2>&1
+if exist "%NESTED_ROOTS%" del /q "%NESTED_ROOTS%" >nul 2>&1
+if exist "%NESTED_BACKUP%" rmdir /s /q "%NESTED_BACKUP%" >nul 2>&1
+
+set "NESTED_DETACHED=0"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; " ^
+  "$repo=[IO.Path]::GetFullPath($env:REPO).TrimEnd('\'); " ^
+  "$backup=$env:NESTED_BACKUP; $map=$env:NESTED_MAP; $roots=$env:NESTED_ROOTS; " ^
+  "$moved=New-Object 'System.Collections.Generic.List[object]'; " ^
+  "try { " ^
+  "  New-Item -ItemType Directory -Force -Path $backup | Out-Null; " ^
+  "  $queue=New-Object 'System.Collections.Generic.Queue[string]'; " ^
+  "  Get-ChildItem -LiteralPath $repo -Directory -Force | Where-Object { $_.Name -ne '.git' } | ForEach-Object { $queue.Enqueue($_.FullName) }; " ^
+  "  $n=0; " ^
+  "  while($queue.Count -gt 0){ " ^
+  "    $dir=$queue.Dequeue(); " ^
+  "    try { $children=Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop } catch { continue }; " ^
+  "    foreach($child in $children){ " ^
+  "      if($child.Name -eq '.git'){ " ^
+  "        $gitPath=$child.FullName; " ^
+  "        $nestedRoot=[IO.Path]::GetDirectoryName($gitPath); " ^
+  "        if([string]::IsNullOrWhiteSpace($nestedRoot)){ throw ('Cannot determine parent for '+$gitPath) }; " ^
+  "        $n++; $dest=Join-Path $backup ([string]$n); " ^
+  "        Move-Item -LiteralPath $gitPath -Destination $dest -Force; " ^
+  "        $moved.Add([pscustomobject]@{Original=$gitPath;Backup=$dest}) | Out-Null; " ^
+  "        Add-Content -LiteralPath $map -Value ($gitPath+'|'+$dest); " ^
+  "        $root=$nestedRoot.Substring($repo.Length).TrimStart('\').Replace('\','/'); " ^
+  "        Add-Content -LiteralPath $roots -Value $root; " ^
+  "        continue " ^
+  "      }; " ^
+  "      if($child.PSIsContainer){ $queue.Enqueue($child.FullName) } " ^
+  "    } " ^
+  "  }; " ^
+  "  Write-Host ('[INFO] Embedded Git metadata detached: '+$n) " ^
+  "} catch { " ^
+  "  Write-Host ('[ERROR] Nested Git preparation failed: '+$_.Exception.Message); " ^
+  "  for($i=$moved.Count-1; $i -ge 0; $i--){ " ^
+  "    $item=$moved[$i]; " ^
+  "    if(Test-Path -LiteralPath $item.Backup){ Move-Item -LiteralPath $item.Backup -Destination $item.Original -Force -ErrorAction SilentlyContinue } " ^
+  "  }; " ^
+  "  exit 1 " ^
+  "}"
+if errorlevel 1 exit /b 1
+
+set "NESTED_DETACHED=1"
+exit /b 0
+
+rem ============================================================
+rem Helper: restore temporarily moved nested .git metadata.
+rem ============================================================
+:restore_nested_git
+if not "!NESTED_DETACHED!"=="1" exit /b 0
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; " ^
+  "$map=$env:NESTED_MAP; " ^
+  "if(Test-Path -LiteralPath $map){ " ^
+  "  Get-Content -LiteralPath $map | ForEach-Object { " ^
+  "    $p=$_.Split('|',2); " ^
+  "    if($p.Count -eq 2 -and (Test-Path -LiteralPath $p[1])){ " ^
+  "      Move-Item -LiteralPath $p[1] -Destination $p[0] -Force " ^
+  "    } " ^
+  "  } " ^
+  "}"
+if errorlevel 1 (
+    echo [ERROR] Failed to restore one or more nested .git entries.
+    exit /b 1
+)
+
+set "NESTED_DETACHED=0"
+if exist "%NESTED_BACKUP%" rmdir /s /q "%NESTED_BACKUP%" >nul 2>&1
+exit /b 0
+
 :section
 echo ------------------------------------------------------------
 echo %~1
@@ -285,21 +433,30 @@ exit /b 0
 
 :cancel
 echo.
+call :restore_nested_git >nul 2>&1
 echo Cancelled. No destructive cleanup was performed.
 goto :done
 
 :done
-del /q "%TEMP%\git_safe_upload_local.txt" >nul 2>&1
-del /q "%TEMP%\git_safe_upload_ignored.txt" >nul 2>&1
+call :restore_nested_git >nul 2>&1
+del /q "%TEMP%\git_all_upload_local.txt" >nul 2>&1
+del /q "%TEMP%\git_all_upload_ignored.txt" >nul 2>&1
+if exist "%NESTED_MAP%" del /q "%NESTED_MAP%" >nul 2>&1
+if exist "%NESTED_ROOTS%" del /q "%NESTED_ROOTS%" >nul 2>&1
+if exist "%NESTED_BACKUP%" rmdir /s /q "%NESTED_BACKUP%" >nul 2>&1
 echo.
 echo Press any key to close...
 pause >nul
 exit /b 0
 
 :fail
-del /q "%TEMP%\git_safe_upload_local.txt" >nul 2>&1
-del /q "%TEMP%\git_safe_upload_ignored.txt" >nul 2>&1
 echo.
+call :restore_nested_git >nul 2>&1
+del /q "%TEMP%\git_all_upload_local.txt" >nul 2>&1
+del /q "%TEMP%\git_all_upload_ignored.txt" >nul 2>&1
+if exist "%NESTED_MAP%" del /q "%NESTED_MAP%" >nul 2>&1
+if exist "%NESTED_ROOTS%" del /q "%NESTED_ROOTS%" >nul 2>&1
+if exist "%NESTED_BACKUP%" rmdir /s /q "%NESTED_BACKUP%" >nul 2>&1
 echo Operation stopped safely.
 echo This uploader never runs git clean, reset --hard, checkout overwrite, or force push.
 echo.

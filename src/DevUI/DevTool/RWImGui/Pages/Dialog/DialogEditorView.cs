@@ -46,7 +46,7 @@ internal static class DialogEditorView
             return;
         }
 
-        ImGui.TextDisabled(DevToolUiSettings.T("语言 · ", "LANGUAGE · ") + snapshot.Language);
+        ImGui.TextDisabled(DevToolUiSettings.T("语言 | ", "LANGUAGE | ") + snapshot.Language);
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索对话", "Search dialogs"), "DialogSearch", ref search, 128);
         ImGui.Separator();
 
@@ -113,7 +113,7 @@ internal static class DialogEditorView
             switch (value.Kind)
             {
                 case EditorDialogEventKind.Text:
-                    ImGui.TextDisabled(DevToolUiSettings.T("文本  ·  等待 ", "TEXT  ·  wait ") + value.InitialWait + DevToolUiSettings.T("  ·  停留 ", "  ·  linger ") + value.Linger);
+                    ImGui.TextDisabled(DevToolUiSettings.T("文本  |  等待 ", "TEXT  |  wait ") + value.InitialWait + DevToolUiSettings.T("  |  停留 ", "  |  linger ") + value.Linger);
                     ImGui.TextWrapped(value.Text ?? string.Empty);
                     break;
                 case EditorDialogEventKind.Chatlog:
@@ -125,11 +125,11 @@ internal static class DialogEditorView
                     ImGui.Text(value.InitialWait + DevToolUiSettings.T(" tick", " ticks"));
                     break;
                 case EditorDialogEventKind.Special:
-                    ImGui.TextDisabled(DevToolUiSettings.T("特殊事件  ·  等待 ", "SPECIAL EVENT  ·  wait ") + value.InitialWait);
+                    ImGui.TextDisabled(DevToolUiSettings.T("特殊事件  |  等待 ", "SPECIAL EVENT  |  wait ") + value.InitialWait);
                     ImGui.TextWrapped(value.Text ?? string.Empty);
                     break;
                 default:
-                    ImGui.TextDisabled(DevToolUiSettings.T("事件  ·  等待 ", "EVENT  ·  wait ") + value.InitialWait);
+                    ImGui.TextDisabled(DevToolUiSettings.T("事件  |  等待 ", "EVENT  |  wait ") + value.InitialWait);
                     ImGui.TextWrapped(value.Text ?? string.Empty);
                     break;
             }

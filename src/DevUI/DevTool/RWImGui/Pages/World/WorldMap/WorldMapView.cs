@@ -141,9 +141,9 @@ internal static class WorldMapView
         float available = ImGui.GetContentRegionAvail().X;
         bool compact = available < 760f;
 
-        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
+        ImGui.TextDisabled(snapshot.RegionName + " | " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
         ImGui.SameLine();
-        ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
+        ImGui.TextDisabled("| " + Math.Round(zoom * 100f) + "%");
 
         if (!compact) ImGui.SameLine(0f, 16f);
         else ImGui.Spacing();
@@ -181,7 +181,7 @@ internal static class WorldMapView
         {
             EditorMapRoomSnapshot source = FindRoom(snapshot, linkingRoom);
             if (DevToolWidgets.SameLineIfFits(120f, 4f))
-                ImGui.TextDisabled("· " + (source?.Name ?? linkingRoom.ToString()) + ":" + linkingNode + " " + DirectionGlyph(linkDirection) + " …");
+                ImGui.TextDisabled("| " + (source?.Name ?? linkingRoom.ToString()) + ":" + linkingNode + " " + DirectionGlyph(linkDirection) + " ...");
         }
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
@@ -738,8 +738,8 @@ internal static class WorldMapView
         draw.AddText(label, text, name);
 
         if (!showSubregionLabels || zoom < 0.75f || string.IsNullOrEmpty(room.Subregion)) return;
-        string meta = MapRoomLayer.Label(room.Layer) + " · " + room.Subregion;
-        if (room.OffScreenDen) meta += " · DEN";
+        string meta = MapRoomLayer.Label(room.Layer) + " | " + room.Subregion;
+        if (room.OffScreenDen) meta += " | DEN";
         Num.Vector2 metaSize = ImGui.CalcTextSize(meta);
         draw.AddText(
             new Num.Vector2((min.X + max.X - metaSize.X) * 0.5f, max.Y + 2f),
@@ -1944,6 +1944,12 @@ internal static class WorldMapView
             roomB: b.Name,
             nodeB: connection.ToNodeIndex));
         selectedConnectionId = string.Empty;
+        EditorShortcutFeedback.PublishCustom(
+            "已删除地图连接",
+            "World Map connection deleted",
+            "Delete",
+            true,
+            EditorShortcutFeedbackVisual.Delete);
     }
 
     private static bool IsEndpointFree(EditorMapPresentationSnapshot snapshot, int roomIndex, EditorMapRoomNodeSnapshot node) =>
@@ -2545,9 +2551,9 @@ internal static class WorldMapView
 
     private static string DirectionGlyph(WorldConnectionDirection direction) => direction switch
     {
-        WorldConnectionDirection.AToB => "->",
-        WorldConnectionDirection.BToA => "<-",
-        _ => "<->"
+        WorldConnectionDirection.AToB => DevToolGlyphs.ArrowRight,
+        WorldConnectionDirection.BToA => DevToolGlyphs.ArrowLeft,
+        _ => DevToolGlyphs.ArrowBoth
     };
 
     private static string ExplicitEdgeId(string connectionId)

@@ -29,8 +29,8 @@ internal static partial class CartographyView
     private static void SourcePickerContent(CartographySourcePicker state, bool chinese)
     {
         CartographyRegionOption selected = state.Regions.FirstOrDefault(region => region.Code == state.Region);
-        string label = selected?.Label(chinese) ?? (state.Region.Length == 0 ? T("正在获取当前区域…", "Finding current region…") : state.Region);
-        ImGui.SetNextItemWidth(Math.Max(180, Math.Min(360, ImGui.GetContentRegionAvail().X - 20)));
+        string label = selected?.Label(chinese) ?? (state.Region.Length == 0 ? T("正在获取当前区域...", "Finding current region...") : state.Region);
+        ImGui.SetNextItemWidth(Math.Max(180, Math.Min(ImGui.GetFontSize() * 21, ImGui.GetContentRegionAvail().X - ImGui.GetFontSize() * 5)));
         if (ImGui.BeginCombo(T("区域##AtlasRegion", "Region##AtlasRegion"), label))
         {
             ImGui.SetNextItemWidth(-1);
@@ -54,7 +54,7 @@ internal static partial class CartographyView
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(T("高级", "Advanced")));
         if (ImGui.Button(T("高级##AtlasSourceOptions", "Advanced##AtlasSourceOptions"))) sourcePanel = !sourcePanel;
         if (state.Loading)
-            ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域…", "Preparing map in background; you can select another region…"));
+            ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域...", "Preparing map in background; you can select another region..."));
         if (state.Failed)
             ImGui.TextWrapped(T("区域载入失败，原有制图已保留：", "Region load failed; existing composition retained: ") + state.Status);
 
@@ -98,7 +98,7 @@ internal static partial class CartographyView
     private static void LeaveDrafts() { CommitDraft(); CommitLayer(); SaveStyle(); FinishGesture(); }
     private static void ExtraToolbar()
     {
-        ImGui.SameLine();if(ImGui.Button(T("导出选区","Export area"))){CommitDraft();tool=Tool.ExportArea;}
+        if(ImGui.Button(T("导出选区","Export area"))){CommitDraft();CancelRoute();tool=Tool.ExportArea;}
     }
     private static void ExtendedItemInspector(CartographyPresentation snapshot)
     {
@@ -122,19 +122,19 @@ internal static partial class CartographyView
         }
         if(draft.Kind==CartographyItemKind.Connection)
         {
-            ImGui.TextWrapped(a.From+" ["+a.FromPort+"] → "+a.To+" ["+a.ToPort+"]");
+            ImGui.TextWrapped(a.From + " [" + a.FromPort + "] " + DevToolGlyphs.ArrowRight + " " + a.To + " [" + a.ToPort + "]");
             int mode=(int)a.Route;
             if(ImGui.Combo(T("线路方式","Routing"),ref mode,T("直线\0先水平\0先垂直\0手动控制点\0","Straight\0Horizontal first\0Vertical first\0Manual points\0"))){a.Route=(CartographyRouteMode)mode;draftDirty=true;CommitDraft();}
             B("虚线","Dashed",ref a.Dashed);B("出口红色端点","Red exit endpoints",ref a.WhiteRed);
             if(ImGui.Button(T("出口水平对齐","Align exit Y")))Send(CartographyCommandKind.AlignPorts,c=>{c.Ids=new[]{draft.Id};c.Integer=0;});
             ImGui.SameLine();if(ImGui.Button(T("出口垂直对齐","Align exit X")))Send(CartographyCommandKind.AlignPorts,c=>{c.Ids=new[]{draft.Id};c.Integer=1;});
-            ImGui.TextWrapped(T("选中线路后双击加点，拖动圆点改线；Alt+点击删点。Shift 拖动保持水平或垂直。","Double-click a selected line to add a point; drag handles to reroute; Alt-click removes a point; Shift constrains the axis."));
+            ImGui.TextWrapped(T("点击线路即可添加并拖动拐点；拖动已有圆点改线；Alt+点击或 Delete 删除所选拐点。Shift 限制方向，Esc 取消拖动。","Click a line to add/drag a bend; drag existing handles to reroute. Alt-click or Delete removes the selected bend. Shift constrains the axis; Esc cancels."));
             for(int n=0;n<draft.Points.Count;n++)
             {
                 ImGui.PushID(n);var p=draft.Points[n];Num.Vector2 v=new(p.X,p.Y);
                 if(ImGui.DragFloat2("##RoutePoint",ref v,1)){p.X=v.X;p.Y=v.Y;draftDirty=true;}
                 if(ImGui.IsItemDeactivatedAfterEdit())CommitDraft();ImGui.SameLine();
-                if(ImGui.SmallButton("×")){draft.Points.RemoveAt(n--);draftDirty=true;CommitDraft();}ImGui.PopID();
+                if(ImGui.SmallButton(DevToolGlyphs.Cross)){draft.Points.RemoveAt(n--);draftDirty=true;CommitDraft();}ImGui.PopID();
             }
             if(ImGui.SmallButton(T("清除控制点","Clear points"))){draft.Points.Clear();a.Route=CartographyRouteMode.Straight;draftDirty=true;CommitDraft();}
         }

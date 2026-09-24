@@ -6,8 +6,10 @@ namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
 /// Presentation-agnostic shortcut metadata shared by DevTool frontends.
-/// The registry deliberately owns only labels and scope; input handling remains in EditorInputRouter
-/// and the individual editor tools. Mods may register additional rows without referencing RWImGui.
+/// The registry owns labels and scope; input handling remains in EditorInputRouter and the individual
+/// editor tools. Every discrete keyboard handler must publish through EditorShortcutFeedback so the
+/// top-center animation is consistent across global and view-specific shortcuts. Mods may register
+/// additional rows without referencing RWImGui.
 /// </summary>
 public sealed class DevToolShortcutDescriptor
 {
@@ -182,6 +184,19 @@ public static class DevToolShortcutRegistry
             new DevToolShortcutDescriptor("objects-place-cancel", "RMB / Esc", "取消物件放置", "Cancel object placement", 70));
 
         RegisterMode(EditorToolMode.Sound,
-            new DevToolShortcutDescriptor("sound-handle", "LMB Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 10));
+            new DevToolShortcutDescriptor("sound-select-all", "Ctrl+A", "全选当前声音列表", "Select all sounds in the current list", 10));
+        RegisterMode(EditorToolMode.Sound,
+            new DevToolShortcutDescriptor("sound-handle", "LMB Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 20));
+
+        RegisterMode(EditorToolMode.Map,
+            new DevToolShortcutDescriptor("map-delete-connection", "Delete / X", "在 World Map 删除当前连接", "Delete the selected World Map connection", 10));
+        RegisterMode(EditorToolMode.Map,
+            new DevToolShortcutDescriptor("player-map-layer", "1 / 2 / 3", "在 Player Map 将所选房间切换到对应图层", "Move selected Player Map rooms to the chosen layer", 20));
+        RegisterMode(EditorToolMode.Map,
+            new DevToolShortcutDescriptor("player-map-nudge", "Arrow Keys", "在 Player Map 微调所选房间", "Nudge selected Player Map rooms", 30));
+        RegisterMode(EditorToolMode.Map,
+            new DevToolShortcutDescriptor("player-map-nudge-fast", "Shift+Arrow", "在 Player Map 快速微调所选房间", "Nudge selected Player Map rooms by a larger step", 31));
+        RegisterMode(EditorToolMode.Map,
+            new DevToolShortcutDescriptor("cartography-select-all", "Ctrl+A", "在 Cartography 全选可编辑元素", "Select all editable Cartography items", 40));
     }
 }

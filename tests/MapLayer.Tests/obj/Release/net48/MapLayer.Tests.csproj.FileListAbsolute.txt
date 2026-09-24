@@ -1,0 +1,11 @@
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.csproj.AssemblyReference.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.AssemblyInfoInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.AssemblyInfo.cs
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.csproj.CoreCompileInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.sourcelink.json
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\bin\Release\net48\MapLayer.Tests.exe.config
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\bin\Release\net48\MapLayer.Tests.exe
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\bin\Release\net48\MapLayer.Tests.pdb
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.exe
+C:\Users\Orrhisk\Desktop\DryCycle\tests\MapLayer.Tests\obj\Release\net48\MapLayer.Tests.pdb

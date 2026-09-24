@@ -488,7 +488,7 @@ internal static class RoomSettingsView
 
             if (effect.Inherited)
             {
-                DevToolWidgets.MutedText(DevToolUiSettings.T("继承效果 · 请修改来源模板。", "Inherited effect · edit the source template to change it."), true);
+                DevToolWidgets.MutedText(DevToolUiSettings.T("继承效果 | 请修改来源模板。", "Inherited effect | edit the source template to change it."), true);
             }
             else if (DevToolWidgets.ActionButton(
                          DevToolUiSettings.T("移除", "Remove"),
@@ -580,7 +580,7 @@ internal static class RoomSettingsView
         {
             EditorRoomEffectSnapshot effect = effects[i];
             string header = effect?.Type ?? string.Empty;
-            if (!string.IsNullOrEmpty(effect?.Category)) header += "  ·  " + effect.Category;
+            if (!string.IsNullOrEmpty(effect?.Category)) header += "  |  " + effect.Category;
             if (effect?.Inherited == true) header += DevToolUiSettings.T("  [继承]", "  [Inherited]");
             else if (effect?.OverWrite == true) header += DevToolUiSettings.T("  [覆盖模板]", "  [Overrides template]");
             header += "##RoomEffect" + (effect?.Index ?? i);

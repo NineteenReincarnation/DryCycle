@@ -1,0 +1,106 @@
+{
+  "version": 4,
+  "targets": {
+    "net48": {
+      "PolySharp/1.15.0": {
+        "type": "package",
+        "build": {
+          "buildTransitive/PolySharp.targets": {}
+        }
+      }
+    },
+    "net48/win-x86": {
+      "PolySharp/1.15.0": {
+        "type": "package",
+        "build": {
+          "buildTransitive/PolySharp.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "PolySharp/1.15.0": {
+      "sha512": "FbU0El+EEjdpuIX4iDbeS7ki1uzpJPx8vbqOzEtqnl1GZeAGJfq+jCbxeJL2y0EPnUNk8dRnnqR2xnYXg9Tf+g==",
+      "type": "package",
+      "path": "polysharp/1.15.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "analyzers/dotnet/cs/PolySharp.SourceGenerators.dll",
+        "build/PolySharp.targets",
+        "buildTransitive/PolySharp.targets",
+        "icon.png",
+        "polysharp.1.15.0.nupkg.sha512",
+        "polysharp.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net48": [
+      "PolySharp >= 1.15.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\Cartography.Tests\\Cartography.Tests.csproj",
+      "projectName": "Cartography.Tests",
+      "projectPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\Cartography.Tests\\Cartography.Tests.csproj",
+      "packagesPath": "C:\\Users\\Orrhisk\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\Cartography.Tests\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\Orrhisk\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "framework": "net48",
+          "targetAlias": "net48",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.400"
+    },
+    "frameworks": {
+      "net48": {
+        "framework": "net48",
+        "targetAlias": "net48",
+        "dependencies": {
+          "PolySharp": {
+            "suppressParent": "All",
+            "target": "Package",
+            "version": "[1.15.0, )"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401\\RuntimeIdentifierGraph.json"
+      }
+    },
+    "runtimes": {
+      "win-x86": {
+        "#import": []
+      }
+    }
+  }
+}

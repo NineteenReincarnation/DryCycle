@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "Nk0YWmKyLss=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\Cartography.Tests\\Cartography.Tests.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\polysharp\\1.15.0\\polysharp.1.15.0.nupkg.sha512"
+  ],
+  "logs": []
+}

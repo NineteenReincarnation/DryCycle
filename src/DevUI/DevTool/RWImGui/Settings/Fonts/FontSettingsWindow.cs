@@ -126,8 +126,8 @@ internal static class FontSettingsWindow
 
         ImGui.Separator();
         ImGui.TextDisabled(DevToolUiSettings.T("预览", "PREVIEW"));
-        ImGui.Text(DevToolUiSettings.T("雨世界开发工具 · 字体预览 123 ABC", "Rain World DevTool · Font preview 123 ABC"));
-        ImGui.TextDisabled(DevToolUiSettings.T("弱化文字预览 · 参数说明", "Muted text preview · parameter hint"));
+        ImGui.Text(DevToolUiSettings.T("雨世界开发工具 | 字体预览 123 ABC", "Rain World DevTool | Font preview 123 ABC"));
+        ImGui.TextDisabled(DevToolUiSettings.T("弱化文字预览 | 参数说明", "Muted text preview | parameter hint"));
         ImGui.TextDisabled(DevToolUiSettings.T("窗口描边：黑色 2 px", "Window outline: black 2 px"));
 
         if (ImGui.Button(DevToolUiSettings.T("恢复默认", "Reset Defaults")))
@@ -166,6 +166,28 @@ internal static class FontSettingsWindow
     {
         string[] families = DevToolFontCatalog.GetAvailableChineseFamilies();
         string selectedFamily = DevToolUiSettings.ChineseFontFamily;
+        if (families.Length > 0)
+        {
+            bool selectedAvailable = false;
+            for (int i = 0; i < families.Length; i++)
+            {
+                if (!string.Equals(
+                        families[i],
+                        selectedFamily,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                selectedAvailable = true;
+                break;
+            }
+
+            if (!selectedAvailable)
+            {
+                selectedFamily = families[0];
+                DevToolUiSettings.ChineseFontFamily =
+                    selectedFamily;
+            }
+        }
+
         int localFontFiles = DevToolFontCatalog.CountLocalFontFiles();
         int registeredLocalFaces = DevToolFontCatalog.RegisteredLocalFaceCount;
         int localChineseFaces = DevToolFontCatalog.CountSelectableLocalChineseFaces();
@@ -193,12 +215,12 @@ internal static class FontSettingsWindow
         }
         else
         {
-            ImGui.TextDisabled($"可选 {families.Length} 个字体族 · 本地中文字体面 {localChineseFaces} 个 · 默认 HarmonyOS Sans SC Medium");
+            ImGui.TextDisabled($"可选 {families.Length} 个字体族 | 本地中文字体面 {localChineseFaces} 个 | 默认 HarmonyOS Sans SC Medium");
         }
 
         DevToolWidgets.MutedText("字体目录");
         ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 · DevTool Context 已注册 {registeredLocalFaces} 个 · 可用于中文 {localChineseFaces} 个");
+        ImGui.TextDisabled($"目录字体 {localFontFiles} 个 | DevTool Context 已注册 {registeredLocalFaces} 个 | 可用于中文 {localChineseFaces} 个");
 
         if (DevToolFontCatalog.RegistrationAttempted && !DevToolFontCatalog.RegistrationSucceeded)
         {

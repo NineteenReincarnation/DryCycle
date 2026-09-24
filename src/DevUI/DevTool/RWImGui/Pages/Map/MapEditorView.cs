@@ -91,7 +91,7 @@ internal static class MapEditorView
             return;
         }
 
-        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
+        ImGui.TextDisabled(snapshot.RegionName + " | " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("适配地图", "Fit Map"),
                 "MapFit",
@@ -286,9 +286,9 @@ internal static class MapEditorView
             return;
         }
 
-        ImGui.TextDisabled(snapshot.RegionName + " · " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
+        ImGui.TextDisabled(snapshot.RegionName + " | " + (snapshot.Rooms?.Length ?? 0) + DevToolUiSettings.T(" 个房间", " rooms"));
         ImGui.SameLine();
-        ImGui.TextDisabled("· " + Math.Round(zoom * 100f) + "%");
+        ImGui.TextDisabled("| " + Math.Round(zoom * 100f) + "%");
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("适配", "Fit"),
@@ -456,8 +456,8 @@ internal static class MapEditorView
             draw.AddRect(min, max, border, 4f, ImDrawFlags.None, room.Selected ? 2f : 1f);
             draw.AddText(min + new Num.Vector2(7f, 5f), text, room.Name);
             string meta = MapRoomLayer.Label(room.Layer);
-            if (!string.IsNullOrEmpty(room.Subregion)) meta += " · " + room.Subregion;
-            if (room.OffScreenDen) meta += " · DEN";
+            if (!string.IsNullOrEmpty(room.Subregion)) meta += " | " + room.Subregion;
+            if (room.OffScreenDen) meta += " | DEN";
             draw.AddText(min + new Num.Vector2(7f, 20f), ImGui.GetColorU32(ImGuiCol.TextDisabled), meta);
         }
     }

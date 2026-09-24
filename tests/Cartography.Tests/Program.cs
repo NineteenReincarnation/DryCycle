@@ -18,7 +18,7 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
-            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity(); RegionLoading(); RuntimeLoading();
+            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity(); RouteGestures(); RegionLoading(); RuntimeLoading();
             if (args.Length > 2 && args[1] == "--game") GameRegions(args[2]);
             else if (args.Length > 1) CorniferRegion(args[1]);
             Console.WriteLine("PASS: " + assertions + " assertions; production authoring / atomic persistence / PNG, SVG and layer export.");

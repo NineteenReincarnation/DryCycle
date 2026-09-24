@@ -85,8 +85,15 @@ public static class EditorInputRouter
         // return without leaving DevTools. This shortcut deliberately works in either mode.
         if (ctrl && shift && global::UnityEngine.Input.GetKeyDown(KeyCode.U))
         {
-            EditorUiModeState.SetVanilla(!EditorUiModeState.UseVanilla);
+            bool nextVanilla = !EditorUiModeState.UseVanilla;
+            EditorUiModeState.SetVanilla(nextVanilla);
             EditorUiModeState.SetOverlayHidden(false);
+            EditorShortcutFeedback.PublishCustom(
+                nextVanilla ? "切换到原版 DevUI" : "切换到新 UI",
+                nextVanilla ? "Vanilla DevUI" : "New UI",
+                "Ctrl+Shift+U",
+                true,
+                EditorShortcutFeedbackVisual.Toggle);
             SetFrontendCapture(false, false, false);
             return;
         }
@@ -96,9 +103,26 @@ public static class EditorInputRouter
         if (!EditorUiModeState.UseVanilla && global::UnityEngine.Input.GetKeyDown(KeyCode.Escape))
         {
             if (session.PlacementActive)
+            {
                 session.CancelPlacement();
+                EditorShortcutFeedback.PublishCustom(
+                    "已取消放置",
+                    "Placement canceled",
+                    "Esc",
+                    true,
+                    EditorShortcutFeedbackVisual.Cancel);
+            }
             else
+            {
+                bool hiding = !EditorUiModeState.OverlayHidden;
                 EditorUiModeState.ToggleOverlayHidden();
+                EditorShortcutFeedback.PublishCustom(
+                    hiding ? "隐藏 DevTool UI" : "显示 DevTool UI",
+                    hiding ? "DevTool UI hidden" : "DevTool UI shown",
+                    "Esc",
+                    true,
+                    EditorShortcutFeedbackVisual.Toggle);
+            }
 
             SetFrontendCapture(false, false, false);
             capturedGame = null;
@@ -110,34 +134,46 @@ public static class EditorInputRouter
                            wantsTextInput ||
                            session.LegacyTransactions.HasPendingTransaction;
 
-        // World Map contains persistent search/inspector InputText controls. Dear ImGui can keep
-        // those controls focused after the developer stops typing, so gating Ctrl+S on text focus
-        // makes Map saving appear randomly broken. Save is an application-level Map command and
-        // Ctrl/Command+S is not meaningful text input, therefore Map may save while a text field is
-        // focused. Other tools retain the old transaction guard to avoid changing their semantics.
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S) &&
-            (session.ToolMode == EditorToolMode.Map || !textEditing))
+        // Save / Undo / Redo are application-level document commands. They are deliberately
+        // resolved before page visibility, Vanilla/New UI presentation and text-focus guards so
+        // every DevTool view has exactly the same keyboard contract. Individual pages must never
+        // re-implement these chords.
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.S))
         {
-            EditorActions.Save(session);
+            bool succeeded = EditorActions.Save(session);
+            EditorShortcutFeedback.Publish(
+                EditorShortcutFeedbackKind.Save,
+                succeeded);
+            return;
+        }
+
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Z))
+        {
+            EditorShortcutFeedbackKind kind =
+                shift
+                    ? EditorShortcutFeedbackKind.Redo
+                    : EditorShortcutFeedbackKind.Undo;
+            bool succeeded =
+                shift
+                    ? EditorActions.Redo(session)
+                    : EditorActions.Undo(session);
+            EditorShortcutFeedback.Publish(
+                kind,
+                succeeded);
+            return;
+        }
+
+        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Y))
+        {
+            bool succeeded = EditorActions.Redo(session);
+            EditorShortcutFeedback.Publish(
+                EditorShortcutFeedbackKind.Redo,
+                succeeded);
             return;
         }
 
         if (textEditing)
             return;
-
-        // Undo/Redo stay below the text-focus guard because Ctrl+Z/Ctrl+Y should continue to edit
-        // the focused text field instead of unexpectedly rewinding the whole editor document.
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Z))
-        {
-            if (shift) EditorActions.Redo(session);
-            else EditorActions.Undo(session);
-            return;
-        }
-        if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Y))
-        {
-            EditorActions.Redo(session);
-            return;
-        }
 
         // Vanilla mode restores the original editor interaction model. Do not let hidden
         // New-UI commands such as duplicate/delete/focus/browser shortcuts fire behind it.
@@ -145,15 +181,58 @@ public static class EditorInputRouter
             return;
 
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
-            EditorActions.DuplicateSelection(session);
+        {
+            bool succeeded = EditorActions.DuplicateSelection(session);
+            EditorShortcutFeedback.PublishCustom(
+                succeeded ? "已复制所选物件" : "没有可复制的物件",
+                succeeded ? "Selection duplicated" : "Nothing to duplicate",
+                "Ctrl+D",
+                succeeded,
+                succeeded ? EditorShortcutFeedbackVisual.Duplicate : EditorShortcutFeedbackVisual.Warning);
+        }
         else if (global::UnityEngine.Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
-            EditorActions.DeleteSelection(session);
+        {
+            bool succeeded = EditorActions.DeleteSelection(session);
+            EditorShortcutFeedback.PublishCustom(
+                succeeded ? "已删除所选物件" : "没有可删除的物件",
+                succeeded ? "Selection deleted" : "Nothing to delete",
+                "Delete",
+                succeeded,
+                succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+        }
         else if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.B))
+        {
+            bool opening = !session.BrowserOpen;
             session.ToggleBrowser();
+            EditorShortcutFeedback.PublishCustom(
+                opening ? "显示浏览器" : "隐藏浏览器",
+                opening ? "Browser shown" : "Browser hidden",
+                "Ctrl+B",
+                true,
+                EditorShortcutFeedbackVisual.Toggle);
+        }
         else if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.I))
+        {
+            bool opening = !session.InspectorOpen;
             session.ToggleInspector();
+            EditorShortcutFeedback.PublishCustom(
+                opening ? "显示检查器" : "隐藏检查器",
+                opening ? "Inspector shown" : "Inspector hidden",
+                "Ctrl+I",
+                true,
+                EditorShortcutFeedbackVisual.Toggle);
+        }
         else if (!ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.Tab))
+        {
+            bool entering = !session.FocusMode;
             session.ToggleFocusMode();
+            EditorShortcutFeedback.PublishCustom(
+                entering ? "进入专注模式" : "退出专注模式",
+                entering ? "Entered Focus mode" : "Exited Focus mode",
+                "Tab",
+                true,
+                EditorShortcutFeedbackVisual.Toggle);
+        }
     }
 
     private static void RainWorldGame_RawUpdateIL(ILContext il)

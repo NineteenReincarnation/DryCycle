@@ -1,0 +1,7 @@
+============================================================
+RWImGUI API Inventory
+============================================================
+Plugin dir : D:\Steam\steamapps\workshop\content\312520\3417372413\plugins
+API        : rain-world-imgui-api 0.0.0.0
+ImGui.NET  : ImGui.NET 1.91.0.1
+

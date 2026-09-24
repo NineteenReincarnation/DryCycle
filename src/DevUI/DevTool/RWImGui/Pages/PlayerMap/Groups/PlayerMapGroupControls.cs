@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DryCycle.DevUI.DevTool.Core;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
@@ -69,12 +70,45 @@ internal static class PlayerMapGroupLayerControls
             return;
 
         int target = -1;
-        if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha1) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad1)) target = 0;
-        else if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha2) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad2)) target = 1;
-        else if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha3) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad3)) target = 2;
+        string keys = string.Empty;
+        if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha1) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad1))
+        {
+            target = 0;
+            keys = "1";
+        }
+        else if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha2) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad2))
+        {
+            target = 1;
+            keys = "2";
+        }
+        else if (UnityEngine.Input.GetKeyDown(KeyCode.Alpha3) || UnityEngine.Input.GetKeyDown(KeyCode.Keypad3))
+        {
+            target = 2;
+            keys = "3";
+        }
         if (target < 0) return;
 
-        QueueLayerChange(PlayerMapSelectionAccess.Collect(snapshot), target);
+        List<PlayerMapRoomSnapshot> selected =
+            PlayerMapSelectionAccess.Collect(snapshot);
+        bool changed = false;
+        for (int i = 0; i < selected.Count; i++)
+        {
+            PlayerMapRoomSnapshot room = selected[i];
+            if (room != null && !room.Disabled && room.Layer != target)
+            {
+                changed = true;
+                break;
+            }
+        }
+
+        QueueLayerChange(selected, target);
+        string layer = MapRoomLayer.Label(target);
+        EditorShortcutFeedback.PublishCustom(
+            changed ? "玩家地图图层切换到 " + layer : "没有房间需要切换图层",
+            changed ? "Player Map layer -> " + layer : "No rooms need a layer change",
+            keys,
+            changed,
+            changed ? EditorShortcutFeedbackVisual.Layer : EditorShortcutFeedbackVisual.Warning);
     }
 
     private static void QueueLayerChange(List<PlayerMapRoomSnapshot> selected, int targetLayer)

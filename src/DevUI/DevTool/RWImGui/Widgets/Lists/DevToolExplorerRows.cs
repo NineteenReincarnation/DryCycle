@@ -18,7 +18,7 @@ internal static class DevToolResponsiveText
         }
         if (ImGui.CalcTextSize(text).X <= maxWidth) return text;
 
-        const string ellipsis = "…";
+        const string ellipsis = "...";
         float ellipsisWidth = ImGui.CalcTextSize(ellipsis).X;
         clipped = true;
         if (ellipsisWidth > maxWidth) return string.Empty;
@@ -264,7 +264,7 @@ internal static class DevToolRoomExplorerEntry
 
         if (!statusClipped && !string.IsNullOrEmpty(secondaryText))
         {
-            string prefix = string.IsNullOrEmpty(renderedStatus) ? string.Empty : " · ";
+            string prefix = string.IsNullOrEmpty(renderedStatus) ? string.Empty : " | ";
             float prefixWidth = string.IsNullOrEmpty(prefix) ? 0f : ImGui.CalcTextSize(prefix).X;
             float secondaryWidth = Math.Max(0f, metaWidth - statusWidth - prefixWidth);
             string renderedSecondary = DevToolResponsiveText.Ellipsize(
@@ -297,7 +297,7 @@ internal static class DevToolRoomExplorerEntry
             {
                 string meta = statusText;
                 if (!string.IsNullOrEmpty(statusText) && !string.IsNullOrEmpty(secondaryText))
-                    meta += " · ";
+                    meta += " | ";
                 meta += secondaryText;
                 if (!string.IsNullOrEmpty(meta))
                     tooltip += "\n" + meta;

@@ -245,6 +245,9 @@ internal sealed class WorldMapRenderTextureSurface
                 sceneObject.SetActive(false);
             }
 
+            if (!bridge.Upload(target))
+                throw new InvalidOperationException(bridge.Error);
+
             lock (gate)
             {
                 if (ownsCandidate)
@@ -853,11 +856,12 @@ internal sealed class WorldMapRenderTextureSurface
         }
     }
 
-    private static void ReleaseTarget(RenderTexture target)
+    private void ReleaseTarget(RenderTexture target)
     {
         if (target == null)
             return;
 
+        bridge.Release(target);
         try
         {
             if (target.IsCreated())

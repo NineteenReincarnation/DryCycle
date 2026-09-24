@@ -1,0 +1,10 @@
+D:\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\Ancient Site\newest\plugins\DryCycle.DevTool.RWImGui.dll
+D:\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\Ancient Site\newest\plugins\DryCycle.DevTool.RWImGui.pdb
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.csproj.AssemblyReference.cache
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.AssemblyInfoInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.AssemblyInfo.cs
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.csproj.CoreCompileInputs.cache
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.sourcelink.json
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.dll
+C:\Users\Orrhisk\Desktop\DryCycle\src\DevUI\DevTool\RWImGui\obj\Release\DryCycle.DevTool.RWImGui.pdb

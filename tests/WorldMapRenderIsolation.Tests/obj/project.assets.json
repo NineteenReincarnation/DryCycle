@@ -1,0 +1,60 @@
+{
+  "version": 4,
+  "targets": {
+    "net48": {}
+  },
+  "libraries": {},
+  "projectFileDependencyGroups": {
+    "net48": []
+  },
+  "packageFolders": {
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\WorldMapRenderIsolation.Tests\\WorldMapRenderIsolation.Tests.csproj",
+      "projectName": "WorldMapRenderIsolation.Tests",
+      "projectPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\WorldMapRenderIsolation.Tests\\WorldMapRenderIsolation.Tests.csproj",
+      "packagesPath": "C:\\Users\\Orrhisk\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\tests\\WorldMapRenderIsolation.Tests\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\Orrhisk\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "framework": "net48",
+          "targetAlias": "net48",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.400"
+    },
+    "frameworks": {
+      "net48": {
+        "framework": "net48",
+        "targetAlias": "net48",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401\\RuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

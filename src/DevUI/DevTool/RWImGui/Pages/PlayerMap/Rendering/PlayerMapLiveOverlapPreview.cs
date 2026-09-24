@@ -10,7 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
 /// Transient overlap preview used only while Player Map rooms are being group-dragged. Stable frames
-/// use PlayerMapLayoutAssist's revision-cached diagnostics; this pass intentionally spends O(n²)
+/// use PlayerMapLayoutAssist's revision-cached diagnostics; this pass intentionally spends O(n^2)
 /// only during active manipulation so the author sees a collision before mouse-up.
 /// </summary>
 internal static class PlayerMapLiveOverlapPreview

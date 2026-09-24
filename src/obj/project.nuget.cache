@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "0J+Vci8Dwsw=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Orrhisk\\Desktop\\DryCycle\\src\\DryCycle.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\ilrepack.lib.msbuild.task\\2.0.46\\ilrepack.lib.msbuild.task.2.0.46.nupkg.sha512",
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\naudio.core\\2.2.1\\naudio.core.2.2.1.nupkg.sha512",
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\naudio.wasapi\\2.2.1\\naudio.wasapi.2.2.1.nupkg.sha512",
+    "C:\\Users\\Orrhisk\\.nuget\\packages\\polysharp\\1.15.0\\polysharp.1.15.0.nupkg.sha512"
+  ],
+  "logs": []
+}

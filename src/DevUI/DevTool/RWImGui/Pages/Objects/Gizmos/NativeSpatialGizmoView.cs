@@ -383,6 +383,12 @@ internal static class NativeSpatialGizmoView
             drag.Index,
             stableId: drag.StableId));
         drag = default;
+        EditorShortcutFeedback.PublishCustom(
+            "已取消空间控制点编辑",
+            "Spatial gizmo edit canceled",
+            "Esc",
+            true,
+            EditorShortcutFeedbackVisual.Cancel);
         return true;
     }
 

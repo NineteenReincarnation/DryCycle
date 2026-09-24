@@ -711,8 +711,8 @@ internal static class SoundLibraryGroupsView
                 $"Group files: {status.ProcessedGroupFiles}/{status.TotalGroupFiles}"));
 
         ImGui.TextDisabled(DevToolUiSettings.T(
-            $"本帧加载 {status.LastFrameWorkMilliseconds:0.00} ms · 峰值 {status.MaxFrameWorkMilliseconds:0.00} ms",
-            $"Frame work {status.LastFrameWorkMilliseconds:0.00} ms · peak {status.MaxFrameWorkMilliseconds:0.00} ms"));
+            $"本帧加载 {status.LastFrameWorkMilliseconds:0.00} ms | 峰值 {status.MaxFrameWorkMilliseconds:0.00} ms",
+            $"Frame work {status.LastFrameWorkMilliseconds:0.00} ms | peak {status.MaxFrameWorkMilliseconds:0.00} ms"));
     }
 
     private static void DrawProjectionShell(int totalSamples)
@@ -755,13 +755,13 @@ internal static class SoundLibraryGroupsView
                     Entry = sound,
                     Source = DevToolSourcePresentation.FromSound(
                         sound.SourceKind, sound.SourceId, sound.SourceName),
-                    StatusLabel = (sound.Available ? "✓ " : "✕ ") + sound.Sample,
-                    TypeLabel = "· " + sound.Type
+                    StatusLabel = (sound.Available ? DevToolGlyphs.Check + " " : DevToolGlyphs.Cross + " ") + sound.Sample,
+                    TypeLabel = "| " + sound.Type
                 };
             }
 
             string line = BuildGroupLine(group);
-            string headerBase = (group?.Name ?? string.Empty) + " · " + (group?.Id ?? string.Empty);
+            string headerBase = (group?.Name ?? string.Empty) + " | " + (group?.Id ?? string.Empty);
             GroupPresentation presentation = new()
             {
                 Group = group,
@@ -769,7 +769,7 @@ internal static class SoundLibraryGroupsView
                 ComboLabel = line + "  (" + sounds.Length + ")##WorkingGroup" + i,
                 WorkingSummary = BuildWorkingSummary(group),
                 Line = line,
-                ActiveHeader = "● " + headerBase + "##SoundGroup" + i,
+                ActiveHeader = DevToolGlyphs.StatusDot + " " + headerBase + "##SoundGroup" + i,
                 InactiveHeader = headerBase + "##SoundGroup" + i,
                 ResourceSummary = DevToolUiSettings.T(
                     $"资源状态：{available}/{sounds.Length} 可用",
@@ -802,14 +802,14 @@ internal static class SoundLibraryGroupsView
     }
 
     private static string BuildGroupLine(SoundGroupSnapshot group) =>
-        (group?.Name ?? string.Empty) + " · " + (group?.Id ?? string.Empty);
+        (group?.Name ?? string.Empty) + " | " + (group?.Id ?? string.Empty);
 
     private static string BuildWorkingSummary(SoundGroupSnapshot group)
     {
         int count = group?.Sounds?.Length ?? 0;
         return DevToolUiSettings.T(
-            $"{count} 个声音 · Library / Scene / Inspector 共用",
-            $"{count} sounds · shared by Library / Scene / Inspector");
+            $"{count} 个声音 | Library / Scene / Inspector 共用",
+            $"{count} sounds | shared by Library / Scene / Inspector");
     }
 
     private static void EnsureDestinationLabels(SoundGroupSnapshot group)
@@ -831,8 +831,8 @@ internal static class SoundLibraryGroupsView
         }
         else
         {
-            destinationWorking = workingBase + " · " + group.Name;
-            destinationSceneAndWorking = sceneWorkingBase + " · " + group.Name;
+            destinationWorking = workingBase + " | " + group.Name;
+            destinationSceneAndWorking = sceneWorkingBase + " | " + group.Name;
         }
         destinationWorkingOption = destinationWorking;
         destinationSceneAndWorkingOption = destinationSceneAndWorking;

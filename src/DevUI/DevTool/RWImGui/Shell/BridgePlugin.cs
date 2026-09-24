@@ -193,7 +193,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // Keep the RWImGui frontend alive in Vanilla presentation mode so the tiny New UI /
         // Vanilla switch remains reachable. Alt+Tab never calls SetVisible(false): the context stays
         // attached and its ImGui window positions/sizes/open-state survive the focus transition.
-        bool frontendVisible = sessionVisible && !EditorUiModeState.OverlayHidden;
+        bool feedbackHold =
+            EditorShortcutFeedback.PresentationHoldActive;
+        bool frontendVisible =
+            sessionVisible &&
+            (!EditorUiModeState.OverlayHidden || feedbackHold);
         DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
     }
 
@@ -304,6 +308,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         global::DryCycle.StartupDiagnostics.Step(
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
+
+        // The consumer context must receive local fonts before the first DX11 Present uploads its
+        // font texture. Waiting until the developer UI is opened is already too late: TexID is then
+        // live and the safe registration guard correctly refuses mutation, leaving Chinese as '?'.
+        global::DryCycle.StartupDiagnostics.Optional(
+            "BridgePlugin/RainWorld.Start/PrepareDevToolFontContext",
+            DevToolFrontend.PrepareFontContextDuringSynchronousStart);
+
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
@@ -374,6 +386,73 @@ internal static class DevToolFrontend
     internal static string ResolvedFontName => resolvedFontName;
     internal static int ResolvedFontWeight => resolvedFontWeight;
     internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;
+
+    internal static bool PrepareFontContextDuringSynchronousStart()
+    {
+        if (DevToolFontCatalog.RegistrationAttempted)
+            return DevToolFontCatalog.RegistrationSucceeded;
+
+        DevToolInputContext context = inputContext;
+        bool switched = false;
+        try
+        {
+            if (ImGUIAPI.HasContext)
+            {
+                log?.LogWarning(
+                    "DryCycle DevTool could not prewarm its font context during RainWorld.Start " +
+                    "because another RWImGui consumer context is active.");
+                return false;
+            }
+
+            if (context == null)
+            {
+                context = new DevToolInputContext();
+                inputContext = context;
+            }
+
+            ImGUIAPI.SwitchContext(context);
+            switched = true;
+
+            bool registered =
+                DevToolFontCatalog.TryRegisterLocalFonts(log);
+            if (registered)
+            {
+                log?.LogInfo(
+                    "DryCycle DevTool prewarmed its dedicated RWImGui font atlas before first Present.");
+            }
+
+            return registered;
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "BridgePlugin/PrepareFontContextDuringSynchronousStart",
+                error);
+            log?.LogWarning(
+                "DryCycle DevTool font-context prewarm failed safely: " +
+                error.Message);
+            return false;
+        }
+        finally
+        {
+            if (switched &&
+                ReferenceEquals(
+                    ImGUIAPI.CurrentContext,
+                    context))
+            {
+                try
+                {
+                    ImGUIAPI.SwitchContext(null);
+                }
+                catch (Exception releaseError)
+                {
+                    log?.LogWarning(
+                        "DryCycle DevTool font prewarm context release failed: " +
+                        releaseError.Message);
+                }
+            }
+        }
+    }
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
@@ -457,6 +536,7 @@ internal static class DevToolFrontend
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
+        WorldMapTextureFrame.Begin();
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
         // While the OS owns focus, keep the consumer context alive but submit no ImGui windows.
@@ -468,10 +548,17 @@ internal static class DevToolFrontend
             return;
         }
 
-        // Vanilla mode deliberately renders only the tiny return panel and therefore does not
-        // require a rebuilt presentation snapshot. New UI surfaces still require a valid snapshot.
-        bool needsPresentationSnapshot = !EditorUiModeState.UseVanilla;
-        if (!visible || (needsPresentationSnapshot && !snapshot.Available) || EditorUiModeState.OverlayHidden)
+        // A shortcut may hide the normal editor UI (Esc) while its top-center acknowledgement is
+        // still animating. Keep a feedback-only frame alive for that brief hold without reopening
+        // any editor windows or requiring a presentation snapshot.
+        bool feedbackOnly =
+            EditorUiModeState.OverlayHidden &&
+            EditorShortcutFeedback.PresentationHoldActive;
+        bool needsPresentationSnapshot =
+            !EditorUiModeState.UseVanilla &&
+            !feedbackOnly;
+        if (!visible ||
+            (needsPresentationSnapshot && !snapshot.Available))
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -490,7 +577,8 @@ internal static class DevToolFrontend
             // the vanilla DevUI and cause visible flicker. Tooltip placement is handled separately.
             io.MouseDrawCursor = false;
 
-            FloatingWindowSnap.BeginFrame(frameContext);
+            if (!feedbackOnly)
+                FloatingWindowSnap.BeginFrame(frameContext);
 
             bool pushedActiveFont = TryPushActiveFont();
             float oldGlobalScale = io.FontGlobalScale;
@@ -509,39 +597,45 @@ internal static class DevToolFrontend
             ImGui.PushStyleColor(ImGuiCol.Border, new System.Numerics.Vector4(0f, 0f, 0f, 1f));
             try
             {
-                // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
-                // presentation hides rebuilt editor panels, not the control used to return.
-                using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.UiModeSwitch))
-                    UiModeSwitch.Draw();
-
-                // Switching from Vanilla to New UI can happen inside UiModeSwitch.Draw(). If the
-                // recreated session has not published its first snapshot yet, wait one frame rather
-                // than feeding an unavailable snapshot into rebuilt editor windows.
-                if (!EditorUiModeState.UseVanilla && snapshot.Available)
+                if (!feedbackOnly)
                 {
-                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
-                        FontSettingsWindow.Draw(frameContext.DisplaySize);
-                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
-                        DevToolOverlay.Draw(snapshot, frameContext);
-                    // Gate structurally inactive Scene surfaces before entering their timing scopes.
-                    // The windows retain their own defensive guards, but stable frames in Focus mode,
-                    // unsupported tools, or Left placement should not pay measurement/call overhead.
-                    bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
-                    if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
+                    // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
+                    // presentation hides rebuilt editor panels, not the control used to return.
+                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.UiModeSwitch))
+                        UiModeSwitch.Draw();
+
+                    // Switching from Vanilla to New UI can happen inside UiModeSwitch.Draw(). If the
+                    // recreated session has not published its first snapshot yet, wait one frame rather
+                    // than feeding an unavailable snapshot into rebuilt editor windows.
+                    if (!EditorUiModeState.UseVanilla && snapshot.Available)
                     {
-                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
-                            SceneWorkspaceWindow.Draw(snapshot, frameContext.DisplaySize);
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
+                            FontSettingsWindow.Draw(frameContext.DisplaySize);
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
+                            DevToolOverlay.Draw(snapshot, frameContext);
+                        bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
+                        if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
+                        {
+                            using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
+                                SceneWorkspaceWindow.Draw(snapshot, frameContext.DisplaySize);
+                        }
+                        if (sceneSurfaceSupported)
+                        {
+                            using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
+                                ScenePlacementWindow.Draw(snapshot, frameContext.DisplaySize);
+                        }
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
+                            ActionToastOverlay.Draw(snapshot, frameContext);
                     }
-                    if (sceneSurfaceSupported)
-                    {
-                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
-                            ScenePlacementWindow.Draw(snapshot, frameContext.DisplaySize);
-                    }
-                    using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
-                        ActionToastOverlay.Draw(snapshot, frameContext);
                 }
 
-                FloatingWindowSnap.EndFrame();
+                // Every keyboard shortcut uses one page-independent feedback surface. It is drawn
+                // last so global commands and view-local commands have the same top-center animation.
+                using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
+                    GlobalShortcutFeedbackOverlay.Draw(frameContext.DisplaySize);
+
+                if (!feedbackOnly)
+                    FloatingWindowSnap.EndFrame();
             }
             finally
             {
@@ -554,14 +648,22 @@ internal static class DevToolFrontend
             // A marquee can begin over empty room pixels, where ImGui itself would normally report
             // WantCaptureMouse=false. Reserve the mouse explicitly so selection never clicks or
             // drags a vanilla world-space DevInterface handle underneath the layout gesture.
-            EditorInputRouter.SetFrontendCapture(
-                io.WantCaptureMouse ||
-                FloatingWindowSnap.OwnsMouse ||
-                NativeObjectGizmoView.OwnsMouse ||
-                NativeSpatialGizmoView.OwnsMouse ||
-                ObjectMarqueeSelectionView.OwnsMouse,
-                io.WantCaptureKeyboard,
-                io.WantTextInput);
+            if (feedbackOnly)
+            {
+                EditorInputRouter.SetFrontendCapture(false, false, false);
+            }
+            else
+            {
+                EditorInputRouter.SetFrontendCapture(
+                    io.WantCaptureMouse ||
+                    ShortcutWindow.OwnsMouse ||
+                    FloatingWindowSnap.OwnsMouse ||
+                    NativeObjectGizmoView.OwnsMouse ||
+                    NativeSpatialGizmoView.OwnsMouse ||
+                    ObjectMarqueeSelectionView.OwnsMouse,
+                    io.WantCaptureKeyboard,
+                    io.WantTextInput);
+            }
         }
         catch (Exception error)
         {
@@ -641,13 +743,28 @@ internal static class DevToolFrontend
                 resolvedFontWeightVariantCount =
                     Math.Max(1, variantCount);
 
+                if (requireChinese)
+                {
+                    string resolvedFamily =
+                        DevToolFontCatalog.FamilyFromName(name);
+                    if (!string.IsNullOrWhiteSpace(resolvedFamily) &&
+                        !string.Equals(
+                            resolvedFamily,
+                            DevToolUiSettings.ChineseFontFamily,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        DevToolUiSettings.ChineseFontFamily =
+                            resolvedFamily;
+                    }
+                }
+
                 if (requireChinese &&
                     Interlocked.Exchange(ref cjkFontLogged, 1) == 0)
                 {
                     log?.LogInfo(
                         "DryCycle DevTool selected local CJK font: " +
                         name +
-                        " · weight " +
+                        " | weight " +
                         actualWeight +
                         ".");
                 }

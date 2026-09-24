@@ -163,7 +163,7 @@ internal static class TriggerEditorView
 
         ImGui.Text(selected.Type);
         ImGui.TextDisabled(selected.Event?.HasEvent == true
-            ? DevToolUiSettings.T("事件 · ", "Event · ") + selected.Event.Type
+            ? DevToolUiSettings.T("事件 | ", "Event | ") + selected.Event.Type
             : DevToolUiSettings.T("未分配事件", "No event assigned"));
         ImGui.Separator();
 
@@ -719,7 +719,7 @@ internal static class TriggerEditorView
                 continue;
             }
             string label = trigger.Type ?? string.Empty;
-            if (trigger.Event?.HasEvent == true) label += "  →  " + trigger.Event.Type;
+            if (trigger.Event?.HasEvent == true) label += "  ->  " + trigger.Event.Type;
             labels[i] = label + "##TriggerScene" + trigger.Index;
         }
         projectedSceneTriggers = triggers;

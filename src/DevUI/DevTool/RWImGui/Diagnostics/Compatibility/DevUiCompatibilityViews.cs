@@ -21,8 +21,8 @@ internal static class DevUiCompatibilityGateView
         ImGui.TextColored(
             gate.Passed ? PassText : FailText,
             gate.Passed
-                ? DevToolUiSettings.T("PASS · 通用迁移验收通过", "PASS · generic migration gate passed")
-                : DevToolUiSettings.T("NOT READY · 仍有通用覆盖缺口", "NOT READY · generic coverage gaps remain"));
+                ? DevToolUiSettings.T("PASS | 通用迁移验收通过", "PASS | generic migration gate passed")
+                : DevToolUiSettings.T("NOT READY | 仍有通用覆盖缺口", "NOT READY | generic coverage gaps remain"));
 
         ImGui.Spacing();
         DrawMetric(
@@ -45,9 +45,9 @@ internal static class DevUiCompatibilityGateView
         ImGui.Spacing();
         DevToolWidgets.MutedText(
             "Vanilla " + gate.VanillaGaps +
-            "  ·  RegionKit " + gate.RegionKitGaps +
-            "  ·  DryCycle " + gate.DryCycleGaps +
-            "  ·  Other " + gate.OtherGaps);
+            "  |  RegionKit " + gate.RegionKitGaps +
+            "  |  DryCycle " + gate.DryCycleGaps +
+            "  |  Other " + gate.OtherGaps);
 
         if (!gate.Passed)
         {
@@ -80,7 +80,7 @@ internal static class DevUiPageCoverageView
         if (snapshot == null || snapshot.TotalPageCount <= 0) return;
 
         string title = DevToolUiSettings.T("页面审计覆盖", "PAGE AUDIT COVERAGE") +
-                       "  ·  " + snapshot.VisitedPageCount + "/" + snapshot.TotalPageCount;
+                       "  |  " + snapshot.VisitedPageCount + "/" + snapshot.TotalPageCount;
         ImGuiTreeNodeFlags flags = snapshot.Complete ? ImGuiTreeNodeFlags.None : ImGuiTreeNodeFlags.DefaultOpen;
         if (!ImGui.CollapsingHeader(title + "##GenericPageAuditCoverage", flags)) return;
 
@@ -108,8 +108,8 @@ internal static class DevUiPageCoverageView
             {
                 ImGui.SameLine();
                 string details = DevToolUiSettings.T(
-                    "镜像 " + page.MirroredControlCount + " · 未映射 " + page.UnmappedProtocolCount,
-                    "mirror " + page.MirroredControlCount + " · unmapped " + page.UnmappedProtocolCount);
+                    "镜像 " + page.MirroredControlCount + " | 未映射 " + page.UnmappedProtocolCount,
+                    "mirror " + page.MirroredControlCount + " | unmapped " + page.UnmappedProtocolCount);
                 DevToolWidgets.MutedText(details);
 
                 if (ImGui.IsItemHovered() && !string.IsNullOrWhiteSpace(page.PageType))
@@ -143,7 +143,7 @@ internal static class DevUiSemanticConformanceView
         if (snapshot == null || string.IsNullOrWhiteSpace(snapshot.PageType)) return;
 
         string title = DevToolUiSettings.T("语义一致性", "SEMANTIC CONFORMANCE") +
-                       "  ·  " + snapshot.ExecutableRouteCount + "/" + snapshot.ControlCount;
+                       "  |  " + snapshot.ExecutableRouteCount + "/" + snapshot.ControlCount;
         ImGuiTreeNodeFlags flags = snapshot.Passed ? ImGuiTreeNodeFlags.None : ImGuiTreeNodeFlags.DefaultOpen;
         if (!ImGui.CollapsingHeader(title + "##DevUiSemanticConformance", flags)) return;
 
@@ -165,7 +165,7 @@ internal static class DevUiSemanticConformanceView
         {
             DevUiSemanticFailure failure = failures[i];
             if (failure == null) continue;
-            ImGui.TextWrapped(failure.Protocol + " · " + failure.Path);
+            ImGui.TextWrapped(failure.Protocol + " | " + failure.Path);
             DevToolWidgets.MutedText(failure.Reason, true);
             if (ImGui.IsItemHovered() && !string.IsNullOrWhiteSpace(failure.RuntimeType))
                 DevToolTooltip.Show(failure.RuntimeType);
