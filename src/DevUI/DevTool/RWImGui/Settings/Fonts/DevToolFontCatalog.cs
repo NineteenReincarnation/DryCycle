@@ -17,7 +17,7 @@ internal static unsafe class DevToolFontCatalog
     internal const string DefaultChineseFamily = "HarmonyOS Sans SC";
     internal const string UbuntuMonoFamily = "Ubuntu Mono";
 
-    private const int MaxLocalFontFaces = 2;
+    private const int MaxLocalFontFaces = 1;
     private const long MaxLocalFontBytes = 64L * 1024L * 1024L;
 
     private sealed class RegisteredFace
@@ -124,8 +124,6 @@ internal static unsafe class DevToolFontCatalog
             IntPtr chineseGlyphRanges =
                 GetExtendedChineseGlyphRanges(
                     io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
-            IntPtr defaultGlyphRanges =
-                io.Fonts.GetGlyphRangesDefault();
             int added = 0;
             int eligibleFiles = 0;
 

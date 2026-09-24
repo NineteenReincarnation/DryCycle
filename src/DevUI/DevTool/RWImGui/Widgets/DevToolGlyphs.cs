@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using ImGuiNET;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -6,9 +7,20 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Centralized Unicode UI glyph selection. Unicode is preferred when the active ImGui font
 /// actually contains every requested glyph; otherwise an ASCII fallback is returned.
+/// Glyph support is cached per active font so stable frames do not repeatedly cross the
+/// managed/native boundary for the same symbols.
 /// </summary>
 internal static unsafe class DevToolGlyphs
 {
+    private static readonly Dictionary<string, bool> GlyphSupport = new(StringComparer.Ordinal);
+    private static ImFontPtr cachedFont;
+
+    internal static void ResetCache()
+    {
+        cachedFont = default;
+        GlyphSupport.Clear();
+    }
+
     internal static string Prefer(string unicode, string ascii)
     {
         if (string.IsNullOrEmpty(unicode)) return ascii ?? string.Empty;
@@ -18,23 +30,40 @@ internal static unsafe class DevToolGlyphs
             ImFontPtr font = ImGui.GetFont();
             if (font.NativePtr == null) return ascii ?? string.Empty;
 
-            for (int i = 0; i < unicode.Length; i++)
+            if (cachedFont.NativePtr != font.NativePtr)
             {
-                char ch = unicode[i];
-                if (char.IsSurrogate(ch))
-                    return ascii ?? string.Empty;
-                if (ch <= 0x7F)
-                    continue;
-                if (font.FindGlyphNoFallback((ushort)ch).NativePtr == null)
-                    return ascii ?? string.Empty;
+                cachedFont = font;
+                GlyphSupport.Clear();
             }
 
-            return unicode;
+            if (!GlyphSupport.TryGetValue(unicode, out bool supported))
+            {
+                supported = ContainsAllGlyphs(font, unicode);
+                GlyphSupport[unicode] = supported;
+            }
+
+            return supported ? unicode : ascii ?? string.Empty;
         }
         catch
         {
             return ascii ?? string.Empty;
         }
+    }
+
+    private static bool ContainsAllGlyphs(ImFontPtr font, string unicode)
+    {
+        for (int i = 0; i < unicode.Length; i++)
+        {
+            char ch = unicode[i];
+            if (char.IsSurrogate(ch))
+                return false;
+            if (ch <= 0x7F)
+                continue;
+            if (font.FindGlyphNoFallback((ushort)ch).NativePtr == null)
+                return false;
+        }
+
+        return true;
     }
 
     internal static string Separator => Prefer("·", "|");

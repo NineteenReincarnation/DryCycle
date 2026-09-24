@@ -422,6 +422,7 @@ internal static class DevToolFrontend
     private static int drawFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
+    private static int fontPushFailureLogged;
     private static int contextActivationFailureLogged;
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
@@ -611,7 +612,9 @@ internal static class DevToolFrontend
         projectedFontWeight = int.MinValue;
         Interlocked.Exchange(ref cjkFontLogged, 0);
         Interlocked.Exchange(ref cjkFontMissingLogged, 0);
+        Interlocked.Exchange(ref fontPushFailureLogged, 0);
         DevToolFontCatalog.ResetConsumerContextState();
+        DevToolGlyphs.ResetCache();
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
@@ -892,8 +895,28 @@ internal static class DevToolFrontend
         if (activeFont.NativePtr == null)
             return false;
 
-        ImGui.PushFont(activeFont);
-        return true;
+        try
+        {
+            ImGui.PushFont(activeFont);
+            return true;
+        }
+        catch (Exception error)
+        {
+            activeFont = default;
+            resolvedFontName = "Default";
+            resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
+            resolvedFontWeightVariantCount = 1;
+            DevToolGlyphs.ResetCache();
+
+            if (Interlocked.Exchange(ref fontPushFailureLogged, 1) == 0)
+            {
+                log?.LogWarning(
+                    "DryCycle DevTool rejected the resolved local font during PushFont and " +
+                    "fell back to the RWImGui context default font: " + error.Message);
+            }
+
+            return false;
+        }
     }
 
 }
