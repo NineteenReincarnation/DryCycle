@@ -33,6 +33,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private bool applicationFocused;
     private bool creatureCatalogFallbackChecked;
     private bool ownsCreatureCatalogRuntime;
+    private bool frontendInputAttached;
+    private bool retainedFrontendActive;
 
     private void OnEnable()
     {
@@ -48,8 +50,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
             applicationFocused = UnityEngine.Application.isFocused;
             creatureCatalogFallbackChecked = false;
             ownsCreatureCatalogRuntime = false;
+            frontendInputAttached = false;
+            retainedFrontendActive = false;
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorUiModeState.SetOverlayHidden", () => EditorUiModeState.SetOverlayHidden(false));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(true));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(false));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetLogger", () => DevToolFrontend.SetLogger(Logger));
             global::DryCycle.StartupDiagnostics.Step(
                 "BridgePlugin/DevToolFrontend.ResetNativeReadiness",
@@ -103,8 +107,24 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private void LateUpdate()
     {
         if (!bridgeEnabled) return;
+
         WorldMapLegacyVisualGuard.LateUpdate();
-        retainedViewLifecycle.LateUpdate();
+
+        bool shouldRunRetainedFrontend =
+            DevToolFrontend.NativeBackendReady &&
+            !EditorUiModeState.UseVanilla &&
+            DevToolSessionHub.IsCurrentSessionLive;
+
+        if (shouldRunRetainedFrontend)
+        {
+            retainedViewLifecycle.LateUpdate();
+            retainedFrontendActive = true;
+        }
+        else if (retainedFrontendActive)
+        {
+            DevToolPageViewRegistry.DeactivateActive();
+            retainedFrontendActive = false;
+        }
     }
 
     private void OnApplicationFocus(bool hasFocus)
@@ -125,32 +145,49 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
-        // The retained World Map keeps live MapPage/RoomPanel/texture/file work on Unity's main
-        // thread. RWImGUI Draw consumes only detached/published snapshots.
-        EditorSession mapSession = DevToolRuntime.ActiveSession;
-        if (mapSession?.ToolMode == EditorToolMode.Map)
+        // The rebuilt frontend is not actually available until RWImGUI reaches a healthy Present.
+        // Claiming frontend ownership before that point made vanilla DevUI sleep while New UI had
+        // nothing to draw, and kept invisible retained pipelines running every gameplay frame.
+        bool nativeFrontendReady = DevToolFrontend.NativeBackendReady;
+        if (frontendInputAttached != nativeFrontendReady)
         {
-            if (WorldMapBackgroundBudget.AllowSourceRecovery())
-                MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
-
-            MapRoomGeometryPresentationHub.Prime(mapSession);
-            int selectedRoomIndex =
-                MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
-            WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
-            WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
-        }
-        else
-        {
-            WorldMapExactShortcuts.UpdateMainThread(mapSession, -1);
+            frontendInputAttached = nativeFrontendReady;
+            EditorInputRouter.SetFrontendAttached(nativeFrontendReady);
         }
 
-        // V2 resources capture only after the live-source pumps above have published detached data.
-        WorldMapRetainedV2Runtime.UpdateMainThread();
-        CartographyCanvasImages.UpdateMainThread();
+        // If the native renderer is unavailable, always leave the original DevUI usable.
+        if (!nativeFrontendReady && !EditorUiModeState.UseVanilla)
+            EditorUiModeState.SetVanilla(true);
 
-        EnsureCreatureCatalogRuntime();
-        if (ownsCreatureCatalogRuntime)
-            WorldCreatureCatalogPicker.PumpMainThread();
+        bool rebuiltFrontendWorkActive =
+            nativeFrontendReady &&
+            !EditorUiModeState.UseVanilla &&
+            DevToolSessionHub.IsCurrentSessionLive;
+
+        if (rebuiltFrontendWorkActive)
+        {
+            EditorSession mapSession = DevToolRuntime.ActiveSession;
+            if (mapSession?.ToolMode == EditorToolMode.Map)
+            {
+                if (WorldMapBackgroundBudget.AllowSourceRecovery())
+                    MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
+
+                MapRoomGeometryPresentationHub.Prime(mapSession);
+                int selectedRoomIndex =
+                    MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
+                WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
+                WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
+
+                // These pumps only back the rebuilt Map UI. Do not run them in gameplay, Vanilla
+                // DevUI, another tool, or when RWImGUI cannot render.
+                WorldMapRetainedV2Runtime.UpdateMainThread();
+                CartographyCanvasImages.UpdateMainThread();
+            }
+
+            EnsureCreatureCatalogRuntime();
+            if (ownsCreatureCatalogRuntime)
+                WorldCreatureCatalogPicker.PumpMainThread();
+        }
 
         // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
         // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
@@ -265,6 +302,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
             SafeFrontendCleanup("creature catalog fallback", WorldCreatureCatalogPicker.Shutdown);
         ownsCreatureCatalogRuntime = false;
         creatureCatalogFallbackChecked = false;
+        frontendInputAttached = false;
+        retainedFrontendActive = false;
         SafeFrontendCleanup("world lineage inspector", WorldLineageInspector.Disable);
         SafeFrontendCleanup("scoped scroll chrome", ScopedScrollChrome.Disable);
         SafeFrontendCleanup("world map legacy visual guard", WorldMapLegacyVisualGuard.Disable);
@@ -392,6 +431,7 @@ internal static class DevToolFrontend
     private static string projectedFontFamily = string.Empty;
     private static int projectedFontWeight = int.MinValue;
 
+    internal static bool NativeBackendReady => Volatile.Read(ref rwimguiPresentObserved) != 0;
     internal static string ResolvedFontName => resolvedFontName;
     internal static int ResolvedFontWeight => resolvedFontWeight;
     internal static int ResolvedFontWeightVariantCount => resolvedFontWeightVariantCount;

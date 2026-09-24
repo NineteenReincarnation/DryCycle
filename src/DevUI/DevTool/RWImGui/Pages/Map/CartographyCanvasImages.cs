@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using DryCycle.DevUI.DevTool.Map.Cartography;
 using ImGuiNET;
 using Num = System.Numerics;
@@ -16,6 +15,7 @@ internal static class CartographyCanvasImages
     }
     private static readonly object Gate = new();
     private static readonly Dictionary<CartographyRaster, Entry> Entries = new();
+    private static readonly List<KeyValuePair<CartographyRaster, Entry>> Pending = new();
     private static long frame;
     internal static string Error { get; private set; } = "";
 
@@ -32,12 +32,26 @@ internal static class CartographyCanvasImages
 
     internal static void UpdateMainThread()
     {
-        KeyValuePair<CartographyRaster, Entry>[] pending;
-        lock (Gate) { frame++; pending = Entries.ToArray(); }
+        lock (Gate)
+        {
+            frame++;
+            if (Entries.Count == 0)
+            {
+                Pending.Clear();
+                Error = "";
+                return;
+            }
+
+            Pending.Clear();
+            foreach (KeyValuePair<CartographyRaster, Entry> pair in Entries)
+                Pending.Add(pair);
+        }
+
         int budget = 8;
         string error = "";
-        foreach (var pair in pending)
+        for (int pendingIndex = 0; pendingIndex < Pending.Count; pendingIndex++)
         {
+            KeyValuePair<CartographyRaster, Entry> pair = Pending[pendingIndex];
             Entry entry = pair.Value;
             bool stale;
             lock (Gate)
