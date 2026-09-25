@@ -289,11 +289,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         bool sessionLiveNow = DevToolSessionHub.IsCurrentSessionLive;
 
-        // Fall back only while DevTools is actually open. As soon as Present becomes healthy the
-        // small Vanilla return panel can attach and Ctrl+Shift+U / the panel can select New UI.
-        if (!nativeFrontendReady && sessionLiveNow && !EditorUiModeState.UseVanilla)
-            EditorUiModeState.SetVanilla(true);
-
+        // Backend readiness is transient; the user's presentation choice is not. While RWImGui is
+        // unavailable FrontendAttached=false already keeps vanilla DevUI visible and rebuilt
+        // snapshot production asleep. Do not permanently rewrite UseVanilla just because Present
+        // was late for one frame. When the heartbeat arrives, New UI can activate automatically.
         EditorSession session = DevToolSessionHub.Current;
         RainWorldGame game = session?.Owner?.game;
         bool rawSessionVisible = DevToolSessionHub.IsCurrentSessionLive;
