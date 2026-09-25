@@ -60,8 +60,9 @@ public static class EditorInputRouter
         {
             // The exact vanilla DevTools block is version-sensitive. Losing this small compatibility
             // gate may restore a vanilla hotkey conflict, but must not remove the entire New UI.
-            try { IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL; }
-            catch { }
+            RemoveHookSafely(
+                "RawUpdate IL compatibility gate after failed install",
+                () => IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL);
             Plugin.Logger?.LogWarning(
                 "DevTool RawUpdate IL compatibility gate is unavailable; continuing without it. " +
                 error);
@@ -80,14 +81,16 @@ public static class EditorInputRouter
         {
             // HookGen removals are safe when a handler was not present. Clean every possible
             // partial subscription before propagating to DevToolRuntime's optional-subsystem guard.
-            try { On.Player.checkInput -= Player_checkInput; } catch { }
-            try { On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate; } catch { }
-            try { On.RainWorldGame.Update -= RainWorldGame_Update; } catch { }
-            try { On.DevInterface.Handle.Update -= Handle_Update; } catch { }
-            try { On.DevInterface.MapPage.Update -= MapPage_Update; } catch { }
+            RemoveHookSafely("Player.checkInput", () => On.Player.checkInput -= Player_checkInput);
+            RemoveHookSafely("RainWorldGame.RawUpdate", () => On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate);
+            RemoveHookSafely("RainWorldGame.Update", () => On.RainWorldGame.Update -= RainWorldGame_Update);
+            RemoveHookSafely("DevInterface.Handle.Update", () => On.DevInterface.Handle.Update -= Handle_Update);
+            RemoveHookSafely("DevInterface.MapPage.Update", () => On.DevInterface.MapPage.Update -= MapPage_Update);
             if (rawUpdateIlInstalled)
             {
-                try { IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL; } catch { }
+                RemoveHookSafely(
+                    "RawUpdate IL compatibility gate",
+                    () => IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL);
                 rawUpdateIlInstalled = false;
             }
             throw;
@@ -109,11 +112,11 @@ public static class EditorInputRouter
             rawUpdateIlInstalled = false;
         }
 
-        try { On.Player.checkInput -= Player_checkInput; } catch { }
-        try { On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate; } catch { }
-        try { On.RainWorldGame.Update -= RainWorldGame_Update; } catch { }
-        try { On.DevInterface.Handle.Update -= Handle_Update; } catch { }
-        try { On.DevInterface.MapPage.Update -= MapPage_Update; } catch { }
+        RemoveHookSafely("Player.checkInput", () => On.Player.checkInput -= Player_checkInput);
+        RemoveHookSafely("RainWorldGame.RawUpdate", () => On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate);
+        RemoveHookSafely("RainWorldGame.Update", () => On.RainWorldGame.Update -= RainWorldGame_Update);
+        RemoveHookSafely("DevInterface.Handle.Update", () => On.DevInterface.Handle.Update -= Handle_Update);
+        RemoveHookSafely("DevInterface.MapPage.Update", () => On.DevInterface.MapPage.Update -= MapPage_Update);
 
         SetFrontendAttached(false);
         vanillaHotkeysSuppressedGame = null;
@@ -281,6 +284,19 @@ public static class EditorInputRouter
                 "Tab",
                 true,
                 EditorShortcutFeedbackVisual.Toggle);
+        }
+    }
+
+    private static void RemoveHookSafely(string name, Action remove)
+    {
+        try
+        {
+            remove?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool input hook cleanup failed for '" + name + "': " + error);
         }
     }
 
