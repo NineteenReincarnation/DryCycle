@@ -31,10 +31,20 @@ internal static class ShortcutWindow
         internal float RadiusScale;
     }
 
-    private static readonly Num.Vector4 OrbFill = new(0.034f, 0.045f, 0.050f, 0.97f);
-    private static readonly Num.Vector4 OrbFillHover = new(0.072f, 0.105f, 0.112f, 0.99f);
-    private static readonly Num.Vector4 OrbBorder = new(0.84f, 0.86f, 0.75f, 0.98f);
-    private static readonly Num.Vector4 OrbTick = new(0.67f, 0.70f, 0.61f, 0.86f);
+    private static readonly Num.Vector4 OrbFill = new(0.025f, 0.035f, 0.046f, 0.96f);
+    private static readonly Num.Vector4 OrbFillHover = new(0.045f, 0.085f, 0.112f, 0.99f);
+    private static readonly Num.Vector4 OrbBorder = new(0.60f, 0.76f, 0.84f, 0.92f);
+    private static readonly Num.Vector4 OrbAccent = new(0.42f, 0.72f, 0.90f, 0.92f);
+    private static readonly Num.Vector4 OrbAccentHot = new(0.67f, 0.88f, 1.00f, 1f);
+    private static readonly Num.Vector4 OrbPetal = new(0.84f, 0.92f, 0.95f, 0.96f);
+    private static readonly Num.Vector4 OrbPetalShadow = new(0.18f, 0.31f, 0.38f, 0.86f);
+
+    private static readonly Num.Vector4 TooltipBackground = new(0.025f, 0.038f, 0.052f, 0.96f);
+    private static readonly Num.Vector4 TooltipBorder = new(0.30f, 0.49f, 0.62f, 0.88f);
+    private static readonly Num.Vector4 TooltipTitle = new(0.58f, 0.82f, 0.98f, 1f);
+    private static readonly Num.Vector4 TooltipChip = new(0.10f, 0.22f, 0.31f, 0.98f);
+    private static readonly Num.Vector4 TooltipChipBorder = new(0.36f, 0.65f, 0.82f, 0.92f);
+    private static readonly Num.Vector4 TooltipHint = new(0.67f, 0.75f, 0.80f, 0.92f);
 
     private static readonly Num.Vector4 GlobalLine = new(0.42f, 0.66f, 0.84f, 0.66f);
     private static readonly Num.Vector4 GlobalFill = new(0.052f, 0.096f, 0.140f, 0.97f);
@@ -198,7 +208,12 @@ internal static class ShortcutWindow
         ImGui.SetNextWindowSize(windowSize, ImGuiCond.Always);
         ImGui.SetNextWindowBgAlpha(0f);
 
+        // The radial surface is a transparent draw host. Explicitly zero the window border as
+        // well as its background so the collapsed flower reads as a real circular control rather
+        // than a circle trapped inside an invisible ImGui rectangle.
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Num.Vector2.Zero);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
         ImGuiWindowFlags flags =
             ImGuiWindowFlags.NoDecoration |
             ImGuiWindowFlags.NoMove |
@@ -210,7 +225,7 @@ internal static class ShortcutWindow
         if (!ImGui.Begin("##DevToolShortcutRadial", flags))
         {
             ImGui.End();
-            ImGui.PopStyleVar();
+            ImGui.PopStyleVar(3);
             return;
         }
 
@@ -439,19 +454,12 @@ internal static class ShortcutWindow
             }
             else if (hoverOrb)
             {
-                DevToolTooltip.Show(
-                    expanded
-                        ? DevToolUiSettings.T(
-                            "快捷键轮：点击收起；拖动移动；滚轮翻页。",
-                            "Shortcut wheel: click to close; drag to move; wheel changes pages.")
-                        : DevToolUiSettings.T(
-                            "快捷键轮：点击展开全局与当前视图快捷键；拖动移动。",
-                            "Shortcut wheel: click for global and current-view shortcuts; drag to move."));
+                ShowOrbTooltip(expanded);
             }
         }
 
         ImGui.End();
-        ImGui.PopStyleVar();
+        ImGui.PopStyleVar(3);
     }
 
     internal static void ResetRetainedState()
@@ -961,139 +969,122 @@ internal static class ShortcutWindow
         float globalReveal,
         float currentReveal)
     {
-        float pulse =
-            feedbackPulse;
-
+        float pulse = feedbackPulse;
         float pressScale =
             orbPressActive
-                ? 0.94f
+                ? 0.955f
                 : hovered
-                    ? 1.035f
+                    ? 1.045f
                     : 1f;
+        float liveRadius = radius * pressScale;
 
-        float liveRadius =
-            radius *
-            pressScale;
+        // Soft halo first: the button should feel detached from the room without turning into a
+        // glowing sticker. Hover and shortcut feedback both reuse the same restrained halo.
+        float haloAlpha =
+            hovered
+                ? 0.19f
+                : 0.095f;
+        draw.AddCircleFilled(
+            center,
+            liveRadius + 5.5f,
+            ImGui.GetColorU32(WithAlpha(OrbAccent, haloAlpha)),
+            40);
 
         if (pulse > 0f)
         {
             draw.AddCircle(
                 center,
-                liveRadius +
-                5f +
-                pulse * 7f,
-                ImGui.GetColorU32(
-                    WithAlpha(
-                        FeedbackFill,
-                        0.40f * pulse)),
-                32,
-                2.4f);
+                liveRadius + 7f + pulse * 8f,
+                ImGui.GetColorU32(WithAlpha(FeedbackFill, 0.42f * pulse)),
+                40,
+                2.2f);
         }
 
         draw.AddCircleFilled(
             center,
             liveRadius,
-            ImGui.GetColorU32(
-                hovered
-                    ? OrbFillHover
-                    : OrbFill),
-            32);
+            ImGui.GetColorU32(hovered ? OrbFillHover : OrbFill),
+            40);
 
+        // Two concentric rims give the control a machined/glass edge. The inner rim gradually
+        // becomes more visible while the palette is open, tying the collapsed flower to its rings.
         draw.AddCircle(
             center,
             liveRadius,
-            ImGui.GetColorU32(
-                OrbBorder),
-            32,
-            hovered
-                ? 2.8f
-                : 2.0f);
+            ImGui.GetColorU32(hovered ? OrbAccentHot : OrbBorder),
+            40,
+            hovered ? 2.35f : 1.65f);
 
         draw.AddCircle(
             center,
-            Math.Max(
-                4f,
-                liveRadius - 7f),
+            Math.Max(4f, liveRadius - 5.5f),
             ImGui.GetColorU32(
                 WithAlpha(
-                    OrbBorder,
-                    0.34f +
-                    globalReveal * 0.18f +
+                    OrbAccent,
+                    0.22f +
+                    globalReveal * 0.16f +
                     currentReveal * 0.12f)),
-            32,
-            1.2f);
+            40,
+            1.1f);
 
-        for (int i = 0; i < 10; i++)
+        // Five restrained rim cuts echo the five petals without the old dotted gear/toothed look.
+        for (int i = 0; i < 5; i++)
         {
             float angle =
-                i *
-                ((float)Math.PI *
-                 2f /
-                 10f);
-
-            Num.Vector2 tick =
-                center +
-                Direction(angle) *
-                (liveRadius + 5f);
-
-            float tickRadius =
-                i % 2 == 0
-                    ? 2.0f
-                    : 1.35f;
-
-            draw.AddCircleFilled(
-                tick,
-                tickRadius,
+                -(float)Math.PI * 0.5f +
+                i * ((float)Math.PI * 2f / 5f);
+            Num.Vector2 direction = Direction(angle);
+            Num.Vector2 inner = center + direction * (liveRadius - 1.5f);
+            Num.Vector2 outer = center + direction * (liveRadius + 3.5f);
+            draw.AddLine(
+                inner,
+                outer,
                 ImGui.GetColorU32(
                     WithAlpha(
-                        OrbTick,
-                        hovered
-                            ? 1f
-                            : 0.82f)),
-                8);
+                        hovered ? OrbAccentHot : OrbAccent,
+                        hovered ? 0.95f : 0.70f)),
+                hovered ? 2.0f : 1.5f);
         }
 
-        // Geometric command-hub mark: no text and no Unicode dependency.
-        float hub =
-            liveRadius * 0.22f;
-
-        draw.AddCircleFilled(
-            center,
-            Math.Max(3f, hub * 0.44f),
-            ImGui.GetColorU32(
-                TextColor),
-            16);
-
-        for (int i = 0; i < 4; i++)
+        // Five-petal plum blossom command mark. Overlapping petals produce a compact flower at every
+        // supported scale; a dark seed in the middle keeps the silhouette crisp over bright rooms.
+        float petalOrbit = liveRadius * 0.165f;
+        float petalRadius = Math.Max(3.2f, liveRadius * 0.145f);
+        Num.Vector4 petalColor = hovered ? OrbAccentHot : OrbPetal;
+        for (int i = 0; i < 5; i++)
         {
             float angle =
-                (float)Math.PI *
-                0.25f +
-                i *
-                (float)Math.PI *
-                0.5f;
-
-            Num.Vector2 direction =
-                Direction(angle);
-
-            Num.Vector2 a =
+                -(float)Math.PI * 0.5f +
+                i * ((float)Math.PI * 2f / 5f);
+            Num.Vector2 petalCenter =
                 center +
-                direction *
-                hub;
+                Direction(angle) *
+                petalOrbit;
 
-            Num.Vector2 b =
-                center +
-                direction *
-                (hub +
-                 liveRadius * 0.18f);
-
-            draw.AddLine(
-                a,
-                b,
-                ImGui.GetColorU32(
-                    TextColor),
-                2f);
+            draw.AddCircleFilled(
+                petalCenter + new Num.Vector2(0.8f, 1.0f),
+                petalRadius,
+                ImGui.GetColorU32(WithAlpha(OrbPetalShadow, 0.72f)),
+                18);
+            draw.AddCircleFilled(
+                petalCenter,
+                petalRadius,
+                ImGui.GetColorU32(petalColor),
+                18);
         }
+
+        float seedRadius = Math.Max(2.7f, liveRadius * 0.085f);
+        draw.AddCircleFilled(
+            center,
+            seedRadius,
+            ImGui.GetColorU32(hovered ? OrbFillHover : OrbFill),
+            18);
+        draw.AddCircle(
+            center,
+            seedRadius + 0.6f,
+            ImGui.GetColorU32(WithAlpha(OrbAccentHot, hovered ? 0.92f : 0.58f)),
+            18,
+            1.0f);
     }
 
     private static void DrawRing(
@@ -1971,42 +1962,211 @@ internal static class ShortcutWindow
                 ? shortcut.ChineseDescription
                 : shortcut.EnglishDescription;
 
-        if (string.IsNullOrWhiteSpace(
-                description))
-            description =
-                shortcut.Id;
+        if (string.IsNullOrWhiteSpace(description))
+            description = shortcut.Id;
 
-        string text =
-            scope +
-            "\n" +
-            shortcut.Input +
-            "\n" +
-            description;
+        BeginShortcutTooltipCard();
+
+        ImGui.TextColored(TooltipTitle, scope ?? string.Empty);
+        ImGui.SameLine();
+        ImGui.TextColored(
+            TooltipHint,
+            DevToolUiSettings.T("快捷键", "SHORTCUT"));
+
+        ImGui.Spacing();
+        DrawTooltipKeyChip(shortcut.Input);
+        ImGui.Spacing();
+
+        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 310f);
+        ImGui.TextUnformatted(description ?? string.Empty);
+        ImGui.PopTextWrapPos();
 
         if (!available)
         {
-            text +=
+            ImGui.Spacing();
+            ImGui.TextColored(
+                new Num.Vector4(0.95f, 0.58f, 0.44f, 1f),
                 DevToolUiSettings.T(
-                    "\n当前状态下不可用",
-                    "\nUnavailable in the current state");
+                    "当前状态下不可用",
+                    "Unavailable in the current state"));
         }
 
         if (paged)
         {
-            text +=
+            ImGui.Spacing();
+            ImGui.TextColored(
+                TooltipHint,
                 DevToolUiSettings.T(
-                    "\n滚轮切换快捷键页 " +
-                    (page + 1) +
-                    "/" +
-                    pages,
-                    "\nMouse wheel changes shortcut page " +
-                    (page + 1) +
-                    "/" +
-                    pages);
+                    "滚轮切换 · 第 " + (page + 1) + "/" + pages + " 页",
+                    "Wheel to change page · " + (page + 1) + "/" + pages));
         }
 
-        DevToolTooltip.Show(
+        EndShortcutTooltipCard();
+    }
+
+    private static void ShowOrbTooltip(bool isExpanded)
+    {
+        BeginShortcutTooltipCard();
+
+        ImGui.TextColored(
+            TooltipTitle,
+            DevToolUiSettings.T(
+                "快捷键梅花轮",
+                "SHORTCUT BLOSSOM"));
+        ImGui.SameLine();
+        ImGui.TextColored(
+            TooltipHint,
+            DevToolUiSettings.T(
+                "全局 + 当前视图",
+                "GLOBAL + CURRENT VIEW"));
+
+        ImGui.Spacing();
+        DrawTooltipHintRow(
+            DevToolUiSettings.T("点击", "CLICK"),
+            isExpanded
+                ? DevToolUiSettings.T("收起快捷键", "Close shortcuts")
+                : DevToolUiSettings.T("展开快捷键", "Open shortcuts"));
+        DrawTooltipHintRow(
+            DevToolUiSettings.T("拖动", "DRAG"),
+            DevToolUiSettings.T("移动按钮", "Move button"));
+
+        if (isExpanded)
+        {
+            DrawTooltipHintRow(
+                DevToolUiSettings.T("滚轮", "WHEEL"),
+                DevToolUiSettings.T("切换快捷键页", "Change shortcut page"));
+        }
+
+        EndShortcutTooltipCard();
+    }
+
+    private static void BeginShortcutTooltipCard()
+    {
+        ImGuiIOPtr io = ImGui.GetIO();
+        Num.Vector2 display = io.DisplaySize;
+        Num.Vector2 mouse = io.MousePos;
+        const float cardWidth = 340f;
+
+        float x =
+            mouse.X > display.X * 0.66f
+                ? mouse.X - cardWidth - 28f
+                : mouse.X + 28f;
+        float y =
+            mouse.Y > display.Y * 0.72f
+                ? mouse.Y - 118f
+                : mouse.Y + 24f;
+
+        x = Clamp(x, 8f, Math.Max(8f, display.X - cardWidth - 8f));
+        y = Clamp(y, 8f, Math.Max(8f, display.Y - 92f));
+
+        ImGui.SetNextWindowPos(new Num.Vector2(x, y), ImGuiCond.Always);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Num.Vector2(12f, 10f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 7f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
+        ImGui.PushStyleColor(ImGuiCol.PopupBg, TooltipBackground);
+        ImGui.PushStyleColor(ImGuiCol.Border, TooltipBorder);
+        ImGui.BeginTooltip();
+    }
+
+    private static void EndShortcutTooltipCard()
+    {
+        ImGui.EndTooltip();
+        ImGui.PopStyleColor(2);
+        ImGui.PopStyleVar(3);
+    }
+
+    private static void DrawTooltipKeyChip(string text)
+    {
+        text =
+            string.IsNullOrWhiteSpace(text)
+                ? "?"
+                : text;
+
+        Num.Vector2 textSize = ImGui.CalcTextSize(text);
+        Num.Vector2 padding = new(8f, 4f);
+        Num.Vector2 pos = ImGui.GetCursorScreenPos();
+        Num.Vector2 min = pos;
+        Num.Vector2 max =
+            pos +
+            textSize +
+            padding * 2f;
+
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        draw.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(TooltipChip),
+            5f);
+        draw.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(TooltipChipBorder),
+            5f,
+            ImDrawFlags.None,
+            1f);
+        draw.AddText(
+            pos + padding,
+            ImGui.GetColorU32(TextColor),
             text);
+
+        ImGui.Dummy(max - min);
+    }
+
+    private static void DrawTooltipHintRow(
+        string action,
+        string description)
+    {
+        Num.Vector2 actionSize =
+            ImGui.CalcTextSize(action ?? string.Empty);
+        float chipWidth =
+            Math.Max(58f, actionSize.X + 16f);
+        Num.Vector2 pos =
+            ImGui.GetCursorScreenPos();
+        float rowHeight =
+            Math.Max(
+                ImGui.GetTextLineHeight() + 8f,
+                26f);
+
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+        Num.Vector2 chipMax =
+            new(
+                pos.X + chipWidth,
+                pos.Y + rowHeight);
+        draw.AddRectFilled(
+            pos,
+            chipMax,
+            ImGui.GetColorU32(TooltipChip),
+            5f);
+        draw.AddRect(
+            pos,
+            chipMax,
+            ImGui.GetColorU32(TooltipChipBorder),
+            5f,
+            ImDrawFlags.None,
+            1f);
+
+        Num.Vector2 textPos =
+            new(
+                pos.X + (chipWidth - actionSize.X) * 0.5f,
+                pos.Y + (rowHeight - actionSize.Y) * 0.5f);
+        draw.AddText(
+            textPos,
+            ImGui.GetColorU32(TooltipTitle),
+            action ?? string.Empty);
+
+        ImGui.SetCursorScreenPos(
+            new Num.Vector2(
+                pos.X + chipWidth + 10f,
+                pos.Y + (rowHeight - ImGui.GetTextLineHeight()) * 0.5f));
+        ImGui.TextColored(
+            TooltipHint,
+            description ?? string.Empty);
+
+        ImGui.SetCursorScreenPos(
+            new Num.Vector2(
+                pos.X,
+                pos.Y + rowHeight + 4f));
     }
 
     private static void ClampPages(
