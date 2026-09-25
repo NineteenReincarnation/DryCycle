@@ -925,11 +925,7 @@ internal static class DevToolFrontend
         bool feedbackOnly =
             EditorUiModeState.OverlayHidden &&
             EditorShortcutFeedback.PresentationHoldActive;
-        bool needsPresentationSnapshot =
-            !EditorUiModeState.UseVanilla &&
-            !feedbackOnly;
-        if (!visible ||
-            (needsPresentationSnapshot && !snapshot.Available))
+        if (!visible)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -980,10 +976,13 @@ internal static class DevToolFrontend
                     // than feeding an unavailable snapshot into rebuilt editor windows.
                     if (!EditorUiModeState.UseVanilla && snapshot.Available)
                     {
-                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
-                            FontSettingsWindow.Draw(frameContext.DisplaySize);
+                        // Draw the core editor chrome before secondary typography/settings windows.
+                        // A Font window bug must not prevent the main Control Center/activity shell
+                        // from being submitted in the same frame.
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
                             DevToolOverlay.Draw(snapshot, frameContext);
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
+                            FontSettingsWindow.Draw(frameContext.DisplaySize);
                         bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
                         if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
                         {
