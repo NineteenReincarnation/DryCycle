@@ -5,6 +5,8 @@ namespace DryCycle.Misc;
 internal static class MiscRuntime
 {
     private static bool _enabled;
+    private static bool _devToolCoreEnabled;
+    private static bool _devToolExtrasAttempted;
 
     public static void Enable()
     {
@@ -32,9 +34,9 @@ internal static class MiscRuntime
             "MiscRuntime/WorldLinkRuntime.Enable",
             DryCycle.WorldLink.WorldLinkRuntime.Enable);
 
-        // The rebuilt editor is an optional development surface. A broken DevTool hook, Player Map
-        // backend, or catalog warm-up must never take the whole gameplay mod (or Rain World) down.
-        TryEnableDevToolBackend();
+        // DevTool lifetime is owned by Plugin, not this gameplay transaction. The core editor is
+        // enabled from Plugin.OnEnable and heavy extras are attempted immediately after OnModsInit.
+        // MiscRuntime rollback therefore cannot accidentally remove the developer UI.
 
         // These two utilities only exist as temporary compatibility fallbacks. They are disabled by
         // default to avoid duplicate hooks/UI once their replacement is active.
@@ -51,8 +53,7 @@ internal static class MiscRuntime
     {
         // Disable is deliberately best-effort and non-throwing. Plugin can call it while unwinding a
         // partially completed startup transaction, so one cleanup failure must not prevent the rest
-        // of the hooks/services from being released.
-        DisableDevToolBackendSafely();
+        // of the hooks/services from being released. DevTool has an independent Plugin-owned lifetime.
 
         SafeDisable(
             "sound format support",
@@ -67,11 +68,12 @@ internal static class MiscRuntime
         _enabled = false;
     }
 
-    private static void TryEnableDevToolBackend()
+    internal static void EnableDevToolCore()
     {
-        // Compatibility helpers are useful, but they are not the editor's lifetime owner.
-        // A version-specific hook or optional subsystem must never prevent the core DevUI.Update
-        // session/presentation pipeline from coming online.
+        if (_devToolCoreEnabled)
+            return;
+
+        // Compatibility helpers are optional; the single DevUI.Update producer is the core.
         TryEnableOptionalDevToolFeature(
             "LegacyDevUiQuiescenceController",
             DryCycle.DevUI.DevTool.Compatibility.LegacyDevUiQuiescenceController.Enable,
@@ -87,21 +89,33 @@ internal static class MiscRuntime
             StartupDiagnostics.Step(
                 "MiscRuntime/DevTool/DevToolRuntime.Enable",
                 DryCycle.DevUI.DevTool.Core.DevToolRuntime.Enable);
+            _devToolCoreEnabled = true;
+            StartupDiagnostics.Marker("MiscRuntime/DevTool/CoreBackend", "ENABLED");
         }
         catch (Exception error)
         {
             StartupDiagnostics.Failure("MiscRuntime/DevTool/CoreBackend", error);
             StartupDiagnostics.Marker(
                 "MiscRuntime/DevTool/CoreBackend",
-                "ROLLBACK-REQUESTED",
-                "core DevUI.Update hook failed; optional editor state will be cleaned up");
+                "DEGRADED",
+                "core DevUI.Update hook failed; gameplay remains available");
             DisableDevToolBackendSafely();
-            return;
         }
+    }
 
-        // Player Map and static catalog warm-up are optional editor features. Failure here used to
-        // call DisableDevToolBackendSafely(), which removed the already-working DevUI.Update hook
-        // and made the entire New UI disappear.
+    internal static void EnableDevToolExtras()
+    {
+        if (_devToolExtrasAttempted)
+            return;
+
+        _devToolExtrasAttempted = true;
+        if (!_devToolCoreEnabled)
+            EnableDevToolCore();
+        if (!_devToolCoreEnabled)
+            return;
+
+        // Player Map and static catalog warm-up are intentionally delayed until RainWorld.OnModsInit
+        // has completed. They are optional and cannot tear down the already-running core editor.
         TryEnableOptionalDevToolFeature(
             "PlayerMapBackendLifecycle",
             () => DryCycle.DevUI.DevTool.Map.PlayerMap.PlayerMapBackendLifecycle.Enable(
@@ -112,6 +126,13 @@ internal static class MiscRuntime
             "RoomSettingsPresentation.WarmStaticCatalogs",
             DryCycle.DevUI.DevTool.Room.RoomSettingsPresentation.WarmStaticCatalogs,
             null);
+    }
+
+    internal static void DisableDevToolBackend()
+    {
+        DisableDevToolBackendSafely();
+        _devToolCoreEnabled = false;
+        _devToolExtrasAttempted = false;
     }
 
     private static void TryEnableOptionalDevToolFeature(
