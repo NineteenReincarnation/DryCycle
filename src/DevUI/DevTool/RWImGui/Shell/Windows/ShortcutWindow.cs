@@ -53,10 +53,12 @@ internal static class ShortcutWindow
 
     private static readonly Num.Vector4 HoverFill = new(0.14f, 0.29f, 0.36f, 0.99f);
     private static readonly Num.Vector4 FeedbackFill = new(0.20f, 0.47f, 0.33f, 1.00f);
-    private static readonly Num.Vector4 DisabledFill = new(0.055f, 0.060f, 0.063f, 0.92f);
-    private static readonly Num.Vector4 DisabledBorder = new(0.28f, 0.30f, 0.30f, 0.70f);
+    // Disabled shortcuts stay fully opaque so the radial layout does not look randomly faded.
+    // Availability is communicated through a darker neutral palette instead of transparency.
+    private static readonly Num.Vector4 DisabledFill = new(0.060f, 0.066f, 0.072f, 0.98f);
+    private static readonly Num.Vector4 DisabledBorder = new(0.34f, 0.37f, 0.39f, 0.92f);
     private static readonly Num.Vector4 TextColor = new(0.91f, 0.94f, 0.92f, 1f);
-    private static readonly Num.Vector4 DisabledText = new(0.48f, 0.51f, 0.50f, 0.82f);
+    private static readonly Num.Vector4 DisabledText = new(0.64f, 0.67f, 0.66f, 1f);
 
     private static readonly Num.Vector2[] CommonPositions = new Num.Vector2[FullCirclePageSize];
     private static readonly Num.Vector2[] CurrentPositions = new Num.Vector2[FullCirclePageSize];
@@ -1133,21 +1135,10 @@ internal static class ShortcutWindow
                     shortcut,
                     snapshot);
 
-            float focusAlpha =
-                focusActive &&
-                !hovered &&
-                !feedback
-                    ? ringFocused
-                        ? 0.56f
-                        : 0.74f
-                    : 1f;
-
-            float nodeAlpha =
-                alpha *
-                focusAlpha *
-                (available
-                    ? 1f
-                    : 0.60f);
+            // Keep every node on the ring at the same opacity. The previous focus/availability
+            // multipliers made Undo/Redo and non-hovered shortcuts appear randomly transparent.
+            // Hover, feedback and disabled state now differ by color, border and scale only.
+            float nodeAlpha = alpha;
 
             Num.Vector4 fill =
                 !available
