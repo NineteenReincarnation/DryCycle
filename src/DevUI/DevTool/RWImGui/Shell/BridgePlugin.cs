@@ -618,6 +618,7 @@ internal static class DevToolFrontend
     private static int contextAttachedLogged;
     private static int firstRenderLogged;
     private static int contextRebuildRequested;
+    private static int textureFrameFailureLogged;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static int fontPushFailureLogged;
@@ -652,6 +653,7 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref contextAttachedLogged, 0);
         Interlocked.Exchange(ref firstRenderLogged, 0);
         Interlocked.Exchange(ref contextRebuildRequested, 0);
+        Interlocked.Exchange(ref textureFrameFailureLogged, 0);
         ResetFontProjectionForNewContext();
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
@@ -798,6 +800,19 @@ internal static class DevToolFrontend
         }
         catch (Exception error)
         {
+            // SwitchContext can fail after RWImGui has already changed part of its ownership state.
+            // Best-effort release prevents the next retry from being stuck forever behind HasContext.
+            try
+            {
+                ImGUIAPI.SwitchContext(null);
+            }
+            catch (Exception cleanupError)
+            {
+                log?.LogWarning(
+                    "DevTool RWImGui context activation cleanup also failed: " +
+                    cleanupError);
+            }
+
             contextAttached = false;
             nextContextAttemptAt = now + 1.0f;
             inputContext = null;
@@ -864,7 +879,23 @@ internal static class DevToolFrontend
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        WorldMapTextureFrame.Begin();
+        try
+        {
+            WorldMapTextureFrame.Begin();
+            Interlocked.Exchange(ref textureFrameFailureLogged, 0);
+        }
+        catch (Exception error)
+        {
+            // Texture leases are a World Map implementation detail. A bad/stale COM texture handle
+            // must not escape IMGUIContext.Render and take the entire editor shell with it.
+            if (Interlocked.Exchange(ref textureFrameFailureLogged, 1) == 0)
+            {
+                log?.LogError(
+                    "DevTool World Map texture-frame cleanup failed; continuing to render the UI shell. " +
+                    error);
+            }
+        }
+
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
         if (Interlocked.Exchange(ref firstRenderLogged, 1) == 0)
