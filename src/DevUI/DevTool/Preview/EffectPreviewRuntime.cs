@@ -70,6 +70,13 @@ public static class EffectPreviewIntentHub
     public static string ActiveType => EffectPreviewRuntime.ActiveType;
     public static bool IsActive => EffectPreviewRuntime.IsActive;
 
+    /// <summary>
+    /// Pumps hover-preview intent from a Unity main-thread caller that is independent from the
+    /// legacy DevUI.Update cadence. The RWImGui frontend uses this so quiescent/temporarily skipped
+    /// vanilla DevUI updates cannot make effect hover previews appear dead.
+    /// </summary>
+    public static void PumpMainThread() => EffectPreviewRuntime.PumpMainThread();
+
     internal static IntentSnapshot Read()
     {
         lock (Gate)
@@ -137,8 +144,8 @@ public static class EffectPreviewIntentHub
 /// </summary>
 internal static class EffectPreviewRuntime
 {
-    internal const double IntentTimeoutSeconds = 0.35;
-    private const double HoverDelaySeconds = 0.18;
+    internal const double IntentTimeoutSeconds = 0.75;
+    private const double HoverDelaySeconds = 0.06;
     private const float PreviewAmount = 0.50f;
 
     // Stage 1 always remains the fallback. Stage 2 is allowed only behind the conservative
@@ -221,9 +228,39 @@ internal static class EffectPreviewRuntime
     internal static void AfterDevUiUpdate(global::DevInterface.DevUI ui)
     {
         EditorSession session = DevToolSessionHub.Current;
-        if (session == null || ui == null || !ReferenceEquals(session.Owner, ui) ||
-            session.ToolMode != EditorToolMode.Room || session.RoomSettings?.effects == null ||
-            EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
+        if (session == null || ui == null || !ReferenceEquals(session.Owner, ui))
+        {
+            End("editor unavailable");
+            ClearPending();
+            return;
+        }
+
+        ProcessIntent(session);
+    }
+
+    /// <summary>
+    /// Independent main-thread pump used by the RWImGui bridge. Preview intent is produced on
+    /// RWImGui's Present thread, while legacy DevUI.Update may be quiescent, throttled or briefly
+    /// skipped by the rebuilt editor. Driving the intent here makes preview lifetime follow the
+    /// actual frontend rather than an implementation detail of the hidden vanilla page.
+    /// </summary>
+    internal static void PumpMainThread()
+    {
+        if (!enabled)
+            return;
+
+        ProcessIntent(DevToolSessionHub.Current);
+    }
+
+    private static void ProcessIntent(EditorSession session)
+    {
+        if (session == null ||
+            !DevToolSessionHub.IsCurrentSessionLive ||
+            session.ToolMode != EditorToolMode.Room ||
+            session.RoomSettings?.effects == null ||
+            session.Room == null ||
+            EditorUiModeState.UseVanilla ||
+            EditorUiModeState.OverlayHidden)
         {
             End("editor unavailable");
             ClearPending();
