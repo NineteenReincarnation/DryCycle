@@ -608,7 +608,7 @@ internal static class DevToolFrontend
     // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
     // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
     // consumer context construction.
-    private static DevToolInputContext inputContext;
+    private static volatile DevToolInputContext inputContext;
     private static ManualLogSource log;
     private static volatile bool visible;
     private static volatile bool applicationFocused = true;
@@ -625,7 +625,7 @@ internal static class DevToolFrontend
     private static int contextActivationFailureLogged;
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
-    private static bool contextAttached;
+    private static volatile bool contextAttached;
     private static float nextContextAttemptAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
