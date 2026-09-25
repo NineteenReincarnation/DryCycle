@@ -619,6 +619,8 @@ internal static class DevToolFrontend
     private static int firstRenderLogged;
     private static int contextRebuildRequested;
     private static int textureFrameFailureLogged;
+    private static volatile bool frontendSafeMode;
+    private static string frontendSafeModeReason = string.Empty;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static int fontPushFailureLogged;
@@ -654,6 +656,8 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref firstRenderLogged, 0);
         Interlocked.Exchange(ref contextRebuildRequested, 0);
         Interlocked.Exchange(ref textureFrameFailureLogged, 0);
+        frontendSafeMode = false;
+        frontendSafeModeReason = string.Empty;
         ResetFontProjectionForNewContext();
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
@@ -939,6 +943,16 @@ internal static class DevToolFrontend
             ImGuiIOPtr io = ImGui.GetIO();
             DevToolUiFrameContext frameContext = new(io);
 
+            if (frontendSafeMode)
+            {
+                DrawFrontendSafeMode(frameContext.DisplaySize);
+                EditorInputRouter.SetFrontendCapture(
+                    io.WantCaptureMouse,
+                    io.WantCaptureKeyboard,
+                    io.WantTextInput);
+                return;
+            }
+
             // Rain World's developer cursor remains authoritative. Do not toggle Unity's cursor
             // visibility and do not draw a second ImGui software cursor; both approaches fight
             // the vanilla DevUI and cause visible flicker. Tooltip placement is handled separately.
@@ -1038,9 +1052,72 @@ internal static class DevToolFrontend
         catch (Exception error)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
+
+            frontendSafeModeReason =
+                error.GetType().Name +
+                ": " +
+                (error.Message ?? string.Empty);
+            frontendSafeMode = true;
+
+            // A page may have thrown after ImGui.Begin/Push*, leaving the current native frame
+            // stack inconsistent. Ask the Unity main thread to rebuild the consumer context before
+            // drawing the dependency-free recovery panel.
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
-                log?.LogError("DevTool RWImGui draw failed: " + error);
+            {
+                log?.LogError(
+                    "DevTool RWImGui draw failed; entering recovery safe mode and rebuilding the consumer context. " +
+                    error);
+            }
         }
+    }
+
+    private static void DrawFrontendSafeMode(System.Numerics.Vector2 display)
+    {
+        float width = Math.Min(560f, Math.Max(300f, display.X - 16f));
+        ImGui.SetNextWindowPos(new System.Numerics.Vector2(8f, 8f), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new System.Numerics.Vector2(width, 0f), ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0.96f);
+
+        if (!ImGui.Begin(
+                "DryCycle DevTool Recovery###DevToolRecoverySafeMode",
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.AlwaysAutoResize |
+                ImGuiWindowFlags.NoSavedSettings))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextUnformatted("New UI renderer recovered from a draw failure.");
+        ImGui.TextWrapped(
+            "Page-specific UI has been isolated. You can retry the rebuilt UI or return to Vanilla DevUI.");
+        if (!string.IsNullOrWhiteSpace(frontendSafeModeReason))
+        {
+            ImGui.Separator();
+            ImGui.TextWrapped(frontendSafeModeReason);
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Retry New UI"))
+        {
+            frontendSafeMode = false;
+            frontendSafeModeReason = string.Empty;
+            Interlocked.Exchange(ref drawFailureLogged, 0);
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Use Vanilla DevUI"))
+        {
+            EditorUiModeState.SetVanilla(true);
+            frontendSafeMode = false;
+            frontendSafeModeReason = string.Empty;
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+        }
+
+        ImGui.End();
     }
 
     private static unsafe float ResolveActiveBaseFontSize()
