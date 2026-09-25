@@ -15,7 +15,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static class DevToolOverlay
 {
     private static bool lanceDebugPage;
-    private static float browserInspectorSplit = 0.40f;
+    private static float browserInspectorSplit = 0.23f;
     private static bool browserInspectorSplitterDragging;
     private const float BrowserPaneFontScale = 1.22f;
 
