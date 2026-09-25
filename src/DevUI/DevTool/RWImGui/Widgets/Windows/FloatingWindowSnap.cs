@@ -274,6 +274,16 @@ internal static class FloatingWindowSnap
 
         if (!state.Initialized)
         {
+            // ImGui ini persistence can restore a perfectly valid window coordinate from an old
+            // monitor/resolution that is completely outside the current display. Clamp on the very
+            // first observed frame instead of accepting that invisible coordinate as authoritative.
+            Num.Vector2 clamped = ClampVisible(position, size);
+            if (DistanceSquared(clamped, position) > GeometryEpsilon)
+            {
+                ImGui.SetWindowPos(clamped);
+                position = clamped;
+            }
+
             state.Position = position;
             state.Size = size;
             state.MouseWasDown = mouseDown;
@@ -281,6 +291,19 @@ internal static class FloatingWindowSnap
             state.Initialized = true;
             DrawSelectionOutline(id, position, size);
             return;
+        }
+
+        // Also repair passive off-screen state after a resolution/fullscreen/monitor change. This
+        // only moves a window when it is outside the visibility bounds; ordinary authored positions
+        // are left untouched.
+        if (!mouseDown && !groupDragging)
+        {
+            Num.Vector2 clamped = ClampVisible(position, size);
+            if (DistanceSquared(clamped, position) > GeometryEpsilon)
+            {
+                ImGui.SetWindowPos(clamped);
+                position = clamped;
+            }
         }
 
         if (groupDragging && Selected.Contains(id) && GroupDragOrigins.TryGetValue(id, out Num.Vector2 origin))
