@@ -7,6 +7,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class UiModeSwitch
 {
+    private static bool migrationDiagnosticsFaulted;
+    private static bool groupStatusFaulted;
+
     internal static void Draw()
     {
         // Apply one shared visual language before any rebuilt editor window is drawn this frame.
@@ -34,15 +37,39 @@ internal static class UiModeSwitch
 
         // Map needs the largest uninterrupted workspace. Compatibility diagnostics stay hidden
         // there. The radial shortcut palette is owned once by DevToolOverlay for every tool mode.
-        if (snapshot.ToolMode != EditorToolMode.Map)
+        if (snapshot.ToolMode != EditorToolMode.Map && !migrationDiagnosticsFaulted)
         {
-            MigrationCoverageWindow.Draw(display);
+            try
+            {
+                MigrationCoverageWindow.Draw(display);
+            }
+            catch (Exception error)
+            {
+                migrationDiagnosticsFaulted = true;
+                global::DryCycle.Plugin.Logger?.LogError(
+                    "DevTool migration diagnostics failed and were isolated from the core UI shell. " +
+                    error);
+            }
         }
 
-        // The group inspector is contextual rather than permanent chrome. Keeping it hidden while
-        // no selection/group exists prevents an empty fourth panel from competing with the room.
-        if (FloatingWindowSnap.SelectedWindowCount > 0 || FloatingWindowSnap.GetGroupSnapshots().Length > 0)
-            GroupStatusWindow.Draw(display);
+        // These windows are diagnostics only. They must never stand between a healthy ImGui context
+        // and the main Control Center/DevToolOverlay.
+        if (!groupStatusFaulted &&
+            (FloatingWindowSnap.SelectedWindowCount > 0 ||
+             FloatingWindowSnap.GetGroupSnapshots().Length > 0))
+        {
+            try
+            {
+                GroupStatusWindow.Draw(display);
+            }
+            catch (Exception error)
+            {
+                groupStatusFaulted = true;
+                global::DryCycle.Plugin.Logger?.LogError(
+                    "DevTool group-status diagnostics failed and were isolated from the core UI shell. " +
+                    error);
+            }
+        }
 
         // ActionToastOverlay is drawn once, after the main editor windows, by BridgePlugin.
         // Do not draw it here as well; duplicate pumping also duplicated the universal mirror.
