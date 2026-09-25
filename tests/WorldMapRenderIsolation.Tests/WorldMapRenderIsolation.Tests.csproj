@@ -14,5 +14,6 @@
     <Reference Include="UnityEditor.CoreModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEditor.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="System.Numerics" />
     <Reference Include="ImGui.NET"><HintPath>$(RWImGuiPluginDir)/ImGui.NET.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="rain-world-imgui-api"><HintPath>$(RWImGuiPluginDir)/rain-world-imgui-api.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

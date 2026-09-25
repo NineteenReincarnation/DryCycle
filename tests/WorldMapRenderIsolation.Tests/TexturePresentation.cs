@@ -56,14 +56,15 @@ public static partial class MapRenderIsolationTests
         ImGuiIOPtr io = ImGui.GetIO();
         io.NativePtr->IniFilename = null;
         io.DisplaySize = new Num.Vector2(128, 128); io.DeltaTime = 1f / 60;
-        string fontFile = Path.GetFullPath(Path.Combine(game, "../../workshop/content/312520/3417372413/data/fonts/NotoSansSC-Regular.ttf"));
-        io.Fonts.AddFontFromFileTTF(fontFile, 20, default, io.Fonts.GetGlyphRangesChineseFull());
+        io.Fonts.AddFontDefault();
         Check(Native<BackendInit>("ImGui_ImplDX11_Init")(d3dDevice, d3dContext) != 0, "Actual ImGui DX11 backend initializes.");
-        newFrame = Native<BackendVoid>("ImGui_ImplDX11_NewFrame");
+        InitializeFontIntegration();
+        newFrame = () => RWIMGUI.Interop.ImGUIBackendInterface.ImGui_ImplDX11_NewFrame();
         shutdown = Native<BackendVoid>("ImGui_ImplDX11_Shutdown");
         renderDrawData = Native<BackendDraw>("ImGui_ImplDX11_RenderDrawData");
         try
         {
+            ExerciseFontLifecycle();
             object bridge = New("WorldMapTextureBridge");
             // Top-left red, top-right green, bottom-left blue, bottom-right white. This detects
             // inverted rows as well as empty image IDs, bad channels and incorrect clipping.
@@ -91,6 +92,7 @@ public static partial class MapRenderIsolationTests
         }
         finally
         {
+            ShutdownFontIntegration();
             shutdown(); ImGui.DestroyContext(context);
             Marshal.Release(d3dContext); Marshal.Release(d3dDevice);
         }

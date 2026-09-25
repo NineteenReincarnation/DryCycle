@@ -8,9 +8,8 @@ using ImGuiNET;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Owns fonts for DryCycle's dedicated DevToolInputContext. Local fonts are never injected into
-/// RWImGUI's shared/default context. Registration happens once, immediately after the dedicated
-/// context is activated and before that context renders its first frame.
+/// Registers one local CJK face in RWImGUI's native atlas before its first backend upload.
+/// Input-context switches neither destroy this atlas nor invalidate its font pointers.
 /// </summary>
 internal static unsafe class DevToolFontCatalog
 {
@@ -35,6 +34,19 @@ internal static unsafe class DevToolFontCatalog
     private static bool registrationAttempted;
     private static bool registrationSucceeded;
     private static string registrationMessage = "Local font registration has not been attempted.";
+    private static IntPtr atlasIdentity;
+
+    internal static void RegisterBeforeBackendFrame(ManualLogSource log)
+    {
+        ImFontAtlasPtr atlas = ImGui.GetIO().Fonts;
+        if (atlas.NativePtr == null) return;
+        if ((IntPtr)atlas.NativePtr != atlasIdentity)
+        {
+            ResetAtlasState();
+            atlasIdentity = (IntPtr)atlas.NativePtr;
+        }
+        if (!registrationAttempted) TryRegisterLocalFonts(log);
+    }
 
     // Font files and the ImGui atlas are stable after startup. The settings window is rendered every
     // frame, so never repeat filesystem enumeration or glyph probing there.
@@ -48,15 +60,9 @@ internal static unsafe class DevToolFontCatalog
     internal static string RegistrationMessage => registrationMessage;
 
     /// <summary>
-    /// Clears only managed bookkeeping for the current consumer atlas. ImFontPtr values are owned
-    /// by RWImGUI's context and become invalid as soon as that context is destroyed. Reusing those
-    /// pointers, or keeping RegisteredPaths populated, makes the next context either skip every font
-    /// or push a stale native pointer.
-    ///
-    /// This method never calls ImGui/RWImGUI native APIs and is therefore safe from OnDestroyed and
-    /// plugin-lifecycle cleanup paths.
+    /// Called only when the native atlas changes, never when an IMGUIContext callback is replaced.
     /// </summary>
-    internal static void ResetConsumerContextState()
+    private static void ResetAtlasState()
     {
         RegisteredFaces.Clear();
         RegisteredPaths.Clear();
@@ -79,8 +85,7 @@ internal static unsafe class DevToolFontCatalog
     }
 
     /// <summary>
-    /// Registers local files into the currently-active DryCycle consumer context. Call only once,
-    /// immediately after ImGUIAPI.SwitchContext(DevToolInputContext) and before its first Render.
+    /// Registers once on the Present thread, before DX11 NewFrame uploads the unlocked native atlas.
     /// </summary>
     internal static bool TryRegisterLocalFonts(ManualLogSource log)
     {
@@ -100,10 +105,9 @@ internal static unsafe class DevToolFontCatalog
 
             if (io.Fonts.Locked || io.Fonts.TexID != 0UL)
             {
-                registrationMessage = "The DevTool font atlas is already locked or uploaded; local fonts were not modified.";
+                registrationMessage = "RWImGUI's atlas is already locked or uploaded; font initialization missed the pre-upload boundary.";
                 log?.LogWarning(
-                    "DryCycle DevTool consumer font atlas was already locked/uploaded before local " +
-                    "font registration. The shared RWImGUI atlas was not modified.");
+                    "DryCycle DevTool font registration missed RWImGUI's pre-upload boundary. The atlas was left intact.");
                 return false;
             }
 
@@ -129,9 +133,9 @@ internal static unsafe class DevToolFontCatalog
                 return false;
             }
 
-            IntPtr chineseGlyphRanges =
-                GetExtendedChineseGlyphRanges(
-                    io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
+            // The common subset omits UI characters such as 浏 (浏览器), as well as names entered
+            // by region authors. Bake the complete CJK range once; context switches reuse it.
+            IntPtr chineseGlyphRanges = io.Fonts.GetGlyphRangesChineseFull();
 
             ImFontPtr font;
             try
@@ -182,7 +186,7 @@ internal static unsafe class DevToolFontCatalog
             log?.LogInfo(
                 "DryCycle DevTool registered fixed Chinese font '" +
                 ChineseFontFileName +
-                "' into its dedicated consumer atlas.");
+                "' before RWImGUI's first atlas upload.");
             return true;
         }
         catch (Exception error)
@@ -191,16 +195,6 @@ internal static unsafe class DevToolFontCatalog
             log?.LogWarning("DryCycle DevTool local font registration failed safely: " + error);
             return false;
         }
-    }
-
-    /// <summary>
-    /// Keep Simplified Chinese registration on ImGui's proven CJK range.
-    /// Optional UI symbols are selected at render time through DevToolGlyphs and fall back to
-    /// ASCII when the active font does not contain the requested glyph.
-    /// </summary>
-    private static IntPtr GetExtendedChineseGlyphRanges(IntPtr baseRanges)
-    {
-        return baseRanges;
     }
 
     /// <summary>

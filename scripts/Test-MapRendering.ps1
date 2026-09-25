@@ -1,7 +1,8 @@
 param(
     [string]$UnityEditor = 'E:/Application/Unity/Editor/Unity.exe',
     [string]$RainWorldDir = 'D:/Steam/steamapps/common/Rain World',
-    [string]$BuildRoot = ''
+    [string]$BuildRoot = '',
+    [string]$FrontendPluginDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,10 +32,32 @@ if (-not (Test-Path -LiteralPath (Join-Path $project 'Packages/manifest.json')))
     '{"dependencies":{"com.unity.modules.imageconversion":"1.0.0","com.unity.modules.imgui":"1.0.0"}}' | Set-Content -LiteralPath (Join-Path $project 'Packages/manifest.json') -Encoding utf8
 }
 Copy-Item -LiteralPath (Join-Path $BuildRoot 'bin/WorldMapRenderIsolation.Tests/Release/net48/WorldMapRenderIsolation.Tests.dll') -Destination (Join-Path $project 'Assets/Editor') -Force
+# Game/plugin references are loaded by the test's AssemblyResolve handler from the real install.
+# Do not make Unity import the entire game and its BepInEx plugins as editor startup assemblies.
+@'
+fileFormatVersion: 2
+guid: b15b0223fcd1d0a4cb4ed13f2771ce45
+PluginImporter:
+  serializedVersion: 2
+  validateReferences: 0
+  platformData:
+  - first:
+      Any:
+    second:
+      enabled: 0
+      settings: {}
+  - first:
+      Editor: Editor
+    second:
+      enabled: 1
+      settings:
+        DefaultValueInitialized: true
+'@ | Set-Content -LiteralPath (Join-Path $project 'Assets/Editor/WorldMapRenderIsolation.Tests.dll.meta') -Encoding utf8
 foreach ($name in @('ImGui.NET.dll', 'System.Runtime.CompilerServices.Unsafe.dll')) {
     Copy-Item -LiteralPath (Join-Path $pluginDir $name) -Destination (Join-Path $project 'Assets/Editor') -Force
 }
 $arguments = @('-batchmode', '-force-d3d11', '-projectPath', ('"' + $project + '"'), '-executeMethod', 'MapRenderIsolationTests.Run', '-rainWorldDir', ('"' + $RainWorldDir + '"'), '-isolationOutput', ('"' + $output + '"'), '-logFile', ('"' + (Join-Path $output 'unity-gpu-test.log') + '"'))
+if ($FrontendPluginDir) { $arguments += @('-frontendPluginDir', ('"' + [IO.Path]::GetFullPath($FrontendPluginDir) + '"')) }
 Write-Host "Unity GPU validation: $output"
 $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -WindowStyle Hidden -PassThru
 $process.WaitForExit()

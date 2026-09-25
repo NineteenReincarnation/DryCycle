@@ -29,6 +29,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Existing Rain World/BepInEx assemblies: used only for RWImGUI's missing font-init extension point. -->
+    <Reference Include="MonoMod.RuntimeDetour"><HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.RuntimeDetour.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MonoMod.Utils"><HintPath>$(RainWorldDir)/BepInEx/core/MonoMod.Utils.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="DryCycle">
       <HintPath>$(GameModOutputDir)/DryCycle.dll</HintPath>
       <Private>false</Private>

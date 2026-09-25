@@ -20,7 +20,7 @@ public static partial class MapRenderIsolationTests
     {
         game = Argument("-rainWorldDir") ?? "D:/Steam/steamapps/common/Rain World";
         output = Argument("-isolationOutput") ?? Path.GetFullPath(Path.Combine(Application.dataPath, "../.."));
-        plugins = Path.Combine(game, "RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins");
+        plugins = Argument("-frontendPluginDir") ?? Path.Combine(game, "RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins");
         Directory.CreateDirectory(output);
         // This is an isolated generated project. Play mode gives the actual renderers their normal
         // deferred Object.Destroy semantics; disabling reload preserves only this test's arguments.
@@ -142,7 +142,8 @@ public static partial class MapRenderIsolationTests
     {
         string name = new AssemblyName(args.Name).Name;
         if (name == "Assembly-CSharp") return Assembly.LoadFrom(Path.Combine(game, "BepInEx/utils/PUBLIC-Assembly-CSharp.dll"));
-        foreach (string directory in new[] { plugins, Path.Combine(game, "BepInEx/core"), Path.Combine(game, "BepInEx/plugins"),
+        foreach (string directory in new[] { plugins, Path.Combine(game, "RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins"),
+            Path.Combine(game, "BepInEx/core"), Path.Combine(game, "BepInEx/plugins"),
             Path.Combine(game, "RainWorld_Data/Managed"), Path.GetFullPath(Path.Combine(game, "../../workshop/content/312520/3417372413/plugins")) })
         {
             string path = Path.Combine(directory, name + ".dll"); if (File.Exists(path)) return Assembly.LoadFrom(path);

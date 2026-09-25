@@ -55,6 +55,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorUiModeState.SetOverlayHidden", () => EditorUiModeState.SetOverlayHidden(false));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(false));
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetLogger", () => DevToolFrontend.SetLogger(Logger));
+            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/FontAtlasIntegration.Enable", () => DevToolFontAtlasIntegration.Enable(Logger));
             global::DryCycle.StartupDiagnostics.Step(
                 "BridgePlugin/DevToolFrontend.ResetNativeReadiness",
                 DevToolFrontend.ResetNativeReadinessFromMainThread);
@@ -86,10 +87,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
             // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
             // terminate the process before BepInEx has a chance to print a managed exception.
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Hook RainWorld.Start", () => On.RainWorld.Start += RainWorld_Start);
-            // Callback registration still waits for AfterModsInit, but local font-atlas mutation is
-            // never retried after RainWorld.Start. RWImGui may create its shared ImGui context from
-            // the DX11 Present thread; mutating io.Fonts later from Unity Update races native atlas
-            // build/NewFrame and can terminate the process without a managed exception.
+            // Font registration is owned by the backend's pre-upload boundary on its Present thread.
+            // Unity Update only publishes visibility; it never mutates ImGui context or atlas state.
             global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit);
 
             bridgeEnabled = true;
@@ -157,11 +156,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         bool sessionLiveNow = DevToolSessionHub.IsCurrentSessionLive;
 
-        // Only fall back once DevTools is actually open. Doing this during ordinary game startup
-        // would permanently change the user's preferred mode before RWImGUI had a chance to reach
-        // its first Present on otherwise healthy systems.
-        if (!nativeFrontendReady && sessionLiveNow && !EditorUiModeState.UseVanilla)
-            EditorUiModeState.SetVanilla(true);
+        // FrontendAttached=false already preserves the native DevUI while the backend is unavailable.
+        // Do not overwrite the user's New UI preference: a delayed first Present must recover itself.
 
         bool rebuiltFrontendWorkActive =
             nativeFrontendReady &&
@@ -301,6 +297,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         applicationFocused = true;
         SafeFrontendCleanup("frontend input attachment", () => EditorInputRouter.SetFrontendAttached(false));
         SafeFrontendCleanup("RWImGui callback", TryUnregisterCallback);
+        SafeFrontendCleanup("RWImGui font registration boundary", DevToolFontAtlasIntegration.Disable);
 
         if (ownsCreatureCatalogRuntime)
             SafeFrontendCleanup("creature catalog fallback", WorldCreatureCatalogPicker.Shutdown);
@@ -348,9 +345,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "ENTER");
 
-        // RWImGUI installs native bindings here. DryCycle deliberately does not touch the shared
-        // ImGui context/font atlas during game startup. DevTool fonts belong to DevToolInputContext
-        // and are installed only when that dedicated consumer context is first activated.
+        // RWImGUI installs native bindings here. The font integration observes export loading, but
+        // touches the shared atlas only on Present, before the backend uploads it for the first time.
         global::DryCycle.StartupDiagnostics.Step(
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
@@ -360,9 +356,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // Calling HasContext/SwitchContext in that state can cross an uninitialized native binding
         // and terminate the whole process before a managed exception can be logged.
         //
-        // Font registration therefore remains deferred to the normal consumer-context lifecycle,
-        // where RWImGUI has already established a usable context. Game startup must always win over
-        // optional DevTool font prewarming.
+        // Font registration is independent of consumer-context activation and cannot run on this
+        // main-thread startup path, even if the backend returned without a managed exception.
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
@@ -410,10 +405,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
 [SuppressUnmanagedCodeSecurity]
 internal static class DevToolFrontend
 {
-    // Do not construct a consumer IMGUIContext merely because BepInEx loads the bridge assembly.
-    // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
-    // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
-    // consumer context construction.
+    // IMGUIContext is a consumer callback, not a separate native ImGui context or font atlas.
+    // Only the RWImGUI Present thread acquires/releases it; Unity Update publishes visibility.
     private static DevToolInputContext inputContext;
     private static ManualLogSource log;
     private static volatile bool visible;
@@ -426,8 +419,8 @@ internal static class DevToolFrontend
     private static int contextActivationFailureLogged;
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
-    private static bool contextAttached;
-    private static float nextContextAttemptAt;
+    private static volatile bool contextAttached;
+    private static double nextContextAttemptAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -463,14 +456,10 @@ internal static class DevToolFrontend
 
     internal static void SetVisibleFromMainThread(bool value)
     {
-        bool wasVisible = visible;
         visible = value;
 
         if (!value)
         {
-            if (contextAttached || wasVisible)
-                ReleaseContext();
-
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
         }
@@ -498,29 +487,29 @@ internal static class DevToolFrontend
             return;
         }
 
-        float now = UnityEngine.Time.realtimeSinceStartup;
-        if (now < nextContextAttemptAt)
-            return;
-
-        EnsureContext(now);
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         // This is the only native-health signal we trust. AddAlwaysCallback reaching Present means
         // RWImGUI completed enough of its D3D11 path for consumer context APIs to be used safely.
-        Interlocked.Exchange(ref rwimguiPresentObserved, 1);
+        if (Interlocked.Exchange(ref rwimguiPresentObserved, 1) == 0)
+            log?.LogInfo("DevTool received a healthy RWImGUI Present; New UI rendering is available.");
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
+        if (!visible)
+        {
+            ReleaseContext();
+            return;
+        }
+        double now = System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
+        if (!contextAttached && now >= nextContextAttemptAt) EnsureContext(now);
     }
 
-    private static void EnsureContext(float now)
+    private static void EnsureContext(double now)
     {
         try
         {
-            // This path runs only when the rebuilt DevTool is actually visible, i.e. well after
-            // RainWorld.Start. Do not gate it on the Always callback: some RWImGUI builds can keep
-            // consumer contexts usable even when that callback is unavailable, and the old gate
-            // permanently prevented New UI from opening.
+            // Executed inside a healthy Present, on the thread that owns ImGui's native state.
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
@@ -547,10 +536,6 @@ internal static class DevToolFrontend
             contextAttached = true;
             nextContextAttemptAt = 0f;
 
-            // Register fonts only after our own context is active and before its first Render.
-            if (!DevToolFontCatalog.RegistrationAttempted)
-                DevToolFontCatalog.TryRegisterLocalFonts(log);
-
             Interlocked.Exchange(ref contextBusyLogged, 0);
             Interlocked.Exchange(ref contextActivationFailureLogged, 0);
         }
@@ -566,7 +551,7 @@ internal static class DevToolFrontend
             {
                 log?.LogWarning(
                     "DevTool RWImGui context activation failed; retrying at low frequency: " +
-                    error.Message);
+                    error);
             }
         }
     }
@@ -578,11 +563,11 @@ internal static class DevToolFrontend
 
         try
         {
-            ImGUIAPI.SwitchContext(null);
+            if (ReferenceEquals(ImGUIAPI.CurrentContext, inputContext)) ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
         {
-            log?.LogWarning("DevTool RWImGui context release failed: " + error.Message);
+            log?.LogWarning("DevTool RWImGui context release failed: " + error);
         }
         finally
         {
@@ -613,13 +598,18 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref cjkFontLogged, 0);
         Interlocked.Exchange(ref cjkFontMissingLogged, 0);
         Interlocked.Exchange(ref fontPushFailureLogged, 0);
-        DevToolFontCatalog.ResetConsumerContextState();
         DevToolGlyphs.ResetCache();
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         WorldMapTextureFrame.Begin();
+        if (!visible)
+        {
+            // Also release after the always callback is unregistered during plugin shutdown.
+            ReleaseContext();
+            return;
+        }
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
         // While the OS owns focus, keep the consumer context alive but submit no ImGui windows.
@@ -640,8 +630,7 @@ internal static class DevToolFrontend
         bool needsPresentationSnapshot =
             !EditorUiModeState.UseVanilla &&
             !feedbackOnly;
-        if (!visible ||
-            (needsPresentationSnapshot && !snapshot.Available))
+        if (needsPresentationSnapshot && !snapshot.Available)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -818,8 +807,7 @@ internal static class DevToolFrontend
         DevToolUiLanguage language = DevToolUiSettings.Language;
         int preferredWeight = DevToolUiSettings.FontWeight;
 
-        // English is the startup-safe path: use the font that RWImGui created for this exact
-        // consumer context. Avoid carrying a local ImFontPtr when no CJK coverage is required.
+        // English uses RWImGUI's shared default font. A local face is selected only for Chinese.
         if (language == DevToolUiLanguage.English)
         {
             if (projectedFontLanguage != language ||
