@@ -280,6 +280,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // leave NativeBackendReady=false for the rest of the process.
         TryRegisterCallback();
 
+        // Hover intent is produced from RWImGui Present, but the old preview driver lived only in
+        // DevUI.Update. Rebuilt pages deliberately quiesce legacy work, so drive the preview from
+        // this always-running Unity main-thread bridge as well. The core pump is idempotent.
+        global::DryCycle.DevUI.DevTool.Preview.EffectPreviewIntentHub.PumpMainThread();
+
         bool nativeFrontendReady = DevToolFrontend.NativeBackendReady;
         if (frontendInputAttached != nativeFrontendReady)
         {
