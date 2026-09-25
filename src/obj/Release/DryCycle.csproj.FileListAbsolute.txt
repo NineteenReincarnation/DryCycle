@@ -1,8 +1,0 @@
-D:\Steam\steamapps\common\Rain World\RainWorld_Data\StreamingAssets\mods\Ancient Site\newest\plugins\DryCycle.dll
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.csproj.AssemblyReference.cache
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.AssemblyInfoInputs.cache
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.AssemblyInfo.cs
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.csproj.CoreCompileInputs.cache
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.csproj.Up2Date
-C:\Users\Orrhisk\Desktop\DryCycle\src\obj\Release\DryCycle.dll

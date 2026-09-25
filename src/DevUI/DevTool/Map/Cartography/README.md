@@ -82,14 +82,14 @@ PNG 使用 Rain World 安装中已有的 `System.Drawing.dll` 和 Windows GDI+�
 
 `tests/Cartography.Tests` 直接编译生产模型、运行时、编辑器历史、场景、缓存、持久化和导出代码，仅替代游戏及 Unity 边界。验证包括区域路径解析、中文全称、当前玩家区域、连续切换、缓存失效与淘汰、未保存修改和撤销保留、刷新期间保存，以及作者文档、文件冲突和图片导出。
 
-编译命令使用工作区 artifacts，避免验证过程自动部署到游戏目录：
+验证输出位于源码目录外的 `../Build/DryCycle`：
 
 ```powershell
-$outputDir = Join-Path $PWD 'artifacts/cartography/build'
+$outputDir = Join-Path $PWD '../Build/DryCycle/artifacts/cartography/build'
 dotnet build src/DryCycle.csproj -c Release -p:DeployToGame=false "-p:OutputPath=$outputDir"
 dotnet build src/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj -c Release "-p:GameModOutputDir=$outputDir"
 dotnet build tests/Cartography.Tests/Cartography.Tests.csproj -c Release
-& ./tests/Cartography.Tests/bin/Release/net48/Cartography.Tests.exe ./artifacts/cartography/validation --game 'D:/Steam/steamapps/common/Rain World'
+& ../Build/DryCycle/bin/Cartography.Tests/Release/net48/Cartography.Tests.exe ../Build/DryCycle/artifacts/cartography/validation --game 'D:/Steam/steamapps/common/Rain World'
 ```
 
 `--game` 会读取本机 B5、CC、SU 的真实区域文件，解码全部房间、生成场景并导出 PNG；不修改游戏区域文件。托管测试和图片检查不等于游戏内交互验收，游戏内仍需验证字体显示、Map/制图切换、拖动与 Undo、文字输入时 Ctrl+S、DevUI 关闭重开，以及后台导出期间继续编辑。

@@ -12,9 +12,11 @@ Set-StrictMode -Version Latest
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GuardRoot = Split-Path -Parent $ScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $GuardRoot))
-$DefaultBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".build-validation"))
+$DefaultBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "../Build/DryCycle/local-build"))
 $ValidationMarkerName = ".drycycle-build-validation"
 $ValidationMarkerText = "DryCycle Local Build Validation"
+$dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
+$dotnetExe = if ($dotnetCommand) { $dotnetCommand.Source } else { Join-Path $env:ProgramFiles 'dotnet/dotnet.exe' }
 
 if ([string]::IsNullOrWhiteSpace($BuildRoot)) {
     $BuildRoot = $DefaultBuildRoot
@@ -81,7 +83,7 @@ function Invoke-DotNetBuild(
         $arguments += "-p:$property"
     }
 
-    & dotnet @arguments
+    & $dotnetExe @arguments
     if ($LASTEXITCODE -ne 0) {
         Fail "$Label failed with exit code $LASTEXITCODE."
     }
@@ -91,11 +93,10 @@ function Invoke-DotNetBuild(
 function Initialize-BuildRoot {
     $buildDriveRoot = [System.IO.Path]::GetPathRoot($BuildRoot)
     $insideRepository = Is-PathWithin $BuildRoot $RepoRoot
-    $insideSafeRepositoryOutput = Is-PathWithin $BuildRoot $DefaultBuildRoot
     if ((Same-Path $BuildRoot $buildDriveRoot) -or
         (Is-PathWithin $BuildRoot $RainWorldDir) -or
-        ($insideRepository -and -not $insideSafeRepositoryOutput)) {
-        Fail "Unsafe BuildRoot. Use .build-validation (or a child of it), or a dedicated directory outside the repository and Rain World installation."
+        $insideRepository) {
+        Fail "Unsafe BuildRoot. Use ../Build/DryCycle/local-build, or a dedicated directory outside the repository and Rain World installation."
     }
 
     $marker = Join-Path $BuildRoot $ValidationMarkerName
@@ -177,8 +178,8 @@ Write-Host "Config     : $Configuration"
 Write-Host "Mode       : $(if ($BackendOnly) { 'Backend only' } else { 'Backend + optional RWImGui frontends' })"
 Write-Host ""
 
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    Fail "dotnet SDK was not found on PATH."
+if (-not (Test-Path -LiteralPath $dotnetExe -PathType Leaf)) {
+    Fail "dotnet SDK was not found on PATH or in Program Files/dotnet."
 }
 
 Require-Directory $RainWorldDir "Rain World directory"

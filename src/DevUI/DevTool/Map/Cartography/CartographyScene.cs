@@ -153,6 +153,7 @@ internal static class CartographySceneBuilder
                     CartographySceneNode route=Route(document,source,item,layer);
                     if(route!=null){nodes.Add(route);if(route.Ambiguous)warnings.Add(item.Appearance.From+" → "+item.Appearance.To+": unresolved port");}continue;
                 }
+                if (item.Kind == CartographyItemKind.Line) { nodes.Add(AnnotationLine(item, layer)); continue; }
                 if(cache!=null&&cache.TryGet(document,item,layer,room,out CartographySceneNode retained,out string retainedError))
                 {nodes.Add(retained);if(retainedError!=null)errors.Add(retainedError);continue;}
                 string error=null;List<CartographyPrimitive> shapes=new();CartographyRect bounds=Bounds(item,source);
@@ -196,6 +197,17 @@ internal static class CartographySceneBuilder
         return new CartographyScene{Nodes=nodes.ToArray(),Bounds=nodes.Count>0?nodes.Select(n=>n.Bounds).Aggregate(CartographyRect.Union):new CartographyRect(0,0,640,480),Errors=errors.ToArray(),Warnings=warnings.ToArray()};
     }
     private static CartographyRect Normalized(CartographyRect r)=>new(Math.Min(r.X,r.Right),Math.Min(r.Y,r.Bottom),Math.Abs(r.Width),Math.Abs(r.Height));
+    internal static CartographySceneNode AnnotationLine(CartographyItem item, CartographyLayer layer)
+    {
+        var line = Line(item.X, item.Y, item.X + item.Width, item.Y + item.Height,
+            Alpha(item.Color, layer.Opacity * item.Appearance.Opacity), item.Stroke, item.Appearance.Dashed);
+        return new CartographySceneNode
+        {
+            Id = item.Id, LayerId = layer.Id, Locked = layer.Locked,
+            Bounds = Normalized(line.Rect).Inflate(item.Stroke + 2), Primitives = new[] { line },
+            Points = new[] { new CartographyPoint { X = item.X, Y = item.Y }, new CartographyPoint { X = item.X + item.Width, Y = item.Y + item.Height } }
+        };
+    }
     private static void AddText(List<CartographyPrimitive> shapes,CartographyItem item,string font,float opacity)
     {
         CartographyRaster raster=CartographyText.Render(item,font);

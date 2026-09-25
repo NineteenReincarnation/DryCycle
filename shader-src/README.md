@@ -62,11 +62,16 @@ HeatWave deliberately follows Rain World's own global/local split instead of tre
 
 ## Build in the Unity Editor
 
-Open `shader-src` as a Unity project, then use:
+For a clean source checkout, run the command-line build below first, then open
+`../Build/DryCycle/shader-project` as the Unity project. Edit authored assets in
+`shader-src`; the next command-line build refreshes the staged copy. The editor menu is:
 
 `DryCycle -> Build Weather AssetBundle (Windows x64)`
 
-The resulting files are written directly to:
+In the staged project the menu writes into `../Build/DryCycle/shader-bundles`.
+Use the command-line build to copy the finished bundles into the source mod and game.
+
+The command-line build copies these redistributable files back to:
 
 - `mod/assets/drycycle/drycycleweather`
 - `mod/assets/drycycle/drycycleweather.version.txt`
@@ -86,7 +91,9 @@ checks `UNITY_EDITOR` or the matching standard Unity Hub installation, and repor
 missing editor before starting the build. It also finds the standard .NET SDK when
 the current terminal has not refreshed its PATH after installation.
 
-Shader bundles are built into the repository's `mod/assets/drycycle` directory and
+The staged Unity project, its Library/Temp caches and bundle manifests stay outside
+the repository under `../Build/DryCycle`. Shader bundles are copied into
+the repository's `mod/assets/drycycle` directory and
 deployed to `D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/assets/drycycle`.
 DLLs go to the same mod's `newest/plugins` directory. Use `-RainWorldDir` to select
 another game installation. The data folder is `RainWorld_Data` (one directory).
@@ -102,7 +109,7 @@ dotnet build .\src\DryCycle.csproj -c Release `
 You can also set the `UNITY_EDITOR` environment variable instead of passing `DryCycleUnityEditor`.
 
 Unity must have an active editor license before a batch build can run. The build
-writes Unity's diagnostic log to `src/obj/unity-shader-build.log` and fails with
+writes Unity's diagnostic log to `../Build/DryCycle/logs/unity-shader-build.log` and fails with
 the editor's exit code if compilation or startup fails. Override
 `DryCycleShaderBuildLog` to choose another log path.
 

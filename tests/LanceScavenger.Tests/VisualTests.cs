@@ -26,7 +26,7 @@ internal static class VisualTests
             PrepareFutile();
             RuntimeScene scene = IntegrationTests.Scene();
             RoomCamera camera = Camera(scene.Room);
-            string directory = Path.Combine(Environment.CurrentDirectory, "artifacts/lance-scavenger");
+            string directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../artifacts/lance-scavenger"));
             Directory.CreateDirectory(directory);
 
             using var sheet = new Bitmap(1000, 420, PixelFormat.Format32bppArgb);

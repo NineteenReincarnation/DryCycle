@@ -1,4 +1,13 @@
 <Project>
+  <PropertyGroup>
+    <!-- Keep local artifacts outside the source checkout, including NuGet restore state.
+         Override DryCycleBuildRoot for CI or a different local build disk. -->
+    <DryCycleBuildRoot Condition="'$(DryCycleBuildRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Build/DryCycle'))</DryCycleBuildRoot>
+    <BaseIntermediateOutputPath>$(DryCycleBuildRoot)/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+    <BaseOutputPath>$(DryCycleBuildRoot)/bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
+  </PropertyGroup>
   <!--
     Task 02 social roles were rejected and physically removed from the repository.
     SDK-style projects compile every *.cs under a project directory by default, so an

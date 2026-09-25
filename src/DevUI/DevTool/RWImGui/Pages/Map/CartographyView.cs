@@ -258,7 +258,11 @@ internal static partial class CartographyView
         {
             moving = snapshot.Document.Clone();
             foreach (CartographyItem item in moving.Items.Where(i => Selection.Contains(i.Id) && !Selection.Contains(i.Appearance.ParentId)))
-            { item.X += delta.X; item.Y += delta.Y; }
+            {
+                if (item.Kind == CartographyItemKind.Connection)
+                    foreach (CartographyPoint p in item.Points) { p.X += delta.X; p.Y += delta.Y; }
+                else { item.X += delta.X; item.Y += delta.Y; }
+            }
         }
         foreach (CartographySceneNode original in snapshot.Scene.Nodes)
         {
@@ -268,6 +272,11 @@ internal static partial class CartographyView
             {
                 CartographyItem route = moving.Items.Find(i => i.Id == node.Id);
                 if (route != null) node = PreviewRoute(node, route, moving, snapshot.Document);
+                offset = default;
+            }
+            if (routeGesture?.Id == node.Id && routeGesture.Kind == CartographyItemKind.Line)
+            {
+                node = CartographySceneBuilder.AnnotationLine(CartographySceneBuilder.Resolve(snapshot.Document, routeGesture), snapshot.Document.Layer(routeGesture.LayerId));
                 offset = default;
             }
             if (!viewport.Intersects(node.Bounds.Offset(offset.X, offset.Y))) continue;

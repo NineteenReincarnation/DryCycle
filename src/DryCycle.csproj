@@ -15,11 +15,13 @@
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
 
-    <DryCycleShaderProjectDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderProjectDir>
+    <DryCycleShaderSourceDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderSourceDir>
+    <DryCycleShaderProjectDir Condition="'$(DryCycleShaderProjectDir)' == ''">$(DryCycleBuildRoot)/shader-project</DryCycleShaderProjectDir>
+    <DryCycleShaderBundleDir>$(DryCycleBuildRoot)/shader-bundles</DryCycleShaderBundleDir>
     <DryCycleWeatherBundleSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather</DryCycleWeatherBundleSource>
     <DryCycleWeatherBundleVersionSource>$(MSBuildProjectDirectory)/../mod/assets/drycycle/drycycleweather.version.txt</DryCycleWeatherBundleVersionSource>
     <DryCycleUnityEditor Condition="'$(DryCycleUnityEditor)' == '' and '$(UNITY_EDITOR)' != ''">$(UNITY_EDITOR)</DryCycleUnityEditor>
-    <DryCycleShaderBuildLog Condition="'$(DryCycleShaderBuildLog)' == ''">$(MSBuildProjectDirectory)/obj/unity-shader-build.log</DryCycleShaderBuildLog>
+    <DryCycleShaderBuildLog Condition="'$(DryCycleShaderBuildLog)' == ''">$(DryCycleBuildRoot)/logs/unity-shader-build.log</DryCycleShaderBuildLog>
   </PropertyGroup>
 
   <!-- RainWorldDir is the single local-install source of truth. Game/mod deployment paths
@@ -172,16 +174,36 @@
            Text="BuildDryCycleAssets=true requires DryCycleUnityEditor (or UNITY_EDITOR) to point at Unity.exe." />
     <Error Condition="'$(DryCycleUnityEditor)' != '' and !Exists('$(DryCycleUnityEditor)')"
            Text="Unity Editor not found: $(DryCycleUnityEditor). Update DryCycleUnityEditor or UNITY_EDITOR after reinstalling Unity." />
-    <Error Condition="!Exists('$(DryCycleShaderProjectDir)/Assets/Editor/BuildDryCycleWeatherBundle.cs')"
-           Text="DryCycle shader project is missing: $(DryCycleShaderProjectDir)" />
+    <Error Condition="!Exists('$(DryCycleShaderSourceDir)/Assets/Editor/BuildDryCycleWeatherBundle.cs')"
+           Text="DryCycle shader source is missing: $(DryCycleShaderSourceDir)" />
+    <PropertyGroup>
+      <_DryCycleBuildFull>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(DryCycleBuildRoot)'))))</_DryCycleBuildFull>
+      <_DryCycleShaderProjectFull>$([System.IO.Path]::GetFullPath('$(DryCycleShaderProjectDir)'))</_DryCycleShaderProjectFull>
+    </PropertyGroup>
+    <Error Condition="!$(_DryCycleShaderProjectFull.StartsWith('$(_DryCycleBuildFull)'))"
+           Text="The staged shader project must be inside DryCycleBuildRoot; source projects must not be used as disposable build output." />
+    <ItemGroup>
+      <DryCycleShaderSource Include="$(DryCycleShaderSourceDir)/**/*"
+          Exclude="$(DryCycleShaderSourceDir)/Library/**;$(DryCycleShaderSourceDir)/Temp/**;$(DryCycleShaderSourceDir)/Logs/**;$(DryCycleShaderSourceDir)/UserSettings/**;$(DryCycleShaderSourceDir)/obj/**;$(DryCycleShaderSourceDir)/.vs/**" />
+      <DryCycleShaderStaged Include="@(DryCycleShaderSource->'$(DryCycleShaderProjectDir)/%(RecursiveDir)%(Filename)%(Extension)')" />
+      <DryCycleShaderObsolete Include="$(DryCycleShaderProjectDir)/Assets/**/*;$(DryCycleShaderProjectDir)/Packages/**/*;$(DryCycleShaderProjectDir)/ProjectSettings/**/*" Exclude="@(DryCycleShaderStaged)" />
+    </ItemGroup>
+    <Delete Files="@(DryCycleShaderObsolete)" />
+    <Copy SourceFiles="@(DryCycleShaderSource)" DestinationFiles="@(DryCycleShaderStaged)" SkipUnchangedFiles="true" />
+    <WriteLinesToFile File="$(DryCycleShaderProjectDir)/DryCycleBundleOutput.txt" Lines="$([System.IO.Path]::GetFullPath('$(DryCycleShaderBundleDir)'))" Overwrite="true" WriteOnlyWhenDifferent="true" />
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(DryCycleShaderBuildLog)'))" />
     <Message Importance="high" Text="Unity shader build log: $(DryCycleShaderBuildLog)" />
-    <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -logFile &quot;$(DryCycleShaderBuildLog)&quot;"
+    <Exec Command="&quot;$(DryCycleUnityEditor)&quot; -batchmode -quit -projectPath &quot;$(DryCycleShaderProjectDir)&quot; -executeMethod DryCycle.Editor.BuildDryCycleWeatherBundle.BuildFromCommandLine -dryCycleBundleOutput &quot;$(DryCycleShaderBundleDir)&quot; -logFile &quot;$(DryCycleShaderBuildLog)&quot;"
           IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="DryCycleShaderBuildExitCode" />
     </Exec>
     <Error Condition="'$(DryCycleShaderBuildExitCode)' != '0'"
            Text="Unity shader build failed with exit code $(DryCycleShaderBuildExitCode). See $(DryCycleShaderBuildLog)." />
+    <ItemGroup>
+      <DryCycleBuiltBundle Include="$(DryCycleShaderBundleDir)/drycycleweather;$(DryCycleShaderBundleDir)/drycycleweather.version.txt;$(DryCycleShaderBundleDir)/drycyclecreatures;$(DryCycleShaderBundleDir)/drycyclecreatures.version.txt" />
+    </ItemGroup>
+    <!-- Only redistributable runtime assets belong in mod; manifests and caches stay in Build. -->
+    <Copy SourceFiles="@(DryCycleBuiltBundle)" DestinationFolder="$(MSBuildProjectDirectory)/../mod/assets/drycycle" />
   </Target>
 
   <Target Name="DeployLanceScavengerAtlases" AfterTargets="PostBuildEvent"

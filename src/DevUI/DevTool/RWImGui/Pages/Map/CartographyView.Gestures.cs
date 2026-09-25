@@ -24,14 +24,9 @@ internal static partial class CartographyView
         CartographySceneBuilder.Route(moving,observed.Source,routeGesture?.Id==item.Id?routeGesture:item,moving.Layer(item.LayerId))??original;
     private static bool HitNode(CartographySceneNode node,Num.Vector2 mouse)
     {
-        if(node.FromId==null)return node.Bounds.Contains(mouse.X,mouse.Y);
-        for(int n=1;n<node.Points.Length;n++)if(Distance(mouse,node.Points[n-1],node.Points[n])<Math.Max(4,8/zoom))return true;
-        return false;
-    }
-    private static float Distance(Num.Vector2 p,CartographyPoint a,CartographyPoint b)
-    {
-        Num.Vector2 start=new(a.X,a.Y),end=new(b.X,b.Y),v=end-start;float t=v.LengthSquared()<.00001f?0:Math.Max(0,Math.Min(1,Num.Vector2.Dot(p-start,v)/v.LengthSquared()));
-        return (p-start-t*v).Length();
+        return node.Points.Length >= 2
+            ? CartographyRouteEditing.NearestSegment(node.Points, mouse.X, mouse.Y, 8 / zoom, out _) >= 0
+            : node.Bounds.Contains(mouse.X, mouse.Y);
     }
     private static void DrawRouteHandles(ImDrawListPtr draw,CartographyPresentation s,Num.Vector2 origin)
     {

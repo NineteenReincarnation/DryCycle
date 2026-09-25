@@ -4,6 +4,22 @@ Rain World v1.11.8 code mod. Mod ID: `Anno`.
 
 Current version: **0.0.34**.
 
+## Local build files
+
+Build intermediates and test executables default to `../Build/DryCycle/obj` and
+`../Build/DryCycle/bin`, outside this source checkout. On this workstation that is
+`C:/Users/Orrhisk/Desktop/Build/DryCycle`. Override `DryCycleBuildRoot` with an MSBuild
+property for another machine. Keep source tests, build scripts and runtime mod assets
+in this repository; generated test projects, screenshots and logs belong in Build.
+
+`scripts/Build-Shaders.ps1` stages the Unity project under `../Build/DryCycle/shader-project`,
+with bundles in `shader-bundles` and logs in `logs`. Only redistributable bundles and
+their version files are copied into `mod/assets/drycycle`. DLL deployment remains
+`Ancient Site/newest/plugins` in the selected Rain World installation.
+
+`上传.bat` respects `.gitignore`. Visual Studio may create its own ignored `.vs`
+directory when opening the solution; it is excluded from that upload script.
+
 ## Versioning
 
 DryCycle increments only the final development number:

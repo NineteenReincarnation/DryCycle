@@ -16,7 +16,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 [BepInPlugin(PluginId, PluginName, PluginVersion)]
 [BepInDependency("Anno", BepInDependency.DependencyFlags.HardDependency)]
-[BepInDependency("rwimgui", BepInDependency.DependencyFlags.HardDependency)]
+[BepInDependency("rwimgui", "1.12.0")]
 public sealed class BridgePlugin : BaseUnityPlugin
 {
     private readonly DevToolRetainedViewLifecycle retainedViewLifecycle = new();

@@ -14,7 +14,7 @@ internal static partial class Program
 
     private static int Main(string[] args)
     {
-        output = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "drycycle-cartography-tests-" + Guid.NewGuid().ToString("N")));
+        output = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine(AppContext.BaseDirectory, "../../../../artifacts/cartography-tests"));
         Directory.CreateDirectory(output);
         try
         {

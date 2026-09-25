@@ -14,7 +14,7 @@ internal static class Program
     private static int Main()
     {
         root = Path.Combine(
-            Path.GetTempPath(),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../artifacts")),
             "drycycle-worldmap-cache-tests-" +
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);

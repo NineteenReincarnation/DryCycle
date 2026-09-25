@@ -1,13 +1,13 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title Universal Safe Git Upload - ALL FILES
+title DryCycle Safe Git Upload - SOURCE FILES
 
 rem ============================================================
-rem Universal Safe Git Upload - ALL FILES
+rem DryCycle Safe Git Upload - SOURCE FILES
 rem
 rem Goals:
 rem   - Works on the current branch. Nothing is hardcoded to main.
-rem   - Uploads ALL project/worktree files, including files ignored by .gitignore.
+rem   - Uploads source changes while respecting .gitignore for local build/cache files.
 rem   - Enables Git for Windows long-path support for this repository.
 rem   - Flattens embedded Git working trees while staging so their actual files
 rem     are committed instead of only an embedded-repository gitlink.
@@ -58,12 +58,12 @@ set "NESTED_ROOTS=%TEMP%\git_all_upload_nested_roots_%RANDOM%_%RANDOM%.txt"
 set "NESTED_DETACHED=0"
 
 echo ============================================================
-echo Universal Safe Git Upload - ALL FILES
+echo DryCycle Safe Git Upload - SOURCE FILES
 echo ============================================================
 echo Repository : %REPO%
 echo Branch     : %BRANCH%
 echo Remote     : %REMOTE_URL%
-echo Mode       : ALL FILES, including .gitignore matches
+echo Mode       : source changes, respecting .gitignore
 echo Long paths : enabled for this repository
 echo.
 
@@ -101,9 +101,9 @@ echo.
 
 rem ------------------------------------------------------------
 rem 2. Show upload candidates.
-rem    Normal status and ignored/untracked files are both upload candidates.
+rem    Ignored/untracked local artifacts are excluded from upload candidates.
 rem ------------------------------------------------------------
-call :section "2. LOCAL CHANGES - ALL FILE MODE"
+call :section "2. LOCAL SOURCE CHANGES"
 
 git status --short --untracked-files=all > "%TEMP%\git_all_upload_local.txt"
 for %%F in ("%TEMP%\git_all_upload_local.txt") do set "LOCAL_SIZE=%%~zF"
@@ -124,9 +124,8 @@ if not "!LOCAL_SIZE!"=="0" (
 echo.
 
 if not "!IGNORED_SIZE!"=="0" (
-    echo Ignored files that WILL ALSO be uploaded in ALL FILE mode:
+    echo Local ignored files excluded from this upload:
     type "%TEMP%\git_all_upload_ignored.txt"
-    set "HAS_LOCAL=1"
 ) else (
     echo No ignored untracked files detected.
 )
@@ -155,7 +154,7 @@ echo.
 rem ------------------------------------------------------------
 rem 2.6 Large-file warning.
 rem     GitHub normally rejects individual files >= 100 MiB without Git LFS.
-rem     We warn only; ALL FILE mode does not silently skip them.
+rem     We warn only; source files are never silently skipped.
 rem ------------------------------------------------------------
 call :section "2.6 LARGE FILE CHECK"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -168,20 +167,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 echo.
 
 rem ------------------------------------------------------------
-rem 3. Stage and commit EVERYTHING.
+rem 3. Stage and commit source changes, including removals of old tracked build files.
 rem ------------------------------------------------------------
 if "!HAS_LOCAL!"=="1" (
-    call :section "3. COMMIT ALL LOCAL FILES"
+    call :section "3. COMMIT SOURCE CHANGES"
     echo This mode uses:
-    echo   git add -f -A -- .
-    echo so .gitignore exclusions are intentionally overridden.
+    echo   git add -A -- .
+    echo Local build/cache exclusions in .gitignore remain active.
     echo.
     echo Embedded Git working trees are temporarily detached while staging
     echo so their real files are committed instead of only a gitlink.
     echo Their .git metadata is restored locally after the commit.
     echo.
 
-    choice /C YN /N /M "Stage and commit ALL project files? [Y/N]: "
+    choice /C YN /N /M "Stage and commit source changes? [Y/N]: "
     if errorlevel 2 goto :cancel
 
     call :detach_nested_git
@@ -198,15 +197,15 @@ if "!HAS_LOCAL!"=="1" (
         )
     )
 
-    git add -f -A -- .
+    git add -A -- .
     if errorlevel 1 (
-        echo [ERROR] git add -f -A failed.
+        echo [ERROR] git add -A failed.
         goto :fail
     )
 
     git diff --cached --quiet
     if not errorlevel 1 (
-        echo [INFO] Nothing was staged after git add -f -A.
+        echo [INFO] Nothing was staged after git add -A.
         call :restore_nested_git
         if errorlevel 1 goto :fail
     ) else (
@@ -216,7 +215,7 @@ if "!HAS_LOCAL!"=="1" (
         echo.
 
         for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "STAMP=%%T"
-        set "MSG=sync-all: local files !STAMP!"
+        set "MSG=sync: source changes !STAMP!"
 
         git commit -m "!MSG!"
         if errorlevel 1 (
@@ -231,11 +230,11 @@ if "!HAS_LOCAL!"=="1" (
             goto :fail
         )
 
-        echo [OK] All project files committed.
+        echo [OK] Source changes committed.
     )
 ) else (
-    call :section "3. COMMIT ALL LOCAL FILES"
-    echo Nothing new to commit, including ignored files.
+    call :section "3. COMMIT SOURCE CHANGES"
+    echo No source changes to commit. Local ignored files remain excluded.
 )
 echo.
 
@@ -267,7 +266,7 @@ if "!REMOTE_EXISTS!"=="1" (
                 echo Conflict files:
                 git diff --name-only --diff-filter=U
                 echo.
-                echo Resolve them, git add -f -A -- ., git commit, then run upload again.
+                echo Resolve them, git add -A -- ., git commit, then run upload again.
                 goto :fail
             )
             echo [ERROR] Merge failed for a non-conflict reason. Nothing was pushed.

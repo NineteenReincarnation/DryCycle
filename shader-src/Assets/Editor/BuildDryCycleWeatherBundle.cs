@@ -84,6 +84,11 @@ namespace DryCycle.Editor
                 throw new InvalidOperationException("Could not resolve DryCycle repository root.");
 
             string output = Path.Combine(repositoryRoot, "mod", "assets", "drycycle");
+            string stagedOutput = Path.Combine(projectRoot, "DryCycleBundleOutput.txt");
+            if (File.Exists(stagedOutput)) output = Path.GetFullPath(File.ReadAllText(stagedOutput).Trim());
+            string[] arguments = Environment.GetCommandLineArgs();
+            for (int i = 0; i + 1 < arguments.Length; i++)
+                if (arguments[i] == "-dryCycleBundleOutput") output = Path.GetFullPath(arguments[++i]);
             Directory.CreateDirectory(output);
 
             AssetBundleBuild weather = new AssetBundleBuild

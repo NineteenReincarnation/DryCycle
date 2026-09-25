@@ -6,12 +6,13 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UnityEditorDir Condition="'$(UnityEditorDir)' == ''">E:/Application/Unity/Editor</UnityEditorDir>
+    <RWImGuiPluginDir Condition="'$(RWImGuiPluginDir)' == ''">D:/Steam/steamapps/workshop/content/312520/3417372413/plugins</RWImGuiPluginDir>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEditor.CoreModule"><HintPath>$(UnityEditorDir)/Data/Managed/UnityEngine/UnityEditor.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="System.Numerics" />
-    <Reference Include="ImGui.NET"><HintPath>D:/Steam/steamapps/workshop/content/312520/3417372413/plugins/ImGui.NET.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ImGui.NET"><HintPath>$(RWImGuiPluginDir)/ImGui.NET.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

@@ -1,12 +1,15 @@
 param(
     [string]$UnityEditor = $env:UNITY_EDITOR,
-    [string]$RainWorldDir = "D:\Steam\steamapps\common\Rain World"
+    [string]$RainWorldDir = "D:\Steam\steamapps\common\Rain World",
+    [string]$BuildRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($BuildRoot)) { $BuildRoot = Join-Path $repoRoot '../Build/DryCycle' }
+$BuildRoot = [System.IO.Path]::GetFullPath($BuildRoot)
 $versionFile = Join-Path $repoRoot "shader-src/ProjectSettings/ProjectVersion.txt"
 $versionMatch = [regex]::Match((Get-Content -LiteralPath $versionFile -Raw), '(?m)^m_EditorVersion:\s*(\S+)')
 if (-not $versionMatch.Success) {
@@ -45,14 +48,16 @@ if (-not (Test-Path -LiteralPath $modRoot -PathType Container)) {
 }
 
 Write-Host "Unity Editor: $UnityEditor (project version: $editorVersion)"
-Write-Host "Shader build output: $(Join-Path $repoRoot 'mod/assets/drycycle')"
+Write-Host "Unity project/cache: $(Join-Path $BuildRoot 'shader-project')"
+Write-Host "Shader build output: $(Join-Path $BuildRoot 'shader-bundles')"
+Write-Host "Redistributable mod assets: $(Join-Path $repoRoot 'mod/assets/drycycle')"
 Write-Host "Shader deployment: $(Join-Path $modRoot 'assets/drycycle')"
 Write-Host "DLL deployment: $(Join-Path $modRoot 'newest/plugins')"
 
 # Use the project's existing build/deployment boundary for both shader bundles and DLLs.
 & $dotnetExe build (Join-Path $repoRoot "src/DryCycle.csproj") -c Release `
     "-p:BuildDryCycleAssets=true" "-p:DryCycleUnityEditor=$UnityEditor" `
-    "-p:RainWorldDir=$RainWorldDir" "-p:GameModRootDir=$modRoot"
+    "-p:RainWorldDir=$RainWorldDir" "-p:GameModRootDir=$modRoot" "-p:DryCycleBuildRoot=$BuildRoot"
 if ($LASTEXITCODE -ne 0) {
     throw "Shader/DLL build or deployment failed with exit code $LASTEXITCODE. See the original build errors above."
 }

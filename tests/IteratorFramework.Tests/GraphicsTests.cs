@@ -156,7 +156,7 @@ internal static class GraphicsTests
             if (File.Exists(file)) clear &= !scene.Room.GetTile(vertex).Solid;
         }
         Check(finite && clear, "sample geometry finite and fits authored room's clear space");
-        GraphicsPreview.Export(runtime, Path.Combine(Environment.CurrentDirectory, "artifacts/iterator-framework"));
+        GraphicsPreview.Export(runtime, Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../artifacts/iterator-framework")));
         Console.WriteLine($"PWN sample spawn: {runtime.Body.Position}; {runtime.Graphics.Sprites.Entries.Count} named sprites.");
         PwnIteratorExample.Unregister();
         Check(runtime.Graphics.IsDestroyed && scene.Room.drawableObjects.Count == 0, "sample unregistration cleans graphics and room");

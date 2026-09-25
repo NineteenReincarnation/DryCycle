@@ -7,7 +7,7 @@ The default installation is `D:/Steam/steamapps/common/Rain World`.
 ```powershell
 & 'C:/Program Files/dotnet/dotnet.exe' build DryCycle.sln -c Release
 & 'C:/Program Files/dotnet/dotnet.exe' build tests/MapLayer.Tests/MapLayer.Tests.csproj -c Release
-& tests/MapLayer.Tests/bin/Release/net48/MapLayer.Tests.exe
+& ../Build/DryCycle/bin/MapLayer.Tests/Release/net48/MapLayer.Tests.exe
 ```
 
 For a different installation, pass `-p:RainWorldDir=...` to the test build and the
