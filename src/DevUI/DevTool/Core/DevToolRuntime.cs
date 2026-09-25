@@ -33,25 +33,79 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
-        BuiltinInspectorAdapters.Enable();
-        NativeObjectInspectorBootstrap.Enable();
-        EditorInputRouter.Enable();
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.Enable();
+
+        // This hook is the core lifetime boundary: without it there is no SessionHub and no
+        // presentation snapshot for the RWImGui frontend. Install it before optional adapters.
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
+
+        TryEnableOptionalSubsystem(
+            "NativeObjectInspectorBootstrap",
+            NativeObjectInspectorBootstrap.Enable);
+
+        TryEnableOptionalSubsystem(
+            "EditorInputRouter",
+            EditorInputRouter.Enable);
+
+        if (EffectLivePreviewEnabled)
+        {
+            TryEnableOptionalSubsystem(
+                "EffectPreviewRuntime",
+                EffectPreviewRuntime.Enable);
+        }
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
-        On.DevInterface.DevUI.Update -= DevUI_Update;
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.Disable();
-        LegacyUiPresentationController.Reset();
-        EditorInputRouter.Disable();
-        DevToolSubsystemCoordinator.ResetRuntimeState();
+
+        // Stop the core producer first so cleanup cannot race another DevUI.Update.
+        try
+        {
+            On.DevInterface.DevUI.Update -= DevUI_Update;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool core DevUI.Update hook removal failed: " + error);
+        }
         enabled = false;
+
+        if (EffectLivePreviewEnabled)
+            TryDisableOptionalSubsystem("EffectPreviewRuntime", EffectPreviewRuntime.Disable);
+
+        TryDisableOptionalSubsystem("LegacyUiPresentationController", LegacyUiPresentationController.Reset);
+        TryDisableOptionalSubsystem("EditorInputRouter", EditorInputRouter.Disable);
+        TryDisableOptionalSubsystem("DevToolSubsystemCoordinator", DevToolSubsystemCoordinator.ResetRuntimeState);
+    }
+
+    private static void TryEnableOptionalSubsystem(string name, Action action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogError(
+                "DevTool optional subsystem '" + name +
+                "' failed during enable; core editor session/presentation remains active. " +
+                error);
+        }
+    }
+
+    private static void TryDisableOptionalSubsystem(string name, Action action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool optional subsystem '" + name +
+                "' failed during cleanup: " + error);
+        }
     }
 
     private static void DevUI_Update(On.DevInterface.DevUI.orig_Update orig, global::DevInterface.DevUI self)

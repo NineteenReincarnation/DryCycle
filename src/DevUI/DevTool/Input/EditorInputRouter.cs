@@ -22,6 +22,7 @@ public static class EditorInputRouter
     private static volatile bool wantsKeyboard;
     private static volatile bool wantsTextInput;
     private static bool enabled;
+    private static bool rawUpdateIlInstalled;
     private static RainWorldGame vanillaHotkeysSuppressedGame;
     private static RainWorldGame capturedGame;
     private static int capturedUnityFrame = -1;
@@ -48,24 +49,72 @@ public static class EditorInputRouter
     internal static void Enable()
     {
         if (enabled) return;
-        IL.RainWorldGame.RawUpdate += RainWorldGame_RawUpdateIL;
-        On.Player.checkInput += Player_checkInput;
-        On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
-        On.RainWorldGame.Update += RainWorldGame_Update;
-        On.DevInterface.Handle.Update += Handle_Update;
-        On.DevInterface.MapPage.Update += MapPage_Update;
-        enabled = true;
+
+        rawUpdateIlInstalled = false;
+        try
+        {
+            IL.RainWorldGame.RawUpdate += RainWorldGame_RawUpdateIL;
+            rawUpdateIlInstalled = true;
+        }
+        catch (Exception error)
+        {
+            // The exact vanilla DevTools block is version-sensitive. Losing this small compatibility
+            // gate may restore a vanilla hotkey conflict, but must not remove the entire New UI.
+            try { IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL; }
+            catch { }
+            Plugin.Logger?.LogWarning(
+                "DevTool RawUpdate IL compatibility gate is unavailable; continuing without it. " +
+                error);
+        }
+
+        try
+        {
+            On.Player.checkInput += Player_checkInput;
+            On.RainWorldGame.RawUpdate += RainWorldGame_RawUpdate;
+            On.RainWorldGame.Update += RainWorldGame_Update;
+            On.DevInterface.Handle.Update += Handle_Update;
+            On.DevInterface.MapPage.Update += MapPage_Update;
+            enabled = true;
+        }
+        catch
+        {
+            // HookGen removals are safe when a handler was not present. Clean every possible
+            // partial subscription before propagating to DevToolRuntime's optional-subsystem guard.
+            try { On.Player.checkInput -= Player_checkInput; } catch { }
+            try { On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate; } catch { }
+            try { On.RainWorldGame.Update -= RainWorldGame_Update; } catch { }
+            try { On.DevInterface.Handle.Update -= Handle_Update; } catch { }
+            try { On.DevInterface.MapPage.Update -= MapPage_Update; } catch { }
+            if (rawUpdateIlInstalled)
+            {
+                try { IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL; } catch { }
+                rawUpdateIlInstalled = false;
+            }
+            throw;
+        }
     }
 
     internal static void Disable()
     {
-        if (!enabled) return;
-        IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL;
-        On.Player.checkInput -= Player_checkInput;
-        On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate;
-        On.RainWorldGame.Update -= RainWorldGame_Update;
-        On.DevInterface.Handle.Update -= Handle_Update;
-        On.DevInterface.MapPage.Update -= MapPage_Update;
+        if (!enabled && !rawUpdateIlInstalled) return;
+
+        if (rawUpdateIlInstalled)
+        {
+            try { IL.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdateIL; }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool RawUpdate IL compatibility gate removal failed: " + error);
+            }
+            rawUpdateIlInstalled = false;
+        }
+
+        try { On.Player.checkInput -= Player_checkInput; } catch { }
+        try { On.RainWorldGame.RawUpdate -= RainWorldGame_RawUpdate; } catch { }
+        try { On.RainWorldGame.Update -= RainWorldGame_Update; } catch { }
+        try { On.DevInterface.Handle.Update -= Handle_Update; } catch { }
+        try { On.DevInterface.MapPage.Update -= MapPage_Update; } catch { }
+
         SetFrontendAttached(false);
         vanillaHotkeysSuppressedGame = null;
         capturedGame = null;
