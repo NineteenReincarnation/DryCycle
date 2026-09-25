@@ -13,10 +13,6 @@
          compile/CI validation to use the exact Rain World references without requiring
          a writable Windows game installation as the build output directory. -->
     <DeployToGame Condition="'$(DeployToGame)' == ''">true</DeployToGame>
-    <!-- The rebuilt DevTool UI lives in a separate BepInEx assembly. Local one-command builds
-         must compile/deploy it after DryCycle.dll; otherwise Visual Studio reports a successful
-         DryCycle build while the game keeps an old or missing frontend DLL. -->
-    <BuildDevToolFrontend Condition="'$(BuildDevToolFrontend)' == ''">true</BuildDevToolFrontend>
     <PathMap>$(MSBuildProjectDirectory)=/DryCycle</PathMap>
 
     <DryCycleShaderSourceDir>$(MSBuildProjectDirectory)/../shader-src</DryCycleShaderSourceDir>
@@ -166,26 +162,6 @@
     <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModOutputDir)' == ''" Text="DeployToGame=true requires GameModOutputDir." />
     <Error Condition="'$(DeployToGame)' == 'true' and !Exists('$(GameModOutputDir)')" Text="DryCycle output folder not found: $(GameModOutputDir)" />
     <Error Condition="'$(DeployToGame)' == 'true' and '$(GameModAssetsDir)' == ''" Text="DeployToGame=true requires GameModAssetsDir." />
-  </Target>
-
-  <Target Name="BuildDevToolRWImGuiFrontend"
-          AfterTargets="Build"
-          Condition="'$(DeployToGame)' == 'true' and '$(BuildDevToolFrontend)' == 'true'">
-    <PropertyGroup>
-      <_DevToolFrontendProject>$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj</_DevToolFrontendProject>
-      <_DevToolFrontendOutput>$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll</_DevToolFrontendOutput>
-    </PropertyGroup>
-
-    <Error Condition="!Exists('$(_DevToolFrontendProject)')"
-           Text="DryCycle DevTool RWImGui project not found: $(_DevToolFrontendProject)" />
-    <Message Importance="high"
-             Text="Building DryCycle DevTool RWImGui frontend -> $(_DevToolFrontendOutput)" />
-    <MSBuild Projects="$(_DevToolFrontendProject)"
-             Targets="Build"
-             BuildInParallel="false"
-             Properties="Configuration=$(Configuration);RainWorldDir=$(RainWorldDir);GameModRootDir=$(GameModRootDir);GameModOutputDir=$(GameModOutputDir)" />
-    <Error Condition="!Exists('$(_DevToolFrontendOutput)')"
-           Text="DryCycle main build succeeded but the New UI frontend DLL was not produced: $(_DevToolFrontendOutput)" />
   </Target>
 
   <!-- Optional one-command shader build. Keep it opt-in because the Unity Editor is
