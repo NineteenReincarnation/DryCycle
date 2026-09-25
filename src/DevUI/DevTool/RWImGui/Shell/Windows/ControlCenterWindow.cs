@@ -29,21 +29,25 @@ internal static class ControlCenterWindow
         // need to scroll. It matters on very small displays and at extreme font scales.
         DevToolScrollChrome.Apply(ImGui.GetIO(), scale);
 
-        float maxWidth = Math.Max(300f, display.X - 16f);
-        float preferredWidth = 430f * Math.Min(1.18f, scale);
-        float width = Math.Min(maxWidth, Math.Max(340f, preferredWidth));
+        float maxWidth = Math.Max(280f, display.X - 16f);
+        float compactMaxWidth = Math.Min(maxWidth, 520f * Math.Min(1.12f, scale));
         float defaultX = 8f;
 
         ImGui.SetNextWindowPos(new Num.Vector2(defaultX, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, 190f), ImGuiCond.FirstUseEver);
+        // This surface contains only two short control rows. Let ImGui derive both axes from the
+        // actual localized button/text extents instead of preserving an old oversized window.
+        // AlwaysAutoResize also corrects already-saved ImGui sizes from previous builds.
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(320f, maxWidth), 120f),
-            new Num.Vector2(maxWidth, Math.Max(140f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(260f, compactMaxWidth), 0f),
+            new Num.Vector2(compactMaxWidth, Math.Max(140f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("界面###DevToolControlCenter", "Interface###DevToolControlCenter"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.AlwaysAutoResize |
+                ImGuiWindowFlags.NoScrollbar |
+                ImGuiWindowFlags.NoScrollWithMouse))
         {
             ImGui.End();
             DrawPerformanceDiagnostics(display);
@@ -53,7 +57,6 @@ internal static class ControlCenterWindow
         FloatingWindowSnap.TrackCurrentWindow("ControlCenter");
         DrawInterfacePanel();
 
-        FitWindowHeightToContents(display);
         ImGui.End();
         DrawPerformanceDiagnostics(display);
     }
@@ -129,19 +132,6 @@ internal static class ControlCenterWindow
 
     private static float KeyColumn() =>
         DevToolUiSettings.IsChinese ? 116f : 108f;
-
-    private static void FitWindowHeightToContents(Num.Vector2 display)
-    {
-        ImGuiStylePtr style = ImGui.GetStyle();
-        float minimum = 126f;
-        float maximum = Math.Max(minimum, display.Y - 16f);
-        float desired = ImGui.GetCursorPosY() + style.WindowPadding.Y;
-        desired = Math.Max(minimum, Math.Min(maximum, desired));
-
-        Num.Vector2 current = ImGui.GetWindowSize();
-        if (Math.Abs(current.Y - desired) > 0.5f)
-            ImGui.SetWindowSize(new Num.Vector2(current.X, desired), ImGuiCond.Always);
-    }
 
     private static void DrawPerformanceDiagnostics(Num.Vector2 display)
     {
