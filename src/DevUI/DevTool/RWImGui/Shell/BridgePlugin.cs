@@ -26,6 +26,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
     private static ManualLogSource log;
     private static bool callbackRegistered;
+    private static bool callbackRegistrationAllowed;
+    private static float nextCallbackRegistrationAttemptAt;
+    private static int callbackRegistrationFailureLogged;
     private bool bridgeEnabled;
     private bool sessionWasVisible;
     private bool sessionWasPaused;
@@ -35,6 +38,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
     private bool ownsCreatureCatalogRuntime;
     private bool frontendInputAttached;
     private bool retainedFrontendActive;
+    private bool mapFrontendWorkFaulted;
+    private bool creatureCatalogWorkFaulted;
+    private bool legacyVisualGuardFaulted;
+    private bool retainedLifecycleFaulted;
 
     private void OnEnable()
     {
@@ -52,54 +59,147 @@ public sealed class BridgePlugin : BaseUnityPlugin
             ownsCreatureCatalogRuntime = false;
             frontendInputAttached = false;
             retainedFrontendActive = false;
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorUiModeState.SetOverlayHidden", () => EditorUiModeState.SetOverlayHidden(false));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/EditorInputRouter.SetFrontendAttached", () => EditorInputRouter.SetFrontendAttached(false));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetLogger", () => DevToolFrontend.SetLogger(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/FontAtlasIntegration.Enable", () => DevToolFontAtlasIntegration.Enable(Logger));
+            mapFrontendWorkFaulted = false;
+            creatureCatalogWorkFaulted = false;
+            legacyVisualGuardFaulted = false;
+            retainedLifecycleFaulted = false;
+            callbackRegistrationAllowed = false;
+            nextCallbackRegistrationAttemptAt = 0f;
+            Interlocked.Exchange(ref callbackRegistrationFailureLogged, 0);
+
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/EditorUiModeState.SetOverlayHidden",
+                () => EditorUiModeState.SetOverlayHidden(false));
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/EditorInputRouter.SetFrontendAttached",
+                () => EditorInputRouter.SetFrontendAttached(false));
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/DevToolFrontend.SetLogger",
+                () => DevToolFrontend.SetLogger(Logger));
             global::DryCycle.StartupDiagnostics.Step(
                 "BridgePlugin/DevToolFrontend.ResetNativeReadiness",
                 DevToolFrontend.ResetNativeReadinessFromMainThread);
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/DevToolFrontend.SetApplicationFocused", () => DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused));
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/DevToolFrontend.SetApplicationFocused",
+                () => DevToolFrontend.SetApplicationFocusedFromMainThread(applicationFocused));
 
-            // The room inspector is composed by the bridge itself, so its authoring sections must share
-            // the bridge lifetime as well. Dedicated helper plugins may also call these methods; both
-            // Enable paths are idempotent.
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldCreatureSpawnInspector.Enable", () => WorldCreatureSpawnInspector.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldLineageInspector.Enable", () => WorldLineageInspector.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/ScopedScrollChrome.Enable", () => ScopedScrollChrome.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapUpdateThrottle.Enable", () => WorldMapUpdateThrottle.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapBackgroundBudget.Enable", () => WorldMapBackgroundBudget.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRasterReadbackFallback.Enable", () => WorldMapRasterReadbackFallback.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapExactShortcuts.Enable", () => WorldMapExactShortcuts.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapLegacyVisualGuard.Enable", () => WorldMapLegacyVisualGuard.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRetainedV2Runtime.Enable", () => WorldMapRetainedV2Runtime.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPresentationCorrectness.Enable", () => WorldMapPresentationCorrectness.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapRenderOrder.Enable", () => WorldMapRenderOrder.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapThumbnailVisibility.Enable", () => WorldMapThumbnailVisibility.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldMapPipeLayers.Enable", () => WorldMapPipeLayers.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/WorldInspectorReadability.Enable", () => WorldInspectorReadability.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/UserFacingCopyCleanup.Enable", () => DevToolUserFacingCopyCleanup.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/PlayerMapFrontendLifecycle.Enable", () => PlayerMapFrontendLifecycle.Enable(Logger));
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/RetainedViewLifecycle.Enable", retainedViewLifecycle.Enable);
-
-            // Never call ImGui.* from BepInEx OnEnable. RWImGui has been chainloaded at this point, but
-            // its RainWorld.Start hook has not necessarily installed the native ImGui function pointers
-            // yet. Calling GetFrameCount/GetIO here can jump through an uninitialised native binding and
-            // terminate the process before BepInEx has a chance to print a managed exception.
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Hook RainWorld.Start", () => On.RainWorld.Start += RainWorld_Start);
-            // Font registration is owned by the backend's pre-upload boundary on its Present thread.
-            // Unity Update only publishes visibility; it never mutates ImGui context or atlas state.
-            global::DryCycle.StartupDiagnostics.Step("BridgePlugin/Subscribe AfterModsInit", () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit);
+            // Only lifecycle wiring belongs to the fatal shell transaction. Map helpers, inspectors,
+            // caches and diagnostics are optional and are enabled independently below.
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/Hook RainWorld.Start",
+                () => On.RainWorld.Start += RainWorld_Start);
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/Hook RainWorld.OnModsInit",
+                () => On.RainWorld.OnModsInit += RainWorld_OnModsInit);
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/Subscribe AfterModsInit",
+                () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit += DryCycle_AfterModsInit);
 
             bridgeEnabled = true;
-            global::DryCycle.StartupDiagnostics.Marker("BridgePlugin.OnEnable", "EXIT");
+            global::DryCycle.StartupDiagnostics.Marker("BridgePlugin.OnEnable", "CORE-READY");
         }
         catch (Exception error)
         {
             global::DryCycle.StartupDiagnostics.Failure("BridgePlugin.OnEnable", error);
             Logger?.LogError(
-                "DryCycle DevTool RWImGui frontend failed during OnEnable and has been isolated; Rain World startup will continue.");
+                "DryCycle DevTool RWImGui core shell failed during OnEnable; Rain World startup will continue. " +
+                error);
             ShutdownBridgeState();
+            return;
+        }
+
+        TryEnableOptionalFrontendFeature(
+            "WorldCreatureSpawnInspector",
+            () => WorldCreatureSpawnInspector.Enable(Logger),
+            WorldCreatureSpawnInspector.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldLineageInspector",
+            () => WorldLineageInspector.Enable(Logger),
+            WorldLineageInspector.Disable);
+        TryEnableOptionalFrontendFeature(
+            "ScopedScrollChrome",
+            () => ScopedScrollChrome.Enable(Logger),
+            ScopedScrollChrome.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapUpdateThrottle",
+            () => WorldMapUpdateThrottle.Enable(Logger),
+            WorldMapUpdateThrottle.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapBackgroundBudget",
+            () => WorldMapBackgroundBudget.Enable(Logger),
+            WorldMapBackgroundBudget.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapRasterReadbackFallback",
+            () => WorldMapRasterReadbackFallback.Enable(Logger),
+            WorldMapRasterReadbackFallback.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapExactShortcuts",
+            () => WorldMapExactShortcuts.Enable(Logger),
+            WorldMapExactShortcuts.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapLegacyVisualGuard",
+            () => WorldMapLegacyVisualGuard.Enable(Logger),
+            WorldMapLegacyVisualGuard.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapRetainedV2Runtime",
+            () => WorldMapRetainedV2Runtime.Enable(Logger),
+            WorldMapRetainedV2Runtime.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapPresentationCorrectness",
+            () => WorldMapPresentationCorrectness.Enable(Logger),
+            WorldMapPresentationCorrectness.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapRenderOrder",
+            () => WorldMapRenderOrder.Enable(Logger),
+            WorldMapRenderOrder.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapThumbnailVisibility",
+            () => WorldMapThumbnailVisibility.Enable(Logger),
+            WorldMapThumbnailVisibility.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldMapPipeLayers",
+            () => WorldMapPipeLayers.Enable(Logger),
+            WorldMapPipeLayers.Disable);
+        TryEnableOptionalFrontendFeature(
+            "WorldInspectorReadability",
+            () => WorldInspectorReadability.Enable(Logger),
+            WorldInspectorReadability.Disable);
+        TryEnableOptionalFrontendFeature(
+            "UserFacingCopyCleanup",
+            () => DevToolUserFacingCopyCleanup.Enable(Logger),
+            DevToolUserFacingCopyCleanup.Disable);
+        TryEnableOptionalFrontendFeature(
+            "PlayerMapFrontendLifecycle",
+            () => PlayerMapFrontendLifecycle.Enable(Logger),
+            PlayerMapFrontendLifecycle.Disable);
+        TryEnableOptionalFrontendFeature(
+            "RetainedViewLifecycle",
+            retainedViewLifecycle.Enable,
+            retainedViewLifecycle.Disable);
+
+        global::DryCycle.StartupDiagnostics.Marker("BridgePlugin.OnEnable", "EXIT");
+    }
+
+    private void TryEnableOptionalFrontendFeature(
+        string name,
+        Action enable,
+        Action rollback)
+    {
+        try
+        {
+            enable?.Invoke();
+        }
+        catch (Exception error)
+        {
+            global::DryCycle.StartupDiagnostics.Failure(
+                "BridgePlugin/Optional/" + name,
+                error);
+            Logger?.LogError(
+                "DryCycle DevTool optional frontend feature '" + name +
+                "' failed; the New UI shell remains enabled. " + error);
+
+            if (rollback != null)
+                SafeFrontendCleanup("optional " + name, rollback);
         }
     }
 
@@ -107,21 +207,53 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
-        WorldMapLegacyVisualGuard.LateUpdate();
+        if (!legacyVisualGuardFaulted)
+        {
+            try
+            {
+                WorldMapLegacyVisualGuard.LateUpdate();
+            }
+            catch (Exception error)
+            {
+                legacyVisualGuardFaulted = true;
+                Logger?.LogError(
+                    "WorldMapLegacyVisualGuard failed and has been disabled for this frontend lifetime. " +
+                    error);
+            }
+        }
 
         bool shouldRunRetainedFrontend =
             DevToolFrontend.NativeBackendReady &&
             !EditorUiModeState.UseVanilla &&
             DevToolSessionHub.IsCurrentSessionLive;
 
-        if (shouldRunRetainedFrontend)
+        if (shouldRunRetainedFrontend && !retainedLifecycleFaulted)
         {
-            retainedViewLifecycle.LateUpdate();
-            retainedFrontendActive = true;
+            try
+            {
+                retainedViewLifecycle.LateUpdate();
+                retainedFrontendActive = true;
+            }
+            catch (Exception error)
+            {
+                retainedLifecycleFaulted = true;
+                retainedFrontendActive = false;
+                Logger?.LogError(
+                    "DevTool retained view lifecycle failed; core New UI rendering remains enabled. " +
+                    error);
+            }
         }
         else if (retainedFrontendActive)
         {
-            DevToolPageViewRegistry.DeactivateActive();
+            try
+            {
+                DevToolPageViewRegistry.DeactivateActive();
+            }
+            catch (Exception error)
+            {
+                Logger?.LogWarning(
+                    "DevTool retained page deactivation failed: " + error);
+            }
             retainedFrontendActive = false;
         }
     }
@@ -144,9 +276,10 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
-        // The rebuilt frontend is not actually available until RWImGUI reaches a healthy Present.
-        // Claiming frontend ownership before that point made vanilla DevUI sleep while New UI had
-        // nothing to draw, and kept invisible retained pipelines running every gameplay frame.
+        // Callback registration is retryable. A single timing/API failure during OnModsInit must not
+        // leave NativeBackendReady=false for the rest of the process.
+        TryRegisterCallback();
+
         bool nativeFrontendReady = DevToolFrontend.NativeBackendReady;
         if (frontendInputAttached != nativeFrontendReady)
         {
@@ -156,53 +289,15 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         bool sessionLiveNow = DevToolSessionHub.IsCurrentSessionLive;
 
-        // FrontendAttached=false already preserves the native DevUI while the backend is unavailable.
-        // Do not overwrite the user's New UI preference: a delayed first Present must recover itself.
-
-        bool rebuiltFrontendWorkActive =
-            nativeFrontendReady &&
-            !EditorUiModeState.UseVanilla &&
-            sessionLiveNow;
-
-        if (rebuiltFrontendWorkActive)
-        {
-            EditorSession mapSession = DevToolRuntime.ActiveSession;
-            if (mapSession?.ToolMode == EditorToolMode.Map)
-            {
-                if (WorldMapBackgroundBudget.AllowSourceRecovery())
-                    MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
-
-                MapRoomGeometryPresentationHub.Prime(mapSession);
-                int selectedRoomIndex =
-                    MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
-                WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
-                WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
-
-                // These pumps only back the rebuilt Map UI. Do not run them in gameplay, Vanilla
-                // DevUI, another tool, or when RWImGUI cannot render.
-                WorldMapRetainedV2Runtime.UpdateMainThread();
-                CartographyCanvasImages.UpdateMainThread();
-            }
-
-            EnsureCreatureCatalogRuntime();
-            if (ownsCreatureCatalogRuntime)
-                WorldCreatureCatalogPicker.PumpMainThread();
-        }
-
-        // Snapshot availability is not authoritative for lifetime: once H destroys vanilla
-        // DevUI, DevUI.Update stops and the last presentation snapshot remains cached.
+        // Backend readiness is transient; the user's presentation choice is not. While RWImGui is
+        // unavailable FrontendAttached=false already keeps vanilla DevUI visible and rebuilt
+        // snapshot production asleep. Do not permanently rewrite UseVanilla just because Present
+        // was late for one frame. When the heartbeat arrives, New UI can activate automatically.
         EditorSession session = DevToolSessionHub.Current;
         RainWorldGame game = session?.Owner?.game;
-        // Session lifetime is authoritative here. Vanilla presentation intentionally does not
-        // publish rebuilt presentation snapshots, so requiring Current.Available makes the tiny
-        // Vanilla -> New UI return panel disappear after H closes and recreates DevUI.
         bool rawSessionVisible = DevToolSessionHub.IsCurrentSessionLive;
         bool definitelyClosed = IsSessionDefinitelyClosed(session, game);
 
-        // Do not use a frame-count grace period here. In exclusive/fullscreen transitions Unity can
-        // stop Update entirely while unfocused and Rain World may take an arbitrary number of frames
-        // to restore game.devUI/room after focus returns. Keep the same consumer context until the
-        // live signal comes back or we have positive evidence that DevTools really closed.
         if (rawSessionVisible)
             focusTransitionActive = false;
         else if (!applicationFocused && sessionWasVisible)
@@ -214,14 +309,16 @@ public sealed class BridgePlugin : BaseUnityPlugin
             sessionWasVisible && focusTransitionActive && !definitelyClosed;
         bool sessionVisible = rawSessionVisible || preserveAcrossFocusTransition;
         bool sessionPaused = sessionVisible && game?.GamePaused == true;
+        bool sessionReturned = sessionVisible && !sessionWasVisible;
 
-        // Escape must actually get the rebuilt overlay out of the way while Rain World's pause /
-        // Warp Menu owns the screen. Do not reopen merely because Escape was released or because
-        // RWImGui currently has no context: that was the old one-frame hide bug. Restore only when
-        // the pause/menu closes or when DevTools itself is closed and opened again.
+        if (sessionReturned)
+        {
+            mapFrontendWorkFaulted = false;
+            creatureCatalogWorkFaulted = false;
+        }
+
         if (EditorUiModeState.OverlayHidden && sessionVisible)
         {
-            bool sessionReturned = !sessionWasVisible;
             bool resumedFromPause = sessionWasPaused && !sessionPaused;
             if (sessionReturned || resumedFromPause)
                 EditorUiModeState.SetOverlayHidden(false);
@@ -230,15 +327,75 @@ public sealed class BridgePlugin : BaseUnityPlugin
         sessionWasVisible = sessionVisible;
         sessionWasPaused = sessionPaused;
 
-        // Keep the RWImGui frontend alive in Vanilla presentation mode so the tiny New UI /
-        // Vanilla switch remains reachable. Alt+Tab never calls SetVisible(false): the context stays
-        // attached and its ImGui window positions/sizes/open-state survive the focus transition.
-        bool feedbackHold =
-            EditorShortcutFeedback.PresentationHoldActive;
+        bool feedbackHold = EditorShortcutFeedback.PresentationHoldActive;
         bool frontendVisible =
             sessionVisible &&
             (!EditorUiModeState.OverlayHidden || feedbackHold);
+
+        // Core shell/context activation happens before Map caches, image pumps or catalog work.
+        // Optional page code can no longer prevent this call from being reached.
         DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
+
+        if (!sessionVisible)
+        {
+            mapFrontendWorkFaulted = false;
+            creatureCatalogWorkFaulted = false;
+            return;
+        }
+
+        bool rebuiltFrontendWorkActive =
+            nativeFrontendReady &&
+            !EditorUiModeState.UseVanilla &&
+            sessionLiveNow;
+        if (!rebuiltFrontendWorkActive)
+            return;
+
+        PumpOptionalFrontendWork();
+    }
+
+    private void PumpOptionalFrontendWork()
+    {
+        EditorSession mapSession = DevToolRuntime.ActiveSession;
+        if (mapSession?.ToolMode == EditorToolMode.Map && !mapFrontendWorkFaulted)
+        {
+            try
+            {
+                if (WorldMapBackgroundBudget.AllowSourceRecovery())
+                    MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
+
+                MapRoomGeometryPresentationHub.Prime(mapSession);
+                int selectedRoomIndex =
+                    MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
+                WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
+                WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
+                WorldMapRetainedV2Runtime.UpdateMainThread();
+                CartographyCanvasImages.UpdateMainThread();
+            }
+            catch (Exception error)
+            {
+                mapFrontendWorkFaulted = true;
+                Logger?.LogError(
+                    "DevTool optional Map frontend pump failed and is disabled until DevTools is reopened. " +
+                    error);
+            }
+        }
+
+        if (!creatureCatalogWorkFaulted)
+        {
+            try
+            {
+                EnsureCreatureCatalogRuntime();
+                if (ownsCreatureCatalogRuntime)
+                    WorldCreatureCatalogPicker.PumpMainThread();
+            }
+            catch (Exception error)
+            {
+                creatureCatalogWorkFaulted = true;
+                Logger?.LogError(
+                    "DevTool optional creature catalog pump failed and is disabled until DevTools is reopened. " +
+                    error);
+            }
+        }
     }
 
     private void EnsureCreatureCatalogRuntime()
@@ -283,6 +440,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         bridgeEnabled = false;
 
         SafeFrontendCleanup("RainWorld.Start hook", () => On.RainWorld.Start -= RainWorld_Start);
+        SafeFrontendCleanup("RainWorld.OnModsInit hook", () => On.RainWorld.OnModsInit -= RainWorld_OnModsInit);
         SafeFrontendCleanup(
             "AfterModsInit lifecycle subscription",
             () => global::DryCycle.DryCycleLifecycleEvents.AfterModsInit -= DryCycle_AfterModsInit);
@@ -295,9 +453,15 @@ public sealed class BridgePlugin : BaseUnityPlugin
         sessionWasPaused = false;
         focusTransitionActive = false;
         applicationFocused = true;
+        mapFrontendWorkFaulted = false;
+        creatureCatalogWorkFaulted = false;
+        legacyVisualGuardFaulted = false;
+        retainedLifecycleFaulted = false;
+        callbackRegistrationAllowed = false;
+        nextCallbackRegistrationAttemptAt = 0f;
+        Interlocked.Exchange(ref callbackRegistrationFailureLogged, 0);
         SafeFrontendCleanup("frontend input attachment", () => EditorInputRouter.SetFrontendAttached(false));
         SafeFrontendCleanup("RWImGui callback", TryUnregisterCallback);
-        SafeFrontendCleanup("RWImGui font registration boundary", DevToolFontAtlasIntegration.Disable);
 
         if (ownsCreatureCatalogRuntime)
             SafeFrontendCleanup("creature catalog fallback", WorldCreatureCatalogPicker.Shutdown);
@@ -345,8 +509,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "ENTER");
 
-        // RWImGUI installs native bindings here. The font integration observes export loading, but
-        // touches the shared atlas only on Present, before the backend uploads it for the first time.
+        // RWImGUI installs native bindings here. DryCycle deliberately does not touch the shared
+        // ImGui context/font atlas during game startup. DevTool fonts belong to DevToolInputContext
+        // and are installed only when that dedicated consumer context is first activated.
         global::DryCycle.StartupDiagnostics.Step(
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
@@ -356,31 +521,65 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // Calling HasContext/SwitchContext in that state can cross an uninitialized native binding
         // and terminate the whole process before a managed exception can be logged.
         //
-        // Font registration is independent of consumer-context activation and cannot run on this
-        // main-thread startup path, even if the backend returned without a managed exception.
+        // Font registration therefore remains deferred to the normal consumer-context lifecycle,
+        // where RWImGUI has already established a usable context. Game startup must always win over
+        // optional DevTool font prewarming.
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
+    }
+
+    private static void RainWorld_OnModsInit(
+        On.RainWorld.orig_OnModsInit orig,
+        RainWorld self)
+    {
+        orig(self);
+        AllowCallbackRegistration("RainWorld.OnModsInit");
     }
 
     private static void DryCycle_AfterModsInit(RainWorld self)
     {
-        TryRegisterCallback();
+        AllowCallbackRegistration("DryCycle.AfterModsInit");
+    }
+
+    private static void AllowCallbackRegistration(string source)
+    {
+        callbackRegistrationAllowed = true;
+        nextCallbackRegistrationAttemptAt = 0f;
+        log?.LogInfo(
+            "DryCycle DevTool RWImGui callback registration enabled by " + source + ".");
     }
 
     private static unsafe void TryRegisterCallback()
     {
-        if (callbackRegistered) return;
+        if (callbackRegistered || !callbackRegistrationAllowed)
+            return;
+
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextCallbackRegistrationAttemptAt)
+            return;
+
         try
         {
             ImGUIAPI.AddAlwaysCallback(&DevToolFrontend.FrameCallback);
             callbackRegistered = true;
-            log?.LogInfo("DryCycle DevTool RWImGui frontend registered.");
+            nextCallbackRegistrationAttemptAt = 0f;
+            Interlocked.Exchange(ref callbackRegistrationFailureLogged, 0);
+            log?.LogInfo(
+                "DryCycle DevTool RWImGui frontend callback registered. " +
+                "Waiting for the first healthy Present heartbeat.");
         }
         catch (Exception error)
         {
-            global::DryCycle.StartupDiagnostics.Failure(
-                "BridgePlugin/TryRegisterCallback",
-                error);
-            log?.LogError("DryCycle DevTool RWImGui registration failed: " + error);
+            nextCallbackRegistrationAttemptAt = now + 1.0f;
+
+            if (Interlocked.Exchange(ref callbackRegistrationFailureLogged, 1) == 0)
+            {
+                global::DryCycle.StartupDiagnostics.Failure(
+                    "BridgePlugin/TryRegisterCallback",
+                    error);
+                log?.LogError(
+                    "DryCycle DevTool RWImGui callback registration failed; retrying once per second. " +
+                    error);
+            }
         }
     }
 
@@ -405,14 +604,23 @@ public sealed class BridgePlugin : BaseUnityPlugin
 [SuppressUnmanagedCodeSecurity]
 internal static class DevToolFrontend
 {
-    // IMGUIContext is a consumer callback, not a separate native ImGui context or font atlas.
-    // Only the RWImGUI Present thread acquires/releases it; Unity Update publishes visibility.
-    private static DevToolInputContext inputContext;
+    // Do not construct a consumer IMGUIContext merely because BepInEx loads the bridge assembly.
+    // Context creation is deferred until the DevTool is actually visible and RWImGui reports that
+    // no other context owns input. This keeps the entire BepInEx/RainWorld startup path free of
+    // consumer context construction.
+    private static volatile DevToolInputContext inputContext;
     private static ManualLogSource log;
     private static volatile bool visible;
     private static volatile bool applicationFocused = true;
     private static int contextBusyLogged;
     private static int drawFailureLogged;
+    private static int firstPresentLogged;
+    private static int contextAttachedLogged;
+    private static int firstRenderLogged;
+    private static int contextRebuildRequested;
+    private static int textureFrameFailureLogged;
+    private static volatile bool frontendSafeMode;
+    private static string frontendSafeModeReason = string.Empty;
     private static int cjkFontLogged;
     private static int cjkFontMissingLogged;
     private static int fontPushFailureLogged;
@@ -420,7 +628,7 @@ internal static class DevToolFrontend
     private static int rwimguiPresentObserved;
     private static int backendUnavailableLogged;
     private static volatile bool contextAttached;
-    private static double nextContextAttemptAt;
+    private static float nextContextAttemptAt;
     private static ImFontPtr activeFont;
     private static string resolvedFontName = string.Empty;
     private static int resolvedFontWeight = DevToolUiSettings.DefaultFontWeight;
@@ -441,11 +649,27 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref rwimguiPresentObserved, 0);
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
         Interlocked.Exchange(ref contextActivationFailureLogged, 0);
+        Interlocked.Exchange(ref contextBusyLogged, 0);
+        Interlocked.Exchange(ref drawFailureLogged, 0);
+        Interlocked.Exchange(ref firstPresentLogged, 0);
+        Interlocked.Exchange(ref contextAttachedLogged, 0);
+        Interlocked.Exchange(ref firstRenderLogged, 0);
+        Interlocked.Exchange(ref contextRebuildRequested, 0);
+        Interlocked.Exchange(ref textureFrameFailureLogged, 0);
+        frontendSafeMode = false;
+        frontendSafeModeReason = string.Empty;
         ResetFontProjectionForNewContext();
         EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
     internal static void SetLogger(ManualLogSource value) => log = value;
+
+    internal static void RequestContextRebuildForLanguageChange()
+    {
+        // Language buttons are clicked on RWImGui's render thread. Only publish intent here; the
+        // Unity main thread performs SwitchContext(null) on the next Update.
+        Interlocked.Exchange(ref contextRebuildRequested, 1);
+    }
 
     internal static void SetApplicationFocusedFromMainThread(bool value)
     {
@@ -456,10 +680,23 @@ internal static class DevToolFrontend
 
     internal static void SetVisibleFromMainThread(bool value)
     {
+        bool wasVisible = visible;
         visible = value;
+
+        if (Interlocked.Exchange(ref contextRebuildRequested, 0) != 0)
+        {
+            if (contextAttached)
+                ReleaseContext();
+
+            inputContext = null;
+            ResetFontProjectionForNewContext();
+        }
 
         if (!value)
         {
+            if (contextAttached || wasVisible)
+                ReleaseContext();
+
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
         }
@@ -487,29 +724,36 @@ internal static class DevToolFrontend
             return;
         }
 
+        float now = UnityEngine.Time.realtimeSinceStartup;
+        if (now < nextContextAttemptAt)
+            return;
+
+        EnsureContext(now);
     }
 
     public static void FrameCallback(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
         // This is the only native-health signal we trust. AddAlwaysCallback reaching Present means
         // RWImGUI completed enough of its D3D11 path for consumer context APIs to be used safely.
-        if (Interlocked.Exchange(ref rwimguiPresentObserved, 1) == 0)
-            log?.LogInfo("DevTool received a healthy RWImGUI Present; New UI rendering is available.");
+        Interlocked.Exchange(ref rwimguiPresentObserved, 1);
         Interlocked.Exchange(ref backendUnavailableLogged, 0);
-        if (!visible)
+
+        if (Interlocked.Exchange(ref firstPresentLogged, 1) == 0)
         {
-            ReleaseContext();
-            return;
+            log?.LogInfo(
+                "DryCycle DevTool RWImGui first healthy Present observed. " +
+                "Consumer context activation is now allowed.");
         }
-        double now = System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
-        if (!contextAttached && now >= nextContextAttemptAt) EnsureContext(now);
     }
 
-    private static void EnsureContext(double now)
+    private static void EnsureContext(float now)
     {
         try
         {
-            // Executed inside a healthy Present, on the thread that owns ImGui's native state.
+            // This path runs only when the rebuilt DevTool is actually visible, i.e. well after
+            // RainWorld.Start. Do not gate it on the Always callback: some RWImGUI builds can keep
+            // consumer contexts usable even when that callback is unavailable, and the old gate
+            // permanently prevented New UI from opening.
             if (ImGUIAPI.HasContext)
             {
                 EditorInputRouter.SetFrontendCapture(false, false, false);
@@ -536,11 +780,43 @@ internal static class DevToolFrontend
             contextAttached = true;
             nextContextAttemptAt = 0f;
 
+            // English is the startup-safe default and must not touch the native font atlas.
+            // Switching to Chinese requests a fresh context on the main thread; only that new
+            // context registers the single fixed HarmonyOS face before its first Render.
+            if (DevToolUiSettings.IsChinese &&
+                !DevToolFontCatalog.RegistrationAttempted)
+            {
+                DevToolFontCatalog.TryRegisterLocalFonts(log);
+            }
+
             Interlocked.Exchange(ref contextBusyLogged, 0);
             Interlocked.Exchange(ref contextActivationFailureLogged, 0);
+
+            if (Interlocked.Exchange(ref contextAttachedLogged, 1) == 0)
+            {
+                log?.LogInfo(
+                    "DryCycle DevTool RWImGui consumer context activated. language=" +
+                    DevToolUiSettings.Language +
+                    ", localFontRegistration=" +
+                    DevToolFontCatalog.RegistrationAttempted +
+                    ".");
+            }
         }
         catch (Exception error)
         {
+            // SwitchContext can fail after RWImGui has already changed part of its ownership state.
+            // Best-effort release prevents the next retry from being stuck forever behind HasContext.
+            try
+            {
+                ImGUIAPI.SwitchContext(null);
+            }
+            catch (Exception cleanupError)
+            {
+                log?.LogWarning(
+                    "DevTool RWImGui context activation cleanup also failed: " +
+                    cleanupError);
+            }
+
             contextAttached = false;
             nextContextAttemptAt = now + 1.0f;
             inputContext = null;
@@ -549,8 +825,8 @@ internal static class DevToolFrontend
 
             if (Interlocked.Exchange(ref contextActivationFailureLogged, 1) == 0)
             {
-                log?.LogWarning(
-                    "DevTool RWImGui context activation failed; retrying at low frequency: " +
+                log?.LogError(
+                    "DevTool RWImGui context activation failed; retrying at low frequency. " +
                     error);
             }
         }
@@ -563,7 +839,7 @@ internal static class DevToolFrontend
 
         try
         {
-            if (ReferenceEquals(ImGUIAPI.CurrentContext, inputContext)) ImGUIAPI.SwitchContext(null);
+            ImGUIAPI.SwitchContext(null);
         }
         catch (Exception error)
         {
@@ -598,19 +874,45 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref cjkFontLogged, 0);
         Interlocked.Exchange(ref cjkFontMissingLogged, 0);
         Interlocked.Exchange(ref fontPushFailureLogged, 0);
+        Interlocked.Exchange(ref contextAttachedLogged, 0);
+        Interlocked.Exchange(ref firstRenderLogged, 0);
+        Interlocked.Exchange(ref drawFailureLogged, 0);
+        DevToolFontCatalog.ResetConsumerContextState();
         DevToolGlyphs.ResetCache();
     }
 
     internal static void RenderFromContext(ref nint idxgiSwapChain, ref uint syncInterval, ref uint flags)
     {
-        WorldMapTextureFrame.Begin();
-        if (!visible)
+        try
         {
-            // Also release after the always callback is unregistered during plugin shutdown.
-            ReleaseContext();
-            return;
+            WorldMapTextureFrame.Begin();
+            Interlocked.Exchange(ref textureFrameFailureLogged, 0);
         }
+        catch (Exception error)
+        {
+            // Texture leases are a World Map implementation detail. A bad/stale COM texture handle
+            // must not escape IMGUIContext.Render and take the entire editor shell with it.
+            if (Interlocked.Exchange(ref textureFrameFailureLogged, 1) == 0)
+            {
+                log?.LogError(
+                    "DevTool World Map texture-frame cleanup failed; continuing to render the UI shell. " +
+                    error);
+            }
+        }
+
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
+
+        if (Interlocked.Exchange(ref firstRenderLogged, 1) == 0)
+        {
+            log?.LogInfo(
+                "DryCycle DevTool RWImGui context Render reached Present. visible=" +
+                visible +
+                ", snapshotAvailable=" +
+                snapshot.Available +
+                ", vanilla=" +
+                EditorUiModeState.UseVanilla +
+                ".");
+        }
 
         // While the OS owns focus, keep the consumer context alive but submit no ImGui windows.
         // This prevents temporary fullscreen/display-size changes and stale mouse input from moving,
@@ -627,10 +929,7 @@ internal static class DevToolFrontend
         bool feedbackOnly =
             EditorUiModeState.OverlayHidden &&
             EditorShortcutFeedback.PresentationHoldActive;
-        bool needsPresentationSnapshot =
-            !EditorUiModeState.UseVanilla &&
-            !feedbackOnly;
-        if (needsPresentationSnapshot && !snapshot.Available)
+        if (!visible)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
             return;
@@ -643,6 +942,16 @@ internal static class DevToolFrontend
         {
             ImGuiIOPtr io = ImGui.GetIO();
             DevToolUiFrameContext frameContext = new(io);
+
+            if (frontendSafeMode)
+            {
+                DrawFrontendSafeMode(frameContext.DisplaySize);
+                EditorInputRouter.SetFrontendCapture(
+                    io.WantCaptureMouse,
+                    io.WantCaptureKeyboard,
+                    io.WantTextInput);
+                return;
+            }
 
             // Rain World's developer cursor remains authoritative. Do not toggle Unity's cursor
             // visibility and do not draw a second ImGui software cursor; both approaches fight
@@ -681,10 +990,13 @@ internal static class DevToolFrontend
                     // than feeding an unavailable snapshot into rebuilt editor windows.
                     if (!EditorUiModeState.UseVanilla && snapshot.Available)
                     {
-                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
-                            FontSettingsWindow.Draw(frameContext.DisplaySize);
+                        // Draw the core editor chrome before secondary typography/settings windows.
+                        // A Font window bug must not prevent the main Control Center/activity shell
+                        // from being submitted in the same frame.
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
                             DevToolOverlay.Draw(snapshot, frameContext);
+                        using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
+                            FontSettingsWindow.Draw(frameContext.DisplaySize);
                         bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
                         if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
                         {
@@ -740,9 +1052,72 @@ internal static class DevToolFrontend
         catch (Exception error)
         {
             EditorInputRouter.SetFrontendCapture(false, false, false);
+
+            frontendSafeModeReason =
+                error.GetType().Name +
+                ": " +
+                (error.Message ?? string.Empty);
+            frontendSafeMode = true;
+
+            // A page may have thrown after ImGui.Begin/Push*, leaving the current native frame
+            // stack inconsistent. Ask the Unity main thread to rebuild the consumer context before
+            // drawing the dependency-free recovery panel.
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+
             if (Interlocked.Exchange(ref drawFailureLogged, 1) == 0)
-                log?.LogError("DevTool RWImGui draw failed: " + error);
+            {
+                log?.LogError(
+                    "DevTool RWImGui draw failed; entering recovery safe mode and rebuilding the consumer context. " +
+                    error);
+            }
         }
+    }
+
+    private static void DrawFrontendSafeMode(System.Numerics.Vector2 display)
+    {
+        float width = Math.Min(560f, Math.Max(300f, display.X - 16f));
+        ImGui.SetNextWindowPos(new System.Numerics.Vector2(8f, 8f), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new System.Numerics.Vector2(width, 0f), ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0.96f);
+
+        if (!ImGui.Begin(
+                "DryCycle DevTool Recovery###DevToolRecoverySafeMode",
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.AlwaysAutoResize |
+                ImGuiWindowFlags.NoSavedSettings))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextUnformatted("New UI renderer recovered from a draw failure.");
+        ImGui.TextWrapped(
+            "Page-specific UI has been isolated. You can retry the rebuilt UI or return to Vanilla DevUI.");
+        if (!string.IsNullOrWhiteSpace(frontendSafeModeReason))
+        {
+            ImGui.Separator();
+            ImGui.TextWrapped(frontendSafeModeReason);
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Retry New UI"))
+        {
+            frontendSafeMode = false;
+            frontendSafeModeReason = string.Empty;
+            Interlocked.Exchange(ref drawFailureLogged, 0);
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Use Vanilla DevUI"))
+        {
+            EditorUiModeState.SetVanilla(true);
+            frontendSafeMode = false;
+            frontendSafeModeReason = string.Empty;
+            Interlocked.Exchange(ref contextRebuildRequested, 1);
+        }
+
+        ImGui.End();
     }
 
     private static unsafe float ResolveActiveBaseFontSize()
@@ -807,7 +1182,8 @@ internal static class DevToolFrontend
         DevToolUiLanguage language = DevToolUiSettings.Language;
         int preferredWeight = DevToolUiSettings.FontWeight;
 
-        // English uses RWImGUI's shared default font. A local face is selected only for Chinese.
+        // English is the startup-safe path: use the font that RWImGui created for this exact
+        // consumer context. Avoid carrying a local ImFontPtr when no CJK coverage is required.
         if (language == DevToolUiLanguage.English)
         {
             if (projectedFontLanguage != language ||

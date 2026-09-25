@@ -74,14 +74,54 @@ internal static unsafe class DevToolFontCatalog
         cachedSelectableLocalChineseFaces = -1;
     }
 
-    internal static string FontDirectory
+    internal static string ChineseFontPath
     {
         get
         {
-            string pluginDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? string.Empty;
-            string modVersionDirectory = Path.GetDirectoryName(pluginDirectory) ?? pluginDirectory;
-            return Path.Combine(modVersionDirectory, "ui", "fonts");
+            ResolveFontDirectories(out string modRootFonts, out string versionFonts);
+
+            string modRootCandidate = Path.Combine(modRootFonts, ChineseFontFileName);
+            if (File.Exists(modRootCandidate))
+                return modRootCandidate;
+
+            string versionCandidate = Path.Combine(versionFonts, ChineseFontFileName);
+            if (File.Exists(versionCandidate))
+                return versionCandidate;
+
+            // Prefer the mod-root location in diagnostics/new installs. The legacy newest/ui/fonts
+            // candidate is still accepted above so existing setups do not break.
+            return modRootCandidate;
         }
+    }
+
+    internal static string FontDirectory =>
+        Path.GetDirectoryName(ChineseFontPath) ?? string.Empty;
+
+    private static void ResolveFontDirectories(
+        out string modRootFonts,
+        out string versionFonts)
+    {
+        string pluginDirectory =
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ??
+            string.Empty;
+        string versionDirectory =
+            Path.GetDirectoryName(pluginDirectory) ??
+            pluginDirectory;
+
+        versionFonts = Path.Combine(versionDirectory, "ui", "fonts");
+
+        string modRootDirectory = versionDirectory;
+        if (string.Equals(
+                Path.GetFileName(versionDirectory),
+                "newest",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            modRootDirectory =
+                Path.GetDirectoryName(versionDirectory) ??
+                versionDirectory;
+        }
+
+        modRootFonts = Path.Combine(modRootDirectory, "ui", "fonts");
     }
 
     /// <summary>
@@ -111,7 +151,7 @@ internal static unsafe class DevToolFontCatalog
                 return false;
             }
 
-            string fontPath = Path.Combine(FontDirectory, ChineseFontFileName);
+            string fontPath = ChineseFontPath;
             cachedLocalFontFileCount = File.Exists(fontPath) ? 1 : 0;
 
             if (!File.Exists(fontPath))
@@ -218,7 +258,7 @@ internal static unsafe class DevToolFontCatalog
         try
         {
             cachedLocalFontFileCount =
-                File.Exists(Path.Combine(FontDirectory, ChineseFontFileName))
+                File.Exists(ChineseFontPath)
                     ? 1
                     : 0;
         }

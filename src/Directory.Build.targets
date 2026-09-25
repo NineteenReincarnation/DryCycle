@@ -27,6 +27,20 @@
     <ResolvedRWImGuiPluginDir Condition="'$(ResolvedRWImGuiPluginDir)' == '' and Exists('$(RWImGuiLocalPluginDir)/rain-world-imgui-api.dll')">$(RWImGuiLocalPluginDir)</ResolvedRWImGuiPluginDir>
   </PropertyGroup>
 
+  <!-- Visual Studio's fast up-to-date check only sees files that belong to the main
+       project by default. RWImGui frontend sources are intentionally excluded from DryCycle.dll,
+       so changing only those files previously let VS report "up to date" and skip MSBuild entirely.
+       Explicit inputs/outputs make a frontend edit or missing frontend DLL invalidate DryCycle's
+       local deploy build, allowing BuildOptionalRWImGuiBridge below to run its forced Rebuild. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(BuildRWImGuiBridge)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
+    <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/**/*.cs" />
+    <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj" />
+    <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/**/*.cs" />
+    <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/DryCycle.AIObservatory.RWImGui.csproj" />
+    <UpToDateCheckBuilt Include="$(GameModOutputDir)/DryCycle.DevTool.RWImGui.dll" />
+    <UpToDateCheckBuilt Include="$(GameModOutputDir)/DryCycle.AIObservatory.RWImGui.dll" />
+  </ItemGroup>
+
   <!-- During the RWImGUI migration DryCycle must not leave a second RWImGui API,
        ImGui.NET or cimgui runtime beside DryCycle.dll. RWImGUI ships a matched API + modified
        ImGui.NET/native stack and duplicate/private copies can make the CLR or native backend bind

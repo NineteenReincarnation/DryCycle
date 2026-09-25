@@ -22,6 +22,7 @@ internal static class DevToolOverlay
     private static string placementLabelType = string.Empty;
     private static bool placementLabelChinese;
     private static string placementLabelText = string.Empty;
+    private static bool pageBackgroundFaulted;
 
     internal static bool SuppressesSharedPageSurfaces => lanceDebugPage;
     internal static bool IsDebugWorkspace => lanceDebugPage;
@@ -32,8 +33,20 @@ internal static class DevToolOverlay
         Num.Vector2 display = frameContext.DisplaySize;
         IDevToolPageView page = lanceDebugPage ? null : DevToolPageViewRegistry.Get(snapshot.ToolMode);
 
-        if (!lanceDebugPage)
-            page?.DrawBackground(snapshot, display);
+        if (!lanceDebugPage && !pageBackgroundFaulted && page != null)
+        {
+            try
+            {
+                page.DrawBackground(snapshot, display);
+            }
+            catch (Exception error)
+            {
+                pageBackgroundFaulted = true;
+                global::DryCycle.Plugin.Logger?.LogError(
+                    "DevTool page background failed and was isolated from shared editor chrome. " +
+                    error);
+            }
+        }
 
         // Control Center and the collapsed shortcut orb are shared editor chrome rather than page content.
         ControlCenterWindow.Draw(snapshot, display);
@@ -69,6 +82,7 @@ internal static class DevToolOverlay
         placementLabelChinese = false;
         placementLabelText = string.Empty;
         lanceDebugPage = false;
+        pageBackgroundFaulted = false;
         ShortcutWindow.ResetRetainedState();
         LanceScavengerDebugView.StopCapture();
     }

@@ -24,6 +24,11 @@ namespace DryCycle.DevUI.DevTool.Core;
 internal static class DevToolRuntime
 {
     private static bool enabled;
+    private static readonly HashSet<string> FaultedDevUiStages =
+        new(StringComparer.Ordinal);
+    private static bool sessionSynchronizationFailureLogged;
+    private static bool presentationFailureLogged;
+
     // Safe stage-one RoomEffect hover preview is active. Advanced runtime/Futile/camera capture has
     // its own gate inside EffectPreviewRuntime and remains disabled until its detours are removed.
     private static readonly bool EffectLivePreviewEnabled = true;
@@ -33,25 +38,106 @@ internal static class DevToolRuntime
     internal static void Enable()
     {
         if (enabled) return;
-        BuiltinInspectorAdapters.Enable();
-        NativeObjectInspectorBootstrap.Enable();
-        EditorInputRouter.Enable();
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.Enable();
+
+        // This hook is the core lifetime boundary: without it there is no SessionHub and no
+        // presentation snapshot for the RWImGui frontend. Install it before optional adapters.
         On.DevInterface.DevUI.Update += DevUI_Update;
         enabled = true;
+        FaultedDevUiStages.Clear();
+        sessionSynchronizationFailureLogged = false;
+        presentationFailureLogged = false;
+
+        TryEnableOptionalSubsystem(
+            "NativeObjectInspectorBootstrap",
+            NativeObjectInspectorBootstrap.Enable);
+
+        TryEnableOptionalSubsystem(
+            "EditorInputRouter",
+            EditorInputRouter.Enable);
+
+        if (EffectLivePreviewEnabled)
+        {
+            TryEnableOptionalSubsystem(
+                "EffectPreviewRuntime",
+                EffectPreviewRuntime.Enable);
+        }
     }
 
     internal static void Disable()
     {
         if (!enabled) return;
-        On.DevInterface.DevUI.Update -= DevUI_Update;
-        if (EffectLivePreviewEnabled)
-            EffectPreviewRuntime.Disable();
-        LegacyUiPresentationController.Reset();
-        EditorInputRouter.Disable();
-        DevToolSubsystemCoordinator.ResetRuntimeState();
+
+        // Stop the core producer first so cleanup cannot race another DevUI.Update.
+        try
+        {
+            On.DevInterface.DevUI.Update -= DevUI_Update;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool core DevUI.Update hook removal failed: " + error);
+        }
         enabled = false;
+        FaultedDevUiStages.Clear();
+        sessionSynchronizationFailureLogged = false;
+        presentationFailureLogged = false;
+
+        if (EffectLivePreviewEnabled)
+            TryDisableOptionalSubsystem("EffectPreviewRuntime", EffectPreviewRuntime.Disable);
+
+        TryDisableOptionalSubsystem("LegacyUiPresentationController", LegacyUiPresentationController.Reset);
+        TryDisableOptionalSubsystem("EditorInputRouter", EditorInputRouter.Disable);
+        TryDisableOptionalSubsystem("DevToolSubsystemCoordinator", DevToolSubsystemCoordinator.ResetRuntimeState);
+    }
+
+    private static void TryEnableOptionalSubsystem(string name, Action action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogError(
+                "DevTool optional subsystem '" + name +
+                "' failed during enable; core editor session/presentation remains active. " +
+                error);
+        }
+    }
+
+    private static void TryDisableOptionalSubsystem(string name, Action action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool optional subsystem '" + name +
+                "' failed during cleanup: " + error);
+        }
+    }
+
+    private static bool RunOptionalDevUiStage(string name, Action action)
+    {
+        if (FaultedDevUiStages.Contains(name))
+            return false;
+
+        try
+        {
+            action?.Invoke();
+            return true;
+        }
+        catch (Exception error)
+        {
+            FaultedDevUiStages.Add(name);
+            Plugin.Logger?.LogError(
+                "DevTool DevUI stage '" + name +
+                "' failed and has been isolated until the DevTool runtime is restarted. " +
+                error);
+            return false;
+        }
     }
 
     private static void DevUI_Update(On.DevInterface.DevUI.orig_Update orig, global::DevInterface.DevUI self)
@@ -59,7 +145,7 @@ internal static class DevToolRuntime
         if (self == null)
         {
             if (EffectLivePreviewEnabled)
-                EffectPreviewRuntime.Reset();
+                RunOptionalDevUiStage("EffectPreview.Reset", EffectPreviewRuntime.Reset);
             orig(self);
             return;
         }
@@ -67,29 +153,68 @@ internal static class DevToolRuntime
         using DevToolPerformanceMonitor.Scope totalScope =
             DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DevUiUpdateTotal);
 
-        using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SessionSynchronization))
+        // SessionHub is the only hard prerequisite for rebuilt presentation. If it fails, preserve
+        // vanilla DevUI and make the primary exception explicit instead of letting the hook abort
+        // the original editor update.
+        try
         {
-            DevToolSessionHub.Synchronize(self);
-            if (EffectLivePreviewEnabled)
-                EffectPreviewRuntime.BeforeDevUiUpdate(self);
+            using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.SessionSynchronization))
+                DevToolSessionHub.Synchronize(self);
+
+            sessionSynchronizationFailureLogged = false;
         }
+        catch (Exception error)
+        {
+            if (!sessionSynchronizationFailureLogged)
+            {
+                sessionSynchronizationFailureLogged = true;
+                Plugin.Logger?.LogError(
+                    "DevTool core SessionHub synchronization failed; falling back to vanilla DevUI for this frame. " +
+                    error);
+            }
+
+            orig(self);
+            return;
+        }
+
         EditorSession session = DevToolSessionHub.Current;
 
-        // Sound/Trigger may exist without a matching DevInterface page. Global New UI / Vanilla
-        // ownership changes are reconciled on the main thread here so render-thread presentation
-        // flags never construct or retire DevInterface objects directly.
-        NativeToolScheduler.SynchronizePresentationOwnership(session);
+        if (EffectLivePreviewEnabled)
+        {
+            RunOptionalDevUiStage(
+                "EffectPreview.BeforeDevUiUpdate",
+                () => EffectPreviewRuntime.BeforeDevUiUpdate(self));
+        }
 
-        bool restoredWorkspaceThisFrame;
+        RunOptionalDevUiStage(
+            "NativeToolScheduler.SynchronizePresentationOwnership",
+            () => NativeToolScheduler.SynchronizePresentationOwnership(session));
+
+        bool restoredWorkspaceThisFrame = false;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.DeferredWorkspaceRestore))
-            restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true;
+        {
+            RunOptionalDevUiStage(
+                "DeferredWorkspaceRestore",
+                () => restoredWorkspaceThisFrame = session?.ApplyDeferredViewRestore() == true);
+        }
 
+        bool legacyTransactionBeforeSucceeded;
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyTransactionBefore))
-            session?.LegacyTransactions.BeforeLegacyUpdate(session);
+        {
+            legacyTransactionBeforeSucceeded =
+                RunOptionalDevUiStage(
+                    "LegacyTransaction.BeforeLegacyUpdate",
+                    () => session?.LegacyTransactions.BeforeLegacyUpdate(session));
+        }
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.InputShortcuts))
-            EditorInputRouter.UpdateShortcuts(session);
+        {
+            RunOptionalDevUiStage(
+                "EditorInputRouter.UpdateShortcuts",
+                () => EditorInputRouter.UpdateShortcuts(session));
+        }
 
+        // The native Sound/Trigger scheduler already fails open to vanilla internally.
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.VanillaDevUiUpdate))
         {
             if (!NativeSoundTriggerDevUiScheduler.TryRun(self))
@@ -98,22 +223,29 @@ internal static class DevToolRuntime
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.PostLegacySynchronization))
         {
-            session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
-            session?.SynchronizeAfterLegacyUpdate(self);
-            session?.LegacyTransactions.AfterLegacyUpdate(session);
+            RunOptionalDevUiStage(
+                "PostLegacySynchronization",
+                () =>
+                {
+                    session?.SynchronizeSelectionFromLegacyNode(self.draggedNode);
+                    session?.SynchronizeAfterLegacyUpdate(self);
+                    if (legacyTransactionBeforeSucceeded)
+                        session?.LegacyTransactions.AfterLegacyUpdate(session);
+                });
         }
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.CommandProcessing))
         {
-            DevToolSubsystemCoordinator.ProcessPendingCommands(session);
+            RunOptionalDevUiStage(
+                "CommandProcessing",
+                () =>
+                {
+                    DevToolSubsystemCoordinator.ProcessPendingCommands(session);
+                    session?.SynchronizeSelectionValidity();
 
-            // Page-switch commands reconcile their page/document immediately inside SetToolMode.
-            // Stable command frames therefore only need selected-object membership validation here,
-            // preserving the no-third-full-Synchronize() fast path.
-            session?.SynchronizeSelectionValidity();
-
-            if (EffectLivePreviewEnabled)
-                EffectPreviewRuntime.AfterDevUiUpdate(self);
+                    if (EffectLivePreviewEnabled)
+                        EffectPreviewRuntime.AfterDevUiUpdate(self);
+                });
         }
 
         bool suppressMigratedLegacyUi =
@@ -131,11 +263,33 @@ internal static class DevToolRuntime
              (session.ToolMode == EditorToolMode.Relationships && self.activePage is RelationshipPage));
 
         using (DevToolPerformanceMonitor.Measure(DevToolPerformanceMetric.LegacyPresentation))
-            LegacyUiPresentationController.Apply(self.activePage, suppressMigratedLegacyUi);
+        {
+            RunOptionalDevUiStage(
+                "LegacyUiPresentationController.Apply",
+                () => LegacyUiPresentationController.Apply(
+                    self.activePage,
+                    suppressMigratedLegacyUi));
+        }
 
+        bool shellOnly =
+            session?.IsOpeningFrame == true ||
+            restoredWorkspaceThisFrame;
 
-        bool shellOnly = session?.IsOpeningFrame == true || restoredWorkspaceThisFrame;
-        PublishPresentations(session, shellOnly);
+        try
+        {
+            PublishPresentations(session, shellOnly);
+            presentationFailureLogged = false;
+        }
+        catch (Exception error)
+        {
+            if (!presentationFailureLogged)
+            {
+                presentationFailureLogged = true;
+                Plugin.Logger?.LogError(
+                    "DevTool presentation publication failed; RWImGui will keep the backend-waiting/core shell visible while publication retries. " +
+                    error);
+            }
+        }
     }
 
     private static void PublishPresentations(EditorSession session, bool shellOnly)

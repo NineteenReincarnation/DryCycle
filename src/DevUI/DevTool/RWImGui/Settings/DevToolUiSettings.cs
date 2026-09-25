@@ -94,7 +94,9 @@ internal static class DevToolUiSettings
 
     internal static void SetLanguage(DevToolUiLanguage value)
     {
+        if (language == value) return;
         language = value;
+        DevToolFrontend.RequestContextRebuildForLanguageChange();
     }
 
     internal static void ResetFontAppearance()

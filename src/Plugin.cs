@@ -2,6 +2,7 @@ using System;
 using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
+using BepInEx.Bootstrap;
 using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
 using DryCycle.Creatures.DesertBatfly;
@@ -63,6 +64,13 @@ internal sealed class Plugin : BaseUnityPlugin
 
         try
         {
+            // Keep the developer editor independent from the large gameplay initialization
+            // transaction. If later weather/item/creature setup fails, DevTool remains available
+            // to inspect the running game and the recorded startup diagnostics.
+            StartupDiagnostics.Optional(
+                "Plugin.OnEnable/DevToolCore.Enable",
+                MiscRuntime.EnableDevToolCore);
+
             StartupDiagnostics.Step("Plugin.OnEnable/IteratorLogBridge.Enable", () => Iterators.IteratorLogBridge.Enable(Logger));
             bool iteratorHooksInstalled = StartupDiagnostics.Step(
                 "Plugin.OnEnable/IteratorHooks.Install",
@@ -150,6 +158,7 @@ internal sealed class Plugin : BaseUnityPlugin
         SafeBootstrapCleanup("OnDisable/IteratorHooks.Uninstall", Iterators.IteratorHooks.Uninstall);
         SafeBootstrapCleanup("OnDisable/IteratorLogBridge.Disable", Iterators.IteratorLogBridge.Disable);
         SafeBootstrapCleanup("OnDisable/AIDebuggerRuntime.Uninstall", AIDebuggerRuntime.Uninstall);
+        SafeBootstrapCleanup("OnDisable/DevToolBackend.Disable", MiscRuntime.DisableDevToolBackend);
 
         SafeBootstrapCleanup(
             "OnDisable/RainWorld.PreModsInit hook",
@@ -188,6 +197,7 @@ internal sealed class Plugin : BaseUnityPlugin
 
     private static void RollbackBootstrap()
     {
+        SafeBootstrapCleanup("DevTool backend", MiscRuntime.DisableDevToolBackend);
         SafeBootstrapCleanup(
             "RainWorld.PostModsInit hook",
             () => On.RainWorld.PostModsInit -= RainWorld_PostModsInit);
@@ -284,6 +294,12 @@ internal sealed class Plugin : BaseUnityPlugin
         StartupDiagnostics.Step("RainWorld.OnModsInit/BeforeModsInit subscribers", () => DryCycleLifecycleEvents.RaiseBeforeModsInit(self));
         TryInitializeSlugBaseHydrationFeatures();
         StartupDiagnostics.Step("RainWorld.OnModsInit/orig", () => orig(self));
+
+        ReportDevToolFrontendLoadState();
+
+        StartupDiagnostics.Optional(
+            "RainWorld.OnModsInit/DevToolExtras.Enable",
+            MiscRuntime.EnableDevToolExtras);
 
         if (_initialized)
         {
@@ -393,6 +409,34 @@ internal sealed class Plugin : BaseUnityPlugin
             StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ROLLED-BACK");
             return;
         }
+    }
+
+    private static void ReportDevToolFrontendLoadState()
+    {
+        bool rwimguiLoaded =
+            Chainloader.PluginInfos.TryGetValue("rwimgui", out var rwimguiInfo) &&
+            rwimguiInfo?.Instance != null;
+        bool devToolFrontendLoaded =
+            Chainloader.PluginInfos.TryGetValue(
+                "DryCycle.DevTool.RWImGui",
+                out var frontendInfo) &&
+            frontendInfo?.Instance != null;
+
+        if (devToolFrontendLoaded)
+        {
+            Logger?.LogInfo(
+                "DryCycle DevTool frontend BepInEx plugin is loaded. rwimguiLoaded=" +
+                rwimguiLoaded +
+                ".");
+            return;
+        }
+
+        Logger?.LogWarning(
+            "DryCycle DevTool frontend BepInEx plugin is NOT loaded. " +
+            "rwimguiLoaded=" +
+            rwimguiLoaded +
+            ". Expected plugin GUID: DryCycle.DevTool.RWImGui. " +
+            "Check newest/plugins/DryCycle.DevTool.RWImGui.dll and BepInEx dependency/load errors.");
     }
 
     private static void TryInitializeSlugBaseHydrationFeatures()
