@@ -32,7 +32,7 @@
        so changing only those files previously let VS report "up to date" and skip MSBuild entirely.
        Explicit inputs/outputs make a frontend edit or missing frontend DLL invalidate DryCycle's
        local deploy build, allowing BuildOptionalRWImGuiBridge below to run its forced Rebuild. -->
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true'">
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DryCycle' and '$(DeployToGame)' == 'true' and '$(ResolvedRWImGuiPluginDir)' != ''">
     <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/**/*.cs" />
     <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DevUI/DevTool/RWImGui/DryCycle.DevTool.RWImGui.csproj" />
     <UpToDateCheckInput Include="$(MSBuildProjectDirectory)/DryCycle.AIObservatory.RWImGui/**/*.cs" />
