@@ -2,6 +2,7 @@ using System;
 using System.Security.Permissions;
 using BepInEx;
 using BepInEx.Logging;
+using BepInEx.Bootstrap;
 using DryCycle.Creatures;
 using DryCycle.Creatures.MossySpider;
 using DryCycle.Creatures.DesertBatfly;
@@ -294,6 +295,8 @@ internal sealed class Plugin : BaseUnityPlugin
         TryInitializeSlugBaseHydrationFeatures();
         StartupDiagnostics.Step("RainWorld.OnModsInit/orig", () => orig(self));
 
+        ReportDevToolFrontendLoadState();
+
         StartupDiagnostics.Optional(
             "RainWorld.OnModsInit/DevToolExtras.Enable",
             MiscRuntime.EnableDevToolExtras);
@@ -406,6 +409,34 @@ internal sealed class Plugin : BaseUnityPlugin
             StartupDiagnostics.Marker("RainWorld.OnModsInit", "EXIT-ROLLED-BACK");
             return;
         }
+    }
+
+    private static void ReportDevToolFrontendLoadState()
+    {
+        bool rwimguiLoaded =
+            Chainloader.PluginInfos.TryGetValue("rwimgui", out var rwimguiInfo) &&
+            rwimguiInfo?.Instance != null;
+        bool devToolFrontendLoaded =
+            Chainloader.PluginInfos.TryGetValue(
+                "DryCycle.DevTool.RWImGui",
+                out var frontendInfo) &&
+            frontendInfo?.Instance != null;
+
+        if (devToolFrontendLoaded)
+        {
+            Logger?.LogInfo(
+                "DryCycle DevTool frontend BepInEx plugin is loaded. rwimguiLoaded=" +
+                rwimguiLoaded +
+                ".");
+            return;
+        }
+
+        Logger?.LogWarning(
+            "DryCycle DevTool frontend BepInEx plugin is NOT loaded. " +
+            "rwimguiLoaded=" +
+            rwimguiLoaded +
+            ". Expected plugin GUID: DryCycle.DevTool.RWImGui. " +
+            "Check newest/plugins/DryCycle.DevTool.RWImGui.dll and BepInEx dependency/load errors.");
     }
 
     private static void TryInitializeSlugBaseHydrationFeatures()
