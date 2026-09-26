@@ -54,7 +54,7 @@ internal static partial class Program
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
-        foreach(string type in new[]{"KarmaFlower","SeedCob","GhostSpot","BlueToken","GoldToken","RedToken","GreenToken","DataPearl","UniqueDataPearl"})
+        foreach(string type in new[]{"KarmaFlower","SeedCob","GhostSpot","BlueToken","GoldToken","RedToken","GreenToken","DataPearl","UniqueDataPearl","DeadTokenStalk"})
             Check(CartographyAssets.Sprite(CartographyRegionLoader.IconFor(type))?.Pixels.Any(p=>(p>>24)>0)==true,type+" has a packaged real sprite without a Cornifer installation.");
         var old=new CartographyItem{Kind=CartographyItemKind.Marker,Marker=CartographyMarker.Sprite,Text="KarmaFlower",Appearance=new CartographyAppearance{Category="Pickup",Icon="Symbol_KarmaFlower"}};
         string original=CartographyRecord.Key(old.Appearance);
