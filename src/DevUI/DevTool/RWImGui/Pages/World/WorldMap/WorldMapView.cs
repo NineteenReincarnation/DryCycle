@@ -799,10 +799,10 @@ internal static class WorldMapView
             float coreThickness =
                 connection.Direction ==
                 WorldConnectionDirection.Bidirectional
-                    ? 3.4f
-                    : 3.2f;
+                    ? 2.5f
+                    : 2.35f;
             float shadowThickness =
-                coreThickness + 4.8f;
+                coreThickness + 3.4f;
 
             DrawConnectionPathStroke(
                 draw,
@@ -2138,8 +2138,7 @@ internal static class WorldMapView
         }
 
         int count =
-            length >= 360f ? 3 :
-            length >= 190f ? 2 : 1;
+            length >= 420f ? 2 : 1;
         bool reverse =
             direction == WorldConnectionDirection.BToA;
         for (int i = 0; i < count; i++)
@@ -2176,10 +2175,10 @@ internal static class WorldMapView
 
         float size =
             Math.Max(
-                13f,
+                6.5f,
                 Math.Min(
-                    15.5f,
-                    11f + coreThickness * 0.60f));
+                    8.0f,
+                    5.7f + coreThickness * 0.55f));
         DrawArrowHead(
             draw,
             point,
@@ -2325,7 +2324,7 @@ internal static class WorldMapView
         float coreThickness)
     {
         Num.Vector2 forward = b - a;
-        float size = Math.Min(forward.Length() * 0.30f, Math.Max(13f, Math.Min(15.5f, 11f + coreThickness * 0.60f)));
+        float size = Math.Min(forward.Length() * 0.22f, Math.Max(6.5f, Math.Min(8.0f, 5.7f + coreThickness * 0.55f)));
         switch (direction)
         {
             case WorldConnectionDirection.AToB:
@@ -2365,9 +2364,30 @@ internal static class WorldMapView
         uint color,
         float size)
     {
-        Num.Vector2 baseCenter = tip - forward * size;
-        float wing = size * 0.58f;
-        draw.AddTriangleFilled(tip, baseCenter + normal * wing, baseCenter - normal * wing, color);
+        // Kept under the old helper name to avoid duplicating call sites: visually this is now a
+        // compact open chevron, not a filled triangle. Direction remains readable without hiding
+        // the route lane, endpoint code or a neighbouring connection.
+        Num.Vector2 baseCenter =
+            tip -
+            forward *
+            (size * 0.72f);
+        float wing =
+            size * 0.42f;
+        float thickness =
+            Math.Max(
+                1.0f,
+                size * 0.16f);
+
+        draw.AddLine(
+            baseCenter + normal * wing,
+            tip,
+            color,
+            thickness);
+        draw.AddLine(
+            baseCenter - normal * wing,
+            tip,
+            color,
+            thickness);
     }
 
     private static void SynchronizeRegion(EditorMapPresentationSnapshot snapshot)
@@ -2858,8 +2878,8 @@ internal static class WorldMapPresentationCorrectness
         if (length >= 25f)
         {
             float arrowSize = Math.Min(
-                length * 0.30f,
-                Math.Max(13f, Math.Min(15.5f, 11f + coreThickness * 0.60f)));
+                length * 0.22f,
+                Math.Max(6.5f, Math.Min(8.0f, 5.7f + coreThickness * 0.55f)));
             Num.Vector2 forward = delta / length;
             DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.35f), -forward, shadow, core, arrowSize);
             DrawArrowHead(draw, Num.Vector2.Lerp(a, b, 0.65f), forward, shadow, core, arrowSize);
@@ -2891,8 +2911,26 @@ internal static class WorldMapPresentationCorrectness
         uint color,
         float size)
     {
-        Num.Vector2 baseCenter = tip - forward * size;
-        float wing = size * 0.58f;
-        draw.AddTriangleFilled(tip, baseCenter + normal * wing, baseCenter - normal * wing, color);
+        Num.Vector2 baseCenter =
+            tip -
+            forward *
+            (size * 0.72f);
+        float wing =
+            size * 0.42f;
+        float thickness =
+            Math.Max(
+                1.0f,
+                size * 0.16f);
+
+        draw.AddLine(
+            baseCenter + normal * wing,
+            tip,
+            color,
+            thickness);
+        draw.AddLine(
+            baseCenter - normal * wing,
+            tip,
+            color,
+            thickness);
     }
 }
