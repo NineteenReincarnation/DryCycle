@@ -6,11 +6,15 @@ on:
     paths:
       - 'src/**'
       - 'Guard/**'
+      - 'scripts/Test-MapRendering.ps1'
+      - 'tests/WorldMapRenderIsolation.Tests/**'
       - '.github/workflows/guard.yml'
   pull_request:
     paths:
       - 'src/**'
       - 'Guard/**'
+      - 'scripts/Test-MapRendering.ps1'
+      - 'tests/WorldMapRenderIsolation.Tests/**'
       - '.github/workflows/guard.yml'
   workflow_dispatch:
 
@@ -30,16 +34,22 @@ jobs:
       - name: Build safety contracts
         shell: bash
         run: bash Guard/build-safety.sh
-      - name: Parse local build validator
+      - name: Parse PowerShell validators
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Join-Path $PWD 'Guard/tools/local-build.ps1'),
-            [ref]$tokens,
-            [ref]$errors)
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          $scripts = @(
+            'Guard/tools/local-build.ps1',
+            'scripts/Test-MapRendering.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $script),
+              [ref]$tokens,
+              [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$script : $($_.Message)" }
+              exit 1
+            }
           }
