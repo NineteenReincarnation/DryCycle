@@ -498,8 +498,7 @@ internal static partial class CartographyView
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
 
-        if (snapshot.Scene.Errors.Length > 0 ||
-            blockingWarnings.Length > 0)
+        if (snapshot.Scene.Errors.Length > 0)
         {
             valid = false;
             ImGui.PushStyleColor(
@@ -507,8 +506,20 @@ internal static partial class CartographyView
                 new Num.Vector4(1f, .48f, .36f, 1f));
             ImGui.TextWrapped(
                 T(
-                    "导出已阻止：存在未解析的房间资源或缺失图标。",
-                    "Export blocked: unresolved room resources or missing sprites."));
+                    "导出已阻止：存在尚未就绪的房间资源。",
+                    "Export blocked: some room resources are not ready."));
+            ImGui.PopStyleColor();
+        }
+
+        if (blockingWarnings.Length > 0)
+        {
+            ImGui.PushStyleColor(
+                ImGuiCol.Text,
+                new Num.Vector4(1f, .48f, .36f, 1f));
+            ImGui.TextWrapped(
+                T(
+                    "检测到缺失图标。点击导出会被后端拒绝并自动打开诊断窗口，不会生成假成功结果。",
+                    "Missing sprites detected. Export will be rejected and the diagnostics window will open; no false success will be reported."));
             ImGui.PopStyleColor();
         }
         else if (snapshot.Scene.Warnings.Length > 0)
@@ -552,13 +563,40 @@ internal static partial class CartographyView
     private static int CurrentDiagnosticCount(
         CartographyPresentation snapshot)
     {
-        int live =
-            (snapshot?.Scene?.Errors?.Length ?? 0) +
-            (snapshot?.Scene?.Warnings?.Length ?? 0);
+        var keys =
+            new HashSet<string>(
+                StringComparer.Ordinal);
 
-        return
-            live +
-            CartographyDiagnostics.Snapshot().Length;
+        foreach (string error in
+                 snapshot?.Scene?.Errors ??
+                 Array.Empty<string>())
+        {
+            keys.Add(
+                "E\n" +
+                error);
+        }
+
+        foreach (string warning in
+                 snapshot?.Scene?.Warnings ??
+                 Array.Empty<string>())
+        {
+            keys.Add(
+                "W\n" +
+                warning);
+        }
+
+        foreach (CartographyDiagnosticEntry entry in
+                 CartographyDiagnostics.Snapshot())
+        {
+            keys.Add(
+                (entry.Severity ==
+                 CartographyDiagnosticSeverity.Error
+                    ? "E\n"
+                    : "W\n") +
+                entry.Message);
+        }
+
+        return keys.Count;
     }
 
     private static void DrawDiagnosticsWindow(
@@ -593,15 +631,45 @@ internal static partial class CartographyView
             CartographyDiagnosticEntry[] history =
                 CartographyDiagnostics.Snapshot();
 
+            var liveKeys =
+                new HashSet<string>(
+                    StringComparer.Ordinal);
+
+            foreach (string error in liveErrors)
+                liveKeys.Add(
+                    "E\n" +
+                    error);
+
+            foreach (string warning in liveWarnings)
+                liveKeys.Add(
+                    "W\n" +
+                    warning);
+
+            CartographyDiagnosticEntry[] uniqueHistory =
+                history
+                    .Where(
+                        entry =>
+                            !liveKeys.Contains(
+                                (entry.Severity ==
+                                 CartographyDiagnosticSeverity.Error
+                                    ? "E\n"
+                                    : "W\n") +
+                                entry.Message))
+                    .ToArray();
+
             int errors =
-                liveErrors.Length +
-                history.Count(
+                liveErrors
+                    .Distinct(StringComparer.Ordinal)
+                    .Count() +
+                uniqueHistory.Count(
                     entry =>
                         entry.Severity ==
                         CartographyDiagnosticSeverity.Error);
             int warnings =
-                liveWarnings.Length +
-                history.Count(
+                liveWarnings
+                    .Distinct(StringComparer.Ordinal)
+                    .Count() +
+                uniqueHistory.Count(
                     entry =>
                         entry.Severity ==
                         CartographyDiagnosticSeverity.Warning);
@@ -624,7 +692,7 @@ internal static partial class CartographyView
                 ImGui.SetClipboardText(
                     BuildDiagnosticsCopyText(
                         snapshot,
-                        history));
+                        uniqueHistory));
             }
 
             ImGui.SameLine();
@@ -677,7 +745,7 @@ internal static partial class CartographyView
                         warning);
                 }
 
-                foreach (CartographyDiagnosticEntry entry in history)
+                foreach (CartographyDiagnosticEntry entry in uniqueHistory)
                 {
                     string header =
                         entry.Category;
