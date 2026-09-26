@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using BepInEx.Logging;
 using DevInterface;
@@ -29,7 +30,10 @@ internal sealed class WorldMapRoomResourceStore
     }
 
     private const int IdleRoomsPerFrame = 6;
+    private const int DormantRoomsPerFrame = 12;
     private const int HotStartRoomsPerFrame = 24;
+    private const double VisibleWorkBudgetMilliseconds = 1.35d;
+    private const double DormantWorkBudgetMilliseconds = 2.00d;
     private const int SourceAuditIntervalFrames = 8;
     private const int ThumbnailPollIntervalFrames = 120;
 
@@ -46,12 +50,48 @@ internal sealed class WorldMapRoomResourceStore
     private int nextAuditFrame;
     private long revision;
 
+    private long thumbnailSessionStartedTicks;
+    private long thumbnailSessionCompletedTicks;
+    private int thumbnailSessionExpected;
+    private int thumbnailSessionCommitted;
+    private int thumbnailSessionPersistentHits;
+    private int thumbnailSessionLiveCommits;
+    private bool thumbnailSessionComplete;
+    private long mainThreadPerfTotalTicks;
+    private long mainThreadPerfPeakTicks;
+    private int mainThreadPerfSamples;
+
     internal IReadOnlyDictionary<int, RoomResource> Rooms => rooms;
     internal int Count => rooms.Count;
     internal long Revision => revision;
     internal int GeometryBuildCount => buildScheduler.CompletedBuildCount;
     internal double GeometryBuildAverageMilliseconds => buildScheduler.AverageBuildMilliseconds;
     internal double GeometryBuildPeakMilliseconds => buildScheduler.PeakBuildMilliseconds;
+    internal int ThumbnailLoadExpected => thumbnailSessionExpected;
+    internal int ThumbnailLoadCommitted => thumbnailSessionCommitted;
+    internal int ThumbnailPersistentHits => thumbnailSessionPersistentHits;
+    internal int ThumbnailLiveCommits => thumbnailSessionLiveCommits;
+    internal bool ThumbnailLoadComplete => thumbnailSessionComplete;
+    internal double ThumbnailLoadElapsedMilliseconds
+    {
+        get
+        {
+            if (thumbnailSessionStartedTicks <= 0L) return 0d;
+            long end =
+                thumbnailSessionCompletedTicks > 0L
+                    ? thumbnailSessionCompletedTicks
+                    : Stopwatch.GetTimestamp();
+            return Math.Max(0L, end - thumbnailSessionStartedTicks) *
+                   1000d / Stopwatch.Frequency;
+        }
+    }
+    internal double MainThreadAverageMilliseconds =>
+        mainThreadPerfSamples <= 0
+            ? 0d
+            : mainThreadPerfTotalTicks * 1000d /
+              Stopwatch.Frequency / mainThreadPerfSamples;
+    internal double MainThreadPeakMilliseconds =>
+        mainThreadPerfPeakTicks * 1000d / Stopwatch.Frequency;
 
     internal int CommittedThumbnailCount
     {
@@ -140,6 +180,7 @@ internal sealed class WorldMapRoomResourceStore
         {
             Reset();
             region = nextRegion;
+            BeginThumbnailLoadSession(scene.Rooms.Count);
             foreach (int roomIndex in scene.Rooms.Keys)
                 Enqueue(roomIndex);
         }
@@ -160,15 +201,32 @@ internal sealed class WorldMapRoomResourceStore
 
         // Navigation/room drag owns the frame budget. Keep committed thumbnails/geometry stable
         // and resume source capture/build commits after the interaction cooldown.
+        bool canvasVisible =
+            WorldMapRetainedV2Runtime.CanvasVisible;
         int budget =
             WorldMapPersistentRetainedCache.ValidatedRoomCount > 0
                 ? HotStartRoomsPerFrame
-                : IdleRoomsPerFrame;
+                : canvasVisible
+                    ? IdleRoomsPerFrame
+                    : DormantRoomsPerFrame;
         if (WorldMapBackgroundBudget.InteractionActive)
             budget = 1;
+
+        long workStarted = Stopwatch.GetTimestamp();
+        double workBudgetMilliseconds =
+            canvasVisible
+                ? VisibleWorkBudgetMilliseconds
+                : DormantWorkBudgetMilliseconds;
+        long workDeadline =
+            workStarted +
+            (long)(Stopwatch.Frequency *
+                   workBudgetMilliseconds / 1000d);
+
         DrainBuildResults(budget);
 
-        while (budget > 0 && visiblePriorityQueue.Count > 0)
+        while (budget > 0 &&
+               Stopwatch.GetTimestamp() < workDeadline &&
+               visiblePriorityQueue.Count > 0)
         {
             int roomIndex = visiblePriorityQueue.Dequeue();
             visiblePriorityQueued.Remove(roomIndex);
@@ -179,7 +237,9 @@ internal sealed class WorldMapRoomResourceStore
             budget--;
         }
 
-        while (budget > 0 && priorityQueue.Count > 0)
+        while (budget > 0 &&
+               Stopwatch.GetTimestamp() < workDeadline &&
+               priorityQueue.Count > 0)
         {
             int roomIndex = priorityQueue.Dequeue();
             if (!queued.Remove(roomIndex))
@@ -191,11 +251,18 @@ internal sealed class WorldMapRoomResourceStore
         }
 
         if (budget <= 0 || snapshotRooms.Length == 0 ||
+            Stopwatch.GetTimestamp() >= workDeadline ||
             UnityEngine.Time.frameCount < nextAuditFrame)
+        {
+            RecordMainThreadWork(workStarted);
+            UpdateThumbnailLoadSession();
             return;
+        }
 
         nextAuditFrame = UnityEngine.Time.frameCount + SourceAuditIntervalFrames;
-        while (budget > 0 && snapshotRooms.Length > 0)
+        while (budget > 0 &&
+               Stopwatch.GetTimestamp() < workDeadline &&
+               snapshotRooms.Length > 0)
         {
             if (auditCursor >= snapshotRooms.Length) auditCursor = 0;
             EditorMapRoomSnapshot room = snapshotRooms[auditCursor++];
@@ -205,6 +272,9 @@ internal sealed class WorldMapRoomResourceStore
                 budget--;
             }
         }
+
+        RecordMainThreadWork(workStarted);
+        UpdateThumbnailLoadSession();
     }
 
     internal void Reset()
@@ -220,6 +290,16 @@ internal sealed class WorldMapRoomResourceStore
         auditRooms = Array.Empty<EditorMapRoomSnapshot>();
         auditCursor = 0;
         nextAuditFrame = 0;
+        thumbnailSessionStartedTicks = 0L;
+        thumbnailSessionCompletedTicks = 0L;
+        thumbnailSessionExpected = 0;
+        thumbnailSessionCommitted = 0;
+        thumbnailSessionPersistentHits = 0;
+        thumbnailSessionLiveCommits = 0;
+        thumbnailSessionComplete = false;
+        mainThreadPerfTotalTicks = 0L;
+        mainThreadPerfPeakTicks = 0L;
+        mainThreadPerfSamples = 0;
         AdvanceRevision();
     }
 
@@ -294,6 +374,15 @@ internal sealed class WorldMapRoomResourceStore
                 resource.Thumbnail.CommitPending())
             {
                 AdvanceRevision();
+                if (!hasCommittedThumbnail)
+                {
+                    thumbnailSessionCommitted++;
+                    if (resolvedPersistent)
+                        thumbnailSessionPersistentHits++;
+                    else
+                        thumbnailSessionLiveCommits++;
+                }
+
                 if (!resolvedPersistent &&
                     !string.IsNullOrEmpty(source.PersistentElementName))
                     MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
@@ -304,6 +393,50 @@ internal sealed class WorldMapRoomResourceStore
             // Missing source is not a command to clear the thumbnail. Keep last-known-good.
             resource.Thumbnail.RejectPending();
         }
+    }
+
+    private void BeginThumbnailLoadSession(int expectedRooms)
+    {
+        thumbnailSessionStartedTicks = Stopwatch.GetTimestamp();
+        thumbnailSessionCompletedTicks = 0L;
+        thumbnailSessionExpected = Math.Max(0, expectedRooms);
+        thumbnailSessionCommitted = 0;
+        thumbnailSessionPersistentHits = 0;
+        thumbnailSessionLiveCommits = 0;
+        thumbnailSessionComplete = thumbnailSessionExpected == 0;
+        if (thumbnailSessionComplete)
+            thumbnailSessionCompletedTicks = thumbnailSessionStartedTicks;
+    }
+
+    private void UpdateThumbnailLoadSession()
+    {
+        if (thumbnailSessionStartedTicks <= 0L ||
+            thumbnailSessionComplete)
+            return;
+
+        if (thumbnailSessionCommitted < thumbnailSessionExpected)
+            return;
+
+        thumbnailSessionComplete = true;
+        thumbnailSessionCompletedTicks = Stopwatch.GetTimestamp();
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            "WorldMap retained thumbnails ready: " +
+            thumbnailSessionCommitted + "/" +
+            thumbnailSessionExpected + " in " +
+            ThumbnailLoadElapsedMilliseconds.ToString("F0") +
+            " ms (persistent " +
+            thumbnailSessionPersistentHits + ", live " +
+            thumbnailSessionLiveCommits + ").");
+    }
+
+    private void RecordMainThreadWork(long started)
+    {
+        long elapsed =
+            Math.Max(0L, Stopwatch.GetTimestamp() - started);
+        mainThreadPerfTotalTicks += elapsed;
+        mainThreadPerfPeakTicks =
+            Math.Max(mainThreadPerfPeakTicks, elapsed);
+        mainThreadPerfSamples++;
     }
 
     private void DrainBuildResults(int budget)
