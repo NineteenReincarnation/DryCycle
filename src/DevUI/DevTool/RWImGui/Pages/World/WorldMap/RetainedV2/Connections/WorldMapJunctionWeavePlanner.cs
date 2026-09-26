@@ -57,6 +57,21 @@ internal static class WorldMapJunctionWeavePlanner
     private const float WeaveLeadDistance = 36f;
     private const float MinimumAxisRun = 4f;
 
+    internal static bool NeedsTransition(
+        float[] offsets,
+        bool[] assigned)
+    {
+        if (offsets == null ||
+            assigned == null ||
+            offsets.Length != assigned.Length)
+            return false;
+
+        return HasVisibleWeaveBoundary(
+            offsets,
+            assigned,
+            offsets.Length);
+    }
+
     internal static Num.Vector2[] Build(
         Num.Vector2[] source,
         float[] offsets,
