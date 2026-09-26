@@ -49,7 +49,10 @@ internal static partial class Program
         var localOnly=new CartographyRoomSource{Name="LOCAL_CURVE_TEST",Width=12,Height=10,Settings="PlacedObjects: LocalTerrain><40><60><40~100^0~0^100~100^0~"};
         CartographyRegionLoader.DecodeCurvedTerrain(localOnly);
         var localRaster=CartographyDrawing.Room(curvedDocument,curvedItem,localOnly);
-        Check(localRaster.Pixels.Any(p=>p==curvedDocument.Options.Wall),"Local/custom curved terrain also uses ordinary terrain color with no special tint.");
+        const uint localStructureColor=0xFF3A4B5C;
+        Check(localRaster.Pixels.Any(p=>p==localStructureColor),"Local/custom curved terrain uses the same Structure palette color as ordinary structure terrain.");
+        int localCurvePixels=localRaster.Pixels.Count(p=>p!=curvedDocument.Terrain);
+        Check(localCurvePixels>0&&localCurvePixels<localRaster.Width*4,"Curved terrain is rendered as a thin surface line instead of rectangular fill bands.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
