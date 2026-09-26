@@ -586,7 +586,17 @@ internal static class WorldMapCorridorLaneAllocator
         // corridor, A/D keep the outer slots instead of snapping inward to a newly centred two-lane
         // corridor. Empty slots are deliberate visual memory, not wasted state.
         List<string> slotIds = new(unique);
-        slotIds.Sort(StringComparer.Ordinal);
+
+        // Stable IDs are only a tie breaker. Primary slot order follows the geometry by which each
+        // route approaches the first shared corridor. Sorting solely by ConnectionId made two
+        // perfectly valid routes swap sides at a bundle entrance, producing an artificial X before
+        // the lanes even reached the shared run.
+        slotIds.Sort(
+            (left, right) =>
+                CompareNaturalLaneOrder(
+                    left,
+                    right,
+                    components));
 
         float[] slotOffsets =
             BuildStableSlotOffsets(
@@ -656,6 +666,112 @@ internal static class WorldMapCorridorLaneAllocator
                 }
             }
         }
+    }
+
+    private static int CompareNaturalLaneOrder(
+        string left,
+        string right,
+        List<CorridorComponent> components)
+    {
+        float leftOrder =
+            NaturalLaneOrder(
+                left,
+                components);
+        float rightOrder =
+            NaturalLaneOrder(
+                right,
+                components);
+
+        int order =
+            leftOrder.CompareTo(
+                rightOrder);
+        if (order != 0)
+            return order;
+
+        return string.CompareOrdinal(
+            left,
+            right);
+    }
+
+    private static float NaturalLaneOrder(
+        string routeId,
+        List<CorridorComponent> components)
+    {
+        if (string.IsNullOrEmpty(routeId) ||
+            components == null)
+            return 0f;
+
+        for (int c = 0; c < components.Count; c++)
+        {
+            CorridorComponent component =
+                components[c];
+            for (int s = 0; s < component.Segments.Count; s++)
+            {
+                SegmentRef segment =
+                    component.Segments[s];
+                if (!string.Equals(
+                        segment.RouteId,
+                        routeId,
+                        StringComparison.Ordinal))
+                    continue;
+
+                Num.Vector2[] points =
+                    BasePoints(segment.Route);
+                int i =
+                    segment.SegmentIndex;
+                if (points == null ||
+                    i < 0 ||
+                    i + 1 >= points.Length)
+                    return 0f;
+
+                float corridorCoordinate =
+                    segment.Coordinate;
+                float total = 0f;
+                int count = 0;
+
+                // Look immediately outside the shared run. The side from which a branch approaches
+                // is the most intuitive lane order and remains stable when unrelated routes are
+                // added elsewhere in the region.
+                if (i > 0)
+                {
+                    float value =
+                        segment.Vertical
+                            ? points[i - 1].X
+                            : points[i - 1].Y;
+                    if (Math.Abs(
+                            value -
+                            corridorCoordinate) > 0.01f)
+                    {
+                        total += value;
+                        count++;
+                    }
+                }
+
+                if (i + 2 < points.Length)
+                {
+                    float value =
+                        segment.Vertical
+                            ? points[i + 2].X
+                            : points[i + 2].Y;
+                    if (Math.Abs(
+                            value -
+                            corridorCoordinate) > 0.01f)
+                    {
+                        total += value;
+                        count++;
+                    }
+                }
+
+                if (count > 0)
+                    return total / count;
+
+                // Completely straight members have no branch-side preference. Their centreline is
+                // still a deterministic geometric key; ConnectionId resolves exact ties.
+                return corridorCoordinate;
+            }
+        }
+
+        return 0f;
     }
 
     private static Dictionary<int, float> ResolveGroupScales(
