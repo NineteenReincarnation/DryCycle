@@ -3003,13 +3003,113 @@ internal static class WorldMapOrthogonalRouter
         int endRoom,
         IReadOnlyList<Obstacle> obstacles)
     {
-        if (points == null || points.Length < 2) return false;
-        for (int i = 1; i < points.Length - 2; i++)
+        if (points == null ||
+            points.Length < 2)
+            return false;
+
+        int lastSegment =
+            points.Length - 2;
+
+        if (lastSegment == 0)
         {
-            if (SegmentBlocked(points[i], points[i + 1], startRoom, endRoom, obstacles))
+            return
+                !TerminalSegmentBlockedDerived(
+                    points[0],
+                    points[1],
+                    startRoom,
+                    obstacles) &&
+                !TerminalSegmentBlockedDerived(
+                    points[0],
+                    points[1],
+                    endRoom,
+                    obstacles);
+        }
+
+        for (int i = 0;
+             i <= lastSegment;
+             i++)
+        {
+            Num.Vector2 a =
+                points[i];
+            Num.Vector2 b =
+                points[i + 1];
+
+            if (i == 0)
+            {
+                if (TerminalSegmentBlockedDerived(
+                        a,
+                        b,
+                        startRoom,
+                        obstacles))
+                    return false;
+
+                continue;
+            }
+
+            if (i == lastSegment)
+            {
+                if (TerminalSegmentBlockedDerived(
+                        a,
+                        b,
+                        endRoom,
+                        obstacles))
+                    return false;
+
+                continue;
+            }
+
+            if (SegmentBlocked(
+                    a,
+                    b,
+                    startRoom,
+                    endRoom,
+                    obstacles))
                 return false;
         }
+
         return true;
+    }
+
+    private static bool TerminalSegmentBlockedDerived(
+        Num.Vector2 a,
+        Num.Vector2 b,
+        int ownRoom,
+        IReadOnlyList<Obstacle> obstacles)
+    {
+        if (obstacles == null)
+            return false;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
+        {
+            Obstacle obstacle =
+                obstacles[i];
+
+            if (obstacle.RoomIndex ==
+                ownRoom)
+                continue;
+
+            Num.Vector2 rawMin =
+                obstacle.Min +
+                new Num.Vector2(
+                    ObstacleMargin,
+                    ObstacleMargin);
+            Num.Vector2 rawMax =
+                obstacle.Max -
+                new Num.Vector2(
+                    ObstacleMargin,
+                    ObstacleMargin);
+
+            if (SegmentIntersectsRect(
+                    a,
+                    b,
+                    rawMin,
+                    rawMax))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool SegmentBlocked(
