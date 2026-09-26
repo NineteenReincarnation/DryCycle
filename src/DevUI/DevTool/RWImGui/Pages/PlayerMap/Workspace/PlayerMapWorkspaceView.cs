@@ -805,7 +805,7 @@ internal static class PlayerMapWorkspaceIntegration
             ExitSpecialView();
         }
 
-        ImGui.SameLine(0f, 14f);
+        ImGui.SameLine(0f, 6f);
         string label = playerMapActive
             ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
             : DevToolUiSettings.T("玩家地图", "Player Map");
