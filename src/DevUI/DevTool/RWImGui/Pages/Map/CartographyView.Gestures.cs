@@ -113,10 +113,14 @@ internal static partial class CartographyView
             return true;
         }
 
-        if (!hovered || io.WantTextInput || (tool != Tool.Select && tool != Tool.Route)) return false;
+        if (io.WantTextInput || (tool != Tool.Select && tool != Tool.Route)) return false;
         CartographyItem item = Selection.Count == 1 ? s.Document.Items.Find(i => i.Id == selectedItem) : null;
+        bool deletePoint = KeyChord(s.Document.Options.DeleteKey, false) ||
+            (!io.KeyCtrl && !io.KeyShift && !io.KeyAlt && !io.KeySuper &&
+             (ImGui.IsKeyPressed(ImGuiKey.X, false) || ImGui.IsKeyPressed(ImGuiKey.Delete, false)));
         if (item?.Kind == CartographyItemKind.Connection && s.Document.Editable(item) && selectedRoutePoint >= 0 &&
-            KeyChord(s.Document.Options.DeleteKey) && !ImGui.IsAnyItemActive())
+            deletePoint && !ImGui.IsAnyItemActive() &&
+            (hovered || ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows)))
         {
             CartographyItem edit = item.Clone();
             if (selectedRoutePoint < edit.Points.Count)
@@ -125,7 +129,10 @@ internal static partial class CartographyView
                 Send(CartographyCommandKind.UpdateItem, c => c.Item = edit);
                 selectedRoutePoint = -1; draft = null; return true;
             }
+            // A stale point selection still owns this key; never turn it into whole-link deletion.
+            selectedRoutePoint = -1; return true;
         }
+        if (!hovered) return false;
         if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left) || io.KeyCtrl || io.KeyShift) return false;
         float radius = 9 / zoom;
         if (item?.Kind == CartographyItemKind.Line && s.Document.Editable(item))
@@ -224,10 +231,10 @@ internal static partial class CartographyView
                 available?EditorShortcutFeedbackVisual.Paste:EditorShortcutFeedbackVisual.Warning);
         }
     }
-    private static bool KeyChord(string chord)
+    private static bool KeyChord(string chord, bool repeat = true)
     {
         string[] keys=chord.Split('+');var io=ImGui.GetIO();
         bool ctrl=keys.Any(k=>k.Equals("Ctrl",StringComparison.OrdinalIgnoreCase)),shift=keys.Any(k=>k.Equals("Shift",StringComparison.OrdinalIgnoreCase)),alt=keys.Any(k=>k.Equals("Alt",StringComparison.OrdinalIgnoreCase));
-        return io.KeyCtrl==ctrl&&io.KeyShift==shift&&io.KeyAlt==alt&&Enum.TryParse(keys.Last(),true,out ImGuiKey key)&&ImGui.IsKeyPressed(key);
+        return io.KeyCtrl==ctrl&&io.KeyShift==shift&&io.KeyAlt==alt&&Enum.TryParse(keys.Last(),true,out ImGuiKey key)&&ImGui.IsKeyPressed(key,repeat);
     }
 }

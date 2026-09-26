@@ -62,19 +62,18 @@ internal static class CartographyExporter
             {
                 using ZipArchive archive = new(stream, ZipArchiveMode.Create, true);
                 int ordinal = 0;
-                foreach (CartographyLayer layer in document.Layers.Where(layer => layer.Visible && layer.Opacity > 0))
+                foreach (CartographyRenderLayer layer in scene.RenderLayers.Where(layer => layer.Pass != CartographyRenderPass.Guides))
                 {
-                    if (!scene.Nodes.Any(node => node.LayerId == layer.Id)) continue;
                     // Numeric filenames are safe even for imported layer IDs and have a shared canvas.
                     ZipArchiveEntry entry = archive.CreateEntry((ordinal++).ToString("D3", CultureInfo.InvariantCulture) + ".png", CompressionLevel.Fastest);
                     using Stream target = entry.Open();
-                    WritePng(target, document, scene, width, height, layer.Id);
+                    WritePng(target, document, scene, width, height, null, layer);
                 }
                 using Stream manifest = archive.CreateEntry("layers.txt").Open();
                 using StreamWriter writer = new(manifest, new UTF8Encoding(false));
                 writer.WriteLine("Bottom to top. All PNGs use the same origin and dimensions: " + width + " x " + height);
                 ordinal = 0;
-                foreach (CartographyLayer layer in document.Layers.Where(layer => layer.Visible && layer.Opacity > 0 && scene.Nodes.Any(node => node.LayerId == layer.Id)))
+                foreach (CartographyRenderLayer layer in scene.RenderLayers.Where(layer => layer.Pass != CartographyRenderPass.Guides))
                     writer.WriteLine((ordinal++).ToString("D3", CultureInfo.InvariantCulture) + ".png\t" + layer.Name);
             }
         }, log);
@@ -83,12 +82,12 @@ internal static class CartographyExporter
         return new CartographyExportResult { Path = System.IO.Path.GetFullPath(path), Width = width, Height = height, Note = note };
     }
 
-    private static void WritePng(Stream output, CartographyDocument document, CartographyScene scene, int width, int height, string layerId)
+    private static void WritePng(Stream output, CartographyDocument document, CartographyScene scene, int width, int height, string layerId, CartographyRenderLayer renderLayer = null)
     {
-        CartographyPngEncoder.Write(output,width,height,(top,rows)=>RenderBitmap(document,scene,width,rows,layerId,top));
+        CartographyPngEncoder.Write(output,width,height,(top,rows)=>RenderBitmap(document,scene,width,rows,layerId,top,renderLayer));
     }
 
-    internal static Bitmap RenderBitmap(CartographyDocument document, CartographyScene scene, int width, int height, string layerId, int pixelTop = 0)
+    internal static Bitmap RenderBitmap(CartographyDocument document, CartographyScene scene, int width, int height, string layerId, int pixelTop = 0, CartographyRenderLayer renderLayer = null)
     {
         Bitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
         using Graphics graphics = Graphics.FromImage(bitmap);
@@ -103,12 +102,14 @@ internal static class CartographyExporter
         graphics.ScaleTransform(document.ExportScale, document.ExportScale);
         graphics.TranslateTransform(-bounds.X, -bounds.Y - pixelTop/document.ExportScale);
         var visible = new CartographyRect(bounds.X,bounds.Y+pixelTop/document.ExportScale,width/document.ExportScale,height/document.ExportScale).Inflate(2/document.ExportScale);
-        foreach (CartographySceneNode node in scene.Nodes)
+        foreach (CartographyRenderLayer batch in renderLayer == null ? scene.RenderLayers : new[] { renderLayer })
+        foreach (CartographySceneNode node in batch.Nodes)
         {
+            if (batch.Pass == CartographyRenderPass.Guides) continue;
             if (layerId != null && node.LayerId != layerId || !visible.Intersects(node.Bounds)) continue;
             foreach (CartographyPrimitive shape in node.Primitives)
             {
-                if(shape.GuideOnly)continue;
+                if(!batch.Accepts(shape))continue;
                 CartographyRect r = shape.Rect;
                 using SolidBrush brush = new(ToColor(shape.Color));
                 using Pen pen = new(brush, shape.Stroke);
@@ -236,12 +237,14 @@ internal static class CartographyExporter
         Attr(xml, "width", width); Attr(xml, "height", height);
         xml.WriteAttributeString("viewBox", F(bounds.X) + " " + F(bounds.Y) + " " + F(bounds.Width) + " " + F(bounds.Height));
         xml.WriteElementString("title", ns, document.Title);
-        foreach (CartographyLayer layer in document.Layers.Where(layer => layer.Visible && layer.Opacity > 0))
+        int ordinal = 0;
+        foreach (CartographyRenderLayer layer in scene.RenderLayers.Where(layer => layer.Pass != CartographyRenderPass.Guides))
         {
-            xml.WriteStartElement("g", ns); xml.WriteAttributeString("id", "layer-" + document.Layers.IndexOf(layer));
+            xml.WriteStartElement("g", ns); xml.WriteAttributeString("id", "layer-" + ordinal++);
             xml.WriteElementString("title", ns, layer.Name);
-            foreach (CartographySceneNode node in scene.Nodes.Where(node => node.LayerId == layer.Id))
-                foreach (CartographyPrimitive shape in node.Primitives) SvgPrimitive(xml, shape, document.FontFamily);
+            foreach (CartographySceneNode node in layer.Nodes)
+                foreach (CartographyPrimitive shape in node.Primitives)
+                    if (layer.Accepts(shape)) SvgPrimitive(xml, shape, document.FontFamily);
             xml.WriteEndElement();
         }
         xml.WriteEndElement();

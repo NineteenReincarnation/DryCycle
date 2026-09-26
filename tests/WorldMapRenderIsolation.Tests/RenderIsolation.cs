@@ -39,12 +39,17 @@ public static partial class MapRenderIsolationTests
         {
             AppDomain.CurrentDomain.AssemblyResolve += Resolve;
             frontend = Assembly.LoadFrom(Path.Combine(plugins, "DryCycle.DevTool.RWImGui.dll"));
+            Assembly.LoadFrom(Path.Combine(plugins, "DryCycle.dll"));
             results.Add("GPU: " + SystemInfo.graphicsDeviceType + " / " + SystemInfo.graphicsDeviceName);
             Check(SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null, "A real graphics device is active.");
             InitializeTextureDevice();
-            ExerciseCartographySprites();
-            ExerciseRenderer();
-            ExerciseTexturePresentation();
+            if (Argument("-testScope") == "connections") ExerciseCorniferConnections();
+            else
+            {
+                ExerciseCartographySprites();
+                ExerciseRenderer();
+                ExerciseTexturePresentation();
+            }
             results.Add("PASS: " + checks + " real Unity/GPU assertions.");
         }
         catch (Exception error) { exit = 1; results.Add("FAIL: " + error); }

@@ -122,10 +122,10 @@ internal static partial class CartographyView
             ImGui.TextWrapped(a.From + " [" + a.FromPort + "] " + DevToolGlyphs.ArrowRight + " " + a.To + " [" + a.ToPort + "]");
             int mode=(int)a.Route;
             if(ImGui.Combo(T("线路方式","Routing"),ref mode,T("直线\0先水平\0先垂直\0手动控制点\0","Straight\0Horizontal first\0Vertical first\0Manual points\0"))){a.Route=(CartographyRouteMode)mode;draftDirty=true;CommitDraft();}
-            B("虚线","Dashed",ref a.Dashed);B("出口红色端点","Red exit endpoints",ref a.WhiteRed);
+            B("出口红色端点","Red exit endpoints",ref a.WhiteRed);
             if(ImGui.Button(T("出口水平对齐","Align exit Y")))Send(CartographyCommandKind.AlignPorts,c=>{c.Ids=new[]{draft.Id};c.Integer=0;});
             ImGui.SameLine();if(ImGui.Button(T("出口垂直对齐","Align exit X")))Send(CartographyCommandKind.AlignPorts,c=>{c.Ids=new[]{draft.Id};c.Integer=1;});
-            ImGui.TextWrapped(T("点击线路即可添加并拖动拐点；拖动已有圆点改线；Alt+点击或 Delete 删除所选拐点。Shift 限制方向，Esc 取消拖动。","Click a line to add/drag a bend; drag existing handles to reroute. Alt-click or Delete removes the selected bend. Shift constrains the axis; Esc cancels."));
+            ImGui.TextWrapped(T("点击线路即可添加并拖动拐点；拖动已有圆点改线；X、Delete 或 Alt+点击删除所选拐点。Shift 限制方向，Esc 取消拖动。","Click a line to add/drag a bend; drag existing handles to reroute. X, Delete or Alt-click removes the selected bend. Shift constrains the axis; Esc cancels."));
             for(int n=0;n<draft.Points.Count;n++)
             {
                 ImGui.PushID(n);var p=draft.Points[n];Num.Vector2 v=new(p.X,p.Y);

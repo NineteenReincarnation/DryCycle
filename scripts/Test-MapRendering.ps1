@@ -2,7 +2,8 @@ param(
     [string]$UnityEditor = 'E:/Application/Unity/Editor/Unity.exe',
     [string]$RainWorldDir = 'D:/Steam/steamapps/common/Rain World',
     [string]$BuildRoot = '',
-    [string]$FrontendPluginDir = ''
+    [string]$FrontendPluginDir = '',
+    [ValidateSet('all', 'connections')][string]$TestScope = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +59,7 @@ foreach ($name in @('ImGui.NET.dll', 'System.Runtime.CompilerServices.Unsafe.dll
 }
 $arguments = @('-batchmode', '-force-d3d11', '-projectPath', ('"' + $project + '"'), '-executeMethod', 'MapRenderIsolationTests.Run', '-rainWorldDir', ('"' + $RainWorldDir + '"'), '-isolationOutput', ('"' + $output + '"'), '-logFile', ('"' + (Join-Path $output 'unity-gpu-test.log') + '"'))
 if ($FrontendPluginDir) { $arguments += @('-frontendPluginDir', ('"' + [IO.Path]::GetFullPath($FrontendPluginDir) + '"')) }
+$arguments += @('-testScope', $TestScope)
 Write-Host "Unity GPU validation: $output"
 $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -WindowStyle Hidden -PassThru
 $process.WaitForExit()

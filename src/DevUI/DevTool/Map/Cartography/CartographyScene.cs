@@ -17,6 +17,8 @@ internal sealed class CartographyPrimitive
     internal bool Dashed;
     internal float DashLength = 6, DashGap = 4, DashOffset;
     internal bool GuideOnly;
+    internal bool UnderRooms;
+    internal bool ScreenSpace;
     internal bool PixelPerfect;
     internal CartographyRaster Raster;
 }
@@ -38,6 +40,7 @@ internal sealed class CartographySceneNode
 internal sealed class CartographyScene
 {
     internal CartographySceneNode[] Nodes = Array.Empty<CartographySceneNode>();
+    internal CartographyRenderLayer[] RenderLayers = Array.Empty<CartographyRenderLayer>();
     internal CartographyRect Bounds = new(0, 0, 640, 480);
     internal string[] Errors = Array.Empty<string>();
     internal string[] Warnings = Array.Empty<string>();
@@ -203,6 +206,7 @@ internal static class CartographySceneBuilder
         return new CartographyScene
         {
             Nodes=nodes.ToArray(),
+            RenderLayers=CartographyComposition.Build(document,nodes),
             Bounds=nodes.Count>0?nodes.Select(n=>n.Bounds).Aggregate(CartographyRect.Union):new CartographyRect(0,0,640,480),
             Errors=errors.Distinct(StringComparer.Ordinal).ToArray(),
             Warnings=warnings.Distinct(StringComparer.Ordinal).ToArray()
@@ -423,17 +427,43 @@ internal static class CartographySceneBuilder
             {
                 CartographyPrimitive shadow =
                     Line(
-                        px,
-                        py,
-                        qx,
-                        qy,
+                        px - dx / length * 3.5f * TileSize,
+                        py - dy / length * 3.5f * TileSize,
+                        qx + dx / length * 3.5f * TileSize,
+                        qy + dy / length * 3.5f * TileSize,
                         Alpha(
                             a.ShadeColor,
                             opacity),
-                        item.Stroke +
-                        a.Outline * 2f);
+                        11f * TileSize);
                 shadow.PixelPerfect = true;
+                shadow.UnderRooms = true;
                 shapes.Add(shadow);
+                if (n < points.Count - 1)
+                    shapes.Add(new CartographyPrimitive
+                    {
+                        Kind = CartographyPrimitiveKind.Fill, UnderRooms = true,
+                        Rect = new CartographyRect(qx - 4.5f * TileSize, qy - 4.5f * TileSize, 9f * TileSize, 9f * TileSize),
+                        Color = Alpha(a.ShadeColor, opacity)
+                    });
+
+                // Cornifer's DrawConnections(overRoomShadow): a narrower translucent backing
+                // between authored bends keeps an interior route legible without covering terrain
+                // with the wide outside border. Endpoint-to-bend segments keep the room intact.
+                uint localShade = Alpha(a.ShadeColor, opacity * (100f / 255f));
+                if (n > 1 && n < points.Count - 1 && length > 6f * TileSize)
+                {
+                    var interior = Line(px + dx / length * 3f * TileSize, py + dy / length * 3f * TileSize,
+                        qx - dx / length * 3f * TileSize, qy - dy / length * 3f * TileSize, localShade, 5f * TileSize);
+                    interior.PixelPerfect = true;
+                    shapes.Add(interior);
+                }
+                if (n > 1 && (n < points.Count - 1 || n > 2))
+                    shapes.Add(new CartographyPrimitive
+                    {
+                        Kind = CartographyPrimitiveKind.Fill,
+                        Rect = new CartographyRect(px - 2.5f * TileSize, py - 2.5f * TileSize, 5f * TileSize, 5f * TileSize),
+                        Color = localShade
+                    });
             }
 
             if (length >
@@ -460,7 +490,7 @@ internal static class CartographySceneBuilder
                         Alpha(
                             item.Color,
                             opacity),
-                        item.Stroke,
+                        TileSize,
                         true);
 
                 line.PixelPerfect = true;
@@ -469,6 +499,15 @@ internal static class CartographySceneBuilder
                 line.DashOffset = phase;
                 shapes.Add(line);
             }
+
+            // DrawGuideLines in Cornifer overlays a one-screen-pixel solid white center on the
+            // aligned pipe. The wide black map shadow still scales with the terrain underneath.
+            var guideShadow = Line(px, py, qx, qy, Alpha(0xFF000000, opacity), 3);
+            guideShadow.GuideOnly = guideShadow.ScreenSpace = guideShadow.PixelPerfect = true;
+            shapes.Add(guideShadow);
+            var guide = Line(px, py, qx, qy, Alpha(0xFFFFFFFF, opacity), 1);
+            guide.GuideOnly = guide.ScreenSpace = guide.PixelPerfect = true;
+            shapes.Add(guide);
 
             phase +=
                 Math.Max(
@@ -621,15 +660,12 @@ internal static class CartographySceneBuilder
                         ? appearance.ShadeColor
                         : 0xFF000000,
                     opacity),
-                Math.Max(
-                    3f,
-                    item.Stroke +
-                    appearance.Outline * 2f),
+                3f,
                 true);
-        shadow.GuideOnly = true;
+        shadow.GuideOnly = shadow.ScreenSpace = true;
         shadow.DashLength = 11f;
         shadow.DashGap = 5f;
-        shadow.DashOffset = -1.5f;
+        shadow.DashOffset = 1.5f;
         shapes.Add(shadow);
 
         CartographyPrimitive guide =
@@ -639,13 +675,11 @@ internal static class CartographySceneBuilder
                 bx,
                 by,
                 Alpha(
-                    item.Color,
+                    0xFFFFFFFF,
                     opacity * 0.60f),
-                Math.Max(
-                    1f,
-                    item.Stroke * 0.5f),
+                1f,
                 true);
-        guide.GuideOnly = true;
+        guide.GuideOnly = guide.ScreenSpace = true;
         guide.DashLength = 8f;
         guide.DashGap = 8f;
         shapes.Add(guide);

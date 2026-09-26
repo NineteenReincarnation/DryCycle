@@ -23,7 +23,7 @@ internal static class CartographyLayerExport
         }
         Tag("8BPS");Short(1);w.Write(new byte[6]);Short(4);Int(height);Int(width);Short(8);Short(3);Int(0);Int(0);
         long section=stream.Position;Int(0);long info=stream.Position;Int(0);
-        var layers=d.Layers.Where(l=>l.Visible&&l.Opacity>0&&scene.Nodes.Any(n=>n.LayerId==l.Id)).Reverse().ToArray();
+        var layers=scene.RenderLayers.Where(l=>l.Pass!=CartographyRenderPass.Guides).Reverse().ToArray();
         Short(-layers.Length); // Negative count declares merged transparency.
         foreach(var layer in layers)
         {
@@ -36,7 +36,7 @@ internal static class CartographyLayerExport
             Tag("8BIM");Tag("luni");Int(4+layer.Name.Length*2);Int(layer.Name.Length);foreach(char c in layer.Name)Short(c);
             Length(extra);
         }
-        foreach(var layer in layers){using Bitmap b=CartographyExporter.RenderBitmap(d,scene,width,height,layer.Id);Channels(CartographyRaster.FromBitmap(b));}
+        foreach(var layer in layers){using Bitmap b=CartographyExporter.RenderBitmap(d,scene,width,height,null,renderLayer:layer);Channels(CartographyRaster.FromBitmap(b));}
         if((stream.Position-info-4)%2!=0)w.Write((byte)0);Length(info);Int(0);Length(section);
         using Bitmap composite=CartographyExporter.RenderBitmap(d,scene,width,height,null);CartographyRaster merged=CartographyRaster.FromBitmap(composite);
         Short(0);byte[] scan=new byte[width];foreach(int shift in new[]{16,8,0,24})for(int y=0;y<height;y++){for(int x=0;x<width;x++)scan[x]=(byte)(merged.Pixels[y*width+x]>>shift);w.Write(scan);}

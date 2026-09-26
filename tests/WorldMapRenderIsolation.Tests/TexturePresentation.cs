@@ -88,6 +88,7 @@ public static partial class MapRenderIsolationTests
             Check(target[64 * 128 + 32].b > 220 && target[64 * 128 + 32].r < 40, "The bottom-left raster pixel renders blue.");
             Check(target[8 * 128 + 8].a == 0 && target[96 * 128 + 96].a == 0, "Raster commands stay within the UI rectangle.");
             Front("WorldMapTextureFrame").GetMethod("Begin", Flags).Invoke(null, null);
+            ExerciseCorniferLinePreview();
             ExerciseCartographyCanvas();
         }
         finally
@@ -229,6 +230,27 @@ public static partial class MapRenderIsolationTests
         view.GetMethod("RouteGesture", Flags).Invoke(null, new object[] { snapshot, true, mouse, io }); ImGui.Render();
         edit = Get(commands.Cast<object>().Last(), "Item");
         Check(((IList)Get(edit, "Points")).Count == 0 && (bool)Get(edit, "Visible"), "Real Delete input removes the selected bend and retains the connection.");
+        int deletedCount=commands.Cast<object>().Count();
+        for(int frame=0;frame<45;frame++)
+        {
+            newFrame();ImGui.NewFrame();
+            bool consumed=(bool)view.GetMethod("RouteGesture",Flags).Invoke(null,new object[]{snapshot,true,mouse,io});
+            if(!consumed)view.GetMethod("Interaction",Flags).Invoke(null,new object[]{snapshot,true,mouse,io});
+            ImGui.Render();
+        }
+        Check(commands.Cast<object>().Count()==deletedCount,"Holding Delete after removing a bend cannot repeat into whole-connection deletion.");
         io.AddKeyEvent(ImGuiKey.Delete, false);
+        newFrame();ImGui.NewFrame();ImGui.Render();
+        view.GetField("selectedRoutePoint",Flags).SetValue(null,0);
+        io.AddKeyEvent(ImGuiKey.X,true);newFrame();ImGui.NewFrame();
+        view.GetMethod("RouteGesture",Flags).Invoke(null,new object[]{snapshot,true,mouse,io});ImGui.Render();
+        edit=Get(commands.Cast<object>().Last(),"Item");
+        Check(commands.Cast<object>().Count()==deletedCount+1&&((IList)Get(edit,"Points")).Count==0&&(bool)Get(edit,"Visible"),"Real X input deletes the selected bend and preserves its connection.");
+        io.AddKeyEvent(ImGuiKey.X,false);newFrame();ImGui.NewFrame();ImGui.Render();
+        view.GetField("selectedRoutePoint",Flags).SetValue(null,0);
+        io.AddKeyEvent(ImGuiKey.X,true);newFrame();ImGui.NewFrame();io.WantTextInput=true;
+        view.GetMethod("RouteGesture",Flags).Invoke(null,new object[]{snapshot,true,mouse,io});ImGui.Render();
+        Check(commands.Cast<object>().Count()==deletedCount+1,"Typing X into a text field does not delete a bend.");
+        io.WantTextInput=false;io.AddKeyEvent(ImGuiKey.X,false);
     }
 }

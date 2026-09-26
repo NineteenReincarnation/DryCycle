@@ -159,8 +159,8 @@ internal static partial class CartographyView
         ToolButton(Tool.Select, T("选择", "Select"), false);
         ToolButton(Tool.Text, T("文字", "Text"));
         ImGui.TextWrapped(tool == Tool.Route
-            ? T("点击连线加拐点并拖动 | Alt+点击 / Delete 删点 | Shift 限制方向 | Esc 取消", "Click a connection to add/drag a bend | Alt-click / Delete removes it | Shift constrains | Esc cancels")
-            : tool == Tool.Select ? T("左键拖动 / 框选 | 点击连线编辑 | Shift 加选 | Ctrl 减选 | 右键平移 | 滚轮缩放", "Drag / marquee | Click connections to edit | Shift add | Ctrl subtract | Right drag pan | Wheel zoom")
+            ? T("点击连线加拐点并拖动 | X / Delete 删点 | Shift 限制方向 | Esc 取消", "Click a connection to add/drag a bend | X / Delete removes it | Shift constrains | Esc cancels")
+            : tool == Tool.Select ? T("左键拖动 / 框选 | 点击连线编辑 | X / Delete 删除所选拐点 | 右键平移 | 滚轮缩放", "Drag / marquee | Click connections to edit | X / Delete removes the selected bend | Right drag pan | Wheel zoom")
             : T("在画布点击放置文字，右键取消。", "Click to place text. Right click cancels."));
         ImGui.Separator();
     }
@@ -223,14 +223,21 @@ internal static partial class CartographyView
                 else { item.X += delta.X; item.Y += delta.Y; }
             }
         }
-        foreach (CartographySceneNode original in snapshot.Scene.Nodes)
+        var routePreviews = dragging || routeGesture != null ? new Dictionary<string, CartographySceneNode>(StringComparer.Ordinal) : null;
+        foreach (CartographyRenderLayer renderLayer in snapshot.Scene.RenderLayers)
+        foreach (CartographySceneNode original in renderLayer.Nodes)
         {
             CartographySceneNode node = original;
             Num.Vector2 offset = dragging && MovesWithSelection(snapshot.Document, node.Id) ? delta : default;
             if ((dragging || routeGesture?.Id == node.Id) && node.FromId != null)
             {
-                CartographyItem route = moving.Items.Find(i => i.Id == node.Id);
-                if (route != null) node = PreviewRoute(node, route, moving, snapshot.Document);
+                if (routePreviews.TryGetValue(node.Id, out var preview)) node = preview;
+                else
+                {
+                    CartographyItem route = moving.Items.Find(i => i.Id == node.Id);
+                    if (route != null) node = PreviewRoute(node, route, moving, snapshot.Document);
+                    routePreviews[node.Id] = node;
+                }
                 offset = default;
             }
             if (routeGesture?.Id == node.Id && routeGesture.Kind == CartographyItemKind.Line)
@@ -239,8 +246,9 @@ internal static partial class CartographyView
                 offset = default;
             }
             if (!viewport.Intersects(node.Bounds.Offset(offset.X, offset.Y))) continue;
-            foreach (CartographyPrimitive shape in node.Primitives) DrawPrimitive(draw, shape, origin, offset, viewport);
-            if (Selection.Contains(node.Id) && node.FromId == null)
+            foreach (CartographyPrimitive shape in node.Primitives)
+                if (renderLayer.Accepts(shape)) DrawPrimitive(draw, shape, origin, offset, viewport);
+            if (renderLayer.Pass == CartographyRenderPass.Content && Selection.Contains(node.Id) && node.FromId == null)
                 draw.AddRect(Screen(origin, node.Bounds.X, node.Bounds.Y, offset), Screen(origin, node.Bounds.Right, node.Bounds.Bottom, offset), 0xFFDCC36C, 0, ImDrawFlags.None, 1.5f);
         }
         if (marquee)
@@ -311,7 +319,7 @@ internal static partial class CartographyView
         if (!hovered || io.WantTextInput || ImGui.IsAnyItemActive() || dragging || marquee) return;
         ClipboardKeys(snapshot, mouse, io);
 
-        if (KeyChord(snapshot.Document.Options.DeleteKey))
+        if (KeyChord(snapshot.Document.Options.DeleteKey, false))
         {
             bool available = Selection.Count > 0;
             if (available)
@@ -924,10 +932,10 @@ internal static partial class CartographyView
         CartographyRect r = shape.Rect;
         // Clip long route segments before generating dash vertices. A map containing distant rooms
         // must not spend millions of iterations drawing invisible dashes beyond the canvas.
-        if (shape.Kind == CartographyPrimitiveKind.Line && !ClipLine(ref r, viewport.Offset(-offset.X, -offset.Y).Inflate(shape.Stroke))) return;
+        if (shape.Kind == CartographyPrimitiveKind.Line && !ClipLine(ref r, viewport.Offset(-offset.X, -offset.Y).Inflate(shape.ScreenSpace ? shape.Stroke/zoom : shape.Stroke))) return;
         if (shape.Kind != CartographyPrimitiveKind.Line && !viewport.Intersects(r.Offset(offset.X, offset.Y))) return;
         Num.Vector2 a = Screen(origin, r.X, r.Y, offset), b = Screen(origin, r.Right, r.Bottom, offset);
-        uint color = Color(shape.Color); float stroke = Math.Max(1.15f, shape.Stroke * zoom);
+        uint color = Color(shape.Color); float stroke = shape.ScreenSpace ? shape.Stroke : Math.Max(1, shape.Stroke * zoom);
         switch (shape.Kind)
         {
             case CartographyPrimitiveKind.Image: CartographyCanvasImages.Draw(draw, shape, a, b, color); break;
@@ -962,9 +970,10 @@ internal static partial class CartographyView
                     float distance = (b - a).Length();
                     if (distance < .1f) break;
                     Num.Vector2 direction = (b - a) / distance;
-                    float dash = Math.Max(1, shape.DashLength * zoom), gap = Math.Max(1, shape.DashGap * zoom);
+                    float dashScale = shape.ScreenSpace ? 1 : zoom;
+                    float dash = Math.Max(1, shape.DashLength * dashScale), gap = Math.Max(1, shape.DashGap * dashScale);
                     float clipped = new Num.Vector2(r.X-shape.Rect.X,r.Y-shape.Rect.Y).Length();
-                    float phase = ((clipped+shape.DashOffset)*zoom) % (dash+gap);
+                    float phase = (clipped*zoom+shape.DashOffset*dashScale) % (dash+gap);
                     for (float step = -phase; step < distance; step += dash + gap)
                         if(step+dash>0) draw.AddLine(a + direction * Math.Max(0,step), a + direction * Math.Min(distance, step + dash), color, stroke);
                 }
@@ -995,7 +1004,7 @@ internal static partial class CartographyView
                 1f,
                 (float)Math.Round(
                     shape.Stroke *
-                    zoom));
+                    (shape.ScreenSpace ? 1 : zoom)));
         float half =
             stroke *
             0.5f;
