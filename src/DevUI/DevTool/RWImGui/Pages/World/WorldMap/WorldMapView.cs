@@ -2121,6 +2121,18 @@ internal static class WorldMapView
         {
             Num.Vector2 a = points[i];
             Num.Vector2 b = points[i + 1];
+            bool terminal =
+                i == 0 ||
+                i == points.Count - 2;
+            float segmentShadowThickness =
+                terminal
+                    ? shadowThickness * 0.72f
+                    : shadowThickness;
+            float segmentCoreThickness =
+                terminal
+                    ? coreThickness * 0.72f
+                    : coreThickness;
+
             if (dashed)
             {
                 DrawDashedLine(
@@ -2128,7 +2140,7 @@ internal static class WorldMapView
                     a,
                     b,
                     shadow,
-                    shadowThickness,
+                    segmentShadowThickness,
                     10f,
                     6f);
                 DrawDashedLine(
@@ -2136,7 +2148,7 @@ internal static class WorldMapView
                     a,
                     b,
                     core,
-                    coreThickness,
+                    segmentCoreThickness,
                     10f,
                     6f);
             }
@@ -2146,12 +2158,12 @@ internal static class WorldMapView
                     a,
                     b,
                     shadow,
-                    shadowThickness);
+                    segmentShadowThickness);
                 draw.AddLine(
                     a,
                     b,
                     core,
-                    coreThickness);
+                    segmentCoreThickness);
             }
         }
 
