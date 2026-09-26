@@ -183,7 +183,6 @@ internal static class WorldMapPresentationIndex
 /// </summary>
 internal static class WorldMapUpdateThrottle
 {
-    private const int SnapshotIntervalFrames = 2;
     private const int PreviewPrimeIntervalFrames = 2;
 
     private static bool enabled;
@@ -253,8 +252,13 @@ internal static class WorldMapUpdateThrottle
         if (!urgent && WorldMapBackgroundBudget.InteractionActive)
             return false;
 
+        int publishInterval =
+            WorldMapBackgroundSchedulingPolicy.SnapshotIntervalFrames(
+                overlayVisible:
+                    !EditorUiModeState.OverlayHidden);
+
         if (!urgent &&
-            Time.frameCount - lastPublishFrame < SnapshotIntervalFrames)
+            Time.frameCount - lastPublishFrame < publishInterval)
             return false;
 
         lastPublishFrame = Time.frameCount;
