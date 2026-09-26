@@ -122,6 +122,11 @@ EOF
 
 dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile -- "$(pwd)/src"
 
+# World Map GPU/runtime tests need the real game + Unity editor and therefore remain a local
+# high-fidelity step, but their C# sources are still part of the CI syntax contract. This catches
+# broken regression-test edits on main instead of silently ignoring the worldmap suite.
+dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile --   "$(pwd)/tests/WorldMapRenderIsolation.Tests"
+
 # World Map persistent cache is a binary compatibility boundary. Run its production-code-linked
 # regression suite in CI so V2 fallback, V3 round-trip/corruption handling and shutdown flush cannot
 # silently regress behind syntax-only validation.
