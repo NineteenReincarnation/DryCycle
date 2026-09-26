@@ -253,17 +253,17 @@ internal static class WorldMapCorridorLaneAllocator
             ConnectionRouteResource route = routes[routeId];
             Num.Vector2[] points = BasePoints(route);
 
-            // Compact routes now carry the same terminal-stub grammar as longer routes. If they
-            // contain a long enough middle run, let them participate in corridor lanes too; the
-            // terminal protection below still prevents offsets from touching the room sockets.
+            // Compact routes now carry the same terminal-stub grammar as longer routes. A four-point
+            // route already has one true middle segment, so do not exclude it from lane allocation.
             if (points == null ||
-                points.Length < 6)
+                points.Length < 4)
                 continue;
 
-            // Phase 1 owns the terminal fan-out. Keep two segments untouched at both ends so
-            // corridor continuity can never pull a socket back into the shared bundle.
-            int firstEligible = 2;
-            int lastEligible = points.Length - 4;
+            // Protect only the physical socket stub (first/last segment). Everything after that is
+            // corridor space and may be lane-separated. Protecting two segments at each end caused
+            // short links to stay on the centreline and form false T/X junctions.
+            int firstEligible = 1;
+            int lastEligible = points.Length - 3;
             if (lastEligible < firstEligible)
                 continue;
 
