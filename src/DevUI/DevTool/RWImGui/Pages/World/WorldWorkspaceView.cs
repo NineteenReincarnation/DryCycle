@@ -328,24 +328,32 @@ internal static class WorldWorkspaceView
         ImGui.TextUnformatted(snapshot.RegionName);
         ImGui.SameLine();
         DevToolWidgets.MutedText(GetToolbarRoomCount(snapshot.Rooms?.Length ?? 0));
-        ImGui.SameLine(0f, 16f);
 
+        string worldMapLabel = DevToolUiSettings.T("世界地图", "World Map");
         DrawWorkspaceModeButton(
             WorkspaceMode.WorldMap,
-            DevToolUiSettings.T("世界地图", "World Map"),
+            worldMapLabel,
             "WorldWorkspaceModeMap",
             DevToolToolbarTone.WorldMap);
-        ImGui.SameLine(0f, 6f);
+
+        string worldDataLabel = DevToolUiSettings.T("世界数据", "World Data");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(worldDataLabel));
         DrawWorkspaceModeButton(
             WorkspaceMode.WorldData,
-            DevToolUiSettings.T("世界数据", "World Data"),
+            worldDataLabel,
             "WorldWorkspaceModeData",
             DevToolToolbarTone.WorldData);
-        ImGui.SameLine(0f, 16f);
-        bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty ||
-                        WorldTextRegistry.Dirty || WorldRoomAttractionRegistry.Dirty;
+
+        bool anyDirty = WorldWorkspaceDataView.HasDirtyData ||
+                        WorldTopologyRegistry.Dirty ||
+                        WorldTextRegistry.Dirty ||
+                        WorldRoomAttractionRegistry.Dirty;
+        string saveLabel = anyDirty
+            ? DevToolUiSettings.T("保存修改", "Save Changes")
+            : DevToolUiSettings.T("保存", "Save");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(saveLabel) + 8f);
         if (DevToolWidgets.ToolbarButton(
-                anyDirty ? DevToolUiSettings.T("保存修改", "Save Changes") : DevToolUiSettings.T("保存", "Save"),
+                saveLabel,
                 "WorldWorkspaceSave",
                 DevToolToolbarTone.Save,
                 anyDirty))
@@ -355,27 +363,30 @@ internal static class WorldWorkspaceView
             Send(EditorUiCommandKind.Save);
         }
 
-        ImGui.SameLine(0f, 6f);
+        string undoLabel = DevToolUiSettings.T("撤销", "Undo");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(undoLabel));
         if (!editor.CanUndo) ImGui.BeginDisabled();
         if (DevToolWidgets.ToolbarButton(
-                DevToolUiSettings.T("撤销", "Undo"),
+                undoLabel,
                 "WorldWorkspaceUndo",
                 DevToolToolbarTone.History))
             Send(EditorUiCommandKind.Undo);
         if (!editor.CanUndo) ImGui.EndDisabled();
 
-        ImGui.SameLine(0f, 6f);
+        string redoLabel = DevToolUiSettings.T("重做", "Redo");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(redoLabel));
         if (!editor.CanRedo) ImGui.BeginDisabled();
         if (DevToolWidgets.ToolbarButton(
-                DevToolUiSettings.T("重做", "Redo"),
+                redoLabel,
                 "WorldWorkspaceRedo",
                 DevToolToolbarTone.History))
             Send(EditorUiCommandKind.Redo);
         if (!editor.CanRedo) ImGui.EndDisabled();
 
-        ImGui.SameLine(0f, 8f);
+        string focusLabel = DevToolUiSettings.T("专注", "Focus");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(focusLabel));
         if (DevToolWidgets.ToolbarButton(
-                DevToolUiSettings.T("专注", "Focus"),
+                focusLabel,
                 "WorldWorkspaceFocus",
                 DevToolToolbarTone.Focus))
             Send(EditorUiCommandKind.ToggleFocus);
