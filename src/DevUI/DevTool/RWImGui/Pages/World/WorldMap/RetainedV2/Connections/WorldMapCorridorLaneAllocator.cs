@@ -190,6 +190,13 @@ internal static class WorldMapCorridorLaneAllocator
                 if (lanePlan.DensityTier > densityTier)
                     densityTier = lanePlan.DensityTier;
 
+                byte compressionTier =
+                    CompressionDensityTier(
+                        lanePlan,
+                        groupScales);
+                if (compressionTier > densityTier)
+                    densityTier = compressionTier;
+
                 float[] effectiveOffsets =
                     BuildEffectiveOffsets(
                         lanePlan,
@@ -999,6 +1006,49 @@ internal static class WorldMapCorridorLaneAllocator
         }
 
         return true;
+    }
+
+    private static byte CompressionDensityTier(
+        RouteLanePlan plan,
+        Dictionary<int, float> scales)
+    {
+        if (plan == null ||
+            scales == null ||
+            plan.GroupIds.Length == 0)
+            return 0;
+
+        float minimumScale =
+            1f;
+        bool found =
+            false;
+
+        for (int i = 0; i < plan.GroupIds.Length; i++)
+        {
+            int groupId =
+                plan.GroupIds[i];
+            if (groupId < 0 ||
+                !scales.TryGetValue(
+                    groupId,
+                    out float scale))
+                continue;
+
+            found = true;
+            minimumScale =
+                Math.Min(
+                    minimumScale,
+                    scale);
+        }
+
+        if (!found)
+            return 0;
+
+        if (minimumScale < 0.36f)
+            return 2;
+
+        if (minimumScale < 0.66f)
+            return 1;
+
+        return 0;
     }
 
     private static float[] BuildEffectiveOffsets(
