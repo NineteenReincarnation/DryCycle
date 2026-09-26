@@ -806,11 +806,8 @@ internal static class PlayerMapWorkspaceIntegration
         }
 
         ImGui.SameLine(0f, 6f);
-        string label = playerMapActive
-            ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
-            : DevToolUiSettings.T("玩家地图", "Player Map");
         if (DevToolWidgets.ToolbarButton(
-                label,
+                DevToolUiSettings.T("玩家地图", "Player Map"),
                 "WorldWorkspacePlayerMap",
                 DevToolToolbarTone.PlayerMap,
                 playerMapActive))
