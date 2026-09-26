@@ -519,7 +519,22 @@ internal sealed class WorldMapRetainedConnectionRenderer
         }
 
         for (int i = 1; i < path.Length - 1; i++)
-            AddRoundJoin(vertices, colors, indices, path[i], halfWidth, color, z);
+        {
+            float joinRadius =
+                i == 1 ||
+                i == path.Length - 2
+                    ? halfWidth * 0.86f
+                    : halfWidth;
+
+            AddRoundJoin(
+                vertices,
+                colors,
+                indices,
+                path[i],
+                joinRadius,
+                color,
+                z);
+        }
     }
 
     private static void AddRoundJoin(
