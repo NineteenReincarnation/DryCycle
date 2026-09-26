@@ -123,6 +123,7 @@ internal static partial class MapRoomGeometryPresentationHub
     // incrementally with the current/selected room receiving first priority.
     private const int RasterLoadsPerFrame = 2;
     private const int RasterBuildCommitsPerFrame = 4;
+    private const double RasterMainThreadBudgetMilliseconds = 1.50d;
     private const int MaxRasterBuildWorkers = 2;
     private const int UnloadedCurveLoadsPerFrame = 3;
     private const int BackgroundRoomsPerFrame = 24;
@@ -225,6 +226,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int backgroundCursor;
     private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
+    private static long rasterFrameDeadlineTicks;
     private static long rasterReadbackTotalTicks;
     private static long rasterReadbackPeakTicks;
     private static int rasterReadbackCount;
@@ -281,15 +283,25 @@ internal static partial class MapRoomGeometryPresentationHub
         if (structureDue)
             SynchronizeStructure(page);
 
-        DrainRasterBuildResults(RasterBuildCommitsPerFrame);
+        rasterFrameDeadlineTicks =
+            Stopwatch.GetTimestamp() +
+            (long)(Stopwatch.Frequency *
+                   RasterMainThreadBudgetMilliseconds / 1000d);
+        DrainRasterBuildResults(
+            RasterBuildCommitsPerFrame,
+            rasterFrameDeadlineTicks);
         rasterLoadsRemaining = RasterLoadsPerFrame;
         curveLoadsRemaining = UnloadedCurveLoadsPerFrame;
 
         int currentRoom = session.Room?.abstractRoom?.index ?? -1;
         int selectedRoom = MapEditorStateHub.Get(session)?.SelectedRoomIndex ?? -1;
 
-        RefreshPriorityRoom(currentRoom, page.world);
-        if (selectedRoom != currentRoom) RefreshPriorityRoom(selectedRoom, page.world);
+        // The player's/current room may use one readback even if the budget is already exhausted;
+        // every other room obeys the frame deadline so one expensive texture cannot trigger a
+        // second synchronous GetPixels spike in the same editor frame.
+        RefreshPriorityRoom(currentRoom, page.world, allowOverBudget: true);
+        if (selectedRoom != currentRoom)
+            RefreshPriorityRoom(selectedRoom, page.world, allowOverBudget: false);
 
         ProcessBackground(page.world, currentRoom, selectedRoom);
         PersistentTryScheduleSave(force: false);
@@ -330,6 +342,7 @@ internal static partial class MapRoomGeometryPresentationHub
         backgroundCursor = 0;
         rasterLoadsRemaining = 0;
         curveLoadsRemaining = 0;
+        rasterFrameDeadlineTicks = 0L;
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
@@ -409,12 +422,20 @@ internal static partial class MapRoomGeometryPresentationHub
         nextStructureSyncFrame = Time.frameCount + StructureSyncIntervalFrames;
     }
 
-    private static void RefreshPriorityRoom(int roomIndex, global::World world)
+    private static void RefreshPriorityRoom(
+        int roomIndex,
+        global::World world,
+        bool allowOverBudget)
     {
         if (roomIndex < 0 || !cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
         RefreshDimensions(entry, entry.RoomRep);
         RefreshNodes(entry, entry.RoomRep, force: true);
-        if (RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: true))
+        bool rasterBudgetAvailable =
+            rasterLoadsRemaining > 0 &&
+            (allowOverBudget ||
+             Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks);
+        if (rasterBudgetAvailable &&
+            RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: true))
             rasterLoadsRemaining = Math.Max(0, rasterLoadsRemaining - 1);
         if (RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
             curveLoadsRemaining = Math.Max(0, curveLoadsRemaining - 1);
@@ -436,7 +457,11 @@ internal static partial class MapRoomGeometryPresentationHub
         // The same visible-room order feeds native texture recovery and semantic geometry. A room
         // already complete is cheap to skip; it must not consume the decode budget of a new room.
         if (processVisuals)
-            for (int i = 0; i < priorityRooms.Count && rasterLoadsRemaining > 0; i++)
+            for (int i = 0;
+                 i < priorityRooms.Count &&
+                 rasterLoadsRemaining > 0 &&
+                 Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks;
+                 i++)
             {
                 int index = priorityRooms[i];
                 if (index == currentRoom || index == selectedRoom || !cache.TryGetValue(index, out CacheEntry priority)) continue;
@@ -459,6 +484,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 RefreshDimensions(entry, entry.RoomRep);
                 RefreshNodes(entry, entry.RoomRep, force: false);
                 if (rasterLoadsRemaining > 0 &&
+                    Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks &&
                     RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: false))
                     rasterLoadsRemaining--;
             }
@@ -630,10 +656,13 @@ internal static partial class MapRoomGeometryPresentationHub
         }
     }
 
-    private static void DrainRasterBuildResults(int maxResults)
+    private static void DrainRasterBuildResults(
+        int maxResults,
+        long deadlineTicks)
     {
         int drained = 0;
         while (drained < Math.Max(0, maxResults) &&
+               Stopwatch.GetTimestamp() < deadlineTicks &&
                rasterBuildCompleted.TryDequeue(out RasterBuildResult result))
         {
             drained++;
