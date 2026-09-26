@@ -32,6 +32,7 @@ internal static partial class CartographyView
     private static string selectedItem = string.Empty;
     private static string pendingSelection = string.Empty;
     private static long pendingSelectionRevision;
+    private static bool diagnosticsWindowOpen;
 
     internal static void Leave()
     {
@@ -69,7 +70,11 @@ internal static partial class CartographyView
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(.045f, .06f, .08f, 1));
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Num.Vector4(.10f, .14f, .19f, 1));
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Num.Vector4(.06f, .08f, .11f, 1));
-        try { DrawContent(editor); }
+        try
+        {
+            DrawContent(editor);
+            DrawDiagnosticsWindow(CartographyRuntime.Presentation);
+        }
         finally
         {
             ImGui.PopStyleColor(3);
@@ -487,9 +492,54 @@ internal static partial class CartographyView
         bool valid = true;
         try { CartographyExporter.Dimensions(styleDraft, snapshot.Scene, out int width, out int height, format); ImGui.TextDisabled(width + " x " + height + " px"); }
         catch (InvalidOperationException error) { ImGui.TextWrapped(error.Message); valid = false; }
-        if (snapshot.Scene.Errors.Length > 0)
-        { valid = false; ImGui.TextWrapped(T("以下可见房间尚不可导出：", "Visible rooms awaiting terrain:") + "\n" + string.Join("\n", snapshot.Scene.Errors.Take(4))); }
-        if (snapshot.Scene.Warnings.Length > 0) ImGui.TextWrapped(string.Join("\n",snapshot.Scene.Warnings.Take(3)));
+        string[] blockingWarnings =
+            snapshot.Scene.Warnings
+                .Where(CartographyRuntime.IsExportBlockingWarning)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+        if (snapshot.Scene.Errors.Length > 0 ||
+            blockingWarnings.Length > 0)
+        {
+            valid = false;
+            ImGui.PushStyleColor(
+                ImGuiCol.Text,
+                new Num.Vector4(1f, .48f, .36f, 1f));
+            ImGui.TextWrapped(
+                T(
+                    "导出已阻止：存在未解析的房间资源或缺失图标。",
+                    "Export blocked: unresolved room resources or missing sprites."));
+            ImGui.PopStyleColor();
+        }
+        else if (snapshot.Scene.Warnings.Length > 0)
+        {
+            ImGui.PushStyleColor(
+                ImGuiCol.Text,
+                new Num.Vector4(1f, .72f, .32f, 1f));
+            ImGui.TextWrapped(
+                T(
+                    "当前制图存在警告；导出可以继续，但请先查看诊断。",
+                    "Cartography has warnings; export can continue, but review diagnostics first."));
+            ImGui.PopStyleColor();
+        }
+
+        int diagnosticCount =
+            CurrentDiagnosticCount(snapshot);
+
+        if (diagnosticCount > 0)
+        {
+            if (ImGui.Button(
+                    T(
+                        "打开导出诊断",
+                        "Open export diagnostics") +
+                    " (" +
+                    diagnosticCount +
+                    ")##AtlasDiagnostics"))
+            {
+                diagnosticsWindowOpen = true;
+            }
+        }
+
         ImGui.SetNextItemWidth(-1); ImGui.InputText("##AtlasExportPath", ref exportPath, 1024);
         if (!valid || snapshot.Exporting) ImGui.BeginDisabled();
         if (ImGui.Button(snapshot.Exporting ? T("正在导出...", "Exporting...") : T("导出图片##AtlasRender", "Export image##AtlasRender")))
@@ -497,6 +547,252 @@ internal static partial class CartographyView
         if (!valid || snapshot.Exporting) ImGui.EndDisabled();
         ImGui.TextWrapped(T("制图项目独立保存；Ctrl+S / Ctrl+Z 在此操作当前制图。图层 PNG 使用相同画布。", "This view saves its own project. Ctrl+S / Ctrl+Z target this composition. Layer PNGs share a canvas."));
         if (styleDirty) Stage(CartographyCommandKind.Style, "style", command => command.Style = styleDraft);
+    }
+
+    private static int CurrentDiagnosticCount(
+        CartographyPresentation snapshot)
+    {
+        int live =
+            (snapshot?.Scene?.Errors?.Length ?? 0) +
+            (snapshot?.Scene?.Warnings?.Length ?? 0);
+
+        return
+            live +
+            CartographyDiagnostics.Snapshot().Length;
+    }
+
+    private static void DrawDiagnosticsWindow(
+        CartographyPresentation snapshot)
+    {
+        if (CartographyDiagnostics.ConsumeOpenRequest())
+            diagnosticsWindowOpen = true;
+
+        if (!diagnosticsWindowOpen)
+            return;
+
+        bool open = diagnosticsWindowOpen;
+
+        ImGui.SetNextWindowSize(
+            new Num.Vector2(
+                720f,
+                460f),
+            ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin(
+                T(
+                    "制图导出诊断##CartographyDiagnostics",
+                    "Cartography Export Diagnostics##CartographyDiagnostics"),
+                ref open))
+        {
+            string[] liveErrors =
+                snapshot?.Scene?.Errors ??
+                Array.Empty<string>();
+            string[] liveWarnings =
+                snapshot?.Scene?.Warnings ??
+                Array.Empty<string>();
+            CartographyDiagnosticEntry[] history =
+                CartographyDiagnostics.Snapshot();
+
+            int errors =
+                liveErrors.Length +
+                history.Count(
+                    entry =>
+                        entry.Severity ==
+                        CartographyDiagnosticSeverity.Error);
+            int warnings =
+                liveWarnings.Length +
+                history.Count(
+                    entry =>
+                        entry.Severity ==
+                        CartographyDiagnosticSeverity.Warning);
+
+            ImGui.TextUnformatted(
+                T("错误", "Errors") +
+                ": " +
+                errors +
+                "    " +
+                T("警告", "Warnings") +
+                ": " +
+                warnings);
+
+            if (ImGui.Button(
+                    T(
+                        "复制全部",
+                        "Copy all") +
+                    "##CartographyDiagnosticsCopy"))
+            {
+                ImGui.SetClipboardText(
+                    BuildDiagnosticsCopyText(
+                        snapshot,
+                        history));
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button(
+                    T(
+                        "清除历史",
+                        "Clear history") +
+                    "##CartographyDiagnosticsClear"))
+            {
+                CartographyDiagnostics.Clear();
+                history =
+                    Array.Empty<CartographyDiagnosticEntry>();
+            }
+
+            ImGui.SameLine();
+            ImGui.TextDisabled(
+                T(
+                    "当前场景问题无法手动清除；修复资源后会自动消失。",
+                    "Live scene issues disappear automatically after the resource is fixed."));
+
+            ImGui.Separator();
+
+            if (ImGui.BeginChild(
+                    "##CartographyDiagnosticsScroll",
+                    new Num.Vector2(
+                        0f,
+                        0f),
+                    ImGuiChildFlags.Borders))
+            {
+                foreach (string error in liveErrors
+                    .Distinct(StringComparer.Ordinal))
+                {
+                    DrawDiagnosticLine(
+                        CartographyDiagnosticSeverity.Error,
+                        T(
+                            "当前场景",
+                            "Live scene"),
+                        error);
+                }
+
+                foreach (string warning in liveWarnings
+                    .Distinct(StringComparer.Ordinal))
+                {
+                    DrawDiagnosticLine(
+                        CartographyDiagnosticSeverity.Warning,
+                        T(
+                            "当前场景",
+                            "Live scene"),
+                        warning);
+                }
+
+                foreach (CartographyDiagnosticEntry entry in history)
+                {
+                    string header =
+                        entry.Category;
+
+                    if (!string.IsNullOrEmpty(
+                            entry.Context))
+                    {
+                        header +=
+                            " | " +
+                            entry.Context;
+                    }
+
+                    DrawDiagnosticLine(
+                        entry.Severity,
+                        header,
+                        entry.Message);
+                }
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.End();
+        diagnosticsWindowOpen = open;
+    }
+
+    private static void DrawDiagnosticLine(
+        CartographyDiagnosticSeverity severity,
+        string header,
+        string message)
+    {
+        Num.Vector4 color =
+            severity ==
+            CartographyDiagnosticSeverity.Error
+                ? new Num.Vector4(
+                    1f,
+                    .46f,
+                    .38f,
+                    1f)
+                : new Num.Vector4(
+                    1f,
+                    .72f,
+                    .32f,
+                    1f);
+
+        ImGui.PushStyleColor(
+            ImGuiCol.Text,
+            color);
+        ImGui.TextUnformatted(
+            severity ==
+            CartographyDiagnosticSeverity.Error
+                ? "ERROR"
+                : "WARNING");
+        ImGui.PopStyleColor();
+
+        if (!string.IsNullOrEmpty(header))
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled(header);
+        }
+
+        ImGui.TextWrapped(
+            message ??
+            string.Empty);
+        ImGui.Separator();
+    }
+
+    private static string BuildDiagnosticsCopyText(
+        CartographyPresentation snapshot,
+        CartographyDiagnosticEntry[] history)
+    {
+        var text =
+            new System.Text.StringBuilder();
+
+        text.AppendLine(
+            "Cartography Export Diagnostics");
+        text.AppendLine(
+            "Project: " +
+            (snapshot?.Identity ??
+             "<none>"));
+        text.AppendLine();
+
+        foreach (string error in
+                 snapshot?.Scene?.Errors ??
+                 Array.Empty<string>())
+        {
+            text.AppendLine(
+                "ERROR | Live scene | " +
+                error);
+        }
+
+        foreach (string warning in
+                 snapshot?.Scene?.Warnings ??
+                 Array.Empty<string>())
+        {
+            text.AppendLine(
+                "WARNING | Live scene | " +
+                warning);
+        }
+
+        if (history != null &&
+            history.Length > 0)
+        {
+            if (text.Length > 0)
+                text.AppendLine();
+
+            text.AppendLine(
+                "History:");
+
+            foreach (CartographyDiagnosticEntry entry in history)
+                text.AppendLine(
+                    entry.CopyText);
+        }
+
+        return text.ToString();
     }
 
     private static void Select(string id, bool add, bool subtract)
