@@ -232,6 +232,9 @@ internal static partial class MapRoomGeometryPresentationHub
     private static long rasterReadbackTotalTicks;
     private static long rasterReadbackPeakTicks;
     private static int rasterReadbackCount;
+    private static long curveLoadTotalTicks;
+    private static long curveLoadPeakTicks;
+    private static int curveLoadCount;
 
     internal static int PublishedGeneration =>
         Volatile.Read(ref publishedGeneration);
@@ -243,6 +246,13 @@ internal static partial class MapRoomGeometryPresentationHub
             : rasterReadbackTotalTicks * 1000d / Stopwatch.Frequency / rasterReadbackCount;
     internal static double RasterReadbackPeakMilliseconds =>
         rasterReadbackPeakTicks * 1000d / Stopwatch.Frequency;
+    internal static int CurveLoadCount => curveLoadCount;
+    internal static double CurveLoadAverageMilliseconds =>
+        curveLoadCount <= 0
+            ? 0d
+            : curveLoadTotalTicks * 1000d / Stopwatch.Frequency / curveLoadCount;
+    internal static double CurveLoadPeakMilliseconds =>
+        curveLoadPeakTicks * 1000d / Stopwatch.Frequency;
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
     {
@@ -355,6 +365,9 @@ internal static partial class MapRoomGeometryPresentationHub
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
+        curveLoadTotalTicks = 0L;
+        curveLoadPeakTicks = 0L;
+        curveLoadCount = 0;
     }
 
     private static void ResetRegion(string nextRegion)
@@ -375,6 +388,9 @@ internal static partial class MapRoomGeometryPresentationHub
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
+        curveLoadTotalTicks = 0L;
+        curveLoadPeakTicks = 0L;
+        curveLoadCount = 0;
     }
 
     private static void SynchronizeStructure(MapPage page)
@@ -1067,11 +1083,14 @@ internal static partial class MapRoomGeometryPresentationHub
         if (!allowDiskLoad) return false;
 
         RoomSettings settings = null;
+        long curveLoadStarted = Stopwatch.GetTimestamp();
         try
         {
             string roomName = WorldLoader.RoomNameManipulator(room.FileName, world.game);
             SlugcatStats.Timeline timeline = world.game != null ? world.game.TimelinePoint : null;
             settings = new RoomSettings(roomName, world.region, false, false, timeline, world.game);
+            if (settings != null)
+                RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
         }
         catch (Exception error)
         {
@@ -1079,10 +1098,17 @@ internal static partial class MapRoomGeometryPresentationHub
             global::DryCycle.Plugin.Logger?.LogDebug(
                 "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
         }
+        finally
+        {
+            long elapsed =
+                Math.Max(0L, Stopwatch.GetTimestamp() - curveLoadStarted);
+            curveLoadTotalTicks += elapsed;
+            curveLoadPeakTicks =
+                Math.Max(curveLoadPeakTicks, elapsed);
+            curveLoadCount++;
+        }
 
-        if (settings == null) return false;
-        RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
-        return true;
+        return settings != null;
     }
 
     private static void RebuildCurves(CacheEntry entry, RoomSettings settings, int fingerprint)
