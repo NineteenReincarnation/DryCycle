@@ -276,6 +276,10 @@ internal static class WorldMapCorridorLaneAllocator
                 }
             }
 
+            candidate =
+                WorldMapOrthogonalRouter.NormalizeNoBacktracking(
+                    candidate);
+
             bool pathChanged =
                 !PathsEquivalent(
                     route.Points,
