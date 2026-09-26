@@ -34,17 +34,23 @@ internal static class FontSettingsWindow
         if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
             return;
 
-        float uiScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float width = Math.Min(Math.Max(390f, display.X - 16f), 390f * uiScale);
-        float height = Math.Min(Math.Max(430f, display.Y - 16f), 430f * Math.Min(1.35f, uiScale));
+        // Keep the typography window compact but large enough to show the whole default panel.
+        // These dimensions match the intended top-right footprint instead of scaling the entire
+        // floating window with the font-size preference.
+        const float preferredWidth = 468f;
+        const float preferredHeight = 420f;
+        float width = Math.Min(preferredWidth, Math.Max(320f, display.X - 16f));
+        float height = Math.Min(preferredHeight, Math.Max(300f, display.Y - 16f));
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 8f), 8f),
             ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
+        // Once intentionally overrides stale ImGui.ini dimensions from older builds, while still
+        // allowing the developer to resize the window afterwards during the current session.
+        ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Once);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(350f * uiScale, Math.Max(350f, display.X - 16f)), 330f),
-            new Num.Vector2(Math.Max(350f, display.X - 16f), Math.Max(330f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(420f, Math.Max(320f, display.X - 16f)), 340f),
+            new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(340f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"), ImGuiWindowFlags.NoCollapse))
@@ -71,12 +77,11 @@ internal static class FontSettingsWindow
         {
             DevToolUiSettings.FontSize = Math.Max(12f, Math.Min(72f, size));
 
-            // Keep this control window usable while the font scale changes. Other floating panels
-            // keep their developer-authored sizes and can be batch-selected/repositioned.
-            float nextScale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+            // Font size changes affect glyphs and controls, not the authored floating-window
+            // footprint. Keep the requested top-right window size stable.
             ImGui.SetWindowSize(new Num.Vector2(
-                Math.Min(Math.Max(390f, display.X - 16f), 390f * nextScale),
-                Math.Min(Math.Max(430f, display.Y - 16f), 430f * Math.Min(1.35f, nextScale))));
+                Math.Min(preferredWidth, Math.Max(320f, display.X - 16f)),
+                Math.Min(preferredHeight, Math.Max(300f, display.Y - 16f))));
         }
 
         if (DevToolUiSettings.IsChinese)
