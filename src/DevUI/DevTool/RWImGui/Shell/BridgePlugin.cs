@@ -373,7 +373,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         {
             try
             {
-                if (WorldMapBackgroundBudget.AllowSourceRecovery())
+                if (WorldMapBackgroundBudget.AllowSourceRecovery(mapSession))
                     MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
 
                 MapRoomGeometryPresentationHub.Prime(mapSession);
