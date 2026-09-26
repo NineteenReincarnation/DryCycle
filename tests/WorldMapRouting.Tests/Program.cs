@@ -275,14 +275,38 @@ internal static class Program
     {
         for (int i = 0; i + 1 < points.Length; i++)
         {
-            if (WorldMapOrthogonalRouter.SegmentIntersectsRect(
-                    points[i],
-                    points[i + 1],
-                    min,
-                    max))
+            if (SegmentIntersectsRect(points[i], points[i + 1], min, max))
                 return true;
         }
         return false;
+    }
+
+    private static bool SegmentIntersectsRect(
+        Num.Vector2 a,
+        Num.Vector2 b,
+        Num.Vector2 min,
+        Num.Vector2 max)
+    {
+        if (Math.Abs(a.X - b.X) < 0.01f)
+        {
+            if (a.X <= min.X || a.X >= max.X) return false;
+            return Math.Max(a.Y, b.Y) > min.Y &&
+                   Math.Min(a.Y, b.Y) < max.Y;
+        }
+
+        if (Math.Abs(a.Y - b.Y) < 0.01f)
+        {
+            if (a.Y <= min.Y || a.Y >= max.Y) return false;
+            return Math.Max(a.X, b.X) > min.X &&
+                   Math.Min(a.X, b.X) < max.X;
+        }
+
+        // Router output is expected to be orthogonal. Treat any unexpected diagonal conservatively
+        // using segment AABB overlap so this test still fails if it enters the blocker.
+        Num.Vector2 segMin = Num.Vector2.Min(a, b);
+        Num.Vector2 segMax = Num.Vector2.Max(a, b);
+        return segMax.X > min.X && segMin.X < max.X &&
+               segMax.Y > min.Y && segMin.Y < max.Y;
     }
 
     private static float Length(Num.Vector2[] points)
