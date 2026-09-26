@@ -24,12 +24,13 @@ internal static class DevToolUiSettings
     internal const float WindowAlpha = 0.52f;
     internal const float PopupAlpha = 0.68f;
 
-    // 18 px is the original rebuilt-editor design scale. English keeps the established 36 px
-    // presentation size, while Simplified Chinese gets a slightly larger 42 px default because
-    // the CJK atlas has a visibly smaller glyph body at the same nominal ImGui font size.
+    // 18 px is the rebuilt-editor design scale and is also the English default. Keeping the
+    // default at the reference size prevents FontGlobalScale and layout scaling from doubling the
+    // whole UI on ordinary 1080p/1440p displays. Simplified Chinese remains slightly larger because
+    // the CJK face has a smaller visible glyph body at the same nominal ImGui font size.
     internal const float ReferenceFontSize = 18f;
-    internal const float DefaultFontSize = 36f;
-    internal const float DefaultChineseFontSize = 42f;
+    internal const float DefaultFontSize = 18f;
+    internal const float DefaultChineseFontSize = 21f;
     internal const int DefaultFontWeight = 400;
     internal const int DefaultChineseFontWeight = 500;
     internal const float WindowOutlineWidth = 2f;
