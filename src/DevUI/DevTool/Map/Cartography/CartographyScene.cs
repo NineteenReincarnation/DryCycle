@@ -89,6 +89,11 @@ internal sealed class CartographySceneCache
 internal static class CartographySceneBuilder
 {
     internal const float TileSize = 3;
+    private const float RouteShadeStrokeTiles = 8f;
+    private const float RouteShadeExtendTiles = 2.5f;
+    private const float RouteShadeJoinTiles = 6f;
+    private const float RouteInteriorShadeStrokeTiles = 4f;
+    private const float RouteInteriorShadeJoinTiles = 4f;
 
     internal static CartographyRect Bounds(CartographyItem item, CartographySource source)
     {
@@ -437,14 +442,14 @@ internal static class CartographySceneBuilder
             {
                 CartographyPrimitive shadow =
                     Line(
-                        px - dx / length * 3.5f * TileSize,
-                        py - dy / length * 3.5f * TileSize,
-                        qx + dx / length * 3.5f * TileSize,
-                        qy + dy / length * 3.5f * TileSize,
+                        px - dx / length * RouteShadeExtendTiles * TileSize,
+                        py - dy / length * RouteShadeExtendTiles * TileSize,
+                        qx + dx / length * RouteShadeExtendTiles * TileSize,
+                        qy + dy / length * RouteShadeExtendTiles * TileSize,
                         Alpha(
                             a.ShadeColor,
                             opacity),
-                        11f * TileSize);
+                        RouteShadeStrokeTiles * TileSize);
                 shadow.PixelPerfect = true;
                 shadow.UnderRooms = true;
                 shapes.Add(shadow);
@@ -452,7 +457,11 @@ internal static class CartographySceneBuilder
                     shapes.Add(new CartographyPrimitive
                     {
                         Kind = CartographyPrimitiveKind.Fill, UnderRooms = true,
-                        Rect = new CartographyRect(qx - 4.5f * TileSize, qy - 4.5f * TileSize, 9f * TileSize, 9f * TileSize),
+                        Rect = new CartographyRect(
+                            qx - RouteShadeJoinTiles * 0.5f * TileSize,
+                            qy - RouteShadeJoinTiles * 0.5f * TileSize,
+                            RouteShadeJoinTiles * TileSize,
+                            RouteShadeJoinTiles * TileSize),
                         Color = Alpha(a.ShadeColor, opacity)
                     });
 
@@ -463,7 +472,7 @@ internal static class CartographySceneBuilder
                 if (n > 1 && n < points.Count - 1 && length > 6f * TileSize)
                 {
                     var interior = Line(px + dx / length * 3f * TileSize, py + dy / length * 3f * TileSize,
-                        qx - dx / length * 3f * TileSize, qy - dy / length * 3f * TileSize, localShade, 5f * TileSize);
+                        qx - dx / length * 3f * TileSize, qy - dy / length * 3f * TileSize, localShade, RouteInteriorShadeStrokeTiles * TileSize);
                     interior.PixelPerfect = true;
                     shapes.Add(interior);
                 }
@@ -471,7 +480,11 @@ internal static class CartographySceneBuilder
                     shapes.Add(new CartographyPrimitive
                     {
                         Kind = CartographyPrimitiveKind.Fill,
-                        Rect = new CartographyRect(px - 2.5f * TileSize, py - 2.5f * TileSize, 5f * TileSize, 5f * TileSize),
+                        Rect = new CartographyRect(
+                            px - RouteInteriorShadeJoinTiles * 0.5f * TileSize,
+                            py - RouteInteriorShadeJoinTiles * 0.5f * TileSize,
+                            RouteInteriorShadeJoinTiles * TileSize,
+                            RouteInteriorShadeJoinTiles * TileSize),
                         Color = localShade
                     });
             }
