@@ -847,6 +847,55 @@ internal static class WorldMapRetainedV2Runtime
             ", routes " +
             ConnectionResources.Count + "/" +
             readinessExpectedConnections + ".");
+
+        LogReadinessProfile();
+    }
+
+    private static void LogReadinessProfile()
+    {
+        string startupMode =
+            WorldMapPersistentRetainedCache.RestoreSnapshotLoaded
+                ? "warm-cache"
+                : "cold/no-cache";
+
+        log?.LogInfo(
+            "WorldMap profile | mode=" + startupMode +
+            " | firstSurface=" +
+            FirstSurfaceReadyMilliseconds.ToString("F0") + "ms" +
+            " | fullReady=" +
+            ViewReadinessMilliseconds.ToString("F0") + "ms" +
+            " | sourceRecovery=" +
+            MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds.ToString("F0") + "ms" +
+            " | retainedThumbs=" +
+            RoomResources.ThumbnailLoadElapsedMilliseconds.ToString("F0") + "ms" +
+            " | routes=" +
+            ConnectionResources.RouteSessionElapsedMilliseconds.ToString("F0") + "ms" +
+            " | persistentThumbHits=" +
+            RoomResources.ThumbnailPersistentHits +
+            " | persistentRouteHits=" +
+            WorldMapPersistentRetainedCache.RestoredRouteCount +
+            " | rasterReadbacks=" +
+            MapRoomGeometryPresentationHub.RasterReadbackCount +
+            " avg=" +
+            MapRoomGeometryPresentationHub.RasterReadbackAverageMilliseconds.ToString("F2") + "ms" +
+            " peak=" +
+            MapRoomGeometryPresentationHub.RasterReadbackPeakMilliseconds.ToString("F2") + "ms" +
+            " | curveLoads=" +
+            MapRoomGeometryPresentationHub.CurveLoadCount +
+            " avg=" +
+            MapRoomGeometryPresentationHub.CurveLoadAverageMilliseconds.ToString("F2") + "ms" +
+            " peak=" +
+            MapRoomGeometryPresentationHub.CurveLoadPeakMilliseconds.ToString("F2") + "ms" +
+            " | retainedPumpAvg=" +
+            RoomResources.MainThreadAverageMilliseconds.ToString("F2") + "ms" +
+            " peak=" +
+            RoomResources.MainThreadPeakMilliseconds.ToString("F2") + "ms" +
+            " | surfaceRenders=" +
+            Surface.RenderCount +
+            " avg=" +
+            Surface.AverageRenderMilliseconds.ToString("F2") + "ms" +
+            " peak=" +
+            Surface.PeakRenderMilliseconds.ToString("F2") + "ms");
     }
 
     private static double ElapsedMilliseconds(
