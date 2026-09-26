@@ -34,6 +34,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private const float DirectionMarkerCoreHalfWidth = 0.78f;
     private const float DirectionMarkerShadowHalfWidth = 1.55f;
     private const float MinimumDirectionMarkerRun = 20f;
+    private const float MaximumDirectionMarkerShift = 16f;
 
     private const float CrossingRadius = 6.4f;
     private const float CrossingRise = 4.8f;
@@ -334,6 +335,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
             colors,
             indices,
             path,
+            route.ConnectionId,
             route.Direction,
             route.DensityTier,
             shadow,
@@ -661,6 +663,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         List<Color32> colors,
         List<int> indices,
         Num.Vector2[] path,
+        string routeId,
         WorldConnectionDirection direction,
         byte densityTier,
         Color32 shadow,
@@ -692,6 +695,16 @@ internal sealed class WorldMapRetainedConnectionRenderer
         {
             return;
         }
+
+        // Parallel members of a bundle used to place their chevrons on the exact same cross-section.
+        // A small deterministic longitudinal shift keeps direction markers readable as individual
+        // route metadata rather than one dense wall of symbols.
+        point +=
+            tangent *
+            StableDirectionMarkerShift(
+                routeId,
+                straightLength,
+                densityTier);
 
         if (direction ==
             WorldConnectionDirection.Bidirectional)
@@ -794,6 +807,55 @@ internal sealed class WorldMapRetainedConnectionRenderer
         }
 
         return length > 0.001f;
+    }
+
+    private static float StableDirectionMarkerShift(
+        string routeId,
+        float straightLength,
+        byte densityTier)
+    {
+        if (string.IsNullOrEmpty(routeId) ||
+            straightLength <= MinimumDirectionMarkerRun)
+            return 0f;
+
+        float available =
+            Math.Max(
+                0f,
+                (straightLength -
+                 MinimumDirectionMarkerRun) *
+                0.34f);
+        float maxShift =
+            Math.Min(
+                MaximumDirectionMarkerShift,
+                available);
+
+        if (densityTier >= 2)
+            maxShift *= 0.65f;
+        else if (densityTier == 1)
+            maxShift *= 0.82f;
+
+        if (maxShift <= 0.5f)
+            return 0f;
+
+        uint hash = 2166136261u;
+        unchecked
+        {
+            for (int i = 0; i < routeId.Length; i++)
+            {
+                hash ^= routeId[i];
+                hash *= 16777619u;
+            }
+        }
+
+        float normalized =
+            (hash & 1023u) /
+            1023f;
+        normalized =
+            normalized * 2f -
+            1f;
+
+        return normalized *
+               maxShift;
     }
 
     private static void AddChevronAtPoint(
