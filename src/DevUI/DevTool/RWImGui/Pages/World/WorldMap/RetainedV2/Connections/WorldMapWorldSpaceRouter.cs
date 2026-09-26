@@ -73,7 +73,8 @@ internal static class WorldMapWorldSpaceRouter
         IReadOnlyList<WorldMapScene.ConnectionNode> connections,
         IReadOnlyDictionary<string, float> laneOffsets,
         IReadOnlyDictionary<string, TerminalFanout> terminalFanouts,
-        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> routingObstacles)
+        IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> routingObstacles,
+        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null)
     {
         Dictionary<string, ConnectionRouteResource> result =
             new(StringComparer.Ordinal);
@@ -140,7 +141,8 @@ internal static class WorldMapWorldSpaceRouter
             WorldMapOrthogonalRouter.BuildRoutesCore(
                 requests,
                 routingObstacles,
-                sourceObstaclesAlreadyInflated: true);
+                sourceObstaclesAlreadyInflated: true,
+                occupancySeedPaths: occupancySeedPaths);
         int count = Math.Min(accepted.Count, routes.Length);
         for (int i = 0; i < count; i++)
         {
