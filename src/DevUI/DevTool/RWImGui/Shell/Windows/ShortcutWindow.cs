@@ -36,8 +36,8 @@ internal static class ShortcutWindow
     private static readonly Num.Vector4 OrbBorder = new(0.60f, 0.76f, 0.84f, 0.92f);
     private static readonly Num.Vector4 OrbAccent = new(0.42f, 0.72f, 0.90f, 0.92f);
     private static readonly Num.Vector4 OrbAccentHot = new(0.67f, 0.88f, 1.00f, 1f);
-    private static readonly Num.Vector4 OrbPetal = new(0.84f, 0.92f, 0.95f, 0.96f);
-    private static readonly Num.Vector4 OrbPetalShadow = new(0.18f, 0.31f, 0.38f, 0.86f);
+    private static readonly Num.Vector4 OrbGlyph = new(0.84f, 0.92f, 0.95f, 0.96f);
+    private static readonly Num.Vector4 OrbGlyphShadow = new(0.18f, 0.31f, 0.38f, 0.86f);
 
     private static readonly Num.Vector4 TooltipBackground = new(0.025f, 0.038f, 0.052f, 0.96f);
     private static readonly Num.Vector4 TooltipBorder = new(0.30f, 0.49f, 0.62f, 0.88f);
@@ -211,7 +211,7 @@ internal static class ShortcutWindow
         ImGui.SetNextWindowBgAlpha(0f);
 
         // The radial surface is a transparent draw host. Explicitly zero the window border as
-        // well as its background so the collapsed flower reads as a real circular control rather
+        // well as its background so the collapsed shortcut control reads as a real circular control rather
         // than a circle trapped inside an invisible ImGui rectangle.
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Num.Vector2.Zero);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
@@ -980,8 +980,8 @@ internal static class ShortcutWindow
                     : 1f;
         float liveRadius = radius * pressScale;
 
-        // Soft halo first: the button should feel detached from the room without turning into a
-        // glowing sticker. Hover and shortcut feedback both reuse the same restrained halo.
+        // Soft halo first: keep the control separated from the room without turning it into a
+        // glowing sticker. Hover and shortcut feedback share the same restrained halo.
         float haloAlpha =
             hovered
                 ? 0.19f
@@ -1008,8 +1008,8 @@ internal static class ShortcutWindow
             ImGui.GetColorU32(hovered ? OrbFillHover : OrbFill),
             40);
 
-        // Two concentric rims give the control a machined/glass edge. The inner rim gradually
-        // becomes more visible while the palette is open, tying the collapsed flower to its rings.
+        // Two concentric rims give the control a machined/glass edge. The inner rim becomes a
+        // little stronger while the shortcut palette is open so both states still feel related.
         draw.AddCircle(
             center,
             liveRadius,
@@ -1029,12 +1029,13 @@ internal static class ShortcutWindow
             40,
             1.1f);
 
-        // Five restrained rim cuts echo the five petals without the old dotted gear/toothed look.
-        for (int i = 0; i < 5; i++)
+        // Four cardinal rim notches make the button read as a radial control without introducing a
+        // decorative motif. They also align visually with the expanded shortcut rings.
+        for (int i = 0; i < 4; i++)
         {
             float angle =
                 -(float)Math.PI * 0.5f +
-                i * ((float)Math.PI * 2f / 5f);
+                i * ((float)Math.PI * 0.5f);
             Num.Vector2 direction = Direction(angle);
             Num.Vector2 inner = center + direction * (liveRadius - 1.5f);
             Num.Vector2 outer = center + direction * (liveRadius + 3.5f);
@@ -1048,45 +1049,63 @@ internal static class ShortcutWindow
                 hovered ? 2.0f : 1.5f);
         }
 
-        // Five-petal plum blossom command mark. Overlapping petals produce a compact flower at every
-        // supported scale; a dark seed in the middle keeps the silhouette crisp over bright rooms.
-        float petalOrbit = liveRadius * 0.165f;
-        float petalRadius = Math.Max(3.2f, liveRadius * 0.145f);
-        Num.Vector4 petalColor = hovered ? OrbAccentHot : OrbPetal;
-        for (int i = 0; i < 5; i++)
+        // Minimal shortcut-hub glyph: a central plate plus four short directional strokes.
+        float glyphRadius =
+            Math.Max(
+                5.0f,
+                liveRadius * 0.19f);
+        float strokeInner =
+            glyphRadius + 2.6f;
+        float strokeOuter =
+            Math.Max(
+                strokeInner + 3.4f,
+                liveRadius * 0.39f);
+        Num.Vector4 glyphColor =
+            hovered
+                ? OrbAccentHot
+                : OrbGlyph;
+
+        draw.AddCircleFilled(
+            center + new Num.Vector2(0.8f, 1.0f),
+            glyphRadius + 0.6f,
+            ImGui.GetColorU32(WithAlpha(OrbGlyphShadow, 0.72f)),
+            20);
+        draw.AddCircleFilled(
+            center,
+            glyphRadius,
+            ImGui.GetColorU32(glyphColor),
+            20);
+
+        for (int i = 0; i < 4; i++)
         {
             float angle =
                 -(float)Math.PI * 0.5f +
-                i * ((float)Math.PI * 2f / 5f);
-            Num.Vector2 petalCenter =
-                center +
-                Direction(angle) *
-                petalOrbit;
+                i * ((float)Math.PI * 0.5f);
+            Num.Vector2 direction =
+                Direction(angle);
 
-            draw.AddCircleFilled(
-                petalCenter + new Num.Vector2(0.8f, 1.0f),
-                petalRadius,
-                ImGui.GetColorU32(WithAlpha(OrbPetalShadow, 0.72f)),
-                18);
-            draw.AddCircleFilled(
-                petalCenter,
-                petalRadius,
-                ImGui.GetColorU32(petalColor),
-                18);
+            draw.AddLine(
+                center + direction * strokeInner,
+                center + direction * strokeOuter,
+                ImGui.GetColorU32(
+                    WithAlpha(
+                        glyphColor,
+                        hovered ? 1f : 0.88f)),
+                hovered ? 2.4f : 2.0f);
         }
 
-        float seedRadius = Math.Max(2.7f, liveRadius * 0.085f);
+        float centerDotRadius =
+            Math.Max(
+                1.8f,
+                glyphRadius * 0.34f);
         draw.AddCircleFilled(
             center,
-            seedRadius,
-            ImGui.GetColorU32(hovered ? OrbFillHover : OrbFill),
-            18);
-        draw.AddCircle(
-            center,
-            seedRadius + 0.6f,
-            ImGui.GetColorU32(WithAlpha(OrbAccentHot, hovered ? 0.92f : 0.58f)),
-            18,
-            1.0f);
+            centerDotRadius,
+            ImGui.GetColorU32(
+                hovered
+                    ? OrbFillHover
+                    : OrbFill),
+            14);
     }
 
     private static void DrawRing(
@@ -2002,8 +2021,8 @@ internal static class ShortcutWindow
         ImGui.TextColored(
             TooltipTitle,
             DevToolUiSettings.T(
-                "快捷键梅花轮",
-                "SHORTCUT BLOSSOM"));
+                "快捷键轮盘",
+                "SHORTCUT WHEEL"));
         ImGui.SameLine();
         ImGui.TextColored(
             TooltipHint,
