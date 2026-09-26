@@ -706,6 +706,13 @@ internal static class WorldMapRetainedV2Runtime
             ConnectionResources.RouteBuildPeakMilliseconds.ToString("F2") +
             " ms");
         ImGui.TextUnformatted(
+            "route readiness: " +
+            (ConnectionResources.RouteSessionComplete ? "complete " : "active ") +
+            ConnectionResources.RouteSessionElapsedMilliseconds.ToString("F0") +
+            " ms | " +
+            ConnectionResources.Count + "/" +
+            ConnectionResources.RouteSessionExpected);
+        ImGui.TextUnformatted(
             "corridor layout: " + ConnectionResources.CorridorLayoutCount +
             " | avg " +
             ConnectionResources.CorridorLayoutAverageMilliseconds.ToString("F2") +
