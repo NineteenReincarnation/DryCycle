@@ -703,7 +703,7 @@ internal static class WorldMapOrthogonalRouter
 
             if (candidate == null ||
                 candidate.Length < 2 ||
-                !CompactRouteClear(
+                !RouteClear(
                     candidate,
                     request.StartRoom,
                     request.EndRoom,
@@ -768,30 +768,6 @@ internal static class WorldMapOrthogonalRouter
         }
 
         return penalty;
-    }
-
-    private static bool CompactRouteClear(
-        Num.Vector2[] points,
-        int startRoom,
-        int endRoom,
-        IReadOnlyList<Obstacle> obstacles)
-    {
-        for (int p = 0; p < points.Length - 1; p++)
-        {
-            Num.Vector2 a = points[p];
-            Num.Vector2 b = points[p + 1];
-            for (int i = 0; i < obstacles.Count; i++)
-            {
-                Obstacle obstacle = obstacles[i];
-                if (obstacle.RoomIndex == startRoom ||
-                    obstacle.RoomIndex == endRoom)
-                    continue;
-                if (SegmentIntersectsRect(a, b, obstacle.Min, obstacle.Max))
-                    return false;
-            }
-        }
-
-        return true;
     }
 
     private static Num.Vector2 EscapeOutsideRoom(
