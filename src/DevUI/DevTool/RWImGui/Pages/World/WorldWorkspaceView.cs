@@ -214,7 +214,10 @@ internal static class WorldWorkspaceView
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(700f, 420f),
             new Num.Vector2(Math.Max(700f, display.X - 8f), Math.Max(420f, display.Y - 8f)));
-        ImGui.SetNextWindowBgAlpha(PlayerMapWorkspaceIntegration.CartographyActive ? 1f : DevToolUiSettings.WindowAlpha);
+        // Cartography uses the same translucent workspace surface as World Map. Its canvas
+        // child is already transparent, so forcing the parent window to alpha 1 made the editor
+        // look like an opaque black sheet even though exported room/map backgrounds stay unchanged.
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("世界工作区###DevToolWorldWorkspace", "World Workspace###DevToolWorldWorkspace"),
