@@ -120,7 +120,6 @@ internal static class CartographyDrawing
                     points[pointIndex],
                     curve.Kind,
                     color,
-                    wall,
                     waterColor);
             }
 
@@ -140,7 +139,6 @@ internal static class CartographyDrawing
                     points[0],
                     curve.Kind,
                     color,
-                    wall,
                     waterColor);
             }
         }
@@ -175,7 +173,6 @@ internal static class CartographyDrawing
         EditorMapPointSnapshot b,
         EditorMapGeometryKind kind,
         uint baseColor,
-        uint wall,
         uint waterColor)
     {
         int x0 = offset + (int)Math.Round(a.X * 3f);
@@ -205,7 +202,6 @@ internal static class CartographyDrawing
                 y0,
                 kind,
                 baseColor,
-                wall,
                 waterColor);
 
             if (x0 == x1 && y0 == y1)
@@ -239,7 +235,6 @@ internal static class CartographyDrawing
         int y,
         EditorMapGeometryKind kind,
         uint baseColor,
-        uint wall,
         uint waterColor)
     {
         if (x < 0 || y < 0 || x >= rasterWidth || y >= rasterHeight)
