@@ -40,7 +40,9 @@ internal sealed class WorldMapConnectionResourceStore
     private readonly List<WorldMapScene.ConnectionNode> buildBatch = new();
     private readonly List<System.Numerics.Vector2[]> routeOccupancySeeds = new();
     private readonly List<System.Numerics.Vector2[]> routeAvoidanceSeeds = new();
-    private readonly HashSet<string> corridorRerouteAttempted =
+    private const byte MaxCorridorRerouteAttempts = 2;
+
+    private readonly Dictionary<string, byte> corridorRerouteAttempts =
         new(StringComparer.Ordinal);
     private readonly Dictionary<int, WorldMapOrthogonalRouter.Obstacle> routingObstacles =
         new();
@@ -107,7 +109,7 @@ internal sealed class WorldMapConnectionResourceStore
 
         foreach (string id in dirty.RemovedConnections)
         {
-            corridorRerouteAttempted.Remove(id);
+            corridorRerouteAttempts.Remove(id);
 
             if (routes.Remove(id))
             {
@@ -128,7 +130,7 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (dirty.FullRebuild || dirty.TopologyChanged)
         {
-            corridorRerouteAttempted.Clear();
+            corridorRerouteAttempts.Clear();
             dependencies.Rebuild(scene);
             RebuildLanePlan(scene, roomResources);
             RebuildRoutingObstacles(scene, roomResources);
@@ -140,16 +142,16 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (dirty.RoomPorts.Count > 0)
         {
-            corridorRerouteAttempted.Clear();
+            corridorRerouteAttempts.Clear();
             RebuildTerminalFanouts(scene, roomResources);
         }
 
         if (dirty.RoomTransforms.Count > 0)
-            corridorRerouteAttempted.Clear();
+            corridorRerouteAttempts.Clear();
 
         foreach (string id in dirty.Connections)
         {
-            corridorRerouteAttempted.Remove(id);
+            corridorRerouteAttempts.Remove(id);
             Enqueue(id);
         }
 
@@ -336,7 +338,7 @@ internal sealed class WorldMapConnectionResourceStore
         buildBatch.Clear();
         routeOccupancySeeds.Clear();
         routeAvoidanceSeeds.Clear();
-        corridorRerouteAttempted.Clear();
+        corridorRerouteAttempts.Clear();
         routingObstacles.Clear();
         routingObstacleSnapshot.Clear();
         routingObstacleSnapshotDirty = true;
@@ -490,9 +492,19 @@ internal sealed class WorldMapConnectionResourceStore
                 routeIds[i];
 
             if (string.IsNullOrEmpty(id) ||
-                !routes.ContainsKey(id) ||
-                !corridorRerouteAttempted.Add(id))
+                !routes.ContainsKey(id))
                 continue;
+
+            corridorRerouteAttempts.TryGetValue(
+                id,
+                out byte attempts);
+
+            if (attempts >=
+                MaxCorridorRerouteAttempts)
+                continue;
+
+            corridorRerouteAttempts[id] =
+                (byte)(attempts + 1);
 
             Enqueue(id);
             scheduled++;
@@ -542,11 +554,26 @@ internal sealed class WorldMapConnectionResourceStore
                 // corridor is supplied as strong soft avoidance rather than as a hard obstacle, so
                 // the router actively searches another corridor but can still fall back here if no
                 // valid alternative exists.
-                if (corridorRerouteAttempted.Contains(
-                        pair.Key))
+                if (corridorRerouteAttempts.TryGetValue(
+                        pair.Key,
+                        out byte attempts) &&
+                    attempts > 0)
                 {
-                    routeAvoidanceSeeds.Add(
-                        points);
+                    // A second retry applies stronger soft pressure to the corridor that already
+                    // failed once. Repeating the seed is intentional: the router's occupancy model
+                    // accumulates weight without turning the old path into a hard obstacle.
+                    int copies =
+                        Math.Max(
+                            1,
+                            attempts);
+
+                    for (int copy = 0;
+                         copy < copies;
+                         copy++)
+                    {
+                        routeAvoidanceSeeds.Add(
+                            points);
+                    }
                 }
 
                 continue;
