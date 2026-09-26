@@ -53,9 +53,31 @@ internal static partial class CartographyView
 
     internal static void Leave()
     {
-        LeaveDrafts();
+        FlushAuthoringForSave();
         imageBrowserOpen = false;
+        CartographyRuntime.SetFrontendSaveBarrier(null);
         CartographyRuntime.SetActive(false);
+    }
+
+    private static void FlushAuthoringForSave()
+    {
+        // A resize/move of the export frame is normally committed on mouse release. Ctrl+S can be
+        // pressed while the pointer is still down, so materialize the preview rectangle before the
+        // generic draft/gesture flush rather than silently dropping the visible author state.
+        if (exportAreaDrag != ExportAreaDrag.None &&
+            observed?.Document != null)
+        {
+            styleDraft ??= observed.Document.Clone();
+            CartographyOptions options = styleDraft.Options;
+            options.ExportArea = true;
+            options.AreaX = exportAreaPreviewRect.X;
+            options.AreaY = exportAreaPreviewRect.Y;
+            options.AreaWidth = Math.Max(1f, exportAreaPreviewRect.Z);
+            options.AreaHeight = Math.Max(1f, exportAreaPreviewRect.W);
+            styleDirty = true;
+        }
+
+        LeaveDrafts();
     }
 
     private static void FinishGesture()
@@ -76,6 +98,10 @@ internal static partial class CartographyView
 
     internal static unsafe void Draw(EditorPresentationSnapshot editor)
     {
+        // Register every visible frame so global Ctrl+S reaches the current frontend-local drafts
+        // before CartographyRuntime serializes the retained document.
+        CartographyRuntime.SetFrontendSaveBarrier(FlushAuthoringForSave);
+
         // Layer names, room/subregion names and author text may be Chinese in either UI language.
         ImGuiIOPtr io = ImGui.GetIO();
         float oldScale = io.FontGlobalScale;
@@ -699,10 +725,10 @@ internal static partial class CartographyView
     {
         if (!ImGui.CollapsingHeader(T("保存与导出##AtlasExport", "SAVE & EXPORT##AtlasExport"), ImGuiTreeNodeFlags.DefaultOpen)) return;
         styleDraft ??= snapshot.Document.Clone();
-        if (ImGui.Button(snapshot.Dirty ? T("保存制图 *", "Save project *") : T("保存制图", "Save project"))) { CommitDraft(); Send(CartographyCommandKind.Save); }
+        if (ImGui.Button(snapshot.Dirty ? T("保存制图 *", "Save project *") : T("保存制图", "Save project"))) { FlushAuthoringForSave(); Send(CartographyCommandKind.Save); }
         ImGui.TextWrapped(snapshot.ProjectPath);
         ImGui.SetNextItemWidth(-1); ImGui.InputText("##AtlasCopyPath", ref copyPath, 1024);
-        if (ImGui.SmallButton(T("另存项目副本##AtlasSaveCopy", "Save project copy##AtlasSaveCopy"))) Send(CartographyCommandKind.Save, command => command.Path = copyPath);
+        if (ImGui.SmallButton(T("另存项目副本##AtlasSaveCopy", "Save project copy##AtlasSaveCopy"))) { FlushAuthoringForSave(); Send(CartographyCommandKind.Save, command => command.Path = copyPath); }
         if (ImGui.SmallButton(T("打开此项目（先保存当前）##AtlasOpen", "Open this project (save current first)##AtlasOpen"))) Send(CartographyCommandKind.Open, command => command.Path = copyPath);
         ImGui.Separator();
         int choice = (int)format;
