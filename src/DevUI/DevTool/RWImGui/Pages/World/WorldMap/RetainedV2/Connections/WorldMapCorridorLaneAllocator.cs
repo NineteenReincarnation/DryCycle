@@ -111,6 +111,7 @@ internal static class WorldMapCorridorLaneAllocator
     private const float PreferredLaneSpacing = 10f;
     private const float MinimumLaneSpacing = 5.5f;
     private const float TargetLaneSpan = 72f;
+    private const float MinimumReadableGroupScale = 0.55f;
 
     // Dense bundles are visually split into stable banks. The lane order never changes; a wider
     // gutter every eight lanes gives the eye a grouping landmark without endpoint codes/colors.
@@ -253,17 +254,16 @@ internal static class WorldMapCorridorLaneAllocator
             unchecked { storeRevision++; }
         }
 
-        // A zero scale means the current corridor physically cannot preserve even the narrowest
-        // readable lane bundle without intersecting a room obstacle. Do not silently accept a
-        // centreline collapse: surface those routes to the resource store for one congestion-aware
-        // reroute pass. If no alternative corridor exists, the store will keep the safe fallback
-        // after that bounded retry rather than loop forever.
+        // Severe compression is already a readability failure before it reaches a literal
+        // centreline collapse. If a bundle drops below the minimum readable scale, surface those
+        // routes to the resource store for one congestion-aware reroute pass. If no alternative
+        // corridor exists, the store keeps the safe compressed fallback after that bounded retry.
         HashSet<string> reroute =
             new(StringComparer.Ordinal);
 
         foreach (KeyValuePair<int, float> pair in groupScales)
         {
-            if (pair.Value > 0.001f ||
+            if (pair.Value >= MinimumReadableGroupScale ||
                 !planSet.GroupRoutes.TryGetValue(
                     pair.Key,
                     out List<string> groupRoutes) ||
