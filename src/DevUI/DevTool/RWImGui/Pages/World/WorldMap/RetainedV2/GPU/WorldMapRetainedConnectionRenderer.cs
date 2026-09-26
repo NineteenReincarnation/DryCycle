@@ -876,43 +876,6 @@ internal sealed class WorldMapRetainedConnectionRenderer
         indices.Add(first + 3);
     }
 
-    private static bool TryPointAtFraction(
-        Num.Vector2[] path,
-        float fraction,
-        out Num.Vector2 point,
-        out Num.Vector2 tangent)
-    {
-        point = default;
-        tangent = Num.Vector2.UnitX;
-        float total = PathLength(path);
-        if (total <= 0.001f) return false;
-
-        float target = total * Math.Max(0f, Math.Min(1f, fraction));
-        float accumulated = 0f;
-
-        for (int i = 0; i < path.Length - 1; i++)
-        {
-            Num.Vector2 delta = path[i + 1] - path[i];
-            float length = delta.Length();
-            if (length <= 0.001f) continue;
-
-            if (accumulated + length >= target)
-            {
-                float t = (target - accumulated) / length;
-                point = Num.Vector2.Lerp(path[i], path[i + 1], t);
-                tangent = delta / length;
-                return true;
-            }
-
-            accumulated += length;
-        }
-
-        Num.Vector2 lastDelta = path[path.Length - 1] - path[path.Length - 2];
-        tangent = Normalize(lastDelta);
-        point = path[path.Length - 1];
-        return tangent.LengthSquared() > 0f;
-    }
-
     private static float PathLength(Num.Vector2[] path)
     {
         float length = 0f;
