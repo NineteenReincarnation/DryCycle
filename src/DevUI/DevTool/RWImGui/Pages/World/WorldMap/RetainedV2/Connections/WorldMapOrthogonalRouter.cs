@@ -194,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 20;
+    private const int RoutingPolicyVersion = 21;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -814,15 +814,58 @@ internal static class WorldMapOrthogonalRouter
         route = null;
         Num.Vector2 a = NearBoundary(request.Start, startDirection, request.StartRoomMin, request.StartRoomMax);
         Num.Vector2 b = NearBoundary(request.End, endDirection, request.EndRoomMin, request.EndRoomMax);
-        float midX = (a.X + b.X) * 0.5f + request.LaneOffset;
-        float midY = (a.Y + b.Y) * 0.5f + request.LaneOffset;
-        var candidates = new List<Num.Vector2[]>(5);
-        if (Math.Abs(a.X - b.X) < 0.01f || Math.Abs(a.Y - b.Y) < 0.01f)
+        float midX = (a.X + b.X) * 0.5f;
+        float midY = (a.Y + b.Y) * 0.5f;
+        bool laneRequested = Math.Abs(request.LaneOffset) > 0.01f;
+        bool horizontalFlow =
+            Math.Abs(startDirection.X) + Math.Abs(endDirection.X) >
+            Math.Abs(startDirection.Y) + Math.Abs(endDirection.Y);
+        if (Math.Abs(
+                (Math.Abs(startDirection.X) + Math.Abs(endDirection.X)) -
+                (Math.Abs(startDirection.Y) + Math.Abs(endDirection.Y))) < 0.01f)
+            horizontalFlow = Math.Abs(b.X - a.X) >= Math.Abs(b.Y - a.Y);
+
+        var candidates = new List<Num.Vector2[]>(6);
+        if (!laneRequested &&
+            (Math.Abs(a.X - b.X) < 0.01f || Math.Abs(a.Y - b.Y) < 0.01f))
             candidates.Add(new[] { a, b });
-        candidates.Add(new[] { a, new Num.Vector2(midX, a.Y), new Num.Vector2(midX, b.Y), b });
-        candidates.Add(new[] { a, new Num.Vector2(a.X, midY), new Num.Vector2(b.X, midY), b });
-        candidates.Add(new[] { a, new Num.Vector2(b.X, a.Y), b });
-        candidates.Add(new[] { a, new Num.Vector2(a.X, b.Y), b });
+
+        if (laneRequested)
+        {
+            // LaneOffset is a corridor identity, not a hint. The previous fast path still offered
+            // the shorter centreline candidate, so parallel links collapsed on top of one another.
+            // Shift only the axis perpendicular to the dominant flow and keep the real socket
+            // anchors at both ends.
+            if (horizontalFlow)
+            {
+                float laneY = midY + request.LaneOffset;
+                candidates.Add(new[]
+                {
+                    a,
+                    new Num.Vector2(a.X, laneY),
+                    new Num.Vector2(b.X, laneY),
+                    b
+                });
+            }
+            else
+            {
+                float laneX = midX + request.LaneOffset;
+                candidates.Add(new[]
+                {
+                    a,
+                    new Num.Vector2(laneX, a.Y),
+                    new Num.Vector2(laneX, b.Y),
+                    b
+                });
+            }
+        }
+        else
+        {
+            candidates.Add(new[] { a, new Num.Vector2(midX, a.Y), new Num.Vector2(midX, b.Y), b });
+            candidates.Add(new[] { a, new Num.Vector2(a.X, midY), new Num.Vector2(b.X, midY), b });
+            candidates.Add(new[] { a, new Num.Vector2(b.X, a.Y), b });
+            candidates.Add(new[] { a, new Num.Vector2(a.X, b.Y), b });
+        }
 
         float best = float.MaxValue;
         foreach (Num.Vector2[] middle in candidates)
