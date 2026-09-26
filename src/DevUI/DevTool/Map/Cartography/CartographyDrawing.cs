@@ -50,225 +50,229 @@ internal static class CartographyDrawing
             for(int yy=0;yy<3;yy++)for(int xx=0;xx<3;xx++)pixels[(y*3+yy)*width+x*3+xx]=color;
         }
 
-        PaintCurvedTerrain(
+        CartographyRaster raster = new(width, height, pixels);
+        int curveOffset = 0;
+        if (d.Options.Borders)
+        {
+            curveOffset = (int)Math.Ceiling(d.Options.BorderSize);
+            raster = Outline(raster, d.Options.BorderSize, wall);
+        }
+
+        // Continuous terrain is a surface boundary in the map, not a filled rectangular band.
+        // Draw the authored spline itself after room outlining so the room border cannot dilate the
+        // curve into a thick block. This also keeps ordinary room geometry and curved geometry
+        // visually consistent: CurvedSlope uses Solid color, LocalTerrain uses Structure color.
+        return PaintCurvedTerrainCurves(
             d,
             a,
             room,
             kinds,
             water,
-            pixels,
-            width,
-            height,
+            raster,
+            curveOffset,
             bg,
             wall,
             waterColor);
-
-        CartographyRaster raster=new(width,height,pixels);
-        return d.Options.Borders?Outline(raster,d.Options.BorderSize,wall):raster;
     }
 
-    private static void PaintCurvedTerrain(
+    private static CartographyRaster PaintCurvedTerrainCurves(
         CartographyDocument document,
         CartographyAppearance appearance,
         CartographyRoomSource room,
         byte[] kinds,
         bool[] water,
-        uint[] pixels,
-        int width,
-        int height,
+        CartographyRaster source,
+        int offset,
         uint background,
         uint wall,
         uint waterColor)
     {
-        EditorMapRectSnapshot[] fills =
-            room.CurvedTerrainFills ??
-            Array.Empty<EditorMapRectSnapshot>();
+        EditorMapPolylineSnapshot[] curves =
+            room.CurvedTerrainCurves ??
+            Array.Empty<EditorMapPolylineSnapshot>();
+        if (curves.Length == 0)
+            return source;
 
-        if (fills.Length == 0)
-            return;
-
-        int roomWidth =
-            room.Width;
-        int roomHeight =
-            room.Height;
-
-        for (int i = 0;
-             i < fills.Length;
-             i++)
+        uint[] pixels = (uint[])source.Pixels.Clone();
+        for (int curveIndex = 0; curveIndex < curves.Length; curveIndex++)
         {
-            EditorMapRectSnapshot fill =
-                fills[i];
-
-            if (fill.Width <= 0f ||
-                fill.Height <= 0f)
+            EditorMapPolylineSnapshot curve = curves[curveIndex];
+            EditorMapPointSnapshot[] points =
+                curve?.Points ??
+                Array.Empty<EditorMapPointSnapshot>();
+            if (points.Length < 2)
                 continue;
 
-            // Continuous terrain changes geometry only. It deliberately uses the exact ordinary
-            // terrain material color instead of introducing a separate curve/structure tint.
-            uint baseColor =
-                wall;
-
-            int minX =
-                Math.Max(
-                    0,
-                    (int)Math.Floor(
-                        fill.X * 3f));
-            int maxX =
-                Math.Min(
-                    width - 1,
-                    (int)Math.Ceiling(
-                        (fill.X +
-                         fill.Width) *
-                        3f) -
-                    1);
-            int minY =
-                Math.Max(
-                    0,
-                    (int)Math.Floor(
-                        (roomHeight -
-                         (fill.Y +
-                          fill.Height)) *
-                        3f));
-            int maxY =
-                Math.Min(
-                    height - 1,
-                    (int)Math.Ceiling(
-                        (roomHeight -
-                         fill.Y) *
-                        3f) -
-                    1);
-
-            if (maxX < minX ||
-                maxY < minY)
-                continue;
-
-            bool solid =
-                fill.Kind ==
-                    EditorMapGeometryKind.Solid ||
-                fill.Kind ==
-                    EditorMapGeometryKind.CurvedSlope;
-
-            for (int py = minY;
-                 py <= maxY;
-                 py++)
+            uint color = CurveTerrainColor(curve.Kind, background, wall);
+            for (int pointIndex = 1; pointIndex < points.Length; pointIndex++)
             {
-                float tileY =
-                    roomHeight -
-                    (py + 0.5f) /
-                    3f;
+                DrawCurveSegment(
+                    pixels,
+                    source.Width,
+                    source.Height,
+                    room,
+                    kinds,
+                    water,
+                    appearance,
+                    document,
+                    offset,
+                    points[pointIndex - 1],
+                    points[pointIndex],
+                    curve.Kind,
+                    color,
+                    wall,
+                    waterColor);
+            }
 
-                if (tileY < fill.Y ||
-                    tileY >
-                        fill.Y +
-                        fill.Height)
-                    continue;
+            if (curve.Closed && points.Length > 2)
+            {
+                DrawCurveSegment(
+                    pixels,
+                    source.Width,
+                    source.Height,
+                    room,
+                    kinds,
+                    water,
+                    appearance,
+                    document,
+                    offset,
+                    points[points.Length - 1],
+                    points[0],
+                    curve.Kind,
+                    color,
+                    wall,
+                    waterColor);
+            }
+        }
 
-                int tileRow =
-                    Math.Max(
-                        0,
-                        Math.Min(
-                            roomHeight - 1,
-                            py / 3));
+        return new CartographyRaster(source.Width, source.Height, pixels);
+    }
 
-                for (int px = minX;
-                     px <= maxX;
-                     px++)
-                {
-                    float tileX =
-                        (px + 0.5f) /
-                        3f;
+    private static uint CurveTerrainColor(
+        EditorMapGeometryKind kind,
+        uint background,
+        uint wall) =>
+        kind switch
+        {
+            // Same palette rules as ordinary room tiles: Solid is wall; Structure is the
+            // 35%-background blend used by kind==3 in Room().
+            EditorMapGeometryKind.LocalTerrain => Blend(wall, background, .35f),
+            EditorMapGeometryKind.CurvedSlope => wall,
+            _ => wall
+        };
 
-                    if (tileX < fill.X ||
-                        tileX >
-                            fill.X +
-                            fill.Width)
-                        continue;
+    private static void DrawCurveSegment(
+        uint[] pixels,
+        int rasterWidth,
+        int rasterHeight,
+        CartographyRoomSource room,
+        byte[] kinds,
+        bool[] water,
+        CartographyAppearance appearance,
+        CartographyDocument document,
+        int offset,
+        EditorMapPointSnapshot a,
+        EditorMapPointSnapshot b,
+        EditorMapGeometryKind kind,
+        uint baseColor,
+        uint wall,
+        uint waterColor)
+    {
+        int x0 = offset + (int)Math.Round(a.X * 3f);
+        int y0 = offset + (int)Math.Round((room.Height - a.Y) * 3f);
+        int x1 = offset + (int)Math.Round(b.X * 3f);
+        int y1 = offset + (int)Math.Round((room.Height - b.Y) * 3f);
 
-                    int tileColumn =
-                        Math.Max(
-                            0,
-                            Math.Min(
-                                roomWidth - 1,
-                                px / 3));
-                    int tileIndex =
-                        tileRow *
-                        roomWidth +
-                        tileColumn;
+        int dx = Math.Abs(x1 - x0);
+        int sx = x0 < x1 ? 1 : -1;
+        int dy = -Math.Abs(y1 - y0);
+        int sy = y0 < y1 ? 1 : -1;
+        int error = dx + dy;
 
-                    // Shortcut mouths and transport markers remain presentation overlays just like
-                    // they do on ordinary terrain; continuous terrain must not paint over them.
-                    if (kinds[tileIndex] >= 4)
-                        continue;
+        while (true)
+        {
+            PaintCurvePixel(
+                pixels,
+                rasterWidth,
+                rasterHeight,
+                room,
+                kinds,
+                water,
+                appearance,
+                document,
+                offset,
+                x0,
+                y0,
+                kind,
+                baseColor,
+                wall,
+                waterColor);
 
-                    uint color =
-                        baseColor;
+            if (x0 == x1 && y0 == y1)
+                break;
 
-                    bool wet =
-                        appearance.WaterLevel == -2
-                            ? water[tileIndex]
-                            : appearance.WaterLevel >= 0 &&
-                              roomHeight -
-                                  1 -
-                                  tileRow <=
-                              appearance.WaterLevel;
-
-                    if (wet &&
-                        (!solid ||
-                         appearance.WaterFront))
-                    {
-                        color =
-                            Blend(
-                                color,
-                                waterColor,
-                                document.Options.WaterOpacity);
-                    }
-
-                    // Match the ordinary terrain death-pit fade. This is not a curve-specific
-                    // effect; it is the same room presentation rule sampled at the curve pixel.
-                    if (appearance.Deathpit &&
-                        tileRow >=
-                            roomHeight - 5 &&
-                        IsAir(
-                            kinds,
-                            roomWidth,
-                            roomHeight,
-                            tileColumn,
-                            roomHeight - 1))
-                    {
-                        color =
-                            Blend(
-                                wall,
-                                color,
-                                (roomHeight -
-                                 tileRow -
-                                 0.5f) /
-                                5f);
-                    }
-
-                    pixels[
-                        py *
-                        width +
-                        px] =
-                        color;
-                }
+            int doubled = error * 2;
+            if (doubled >= dy)
+            {
+                error += dy;
+                x0 += sx;
+            }
+            if (doubled <= dx)
+            {
+                error += dx;
+                y0 += sy;
             }
         }
     }
 
-    private static bool IsAir(
+    private static void PaintCurvePixel(
+        uint[] pixels,
+        int rasterWidth,
+        int rasterHeight,
+        CartographyRoomSource room,
         byte[] kinds,
-        int width,
-        int height,
+        bool[] water,
+        CartographyAppearance appearance,
+        CartographyDocument document,
+        int offset,
         int x,
-        int y) =>
-        x >= 0 &&
-        y >= 0 &&
-        x < width &&
-        y < height &&
-        kinds[
-            y *
-            width +
-            x] != 2;
+        int y,
+        EditorMapGeometryKind kind,
+        uint baseColor,
+        uint wall,
+        uint waterColor)
+    {
+        if (x < 0 || y < 0 || x >= rasterWidth || y >= rasterHeight)
+            return;
+
+        int roomX = x - offset;
+        int roomY = y - offset;
+        if (roomX < 0 || roomY < 0 || roomX >= room.Width * 3 || roomY >= room.Height * 3)
+            return;
+
+        int tileColumn = Math.Max(0, Math.Min(room.Width - 1, roomX / 3));
+        int tileRow = Math.Max(0, Math.Min(room.Height - 1, roomY / 3));
+        int tileIndex = tileRow * room.Width + tileColumn;
+
+        // Preserve shortcut/transport markers exactly as ordinary terrain rendering does.
+        if (kinds[tileIndex] >= 4)
+            return;
+
+        uint color = baseColor;
+        bool solid =
+            kind == EditorMapGeometryKind.CurvedSlope ||
+            kind == EditorMapGeometryKind.Solid;
+        bool wet =
+            appearance.WaterLevel == -2
+                ? water[tileIndex]
+                : appearance.WaterLevel >= 0 &&
+                  room.Height - 1 - tileRow <= appearance.WaterLevel;
+
+        if (wet && (!solid || appearance.WaterFront))
+            color = Blend(color, waterColor, document.Options.WaterOpacity);
+
+        pixels[y * rasterWidth + x] = color;
+    }
     internal static CartographyRaster Outline(CartographyRaster raster,float size,uint color)
     {
         int radius=(int)Math.Ceiling(size);if(radius<=0)return raster;
