@@ -95,8 +95,10 @@ public static partial class MapRenderIsolationTests
             var lanePath = (Num.Vector2[])Get(laneRoutes.GetValue(i), "Points");
             Check(lanePath[0] == new Num.Vector2(75, 50) && lanePath[lanePath.Length - 1] == new Num.Vector2(149, 50),
                 "Parallel fast routes retain the real socket anchors.");
-            Check(!lanePath.Zip(lanePath.Skip(1), (a, b) => Num.Vector2.Dot(b - a, i > 0 ? a - lanePath[Math.Max(0, Array.IndexOf(lanePath, a) - 1)] : Num.Vector2.Zero)).Any(v => v < -0.01f),
-                "Parallel fast routes do not reverse direction.");
+            bool reverses = false;
+            for (int p = 1; p + 1 < lanePath.Length; p++)
+                reverses |= Num.Vector2.Dot(lanePath[p] - lanePath[p - 1], lanePath[p + 1] - lanePath[p]) < -0.01f;
+            Check(!reverses, "Parallel fast routes do not reverse direction.");
             float corridorY = lanePath.Length > 2 ? lanePath.Skip(1).Take(lanePath.Length - 2).Average(pt => pt.Y) : 50f;
             laneYs.Add(corridorY);
         }
