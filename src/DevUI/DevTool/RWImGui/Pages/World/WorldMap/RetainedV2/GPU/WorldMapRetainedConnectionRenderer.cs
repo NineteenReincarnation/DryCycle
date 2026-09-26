@@ -284,6 +284,10 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
         Color32 shadow = new(4, 5, 7, 238);
         Color32 core = RouteColor(route);
+        float coreHalfWidth =
+            RouteCoreHalfWidth(route);
+        float shadowHalfWidth =
+            RouteShadowHalfWidth(route);
 
         if (route.Ambiguous)
         {
@@ -292,7 +296,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 colors,
                 indices,
                 path,
-                ShadowHalfWidth,
+                shadowHalfWidth,
                 shadow,
                 0.08f);
             AddDashedPath(
@@ -300,7 +304,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 colors,
                 indices,
                 path,
-                CoreHalfWidth,
+                coreHalfWidth,
                 core,
                 0.04f);
         }
@@ -311,7 +315,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 colors,
                 indices,
                 path,
-                ShadowHalfWidth,
+                shadowHalfWidth,
                 shadow,
                 0.08f);
             AddPath(
@@ -319,7 +323,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 colors,
                 indices,
                 path,
-                CoreHalfWidth,
+                coreHalfWidth,
                 core,
                 0.04f);
         }
@@ -901,6 +905,32 @@ internal sealed class WorldMapRetainedConnectionRenderer
     {
         float length = value.Length();
         return length <= 0.0001f ? Num.Vector2.Zero : value / length;
+    }
+
+    private static float RouteCoreHalfWidth(
+        ConnectionRouteResource route)
+    {
+        byte tier =
+            route?.DensityTier ?? 0;
+
+        if (tier >= 2)
+            return 0.76f;
+        if (tier == 1)
+            return 0.96f;
+        return CoreHalfWidth;
+    }
+
+    private static float RouteShadowHalfWidth(
+        ConnectionRouteResource route)
+    {
+        byte tier =
+            route?.DensityTier ?? 0;
+
+        if (tier >= 2)
+            return 1.70f;
+        if (tier == 1)
+            return 2.20f;
+        return ShadowHalfWidth;
     }
 
     private static Color32 RouteColor(ConnectionRouteResource route)
