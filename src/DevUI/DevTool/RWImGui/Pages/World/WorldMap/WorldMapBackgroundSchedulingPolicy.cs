@@ -11,6 +11,8 @@ internal static class WorldMapBackgroundSchedulingPolicy
 {
     internal const int VisibleGeometrySweepIntervalFrames = 4;
     internal const int VisibleSourceRecoveryIntervalFrames = 1;
+    internal const int VisibleSnapshotIntervalFrames = 2;
+    internal const int DormantSnapshotIntervalFrames = 12;
     internal const int VisibleShortcutPrimeIntervalFrames = 2;
     internal const int VisibleExactShortcutIntervalFrames = 1;
     internal const int DormantShortcutIntervalFrames = 12;
@@ -46,6 +48,12 @@ internal static class WorldMapBackgroundSchedulingPolicy
                 canvasVisible: false,
                 thumbnailWorkIncomplete: recoveryIncomplete,
                 catchupAgeMilliseconds: recoveryAgeMilliseconds);
+
+    internal static int SnapshotIntervalFrames(
+        bool overlayVisible) =>
+        overlayVisible
+            ? VisibleSnapshotIntervalFrames
+            : DormantSnapshotIntervalFrames;
 
     internal static int ShortcutPrimeIntervalFrames(
         bool canvasVisible) =>
