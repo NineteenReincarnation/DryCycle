@@ -18,11 +18,12 @@ internal static class Program
             ParallelShortLanes();
             DenseObstacleLanes();
             CacheReuse();
+            PresentedRouteSpatialSnapshot();
 
             Console.WriteLine(
                 "PASS: " + assertions +
                 " assertions; World Map routing keeps short/direct paths, obstacle avoidance, " +
-                "parallel lane separation, bounded detours and cache reuse.");
+                "parallel lane separation, bounded detours, cache reuse and frame-stable retained hit testing.");
             return 0;
         }
         catch (Exception error)
@@ -271,6 +272,61 @@ internal static class Program
         Check(
             signatures.Count >= 3,
             "Four dense parallel connections must retain multiple distinct corridors.");
+    }
+
+    private static void PresentedRouteSpatialSnapshot()
+    {
+        var presented = new WorldMapRouteSpatialIndex();
+        var live = new WorldMapRouteSpatialIndex();
+
+        Num.Vector2[] oldFrame =
+        {
+            new Num.Vector2(10f, 20f),
+            new Num.Vector2(110f, 20f)
+        };
+        Num.Vector2[] newLive =
+        {
+            new Num.Vector2(10f, 80f),
+            new Num.Vector2(110f, 80f)
+        };
+
+        presented.Upsert("route", oldFrame);
+        live.Upsert("route", oldFrame);
+        live.Upsert("route", newLive);
+
+        Check(
+            presented.TryHit(
+                new Num.Vector2(60f, 20f),
+                4f,
+                allowedIds: null,
+                out string presentedId,
+                out float _) &&
+            presentedId == "route",
+            "Presented-route hit testing must remain on the route geometry that produced the visible surface.");
+
+        Check(
+            !presented.TryHit(
+                new Num.Vector2(60f, 80f),
+                4f,
+                allowedIds: null,
+                out string _,
+                out float _),
+            "Presented-route hit testing must not jump to a newer live route before the surface redraws.");
+
+        Check(
+            live.TryHit(
+                new Num.Vector2(60f, 80f),
+                4f,
+                allowedIds: null,
+                out string liveId,
+                out float _) &&
+            liveId == "route",
+            "Live route spatial state may advance independently while the presented frame stays stable.");
+
+        Check(
+            presented.TryGetPoints("route", out Num.Vector2[] presentedPoints) &&
+            ReferenceEquals(presentedPoints, oldFrame),
+            "Presented-route marker lookup must retain the exact immutable point array for the rendered frame.");
     }
 
     private static void CacheReuse()
