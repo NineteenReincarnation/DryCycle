@@ -820,6 +820,7 @@ internal static class WorldMapView
                 core,
                 shadowThickness,
                 coreThickness,
+                connection.ConnectionId,
                 connection.Direction,
                 connection.Ambiguous);
 
@@ -1148,6 +1149,7 @@ internal static class WorldMapView
             core,
             isolationThickness,
             coreThickness,
+            connection.ConnectionId,
             connection.Direction,
             connection.Ambiguous);
 
@@ -2344,6 +2346,7 @@ internal static class WorldMapView
         uint core,
         float shadowThickness,
         float coreThickness,
+        string markerKey,
         WorldConnectionDirection direction,
         bool dashed)
     {
@@ -2447,6 +2450,12 @@ internal static class WorldMapView
             return;
         }
 
+        markerPoint +=
+            markerTangent *
+            StableDirectionMarkerShift(
+                markerKey,
+                straightLength);
+
         float markerSize =
             Math.Max(
                 6.5f,
@@ -2502,6 +2511,45 @@ internal static class WorldMapView
             shadow,
             core,
             markerSize);
+    }
+
+    private static float StableDirectionMarkerShift(
+        string markerKey,
+        float straightLength)
+    {
+        if (string.IsNullOrEmpty(markerKey) ||
+            straightLength <= 20f)
+            return 0f;
+
+        float maxShift =
+            Math.Min(
+                14f,
+                Math.Max(
+                    0f,
+                    (straightLength - 20f) *
+                    0.30f));
+        if (maxShift <= 0.5f)
+            return 0f;
+
+        uint hash = 2166136261u;
+        unchecked
+        {
+            for (int i = 0; i < markerKey.Length; i++)
+            {
+                hash ^= markerKey[i];
+                hash *= 16777619u;
+            }
+        }
+
+        float normalized =
+            (hash & 1023u) /
+            1023f;
+        normalized =
+            normalized * 2f -
+            1f;
+
+        return normalized *
+               maxShift;
     }
 
     private static bool TryLongestPathSegment(
