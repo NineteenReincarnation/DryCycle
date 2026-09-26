@@ -159,8 +159,9 @@ internal sealed class WorldMapRoomResourceStore
             WorldMapPersistentRetainedCache.ValidatedRoomCount > 0
                 ? HotStartRoomsPerFrame
                 : IdleRoomsPerFrame;
+        if (WorldMapBackgroundBudget.InteractionActive)
+            budget = 1;
         DrainBuildResults(budget);
-        if (WorldMapBackgroundBudget.InteractionActive) budget = 1;
 
         while (budget > 0 && visiblePriorityQueue.Count > 0)
         {
