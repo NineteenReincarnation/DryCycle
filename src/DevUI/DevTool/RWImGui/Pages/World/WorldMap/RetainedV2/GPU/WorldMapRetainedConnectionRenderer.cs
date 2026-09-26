@@ -22,15 +22,22 @@ internal sealed class WorldMapRetainedConnectionRenderer
         internal long Revision = long.MinValue;
     }
 
-    private const float CoreHalfWidth = 1.55f;
-    private const float ShadowHalfWidth = 4.0f;
+    private const float CoreHalfWidth = 1.20f;
+    private const float ShadowHalfWidth = 2.85f;
     private const float DashLength = 10f;
     private const float DashGap = 6f;
-    private const float ArrowSize = 13f;
-    private const float CrossingRadius = 7f;
-    private const float CrossingRise = 5.5f;
-    private const float DenseCrossingRadius = 5.7f;
-    private const float DenseCrossingRise = 4.2f;
+
+    // Direction is metadata, not the dominant shape of a route. Small chevrons preserve flow
+    // readability without covering lane spacing, port numbers or neighbouring connections.
+    private const float DirectionMarkerLength = 6.5f;
+    private const float DirectionMarkerSpread = 3.4f;
+    private const float DirectionMarkerCoreHalfWidth = 0.78f;
+    private const float DirectionMarkerShadowHalfWidth = 1.55f;
+
+    private const float CrossingRadius = 6.4f;
+    private const float CrossingRise = 4.8f;
+    private const float DenseCrossingRadius = 5.2f;
+    private const float DenseCrossingRise = 3.7f;
 
     private readonly Dictionary<string, RouteObject> routeObjects =
         new(StringComparer.Ordinal);
@@ -556,66 +563,75 @@ internal sealed class WorldMapRetainedConnectionRenderer
         Color32 core)
     {
         float length = PathLength(path);
-        if (length < 24f) return;
+        if (length < 34f)
+            return;
 
-        float arrowScale =
+        float markerScale =
             densityTier >= 2
-                ? 0.68f
+                ? 0.74f
                 : densityTier == 1
-                    ? 0.82f
+                    ? 0.86f
                     : 1f;
 
         if (direction == WorldConnectionDirection.Bidirectional)
         {
-            AddArrowAt(
+            // One compact opposing pair communicates bidirectionality without turning the route into
+            // a sequence of large traffic signs.
+            AddChevronAt(
                 vertices,
                 colors,
                 indices,
                 path,
-                0.35f,
+                0.43f,
                 reverse: true,
-                arrowScale,
+                markerScale,
                 shadow,
                 core);
-            AddArrowAt(
+            AddChevronAt(
                 vertices,
                 colors,
                 indices,
                 path,
-                0.65f,
+                0.57f,
                 reverse: false,
-                arrowScale,
+                markerScale,
                 shadow,
                 core);
             return;
         }
 
+        bool reverse =
+            direction ==
+            WorldConnectionDirection.BToA;
+
         int count =
             densityTier > 0
                 ? 1
-                : length >= 360f
-                    ? 3
-                    : length >= 190f
-                        ? 2
-                        : 1;
-        bool reverse = direction == WorldConnectionDirection.BToA;
+                : length >= 420f
+                    ? 2
+                    : 1;
+
         for (int i = 0; i < count; i++)
         {
-            float fraction = (i + 1f) / (count + 1f);
-            AddArrowAt(
+            float fraction =
+                count == 1
+                    ? 0.5f
+                    : (i == 0 ? 0.34f : 0.66f);
+
+            AddChevronAt(
                 vertices,
                 colors,
                 indices,
                 path,
                 fraction,
                 reverse,
-                arrowScale,
+                markerScale,
                 shadow,
                 core);
         }
     }
 
-    private static void AddArrowAt(
+    private static void AddChevronAt(
         List<Vector3> vertices,
         List<Color32> colors,
         List<int> indices,
@@ -633,58 +649,73 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 out Num.Vector2 tangent))
             return;
 
-        if (reverse) tangent = -tangent;
-        Num.Vector2 normal = new(-tangent.Y, tangent.X);
+        if (reverse)
+            tangent = -tangent;
 
-        AddArrowTriangle(
+        Num.Vector2 normal =
+            new(-tangent.Y, tangent.X);
+
+        float length =
+            DirectionMarkerLength *
+            sizeScale;
+        float spread =
+            DirectionMarkerSpread *
+            sizeScale;
+
+        Num.Vector2 tip =
+            point +
+            tangent *
+            (length * 0.5f);
+        Num.Vector2 back =
+            point -
+            tangent *
+            (length * 0.5f);
+        Num.Vector2 left =
+            back +
+            normal *
+            spread;
+        Num.Vector2 right =
+            back -
+            normal *
+            spread;
+
+        AddThickSegment(
             vertices,
             colors,
             indices,
-            point,
-            tangent,
-            normal,
-            ArrowSize * sizeScale + 4f,
+            left,
+            tip,
+            DirectionMarkerShadowHalfWidth,
             shadow,
-            -0.08f);
-        AddArrowTriangle(
+            -0.082f);
+        AddThickSegment(
             vertices,
             colors,
             indices,
-            point,
-            tangent,
-            normal,
-            ArrowSize * sizeScale,
+            right,
+            tip,
+            DirectionMarkerShadowHalfWidth,
+            shadow,
+            -0.082f);
+
+        AddThickSegment(
+            vertices,
+            colors,
+            indices,
+            left,
+            tip,
+            DirectionMarkerCoreHalfWidth,
             core,
-            -0.10f);
-    }
-
-    private static void AddArrowTriangle(
-        List<Vector3> vertices,
-        List<Color32> colors,
-        List<int> indices,
-        Num.Vector2 center,
-        Num.Vector2 tangent,
-        Num.Vector2 normal,
-        float size,
-        Color32 color,
-        float z)
-    {
-        Num.Vector2 tip = center + tangent * (size * 0.55f);
-        Num.Vector2 baseCenter = center - tangent * (size * 0.45f);
-        float half = size * 0.42f;
-        Num.Vector2 left = baseCenter + normal * half;
-        Num.Vector2 right = baseCenter - normal * half;
-
-        int first = vertices.Count;
-        vertices.Add(ToUnity(tip, z));
-        vertices.Add(ToUnity(left, z));
-        vertices.Add(ToUnity(right, z));
-        colors.Add(color);
-        colors.Add(color);
-        colors.Add(color);
-        indices.Add(first);
-        indices.Add(first + 1);
-        indices.Add(first + 2);
+            -0.105f);
+        AddThickSegment(
+            vertices,
+            colors,
+            indices,
+            right,
+            tip,
+            DirectionMarkerCoreHalfWidth,
+            core,
+            -0.105f);
     }
 
     private static void AddThickSegment(
