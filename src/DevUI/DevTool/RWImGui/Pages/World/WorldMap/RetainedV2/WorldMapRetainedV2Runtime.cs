@@ -35,8 +35,28 @@ internal static class WorldMapRetainedV2Runtime
     private static readonly List<int> sourcePriorityRooms = new();
     private static readonly List<int> visibleRooms = new();
     private static readonly List<string> visibleRoutes = new();
-    private static HashSet<string> presentedRouteIds =
-        new(StringComparer.Ordinal);
+
+    private sealed class PresentedRouteSnapshot
+    {
+        internal readonly HashSet<string> Ids;
+        internal readonly WorldMapRouteSpatialIndex SpatialIndex;
+
+        internal PresentedRouteSnapshot(
+            HashSet<string> ids,
+            WorldMapRouteSpatialIndex spatialIndex)
+        {
+            Ids = ids ?? new HashSet<string>(StringComparer.Ordinal);
+            SpatialIndex = spatialIndex ?? new WorldMapRouteSpatialIndex();
+        }
+
+        internal static PresentedRouteSnapshot Empty() =>
+            new(
+                new HashSet<string>(StringComparer.Ordinal),
+                new WorldMapRouteSpatialIndex());
+    }
+
+    private static PresentedRouteSnapshot presentedRoutes =
+        PresentedRouteSnapshot.Empty();
     private static Dictionary<string, WorldMapCrossingMark[]> presentedCrossingsByRoute =
         new(StringComparer.Ordinal);
     private static long presentedCrossingRevision = long.MinValue;
@@ -362,12 +382,14 @@ internal static class WorldMapRetainedV2Runtime
         if (!enabled || string.IsNullOrEmpty(connectionId))
             return false;
 
-        HashSet<string> ids = Volatile.Read(ref presentedRouteIds);
-        return ids != null && ids.Contains(connectionId);
+        PresentedRouteSnapshot snapshot =
+            Volatile.Read(ref presentedRoutes);
+        return snapshot?.Ids != null &&
+               snapshot.Ids.Contains(connectionId);
     }
 
     internal static int PresentedRouteCount =>
-        Volatile.Read(ref presentedRouteIds)?.Count ?? 0;
+        Volatile.Read(ref presentedRoutes)?.Ids?.Count ?? 0;
 
     internal static bool TryGetConnectionCrossings(
         string connectionId,
@@ -395,10 +417,25 @@ internal static class WorldMapRetainedV2Runtime
         out Num.Vector2[] points)
     {
         points = null;
-        return enabled &&
-               RouteSpatialIndex.TryGetPoints(
-                   connectionId,
-                   out points);
+        if (!enabled || string.IsNullOrEmpty(connectionId))
+            return false;
+
+        // When the route is already on the retained surface, marker placement must use the exact
+        // immutable point set that produced those pixels, not a newer live route waiting for the
+        // next surface redraw. Non-presented routes may still use the live spatial index.
+        PresentedRouteSnapshot presented =
+            Volatile.Read(ref presentedRoutes);
+        if (presented?.Ids?.Contains(connectionId) == true &&
+            presented.SpatialIndex.TryGetPoints(
+                connectionId,
+                out points))
+        {
+            return true;
+        }
+
+        return RouteSpatialIndex.TryGetPoints(
+            connectionId,
+            out points);
     }
 
     internal static bool TryHitConnection(
@@ -412,13 +449,17 @@ internal static class WorldMapRetainedV2Runtime
         if (!enabled)
             return false;
 
-        HashSet<string> allowed = Volatile.Read(ref presentedRouteIds);
-        return allowed != null &&
-               allowed.Count > 0 &&
-               RouteSpatialIndex.TryHit(
+        // Hit testing follows the same immutable route snapshot as the pixels currently displayed
+        // by the retained surface. This removes the one-frame mismatch where a newly rebuilt live
+        // route could be clickable before the offscreen surface had redrawn it.
+        PresentedRouteSnapshot presented =
+            Volatile.Read(ref presentedRoutes);
+        return presented?.Ids != null &&
+               presented.Ids.Count > 0 &&
+               presented.SpatialIndex.TryHit(
                    worldPoint,
                    worldRadius,
-                   allowed,
+                   allowedIds: null,
                    out connectionId,
                    out distanceSquared);
     }
@@ -570,18 +611,42 @@ internal static class WorldMapRetainedV2Runtime
     private static void PublishPresentedRoutes(
         IReadOnlyList<string> routeIds)
     {
-        HashSet<string> next = new(StringComparer.Ordinal);
+        HashSet<string> ids = new(StringComparer.Ordinal);
+        WorldMapRouteSpatialIndex index = new();
+
         if (routeIds != null)
         {
             for (int i = 0; i < routeIds.Count; i++)
             {
                 string id = routeIds[i];
-                if (!string.IsNullOrEmpty(id))
-                    next.Add(id);
+                if (string.IsNullOrEmpty(id) ||
+                    !ConnectionResources.TryGet(
+                        id,
+                        out ConnectionRouteResource route) ||
+                    route?.Points == null ||
+                    route.Points.Length < 2)
+                {
+                    continue;
+                }
+
+                // Surface publication is a frame boundary. Clone the route points once here so
+                // direction markers and hover hit testing remain tied to the rendered frame even
+                // if the live router publishes a newer route before the next Camera.Render.
+                ConnectionRouteResource snapshotRoute =
+                    new()
+                    {
+                        ConnectionId = id,
+                        Points = (Num.Vector2[])route.Points.Clone()
+                    };
+
+                index.Upsert(snapshotRoute);
+                ids.Add(id);
             }
         }
 
-        Volatile.Write(ref presentedRouteIds, next);
+        Volatile.Write(
+            ref presentedRoutes,
+            new PresentedRouteSnapshot(ids, index));
     }
 
     internal static bool QueryRooms(
@@ -623,8 +688,8 @@ internal static class WorldMapRetainedV2Runtime
         visibleRooms.Clear();
         visibleRoutes.Clear();
         Volatile.Write(
-            ref presentedRouteIds,
-            new HashSet<string>(StringComparer.Ordinal));
+            ref presentedRoutes,
+            PresentedRouteSnapshot.Empty());
         Volatile.Write(
             ref presentedCrossingsByRoute,
             new Dictionary<string, WorldMapCrossingMark[]>(
