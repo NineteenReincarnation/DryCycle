@@ -820,7 +820,7 @@ internal static class PlayerMapWorkspaceIntegration
         if (enabled) return;
         enabled = true;
         log = logger;
-        logger?.LogInfo("Player Map integrated into World Workspace through direct view calls; no self-detour attached.");
+        logger?.LogInfo("Player Map and Cartography integrated into the shared Map page surfaces; no self-detour attached.");
     }
 
     internal static void Disable()
@@ -843,10 +843,10 @@ internal static class PlayerMapWorkspaceIntegration
             ExitSpecialView();
         }
 
-        ImGui.SameLine(0f, 14f);
         string label = playerMapActive
             ? DevToolUiSettings.T("返回世界地图", "Back to World Map")
             : DevToolUiSettings.T("玩家地图", "Player Map");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(label) + 14f);
         if (DevToolWidgets.ToolbarButton(
                 label,
                 "WorldWorkspacePlayerMap",
@@ -862,15 +862,21 @@ internal static class PlayerMapWorkspaceIntegration
                 PlayerMapActivityGate.Reset();
         }
 
-        ImGui.SameLine(0f, 6f);
+        string cartographyLabel = DevToolUiSettings.T("制图", "Cartography");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(cartographyLabel) + 6f);
         if (DevToolWidgets.ToolbarButton(
-                DevToolUiSettings.T("制图", "Cartography"),
+                cartographyLabel,
                 "WorldWorkspaceCartography",
                 DevToolToolbarTone.Cartography,
                 cartographyActive))
         {
             if (cartographyActive) ExitSpecialView();
-            else { playerMapActive = false; cartographyActive = true; WorldWorkspaceView.WorkspaceModeValue = 0; }
+            else
+            {
+                playerMapActive = false;
+                cartographyActive = true;
+                WorldWorkspaceView.WorkspaceModeValue = 0;
+            }
         }
         CartographyRuntime.SetActive(cartographyActive);
     }
@@ -878,21 +884,79 @@ internal static class PlayerMapWorkspaceIntegration
     internal static void ExitSpecialView()
     {
         if (cartographyActive) CartographyView.Leave();
-        cartographyActive = false; playerMapActive = false;
+        cartographyActive = false;
+        playerMapActive = false;
         CartographyRuntime.SetActive(false);
         PlayerMapActivityGate.Reset();
     }
 
+    internal static bool DrawBrowserIfActive(
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!TryEnterSpecialView())
+            return false;
+
+        if (cartographyActive)
+            CartographyView.DrawBrowser(editor);
+        else
+            PlayerMapWorkspaceView.DrawBrowserPane(snapshot);
+        return true;
+    }
+
+    internal static bool DrawCenterIfActive(
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!TryEnterSpecialView())
+            return false;
+
+        if (cartographyActive)
+            CartographyView.DrawCenter(editor);
+        else
+            PlayerMapWorkspaceView.DrawCenterPane(snapshot);
+        return true;
+    }
+
+    internal static bool DrawInspectorIfActive(
+        EditorPresentationSnapshot editor,
+        EditorMapPresentationSnapshot snapshot)
+    {
+        if (!TryEnterSpecialView())
+            return false;
+
+        if (cartographyActive)
+            CartographyView.DrawInspectorPane(editor);
+        else
+            PlayerMapWorkspaceView.DrawInspectorPane(snapshot);
+        return true;
+    }
+
+    // Compatibility entry point retained for any in-assembly callers that still expect the former
+    // monolithic body. The registered Map page no longer calls this path.
     internal static bool DrawBodyIfActive(
         EditorPresentationSnapshot editor,
         EditorMapPresentationSnapshot snapshot)
+    {
+        if (!TryEnterSpecialView())
+            return false;
+
+        if (cartographyActive)
+        {
+            CartographyView.Draw(editor);
+            return true;
+        }
+
+        PlayerMapWorkspaceView.DrawBody(editor, snapshot);
+        return true;
+    }
+
+    private static bool TryEnterSpecialView()
     {
         if (!enabled || (!playerMapActive && !cartographyActive))
             return false;
 
         PlayerMapActivityGate.MarkVisible();
-        if (cartographyActive) { CartographyView.Draw(editor); return true; }
-        PlayerMapWorkspaceView.DrawBody(editor, snapshot);
         return true;
     }
 }
