@@ -319,8 +319,12 @@ internal static class WorldMapUpdateThrottle
             selectedRoomIndex != lastShortcutSelection ||
             currentRoom != lastShortcutCurrentRoom;
 
+        int interval =
+            WorldMapBackgroundSchedulingPolicy.ShortcutPrimeIntervalFrames(
+                WorldMapRetainedV2Runtime.CanvasVisible);
+
         if (!urgent &&
-            Time.frameCount - lastShortcutPrimeFrame < PreviewPrimeIntervalFrames)
+            Time.frameCount - lastShortcutPrimeFrame < interval)
             return false;
 
         lastShortcutPrimeFrame = Time.frameCount;
