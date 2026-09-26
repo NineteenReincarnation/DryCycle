@@ -123,8 +123,13 @@ internal static partial class CartographyView
         bool inspector = editor.InspectorOpen && available.X >= em * 30;
         float right = inspector ? Math.Min(em * 24, available.X * .35f) : 0;
         float center = Math.Max(180, available.X - right - (inspector ? 8 : 0));
+        // The map composition itself has no baked background. Use a transparent child so the
+        // editor preview follows the same compositing model as PNG/SVG export; grid and map content
+        // are still drawn explicitly on top.
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
         if (ImGui.BeginChild("##CartographyCanvas", new Num.Vector2(center, available.Y), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)) Canvas(snapshot);
         ImGui.EndChild();
+        ImGui.PopStyleColor();
         if (inspector)
         {
             ImGui.SameLine(0, 8);
@@ -462,7 +467,6 @@ internal static partial class CartographyView
         if (ImGui.Checkbox(T("房间名称##AtlasNames", "Room names##AtlasNames"), ref styleDraft.ShowRoomNames)) { styleDirty = true; SaveStyle(); }
         if (ImGui.Checkbox(T("连接线##AtlasLinks", "Connections##AtlasLinks"), ref styleDraft.ShowConnections)) { styleDirty = true; SaveStyle(); }
         if (ImGui.Checkbox(T("房间轮廓裁剪##AtlasCrop", "Crop room outlines##AtlasCrop"), ref styleDraft.CropSolid)) { styleDirty = true; SaveStyle(); }
-        if (EditColor(T("导出底色##AtlasBg", "Export background##AtlasBg"), ref styleDraft.Background)) styleDirty = true; if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (EditColor(T("默认房间底色##AtlasTerrain", "Default room background##AtlasTerrain"), ref styleDraft.Terrain)) styleDirty = true; if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (EditColor(T("水体##AtlasWater", "Water##AtlasWater"), ref styleDraft.Water)) styleDirty = true; if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (EditColor(T("连线##AtlasLinkColor", "Links##AtlasLinkColor"), ref styleDraft.Connections)) styleDirty = true; if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
@@ -488,7 +492,6 @@ internal static partial class CartographyView
         if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (ImGui.DragInt(T("边距##AtlasPadding", "Padding##AtlasPadding"), ref styleDraft.Padding, 1, 0, 1024)) styleDirty = true;
         if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
-        if (ImGui.Checkbox(T("透明背景##AtlasTransparent", "Transparent background##AtlasTransparent"), ref styleDraft.Transparent)) { styleDirty = true; SaveStyle(); }
         bool valid = true;
         try { CartographyExporter.Dimensions(styleDraft, snapshot.Scene, out int width, out int height, format); ImGui.TextDisabled(width + " x " + height + " px"); }
         catch (InvalidOperationException error) { ImGui.TextWrapped(error.Message); valid = false; }
