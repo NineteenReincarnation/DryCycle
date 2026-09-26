@@ -52,7 +52,12 @@ internal static partial class Program
         const uint localStructureColor=0xFF3A4B5C;
         Check(localRaster.Pixels.Any(p=>p==localStructureColor),"Local/custom curved terrain uses the same Structure palette color as ordinary structure terrain.");
         int localCurvePixels=localRaster.Pixels.Count(p=>p!=curvedDocument.Terrain);
-        Check(localCurvePixels>0&&localCurvePixels<localRaster.Width*4,"Curved terrain is rendered as a thin surface line instead of rectangular fill bands.");
+        Check(localCurvePixels>localRaster.Width*4,"Curved terrain keeps its filled body beneath the authored surface.");
+        int[] localSurfaceRows=Enumerable.Range(0,localRaster.Width)
+            .Select(x=>Enumerable.Range(0,localRaster.Height).FirstOrDefault(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor,-1))
+            .Where(y=>y>=0)
+            .ToArray();
+        Check(localSurfaceRows.Distinct().Count()>3,"Curved terrain uses the sampled spline as a smooth surface instead of tile-sized rectangular steps.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
