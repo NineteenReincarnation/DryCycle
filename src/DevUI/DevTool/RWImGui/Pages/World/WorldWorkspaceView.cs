@@ -330,18 +330,24 @@ internal static class WorldWorkspaceView
         DevToolWidgets.MutedText(GetToolbarRoomCount(snapshot.Rooms?.Length ?? 0));
         ImGui.SameLine(0f, 16f);
 
+        // Primary map modes stay together on the left: World Map -> Player Map -> Cartography.
         DrawWorkspaceModeButton(
             WorkspaceMode.WorldMap,
             DevToolUiSettings.T("世界地图", "World Map"),
             "WorldWorkspaceModeMap",
             DevToolToolbarTone.WorldMap);
+
+        PlayerMapWorkspaceIntegration.DrawToolbar(editor, snapshot);
+
         ImGui.SameLine(0f, 6f);
         DrawWorkspaceModeButton(
             WorkspaceMode.WorldData,
             DevToolUiSettings.T("世界数据", "World Data"),
             "WorldWorkspaceModeData",
             DevToolToolbarTone.WorldData);
-        ImGui.SameLine(0f, 16f);
+
+        // Editing history is a separate compact group with a small visual gap from view modes.
+        ImGui.SameLine(0f, 12f);
         bool anyDirty = WorldWorkspaceDataView.HasDirtyData || WorldTopologyRegistry.Dirty ||
                         WorldTextRegistry.Dirty || WorldRoomAttractionRegistry.Dirty;
         if (DevToolWidgets.ToolbarButton(
@@ -379,8 +385,6 @@ internal static class WorldWorkspaceView
                 "WorldWorkspaceFocus",
                 DevToolToolbarTone.Focus))
             Send(EditorUiCommandKind.ToggleFocus);
-
-        PlayerMapWorkspaceIntegration.DrawToolbar(editor, snapshot);
     }
 
     private static string GetToolbarRoomCount(int count)
