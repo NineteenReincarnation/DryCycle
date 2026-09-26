@@ -54,6 +54,19 @@ internal static partial class CartographyView
             SelectSource(state.Region, state.Campaign, true);
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(T("高级", "Advanced")));
         if (ImGui.Button(T("高级##AtlasSourceOptions", "Advanced##AtlasSourceOptions"))) sourcePanel = !sourcePanel;
+
+        CartographyPresentation presentation = CartographyRuntime.Presentation;
+        bool canvasAreaActive = presentation?.Document?.Options?.ExportArea == true;
+        string canvasAreaLabel = T("画布选区", "Canvas selection");
+        DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(canvasAreaLabel));
+        if (canvasAreaActive)
+            ImGui.PushStyleColor(ImGuiCol.Button, new Num.Vector4(.20f, .43f, .69f, 1f));
+        bool toggleCanvasArea = ImGui.Button(canvasAreaLabel + "##AtlasCanvasSelection");
+        if (canvasAreaActive)
+            ImGui.PopStyleColor();
+        if (toggleCanvasArea)
+            SetCanvasSelectionEnabled(presentation, !canvasAreaActive);
+
         if (state.Loading)
             ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域...", "Preparing map in background; you can select another region..."));
         if (state.Failed)
@@ -79,6 +92,41 @@ internal static partial class CartographyView
             }
         }
         ImGui.Separator();
+    }
+
+    private static void SetCanvasSelectionEnabled(
+        CartographyPresentation presentation,
+        bool enabled)
+    {
+        if (presentation?.Document == null ||
+            string.IsNullOrEmpty(presentation.Identity))
+            return;
+
+        // Flush any pending inspector edits first so toggling the canvas area never overwrites them.
+        LeaveDrafts();
+
+        CartographyDocument style = presentation.Document.Clone();
+        style.Options.ExportArea = enabled;
+        if (style.Options.AreaWidth < 1f)
+            style.Options.AreaWidth = 800f;
+        if (style.Options.AreaHeight < 1f)
+            style.Options.AreaHeight = 600f;
+
+        string key = presentation.Identity + "/style";
+        CartographyRuntime.StageDraft(
+            key,
+            new CartographyCommand
+            {
+                DocumentId = presentation.Identity,
+                Revision = presentation.Revision,
+                Kind = CartographyCommandKind.Style,
+                Style = style
+            });
+        CartographyRuntime.CommitDraft(key);
+
+        styleDraft = style;
+        styleDirty = false;
+        exportAreaDrag = ExportAreaDrag.None;
     }
 
     private static string CampaignLabel(string campaign) => campaign switch
@@ -210,12 +258,6 @@ internal static partial class CartographyView
             ImGui.InputTextWithHint("##AtlasImagePath",T("PNG / JPG / BMP 文件路径","PNG / JPG / BMP path"),ref imagePath,1024);
             if(ImGui.Button(T("导入图片到活动图层","Import image into active layer")))Send(CartographyCommandKind.AddImage,c=>{c.Path=imagePath;c.Item=new CartographyItem{Kind=CartographyItemKind.Image,LayerId=activeLayer,X=snapshot.Scene.Bounds.X,Y=snapshot.Scene.Bounds.Y,Color=0xFFFFFFFF};});
             ImGui.TextWrapped(T("选择图片可调整位置、尺寸和透明度；图层顺序决定前景或背景叠加。","Select an image to change position, size and opacity. Layer order controls foreground/background placement."));
-        }
-        if(ImGui.CollapsingHeader(T("导出范围##AtlasArea","EXPORT AREA##AtlasArea")))
-        {
-            B("使用画布选区","Use selected area",ref o.ExportArea);
-            Num.Vector4 r=new(o.AreaX,o.AreaY,o.AreaWidth,o.AreaHeight);
-            if(ImGui.DragFloat4("X / Y / W / H",ref r,1)){o.AreaX=r.X;o.AreaY=r.Y;o.AreaWidth=Math.Max(1,r.Z);o.AreaHeight=Math.Max(1,r.W);styleDirty=true;}if(ImGui.IsItemDeactivatedAfterEdit())SaveStyle();
         }
         if(styleDirty)Stage(CartographyCommandKind.Style,"style",c=>c.Style=styleDraft);
     }
