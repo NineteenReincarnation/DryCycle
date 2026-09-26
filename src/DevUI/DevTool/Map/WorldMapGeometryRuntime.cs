@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -224,9 +225,20 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int backgroundCursor;
     private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
+    private static long rasterReadbackTotalTicks;
+    private static long rasterReadbackPeakTicks;
+    private static int rasterReadbackCount;
 
     internal static int PublishedGeneration =>
         Volatile.Read(ref publishedGeneration);
+
+    internal static int RasterReadbackCount => rasterReadbackCount;
+    internal static double RasterReadbackAverageMilliseconds =>
+        rasterReadbackCount <= 0
+            ? 0d
+            : rasterReadbackTotalTicks * 1000d / Stopwatch.Frequency / rasterReadbackCount;
+    internal static double RasterReadbackPeakMilliseconds =>
+        rasterReadbackPeakTicks * 1000d / Stopwatch.Frequency;
 
     internal static EditorMapRoomVisualSnapshot Get(int roomIndex)
     {
@@ -318,6 +330,9 @@ internal static partial class MapRoomGeometryPresentationHub
         backgroundCursor = 0;
         rasterLoadsRemaining = 0;
         curveLoadsRemaining = 0;
+        rasterReadbackTotalTicks = 0L;
+        rasterReadbackPeakTicks = 0L;
+        rasterReadbackCount = 0;
     }
 
     private static void ResetRegion(string nextRegion)
@@ -333,6 +348,9 @@ internal static partial class MapRoomGeometryPresentationHub
         lastSubNodeCount = -1;
         nextStructureSyncFrame = 0;
         backgroundCursor = 0;
+        rasterReadbackTotalTicks = 0L;
+        rasterReadbackPeakTicks = 0L;
+        rasterReadbackCount = 0;
     }
 
     private static void SynchronizeStructure(MapPage page)
@@ -790,9 +808,11 @@ internal static partial class MapRoomGeometryPresentationHub
     private static bool TryReadMapPixels(RasterSourceInfo source, out Color[] pixels)
     {
         pixels = null;
+        if (source.Texture == null) return false;
+
+        long started = Stopwatch.GetTimestamp();
         try
         {
-            if (source.Texture == null) return false;
             pixels = source.X == 0 && source.Y == 0 &&
                      source.Width == source.Texture.width && source.Height == source.Texture.height
                 ? source.Texture.GetPixels()
@@ -803,6 +823,13 @@ internal static partial class MapRoomGeometryPresentationHub
         {
             global::DryCycle.Plugin.Logger?.LogDebug("WorldMap minimap raster read failed: " + error.Message);
             return false;
+        }
+        finally
+        {
+            long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - started);
+            rasterReadbackTotalTicks += elapsed;
+            rasterReadbackPeakTicks = Math.Max(rasterReadbackPeakTicks, elapsed);
+            rasterReadbackCount++;
         }
     }
 
