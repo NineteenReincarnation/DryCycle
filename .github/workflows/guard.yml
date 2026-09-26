@@ -9,6 +9,7 @@ on:
       - 'scripts/Test-MapRendering.ps1'
       - 'tests/WorldMapRenderIsolation.Tests/**'
       - 'tests/WorldMapRouting.Tests/**'
+      - 'tests/WorldMapDirection.Tests/**'
       - '.github/workflows/guard.yml'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - 'scripts/Test-MapRendering.ps1'
       - 'tests/WorldMapRenderIsolation.Tests/**'
       - 'tests/WorldMapRouting.Tests/**'
+      - 'tests/WorldMapDirection.Tests/**'
       - '.github/workflows/guard.yml'
   workflow_dispatch:
 
