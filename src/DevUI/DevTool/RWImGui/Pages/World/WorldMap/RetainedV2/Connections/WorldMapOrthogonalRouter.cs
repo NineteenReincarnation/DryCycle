@@ -1409,7 +1409,18 @@ internal static class WorldMapOrthogonalRouter
         HashSet<long> sampled =
             new();
 
-        for (int i = 0; i < points.Length - 1; i++)
+        int firstSegment =
+            points.Length >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            points.Length >= 4
+                ? points.Length - 3
+                : points.Length - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
         {
             Num.Vector2 a =
                 points[i];
@@ -1525,7 +1536,18 @@ internal static class WorldMapOrthogonalRouter
             occupancy == null)
             return;
 
-        for (int i = 0; i < points.Length - 1; i++)
+        int firstSegment =
+            points.Length >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            points.Length >= 4
+                ? points.Length - 3
+                : points.Length - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
         {
             Num.Vector2 a = points[i];
             Num.Vector2 b = points[i + 1];
