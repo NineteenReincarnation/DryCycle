@@ -445,6 +445,7 @@ internal static class WorldMapOrthogonalRouter
                 request.Start,
                 startDirection,
                 request.StartRoom,
+                request.EndRoom,
                 obstacles,
                 request.StartTerminalExtraDepth);
         Num.Vector2 endBaseEscape =
@@ -452,6 +453,7 @@ internal static class WorldMapOrthogonalRouter
                 request.End,
                 endDirection,
                 request.EndRoom,
+                request.StartRoom,
                 obstacles,
                 request.EndTerminalExtraDepth);
         Num.Vector2 startEscape =
@@ -981,16 +983,24 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 mouth,
         Num.Vector2 direction,
         int roomIndex,
+        int counterpartRoom,
         List<Obstacle> obstacles,
         float terminalExtraDepth)
     {
         const float clearance = 5f;
 
-        float ownRequiredDistance = PortNeck;
-        for (int i = 0; i < obstacles.Count; i++)
+        float ownRequiredDistance =
+            PortNeck;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
         {
-            Obstacle obstacle = obstacles[i];
-            if (obstacle.RoomIndex != roomIndex)
+            Obstacle obstacle =
+                obstacles[i];
+
+            if (obstacle.RoomIndex !=
+                roomIndex)
                 continue;
 
             if (direction.X < -0.5f)
@@ -998,28 +1008,36 @@ internal static class WorldMapOrthogonalRouter
                 ownRequiredDistance =
                     Math.Max(
                         ownRequiredDistance,
-                        mouth.X - obstacle.Min.X + clearance);
+                        mouth.X -
+                        obstacle.Min.X +
+                        clearance);
             }
             else if (direction.X > 0.5f)
             {
                 ownRequiredDistance =
                     Math.Max(
                         ownRequiredDistance,
-                        obstacle.Max.X - mouth.X + clearance);
+                        obstacle.Max.X -
+                        mouth.X +
+                        clearance);
             }
             else if (direction.Y < -0.5f)
             {
                 ownRequiredDistance =
                     Math.Max(
                         ownRequiredDistance,
-                        mouth.Y - obstacle.Min.Y + clearance);
+                        mouth.Y -
+                        obstacle.Min.Y +
+                        clearance);
             }
             else
             {
                 ownRequiredDistance =
                     Math.Max(
                         ownRequiredDistance,
-                        obstacle.Max.Y - mouth.Y + clearance);
+                        obstacle.Max.Y -
+                        mouth.Y +
+                        clearance);
             }
 
             break;
@@ -1033,95 +1051,119 @@ internal static class WorldMapOrthogonalRouter
                     0f,
                     terminalExtraDepth));
 
-        // Terminal fan-out is visual/readability infrastructure, not permission to cut through the
-        // next room. Cap the outward neck at the nearest foreign routing obstacle when necessary.
-        // The later orthogonal router can still fan around that obstacle from the safe point.
-        for (int i = 0; i < obstacles.Count; i++)
+        // Inflated routing margins are visual clearance, not hard room bodies. When another room
+        // sits closer than the normal terminal neck, shorten the stub instead of tunnelling through
+        // the room. Counterpart terminals meet roughly in the physical gap; unrelated rooms reserve
+        // a small body clearance before the route turns.
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
         {
-            Obstacle obstacle = obstacles[i];
-            if (obstacle.RoomIndex == roomIndex)
+            Obstacle obstacle =
+                obstacles[i];
+
+            if (obstacle.RoomIndex ==
+                roomIndex)
                 continue;
 
-            if (!TryForwardObstacleDistance(
+            if (!TryForwardRawRoomDistance(
                     mouth,
                     direction,
                     obstacle,
-                    clearance,
-                    out float safeDistance))
+                    out float rawDistance))
                 continue;
 
-            if (safeDistance < ownRequiredDistance)
+            float safeDistance =
+                obstacle.RoomIndex ==
+                counterpartRoom
+                    ? rawDistance *
+                      0.5f
+                    : rawDistance -
+                      clearance;
+
+            if (safeDistance <= 0f)
                 continue;
 
             distance =
                 Math.Min(
                     distance,
-                    safeDistance);
+                    Math.Max(
+                        1f,
+                        safeDistance));
         }
 
-        return mouth + direction * distance;
+        return mouth +
+               direction *
+               distance;
     }
 
-    private static bool TryForwardObstacleDistance(
+    private static bool TryForwardRawRoomDistance(
         Num.Vector2 mouth,
         Num.Vector2 direction,
         Obstacle obstacle,
-        float clearance,
-        out float safeDistance)
+        out float distance)
     {
-        safeDistance = float.MaxValue;
+        distance =
+            float.MaxValue;
+
+        Num.Vector2 rawMin =
+            obstacle.Min +
+            new Num.Vector2(
+                ObstacleMargin,
+                ObstacleMargin);
+        Num.Vector2 rawMax =
+            obstacle.Max -
+            new Num.Vector2(
+                ObstacleMargin,
+                ObstacleMargin);
 
         if (direction.X > 0.5f)
         {
-            if (mouth.Y < obstacle.Min.Y - clearance ||
-                mouth.Y > obstacle.Max.Y + clearance ||
-                obstacle.Min.X <= mouth.X)
+            if (mouth.Y < rawMin.Y ||
+                mouth.Y > rawMax.Y ||
+                rawMin.X <= mouth.X)
                 return false;
 
-            safeDistance =
-                obstacle.Min.X -
-                mouth.X -
-                clearance;
+            distance =
+                rawMin.X -
+                mouth.X;
             return true;
         }
 
         if (direction.X < -0.5f)
         {
-            if (mouth.Y < obstacle.Min.Y - clearance ||
-                mouth.Y > obstacle.Max.Y + clearance ||
-                obstacle.Max.X >= mouth.X)
+            if (mouth.Y < rawMin.Y ||
+                mouth.Y > rawMax.Y ||
+                rawMax.X >= mouth.X)
                 return false;
 
-            safeDistance =
+            distance =
                 mouth.X -
-                obstacle.Max.X -
-                clearance;
+                rawMax.X;
             return true;
         }
 
         if (direction.Y > 0.5f)
         {
-            if (mouth.X < obstacle.Min.X - clearance ||
-                mouth.X > obstacle.Max.X + clearance ||
-                obstacle.Min.Y <= mouth.Y)
+            if (mouth.X < rawMin.X ||
+                mouth.X > rawMax.X ||
+                rawMin.Y <= mouth.Y)
                 return false;
 
-            safeDistance =
-                obstacle.Min.Y -
-                mouth.Y -
-                clearance;
+            distance =
+                rawMin.Y -
+                mouth.Y;
             return true;
         }
 
-        if (mouth.X < obstacle.Min.X - clearance ||
-            mouth.X > obstacle.Max.X + clearance ||
-            obstacle.Max.Y >= mouth.Y)
+        if (mouth.X < rawMin.X ||
+            mouth.X > rawMax.X ||
+            rawMax.Y >= mouth.Y)
             return false;
 
-        safeDistance =
+        distance =
             mouth.Y -
-            obstacle.Max.Y -
-            clearance;
+            rawMax.Y;
         return true;
     }
 
@@ -1590,6 +1632,8 @@ internal static class WorldMapOrthogonalRouter
 
             ScoreLocalDetour(
                 candidate,
+                startRoom,
+                endRoom,
                 obstacles,
                 occupancy,
                 ref bestScore,
@@ -1617,6 +1661,8 @@ internal static class WorldMapOrthogonalRouter
 
             ScoreLocalDetour(
                 candidate,
+                startRoom,
+                endRoom,
                 obstacles,
                 occupancy,
                 ref bestScore,
@@ -1630,6 +1676,8 @@ internal static class WorldMapOrthogonalRouter
 
     private static void ScoreLocalDetour(
         Num.Vector2[] candidate,
+        int startRoom,
+        int endRoom,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
         ref float bestScore,
@@ -1640,6 +1688,8 @@ internal static class WorldMapOrthogonalRouter
             candidate.Length < 2 ||
             !CorridorRouteClear(
                 candidate,
+                startRoom,
+                endRoom,
                 obstacles))
         {
             return;
@@ -1824,6 +1874,8 @@ internal static class WorldMapOrthogonalRouter
 
     private static bool CorridorRouteClear(
         Num.Vector2[] points,
+        int startRoom,
+        int endRoom,
         IReadOnlyList<Obstacle> obstacles)
     {
         if (points == null ||
@@ -1837,8 +1889,8 @@ internal static class WorldMapOrthogonalRouter
             if (SegmentBlocked(
                     points[i],
                     points[i + 1],
-                    -1,
-                    -1,
+                    startRoom,
+                    endRoom,
                     obstacles))
                 return false;
         }
@@ -1924,7 +1976,15 @@ internal static class WorldMapOrthogonalRouter
         int ex = Clamp((int)Math.Round((end.X - min.X) / cell), 0, width - 1);
         int ey = Clamp((int)Math.Round((end.Y - min.Y) / cell), 0, height - 1);
 
-        bool[] blocked = BuildBlockedGrid(min, cell, width, height, obstacles);
+        bool[] blocked =
+            BuildBlockedGrid(
+                min,
+                cell,
+                width,
+                height,
+                obstacles,
+                startRoom,
+                endRoom);
         blocked[sy * width + sx] = false;
         blocked[ey * width + ex] = false;
 
@@ -2126,6 +2186,8 @@ internal static class WorldMapOrthogonalRouter
         return BuildSnappedSearchRoute(
             start,
             end,
+            startRoom,
+            endRoom,
             reversed,
             obstacles);
     }
@@ -2133,6 +2195,8 @@ internal static class WorldMapOrthogonalRouter
     private static Num.Vector2[] BuildSnappedSearchRoute(
         Num.Vector2 start,
         Num.Vector2 end,
+        int startRoom,
+        int endRoom,
         List<Num.Vector2> reversed,
         IReadOnlyList<Obstacle> obstacles)
     {
@@ -2219,6 +2283,8 @@ internal static class WorldMapOrthogonalRouter
 
                 if (!CorridorRouteClear(
                         candidate,
+                        startRoom,
+                        endRoom,
                         obstacles))
                     continue;
 
@@ -2245,7 +2311,9 @@ internal static class WorldMapOrthogonalRouter
         float cell,
         int width,
         int height,
-        List<Obstacle> obstacles)
+        List<Obstacle> obstacles,
+        int startRoom,
+        int endRoom)
     {
         bool[] blocked = new bool[width * height];
         for (int y = 0; y < height; y++)
@@ -2259,16 +2327,36 @@ internal static class WorldMapOrthogonalRouter
                     Obstacle obstacle =
                         obstacles[i];
 
+                    Num.Vector2 obstacleMin =
+                        obstacle.Min;
+                    Num.Vector2 obstacleMax =
+                        obstacle.Max;
+
+                    if (obstacle.RoomIndex ==
+                            startRoom ||
+                        obstacle.RoomIndex ==
+                            endRoom)
+                    {
+                        obstacleMin +=
+                            new Num.Vector2(
+                                ObstacleMargin,
+                                ObstacleMargin);
+                        obstacleMax -=
+                            new Num.Vector2(
+                                ObstacleMargin,
+                                ObstacleMargin);
+                    }
+
                     // Cover a small fraction of the cell footprint so a grid edge cannot skim
                     // through a room between two free centres, without effectively inflating every
                     // room by another half-cell and closing narrow but legitimate corridors.
                     float halfCell =
                         cell *
                         0.20f;
-                    if (point.X + halfCell <= obstacle.Min.X ||
-                        point.X - halfCell >= obstacle.Max.X ||
-                        point.Y + halfCell <= obstacle.Min.Y ||
-                        point.Y - halfCell >= obstacle.Max.Y)
+                    if (point.X + halfCell <= obstacleMin.X ||
+                        point.X - halfCell >= obstacleMax.X ||
+                        point.Y + halfCell <= obstacleMin.Y ||
+                        point.Y - halfCell >= obstacleMax.Y)
                     {
                         continue;
                     }
@@ -2931,11 +3019,46 @@ internal static class WorldMapOrthogonalRouter
         int endRoom,
         IReadOnlyList<Obstacle> obstacles)
     {
-        for (int i = 0; i < obstacles.Count; i++)
+        if (obstacles == null)
+            return false;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
         {
-            Obstacle obstacle = obstacles[i];
-            if (SegmentIntersectsRect(a, b, obstacle.Min, obstacle.Max)) return true;
+            Obstacle obstacle =
+                obstacles[i];
+            Num.Vector2 min =
+                obstacle.Min;
+            Num.Vector2 max =
+                obstacle.Max;
+
+            if (obstacle.RoomIndex ==
+                    startRoom ||
+                obstacle.RoomIndex ==
+                    endRoom)
+            {
+                // Endpoint-room clearance margins are soft for their own connection. The physical
+                // room body remains hard, which lets close rooms connect without forcing a huge
+                // detour solely because the 24px visual margins overlap.
+                min +=
+                    new Num.Vector2(
+                        ObstacleMargin,
+                        ObstacleMargin);
+                max -=
+                    new Num.Vector2(
+                        ObstacleMargin,
+                        ObstacleMargin);
+            }
+
+            if (SegmentIntersectsRect(
+                    a,
+                    b,
+                    min,
+                    max))
+                return true;
         }
+
         return false;
     }
 
