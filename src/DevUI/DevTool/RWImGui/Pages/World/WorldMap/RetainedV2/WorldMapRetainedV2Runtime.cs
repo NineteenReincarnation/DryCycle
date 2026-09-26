@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Core;
@@ -46,6 +47,9 @@ internal static class WorldMapRetainedV2Runtime
     private static int activeLayerMask = 7;
     private static int activeShowConnections = 1;
     private static float activeZoom = 1f;
+    private static long canvasSeenAt;
+    internal static bool CanvasVisible => enabled && !EditorUiModeState.OverlayHidden &&
+        Stopwatch.GetTimestamp() - Interlocked.Read(ref canvasSeenAt) < Stopwatch.Frequency / 4;
     private static int retainedConnectionsReady;
     private static long lastRenderedViewRevision = long.MinValue;
     private static long lastRenderedSceneRevision = long.MinValue;
@@ -94,6 +98,7 @@ internal static class WorldMapRetainedV2Runtime
         WorldMapViewTransform viewTransform)
     {
         if (!enabled) return;
+        Interlocked.Exchange(ref canvasSeenAt, Stopwatch.GetTimestamp());
         Volatile.Write(ref activeLayerMask, layerMask);
         Volatile.Write(ref activeShowConnections, showConnections ? 1 : 0);
         Volatile.Write(ref activeZoom, viewTransform.Zoom > 0.0001f ? viewTransform.Zoom : 1f);
@@ -144,7 +149,7 @@ internal static class WorldMapRetainedV2Runtime
                 Volatile.Write(ref retainedConnectionsReady, 0);
         }
 
-        if (session?.ToolMode == EditorToolMode.Map &&
+        if (CanvasVisible && session?.ToolMode == EditorToolMode.Map &&
             snapshot?.Available == true &&
             MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
             MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
@@ -166,6 +171,8 @@ internal static class WorldMapRetainedV2Runtime
         {
             sourcePriorityRooms.Clear();
         }
+
+        MapRoomGeometryPresentationHub.PrioritizeRooms(sourcePriorityRooms);
 
         RoomResources.UpdateMainThread(
             session,
@@ -204,7 +211,7 @@ internal static class WorldMapRetainedV2Runtime
             ref retainedConnectionsReady,
             ConnectionResources.HasCompleteRoutes(MainSceneState) ? 1 : 0);
 
-        if (session?.ToolMode == EditorToolMode.Map &&
+        if (CanvasVisible && session?.ToolMode == EditorToolMode.Map &&
             snapshot?.Available == true &&
             MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
             MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
@@ -585,6 +592,8 @@ internal static class WorldMapRetainedV2Runtime
         geometryChangedRooms.Clear();
         routeChanged.Clear();
         sourcePriorityRooms.Clear();
+        MapRoomGeometryPresentationHub.PrioritizeRooms(null);
+        Interlocked.Exchange(ref canvasSeenAt, 0L);
         visibleRooms.Clear();
         visibleRoutes.Clear();
         Volatile.Write(

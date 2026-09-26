@@ -346,7 +346,6 @@ internal enum WorldMapInteractionKind
 /// </summary>
 internal static class WorldMapBackgroundBudget
 {
-    private const float DetailedBackgroundZoom = 0.42f;
     private const int GeometrySweepIntervalFrames = 4;
     private const int ShortcutSweepIntervalFrames = 4;
     private const int InteractionCooldownMilliseconds = 90;
@@ -435,10 +434,9 @@ internal static class WorldMapBackgroundBudget
             return false;
         }
 
-        if (WorldMapRetainedV2Runtime.LatestZoom < DetailedBackgroundZoom)
-            return false;
-
-        if (Time.frameCount - lastGeometrySweepFrame < GeometrySweepIntervalFrames)
+        // Zoom changes presentation, never whether a room is allowed to finish loading.
+        int interval = WorldMapRetainedV2Runtime.CanvasVisible ? GeometrySweepIntervalFrames : 12;
+        if (Time.frameCount - lastGeometrySweepFrame < interval)
             return false;
 
         lastGeometrySweepFrame = Time.frameCount;

@@ -194,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 19;
+    private const int RoutingPolicyVersion = 20;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -439,7 +439,13 @@ internal static class WorldMapOrthogonalRouter
             }
         }
 
-        // Every connection gets a real terminal stub before any global routing decision.
+        // Nearby sockets do not need a 28px neck plus the room's 24px obstacle margin before
+        // turning. Solve the open corridor first, retaining real terminal anchors for lane edits.
+        if (TryOpenCorridor(request, startDirection, endDirection, obstacles, occupancy,
+                out Num.Vector2[] openCorridor))
+            return NewRoute(request, RouteKind.Compact, openCorridor, startDirection, endDirection);
+
+        // Obstructed links retain the wider escape/fanout grammar before global routing.
         Num.Vector2 startBaseEscape =
             EscapeOutsideRoom(
                 request.Start,
@@ -795,6 +801,65 @@ internal static class WorldMapOrthogonalRouter
             EndTerminalExtraDepth = route.EndTerminalExtraDepth,
             Reused = route.Reused
         };
+    }
+
+    private static bool TryOpenCorridor(
+        Request request,
+        Num.Vector2 startDirection,
+        Num.Vector2 endDirection,
+        List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
+        out Num.Vector2[] route)
+    {
+        route = null;
+        Num.Vector2 a = NearBoundary(request.Start, startDirection, request.StartRoomMin, request.StartRoomMax);
+        Num.Vector2 b = NearBoundary(request.End, endDirection, request.EndRoomMin, request.EndRoomMax);
+        float midX = (a.X + b.X) * 0.5f + request.LaneOffset;
+        float midY = (a.Y + b.Y) * 0.5f + request.LaneOffset;
+        var candidates = new List<Num.Vector2[]>(5);
+        if (Math.Abs(a.X - b.X) < 0.01f || Math.Abs(a.Y - b.Y) < 0.01f)
+            candidates.Add(new[] { a, b });
+        candidates.Add(new[] { a, new Num.Vector2(midX, a.Y), new Num.Vector2(midX, b.Y), b });
+        candidates.Add(new[] { a, new Num.Vector2(a.X, midY), new Num.Vector2(b.X, midY), b });
+        candidates.Add(new[] { a, new Num.Vector2(b.X, a.Y), b });
+        candidates.Add(new[] { a, new Num.Vector2(a.X, b.Y), b });
+
+        float best = float.MaxValue;
+        foreach (Num.Vector2[] middle in candidates)
+        {
+            var full = new Num.Vector2[middle.Length + 2];
+            full[0] = request.Start;
+            Array.Copy(middle, 0, full, 1, middle.Length);
+            full[full.Length - 1] = request.End;
+            Num.Vector2[] candidate = SimplifyRoute(full);
+            if (HasReversal(candidate) || !FullRouteClear(request, candidate, obstacles)) continue;
+            float congestion = RouteCongestionPenalty(candidate, occupancy);
+            if (congestion > DirectRouteCongestionLimit) continue;
+            float score = PathLength(candidate) + CompactBendPenalty * Simplify(candidate).Length + congestion;
+            if (score >= best) continue;
+            best = score;
+            route = candidate;
+        }
+        return route != null;
+    }
+
+    private static Num.Vector2 NearBoundary(Num.Vector2 port, Num.Vector2 direction, Num.Vector2 min, Num.Vector2 max)
+    {
+        const float clearance = 8f;
+        if (direction.X < -0.5f) return new Num.Vector2(Math.Min(port.X - clearance, min.X - clearance), port.Y);
+        if (direction.X > 0.5f) return new Num.Vector2(Math.Max(port.X + clearance, max.X + clearance), port.Y);
+        if (direction.Y < -0.5f) return new Num.Vector2(port.X, Math.Min(port.Y - clearance, min.Y - clearance));
+        return new Num.Vector2(port.X, Math.Max(port.Y + clearance, max.Y + clearance));
+    }
+
+    private static bool HasReversal(Num.Vector2[] points)
+    {
+        for (int i = 1; i + 1 < points.Length; i++)
+        {
+            Num.Vector2 before = points[i] - points[i - 1], after = points[i + 1] - points[i];
+            if (Num.Vector2.Dot(before, after) < -0.01f) return true;
+        }
+        return false;
     }
 
     private static bool TryBuildCompactRoute(

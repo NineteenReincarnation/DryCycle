@@ -128,6 +128,12 @@ internal sealed class WorldMapBuildScheduler
         while (activeWorkers < MaxWorkers && pending.Count > 0)
         {
             RoomBuildRequest request = pending.Dequeue();
+            // A newer room snapshot can arrive while both workers are busy. Do not build an
+            // obsolete raster/terrain mesh just to discard it when it reaches the main thread.
+            if (request.Generation != generation ||
+                !latestRequestedStamp.TryGetValue(request.RoomIndex, out int stamp) ||
+                stamp != request.SourceStamp)
+                continue;
             activeWorkers++;
             Task.Run(() => Execute(request));
         }

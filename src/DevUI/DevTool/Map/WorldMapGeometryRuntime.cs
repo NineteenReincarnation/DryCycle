@@ -211,6 +211,12 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int rasterBuildGeneration;
     private static int publishedGeneration;
     private static readonly List<int> roomOrder = new();
+    private static readonly List<int> priorityRooms = new();
+    internal static void PrioritizeRooms(IReadOnlyList<int> rooms)
+    {
+        priorityRooms.Clear();
+        if (rooms != null) for (int i = 0; i < rooms.Count; i++) priorityRooms.Add(rooms[i]);
+    }
     private static string region = string.Empty;
     private static int lastPrimeFrame = -1;
     private static int lastSubNodeCount = -1;
@@ -279,6 +285,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     internal static void InvalidateRoom(int roomIndex)
     {
+        failedRecoveryRooms.Remove(roomIndex);
         if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
         entry.RasterInitialized = false;
         entry.RasterRequestedSourceKey = int.MinValue;
@@ -303,6 +310,7 @@ internal static partial class MapRoomGeometryPresentationHub
         lock (publishedGate) published.Clear();
         Interlocked.Increment(ref publishedGeneration);
         roomOrder.Clear();
+        priorityRooms.Clear();
         region = string.Empty;
         lastPrimeFrame = -1;
         lastSubNodeCount = -1;
@@ -319,6 +327,7 @@ internal static partial class MapRoomGeometryPresentationHub
         lock (publishedGate) published.Clear();
         Interlocked.Increment(ref publishedGeneration);
         roomOrder.Clear();
+        priorityRooms.Clear();
         region = nextRegion ?? string.Empty;
         lastPrimeFrame = -1;
         lastSubNodeCount = -1;
@@ -405,6 +414,19 @@ internal static partial class MapRoomGeometryPresentationHub
 
         int count = roomOrder.Count;
         if (count == 0) return;
+
+        // The same visible-room order feeds native texture recovery and semantic geometry. A room
+        // already complete is cheap to skip; it must not consume the decode budget of a new room.
+        if (processVisuals)
+            for (int i = 0; i < priorityRooms.Count && rasterLoadsRemaining > 0; i++)
+            {
+                int index = priorityRooms[i];
+                if (index == currentRoom || index == selectedRoom || !cache.TryGetValue(index, out CacheEntry priority)) continue;
+                RefreshDimensions(priority, priority.RoomRep);
+                RefreshNodes(priority, priority.RoomRep, force: false);
+                if (RefreshRaster(priority, priority.RoomRep, allowDecode: true, forcePoll: false)) rasterLoadsRemaining--;
+                Publish(priority, allowRasterReadback: true);
+            }
 
         int checks = Math.Min(count, BackgroundRoomsPerFrame);
         for (int i = 0; i < checks; i++)

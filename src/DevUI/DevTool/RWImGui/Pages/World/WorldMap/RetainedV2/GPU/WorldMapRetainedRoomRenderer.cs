@@ -24,6 +24,8 @@ internal sealed class WorldMapRetainedRoomRenderer
         internal long ThumbnailGeneration = long.MinValue;
         internal long TransformRevision = long.MinValue;
         internal int Layer = int.MinValue;
+        internal float WidthTiles, HeightTiles;
+        internal bool Textured;
     }
 
     private const float TileDisplaySize = 2f;
@@ -77,7 +79,7 @@ internal sealed class WorldMapRetainedRoomRenderer
                 bool thumbnailChanged = obj.ThumbnailGeneration != resource.Thumbnail.Generation;
                 if (geometryChanged || thumbnailChanged)
                 {
-                    RebuildRoom(obj, resource);
+                    RebuildRoom(obj, resource, geometryChanged, thumbnailChanged);
                     obj.GeometryGeneration = resource.GeometryGeneration;
                     obj.ThumbnailGeneration = resource.Thumbnail.Generation;
                 }
@@ -92,6 +94,7 @@ internal sealed class WorldMapRetainedRoomRenderer
                 ReplaceMesh(obj.OverlayFilter, null);
                 obj.GeometryGeneration = -1L;
                 obj.ThumbnailGeneration = -1L;
+                obj.Textured = false;
             }
 
             if (obj.TransformRevision != room.TransformRevision || obj.Layer != room.Layer)
@@ -222,23 +225,32 @@ internal sealed class WorldMapRetainedRoomRenderer
 
     private void RebuildRoom(
         RoomObject obj,
-        WorldMapRoomResourceStore.RoomResource resource)
+        WorldMapRoomResourceStore.RoomResource resource,
+        bool geometryChanged,
+        bool thumbnailChanged)
     {
         RoomGeometryBlob geometry = resource.Geometry ?? RoomGeometryBlob.Empty;
         if (resource.Thumbnail.HasCommitted)
         {
             RoomThumbnailResource.Descriptor thumbnail = resource.Thumbnail.Committed;
-            ReplaceMesh(obj.BaseFilter, BuildThumbnailMesh(geometry, thumbnail));
-            obj.BaseRenderer.sharedMaterial = GetTextureMaterial(thumbnail.Texture);
+            if (!obj.Textured || thumbnailChanged ||
+                obj.WidthTiles != geometry.WidthTiles || obj.HeightTiles != geometry.HeightTiles)
+            {
+                ReplaceMesh(obj.BaseFilter, BuildThumbnailMesh(geometry, thumbnail));
+                obj.BaseRenderer.sharedMaterial = GetTextureMaterial(thumbnail.Texture);
+            }
 
             // Vanilla map textures do not contain authored RoomSettings terrain (TerrainHandle,
             // LocalTerrain, CurvedSlope/SuperSlope, DryCycle custom curved terrain). Draw that
             // semantic geometry as a retained overlay using the same terrain colors as normal tiles.
-            Mesh authoredOverlay = BuildAuthoredTerrainMesh(geometry);
-            if (authoredOverlay == null)
-                authoredOverlay = BuildColorMesh(geometry, customOnly: true);
-            ReplaceMesh(obj.OverlayFilter, authoredOverlay);
-            obj.OverlayRenderer.sharedMaterial = colorMaterial;
+            if (!obj.Textured || geometryChanged)
+            {
+                Mesh authoredOverlay = BuildAuthoredTerrainMesh(geometry);
+                if (authoredOverlay == null)
+                    authoredOverlay = BuildColorMesh(geometry, customOnly: true);
+                ReplaceMesh(obj.OverlayFilter, authoredOverlay);
+                obj.OverlayRenderer.sharedMaterial = colorMaterial;
+            }
         }
         else
         {
@@ -246,6 +258,9 @@ internal sealed class WorldMapRetainedRoomRenderer
             obj.BaseRenderer.sharedMaterial = colorMaterial;
             ReplaceMesh(obj.OverlayFilter, null);
         }
+        obj.WidthTiles = geometry.WidthTiles;
+        obj.HeightTiles = geometry.HeightTiles;
+        obj.Textured = resource.Thumbnail.HasCommitted;
     }
 
     private Material GetTextureMaterial(Texture2D texture)

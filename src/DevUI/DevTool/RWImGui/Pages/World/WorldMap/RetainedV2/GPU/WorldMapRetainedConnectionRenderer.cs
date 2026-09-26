@@ -22,21 +22,10 @@ internal sealed class WorldMapRetainedConnectionRenderer
         internal long Revision = long.MinValue;
     }
 
-    private const float CoreHalfWidth = 1.20f;
-    private const float ShadowHalfWidth = 2.85f;
+    private const float CoreHalfWidth = 0.95f;
+    private const float ShadowHalfWidth = 1.95f;
     private const float DashLength = 10f;
     private const float DashGap = 6f;
-
-    // Direction is metadata, not the dominant shape of a route. Small chevrons preserve flow
-    // readability without covering lane spacing, port numbers or neighbouring connections.
-    private const float DirectionMarkerLength = 6.5f;
-    private const float DirectionMarkerSpread = 3.4f;
-    private const float DirectionMarkerCoreHalfWidth = 0.78f;
-    private const float DirectionMarkerShadowHalfWidth = 1.55f;
-    private const float MinimumDirectionMarkerRun = 20f;
-    private const float MaximumDirectionMarkerShift = 16f;
-    private const float SecondaryDirectionMarkerRouteLength = 420f;
-    private const float SecondaryDirectionMarkerMinimumDistance = 90f;
 
     private const float CrossingRadius = 6.4f;
     private const float CrossingRise = 4.8f;
@@ -279,8 +268,10 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
     private static Mesh BuildRouteMesh(ConnectionRouteResource route)
     {
-        Num.Vector2[] path = route.Points ?? Array.Empty<Num.Vector2>();
-        if (path.Length < 2) return null;
+        if (route.Points == null || route.Points.Length < 2) return null;
+        var rounded = new List<Num.Vector2>(route.Points.Length * 5);
+        WorldMapConnectionDrawing.RoundCorners(route.Points, rounded, WorldMapConnectionDrawing.CornerRadius);
+        Num.Vector2[] path = rounded.ToArray();
 
         List<Vector3> vertices = new();
         List<Color32> colors = new();
@@ -330,18 +321,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 coreHalfWidth,
                 core,
                 0.04f);
+            AddPath(vertices, colors, indices, path, coreHalfWidth * 0.32f,
+                new Color32(248, 226, 181, 200), 0.02f);
         }
 
-        AddDirectionArrows(
-            vertices,
-            colors,
-            indices,
-            path,
-            route.ConnectionId,
-            route.Direction,
-            route.DensityTier,
-            shadow,
-            core);
+        // Flow markers are drawn in screen space by WorldMapView. Baking them into this mesh made
+        // them disappear at overview zoom and become huge when zooming into adjacent sockets.
 
         if (indices.Count == 0) return null;
         Mesh mesh = NewMesh("DryCycle WorldMap V2 Route");
@@ -530,37 +515,25 @@ internal sealed class WorldMapRetainedConnectionRenderer
     {
         for (int i = 0; i < path.Length - 1; i++)
         {
-            float segmentHalfWidth =
-                i == 0 ||
-                i == path.Length - 2
-                    ? halfWidth * 0.72f
-                    : halfWidth;
-
             AddThickSegment(
                 vertices,
                 colors,
                 indices,
                 path[i],
                 path[i + 1],
-                segmentHalfWidth,
+                halfWidth,
                 color,
                 z);
         }
 
         for (int i = 1; i < path.Length - 1; i++)
         {
-            float joinRadius =
-                i == 1 ||
-                i == path.Length - 2
-                    ? halfWidth * 0.86f
-                    : halfWidth;
-
             AddRoundJoin(
                 vertices,
                 colors,
                 indices,
                 path[i],
-                joinRadius,
+                halfWidth,
                 color,
                 z);
         }
@@ -658,416 +631,6 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
             phase = (phase + length) % cycle;
         }
-    }
-
-    private static void AddDirectionArrows(
-        List<Vector3> vertices,
-        List<Color32> colors,
-        List<int> indices,
-        Num.Vector2[] path,
-        string routeId,
-        WorldConnectionDirection direction,
-        byte densityTier,
-        Color32 shadow,
-        Color32 core)
-    {
-        float totalLength =
-            PathLength(path);
-        if (totalLength < 34f)
-            return;
-
-        float markerScale =
-            densityTier >= 2
-                ? 0.74f
-                : densityTier == 1
-                    ? 0.86f
-                    : 1f;
-
-        Num.Vector2 point;
-        Num.Vector2 tangent;
-        float straightLength;
-
-        if (!TryLongestRouteSegment(
-                path,
-                out point,
-                out tangent,
-                out straightLength,
-                out int primarySegment) ||
-            straightLength <
-                MinimumDirectionMarkerRun)
-        {
-            return;
-        }
-
-        // Parallel members of a bundle used to place their chevrons on the exact same cross-section.
-        // A small deterministic longitudinal shift keeps direction markers readable as individual
-        // route metadata rather than one dense wall of symbols.
-        point +=
-            tangent *
-            StableDirectionMarkerShift(
-                routeId,
-                straightLength,
-                densityTier,
-                primarySegment);
-
-        if (direction ==
-            WorldConnectionDirection.Bidirectional)
-        {
-            float separation =
-                Math.Min(
-                    9f,
-                    Math.Max(
-                        4f,
-                        straightLength * 0.12f));
-
-            AddChevronAtPoint(
-                vertices,
-                colors,
-                indices,
-                point - tangent * separation,
-                -tangent,
-                markerScale,
-                shadow,
-                core);
-            AddChevronAtPoint(
-                vertices,
-                colors,
-                indices,
-                point + tangent * separation,
-                tangent,
-                markerScale,
-                shadow,
-                core);
-            return;
-        }
-
-        if (direction ==
-            WorldConnectionDirection.BToA)
-        {
-            tangent =
-                -tangent;
-        }
-
-        AddChevronAtPoint(
-            vertices,
-            colors,
-            indices,
-            point,
-            tangent,
-            markerScale,
-            shadow,
-            core);
-
-        if (totalLength <
-                SecondaryDirectionMarkerRouteLength ||
-            !TrySecondaryRouteSegment(
-                path,
-                primarySegment,
-                point,
-                out Num.Vector2 secondaryPoint,
-                out Num.Vector2 secondaryTangent,
-                out float secondaryLength,
-                out int secondarySegment))
-        {
-            return;
-        }
-
-        secondaryPoint +=
-            secondaryTangent *
-            StableDirectionMarkerShift(
-                routeId,
-                secondaryLength,
-                densityTier,
-                secondarySegment);
-
-        if (direction ==
-            WorldConnectionDirection.BToA)
-        {
-            secondaryTangent =
-                -secondaryTangent;
-        }
-
-        AddChevronAtPoint(
-            vertices,
-            colors,
-            indices,
-            secondaryPoint,
-            secondaryTangent,
-            markerScale,
-            shadow,
-            core);
-    }
-
-    private static bool TryLongestRouteSegment(
-        Num.Vector2[] path,
-        out Num.Vector2 point,
-        out Num.Vector2 tangent,
-        out float length,
-        out int segmentIndex)
-    {
-        point =
-            default;
-        tangent =
-            Num.Vector2.UnitX;
-        length =
-            0f;
-        segmentIndex =
-            -1;
-
-        if (path == null ||
-            path.Length < 2)
-            return false;
-
-        int firstSegment =
-            path.Length >= 4
-                ? 1
-                : 0;
-        int lastSegment =
-            path.Length >= 4
-                ? path.Length - 3
-                : path.Length - 2;
-
-        for (int i = firstSegment;
-             i <= lastSegment;
-             i++)
-        {
-            Num.Vector2 delta =
-                path[i + 1] -
-                path[i];
-            float candidateLength =
-                delta.Length();
-
-            if (candidateLength <=
-                length + 0.01f)
-                continue;
-
-            length =
-                candidateLength;
-            tangent =
-                delta /
-                candidateLength;
-            point =
-                (path[i] +
-                 path[i + 1]) *
-                0.5f;
-            segmentIndex =
-                i;
-        }
-
-        return length > 0.001f;
-    }
-
-    private static bool TrySecondaryRouteSegment(
-        Num.Vector2[] path,
-        int primarySegment,
-        Num.Vector2 primaryPoint,
-        out Num.Vector2 point,
-        out Num.Vector2 tangent,
-        out float length,
-        out int segmentIndex)
-    {
-        point =
-            default;
-        tangent =
-            Num.Vector2.UnitX;
-        length =
-            0f;
-        segmentIndex =
-            -1;
-
-        if (path == null ||
-            path.Length < 3)
-            return false;
-
-        int firstSegment =
-            path.Length >= 4
-                ? 1
-                : 0;
-        int lastSegment =
-            path.Length >= 4
-                ? path.Length - 3
-                : path.Length - 2;
-
-        for (int i = firstSegment;
-             i <= lastSegment;
-             i++)
-        {
-            if (i == primarySegment)
-                continue;
-
-            Num.Vector2 delta =
-                path[i + 1] -
-                path[i];
-            float candidateLength =
-                delta.Length();
-
-            if (candidateLength <
-                    MinimumDirectionMarkerRun *
-                    1.5f ||
-                candidateLength <=
-                    length + 0.01f)
-                continue;
-
-            Num.Vector2 candidatePoint =
-                (path[i] +
-                 path[i + 1]) *
-                0.5f;
-
-            if (Num.Vector2.Distance(
-                    candidatePoint,
-                    primaryPoint) <
-                SecondaryDirectionMarkerMinimumDistance)
-                continue;
-
-            length =
-                candidateLength;
-            tangent =
-                delta /
-                candidateLength;
-            point =
-                candidatePoint;
-            segmentIndex =
-                i;
-        }
-
-        return segmentIndex >= 0;
-    }
-
-    private static float StableDirectionMarkerShift(
-        string routeId,
-        float straightLength,
-        byte densityTier,
-        int salt)
-    {
-        if (string.IsNullOrEmpty(routeId) ||
-            straightLength <= MinimumDirectionMarkerRun)
-            return 0f;
-
-        float available =
-            Math.Max(
-                0f,
-                (straightLength -
-                 MinimumDirectionMarkerRun) *
-                0.34f);
-        float maxShift =
-            Math.Min(
-                MaximumDirectionMarkerShift,
-                available);
-
-        if (densityTier >= 2)
-            maxShift *= 0.65f;
-        else if (densityTier == 1)
-            maxShift *= 0.82f;
-
-        if (maxShift <= 0.5f)
-            return 0f;
-
-        uint hash = 2166136261u;
-        unchecked
-        {
-            for (int i = 0; i < routeId.Length; i++)
-            {
-                hash ^= routeId[i];
-                hash *= 16777619u;
-            }
-
-            hash ^= (uint)(salt + 1);
-            hash *= 16777619u;
-        }
-
-        float normalized =
-            (hash & 1023u) /
-            1023f;
-        normalized =
-            normalized * 2f -
-            1f;
-
-        return normalized *
-               maxShift;
-    }
-
-    private static void AddChevronAtPoint(
-        List<Vector3> vertices,
-        List<Color32> colors,
-        List<int> indices,
-        Num.Vector2 point,
-        Num.Vector2 tangent,
-        float sizeScale,
-        Color32 shadow,
-        Color32 core)
-    {
-        float tangentLength =
-            tangent.Length();
-        if (tangentLength <= 0.001f)
-            return;
-
-        tangent /=
-            tangentLength;
-
-        Num.Vector2 normal =
-            new(-tangent.Y, tangent.X);
-
-        float length =
-            DirectionMarkerLength *
-            sizeScale;
-        float spread =
-            DirectionMarkerSpread *
-            sizeScale;
-
-        Num.Vector2 tip =
-            point +
-            tangent *
-            (length * 0.5f);
-        Num.Vector2 back =
-            point -
-            tangent *
-            (length * 0.5f);
-        Num.Vector2 left =
-            back +
-            normal *
-            spread;
-        Num.Vector2 right =
-            back -
-            normal *
-            spread;
-
-        AddThickSegment(
-            vertices,
-            colors,
-            indices,
-            left,
-            tip,
-            DirectionMarkerShadowHalfWidth,
-            shadow,
-            -0.082f);
-        AddThickSegment(
-            vertices,
-            colors,
-            indices,
-            right,
-            tip,
-            DirectionMarkerShadowHalfWidth,
-            shadow,
-            -0.082f);
-
-        AddThickSegment(
-            vertices,
-            colors,
-            indices,
-            left,
-            tip,
-            DirectionMarkerCoreHalfWidth,
-            core,
-            -0.105f);
-        AddThickSegment(
-            vertices,
-            colors,
-            indices,
-            right,
-            tip,
-            DirectionMarkerCoreHalfWidth,
-            core,
-            -0.105f);
     }
 
     private static void AddThickSegment(
@@ -1185,9 +748,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
             route?.DensityTier ?? 0;
 
         if (tier >= 2)
-            return 0.76f;
+            return 0.70f;
         if (tier == 1)
-            return 0.96f;
+            return 0.82f;
         return CoreHalfWidth;
     }
 
@@ -1198,9 +761,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
             route?.DensityTier ?? 0;
 
         if (tier >= 2)
-            return 1.70f;
+            return 1.45f;
         if (tier == 1)
-            return 2.20f;
+            return 1.70f;
         return ShadowHalfWidth;
     }
 
@@ -1210,7 +773,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
             return new Color32(150, 155, 164, 220);
 
         return route?.Direction == WorldConnectionDirection.Bidirectional
-            ? new Color32(235, 170, 74, 245)
+            ? new Color32(211, 171, 103, 245)
             : new Color32(232, 238, 247, 245);
     }
 }

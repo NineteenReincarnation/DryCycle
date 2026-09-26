@@ -38,6 +38,8 @@ internal static class WorldMapView
     private static readonly List<int> retainedVisibleRoomIds = new();
     private static readonly List<int> retainedHoverRoomIds = new();
     private static readonly List<Num.Vector2> connectionPathScratch = new(12);
+    private static readonly List<Num.Vector2> roundedConnectionScratch = new(64);
+    private static readonly List<Num.Vector4> directionMarkerOccluders = new(128);
     private static readonly List<Num.Vector4> overlayLabelRects = new(128);
     private static long localPositionRevision;
     private static EditorMapRoomSnapshot[] synchronizedPositionRooms;
@@ -848,7 +850,7 @@ internal static class WorldMapView
 
     private static uint ConnectionColor(WorldConnectionDirection direction) =>
         ImGui.GetColorU32(direction == WorldConnectionDirection.Bidirectional
-            ? new Num.Vector4(0.98f, 0.72f, 0.10f, 1.00f)
+            ? new Num.Vector4(0.83f, 0.67f, 0.40f, 1.00f)
             : new Num.Vector4(0.92f, 0.94f, 0.97f, 1.00f));
 
     private static void DrawRoomLabel(
@@ -889,16 +891,24 @@ internal static class WorldMapView
             snapshot.Connections ?? Array.Empty<EditorMapConnectionSnapshot>();
         Num.Vector2 canvasMax = canvasMin + canvasSize;
 
+        directionMarkerOccluders.Clear();
+        foreach (EditorMapRoomSnapshot room in snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>())
+        {
+            if (room == null || !IsLayerVisible(room.Layer)) continue;
+            GetRoomRect(room, WorldMapPresentationIndex.GetRoomVisual(room.RoomIndex), canvasMin,
+                out Num.Vector2 min, out Num.Vector2 max);
+            directionMarkerOccluders.Add(new Num.Vector4(min.X, min.Y, max.X, max.Y));
+        }
+
         for (int i = 0; i < connections.Length; i++)
         {
             EditorMapConnectionSnapshot connection = connections[i];
             if (connection == null)
                 continue;
 
-            if (skipRetainedRoutes &&
+            bool retained = skipRetainedRoutes &&
                 WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
-                    connection.ConnectionId))
-                continue;
+                    connection.ConnectionId);
 
             if (!BuildImmediateConnectionPath(
                     snapshot,
@@ -924,21 +934,22 @@ internal static class WorldMapView
             float coreThickness =
                 connection.Direction ==
                 WorldConnectionDirection.Bidirectional
-                    ? 2.5f
-                    : 2.35f;
+                    ? 1.9f
+                    : 1.8f;
             float shadowThickness =
-                coreThickness + 3.4f;
+                coreThickness + 2f;
 
-            DrawConnectionPathStroke(
+            if (!retained) DrawConnectionPathStroke(
                 draw,
                 connectionPathScratch,
                 shadow,
                 core,
                 shadowThickness,
                 coreThickness,
-                connection.ConnectionId,
-                connection.Direction,
                 connection.Ambiguous);
+
+            WorldMapConnectionDrawing.DrawDirectionMarker(draw, connectionPathScratch, canvasMin, canvasMax,
+                directionMarkerOccluders, connection.Direction, 0xFFBFE5FA);
 
             if (connection.Ambiguous &&
                 TryPointOnPath(
@@ -1254,9 +1265,9 @@ internal static class WorldMapView
                 : ConnectionColor(connection.Direction);
 
         float coreThickness =
-            selected ? 3.7f : 3.1f;
+            selected ? 2.6f : 2.2f;
         float isolationThickness =
-            selected ? 6.5f : 5.5f;
+            selected ? 5.2f : 4.4f;
 
         DrawConnectionPathStroke(
             draw,
@@ -1265,9 +1276,10 @@ internal static class WorldMapView
             core,
             isolationThickness,
             coreThickness,
-            connection.ConnectionId,
-            connection.Direction,
             connection.Ambiguous);
+
+        WorldMapConnectionDrawing.DrawDirectionMarker(draw, connectionPathScratch, canvasMin, canvasMax,
+            directionMarkerOccluders, connection.Direction, 0xFFEAF4FF);
 
         DrawFocusedCrossingSemantics(
             draw,
@@ -2952,385 +2964,27 @@ internal static class WorldMapView
         uint core,
         float shadowThickness,
         float coreThickness,
-        string markerKey,
-        WorldConnectionDirection direction,
         bool dashed)
     {
-        if (points == null || points.Count < 2)
-            return;
-
-        for (int i = 0; i < points.Count - 1; i++)
+        if (points == null || points.Count < 2) return;
+        WorldMapConnectionDrawing.RoundCorners(points, roundedConnectionScratch,
+            WorldMapConnectionDrawing.CornerRadius * zoom);
+        for (int i = 0; i + 1 < roundedConnectionScratch.Count; i++)
         {
-            Num.Vector2 a = points[i];
-            Num.Vector2 b = points[i + 1];
-            bool terminal =
-                i == 0 ||
-                i == points.Count - 2;
-            float segmentShadowThickness =
-                terminal
-                    ? shadowThickness * 0.72f
-                    : shadowThickness;
-            float segmentCoreThickness =
-                terminal
-                    ? coreThickness * 0.72f
-                    : coreThickness;
-
+            Num.Vector2 a = roundedConnectionScratch[i], b = roundedConnectionScratch[i + 1];
             if (dashed)
             {
-                DrawDashedLine(
-                    draw,
-                    a,
-                    b,
-                    shadow,
-                    segmentShadowThickness,
-                    10f,
-                    6f);
-                DrawDashedLine(
-                    draw,
-                    a,
-                    b,
-                    core,
-                    segmentCoreThickness,
-                    10f,
-                    6f);
+                DrawDashedLine(draw, a, b, shadow, shadowThickness, 10f, 6f);
+                DrawDashedLine(draw, a, b, core, coreThickness, 10f, 6f);
             }
             else
             {
-                draw.AddLine(
-                    a,
-                    b,
-                    shadow,
-                    segmentShadowThickness);
-                draw.AddLine(
-                    a,
-                    b,
-                    core,
-                    segmentCoreThickness);
+                draw.AddLine(a, b, shadow, shadowThickness);
+                draw.AddLine(a, b, core, coreThickness);
+                draw.AddLine(a, b, 0xC8B5E2F8, Math.Max(0.7f, coreThickness * 0.32f));
             }
         }
-
-        if (!dashed)
-        {
-            // Match the retained GPU renderer: independent line segments otherwise leave harsh
-            // square seams at every 90-degree turn and make the route read like plumbing.
-            for (int i = 1; i < points.Count - 1; i++)
-            {
-                float joinScale =
-                    i == 1 ||
-                    i == points.Count - 2
-                        ? 0.86f
-                        : 1f;
-
-                draw.AddCircleFilled(
-                    points[i],
-                    shadowThickness *
-                    0.5f *
-                    joinScale,
-                    shadow,
-                    10);
-                draw.AddCircleFilled(
-                    points[i],
-                    coreThickness *
-                    0.5f *
-                    joinScale,
-                    core,
-                    10);
-            }
-        }
-
-        float length = PathLength(points);
-        if (length < 25f)
-            return;
-
-        Num.Vector2 markerPoint;
-        Num.Vector2 markerTangent;
-        float straightLength;
-
-        if (!TryLongestPathSegment(
-                points,
-                out markerPoint,
-                out markerTangent,
-                out straightLength,
-                out int primarySegment) ||
-            straightLength < 20f)
-        {
-            return;
-        }
-
-        markerPoint +=
-            markerTangent *
-            StableDirectionMarkerShift(
-                markerKey,
-                straightLength,
-                primarySegment);
-
-        float markerSize =
-            Math.Max(
-                6.5f,
-                Math.Min(
-                    8.0f,
-                    5.7f +
-                    coreThickness *
-                    0.55f));
-
-        if (direction ==
-            WorldConnectionDirection.Bidirectional)
-        {
-            float separation =
-                Math.Min(
-                    9f,
-                    Math.Max(
-                        4f,
-                        straightLength *
-                        0.12f));
-
-            DrawArrowHead(
-                draw,
-                markerPoint -
-                    markerTangent *
-                    separation,
-                -markerTangent,
-                shadow,
-                core,
-                markerSize);
-            DrawArrowHead(
-                draw,
-                markerPoint +
-                    markerTangent *
-                    separation,
-                markerTangent,
-                shadow,
-                core,
-                markerSize);
-            return;
-        }
-
-        if (direction ==
-            WorldConnectionDirection.BToA)
-        {
-            markerTangent =
-                -markerTangent;
-        }
-
-        DrawArrowHead(
-            draw,
-            markerPoint,
-            markerTangent,
-            shadow,
-            core,
-            markerSize);
-
-        if (length < 420f ||
-            !TrySecondaryPathSegment(
-                points,
-                primarySegment,
-                markerPoint,
-                out Num.Vector2 secondaryPoint,
-                out Num.Vector2 secondaryTangent,
-                out float secondaryLength,
-                out int secondarySegment))
-        {
-            return;
-        }
-
-        secondaryPoint +=
-            secondaryTangent *
-            StableDirectionMarkerShift(
-                markerKey,
-                secondaryLength,
-                secondarySegment);
-
-        if (direction ==
-            WorldConnectionDirection.BToA)
-        {
-            secondaryTangent =
-                -secondaryTangent;
-        }
-
-        DrawArrowHead(
-            draw,
-            secondaryPoint,
-            secondaryTangent,
-            shadow,
-            core,
-            markerSize);
     }
-
-    private static float StableDirectionMarkerShift(
-        string markerKey,
-        float straightLength,
-        int salt)
-    {
-        if (string.IsNullOrEmpty(markerKey) ||
-            straightLength <= 20f)
-            return 0f;
-
-        float maxShift =
-            Math.Min(
-                14f,
-                Math.Max(
-                    0f,
-                    (straightLength - 20f) *
-                    0.30f));
-        if (maxShift <= 0.5f)
-            return 0f;
-
-        uint hash = 2166136261u;
-        unchecked
-        {
-            for (int i = 0; i < markerKey.Length; i++)
-            {
-                hash ^= markerKey[i];
-                hash *= 16777619u;
-            }
-
-            hash ^= (uint)(salt + 1);
-            hash *= 16777619u;
-        }
-
-        float normalized =
-            (hash & 1023u) /
-            1023f;
-        normalized =
-            normalized * 2f -
-            1f;
-
-        return normalized *
-               maxShift;
-    }
-
-    private static bool TryLongestPathSegment(
-        IReadOnlyList<Num.Vector2> points,
-        out Num.Vector2 point,
-        out Num.Vector2 tangent,
-        out float length,
-        out int segmentIndex)
-    {
-        point =
-            Num.Vector2.Zero;
-        tangent =
-            Num.Vector2.Zero;
-        length =
-            0f;
-        segmentIndex =
-            -1;
-
-        if (points == null ||
-            points.Count < 2)
-            return false;
-
-        int firstSegment =
-            points.Count >= 4
-                ? 1
-                : 0;
-        int lastSegment =
-            points.Count >= 4
-                ? points.Count - 3
-                : points.Count - 2;
-
-        for (int i = firstSegment;
-             i <= lastSegment;
-             i++)
-        {
-            Num.Vector2 delta =
-                points[i + 1] -
-                points[i];
-            float candidateLength =
-                delta.Length();
-
-            if (candidateLength <=
-                length + 0.01f)
-                continue;
-
-            length =
-                candidateLength;
-            tangent =
-                delta /
-                candidateLength;
-            point =
-                (points[i] +
-                 points[i + 1]) *
-                0.5f;
-            segmentIndex =
-                i;
-        }
-
-        return length > 0.001f;
-    }
-
-    private static bool TrySecondaryPathSegment(
-        IReadOnlyList<Num.Vector2> points,
-        int primarySegment,
-        Num.Vector2 primaryPoint,
-        out Num.Vector2 point,
-        out Num.Vector2 tangent,
-        out float length,
-        out int segmentIndex)
-    {
-        point =
-            Num.Vector2.Zero;
-        tangent =
-            Num.Vector2.Zero;
-        length =
-            0f;
-        segmentIndex =
-            -1;
-
-        if (points == null ||
-            points.Count < 3)
-            return false;
-
-        int firstSegment =
-            points.Count >= 4
-                ? 1
-                : 0;
-        int lastSegment =
-            points.Count >= 4
-                ? points.Count - 3
-                : points.Count - 2;
-
-        for (int i = firstSegment;
-             i <= lastSegment;
-             i++)
-        {
-            if (i == primarySegment)
-                continue;
-
-            Num.Vector2 delta =
-                points[i + 1] -
-                points[i];
-            float candidateLength =
-                delta.Length();
-
-            if (candidateLength < 30f ||
-                candidateLength <=
-                    length + 0.01f)
-                continue;
-
-            Num.Vector2 candidatePoint =
-                (points[i] +
-                 points[i + 1]) *
-                0.5f;
-
-            if (Num.Vector2.Distance(
-                    candidatePoint,
-                    primaryPoint) < 90f)
-                continue;
-
-            length =
-                candidateLength;
-            tangent =
-                delta /
-                candidateLength;
-            point =
-                candidatePoint;
-            segmentIndex =
-                i;
-        }
-
-        return segmentIndex >= 0;
-    }
-
     private static bool TryPointOnPath(
         IReadOnlyList<Num.Vector2> points,
         float fraction,

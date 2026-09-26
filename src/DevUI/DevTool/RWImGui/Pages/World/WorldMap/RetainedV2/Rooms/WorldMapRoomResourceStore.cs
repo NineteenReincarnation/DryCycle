@@ -144,7 +144,9 @@ internal sealed class WorldMapRoomResourceStore
         if (!ReferenceEquals(auditRooms, snapshotRooms))
         {
             auditRooms = snapshotRooms;
-            auditCursor = 0;
+            // Presentation snapshots are replaced every few frames. Restarting here starves all
+            // rooms beyond the first audit batch even when their textures are already available.
+            if (auditCursor >= snapshotRooms.Length) auditCursor = 0;
         }
 
         // Region reset happens above, so first-open visible promotion cannot be discarded by the
@@ -153,14 +155,12 @@ internal sealed class WorldMapRoomResourceStore
 
         // Navigation/room drag owns the frame budget. Keep committed thumbnails/geometry stable
         // and resume source capture/build commits after the interaction cooldown.
-        if (WorldMapBackgroundBudget.InteractionActive)
-            return;
-
         int budget =
             WorldMapPersistentRetainedCache.ValidatedRoomCount > 0
                 ? HotStartRoomsPerFrame
                 : IdleRoomsPerFrame;
         DrainBuildResults(budget);
+        if (WorldMapBackgroundBudget.InteractionActive) budget = 1;
 
         while (budget > 0 && visiblePriorityQueue.Count > 0)
         {
@@ -298,13 +298,27 @@ internal sealed class WorldMapRoomResourceStore
                 return;
             }
 
+            bool routingChanged = RoutingGeometryChanged(resource.Geometry, result.Geometry);
             resource.Geometry = result.Geometry;
             resource.VisualStamp = result.SourceStamp;
             resource.RequestedVisualStamp = int.MinValue;
-            geometryChanged.Add(result.RoomIndex);
+            // Raster/curve updates rebuild the thumbnail, not the unchanged pipe paths.
+            if (routingChanged) geometryChanged.Add(result.RoomIndex);
             unchecked { resource.GeometryGeneration++; }
             AdvanceRevision();
         });
+    }
+
+    internal static bool RoutingGeometryChanged(RoomGeometryBlob previous, RoomGeometryBlob next)
+    {
+        if (previous == null || next == null || previous.WidthTiles != next.WidthTiles || previous.HeightTiles != next.HeightTiles ||
+            previous.Nodes.Length != next.Nodes.Length) return true;
+        for (int i = 0; i < previous.Nodes.Length; i++)
+        {
+            var a = previous.Nodes[i]; var b = next.Nodes[i];
+            if (a.NodeIndex != b.NodeIndex || a.X != b.X || a.Y != b.Y) return true;
+        }
+        return false;
     }
 
     private bool NeedsPriorityRefresh(int roomIndex)

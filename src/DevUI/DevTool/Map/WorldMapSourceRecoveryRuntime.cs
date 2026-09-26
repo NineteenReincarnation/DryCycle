@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using DevInterface;
@@ -31,6 +32,8 @@ internal static partial class MapRoomGeometryPresentationHub
     private static bool sourceRecoveryMapActive;
     private static int sourceDimensionCursor;
     private static int lastSourceRecoveryFrame = -1;
+    private static readonly HashSet<int> failedRecoveryRooms = new();
+    private static readonly Dictionary<int, int> recoveryRoomIndices = new();
 
     internal static void RecoverMissingSources(EditorSession session)
     {
@@ -70,6 +73,10 @@ internal static partial class MapRoomGeometryPresentationHub
             sourceRecoveryMapObject = page.map;
             sourceRecoveryMapActive = true;
             sourceDimensionsResolved.Clear();
+            failedRecoveryRooms.Clear();
+            recoveryRoomIndices.Clear();
+            for (int i = 0; i < page.map.roomReps.Length; i++)
+                if (page.map.roomReps[i]?.room != null) recoveryRoomIndices[page.map.roomReps[i].room.index] = i;
             sourceDimensionCursor = 0;
         }
 
@@ -85,6 +92,8 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         sourceRecoveryWorld = null;
         sourceDimensionsResolved.Clear();
+        failedRecoveryRooms.Clear();
+        recoveryRoomIndices.Clear();
         sourceDimensionCursor = 0;
         lastSourceRecoveryFrame = -1;
         sourceRecoveryMapActive = false;
@@ -206,11 +215,14 @@ internal static partial class MapRoomGeometryPresentationHub
         if (roomCount <= 0) return;
         if (mapObject.roomLoaderIndex < 0) mapObject.roomLoaderIndex = 0;
 
-        // The loop only skips already-resolved rooms and can finalize at most one active preparer.
-        // It never spins a pending preparer without a budget and never sleeps the Unity thread.
+        // Bound the whole queue as well as each incremental shortcut-mapping job.
         int guard = roomCount + 1;
+        long deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2 / 1000;
+        int completed = 0;
         while (guard-- > 0)
         {
+            // One budget for the entire queue, not a fresh 1.5 ms budget for every room.
+            if (completed >= 2 || Stopwatch.GetTimestamp() >= deadline) return;
             if (mapObject.roomPrep != null)
             {
                 RoomPreparer preparer = mapObject.roomPrep;
@@ -227,22 +239,24 @@ internal static partial class MapRoomGeometryPresentationHub
                     preparer.done = true;
                     global::DryCycle.Plugin.Logger?.LogWarning(
                         "WorldMap RoomPreparer update failed for " +
-                        (preparer.room?.abstractRoom?.name ?? "?") + ": " + error.Message);
+                        (preparer.room?.abstractRoom?.name ?? "?") + ": " + error);
                 }
 
                 if (!preparer.done) return;
                 FinishPreparedMapTexture(mapObject, preparer, roomCount);
+                completed++;
                 if (!allowStartNew) return;
                 continue;
             }
 
-            if (!allowStartNew || mapObject.roomLoaderIndex >= roomCount) return;
+            if (!allowStartNew || !SelectNextMissingRoom(mapObject, roomCount)) return;
 
             int localIndex = mapObject.roomLoaderIndex;
             MapObject.RoomRepresentation roomRep = mapObject.roomReps[localIndex];
             if (roomRep == null || roomRep.room == null)
             {
                 mapObject.roomLoaderIndex++;
+                completed++;
                 continue;
             }
 
@@ -265,10 +279,13 @@ internal static partial class MapRoomGeometryPresentationHub
                 catch (Exception error)
                 {
                     global::DryCycle.Plugin.Logger?.LogWarning(
-                        "WorldMap realized-room MapTex recovery failed for " + roomRep.room.name + ": " + error.Message);
+                        "WorldMap realized-room MapTex recovery failed for " + roomRep.room.name + ": " + error);
                 }
 
+                if (roomRep.texture == null && roomRep.mapTex == null)
+                    failedRecoveryRooms.Add(roomRep.room.index);
                 mapObject.roomLoaderIndex++;
+                completed++;
                 continue;
             }
 
@@ -292,15 +309,35 @@ internal static partial class MapRoomGeometryPresentationHub
                 if (!preparer.done) return;
 
                 FinishPreparedMapTexture(mapObject, preparer, roomCount);
+                completed++;
             }
             catch (Exception error)
             {
                 global::DryCycle.Plugin.Logger?.LogWarning(
-                    "WorldMap could not start MapTex recovery for " + roomRep.room.name + ": " + error.Message);
+                    "WorldMap could not start MapTex recovery for " + roomRep.room.name + ": " + error);
                 mapObject.roomPrep = null;
+                failedRecoveryRooms.Add(roomRep.room.index);
                 mapObject.roomLoaderIndex++;
             }
         }
+    }
+
+    private static bool SelectNextMissingRoom(MapObject mapObject, int count)
+    {
+        bool Missing(int local) => local >= 0 && local < count && mapObject.roomReps[local]?.room != null &&
+            mapObject.roomReps[local].texture == null && mapObject.roomReps[local].mapTex == null &&
+            !failedRecoveryRooms.Contains(mapObject.roomReps[local].room.index);
+        for (int p = 0; p < priorityRooms.Count; p++)
+            if (recoveryRoomIndices.TryGetValue(priorityRooms[p], out int local) && Missing(local))
+            { mapObject.roomLoaderIndex = local; return true; }
+        int start = mapObject.roomLoaderIndex % count;
+        for (int step = 0; step < count; step++)
+        {
+            int i = (start + step) % count;
+            if (!Missing(i)) continue;
+            mapObject.roomLoaderIndex = i; return true;
+        }
+        return false;
     }
 
     private static void AdvancePreparerOneFrame(RoomPreparer preparer)
@@ -397,10 +434,12 @@ internal static partial class MapRoomGeometryPresentationHub
         {
             global::DryCycle.Plugin.Logger?.LogWarning(
                 "WorldMap MapTex finalization failed for " +
-                (roomRep?.room?.name ?? "?") + ": " + error.Message);
+                (roomRep?.room?.name ?? "?") + ": " + error);
         }
         finally
         {
+            if (roomRep?.room != null && roomRep.texture == null && roomRep.mapTex == null)
+                failedRecoveryRooms.Add(roomRep.room.index);
             mapObject.roomPrep = null;
             mapObject.roomLoaderIndex = localIndex + 1;
         }

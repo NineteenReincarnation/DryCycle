@@ -44,6 +44,7 @@ public static partial class MapRenderIsolationTests
             Check(SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null, "A real graphics device is active.");
             InitializeTextureDevice();
             if (Argument("-testScope") == "connections") ExerciseCorniferConnections();
+            else if (Argument("-testScope") == "worldmap") ExerciseWorldMapOptimization();
             else
             {
                 ExerciseCartographySprites();
