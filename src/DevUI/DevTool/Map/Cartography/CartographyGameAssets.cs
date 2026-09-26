@@ -8,26 +8,110 @@ namespace DryCycle.DevUI.DevTool.Map.Cartography;
 // The only Unity-dependent asset adapter. Read each atlas once, on the game thread.
 internal static class CartographyGameAssets
 {
+    private static readonly HashSet<string> pending =
+        new(StringComparer.Ordinal);
+    private static int nextRetryTick;
+
+    internal static bool HasPending =>
+        pending.Count > 0;
+
     internal static void Load(CartographySource source)
     {
         string[] standard = { "ShelterMarker", "ChieftainA", "Symbol_Pearl", "Sandbox_Unlock", "Kill_Slugcat",
             "karma0", "karma1", "karma2", "karma3", "karma4", "karma5-9", "karma6-9", "karma7-9", "karma8-9", "karma9-9" };
-        var atlases = new Dictionary<Texture, Color32[]>();
-        foreach (string name in standard.Concat(CartographyIconCatalog.Objects.Values.Select(v => v.Sprite))
-            .Concat(source.Decorations.Select(i => i.Appearance.Icon)).Where(n => n.Length > 0).Distinct())
+
+        pending.Clear();
+
+        foreach (string name in standard
+            .Concat(CartographyIconCatalog.Objects.Values.Select(v => v.Sprite))
+            .Concat(source?.Decorations?.Select(i => i.Appearance.Icon) ?? Enumerable.Empty<string>())
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Distinct(StringComparer.Ordinal))
         {
-            if (CartographyAssets.Sprite(name) != null) continue;
-            if (!Futile.atlasManager.DoesContainElementWithName(name)) continue;
+            if (CartographyAssets.Sprite(name) == null)
+                pending.Add(name);
+        }
+
+        TryLoadPending(force: true);
+    }
+
+    /// <summary>
+    /// Futile/mod atlases are not guaranteed to contain every element at the exact frame the
+    /// Cartography source becomes ready. Retry missing raw atlas elements on the game thread; when
+    /// anything arrives, rebuild the semantic Object_* aliases as well.
+    /// </summary>
+    internal static bool RetryPending() =>
+        TryLoadPending(force: false);
+
+    private static bool TryLoadPending(bool force)
+    {
+        if (pending.Count == 0)
+            return false;
+
+        int now =
+            Environment.TickCount;
+
+        if (!force &&
+            unchecked(now - nextRetryTick) < 0)
+            return false;
+
+        nextRetryTick =
+            unchecked(now + 750);
+
+        bool changed = false;
+        var atlases =
+            new Dictionary<Texture, Color32[]>();
+
+        foreach (string name in pending.ToArray())
+        {
+            if (CartographyAssets.Sprite(name) != null)
+            {
+                pending.Remove(name);
+                changed = true;
+                continue;
+            }
+
+            if (!Futile.atlasManager.DoesContainElementWithName(name))
+                continue;
+
             try
             {
-                FAtlasElement element = Futile.atlasManager.GetElementWithName(name);
-                Texture texture = element.atlas.texture;
-                if (!atlases.TryGetValue(texture, out Color32[] pixels)) atlases[texture] = pixels = ReadTexture(texture);
-                CartographyAssets.Register(name, ReadSprite(element, pixels));
+                FAtlasElement element =
+                    Futile.atlasManager.GetElementWithName(name);
+                Texture texture =
+                    element.atlas.texture;
+
+                if (!atlases.TryGetValue(
+                        texture,
+                        out Color32[] pixels))
+                {
+                    atlases[texture] =
+                        pixels =
+                            ReadTexture(texture);
+                }
+
+                CartographyAssets.Register(
+                    name,
+                    ReadSprite(
+                        element,
+                        pixels));
+                pending.Remove(name);
+                changed = true;
             }
-            catch (Exception error) { Plugin.Logger?.LogError("Cartography atlas readback failed for '" + name + "': " + error); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogError(
+                    "Cartography atlas readback failed for '" +
+                    name +
+                    "': " +
+                    error);
+            }
         }
-        CartographyIconCatalog.RegisterObjectSprites();
+
+        if (changed)
+            CartographyIconCatalog.RegisterObjectSprites();
+
+        return changed;
     }
 
     internal static CartographyRaster ReadSprite(FAtlasElement element, Color32[] pixels = null)
