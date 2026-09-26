@@ -159,6 +159,7 @@ internal static partial class CartographyRuntime
     private static global::World observedWorld;
     private static volatile bool active;
     private static volatile CartographyPresentation presentation = CartographyPresentation.Empty;
+    private static Action frontendSaveBarrier;
 
     internal static CartographyPresentation Presentation => presentation;
     internal static bool ActiveFor(EditorSession session) => active && session != null && ReferenceEquals(currentSession, session) &&
@@ -171,6 +172,13 @@ internal static partial class CartographyRuntime
         if (value && !active) Interlocked.Exchange(ref followPlayerRequested, 1);
         active = value;
     }
+
+    // The retained backend cannot see still-focused RWImGui widgets. The frontend registers a
+    // lightweight save barrier so Ctrl+S can first push its local item/layer/style/gesture state
+    // into the normal command queue. The callback is intentionally an Action to keep the core
+    // runtime independent from the optional frontend assembly.
+    internal static void SetFrontendSaveBarrier(Action barrier) =>
+        frontendSaveBarrier = barrier;
 
     internal static void Enqueue(CartographyCommand command)
     {
@@ -192,7 +200,18 @@ internal static partial class CartographyRuntime
 
     internal static void CommitDraft(string key)
     {
-        if (Drafts.TryRemove(key, out CartographyCommand command)) Enqueue(command);
+        if (!Drafts.TryRemove(key, out CartographyCommand command))
+            return;
+
+        if (command.Kind == CartographyCommandKind.Style &&
+            !string.IsNullOrEmpty(command.DocumentId) &&
+            Documents.TryGetValue(command.DocumentId, out Workspace workspace) &&
+            workspace.Document != null)
+        {
+            command.Revision = workspace.Revision;
+        }
+
+        Enqueue(command);
     }
 
     private static void CommitDrafts()
@@ -235,6 +254,21 @@ internal static partial class CartographyRuntime
     internal static bool SaveActive(EditorSession session)
     {
         if (!ActiveFor(session) || current?.Document == null) return false;
+
+        // Ctrl+S is a document barrier, not merely a disk write. Flush frontend-local state first,
+        // then commit staged backend drafts and queued edits before serializing the authoritative
+        // document. This makes keyboard save identical to leaving a focused inspector control and
+        // clicking the Cartography Save button.
+        try
+        {
+            frontendSaveBarrier?.Invoke();
+        }
+        catch (Exception error)
+        {
+            Report(current, "Save failed while committing Cartography UI state / 保存制图界面状态失败", error);
+            return false;
+        }
+
         CommitDrafts();
         if (!FlushCommands()) return false;
         return Save(current, current.Path);
@@ -246,6 +280,7 @@ internal static partial class CartographyRuntime
         // before closing the frontend. No dirty author state is reset here.
         CommitDrafts(); FlushCommands();
         active = false; currentSession = null; observedWorld = null;
+        frontendSaveBarrier = null;
         presentation = CartographyPresentation.Empty;
     }
 
