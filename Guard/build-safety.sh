@@ -140,6 +140,12 @@ dotnet run --project tests/WorldMapRouting.Tests/WorldMapRouting.Tests.csproj \
   --configuration Release \
   --no-launch-profile
 
+# Direction-marker placement is pure screen-space geometry. Run it on hosted CI so the original
+# missing-bidirectional-arrow regression cannot return even when the Unity GPU suite is unavailable.
+dotnet run --project tests/WorldMapDirection.Tests/WorldMapDirection.Tests.csproj \
+  --configuration Release \
+  --no-launch-profile
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
