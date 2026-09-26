@@ -910,10 +910,19 @@ internal static class WorldMapRetainedV2Runtime
                 CanvasVisible,
                 backgroundIncomplete,
                 backgroundCatchupAge);
+        int sourceRecoveryCadence =
+            WorldMapBackgroundSchedulingPolicy.SourceRecoveryIntervalFrames(
+                CanvasVisible,
+                recoveryIncomplete:
+                    !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete,
+                recoveryAgeMilliseconds:
+                    MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds);
         ImGui.TextUnformatted(
-            "thumbnail background cadence: every " +
+            "thumbnail background cadence: geometry every " +
             backgroundCadence +
-            " frame(s) | " +
+            "f | source recovery every " +
+            sourceRecoveryCadence +
+            "f | " +
             (CanvasVisible
                 ? "canvas visible"
                 : backgroundIncomplete
