@@ -25,11 +25,13 @@ internal sealed class WorldMapRoomResourceStore
         internal int VisualStamp;
         internal int RequestedVisualStamp = int.MinValue;
         internal long GeometryGeneration;
+        internal int NextThumbnailPollFrame;
     }
 
     private const int IdleRoomsPerFrame = 6;
     private const int HotStartRoomsPerFrame = 24;
     private const int SourceAuditIntervalFrames = 8;
+    private const int ThumbnailPollIntervalFrames = 120;
 
     private readonly Dictionary<int, RoomResource> rooms = new();
     private readonly Queue<int> visiblePriorityQueue = new();
@@ -254,18 +256,37 @@ internal sealed class WorldMapRoomResourceStore
         }
 
         WorldMapLegacyRoomSourceService.RoomTextureSource source = default;
+        bool hasCommittedThumbnail = resource.Thumbnail.HasCommitted;
         bool resolvedPersistent =
-            !resource.Thumbnail.HasCommitted &&
+            !hasCommittedThumbnail &&
             WorldMapPersistentRetainedCache.TryResolveThumbnail(
                 roomIndex,
                 out source);
 
-        bool resolvedLive =
-            resolvedPersistent ||
-            WorldMapLegacyRoomSourceService.TryGetRoomTexture(
-                page,
-                roomIndex,
-                out source);
+        // A committed thumbnail is immutable for almost every frame. Previously every low-frequency
+        // room audit still resolved Futile atlas state for every room, even when the descriptor had
+        // not changed. Poll committed sources at a staggered interval while unresolved rooms keep
+        // probing immediately so freshly generated MapTex appears without extra latency.
+        bool shouldProbeLive =
+            !hasCommittedThumbnail ||
+            UnityEngine.Time.frameCount >= resource.NextThumbnailPollFrame;
+        bool resolvedLive = resolvedPersistent;
+        if (!resolvedPersistent && shouldProbeLive)
+        {
+            resolvedLive =
+                WorldMapLegacyRoomSourceService.TryGetRoomTexture(
+                    page,
+                    roomIndex,
+                    out source);
+        }
+
+        if (resolvedPersistent || shouldProbeLive)
+        {
+            resource.NextThumbnailPollFrame =
+                UnityEngine.Time.frameCount +
+                ThumbnailPollIntervalFrames +
+                Math.Abs(roomIndex % 31);
+        }
 
         if (resolvedLive)
         {
@@ -278,7 +299,7 @@ internal sealed class WorldMapRoomResourceStore
                     MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
             }
         }
-        else
+        else if (shouldProbeLive)
         {
             // Missing source is not a command to clear the thumbnail. Keep last-known-good.
             resource.Thumbnail.RejectPending();
