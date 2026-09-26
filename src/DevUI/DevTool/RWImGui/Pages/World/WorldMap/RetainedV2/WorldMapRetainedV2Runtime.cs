@@ -841,6 +841,14 @@ internal static class WorldMapRetainedV2Runtime
             MapRoomGeometryPresentationHub.RasterReadbackPeakMilliseconds.ToString("F2") +
             " ms");
         ImGui.TextUnformatted(
+            "authored terrain loads: " +
+            MapRoomGeometryPresentationHub.CurveLoadCount +
+            " | avg " +
+            MapRoomGeometryPresentationHub.CurveLoadAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            MapRoomGeometryPresentationHub.CurveLoadPeakMilliseconds.ToString("F2") +
+            " ms");
+        ImGui.TextUnformatted(
             "world-space routes: " + ConnectionResources.Count +
             " | pending " + ConnectionResources.PendingCount);
         ImGui.TextUnformatted(
