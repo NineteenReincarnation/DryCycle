@@ -178,23 +178,29 @@ internal static class WorldMapOrthogonalRouter
         internal byte Count { get; }
     }
 
-    private const float ObstacleMargin = 15f;
-    private const float PortNeck = 22f;
+    // Keep routing corridors visibly detached from room silhouettes. The old 15/22px margins were
+    // only large enough for one centreline; once several connections shared a corridor, lane offsets
+    // were forced back onto the same line and produced false visual junctions.
+    private const float ObstacleMargin = 24f;
+    private const float PortNeck = 28f;
     private const float CompactRoomGap = 52f;
     private const float CompactEndpointDistance = 150f;
     private const float CompactAdjacentEndpointDistance = 220f;
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 5;
+    private const int RoutingPolicyVersion = 6;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
-    private const float BendPenalty = 0.72f;
-    private const float BacktrackPenalty = 2.65f;
-    private const float CrossingPenalty = 7.5f;
-    private const float ParallelCongestionPenalty = 1.15f;
-    private const float ProximityPenalty = 0.22f;
+    // Readability-first costs: fewer deliberate bends are preferable to a slightly shorter path;
+    // crossings are expensive, while parallel corridor sharing is cheap because the lane allocator
+    // separates those routes after the base path is solved.
+    private const float BendPenalty = 1.60f;
+    private const float BacktrackPenalty = 3.40f;
+    private const float CrossingPenalty = 11.0f;
+    private const float ParallelCongestionPenalty = 0.40f;
+    private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
     private const int MaxGridExtent = 112;
@@ -317,21 +323,6 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 startDirection = Cardinalize(request.StartDirection, request.End - request.Start);
         Num.Vector2 endDirection = Cardinalize(request.EndDirection, request.Start - request.End);
 
-        if (TryBuildCompactRoute(
-                request,
-                startDirection,
-                endDirection,
-                obstacles,
-                out Num.Vector2[] compact))
-        {
-            return NewRoute(
-                request,
-                RouteKind.Compact,
-                compact,
-                startDirection,
-                endDirection);
-        }
-
         Num.Vector2 startPerp = new(-startDirection.Y, startDirection.X);
         Num.Vector2 endPerp = new(-endDirection.Y, endDirection.X);
 
@@ -353,6 +344,10 @@ internal static class WorldMapOrthogonalRouter
             if (Num.Vector2.Dot(endPerp, stableNormal) < 0f) endPerp = -endPerp;
         }
 
+        // Every connection gets a real terminal stub before any global routing decision. Compact
+        // routes used to bypass this block entirely, so adjacent rooms could leave the socket and
+        // turn immediately on top of other links. That was the main source of "all arrows on one
+        // line" and ambiguous T-junction shapes around dense room edges.
         Num.Vector2 startBaseEscape =
             EscapeOutsideRoom(
                 request.Start,
@@ -369,6 +364,25 @@ internal static class WorldMapOrthogonalRouter
                 request.EndTerminalExtraDepth);
         Num.Vector2 startEscape = startBaseEscape + startPerp * request.LaneOffset;
         Num.Vector2 endEscape = endBaseEscape + endPerp * request.LaneOffset;
+
+        if (TryBuildCompactRoute(
+                request,
+                startDirection,
+                endDirection,
+                startBaseEscape,
+                startEscape,
+                endEscape,
+                endBaseEscape,
+                obstacles,
+                out Num.Vector2[] compact))
+        {
+            return NewRoute(
+                request,
+                RouteKind.Compact,
+                compact,
+                startDirection,
+                endDirection);
+        }
 
         if (CanUseBridge(request, startDirection, endDirection, startEscape, endEscape, obstacles))
         {
@@ -504,6 +518,10 @@ internal static class WorldMapOrthogonalRouter
         Request request,
         Num.Vector2 startDirection,
         Num.Vector2 endDirection,
+        Num.Vector2 startBaseEscape,
+        Num.Vector2 startEscape,
+        Num.Vector2 endEscape,
+        Num.Vector2 endBaseEscape,
         List<Obstacle> obstacles,
         out Num.Vector2[] route)
     {
@@ -529,88 +547,89 @@ internal static class WorldMapOrthogonalRouter
         if (!closeEndpoints && !adjacentRooms)
             return false;
 
-        List<Num.Vector2[]> candidates = new(4);
-        if (Math.Abs(request.LaneOffset) <= 0.5f)
+        // Compact means "small corridor", not "skip the terminal grammar". All candidates are solved
+        // between the escaped/lane-shifted points, then the fixed socket stubs are prepended/appended.
+        // This preserves a readable ownership cue at both ends and keeps sibling connections apart.
+        List<Num.Vector2[]> middles = new(4);
+
+        if (Math.Abs(startEscape.X - endEscape.X) < 0.5f ||
+            Math.Abs(startEscape.Y - endEscape.Y) < 0.5f)
         {
-            if (Math.Abs(request.Start.X - request.End.X) < 0.5f ||
-                Math.Abs(request.Start.Y - request.End.Y) < 0.5f)
-            {
-                candidates.Add(new[] { request.Start, request.End });
-            }
+            middles.Add(new[] { startEscape, endEscape });
+        }
 
-            candidates.Add(new[]
-            {
-                request.Start,
-                new Num.Vector2(request.End.X, request.Start.Y),
-                request.End
-            });
-            candidates.Add(new[]
-            {
-                request.Start,
-                new Num.Vector2(request.Start.X, request.End.Y),
-                request.End
-            });
+        middles.Add(new[]
+        {
+            startEscape,
+            new Num.Vector2(endEscape.X, startEscape.Y),
+            endEscape
+        });
+        middles.Add(new[]
+        {
+            startEscape,
+            new Num.Vector2(startEscape.X, endEscape.Y),
+            endEscape
+        });
 
-            Num.Vector2 delta = request.End - request.Start;
-            if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+        Num.Vector2 delta = endEscape - startEscape;
+        if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+        {
+            float midX = (startEscape.X + endEscape.X) * 0.5f;
+            middles.Add(new[]
             {
-                float midX = (request.Start.X + request.End.X) * 0.5f;
-                candidates.Add(new[]
-                {
-                    request.Start,
-                    new Num.Vector2(midX, request.Start.Y),
-                    new Num.Vector2(midX, request.End.Y),
-                    request.End
-                });
-            }
-            else
-            {
-                float midY = (request.Start.Y + request.End.Y) * 0.5f;
-                candidates.Add(new[]
-                {
-                    request.Start,
-                    new Num.Vector2(request.Start.X, midY),
-                    new Num.Vector2(request.End.X, midY),
-                    request.End
-                });
-            }
+                startEscape,
+                new Num.Vector2(midX, startEscape.Y),
+                new Num.Vector2(midX, endEscape.Y),
+                endEscape
+            });
         }
         else
         {
-            Num.Vector2 delta = request.End - request.Start;
-            if (Math.Abs(delta.X) >= Math.Abs(delta.Y))
+            float midY = (startEscape.Y + endEscape.Y) * 0.5f;
+            middles.Add(new[]
             {
-                float laneY =
-                    (request.Start.Y + request.End.Y) * 0.5f +
-                    request.LaneOffset;
-                candidates.Add(new[]
-                {
-                    request.Start,
-                    new Num.Vector2(request.Start.X, laneY),
-                    new Num.Vector2(request.End.X, laneY),
-                    request.End
-                });
-            }
-            else
-            {
-                float laneX =
-                    (request.Start.X + request.End.X) * 0.5f +
-                    request.LaneOffset;
-                candidates.Add(new[]
-                {
-                    request.Start,
-                    new Num.Vector2(laneX, request.Start.Y),
-                    new Num.Vector2(laneX, request.End.Y),
-                    request.End
-                });
-            }
+                startEscape,
+                new Num.Vector2(startEscape.X, midY),
+                new Num.Vector2(endEscape.X, midY),
+                endEscape
+            });
         }
 
         float bestScore = float.MaxValue;
         Num.Vector2[] best = null;
-        for (int i = 0; i < candidates.Count; i++)
+
+        for (int i = 0; i < middles.Count; i++)
         {
-            Num.Vector2[] candidate = Simplify(candidates[i]);
+            Num.Vector2[] middle = Simplify(middles[i]);
+            if (middle == null || middle.Length < 2)
+                continue;
+
+            List<Num.Vector2> full =
+                new(middle.Length + 4)
+                {
+                    request.Start,
+                    startBaseEscape
+                };
+
+            if (Num.Vector2.DistanceSquared(
+                    startBaseEscape,
+                    startEscape) > 0.25f)
+                full.Add(startEscape);
+
+            for (int p = 1; p < middle.Length - 1; p++)
+                full.Add(middle[p]);
+
+            if (Num.Vector2.DistanceSquared(
+                    endEscape,
+                    endBaseEscape) > 0.25f)
+                full.Add(endEscape);
+
+            full.Add(endBaseEscape);
+            full.Add(request.End);
+
+            Num.Vector2[] candidate =
+                Simplify(full.ToArray());
+
             if (candidate == null ||
                 candidate.Length < 2 ||
                 !CompactRouteClear(
@@ -628,7 +647,9 @@ internal static class WorldMapOrthogonalRouter
                 startDirection,
                 endDirection);
 
-            if (score >= bestScore) continue;
+            if (score >= bestScore)
+                continue;
+
             bestScore = score;
             best = candidate;
         }
