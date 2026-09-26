@@ -607,10 +607,45 @@ internal static class WorldMapView
             // bringing back the old full-map interaction cost.
             DrawRoomGeometry(draw, room, visual, min, selected, hovered);
         }
+        else if (selected || hovered || room.CurrentRoom)
+        {
+            DrawRetainedRoomOutline(draw, room, min, max, selected, hovered);
+        }
 
         // Labels are navigation content. Keep them visible while panning; DrawRoomLabel already
         // applies the zoom LOD threshold so this does not turn low-zoom navigation into a text wall.
         DrawRoomLabel(draw, room, min, max, selected, hovered);
+    }
+
+    private static void DrawRetainedRoomOutline(
+        ImDrawListPtr draw,
+        EditorMapRoomSnapshot room,
+        Num.Vector2 roomMin,
+        Num.Vector2 roomMax,
+        bool selected,
+        bool hovered)
+    {
+        WorldMapRenderOrder.UseOverlay(draw);
+
+        uint outline = ImGui.GetColorU32(
+            selected ? ImGuiCol.ButtonActive :
+            room.CurrentRoom ? ImGuiCol.Header :
+            hovered ? ImGuiCol.ButtonHovered :
+            ImGuiCol.Border);
+
+        float thickness =
+            selected ? 2.4f :
+            room.CurrentRoom ? 1.8f :
+            1.35f;
+
+        float pad = selected ? 1.5f : 0.75f;
+        draw.AddRect(
+            roomMin - new Num.Vector2(pad, pad),
+            roomMax + new Num.Vector2(pad, pad),
+            outline,
+            Math.Max(1f, 3f * zoom),
+            ImDrawFlags.None,
+            thickness);
     }
 
     private static void DrawRoomNavigationLod(
@@ -778,8 +813,9 @@ internal static class WorldMapView
             EditorMapGeometryKind.Shortcut => ImGui.GetColorU32(new Num.Vector4(0.84f, 0.85f, 0.84f, 1.00f)),
             EditorMapGeometryKind.Transport => ImGui.GetColorU32(new Num.Vector4(0.72f, 0.20f, 0.28f, 1.00f)),
             EditorMapGeometryKind.Water => ImGui.GetColorU32(new Num.Vector4(0.12f, 0.34f, 0.78f, 0.24f)),
-            EditorMapGeometryKind.LocalTerrain => ImGui.GetColorU32(new Num.Vector4(0.73f, 0.46f, 0.39f, 1.00f)),
-            EditorMapGeometryKind.CurvedSlope => ImGui.GetColorU32(new Num.Vector4(0.88f, 0.89f, 0.90f, 1.00f)),
+            // Authored curved terrain uses the same semantic colors as ordinary terrain.
+            EditorMapGeometryKind.LocalTerrain => ImGui.GetColorU32(new Num.Vector4(0.58f, 0.31f, 0.31f, 1.00f)),
+            EditorMapGeometryKind.CurvedSlope => ImGui.GetColorU32(new Num.Vector4(0.29f, 0.30f, 0.31f, 1.00f)),
             EditorMapGeometryKind.QuicksandMaterial => ImGui.GetColorU32(ImGuiCol.ButtonHovered),
             EditorMapGeometryKind.QuicksandBody => ImGui.GetColorU32(ImGuiCol.Separator),
             _ => ImGui.GetColorU32(ImGuiCol.Border)

@@ -144,10 +144,15 @@ internal static class ShortcutWindow
         int currentCount = PageCount(cachedCurrentMode.Length, currentOffset, pageSize);
 
         float globalReveal = EaseOutCubic(Clamp(openAmount / 0.72f, 0f, 1f));
-        float currentReveal = EaseOutCubic(Clamp((openAmount - 0.18f) / 0.82f, 0f, 1f));
+        bool hasCurrentModeShortcuts = cachedCurrentMode.Length > 0;
+        float currentReveal =
+            hasCurrentModeShortcuts
+                ? EaseOutCubic(Clamp((openAmount - 0.18f) / 0.82f, 0f, 1f))
+                : 0f;
 
-        // Global appears first. Current follows with a restrained delayed rotation. On close the
-        // ordering naturally reverses because currentReveal reaches zero before globalReveal.
+        // Global appears first. The yellow current-tool ring only exists when that page actually
+        // owns shortcuts; pages such as Room must not show an empty decorative ring/label.
+        // On close the ordering naturally reverses because currentReveal reaches zero first.
         float commonRotation = commonPageDirection * commonPageMotion * 0.30f;
         float modeRotation = currentModeMotion * 0.18f;
         float currentRotation =

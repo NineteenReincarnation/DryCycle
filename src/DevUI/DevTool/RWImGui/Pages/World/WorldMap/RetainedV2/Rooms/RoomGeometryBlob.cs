@@ -48,6 +48,8 @@ internal sealed class RoomGeometryBlob
         0,
         Array.Empty<Vertex>(),
         Array.Empty<int>(),
+        Array.Empty<Vertex>(),
+        Array.Empty<int>(),
         Array.Empty<Segment>(),
         Array.Empty<EditorMapNodeVisualSnapshot>());
 
@@ -58,6 +60,8 @@ internal sealed class RoomGeometryBlob
         int sourceStamp,
         Vertex[] vertices,
         int[] triangleIndices,
+        Vertex[] authoredTerrainVertices,
+        int[] authoredTerrainTriangleIndices,
         Segment[] curveSegments,
         EditorMapNodeVisualSnapshot[] nodes)
     {
@@ -67,6 +71,8 @@ internal sealed class RoomGeometryBlob
         SourceStamp = sourceStamp;
         Vertices = vertices ?? Array.Empty<Vertex>();
         TriangleIndices = triangleIndices ?? Array.Empty<int>();
+        AuthoredTerrainVertices = authoredTerrainVertices ?? Array.Empty<Vertex>();
+        AuthoredTerrainTriangleIndices = authoredTerrainTriangleIndices ?? Array.Empty<int>();
         CurveSegments = curveSegments ?? Array.Empty<Segment>();
         Nodes = nodes ?? Array.Empty<EditorMapNodeVisualSnapshot>();
     }
@@ -77,6 +83,8 @@ internal sealed class RoomGeometryBlob
     internal int SourceStamp { get; }
     internal Vertex[] Vertices { get; }
     internal int[] TriangleIndices { get; }
+    internal Vertex[] AuthoredTerrainVertices { get; }
+    internal int[] AuthoredTerrainTriangleIndices { get; }
     internal Segment[] CurveSegments { get; }
     internal EditorMapNodeVisualSnapshot[] Nodes { get; }
 

@@ -230,7 +230,14 @@ internal sealed class WorldMapRetainedRoomRenderer
             RoomThumbnailResource.Descriptor thumbnail = resource.Thumbnail.Committed;
             ReplaceMesh(obj.BaseFilter, BuildThumbnailMesh(geometry, thumbnail));
             obj.BaseRenderer.sharedMaterial = GetTextureMaterial(thumbnail.Texture);
-            ReplaceMesh(obj.OverlayFilter, BuildColorMesh(geometry, customOnly: true));
+
+            // Vanilla map textures do not contain authored RoomSettings terrain (TerrainHandle,
+            // LocalTerrain, CurvedSlope/SuperSlope, DryCycle custom curved terrain). Draw that
+            // semantic geometry as a retained overlay using the same terrain colors as normal tiles.
+            Mesh authoredOverlay = BuildAuthoredTerrainMesh(geometry);
+            if (authoredOverlay == null)
+                authoredOverlay = BuildColorMesh(geometry, customOnly: true);
+            ReplaceMesh(obj.OverlayFilter, authoredOverlay);
             obj.OverlayRenderer.sharedMaterial = colorMaterial;
         }
         else
@@ -288,6 +295,46 @@ internal sealed class WorldMapRetainedRoomRenderer
             new Color32(255,255,255,255)
         };
         mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
+    private static Mesh BuildAuthoredTerrainMesh(RoomGeometryBlob geometry)
+    {
+        RoomGeometryBlob.Vertex[] source =
+            geometry.AuthoredTerrainVertices ?? Array.Empty<RoomGeometryBlob.Vertex>();
+        int[] sourceIndices =
+            geometry.AuthoredTerrainTriangleIndices ?? Array.Empty<int>();
+        if (source.Length == 0 || sourceIndices.Length < 3)
+            return null;
+
+        List<Vector3> vertices = new();
+        List<Color32> colors = new();
+        List<int> indices = new();
+        float heightTiles = Math.Max(1f, geometry.HeightTiles);
+
+        for (int i = 0; i + 2 < sourceIndices.Length; i += 3)
+        {
+            RoomGeometryBlob.Vertex a = source[sourceIndices[i]];
+            RoomGeometryBlob.Vertex b = source[sourceIndices[i + 1]];
+            RoomGeometryBlob.Vertex c = source[sourceIndices[i + 2]];
+
+            int first = vertices.Count;
+            AddVertex(vertices, colors, a, heightTiles);
+            AddVertex(vertices, colors, b, heightTiles);
+            AddVertex(vertices, colors, c, heightTiles);
+            indices.Add(first);
+            indices.Add(first + 1);
+            indices.Add(first + 2);
+        }
+
+        if (indices.Count == 0)
+            return null;
+
+        Mesh mesh = NewMesh("DryCycle WorldMap V2 Authored Terrain");
+        mesh.vertices = vertices.ToArray();
+        mesh.colors32 = colors.ToArray();
+        mesh.triangles = indices.ToArray();
         mesh.RecalculateBounds();
         return mesh;
     }
@@ -353,8 +400,10 @@ internal sealed class WorldMapRetainedRoomRenderer
         EditorMapGeometryKind.Shortcut => new Color32(214, 217, 214, 255),
         EditorMapGeometryKind.Transport => new Color32(184, 51, 71, 255),
         EditorMapGeometryKind.Water => new Color32(31, 87, 199, 90),
-        EditorMapGeometryKind.LocalTerrain => new Color32(112, 119, 124, 230),
-        EditorMapGeometryKind.CurvedSlope => new Color32(125, 132, 138, 235),
+        // Curved terrain is terrain, not a special visualization category. Keep its semantic
+        // colors identical to the ordinary terrain it represents.
+        EditorMapGeometryKind.LocalTerrain => new Color32(148, 79, 79, 255),
+        EditorMapGeometryKind.CurvedSlope => new Color32(74, 77, 79, 255),
         EditorMapGeometryKind.QuicksandBody => new Color32(94, 70, 50, 220),
         EditorMapGeometryKind.QuicksandMaterial => new Color32(180, 126, 72, 245),
         _ => new Color32(180, 180, 180, 255)
