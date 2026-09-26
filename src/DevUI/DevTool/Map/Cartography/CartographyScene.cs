@@ -175,7 +175,17 @@ internal static class CartographySceneBuilder
                         {
                             CartographyRaster terrain=CartographyDrawing.Room(document,item,room);
                             float padding=(terrain.Width-room.Width*3)/2f;
-                            shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Image,Rect=bounds.Inflate(padding),Color=Alpha(0xFFFFFFFF,opacity),Raster=terrain});
+                            shapes.Add(new CartographyPrimitive
+                            {
+                                Kind = CartographyPrimitiveKind.Image,
+                                Rect = bounds.Inflate(padding),
+                                Color = Alpha(0xFFFFFFFF, opacity),
+                                Raster = terrain,
+                                // Room maps are authored pixel geometry. All regions use the same
+                                // crisp presentation path; never let a region fall back to soft
+                                // sub-pixel texture scaling.
+                                PixelPerfect = true
+                            });
                             if(document.Options.InRoomShortcuts&&item.Appearance.Shortcuts)
                                 foreach(CartographyPoint[] path in room.Shortcuts)for(int n=1;n<path.Length;n++)
                                     shapes.Add(Line(bounds.X+path[n-1].X*3,bounds.Y+(room.Height-path[n-1].Y)*3,bounds.X+path[n].X*3,bounds.Y+(room.Height-path[n].Y)*3,Alpha(0xFFEEEEEE,opacity),1.2f));
