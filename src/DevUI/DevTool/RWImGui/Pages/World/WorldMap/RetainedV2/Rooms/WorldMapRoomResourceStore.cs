@@ -224,7 +224,9 @@ internal sealed class WorldMapRoomResourceStore
             (long)(Stopwatch.Frequency *
                    workBudgetMilliseconds / 1000d);
 
-        DrainBuildResults(budget);
+        budget -= DrainBuildResults(
+            budget,
+            workDeadline);
 
         while (budget > 0 &&
                Stopwatch.GetTimestamp() < workDeadline &&
@@ -457,10 +459,15 @@ internal sealed class WorldMapRoomResourceStore
         mainThreadPerfSamples++;
     }
 
-    private void DrainBuildResults(int budget)
+    private int DrainBuildResults(
+        int budget,
+        long workDeadline)
     {
         int maxResults = Math.Max(1, budget);
-        buildScheduler.Drain(maxResults, result =>
+        return buildScheduler.Drain(
+            maxResults,
+            workDeadline,
+            result =>
         {
             if (!rooms.TryGetValue(result.RoomIndex, out RoomResource resource))
                 return;
