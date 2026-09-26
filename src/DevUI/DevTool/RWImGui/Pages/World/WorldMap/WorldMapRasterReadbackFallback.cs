@@ -140,6 +140,7 @@ internal static class WorldMapRasterReadbackFallback
             WidthTiles = Math.Max(1f, source.Width),
             HeightTiles = Math.Max(1f, source.Height),
             RasterRuns = cached.Runs,
+            TerrainRuns = original.TerrainRuns ?? Array.Empty<EditorMapRectSnapshot>(),
             Curves = original.Curves ?? Array.Empty<EditorMapPolylineSnapshot>(),
             Nodes = original.Nodes ?? Array.Empty<EditorMapNodeVisualSnapshot>()
         };
