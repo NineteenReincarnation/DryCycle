@@ -346,10 +346,6 @@ internal enum WorldMapInteractionKind
 /// </summary>
 internal static class WorldMapBackgroundBudget
 {
-    private const int GeometrySweepIntervalFrames = 4;
-    private const int DormantCatchupGeometrySweepIntervalFrames = 6;
-    private const int DormantMaintenanceGeometrySweepIntervalFrames = 12;
-    private const double DormantCatchupWindowMilliseconds = 15000d;
     private const int ShortcutSweepIntervalFrames = 4;
     private const int InteractionCooldownMilliseconds = 90;
 
@@ -450,15 +446,11 @@ internal static class WorldMapBackgroundBudget
             Math.Max(
                 MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds,
                 WorldMapRetainedV2Runtime.Resources.ThumbnailLoadElapsedMilliseconds);
-        bool backgroundCatchup =
-            incomplete &&
-            catchupAge < DormantCatchupWindowMilliseconds;
         int interval =
-            canvasVisible
-                ? GeometrySweepIntervalFrames
-                : backgroundCatchup
-                    ? DormantCatchupGeometrySweepIntervalFrames
-                    : DormantMaintenanceGeometrySweepIntervalFrames;
+            WorldMapBackgroundSchedulingPolicy.GeometrySweepIntervalFrames(
+                canvasVisible,
+                incomplete,
+                catchupAge);
         if (Time.frameCount - lastGeometrySweepFrame < interval)
             return false;
 
