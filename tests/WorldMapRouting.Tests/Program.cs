@@ -226,7 +226,13 @@ internal static class Program
             End = end,
             StartDirection = Num.Vector2.UnitX,
             EndDirection = -Num.Vector2.UnitX,
-            LaneOffset = laneOffset
+            LaneOffset = laneOffset,
+            StartTerminalLaneIndex = 0,
+            StartTerminalLaneCount = 1,
+            StartTerminalExtraDepth = 0f,
+            EndTerminalLaneIndex = 0,
+            EndTerminalLaneCount = 1,
+            EndTerminalExtraDepth = 0f
         };
     }
 
