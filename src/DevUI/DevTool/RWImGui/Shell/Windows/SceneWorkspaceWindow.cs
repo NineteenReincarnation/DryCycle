@@ -17,18 +17,27 @@ internal static class SceneWorkspaceWindow
     {
         if (snapshot == null || !snapshot.Available || snapshot.FocusMode ||
             DevToolOverlay.SuppressesSharedPageSurfaces ||
-            !DevToolUiSettings.SceneInCenter ||
             !DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page) ||
-            !page.SupportsSceneSurface)
+            !page.SupportsSceneSurface ||
+            (!DevToolUiSettings.SceneInCenter && !page.AlwaysShowSceneSurface))
             return;
 
         float scale = Math.Max(0.78f, Math.Min(2.2f, DevToolUiSettings.UiScale));
-        float width = Math.Min(
-            Math.Max(500f, display.X * 0.34f),
-            Math.Max(420f, Math.Min(760f * Math.Min(1.20f, scale), display.X - 32f)));
-        float height = Math.Min(
-            Math.Max(420f, display.Y * 0.56f),
-            Math.Max(320f, Math.Min(680f * Math.Min(1.12f, scale), display.Y - 80f)));
+        bool primaryWorkspace = page.AlwaysShowSceneSurface;
+        float width = primaryWorkspace
+            ? Math.Min(
+                Math.Max(640f, display.X * 0.56f),
+                Math.Max(560f, Math.Min(1040f * Math.Min(1.10f, scale), display.X - 32f)))
+            : Math.Min(
+                Math.Max(500f, display.X * 0.34f),
+                Math.Max(420f, Math.Min(760f * Math.Min(1.20f, scale), display.X - 32f)));
+        float height = primaryWorkspace
+            ? Math.Min(
+                Math.Max(460f, display.Y * 0.64f),
+                Math.Max(360f, Math.Min(740f * Math.Min(1.08f, scale), display.Y - 80f)))
+            : Math.Min(
+                Math.Max(420f, display.Y * 0.56f),
+                Math.Max(320f, Math.Min(680f * Math.Min(1.12f, scale), display.Y - 80f)));
         Num.Vector2 pos = new(
             Math.Max(8f, (display.X - width) * 0.5f),
             Math.Max(62f, (display.Y - height) * 0.52f));
@@ -36,8 +45,8 @@ internal static class SceneWorkspaceWindow
         ImGui.SetNextWindowPos(pos, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(420f, 300f),
-            new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(300f, display.Y - 16f)));
+            primaryWorkspace ? new Num.Vector2(560f, 360f) : new Num.Vector2(420f, 300f),
+            new Num.Vector2(Math.Max(560f, display.X - 16f), Math.Max(360f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         string title = DevToolUiSettings.T("场景###DevToolSceneWorkspace", "Scene###DevToolSceneWorkspace");
