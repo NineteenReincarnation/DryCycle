@@ -93,7 +93,7 @@ internal static class WorldMapCorridorLaneAllocator
     }
 
     private const float CoordinateBucketSize = 4f;
-    private const float MinimumSharedRun = 28f;
+    private const float MinimumSharedRun = 22f;
     private const float PreferredLaneSpacing = 10f;
     private const float MinimumLaneSpacing = 5.5f;
     private const float TargetLaneSpan = 72f;
@@ -104,16 +104,28 @@ internal static class WorldMapCorridorLaneAllocator
     private const int DenseBankCapacity = 8;
     private const float DenseLaneSpacing = 6.25f;
     private const float DenseBankGutter = 9f;
+    // Do not jump directly from a full lane bundle to one shared centreline when clearance gets
+    // tight. Preserve visible separation as far as possible; collapsing to zero is the final safety
+    // fallback only when even a narrow bundle would intersect a room obstacle.
     private static readonly float[] DenseGroupScales =
     {
         1f,
-        0.82f,
-        0.68f,
+        0.86f,
+        0.74f,
+        0.62f,
+        0.50f,
+        0.38f,
+        0.28f,
         0f
     };
     private static readonly float[] NormalGroupScales =
     {
         1f,
+        0.84f,
+        0.68f,
+        0.54f,
+        0.42f,
+        0.30f,
         0f
     };
 
@@ -241,8 +253,10 @@ internal static class WorldMapCorridorLaneAllocator
             ConnectionRouteResource route = routes[routeId];
             Num.Vector2[] points = BasePoints(route);
 
-            if (route?.Kind == WorldMapOrthogonalRouter.RouteKind.Compact ||
-                points == null ||
+            // Compact routes now carry the same terminal-stub grammar as longer routes. If they
+            // contain a long enough middle run, let them participate in corridor lanes too; the
+            // terminal protection below still prevents offsets from touching the room sockets.
+            if (points == null ||
                 points.Length < 6)
                 continue;
 
