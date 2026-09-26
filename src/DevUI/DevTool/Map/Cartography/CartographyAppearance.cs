@@ -29,7 +29,7 @@ internal sealed class CartographyOptions
 {
     public bool TileWalls = true, Borders = true, MarkShortcuts = true, ExitsOnly = true, ShortcutBackground = true;
     public bool Objects = true, Pickups, Slugcats, Diamonds = true, HollowDiamonds, SpecialRooms = true, InRoomShortcuts = true;
-    public uint Canvas = 0xFF202733, RoomNameColor = 0xFFFFFF00, Wall = 0xFF050505;
+    public uint Canvas = 0x00000000, RoomNameColor = 0xFFFFFF00, Wall = 0xFF050505;
     public float WaterOpacity = .3f, BorderSize = 3;
     public string HiddenTypes = "DevToken", Campaign = "White", Installation = "", SpriteDirectory = "";
     public string PanKey = "Right", DeleteKey = "Delete", DuplicateKey = "Ctrl+D", CopyKey = "Ctrl+C", CutKey = "Ctrl+X", PasteKey = "Ctrl+V";
