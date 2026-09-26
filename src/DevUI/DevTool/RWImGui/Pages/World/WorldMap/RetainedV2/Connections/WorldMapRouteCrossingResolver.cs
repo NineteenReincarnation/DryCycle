@@ -311,17 +311,46 @@ internal static class WorldMapRouteCrossingResolver
                             ? horizontal
                             : vertical;
                     }
-                    else if (string.CompareOrdinal(
-                                 vertical.RouteId,
-                                 horizontal.RouteId) >= 0)
-                    {
-                        over = vertical;
-                        under = horizontal;
-                    }
                     else
                     {
-                        over = horizontal;
-                        under = vertical;
+                        float verticalCapacity =
+                            BridgeShoulderCapacity(
+                                vertical,
+                                point);
+                        float horizontalCapacity =
+                            BridgeShoulderCapacity(
+                                horizontal,
+                                point);
+
+                        if (Math.Abs(
+                                verticalCapacity -
+                                horizontalCapacity) >
+                            0.01f)
+                        {
+                            over =
+                                verticalCapacity >
+                                horizontalCapacity
+                                    ? vertical
+                                    : horizontal;
+                            under =
+                                ReferenceEquals(
+                                    over,
+                                    vertical)
+                                    ? horizontal
+                                    : vertical;
+                        }
+                        else if (string.CompareOrdinal(
+                                     vertical.RouteId,
+                                     horizontal.RouteId) >= 0)
+                        {
+                            over = vertical;
+                            under = horizontal;
+                        }
+                        else
+                        {
+                            over = horizontal;
+                            under = vertical;
+                        }
                     }
 
                     Num.Vector2 tangent =
@@ -539,6 +568,20 @@ internal static class WorldMapRouteCrossingResolver
         // safer representation than inventing an arc with no shoulders.
         return verticalCanBridge ||
                horizontalCanBridge;
+    }
+
+    private static float BridgeShoulderCapacity(
+        SegmentRef segment,
+        Num.Vector2 point)
+    {
+        float along =
+            segment.Vertical
+                ? point.Y
+                : point.X;
+
+        return Math.Min(
+            along - segment.Min,
+            segment.Max - along);
     }
 
     private static bool HasBridgeShoulders(
