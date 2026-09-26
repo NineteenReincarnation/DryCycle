@@ -906,7 +906,7 @@ internal static class WorldMapView
             if (connection == null)
                 continue;
 
-            bool retained = skipRetainedRoutes &&
+            bool retainedOnSurface = skipRetainedRoutes &&
                 WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
                     connection.ConnectionId);
 
@@ -914,8 +914,15 @@ internal static class WorldMapView
                     snapshot,
                     connection,
                     canvasMin,
-                    connectionPathScratch))
+                    connectionPathScratch,
+                    out bool usedRetainedRoute))
                 continue;
+
+            // Never suppress the immediate stroke unless the marker/path also came from the exact
+            // retained route currently used for hit testing. During a route-index/surface handoff,
+            // falling back to the legacy path while hiding its stroke would put the direction glyph
+            // on a different line from the visible GPU route.
+            bool retained = retainedOnSurface && usedRetainedRoute;
 
             if (!PathNearCanvas(
                     connectionPathScratch,
@@ -2521,8 +2528,22 @@ internal static class WorldMapView
         EditorMapPresentationSnapshot snapshot,
         EditorMapConnectionSnapshot connection,
         Num.Vector2 canvasMin,
-        List<Num.Vector2> output)
+        List<Num.Vector2> output) =>
+        BuildImmediateConnectionPath(
+            snapshot,
+            connection,
+            canvasMin,
+            output,
+            out _);
+
+    private static bool BuildImmediateConnectionPath(
+        EditorMapPresentationSnapshot snapshot,
+        EditorMapConnectionSnapshot connection,
+        Num.Vector2 canvasMin,
+        List<Num.Vector2> output,
+        out bool usedRetainedRoute)
     {
+        usedRetainedRoute = false;
         output.Clear();
         if (connection == null ||
             connection.FromNodeIndex < 0 ||
@@ -2554,7 +2575,8 @@ internal static class WorldMapView
                 AppendDistinct(
                     output,
                     ToScreen(canvasMin, retainedPoints[i]));
-            return output.Count >= 2;
+            usedRetainedRoute = output.Count >= 2;
+            return usedRetainedRoute;
         }
 
         Num.Vector2 a =
