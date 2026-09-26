@@ -57,6 +57,9 @@ internal static class WorldMapJunctionWeavePlanner
     private const float WeaveLeadDistance = 36f;
     private const float WeaveLaneStaggerFactor = 0.55f;
     private const float MaximumWeaveLaneStagger = 24f;
+    private const float JunctionClearanceBase = 8f;
+    private const float JunctionClearanceOffsetFactor = 0.65f;
+    private const float MaximumJunctionClearance = 28f;
     private const float MinimumAxisRun = 4f;
     private const float MinimumScaleTransitionRun = 18f;
 
@@ -167,20 +170,34 @@ internal static class WorldMapJunctionWeavePlanner
                         run * 0.45f);
 
                 float transitionDistance;
+                float junctionClearance =
+                    Math.Min(
+                        Math.Min(
+                            MaximumJunctionClearance,
+                            run * 0.22f),
+                        JunctionClearanceBase +
+                        Math.Abs(offsetDelta) *
+                        JunctionClearanceOffsetFactor);
+
                 if (profile.EntryCarried &&
                     !profile.ExitCarried)
                 {
-                    // Leaving a bundle: keep the old lane for a while inside the branch, then peel
-                    // toward the branch centreline away from the shared junction.
-                    transitionDistance = lead;
+                    // Leaving a bundle: keep the old lane deeper into the branch before peeling
+                    // toward the centreline. Larger lateral changes reserve more empty space around
+                    // the junction so neighbouring routes do not appear to pinch together.
+                    transitionDistance =
+                        lead +
+                        junctionClearance;
                 }
                 else if (!profile.EntryCarried &&
                          profile.ExitCarried)
                 {
-                    // Entering a bundle: move into the slot before the shared junction so arrival is
-                    // already ordered rather than collapsing at the merge point.
+                    // Entering a bundle: finish the lateral move before reaching the shared
+                    // junction, again reserving clearance proportional to the amount of lane shift.
                     transitionDistance =
-                        run - lead;
+                        run -
+                        lead -
+                        junctionClearance;
                 }
                 else
                 {
