@@ -201,56 +201,67 @@ internal static class WorldWorkspaceView
     private static bool statusChinese;
     private static string statusText = string.Empty;
 
-    internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
+    internal static void DrawBrowser(EditorPresentationSnapshot editor)
     {
-        EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
+        if (!TryPrepare(editor, out EditorMapPresentationSnapshot snapshot))
+            return;
 
-        float defaultX = 188f;
-        float defaultY = 8f;
-        float defaultWidth = Math.Max(720f, display.X - defaultX - 10f);
-        float defaultHeight = Math.Max(430f, display.Y - defaultY - 10f);
-        ImGui.SetNextWindowPos(new Num.Vector2(defaultX, defaultY), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(700f, 420f),
-            new Num.Vector2(Math.Max(700f, display.X - 8f), Math.Max(420f, display.Y - 8f)));
-        ImGui.SetNextWindowBgAlpha(PlayerMapWorkspaceIntegration.CartographyActive ? 1f : DevToolUiSettings.WindowAlpha);
+        if (PlayerMapWorkspaceIntegration.DrawBrowserIfActive(editor, snapshot))
+            return;
 
-        if (!ImGui.Begin(
-                DevToolUiSettings.T("世界工作区###DevToolWorldWorkspace", "World Workspace###DevToolWorldWorkspace"),
-                ImGuiWindowFlags.NoCollapse))
+        DrawExplorer(snapshot);
+    }
+
+    internal static void DrawInspector(EditorPresentationSnapshot editor)
+    {
+        if (!TryPrepare(editor, out EditorMapPresentationSnapshot snapshot))
+            return;
+
+        if (PlayerMapWorkspaceIntegration.DrawInspectorIfActive(editor, snapshot))
+            return;
+
+        DrawWorldInspector(snapshot);
+    }
+
+    internal static void DrawSceneWorkspace(EditorPresentationSnapshot editor)
+    {
+        if (!TryPrepare(editor, out EditorMapPresentationSnapshot snapshot))
+            return;
+
+        DrawToolbar(editor, snapshot);
+        ImGui.Separator();
+
+        if (PlayerMapWorkspaceIntegration.DrawCenterIfActive(editor, snapshot))
         {
-            ImGui.End();
+            ImGui.Separator();
+            DrawStatus(snapshot);
             return;
         }
 
-        FloatingWindowSnap.TrackCurrentWindow("WorldWorkspace");
-        if (!snapshot.Available)
+        DrawCenter(snapshot);
+        SynchronizeCanvasSelection(snapshot);
+        ImGui.Separator();
+        DrawStatus(snapshot);
+    }
+
+    private static bool TryPrepare(
+        EditorPresentationSnapshot editor,
+        out EditorMapPresentationSnapshot snapshot)
+    {
+        snapshot = MapEditorPresentationHub.Current;
+        if (snapshot?.Available != true)
         {
             DevToolWidgets.MutedText(
                 DevToolUiSettings.T("当前区域地图不可用。", "The current region map is unavailable."),
                 true);
-            ImGui.End();
-            return;
+            return false;
         }
 
         WorldTopologyRegistry.EnsureLoaded();
         EnsureRoomIndex(snapshot);
         EnsureConnectionIndex(snapshot);
         SynchronizeSelection(snapshot);
-        DrawToolbar(editor, snapshot);
-        ImGui.Separator();
-
-        Num.Vector2 available = ImGui.GetContentRegionAvail();
-        float statusHeight = Math.Max(28f, ImGui.GetFrameHeight() + 8f);
-        float bodyHeight = Math.Max(180f, available.Y - statusHeight);
-        if (ImGui.BeginChild("##WorldWorkspaceBody", new Num.Vector2(0f, bodyHeight), ImGuiChildFlags.None))
-            DrawBody(editor, snapshot);
-        ImGui.EndChild();
-
-        ImGui.Separator();
-        DrawStatus(snapshot);
-        ImGui.End();
+        return true;
     }
 
     internal static void ResetRetainedState()
