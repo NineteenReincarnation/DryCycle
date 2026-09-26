@@ -689,6 +689,16 @@ internal static class WorldMapRetainedV2Runtime
                 ? " | topology rejected"
                 : string.Empty));
         ImGui.TextUnformatted(
+            "persistent restore: " +
+            (WorldMapPersistentRetainedCache.RestoreSnapshotLoaded
+                ? "warm-cache "
+                : "cold/no-cache ") +
+            WorldMapPersistentRetainedCache.RestoreValidationMilliseconds.ToString("F0") +
+            " ms | thumbnail hits " +
+            WorldMapPersistentRetainedCache.RestoredThumbnailCount +
+            " | route hits " +
+            WorldMapPersistentRetainedCache.RestoredRouteCount);
+        ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
             " | visible " + visibleRooms.Count);
         ImGui.TextUnformatted(
