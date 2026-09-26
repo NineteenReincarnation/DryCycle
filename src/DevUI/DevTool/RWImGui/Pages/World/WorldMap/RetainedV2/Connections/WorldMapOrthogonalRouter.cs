@@ -194,13 +194,13 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 15;
+    private const int RoutingPolicyVersion = 16;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
-    // Readability-first costs: fewer deliberate bends are preferable to a slightly shorter path;
-    // crossings are expensive, while parallel corridor sharing is cheap because the lane allocator
-    // separates those routes after the base path is solved.
+    // Readability costs refine a geometrically short route; they must not dominate distance.
+    // Crossings remain expensive and shared corridors remain cheap, but a clear straight/L route is
+    // retained as an upper bound so soft congestion can never justify a screen-spanning detour.
     private const float BendPenalty = 1.60f;
     private const float BacktrackPenalty = 3.40f;
     private const float CrossingPenalty = 11.0f;
@@ -212,6 +212,10 @@ internal static class WorldMapOrthogonalRouter
     private const int PreferredParallelCapacity = 8;
     private const float ParallelOverflowPenalty = 0.92f;
     private const float DirectRouteCongestionLimit = 28f;
+    private const float DirectRouteDetourRatio = 1.38f;
+    private const float DirectRouteDetourExtra = 72f;
+    private const float CongestedRerouteDetourRatio = 1.52f;
+    private const float CongestedRerouteDetourExtra = 112f;
     private const int RerouteAvoidanceOccupancyWeight = 12;
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
@@ -467,6 +471,9 @@ internal static class WorldMapOrthogonalRouter
             }
         }
 
+        Num.Vector2[] directSimple = null;
+        float directSimpleCongestion = float.MaxValue;
+
         if (TrySimpleOrthogonal(
                 startEscape,
                 endEscape,
@@ -474,15 +481,31 @@ internal static class WorldMapOrthogonalRouter
                 request.EndRoom,
                 obstacles,
                 occupancy,
-                out Num.Vector2[] simple))
+                out Num.Vector2[] simple,
+                out directSimpleCongestion))
         {
-            List<Num.Vector2> points = new(simple.Length + 6) { request.Start, startBaseEscape };
-            if (Num.Vector2.DistanceSquared(startBaseEscape, startEscape) > 0.25f) points.Add(startEscape);
-            for (int i = 1; i < simple.Length - 1; i++) points.Add(simple[i]);
-            if (Num.Vector2.DistanceSquared(endEscape, endBaseEscape) > 0.25f) points.Add(endEscape);
-            points.Add(endBaseEscape);
-            points.Add(request.End);
-            return NewRoute(request, RouteKind.Orthogonal, SimplifyRoute(points.ToArray()), startDirection, endDirection);
+            directSimple =
+                BuildFullRoute(
+                    request,
+                    startBaseEscape,
+                    startEscape,
+                    simple,
+                    endEscape,
+                    endBaseEscape);
+
+            // A clean straight/L-shaped route is the canonical answer. Soft occupancy pressure may
+            // suggest another corridor, but it should only get that chance once the simple route is
+            // genuinely crowded.
+            if (directSimpleCongestion <=
+                DirectRouteCongestionLimit)
+            {
+                return NewRoute(
+                    request,
+                    RouteKind.Orthogonal,
+                    directSimple,
+                    startDirection,
+                    endDirection);
+            }
         }
 
         Num.Vector2[] searched = SearchOrthogonal(
@@ -497,13 +520,48 @@ internal static class WorldMapOrthogonalRouter
 
         if (searched.Length > 0)
         {
-            List<Num.Vector2> points = new(searched.Length + 6) { request.Start, startBaseEscape };
-            if (Num.Vector2.DistanceSquared(startBaseEscape, startEscape) > 0.25f) points.Add(startEscape);
-            for (int i = 1; i < searched.Length - 1; i++) points.Add(searched[i]);
-            if (Num.Vector2.DistanceSquared(endEscape, endBaseEscape) > 0.25f) points.Add(endEscape);
-            points.Add(endBaseEscape);
-            points.Add(request.End);
-            return NewRoute(request, RouteKind.Orthogonal, SimplifyRoute(points.ToArray()), startDirection, endDirection);
+            Num.Vector2[] searchedFull =
+                BuildFullRoute(
+                    request,
+                    startBaseEscape,
+                    startEscape,
+                    searched,
+                    endEscape,
+                    endBaseEscape);
+
+            if (directSimple != null &&
+                PreferDirectRouteOverDetour(
+                    directSimple,
+                    searchedFull,
+                    preferAlternativeCorridor))
+            {
+                return NewRoute(
+                    request,
+                    RouteKind.Orthogonal,
+                    directSimple,
+                    startDirection,
+                    endDirection);
+            }
+
+            return NewRoute(
+                request,
+                RouteKind.Orthogonal,
+                searchedFull,
+                startDirection,
+                endDirection);
+        }
+
+        // If A* cannot find anything better, never throw away a geometrically valid one-bend route
+        // merely because its soft congestion score is high. Falling back to an outer rectangle here
+        // is exactly how short obvious links turned into giant screen-spanning detours.
+        if (directSimple != null)
+        {
+            return NewRoute(
+                request,
+                RouteKind.Orthogonal,
+                directSimple,
+                startDirection,
+                endDirection);
         }
 
         Num.Vector2[] fallback = BuildOuterFallback(
@@ -998,9 +1056,11 @@ internal static class WorldMapOrthogonalRouter
         int endRoom,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
-        out Num.Vector2[] points)
+        out Num.Vector2[] points,
+        out float congestionScore)
     {
         points = null;
+        congestionScore = float.MaxValue;
         List<Num.Vector2[]> candidates =
             new(3);
 
@@ -1101,20 +1161,20 @@ internal static class WorldMapOrthogonalRouter
                     candidate,
                     occupancy);
 
-            // A direct L/straight path is only preferred while the corridor still has useful visual
-            // capacity. Once crowded, hand control to the search router so it can choose a slightly
-            // longer independent corridor rather than stacking another centreline.
-            if (congestion >
-                DirectRouteCongestionLimit)
-                continue;
-
+            // Geometry is primary here. Keep the best clear straight/L candidate even when the
+            // corridor is crowded so BuildRoute can compare any A* alternative against a concrete
+            // shortest-path upper bound. Congestion remains a tie-breaker, not a license for a huge
+            // detour.
             float score =
                 PathLength(candidate) +
                 Math.Max(
                     0,
                     candidate.Length - 2) *
                 BendPenalty +
-                congestion;
+                Math.Min(
+                    congestion,
+                    DirectRouteCongestionLimit) *
+                0.20f;
 
             if (score >= bestScore)
                 continue;
@@ -1123,6 +1183,8 @@ internal static class WorldMapOrthogonalRouter
                 score;
             best =
                 candidate;
+            congestionScore =
+                congestion;
         }
 
         if (best == null)
@@ -1131,6 +1193,99 @@ internal static class WorldMapOrthogonalRouter
         points =
             best;
         return true;
+    }
+
+    private static Num.Vector2[] BuildFullRoute(
+        Request request,
+        Num.Vector2 startBaseEscape,
+        Num.Vector2 startEscape,
+        Num.Vector2[] middle,
+        Num.Vector2 endEscape,
+        Num.Vector2 endBaseEscape)
+    {
+        List<Num.Vector2> points =
+            new(
+                (middle?.Length ?? 0) +
+                6)
+            {
+                request.Start,
+                startBaseEscape
+            };
+
+        if (Num.Vector2.DistanceSquared(
+                startBaseEscape,
+                startEscape) > 0.25f)
+        {
+            points.Add(
+                startEscape);
+        }
+
+        if (middle != null)
+        {
+            for (int i = 1;
+                 i < middle.Length - 1;
+                 i++)
+            {
+                points.Add(
+                    middle[i]);
+            }
+        }
+
+        if (Num.Vector2.DistanceSquared(
+                endEscape,
+                endBaseEscape) > 0.25f)
+        {
+            points.Add(
+                endEscape);
+        }
+
+        points.Add(
+            endBaseEscape);
+        points.Add(
+            request.End);
+
+        return SimplifyRoute(
+            points.ToArray());
+    }
+
+    private static bool PreferDirectRouteOverDetour(
+        Num.Vector2[] direct,
+        Num.Vector2[] detour,
+        bool congestionReroute)
+    {
+        if (direct == null ||
+            direct.Length < 2)
+            return false;
+
+        if (detour == null ||
+            detour.Length < 2)
+            return true;
+
+        float directLength =
+            PathLength(
+                direct);
+        float detourLength =
+            PathLength(
+                detour);
+
+        float ratio =
+            congestionReroute
+                ? CongestedRerouteDetourRatio
+                : DirectRouteDetourRatio;
+        float extra =
+            congestionReroute
+                ? CongestedRerouteDetourExtra
+                : DirectRouteDetourExtra;
+
+        float maximumReasonableDetour =
+            Math.Max(
+                directLength *
+                ratio,
+                directLength +
+                extra);
+
+        return detourLength >
+               maximumReasonableDetour;
     }
 
     private static Num.Vector2[] SearchOrthogonal(
