@@ -371,6 +371,7 @@ internal static partial class MapRoomGeometryPresentationHub
         nextStructureSyncFrame = 0;
         backgroundCursor = 0;
         rasterFrameDeadlineTicks = 0L;
+        geometryFrameDeadlineTicks = 0L;
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
