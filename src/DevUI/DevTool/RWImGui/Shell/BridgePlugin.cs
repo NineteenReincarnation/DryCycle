@@ -76,6 +76,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
             global::DryCycle.StartupDiagnostics.Step(
                 "BridgePlugin/DevToolFrontend.SetLogger",
                 () => DevToolFrontend.SetLogger(Logger));
+
+            // RWImGUI owns one shared native font atlas. The HarmonyOS CJK face must be inserted
+            // before RWImGUI's first DX11 backend frame uploads that atlas; waiting until the user
+            // switches the consumer context to Chinese is already too late.
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/DevToolFontAtlasIntegration.Enable",
+                () => DevToolFontAtlasIntegration.Enable(Logger));
+
             global::DryCycle.StartupDiagnostics.Step(
                 "BridgePlugin/DevToolFrontend.ResetNativeReadiness",
                 DevToolFrontend.ResetNativeReadinessFromMainThread);
@@ -467,6 +475,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         Interlocked.Exchange(ref callbackRegistrationFailureLogged, 0);
         SafeFrontendCleanup("frontend input attachment", () => EditorInputRouter.SetFrontendAttached(false));
         SafeFrontendCleanup("RWImGui callback", TryUnregisterCallback);
+        SafeFrontendCleanup("font atlas integration", DevToolFontAtlasIntegration.Disable);
 
         if (ownsCreatureCatalogRuntime)
             SafeFrontendCleanup("creature catalog fallback", WorldCreatureCatalogPicker.Shutdown);
@@ -514,9 +523,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "ENTER");
 
-        // RWImGUI installs native bindings here. DryCycle deliberately does not touch the shared
-        // ImGui context/font atlas during game startup. DevTool fonts belong to DevToolInputContext
-        // and are installed only when that dedicated consumer context is first activated.
+        // RWImGUI installs native bindings here. DryCycle does not create/switch consumer contexts
+        // during game startup, but DevToolFontAtlasIntegration is already armed from BridgePlugin
+        // OnEnable so the fixed HarmonyOS face can join RWImGUI's shared atlas before first upload.
         global::DryCycle.StartupDiagnostics.Step(
             "BridgePlugin/RainWorld.Start/orig",
             () => orig(self));
@@ -526,9 +535,8 @@ public sealed class BridgePlugin : BaseUnityPlugin
         // Calling HasContext/SwitchContext in that state can cross an uninitialized native binding
         // and terminate the whole process before a managed exception can be logged.
         //
-        // Font registration therefore remains deferred to the normal consumer-context lifecycle,
-        // where RWImGUI has already established a usable context. Game startup must always win over
-        // optional DevTool font prewarming.
+        // Font registration itself happens inside the backend pre-upload callback; this hook does
+        // not call ImGUIAPI.HasContext/SwitchContext and therefore keeps startup ownership safe.
         global::DryCycle.StartupDiagnostics.Marker("BridgePlugin/RainWorld.Start", "EXIT");
     }
 
@@ -785,15 +793,9 @@ internal static class DevToolFrontend
             contextAttached = true;
             nextContextAttemptAt = 0f;
 
-            // English is the startup-safe default and must not touch the native font atlas.
-            // Switching to Chinese requests a fresh context on the main thread; only that new
-            // context registers the single fixed HarmonyOS face before its first Render.
-            if (DevToolUiSettings.IsChinese &&
-                !DevToolFontCatalog.RegistrationAttempted)
-            {
-                DevToolFontCatalog.TryRegisterLocalFonts(log);
-            }
-
+            // The shared atlas is immutable by this point. HarmonyOS is registered by
+            // DevToolFontAtlasIntegration before RWImGUI's first backend upload, regardless of
+            // which language is active at startup. Context switches only select an existing face.
             Interlocked.Exchange(ref contextBusyLogged, 0);
             Interlocked.Exchange(ref contextActivationFailureLogged, 0);
 
