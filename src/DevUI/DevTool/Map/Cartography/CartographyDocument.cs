@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.Map.Cartography;
 
@@ -195,6 +196,13 @@ internal sealed class CartographyRoomSource
     internal Dictionary<int, CartographyRect> Ports = new();
     internal string Subregion = "", Tags = "", Settings = "";
     internal byte[] Terrain = Array.Empty<byte>();
+
+    // Authored continuous terrain is detached semantic geometry shared with World Map. Cartography
+    // paints these fills with the exact same Solid/Structure palette rules as ordinary room tiles;
+    // only the silhouette is curved.
+    internal EditorMapRectSnapshot[] CurvedTerrainFills = Array.Empty<EditorMapRectSnapshot>();
+    internal EditorMapPolylineSnapshot[] CurvedTerrainCurves = Array.Empty<EditorMapPolylineSnapshot>();
+
     internal List<CartographyPoint[]> Shortcuts = new();
 }
 
