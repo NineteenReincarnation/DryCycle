@@ -346,6 +346,15 @@ internal static class WorldMapView
                 canvasSize,
                 skipRetainedRoutes: retainedConnectionsPresented);
 
+            if (!retainedConnectionsPresented)
+            {
+                DrawFallbackCrossingSemantics(
+                    draw,
+                    snapshot,
+                    canvasMin,
+                    canvasSize);
+            }
+
             DrawConnectionFocusOverlays(
                 draw,
                 snapshot,
@@ -825,6 +834,208 @@ internal static class WorldMapView
                     labelPoint + new Num.Vector2(8f, -20f),
                     core,
                     "?");
+            }
+        }
+    }
+
+    private static void DrawFallbackCrossingSemantics(
+        ImDrawListPtr draw,
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize)
+    {
+        if (snapshot == null)
+            return;
+
+        EditorMapConnectionSnapshot[] connections =
+            snapshot.Connections ??
+            Array.Empty<EditorMapConnectionSnapshot>();
+        Num.Vector2 canvasMax =
+            canvasMin +
+            canvasSize;
+
+        for (int c = 0;
+             c < connections.Length;
+             c++)
+        {
+            EditorMapConnectionSnapshot overConnection =
+                connections[c];
+
+            if (overConnection == null ||
+                string.IsNullOrEmpty(
+                    overConnection.ConnectionId) ||
+                !WorldMapRetainedV2Runtime.TryGetConnectionCrossings(
+                    overConnection.ConnectionId,
+                    out WorldMapCrossingMark[] marks) ||
+                marks == null)
+                continue;
+
+            for (int i = 0;
+                 i < marks.Length;
+                 i++)
+            {
+                WorldMapCrossingMark mark =
+                    marks[i];
+
+                // Crossing snapshots are indexed under both routes. Render only from the over-route
+                // entry so every semantic crossing is emitted exactly once.
+                if (!string.Equals(
+                        mark.OverRouteId,
+                        overConnection.ConnectionId,
+                        StringComparison.Ordinal))
+                    continue;
+
+                EditorMapConnectionSnapshot underConnection =
+                    FindConnection(
+                        snapshot,
+                        mark.UnderRouteId);
+
+                if (underConnection == null ||
+                    !ConnectionLayersVisible(
+                        snapshot,
+                        overConnection) ||
+                    !ConnectionLayersVisible(
+                        snapshot,
+                        underConnection))
+                    continue;
+
+                Num.Vector2 point =
+                    ToScreen(
+                        canvasMin,
+                        mark.Point);
+
+                if (point.X < canvasMin.X - 32f ||
+                    point.Y < canvasMin.Y - 32f ||
+                    point.X > canvasMax.X + 32f ||
+                    point.Y > canvasMax.Y + 32f)
+                    continue;
+
+                Num.Vector2 tangent =
+                    mark.Tangent;
+                float tangentLength =
+                    tangent.Length();
+                if (tangentLength <= 0.001f)
+                    continue;
+
+                tangent /=
+                    tangentLength;
+                Num.Vector2 normal =
+                    new(
+                        -tangent.Y,
+                        tangent.X);
+
+                float radius =
+                    Math.Max(
+                        2.5f,
+                        (mark.Dense ? 5.2f : 6.4f) *
+                        zoom);
+                float rise =
+                    Math.Max(
+                        1.8f,
+                        (mark.Dense ? 3.7f : 4.8f) *
+                        zoom);
+                float underGap =
+                    Math.Max(
+                        3.2f,
+                        (mark.Dense ? 4.8f : 6.4f) *
+                        zoom);
+
+                uint mask =
+                    ImGui.GetColorU32(
+                        ImGuiCol.WindowBg);
+                uint bridgeCore =
+                    overConnection.Ambiguous
+                        ? ImGui.GetColorU32(
+                            ImGuiCol.TextDisabled)
+                        : ConnectionColor(
+                            overConnection.Direction);
+                float bridgeCoreThickness =
+                    overConnection.Direction ==
+                    WorldConnectionDirection.Bidirectional
+                        ? 2.5f
+                        : 2.35f;
+                float bridgeShadowThickness =
+                    bridgeCoreThickness +
+                    3.4f;
+
+                float underCoreThickness =
+                    underConnection.Direction ==
+                    WorldConnectionDirection.Bidirectional
+                        ? 2.5f
+                        : 2.35f;
+                float underShadowThickness =
+                    underCoreThickness +
+                    3.4f;
+
+                // Explicitly break the under-route, then erase the straight over-route span before
+                // drawing the arc. This mirrors the retained GPU presentation when the surface is
+                // temporarily unavailable during pan/zoom.
+                draw.AddLine(
+                    point -
+                        normal *
+                        underGap,
+                    point +
+                        normal *
+                        underGap,
+                    mask,
+                    underShadowThickness +
+                    2f);
+
+                draw.AddLine(
+                    point -
+                        tangent *
+                        (radius + 3f),
+                    point +
+                        tangent *
+                        (radius + 3f),
+                    mask,
+                    bridgeShadowThickness +
+                    2f);
+
+                int arcSegments =
+                    mark.Dense ? 3 : 6;
+                Num.Vector2 previous =
+                    point -
+                    tangent *
+                    radius;
+
+                for (int segment = 1;
+                     segment <= arcSegments;
+                     segment++)
+                {
+                    float t =
+                        segment /
+                        (float)arcSegments;
+                    float along =
+                        (-1f + t * 2f) *
+                        radius;
+                    float lift =
+                        (float)Math.Sin(
+                            Math.PI * t) *
+                        rise;
+
+                    Num.Vector2 current =
+                        point +
+                        tangent *
+                        along +
+                        normal *
+                        lift;
+
+                    draw.AddLine(
+                        previous,
+                        current,
+                        mask,
+                        bridgeShadowThickness);
+
+                    draw.AddLine(
+                        previous,
+                        current,
+                        bridgeCore,
+                        bridgeCoreThickness);
+
+                    previous =
+                        current;
+                }
             }
         }
     }
