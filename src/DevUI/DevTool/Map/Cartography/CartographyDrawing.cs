@@ -50,39 +50,29 @@ internal static class CartographyDrawing
             for(int yy=0;yy<3;yy++)for(int xx=0;xx<3;xx++)pixels[(y*3+yy)*width+x*3+xx]=color;
         }
 
-        CartographyRaster raster = new(width, height, pixels);
-        int curveOffset = 0;
-        if (d.Options.Borders)
-        {
-            curveOffset = (int)Math.Ceiling(d.Options.BorderSize);
-            raster = Outline(raster, d.Options.BorderSize, wall);
-        }
-
-        // Continuous terrain is a surface boundary in the map, not a filled rectangular band.
-        // Draw the authored spline itself after room outlining so the room border cannot dilate the
-        // curve into a thick block. This also keeps ordinary room geometry and curved geometry
-        // visually consistent: CurvedSlope uses Solid color, LocalTerrain uses Structure color.
-        return PaintCurvedTerrainCurves(
+        CartographyRaster raster = PaintCurvedTerrainBands(
             d,
             a,
             room,
             kinds,
             water,
-            raster,
-            curveOffset,
+            new CartographyRaster(width, height, pixels),
             bg,
             wall,
             waterColor);
+
+        return d.Options.Borders
+            ? Outline(raster, d.Options.BorderSize, wall)
+            : raster;
     }
 
-    private static CartographyRaster PaintCurvedTerrainCurves(
+    private static CartographyRaster PaintCurvedTerrainBands(
         CartographyDocument document,
         CartographyAppearance appearance,
         CartographyRoomSource room,
         byte[] kinds,
         bool[] water,
         CartographyRaster source,
-        int offset,
         uint background,
         uint wall,
         uint waterColor)
@@ -90,10 +80,15 @@ internal static class CartographyDrawing
         EditorMapPolylineSnapshot[] curves =
             room.CurvedTerrainCurves ??
             Array.Empty<EditorMapPolylineSnapshot>();
-        if (curves.Length == 0)
+        EditorMapRectSnapshot[] fills =
+            room.CurvedTerrainFills ??
+            Array.Empty<EditorMapRectSnapshot>();
+
+        if (curves.Length == 0 || fills.Length == 0)
             return source;
 
         uint[] pixels = (uint[])source.Pixels.Clone();
+
         for (int curveIndex = 0; curveIndex < curves.Length; curveIndex++)
         {
             EditorMapPolylineSnapshot curve = curves[curveIndex];
@@ -103,10 +98,12 @@ internal static class CartographyDrawing
             if (points.Length < 2)
                 continue;
 
-            uint color = CurveTerrainColor(curve.Kind, background, wall);
+            EditorMapGeometryKind fillKind = CurveFillKind(curve.Kind);
+            uint baseColor = TerrainColor(fillKind, background, wall);
+
             for (int pointIndex = 1; pointIndex < points.Length; pointIndex++)
             {
-                DrawCurveSegment(
+                PaintCurveBandSegment(
                     pixels,
                     source.Width,
                     source.Height,
@@ -115,17 +112,18 @@ internal static class CartographyDrawing
                     water,
                     appearance,
                     document,
-                    offset,
+                    fills,
                     points[pointIndex - 1],
                     points[pointIndex],
-                    curve.Kind,
-                    color,
+                    fillKind,
+                    baseColor,
+                    wall,
                     waterColor);
             }
 
             if (curve.Closed && points.Length > 2)
             {
-                DrawCurveSegment(
+                PaintCurveBandSegment(
                     pixels,
                     source.Width,
                     source.Height,
@@ -134,11 +132,12 @@ internal static class CartographyDrawing
                     water,
                     appearance,
                     document,
-                    offset,
+                    fills,
                     points[points.Length - 1],
                     points[0],
-                    curve.Kind,
-                    color,
+                    fillKind,
+                    baseColor,
+                    wall,
                     waterColor);
             }
         }
@@ -146,20 +145,27 @@ internal static class CartographyDrawing
         return new CartographyRaster(source.Width, source.Height, pixels);
     }
 
-    private static uint CurveTerrainColor(
+    private static EditorMapGeometryKind CurveFillKind(EditorMapGeometryKind kind) =>
+        kind switch
+        {
+            EditorMapGeometryKind.LocalTerrain => EditorMapGeometryKind.Structure,
+            EditorMapGeometryKind.CurvedSlope => EditorMapGeometryKind.Solid,
+            _ => kind
+        };
+
+    private static uint TerrainColor(
         EditorMapGeometryKind kind,
         uint background,
         uint wall) =>
         kind switch
         {
-            // Same palette rules as ordinary room tiles: Solid is wall; Structure is the
-            // 35%-background blend used by kind==3 in Room().
-            EditorMapGeometryKind.LocalTerrain => Blend(wall, background, .35f),
-            EditorMapGeometryKind.CurvedSlope => wall,
-            _ => wall
+            EditorMapGeometryKind.Solid => wall,
+            EditorMapGeometryKind.Structure => Blend(wall, background, .35f),
+            EditorMapGeometryKind.BackWall => Blend(wall, background, .75f),
+            _ => background
         };
 
-    private static void DrawCurveSegment(
+    private static void PaintCurveBandSegment(
         uint[] pixels,
         int rasterWidth,
         int rasterHeight,
@@ -168,27 +174,64 @@ internal static class CartographyDrawing
         bool[] water,
         CartographyAppearance appearance,
         CartographyDocument document,
-        int offset,
+        EditorMapRectSnapshot[] fills,
         EditorMapPointSnapshot a,
         EditorMapPointSnapshot b,
-        EditorMapGeometryKind kind,
+        EditorMapGeometryKind fillKind,
         uint baseColor,
+        uint wall,
         uint waterColor)
     {
-        int x0 = offset + (int)Math.Round(a.X * 3f);
-        int y0 = offset + (int)Math.Round((room.Height - a.Y) * 3f);
-        int x1 = offset + (int)Math.Round(b.X * 3f);
-        int y1 = offset + (int)Math.Round((room.Height - b.Y) * 3f);
+        float ax = a.X * 3f;
+        float bx = b.X * 3f;
+        int minX = Math.Max(0, (int)Math.Floor(Math.Min(ax, bx)));
+        int maxX = Math.Min(rasterWidth - 1, (int)Math.Ceiling(Math.Max(ax, bx)));
+        float span = bx - ax;
 
-        int dx = Math.Abs(x1 - x0);
-        int sx = x0 < x1 ? 1 : -1;
-        int dy = -Math.Abs(y1 - y0);
-        int sy = y0 < y1 ? 1 : -1;
-        int error = dx + dy;
-
-        while (true)
+        if (Math.Abs(span) < 0.0001f)
         {
-            PaintCurvePixel(
+            int x = Math.Max(0, Math.Min(rasterWidth - 1, (int)Math.Round(ax)));
+            float surfaceY = (a.Y + b.Y) * .5f;
+            if (TryResolveFillSpan(fills, fillKind, (x + .5f) / 3f, surfaceY, out float otherY))
+                PaintCurveColumn(
+                    pixels,
+                    rasterWidth,
+                    rasterHeight,
+                    room,
+                    kinds,
+                    water,
+                    appearance,
+                    document,
+                    x,
+                    surfaceY,
+                    otherY,
+                    fillKind,
+                    baseColor,
+                    wall,
+                    waterColor);
+            return;
+        }
+
+        for (int x = minX; x <= maxX; x++)
+        {
+            float sampleX = x + .5f;
+            float t = (sampleX - ax) / span;
+            if (t < -0.001f || t > 1.001f)
+                continue;
+
+            t = Math.Max(0f, Math.Min(1f, t));
+            float surfaceY = a.Y + (b.Y - a.Y) * t;
+            float tileX = sampleX / 3f;
+
+            if (!TryResolveFillSpan(
+                    fills,
+                    fillKind,
+                    tileX,
+                    surfaceY,
+                    out float otherY))
+                continue;
+
+            PaintCurveColumn(
                 pixels,
                 rasterWidth,
                 rasterHeight,
@@ -197,31 +240,55 @@ internal static class CartographyDrawing
                 water,
                 appearance,
                 document,
-                offset,
-                x0,
-                y0,
-                kind,
+                x,
+                surfaceY,
+                otherY,
+                fillKind,
                 baseColor,
+                wall,
                 waterColor);
-
-            if (x0 == x1 && y0 == y1)
-                break;
-
-            int doubled = error * 2;
-            if (doubled >= dy)
-            {
-                error += dy;
-                x0 += sx;
-            }
-            if (doubled <= dx)
-            {
-                error += dx;
-                y0 += sy;
-            }
         }
     }
 
-    private static void PaintCurvePixel(
+    private static bool TryResolveFillSpan(
+        EditorMapRectSnapshot[] fills,
+        EditorMapGeometryKind fillKind,
+        float tileX,
+        float surfaceY,
+        out float otherY)
+    {
+        otherY = surfaceY;
+        float bestScore = float.MaxValue;
+        bool found = false;
+
+        for (int i = 0; i < fills.Length; i++)
+        {
+            EditorMapRectSnapshot fill = fills[i];
+            if (fill.Kind != fillKind ||
+                fill.Width <= 0f ||
+                fill.Height <= 0f ||
+                tileX < fill.X - .025f ||
+                tileX > fill.X + fill.Width + .025f)
+                continue;
+
+            float minY = fill.Y;
+            float maxY = fill.Y + fill.Height;
+            float distanceToMin = Math.Abs(surfaceY - minY);
+            float distanceToMax = Math.Abs(surfaceY - maxY);
+            float score = Math.Min(distanceToMin, distanceToMax);
+
+            if (score >= bestScore)
+                continue;
+
+            bestScore = score;
+            otherY = distanceToMax <= distanceToMin ? minY : maxY;
+            found = true;
+        }
+
+        return found;
+    }
+
+    private static void PaintCurveColumn(
         uint[] pixels,
         int rasterWidth,
         int rasterHeight,
@@ -230,44 +297,66 @@ internal static class CartographyDrawing
         bool[] water,
         CartographyAppearance appearance,
         CartographyDocument document,
-        int offset,
         int x,
-        int y,
-        EditorMapGeometryKind kind,
+        float surfaceY,
+        float otherY,
+        EditorMapGeometryKind fillKind,
         uint baseColor,
+        uint wall,
         uint waterColor)
     {
-        if (x < 0 || y < 0 || x >= rasterWidth || y >= rasterHeight)
-            return;
+        float surfacePixel = (room.Height - surfaceY) * 3f;
+        float otherPixel = (room.Height - otherY) * 3f;
+        int minY = Math.Max(0, (int)Math.Floor(Math.Min(surfacePixel, otherPixel)));
+        int maxY = Math.Min(rasterHeight - 1, (int)Math.Ceiling(Math.Max(surfacePixel, otherPixel)));
 
-        int roomX = x - offset;
-        int roomY = y - offset;
-        if (roomX < 0 || roomY < 0 || roomX >= room.Width * 3 || roomY >= room.Height * 3)
-            return;
+        for (int y = minY; y <= maxY; y++)
+        {
+            int tileColumn = Math.Max(0, Math.Min(room.Width - 1, x / 3));
+            int tileRow = Math.Max(0, Math.Min(room.Height - 1, y / 3));
+            int tileIndex = tileRow * room.Width + tileColumn;
 
-        int tileColumn = Math.Max(0, Math.Min(room.Width - 1, roomX / 3));
-        int tileRow = Math.Max(0, Math.Min(room.Height - 1, roomY / 3));
-        int tileIndex = tileRow * room.Width + tileColumn;
+            // Preserve shortcut/transport marker pixels exactly as the ordinary room pass does.
+            if (kinds[tileIndex] >= 4)
+                continue;
 
-        // Preserve shortcut/transport markers exactly as ordinary terrain rendering does.
-        if (kinds[tileIndex] >= 4)
-            return;
+            uint color = baseColor;
+            bool solid = fillKind == EditorMapGeometryKind.Solid;
+            bool wet =
+                appearance.WaterLevel == -2
+                    ? water[tileIndex]
+                    : appearance.WaterLevel >= 0 &&
+                      room.Height - 1 - tileRow <= appearance.WaterLevel;
 
-        uint color = baseColor;
-        bool solid =
-            kind == EditorMapGeometryKind.CurvedSlope ||
-            kind == EditorMapGeometryKind.Solid;
-        bool wet =
-            appearance.WaterLevel == -2
-                ? water[tileIndex]
-                : appearance.WaterLevel >= 0 &&
-                  room.Height - 1 - tileRow <= appearance.WaterLevel;
+            if (wet && (!solid || appearance.WaterFront))
+                color = Blend(color, waterColor, document.Options.WaterOpacity);
 
-        if (wet && (!solid || appearance.WaterFront))
-            color = Blend(color, waterColor, document.Options.WaterOpacity);
+            if (appearance.Deathpit &&
+                tileRow >= room.Height - 5 &&
+                IsAirTile(kinds, room.Width, room.Height, tileColumn, room.Height - 1))
+            {
+                color = Blend(
+                    wall,
+                    color,
+                    (room.Height - tileRow - .5f) / 5f);
+            }
 
-        pixels[y * rasterWidth + x] = color;
+            pixels[y * rasterWidth + x] = color;
+        }
     }
+
+    private static bool IsAirTile(
+        byte[] kinds,
+        int width,
+        int height,
+        int x,
+        int y) =>
+        x >= 0 &&
+        y >= 0 &&
+        x < width &&
+        y < height &&
+        kinds[y * width + x] != 2;
+
     internal static CartographyRaster Outline(CartographyRaster raster,float size,uint color)
     {
         int radius=(int)Math.Ceiling(size);if(radius<=0)return raster;
