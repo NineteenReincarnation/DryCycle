@@ -57,6 +57,7 @@ internal static class WorldMapRetainedV2Runtime
 
     private static PresentedRouteSnapshot presentedRoutes =
         PresentedRouteSnapshot.Empty();
+    private static long presentedRouteRevision = long.MinValue;
     private static Dictionary<string, WorldMapCrossingMark[]> presentedCrossingsByRoute =
         new(StringComparer.Ordinal);
     private static long presentedCrossingRevision = long.MinValue;
@@ -346,7 +347,8 @@ internal static class WorldMapRetainedV2Runtime
                     PublishPresentedRoutes(
                         showConnections
                             ? visibleRoutes
-                            : null);
+                            : null,
+                        routeRevision);
                 }
             }
         }
@@ -609,8 +611,19 @@ internal static class WorldMapRetainedV2Runtime
     }
 
     private static void PublishPresentedRoutes(
-        IReadOnlyList<string> routeIds)
+        IReadOnlyList<string> routeIds,
+        long routeRevision)
     {
+        PresentedRouteSnapshot current =
+            Volatile.Read(ref presentedRoutes);
+        if (routeRevision == presentedRouteRevision &&
+            PresentedRouteSetMatches(
+                current?.Ids,
+                routeIds))
+        {
+            return;
+        }
+
         HashSet<string> ids = new(StringComparer.Ordinal);
         WorldMapRouteSpatialIndex index = new();
 
@@ -640,9 +653,40 @@ internal static class WorldMapRetainedV2Runtime
             }
         }
 
+        presentedRouteRevision = routeRevision;
         Volatile.Write(
             ref presentedRoutes,
             new PresentedRouteSnapshot(ids, index));
+    }
+
+    private static bool PresentedRouteSetMatches(
+        HashSet<string> current,
+        IReadOnlyList<string> routeIds)
+    {
+        int expected = 0;
+        if (routeIds != null)
+        {
+            for (int i = 0; i < routeIds.Count; i++)
+                if (!string.IsNullOrEmpty(routeIds[i]))
+                    expected++;
+        }
+
+        if (current == null ||
+            current.Count != expected)
+            return false;
+
+        if (routeIds == null)
+            return current.Count == 0;
+
+        for (int i = 0; i < routeIds.Count; i++)
+        {
+            string id = routeIds[i];
+            if (!string.IsNullOrEmpty(id) &&
+                !current.Contains(id))
+                return false;
+        }
+
+        return true;
     }
 
     internal static bool QueryRooms(
@@ -683,6 +727,7 @@ internal static class WorldMapRetainedV2Runtime
         Interlocked.Exchange(ref canvasSeenAt, 0L);
         visibleRooms.Clear();
         visibleRoutes.Clear();
+        presentedRouteRevision = long.MinValue;
         Volatile.Write(
             ref presentedRoutes,
             PresentedRouteSnapshot.Empty());
