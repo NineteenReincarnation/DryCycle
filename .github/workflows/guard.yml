@@ -16,6 +16,7 @@ on:
       - 'Guard/**'
       - 'scripts/Test-MapRendering.ps1'
       - 'tests/WorldMapRenderIsolation.Tests/**'
+      - 'tests/WorldMapRouting.Tests/**'
       - '.github/workflows/guard.yml'
   workflow_dispatch:
 
