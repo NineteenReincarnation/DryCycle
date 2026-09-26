@@ -69,6 +69,38 @@ public static partial class MapRenderIsolationTests
             entersRoom |= (bool)router.GetMethod("SegmentIntersectsRect", Flags).Invoke(null,
                 new object[] { path[i], path[i + 1], new Num.Vector2(104, 20), new Num.Vector2(120, 95) });
         Check(!entersRoom && Length(path) > 96, "An obstructed corridor reroutes without crossing the third room.");
+
+        // Three links sharing the same facing sockets must keep distinct short corridors. The
+        // open-corridor fast path used to ignore LaneOffset because the exact centreline was always
+        // shorter, collapsing parallel links back into one unreadable stroke.
+        router.GetMethod("Clear", Flags).Invoke(null, null);
+        Array laneRequests = Array.CreateInstance(request.GetType(), 3);
+        float[] offsets = { -12f, 0f, 12f };
+        for (int i = 0; i < offsets.Length; i++)
+        {
+            object lane = New("WorldMapOrthogonalRouter+Request");
+            Set(lane, "Id", "lane-" + i); Set(lane, "StartRoom", 0); Set(lane, "EndRoom", 1);
+            Set(lane, "StartRoomMin", new Num.Vector2(0, 0)); Set(lane, "StartRoomMax", new Num.Vector2(80, 100));
+            Set(lane, "EndRoomMin", new Num.Vector2(144, 0)); Set(lane, "EndRoomMax", new Num.Vector2(224, 100));
+            Set(lane, "Start", new Num.Vector2(75, 50)); Set(lane, "End", new Num.Vector2(149, 50));
+            Set(lane, "StartDirection", Num.Vector2.UnitX); Set(lane, "EndDirection", -Num.Vector2.UnitX);
+            Set(lane, "LaneOffset", offsets[i]);
+            laneRequests.SetValue(lane, i);
+        }
+        Array laneRoutes = (Array)router.GetMethod("BuildRoutesCore", Flags)
+            .Invoke(null, new object[] { laneRequests, obstacles, false, null, null });
+        var laneYs = new List<float>();
+        for (int i = 0; i < laneRoutes.Length; i++)
+        {
+            var lanePath = (Num.Vector2[])Get(laneRoutes.GetValue(i), "Points");
+            Check(lanePath[0] == new Num.Vector2(75, 50) && lanePath[lanePath.Length - 1] == new Num.Vector2(149, 50),
+                "Parallel fast routes retain the real socket anchors.");
+            Check(!lanePath.Zip(lanePath.Skip(1), (a, b) => Num.Vector2.Dot(b - a, i > 0 ? a - lanePath[Math.Max(0, Array.IndexOf(lanePath, a) - 1)] : Num.Vector2.Zero)).Any(v => v < -0.01f),
+                "Parallel fast routes do not reverse direction.");
+            float corridorY = lanePath.Length > 2 ? lanePath.Skip(1).Take(lanePath.Length - 2).Average(pt => pt.Y) : 50f;
+            laneYs.Add(corridorY);
+        }
+        Check(laneYs.Max() - laneYs.Min() >= 18f, "Parallel short links preserve visibly separated lane offsets.");
     }
 
     private static object Geometry(float width, int stamp, float nodeX = 2)
@@ -139,6 +171,22 @@ public static partial class MapRenderIsolationTests
             int width = lit.Length == 0 ? 0 : lit.Max(i => i % 920) - lit.Min(i => i % 920) + 1;
             Check(width >= 10 && width <= 15, "Short stepped bidirectional link has a compact visible GPU marker at zoom " + zoom + ".");
         }
+
+        // A genuinely tiny inter-room gap must still retain direction metadata. This is the case
+        // the previous "short" test did not cover: it used a 210 px path and only reduced zoom.
+        object[] tinyMarker = {
+            new[] { new Num.Vector2(100, 80), new Num.Vector2(114, 80) },
+            Num.Vector2.Zero,
+            new Num.Vector2(920, 520),
+            new[] { new Num.Vector4(70, 60, 98, 100), new Num.Vector4(116, 60, 150, 100) },
+            default(Num.Vector2),
+            default(Num.Vector2),
+            0f
+        };
+        Check((bool)drawing.GetMethod("TryDirectionMarker", Flags).Invoke(null, tinyMarker),
+            "A 14 px room-to-room corridor still gets a direction marker.");
+        Check((float)tinyMarker[6] < 1f && (float)tinyMarker[6] >= .32f,
+            "Ultra-short direction markers shrink instead of disappearing.");
 
         // Actual retained route mesh, presented through the production texture bridge, with the
         // screen-space marker on top. This catches discrepancies between the two render paths.
