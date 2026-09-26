@@ -58,6 +58,7 @@ internal static class WorldMapJunctionWeavePlanner
     private const float WeaveLaneStaggerFactor = 0.55f;
     private const float MaximumWeaveLaneStagger = 24f;
     private const float MinimumAxisRun = 4f;
+    private const float MinimumScaleTransitionRun = 18f;
 
     internal static bool NeedsTransition(
         float[] offsets,
@@ -353,6 +354,61 @@ internal static class WorldMapJunctionWeavePlanner
                     exit,
                     entryCarried,
                     exitCarried);
+        }
+
+        // When two adjacent assigned corridor segments use the same axis but different spacing
+        // scales, do not snap laterally at the shared vertex. Move the scale transition into the
+        // preceding corridor segment as an explicit dogleg. This preserves lane order while making
+        // bundle compression/expansion gradual in screen space.
+        for (int i = 0;
+             i < segmentCount - 1;
+             i++)
+        {
+            if (!assigned[i] ||
+                !assigned[i + 1])
+                continue;
+
+            SegmentProfile current =
+                profiles[i];
+            SegmentProfile next =
+                profiles[i + 1];
+
+            if (current.Vertical !=
+                    next.Vertical ||
+                Math.Abs(
+                    offsets[i] -
+                    offsets[i + 1]) <=
+                OffsetEpsilon)
+                continue;
+
+            Num.Vector2 delta =
+                source[i + 1] -
+                source[i];
+            float run =
+                Math.Abs(
+                    current.Vertical
+                        ? delta.Y
+                        : delta.X);
+
+            if (!IsWeaveEligible(
+                    i,
+                    segmentCount) ||
+                run <
+                    MinimumScaleTransitionRun)
+            {
+                // Returning null is intentional: the allocator will keep the safe base geometry and
+                // schedule the touched continuity bundle for its bounded alternate-corridor retry
+                // instead of drawing an abrupt perpendicular "pinch" at this junction.
+                return null;
+            }
+
+            profiles[i] =
+                new SegmentProfile(
+                    current.Vertical,
+                    offsets[i],
+                    offsets[i + 1],
+                    true,
+                    true);
         }
 
         return profiles;
