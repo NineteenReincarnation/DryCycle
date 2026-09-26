@@ -2490,8 +2490,19 @@ internal static class WorldMapView
 
             if (skipRetainedRoutes &&
                 WorldMapRetainedV2Runtime.IsConnectionRetainedOnSurface(
-                    connection.ConnectionId))
+                    connection.ConnectionId) &&
+                WorldMapRetainedV2Runtime.TryGetConnectionRoutePoints(
+                    connection.ConnectionId,
+                    out Num.Vector2[] retainedHitRoute) &&
+                retainedHitRoute != null &&
+                retainedHitRoute.Length >= 2)
+            {
+                // The retained hit index and the visible retained surface now refer to the same
+                // route geometry, so the immediate hit path would only duplicate work. During the
+                // brief surface/index handoff, fall through to the immediate path instead of making
+                // the connection temporarily unhoverable.
                 continue;
+            }
 
             if (!BuildImmediateConnectionPath(
                     snapshot,
