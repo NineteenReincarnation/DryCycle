@@ -35,6 +35,19 @@ internal static partial class MapRoomGeometryPresentationHub
     private static readonly Dictionary<int, int> recoveryRetryFrame = new();
     private static readonly Dictionary<int, byte> recoveryFailureCount = new();
     private static readonly Dictionary<int, int> recoveryRoomIndices = new();
+    private static long recoveryPerfTotalTicks;
+    private static long recoveryPerfPeakTicks;
+    private static int recoveryPerfSamples;
+    private static int recoveryPerfCompletedRooms;
+
+    internal static int SourceRecoveryBackoffCount => recoveryRetryFrame.Count;
+    internal static int SourceRecoveryCompletedRooms => recoveryPerfCompletedRooms;
+    internal static double SourceRecoveryAverageMilliseconds =>
+        recoveryPerfSamples <= 0
+            ? 0d
+            : recoveryPerfTotalTicks * 1000d / Stopwatch.Frequency / recoveryPerfSamples;
+    internal static double SourceRecoveryPeakMilliseconds =>
+        recoveryPerfPeakTicks * 1000d / Stopwatch.Frequency;
 
     internal static void RecoverMissingSources(EditorSession session)
     {
@@ -97,6 +110,10 @@ internal static partial class MapRoomGeometryPresentationHub
         recoveryRetryFrame.Clear();
         recoveryFailureCount.Clear();
         recoveryRoomIndices.Clear();
+        recoveryPerfTotalTicks = 0L;
+        recoveryPerfPeakTicks = 0L;
+        recoveryPerfSamples = 0;
+        recoveryPerfCompletedRooms = 0;
         sourceDimensionCursor = 0;
         lastSourceRecoveryFrame = -1;
         sourceRecoveryMapActive = false;
@@ -218,113 +235,123 @@ internal static partial class MapRoomGeometryPresentationHub
         if (roomCount <= 0) return;
         if (mapObject.roomLoaderIndex < 0) mapObject.roomLoaderIndex = 0;
 
-        // Bound the whole queue as well as each incremental shortcut-mapping job.
-        int guard = roomCount + 1;
-        long deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2 / 1000;
+        long perfStarted = Stopwatch.GetTimestamp();
         int completed = 0;
-        while (guard-- > 0)
+        try
         {
-            // One budget for the entire queue, not a fresh 1.5 ms budget for every room.
-            if (completed >= 2 || Stopwatch.GetTimestamp() >= deadline) return;
-            if (mapObject.roomPrep != null)
+            // Bound the whole queue as well as each incremental shortcut-mapping job.
+            int guard = roomCount + 1;
+            long deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 2 / 1000;
+            while (guard-- > 0)
             {
-                RoomPreparer preparer = mapObject.roomPrep;
-                ApplyPreparedRoomDimensions(preparer.room);
-
-                try
+                // One budget for the entire queue, not a fresh 1.5 ms budget for every room.
+                if (completed >= 2 || Stopwatch.GetTimestamp() >= deadline) return;
+                if (mapObject.roomPrep != null)
                 {
-                    AdvancePreparerOneFrame(preparer);
+                    RoomPreparer preparer = mapObject.roomPrep;
                     ApplyPreparedRoomDimensions(preparer.room);
+
+                    try
+                    {
+                        AdvancePreparerOneFrame(preparer);
+                        ApplyPreparedRoomDimensions(preparer.room);
+                    }
+                    catch (Exception error)
+                    {
+                        preparer.failed = true;
+                        preparer.done = true;
+                        global::DryCycle.Plugin.Logger?.LogWarning(
+                            "WorldMap RoomPreparer update failed for " +
+                            (preparer.room?.abstractRoom?.name ?? "?") + ": " + error);
+                    }
+
+                    if (!preparer.done) return;
+                    FinishPreparedMapTexture(mapObject, preparer, roomCount);
+                    completed++;
+                    if (!allowStartNew) return;
+                    continue;
                 }
-                catch (Exception error)
+
+                if (!allowStartNew || !SelectNextMissingRoom(mapObject, roomCount)) return;
+
+                int localIndex = mapObject.roomLoaderIndex;
+                MapObject.RoomRepresentation roomRep = mapObject.roomReps[localIndex];
+                if (roomRep == null || roomRep.room == null)
                 {
-                    preparer.failed = true;
-                    preparer.done = true;
-                    global::DryCycle.Plugin.Logger?.LogWarning(
-                        "WorldMap RoomPreparer update failed for " +
-                        (preparer.room?.abstractRoom?.name ?? "?") + ": " + error);
+                    mapObject.roomLoaderIndex++;
+                    completed++;
+                    continue;
                 }
 
-                if (!preparer.done) return;
-                FinishPreparedMapTexture(mapObject, preparer, roomCount);
-                completed++;
-                if (!allowStartNew) return;
-                continue;
-            }
+                if (roomRep.texture != null || roomRep.mapTex != null)
+                {
+                    ClearRecoveryFailure(roomRep.room.index);
+                    RefreshRecoveredRoomEntry(roomRep);
+                    mapObject.roomLoaderIndex++;
+                    continue;
+                }
 
-            if (!allowStartNew || !SelectNextMissingRoom(mapObject, roomCount)) return;
+                global::Room realized = roomRep.room.realizedRoom;
+                if (realized != null && realized.readyForAI)
+                {
+                    try
+                    {
+                        roomRep.CreateMapTexture(realized);
+                        MarkVanillaMapRoomRefresh(mapObject, localIndex);
+                        RefreshRecoveredRoomEntry(roomRep);
+                    }
+                    catch (Exception error)
+                    {
+                        global::DryCycle.Plugin.Logger?.LogWarning(
+                            "WorldMap realized-room MapTex recovery failed for " + roomRep.room.name + ": " + error);
+                    }
 
-            int localIndex = mapObject.roomLoaderIndex;
-            MapObject.RoomRepresentation roomRep = mapObject.roomReps[localIndex];
-            if (roomRep == null || roomRep.room == null)
-            {
-                mapObject.roomLoaderIndex++;
-                completed++;
-                continue;
-            }
+                    if (roomRep.texture == null && roomRep.mapTex == null)
+                        NoteRecoveryFailure(roomRep.room.index);
+                    else
+                        ClearRecoveryFailure(roomRep.room.index);
+                    mapObject.roomLoaderIndex++;
+                    completed++;
+                    continue;
+                }
 
-            if (roomRep.texture != null || roomRep.mapTex != null)
-            {
-                ClearRecoveryFailure(roomRep.room.index);
-                RefreshRecoveredRoomEntry(roomRep);
-                mapObject.roomLoaderIndex++;
-                continue;
-            }
-
-            global::Room realized = roomRep.room.realizedRoom;
-            if (realized != null && realized.readyForAI)
-            {
                 try
                 {
-                    roomRep.CreateMapTexture(realized);
-                    MarkVanillaMapRoomRefresh(mapObject, localIndex);
-                    RefreshRecoveredRoomEntry(roomRep);
+                    global::Room preparedRoom = new(null, mapObject.world, roomRep.room);
+
+                    // MapTex only needs loaded tiles and shortcut metadata. Running AImapper and
+                    // heatmap decompression here duplicates room-load work for no visual gain.
+                    RoomPreparer preparer = new(
+                        preparedRoom,
+                        loadAiHeatMaps: false,
+                        falseBake: false,
+                        shortcutsOnly: true);
+                    mapObject.roomPrep = preparer;
+                    ApplyPreparedRoomDimensions(preparedRoom);
+
+                    AdvancePreparerOneFrame(preparer);
+                    if (!preparer.done) return;
+
+                    FinishPreparedMapTexture(mapObject, preparer, roomCount);
+                    completed++;
                 }
                 catch (Exception error)
                 {
                     global::DryCycle.Plugin.Logger?.LogWarning(
-                        "WorldMap realized-room MapTex recovery failed for " + roomRep.room.name + ": " + error);
-                }
-
-                if (roomRep.texture == null && roomRep.mapTex == null)
+                        "WorldMap could not start MapTex recovery for " + roomRep.room.name + ": " + error);
+                    mapObject.roomPrep = null;
                     NoteRecoveryFailure(roomRep.room.index);
-                else
-                    ClearRecoveryFailure(roomRep.room.index);
-                mapObject.roomLoaderIndex++;
-                completed++;
-                continue;
+                    mapObject.roomLoaderIndex++;
+                }
             }
-
-            try
-            {
-                global::Room preparedRoom = new(null, mapObject.world, roomRep.room);
-
-                // MapTex only needs loaded tiles and shortcut metadata. Running AImapper and heatmap
-                // decompression here duplicates a large amount of room-load work for no visual gain.
-                // Keep the vanilla RoomPreparer/ShortcutMapper data path, but own its cheap subset on
-                // the main thread under a strict per-frame budget instead of starting its worker.
-                RoomPreparer preparer = new(
-                    preparedRoom,
-                    loadAiHeatMaps: false,
-                    falseBake: false,
-                    shortcutsOnly: true);
-                mapObject.roomPrep = preparer;
-                ApplyPreparedRoomDimensions(preparedRoom);
-
-                AdvancePreparerOneFrame(preparer);
-                if (!preparer.done) return;
-
-                FinishPreparedMapTexture(mapObject, preparer, roomCount);
-                completed++;
-            }
-            catch (Exception error)
-            {
-                global::DryCycle.Plugin.Logger?.LogWarning(
-                    "WorldMap could not start MapTex recovery for " + roomRep.room.name + ": " + error);
-                mapObject.roomPrep = null;
-                NoteRecoveryFailure(roomRep.room.index);
-                mapObject.roomLoaderIndex++;
-            }
+        }
+        finally
+        {
+            long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - perfStarted);
+            recoveryPerfTotalTicks += elapsed;
+            recoveryPerfPeakTicks = Math.Max(recoveryPerfPeakTicks, elapsed);
+            recoveryPerfSamples++;
+            recoveryPerfCompletedRooms += completed;
         }
     }
 
