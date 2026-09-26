@@ -2107,10 +2107,22 @@ internal static class ShortcutWindow
         string action,
         string description)
     {
+        string safeAction =
+            action ?? string.Empty;
+        string safeDescription =
+            description ?? string.Empty;
+
         Num.Vector2 actionSize =
-            ImGui.CalcTextSize(action ?? string.Empty);
+            ImGui.CalcTextSize(
+                safeAction);
+        Num.Vector2 descriptionSize =
+            ImGui.CalcTextSize(
+                safeDescription);
+
         float chipWidth =
-            Math.Max(58f, actionSize.X + 16f);
+            Math.Max(
+                58f,
+                actionSize.X + 16f);
         Num.Vector2 pos =
             ImGui.GetCursorScreenPos();
         float rowHeight =
@@ -2137,27 +2149,43 @@ internal static class ShortcutWindow
             ImDrawFlags.None,
             1f);
 
-        Num.Vector2 textPos =
+        Num.Vector2 actionPos =
             new(
-                pos.X + (chipWidth - actionSize.X) * 0.5f,
-                pos.Y + (rowHeight - actionSize.Y) * 0.5f);
+                pos.X +
+                (chipWidth - actionSize.X) *
+                0.5f,
+                pos.Y +
+                (rowHeight - actionSize.Y) *
+                0.5f);
         draw.AddText(
-            textPos,
+            actionPos,
             ImGui.GetColorU32(TooltipTitle),
-            action ?? string.Empty);
+            safeAction);
 
-        ImGui.SetCursorScreenPos(
-            new Num.Vector2(
+        Num.Vector2 descriptionPos =
+            new(
                 pos.X + chipWidth + 10f,
-                pos.Y + (rowHeight - ImGui.GetTextLineHeight()) * 0.5f));
-        ImGui.TextColored(
-            TooltipHint,
-            description ?? string.Empty);
+                pos.Y +
+                (rowHeight - descriptionSize.Y) *
+                0.5f);
+        draw.AddText(
+            descriptionPos,
+            ImGui.GetColorU32(TooltipHint),
+            safeDescription);
 
-        ImGui.SetCursorScreenPos(
+        // Dear ImGui 1.91 asserts when SetCursorPos/SetCursorScreenPos is used only to extend a
+        // window's content bounds. This row used to move the cursor below the painted content
+        // without submitting an item, so ending the tooltip could hit imgui.cpp's boundary assert.
+        // Submit one real layout item instead: Dummy owns both the horizontal text extent and the
+        // vertical row advance while the custom visuals stay on the draw list.
+        float rowWidth =
+            chipWidth +
+            10f +
+            descriptionSize.X;
+        ImGui.Dummy(
             new Num.Vector2(
-                pos.X,
-                pos.Y + rowHeight + 4f));
+                rowWidth,
+                rowHeight + 4f));
     }
 
     private static void ClampPages(
