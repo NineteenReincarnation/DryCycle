@@ -13,8 +13,11 @@ internal sealed class WorldMapConnectionResourceStore
 {
     private const int IdleRoutesPerFrame = 24;
     private const int InteractiveRoutesPerFrame = 8;
-    private const float PreferredPairLaneSpacing = 8f;
-    private const float MinimumPairLaneSpacing = 5f;
+    // Use one spacing grammar from the room edge into the global corridor. Pair lanes used to
+    // begin at 8/5px while terminal/corridor lanes targeted roughly 10/6px, forcing an immediate
+    // expansion after the stub even when there was plenty of space.
+    private const float PreferredPairLaneSpacing = 10f;
+    private const float MinimumPairLaneSpacing = 6f;
     private const float PreferredTerminalLaneSpacing = 10f;
     private const float MinimumTerminalLaneSpacing = 6f;
     private const float PairLaneTargetSpan = 72f;
