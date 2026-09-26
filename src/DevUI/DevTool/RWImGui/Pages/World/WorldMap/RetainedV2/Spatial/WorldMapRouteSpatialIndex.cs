@@ -42,15 +42,27 @@ internal sealed class WorldMapRouteSpatialIndex
 
     internal void Upsert(ConnectionRouteResource route)
     {
-        if (route == null || string.IsNullOrEmpty(route.ConnectionId))
+        if (route == null)
             return;
 
-        Num.Vector2[] points = route.Points ?? Array.Empty<Num.Vector2>();
+        Upsert(
+            route.ConnectionId,
+            route.Points);
+    }
+
+    internal void Upsert(
+        string connectionId,
+        Num.Vector2[] points)
+    {
+        if (string.IsNullOrEmpty(connectionId))
+            return;
+
+        points ??= Array.Empty<Num.Vector2>();
 
         gate.EnterWriteLock();
         try
         {
-            RemoveLocked(route.ConnectionId);
+            RemoveLocked(connectionId);
             if (points.Length < 2) return;
 
             Num.Vector2 min = points[0];
@@ -65,7 +77,7 @@ internal sealed class WorldMapRouteSpatialIndex
             EnumerateCells(min, max, occupied);
             Entry entry = new()
             {
-                Id = route.ConnectionId,
+                Id = connectionId,
                 Min = min,
                 Max = max,
                 Points = points,
