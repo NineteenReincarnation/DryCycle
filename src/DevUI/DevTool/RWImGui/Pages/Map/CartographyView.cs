@@ -921,7 +921,14 @@ internal static partial class CartographyView
         uint color = Color(shape.Color); float stroke = shape.ScreenSpace ? shape.Stroke : Math.Max(1, shape.Stroke * zoom);
         switch (shape.Kind)
         {
-            case CartographyPrimitiveKind.Image: CartographyCanvasImages.Draw(draw, shape, a, b, color); break;
+            case CartographyPrimitiveKind.Image:
+                if (shape.PixelPerfect)
+                {
+                    a = new Num.Vector2((float)Math.Round(a.X), (float)Math.Round(a.Y));
+                    b = new Num.Vector2((float)Math.Round(b.X), (float)Math.Round(b.Y));
+                }
+                CartographyCanvasImages.Draw(draw, shape, a, b, color);
+                break;
             case CartographyPrimitiveKind.Fill:
                 if (shape.PixelPerfect)
                 {
