@@ -14,6 +14,7 @@ internal static class Program
         {
             StraightAndStaggered();
             ObstacleDetour();
+            NearbyRoutesDoNotOvershoot();
             ParallelShortLanes();
             DenseObstacleLanes();
             CacheReuse();
@@ -97,6 +98,66 @@ internal static class Program
         Check(
             Length(route.Points) < 520f,
             "Blocked route must stay locally bounded instead of taking a screen-spanning detour.");
+    }
+
+    private static void NearbyRoutesDoNotOvershoot()
+    {
+        WorldMapOrthogonalRouter.Clear();
+
+        var request = new WorldMapOrthogonalRouter.Request
+        {
+            Id = "nearby-left-down",
+            StartRoom = 0,
+            EndRoom = 1,
+            StartRoomMin = new Num.Vector2(200f, 0f),
+            StartRoomMax = new Num.Vector2(280f, 100f),
+            EndRoomMin = new Num.Vector2(0f, 140f),
+            EndRoomMax = new Num.Vector2(80f, 240f),
+            Start = new Num.Vector2(205f, 50f),
+            End = new Num.Vector2(75f, 190f),
+            StartDirection = -Num.Vector2.UnitX,
+            EndDirection = Num.Vector2.UnitX,
+            LaneOffset = 0f,
+            StartTerminalLaneIndex = 0,
+            StartTerminalLaneCount = 1,
+            EndTerminalLaneIndex = 0,
+            EndTerminalLaneCount = 1
+        };
+
+        var obstacles = new List<WorldMapOrthogonalRouter.Obstacle>
+        {
+            new(
+                0,
+                request.StartRoomMin,
+                request.StartRoomMax),
+            new(
+                1,
+                request.EndRoomMin,
+                request.EndRoomMax)
+        };
+
+        Num.Vector2[] points =
+            Solve(new[] { request }, obstacles)[0].Points;
+
+        float minX = points.Min(p => p.X);
+        float maxX = points.Max(p => p.X);
+        float minY = points.Min(p => p.Y);
+        float maxY = points.Max(p => p.Y);
+        float manhattan =
+            Math.Abs(request.Start.X - request.End.X) +
+            Math.Abs(request.Start.Y - request.End.Y);
+
+        Check(
+            minX >= Math.Min(request.Start.X, request.End.X) - 0.01f &&
+            maxX <= Math.Max(request.Start.X, request.End.X) + 0.01f,
+            "A clear nearby link must not travel horizontally away from both endpoints before coming back.");
+        Check(
+            minY >= Math.Min(request.Start.Y, request.End.Y) - 0.01f &&
+            maxY <= Math.Max(request.Start.Y, request.End.Y) + 0.01f,
+            "A clear nearby link must not travel vertically away from both endpoints before coming back.");
+        Check(
+            Length(points) <= manhattan + 0.01f,
+            "A clear nearby link must use a Manhattan-shortest route instead of an unnecessary outer detour.");
     }
 
     private static void ParallelShortLanes()
