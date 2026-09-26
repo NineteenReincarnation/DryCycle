@@ -21,6 +21,8 @@ internal static class RoomGeometryBuilder
 
         List<RoomGeometryBlob.Vertex> vertices = new();
         List<int> indices = new();
+        List<RoomGeometryBlob.Vertex> authoredTerrainVertices = new();
+        List<int> authoredTerrainIndices = new();
 
         // A neutral Air base is always present. If the room has no committed thumbnail yet, later
         // render stages can still show a visible non-black room instead of an uninitialised surface.
@@ -50,6 +52,31 @@ internal static class RoomGeometryBuilder
             AddQuad(
                 vertices,
                 indices,
+                x0,
+                y0,
+                x1 - x0,
+                y1 - y0,
+                run.Kind);
+        }
+
+        EditorMapRectSnapshot[] authoredRuns =
+            visual.TerrainRuns ?? Array.Empty<EditorMapRectSnapshot>();
+        for (int i = 0; i < authoredRuns.Length; i++)
+        {
+            EditorMapRectSnapshot run = authoredRuns[i];
+            if (run.Width <= 0f || run.Height <= 0f || run.Kind == EditorMapGeometryKind.Air)
+                continue;
+
+            float x0 = Math.Max(0f, run.X);
+            float y0 = Math.Max(0f, run.Y);
+            float x1 = Math.Min(width, run.X + run.Width);
+            float y1 = Math.Min(height, run.Y + run.Height);
+            if (x1 <= x0 || y1 <= y0)
+                continue;
+
+            AddQuad(
+                authoredTerrainVertices,
+                authoredTerrainIndices,
                 x0,
                 y0,
                 x1 - x0,
@@ -106,6 +133,8 @@ internal static class RoomGeometryBuilder
             sourceStamp,
             vertices.ToArray(),
             indices.ToArray(),
+            authoredTerrainVertices.ToArray(),
+            authoredTerrainIndices.ToArray(),
             segments.ToArray(),
             nodes);
     }
@@ -130,6 +159,8 @@ internal static class RoomGeometryBuilder
             0,
             vertices.ToArray(),
             indices.ToArray(),
+            Array.Empty<RoomGeometryBlob.Vertex>(),
+            Array.Empty<int>(),
             Array.Empty<RoomGeometryBlob.Segment>(),
             Array.Empty<EditorMapNodeVisualSnapshot>());
     }
