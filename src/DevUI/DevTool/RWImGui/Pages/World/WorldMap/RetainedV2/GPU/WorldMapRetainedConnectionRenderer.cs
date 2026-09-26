@@ -411,13 +411,20 @@ internal sealed class WorldMapRetainedConnectionRenderer
                     ? DenseCrossingRise
                     : CrossingRise;
 
+            float overShadowHalfWidth =
+                RouteShadowHalfWidth(
+                    overRoute);
+            float overCoreHalfWidth =
+                RouteCoreHalfWidth(
+                    overRoute);
+
             AddThickSegment(
                 vertices,
                 colors,
                 indices,
                 point - tangent * (radius + 2.5f),
                 point + tangent * (radius + 2.5f),
-                ShadowHalfWidth + 1.4f,
+                overShadowHalfWidth + 1.2f,
                 mask,
                 -0.02f);
 
@@ -451,7 +458,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                     indices,
                     previous,
                     current,
-                    ShadowHalfWidth,
+                    overShadowHalfWidth,
                     bridgeShadow,
                     -0.055f);
 
@@ -461,7 +468,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                     indices,
                     previous,
                     current,
-                    CoreHalfWidth,
+                    overCoreHalfWidth,
                     core,
                     -0.08f);
 
