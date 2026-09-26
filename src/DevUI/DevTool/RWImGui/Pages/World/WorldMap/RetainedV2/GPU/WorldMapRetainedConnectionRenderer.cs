@@ -500,13 +500,19 @@ internal sealed class WorldMapRetainedConnectionRenderer
     {
         for (int i = 0; i < path.Length - 1; i++)
         {
+            float segmentHalfWidth =
+                i == 0 ||
+                i == path.Length - 2
+                    ? halfWidth * 0.72f
+                    : halfWidth;
+
             AddThickSegment(
                 vertices,
                 colors,
                 indices,
                 path[i],
                 path[i + 1],
-                halfWidth,
+                segmentHalfWidth,
                 color,
                 z);
         }
@@ -587,13 +593,19 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 }
 
                 float end = Math.Min(length, distance + remainingDash);
+                float segmentHalfWidth =
+                    i == 0 ||
+                    i == path.Length - 2
+                        ? halfWidth * 0.72f
+                        : halfWidth;
+
                 AddThickSegment(
                     vertices,
                     colors,
                     indices,
                     a + direction * distance,
                     a + direction * end,
-                    halfWidth,
+                    segmentHalfWidth,
                     color,
                     z);
                 distance = end + DashGap;
