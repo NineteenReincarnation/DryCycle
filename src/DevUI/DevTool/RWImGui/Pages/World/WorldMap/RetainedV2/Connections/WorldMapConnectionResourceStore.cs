@@ -660,44 +660,75 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapRoomResourceStore roomResources)
     {
         laneOffsets.Clear();
-        Dictionary<long, List<WorldMapScene.ConnectionNode>> groups =
+
+        // Room-pair identity alone is not enough to define a parallel bundle. Two connections can
+        // link the same rooms while leaving through completely different sides (for example right-
+        // to-left versus top-to-bottom). Offsetting those as if they shared one corridor bends them
+        // toward each other and creates unnecessary crossings. Split each room pair by canonical
+        // endpoint-side combination first, then allocate lanes only inside that visual family.
+        Dictionary<long, Dictionary<int, List<WorldMapScene.ConnectionNode>>> groups =
             new();
 
         foreach (WorldMapScene.ConnectionNode connection
                  in scene.Connections.Values)
         {
-            int a =
+            int roomA =
                 Math.Min(
                     connection.FromRoomIndex,
                     connection.ToRoomIndex);
-            int b =
+            int roomB =
                 Math.Max(
                     connection.FromRoomIndex,
                     connection.ToRoomIndex);
-            long key =
-                ((long)(uint)a << 32) |
-                (uint)b;
+            long pairKey =
+                ((long)(uint)roomA << 32) |
+                (uint)roomB;
+
+            int sideA =
+                PairEndpointSide(
+                    connection,
+                    roomA,
+                    scene,
+                    roomResources);
+            int sideB =
+                PairEndpointSide(
+                    connection,
+                    roomB,
+                    scene,
+                    roomResources);
+            int sideKey =
+                (sideA << 2) |
+                sideB;
 
             if (!groups.TryGetValue(
-                    key,
+                    pairKey,
+                    out Dictionary<int, List<WorldMapScene.ConnectionNode>> sideGroups))
+            {
+                sideGroups =
+                    new Dictionary<int, List<WorldMapScene.ConnectionNode>>();
+                groups.Add(
+                    pairKey,
+                    sideGroups);
+            }
+
+            if (!sideGroups.TryGetValue(
+                    sideKey,
                     out List<WorldMapScene.ConnectionNode> members))
             {
                 members =
                     new List<WorldMapScene.ConnectionNode>();
-                groups.Add(key, members);
+                sideGroups.Add(
+                    sideKey,
+                    members);
             }
 
-            members.Add(connection);
+            members.Add(
+                connection);
         }
 
-        foreach (KeyValuePair<long, List<WorldMapScene.ConnectionNode>> pair
+        foreach (KeyValuePair<long, Dictionary<int, List<WorldMapScene.ConnectionNode>>> pair
                  in groups)
         {
-            List<WorldMapScene.ConnectionNode> members =
-                pair.Value;
-            if (members.Count == 0)
-                continue;
-
             int roomA =
                 unchecked(
                     (int)(uint)(pair.Key >> 32));
@@ -732,27 +763,81 @@ internal sealed class WorldMapConnectionResourceStore
                     Math.Abs(delta.Y);
             }
 
-            members.Sort(
-                (left, right) =>
-                    ComparePairLaneMembers(
-                        left,
-                        right,
-                        roomA,
-                        roomB,
-                        horizontalPair,
-                        scene,
-                        roomResources));
+            List<int> sideKeys =
+                new(pair.Value.Keys);
+            sideKeys.Sort();
 
-            float[] offsets =
-                BuildPairLaneOffsets(
-                    members.Count);
-
-            for (int i = 0; i < members.Count; i++)
+            for (int groupIndex = 0;
+                 groupIndex < sideKeys.Count;
+                 groupIndex++)
             {
-                laneOffsets[members[i].Id] =
-                    offsets[i];
+                List<WorldMapScene.ConnectionNode> members =
+                    pair.Value[sideKeys[groupIndex]];
+
+                if (members == null ||
+                    members.Count == 0)
+                    continue;
+
+                members.Sort(
+                    (left, right) =>
+                        ComparePairLaneMembers(
+                            left,
+                            right,
+                            roomA,
+                            roomB,
+                            horizontalPair,
+                            scene,
+                            roomResources));
+
+                float[] offsets =
+                    BuildPairLaneOffsets(
+                        members.Count);
+
+                for (int i = 0;
+                     i < members.Count;
+                     i++)
+                {
+                    laneOffsets[members[i].Id] =
+                        offsets[i];
+                }
             }
         }
+    }
+
+    private static int PairEndpointSide(
+        WorldMapScene.ConnectionNode connection,
+        int roomIndex,
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        if (connection == null ||
+            scene == null ||
+            !scene.TryGetRoom(
+                roomIndex,
+                out WorldMapScene.RoomNode room))
+            return 0;
+
+        System.Numerics.Vector2 point =
+            ResolvePairEndpoint(
+                connection,
+                roomIndex,
+                scene,
+                roomResources);
+
+        WorldMapWorldSpaceRouter.GetRoomBounds(
+            room,
+            roomResources,
+            out System.Numerics.Vector2 min,
+            out System.Numerics.Vector2 max);
+
+        System.Numerics.Vector2 direction =
+            WorldMapOrthogonalRouter.InferPortDirection(
+                point,
+                min,
+                max);
+
+        return SideCode(
+            direction);
     }
 
     private static int ComparePairLaneMembers(
