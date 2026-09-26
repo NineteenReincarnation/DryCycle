@@ -103,11 +103,10 @@ internal static class CartographyDrawing
                 fill.Height <= 0f)
                 continue;
 
+            // Continuous terrain changes geometry only. It deliberately uses the exact ordinary
+            // terrain material color instead of introducing a separate curve/structure tint.
             uint baseColor =
-                CurvedTerrainColor(
-                    fill.Kind,
-                    background,
-                    wall);
+                wall;
 
             int minX =
                 Math.Max(
@@ -253,29 +252,6 @@ internal static class CartographyDrawing
                         color;
                 }
             }
-        }
-    }
-
-    private static uint CurvedTerrainColor(
-        EditorMapGeometryKind kind,
-        uint background,
-        uint wall)
-    {
-        // No curve-only palette. A curved Solid is a normal Solid; LocalTerrain/Structure uses the
-        // normal structure color. Geometry changes shape only, never material styling.
-        switch (kind)
-        {
-            case EditorMapGeometryKind.Structure:
-            case EditorMapGeometryKind.LocalTerrain:
-                return Blend(
-                    wall,
-                    background,
-                    .35f);
-
-            case EditorMapGeometryKind.Solid:
-            case EditorMapGeometryKind.CurvedSlope:
-            default:
-                return wall;
         }
     }
 
