@@ -32,7 +32,8 @@ internal static partial class MapRoomGeometryPresentationHub
     private static bool sourceRecoveryMapActive;
     private static int sourceDimensionCursor;
     private static int lastSourceRecoveryFrame = -1;
-    private static readonly HashSet<int> failedRecoveryRooms = new();
+    private static readonly Dictionary<int, int> recoveryRetryFrame = new();
+    private static readonly Dictionary<int, byte> recoveryFailureCount = new();
     private static readonly Dictionary<int, int> recoveryRoomIndices = new();
 
     internal static void RecoverMissingSources(EditorSession session)
@@ -73,7 +74,8 @@ internal static partial class MapRoomGeometryPresentationHub
             sourceRecoveryMapObject = page.map;
             sourceRecoveryMapActive = true;
             sourceDimensionsResolved.Clear();
-            failedRecoveryRooms.Clear();
+            recoveryRetryFrame.Clear();
+            recoveryFailureCount.Clear();
             recoveryRoomIndices.Clear();
             for (int i = 0; i < page.map.roomReps.Length; i++)
                 if (page.map.roomReps[i]?.room != null) recoveryRoomIndices[page.map.roomReps[i].room.index] = i;
@@ -92,7 +94,8 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         sourceRecoveryWorld = null;
         sourceDimensionsResolved.Clear();
-        failedRecoveryRooms.Clear();
+        recoveryRetryFrame.Clear();
+        recoveryFailureCount.Clear();
         recoveryRoomIndices.Clear();
         sourceDimensionCursor = 0;
         lastSourceRecoveryFrame = -1;
@@ -262,6 +265,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
             if (roomRep.texture != null || roomRep.mapTex != null)
             {
+                ClearRecoveryFailure(roomRep.room.index);
                 RefreshRecoveredRoomEntry(roomRep);
                 mapObject.roomLoaderIndex++;
                 continue;
@@ -283,7 +287,9 @@ internal static partial class MapRoomGeometryPresentationHub
                 }
 
                 if (roomRep.texture == null && roomRep.mapTex == null)
-                    failedRecoveryRooms.Add(roomRep.room.index);
+                    NoteRecoveryFailure(roomRep.room.index);
+                else
+                    ClearRecoveryFailure(roomRep.room.index);
                 mapObject.roomLoaderIndex++;
                 completed++;
                 continue;
@@ -316,7 +322,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 global::DryCycle.Plugin.Logger?.LogWarning(
                     "WorldMap could not start MapTex recovery for " + roomRep.room.name + ": " + error);
                 mapObject.roomPrep = null;
-                failedRecoveryRooms.Add(roomRep.room.index);
+                NoteRecoveryFailure(roomRep.room.index);
                 mapObject.roomLoaderIndex++;
             }
         }
@@ -326,7 +332,7 @@ internal static partial class MapRoomGeometryPresentationHub
     {
         bool Missing(int local) => local >= 0 && local < count && mapObject.roomReps[local]?.room != null &&
             mapObject.roomReps[local].texture == null && mapObject.roomReps[local].mapTex == null &&
-            !failedRecoveryRooms.Contains(mapObject.roomReps[local].room.index);
+            RecoveryRetryReady(mapObject.roomReps[local].room.index);
         for (int p = 0; p < priorityRooms.Count; p++)
             if (recoveryRoomIndices.TryGetValue(priorityRooms[p], out int local) && Missing(local))
             { mapObject.roomLoaderIndex = local; return true; }
@@ -338,6 +344,31 @@ internal static partial class MapRoomGeometryPresentationHub
             mapObject.roomLoaderIndex = i; return true;
         }
         return false;
+    }
+
+    private static bool RecoveryRetryReady(int roomIndex) =>
+        !recoveryRetryFrame.TryGetValue(roomIndex, out int retryFrame) ||
+        Time.frameCount >= retryFrame;
+
+    private static void NoteRecoveryFailure(int roomIndex)
+    {
+        if (roomIndex < 0) return;
+        recoveryFailureCount.TryGetValue(roomIndex, out byte failures);
+        failures = (byte)Math.Min(byte.MaxValue, failures + 1);
+        recoveryFailureCount[roomIndex] = failures;
+
+        int delay =
+            failures <= 1 ? 30 :
+            failures == 2 ? 120 :
+            600;
+        recoveryRetryFrame[roomIndex] = Time.frameCount + delay;
+    }
+
+    private static void ClearRecoveryFailure(int roomIndex)
+    {
+        if (roomIndex < 0) return;
+        recoveryRetryFrame.Remove(roomIndex);
+        recoveryFailureCount.Remove(roomIndex);
     }
 
     private static void AdvancePreparerOneFrame(RoomPreparer preparer)
@@ -438,8 +469,13 @@ internal static partial class MapRoomGeometryPresentationHub
         }
         finally
         {
-            if (roomRep?.room != null && roomRep.texture == null && roomRep.mapTex == null)
-                failedRecoveryRooms.Add(roomRep.room.index);
+            if (roomRep?.room != null)
+            {
+                if (roomRep.texture == null && roomRep.mapTex == null)
+                    NoteRecoveryFailure(roomRep.room.index);
+                else
+                    ClearRecoveryFailure(roomRep.room.index);
+            }
             mapObject.roomPrep = null;
             mapObject.roomLoaderIndex = localIndex + 1;
         }
