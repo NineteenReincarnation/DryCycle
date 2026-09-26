@@ -285,7 +285,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     internal static void InvalidateRoom(int roomIndex)
     {
-        failedRecoveryRooms.Remove(roomIndex);
+        ClearRecoveryFailure(roomIndex);
         if (!cache.TryGetValue(roomIndex, out CacheEntry entry)) return;
         entry.RasterInitialized = false;
         entry.RasterRequestedSourceKey = int.MinValue;
