@@ -93,6 +93,9 @@ public sealed class EditorMapRoomVisualSnapshot
     public float WidthTiles { get; init; } = 12f;
     public float HeightTiles { get; init; } = 6f;
     public EditorMapRectSnapshot[] RasterRuns { get; init; } = Array.Empty<EditorMapRectSnapshot>();
+    // Authored RoomSettings terrain only. Retained thumbnails use this as a semantic overlay so
+    // curved/custom terrain remains visible even when the vanilla map texture is the base layer.
+    public EditorMapRectSnapshot[] TerrainRuns { get; init; } = Array.Empty<EditorMapRectSnapshot>();
     public EditorMapPolylineSnapshot[] Curves { get; init; } = Array.Empty<EditorMapPolylineSnapshot>();
     public EditorMapNodeVisualSnapshot[] Nodes { get; init; } = Array.Empty<EditorMapNodeVisualSnapshot>();
 }
@@ -1533,6 +1536,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 WidthTiles = Math.Max(1f, entry.WidthTiles),
                 HeightTiles = Math.Max(1f, entry.HeightTiles),
                 RasterRuns = MergeRuns(entry.BaseRasterRuns, entry.TerrainFillRuns),
+                TerrainRuns = CompactRasterRuns(entry.TerrainFillRuns ?? Array.Empty<EditorMapRectSnapshot>()),
                 Curves = entry.Curves,
                 Nodes = entry.Nodes
             };
