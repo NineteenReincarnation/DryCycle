@@ -647,6 +647,20 @@ internal static class WorldMapRetainedV2Runtime
             " | retrying " +
             MapRoomGeometryPresentationHub.SourceRecoveryBackoffCount);
         ImGui.TextUnformatted(
+            "thumbnail load session: " +
+            (MapRoomGeometryPresentationHub.SourceRecoverySessionReadyAtEntry
+                ? "ready-at-entry"
+                : "recovery") +
+            " | " +
+            (MapRoomGeometryPresentationHub.SourceRecoverySessionComplete
+                ? "complete "
+                : "active ") +
+            MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds.ToString("F0") +
+            " ms | remaining " +
+            MapRoomGeometryPresentationHub.SourceRecoverySessionRemainingRooms +
+            "/" +
+            MapRoomGeometryPresentationHub.SourceRecoverySessionInitialMissingRooms);
+        ImGui.TextUnformatted(
             "retained geometry builds: avg " +
             RoomResources.GeometryBuildAverageMilliseconds.ToString("F2") +
             " ms | peak " +
