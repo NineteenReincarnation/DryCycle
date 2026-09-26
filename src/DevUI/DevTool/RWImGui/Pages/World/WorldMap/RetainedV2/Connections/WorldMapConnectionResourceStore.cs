@@ -72,6 +72,10 @@ internal sealed class WorldMapConnectionResourceStore
     private long crossingPerfTotalTicks;
     private long crossingPerfPeakTicks;
     private int crossingPerfCount;
+    private long routeSessionStartedTicks;
+    private long routeSessionCompletedTicks;
+    private int routeSessionExpected;
+    private bool routeSessionComplete;
 
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
     internal IReadOnlyList<WorldMapCrossingMark> Crossings => crossings;
@@ -103,6 +107,22 @@ internal sealed class WorldMapConnectionResourceStore
             : crossingPerfTotalTicks * 1000d / Stopwatch.Frequency / crossingPerfCount;
     internal double CrossingBuildPeakMilliseconds =>
         crossingPerfPeakTicks * 1000d / Stopwatch.Frequency;
+    internal int RouteSessionExpected => routeSessionExpected;
+    internal bool RouteSessionComplete => routeSessionComplete;
+    internal double RouteSessionElapsedMilliseconds
+    {
+        get
+        {
+            if (routeSessionStartedTicks <= 0L)
+                return 0d;
+            long end =
+                routeSessionCompletedTicks > 0L
+                    ? routeSessionCompletedTicks
+                    : Stopwatch.GetTimestamp();
+            return Math.Max(0L, end - routeSessionStartedTicks) *
+                   1000d / Stopwatch.Frequency;
+        }
+    }
 
 
     internal bool TryGet(string id, out ConnectionRouteResource route)
@@ -252,6 +272,7 @@ internal sealed class WorldMapConnectionResourceStore
             else if (crossingLayoutDirty)
                 RebuildCrossings();
 
+            UpdateRouteLoadSession();
             return;
         }
 
@@ -379,6 +400,8 @@ internal sealed class WorldMapConnectionResourceStore
                 queue.Count == 0)
                 ApplyCorridorLanes();
         }
+
+        UpdateRouteLoadSession();
     }
 
     internal void Reset()
@@ -414,12 +437,18 @@ internal sealed class WorldMapConnectionResourceStore
         crossingPerfTotalTicks = 0L;
         crossingPerfPeakTicks = 0L;
         crossingPerfCount = 0;
+        routeSessionStartedTicks = 0L;
+        routeSessionCompletedTicks = 0L;
+        routeSessionExpected = 0;
+        routeSessionComplete = false;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
 
     private void EnqueueAll(WorldMapScene scene)
     {
+        BeginRouteLoadSession(scene?.Connections.Count ?? 0);
+
         List<string> ids =
             new(scene.Connections.Keys);
         ids.Sort(StringComparer.Ordinal);
@@ -446,6 +475,39 @@ internal sealed class WorldMapConnectionResourceStore
                 unchecked { revision++; }
             }
         }
+    }
+
+    private void BeginRouteLoadSession(int expectedRoutes)
+    {
+        routeSessionStartedTicks = Stopwatch.GetTimestamp();
+        routeSessionCompletedTicks = 0L;
+        routeSessionExpected = Math.Max(0, expectedRoutes);
+        routeSessionComplete = false;
+        UpdateRouteLoadSession();
+    }
+
+    private void UpdateRouteLoadSession()
+    {
+        if (routeSessionStartedTicks <= 0L ||
+            routeSessionComplete ||
+            queue.Count > 0 ||
+            corridorLayoutDirty ||
+            crossingLayoutDirty ||
+            routes.Count < routeSessionExpected)
+            return;
+
+        routeSessionComplete = true;
+        routeSessionCompletedTicks = Stopwatch.GetTimestamp();
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            "WorldMap routes ready: " +
+            routes.Count + "/" + routeSessionExpected +
+            " in " +
+            RouteSessionElapsedMilliseconds.ToString("F0") +
+            " ms (build avg " +
+            RouteBuildAverageMilliseconds.ToString("F2") +
+            " ms, peak " +
+            RouteBuildPeakMilliseconds.ToString("F2") +
+            " ms).");
     }
 
     private void Enqueue(string id)
