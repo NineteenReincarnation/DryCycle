@@ -286,6 +286,14 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (buildBatch.Count > 0)
         {
+            // Occupancy is incremental inside one router batch, so solve the same set in a stable
+            // order regardless of which dirty notification enqueued the connections first.
+            buildBatch.Sort(
+                (left, right) =>
+                    string.CompareOrdinal(
+                        left?.Id,
+                        right?.Id));
+
             BuildRouteOccupancySeeds();
             rebuilt =
                 WorldMapWorldSpaceRouter.Build(
