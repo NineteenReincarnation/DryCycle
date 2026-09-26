@@ -161,6 +161,8 @@ internal static class WorldMapRouteCrossingResolver
     private const float AxisEpsilon = 0.01f;
     private const float BridgeShoulder = 10f;
     private const float RouteEndpointClearance = 18f;
+    private const float CrossingClusterDistance = 18f;
+    private const float CrossingClusterCellSize = 24f;
 
     private const int DenseCellPairThreshold = 96;
     private const int MaxUniquePairChecksPerCell = 4096;
@@ -472,11 +474,111 @@ internal static class WorldMapRouteCrossingResolver
         }
 
         marks.Sort(CompareMarks);
+        MarkCrossingClustersDense(marks);
 
         return new WorldMapCrossingResolveResult(
             marks.ToArray(),
             budgetLimited,
             candidateChecks);
+    }
+
+    private static void MarkCrossingClustersDense(
+        List<WorldMapCrossingMark> marks)
+    {
+        if (marks == null ||
+            marks.Count < 2)
+            return;
+
+        Dictionary<long, List<int>> buckets =
+            new();
+        bool[] dense =
+            new bool[marks.Count];
+        float thresholdSquared =
+            CrossingClusterDistance *
+            CrossingClusterDistance;
+
+        for (int i = 0; i < marks.Count; i++)
+        {
+            WorldMapCrossingMark mark =
+                marks[i];
+            int cx =
+                (int)Math.Floor(
+                    mark.Point.X /
+                    CrossingClusterCellSize);
+            int cy =
+                (int)Math.Floor(
+                    mark.Point.Y /
+                    CrossingClusterCellSize);
+
+            for (int oy = -1; oy <= 1; oy++)
+            {
+                for (int ox = -1; ox <= 1; ox++)
+                {
+                    long neighborKey =
+                        CellKey(
+                            cx + ox,
+                            cy + oy);
+
+                    if (!buckets.TryGetValue(
+                            neighborKey,
+                            out List<int> neighbors))
+                        continue;
+
+                    for (int n = 0;
+                         n < neighbors.Count;
+                         n++)
+                    {
+                        int otherIndex =
+                            neighbors[n];
+
+                        if (Num.Vector2.DistanceSquared(
+                                mark.Point,
+                                marks[otherIndex].Point) >
+                            thresholdSquared)
+                            continue;
+
+                        dense[i] = true;
+                        dense[otherIndex] = true;
+                    }
+                }
+            }
+
+            long key =
+                CellKey(
+                    cx,
+                    cy);
+
+            if (!buckets.TryGetValue(
+                    key,
+                    out List<int> bucket))
+            {
+                bucket =
+                    new List<int>();
+                buckets.Add(
+                    key,
+                    bucket);
+            }
+
+            bucket.Add(i);
+        }
+
+        for (int i = 0; i < marks.Count; i++)
+        {
+            if (!dense[i] ||
+                marks[i].Dense)
+                continue;
+
+            WorldMapCrossingMark mark =
+                marks[i];
+
+            marks[i] =
+                new WorldMapCrossingMark(
+                    mark.OverRouteId,
+                    mark.UnderRouteId,
+                    mark.Point,
+                    mark.Tangent,
+                    true);
+        }
     }
 
     private static void AppendBudgetedCellMarks(
