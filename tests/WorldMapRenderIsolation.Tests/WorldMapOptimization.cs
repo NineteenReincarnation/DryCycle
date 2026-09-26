@@ -103,6 +103,50 @@ public static partial class MapRenderIsolationTests
             laneYs.Add(corridorY);
         }
         Check(laneYs.Max() - laneYs.Min() >= 18f, "Parallel short links preserve visibly separated lane offsets.");
+
+        // Dense regression: four parallel links must route around a blocking room without
+        // backtracking, entering the obstacle, or collapsing to one shared centreline.
+        router.GetMethod("Clear", Flags).Invoke(null, null);
+        Array denseRequests = Array.CreateInstance(request.GetType(), 4);
+        float[] denseOffsets = { -18f, -6f, 6f, 18f };
+        for (int i = 0; i < denseOffsets.Length; i++)
+        {
+            object lane = New("WorldMapOrthogonalRouter+Request");
+            Set(lane, "Id", "dense-" + i); Set(lane, "StartRoom", 0); Set(lane, "EndRoom", 1);
+            Set(lane, "StartRoomMin", new Num.Vector2(0, 0)); Set(lane, "StartRoomMax", new Num.Vector2(80, 120));
+            Set(lane, "EndRoomMin", new Num.Vector2(260, 0)); Set(lane, "EndRoomMax", new Num.Vector2(340, 120));
+            Set(lane, "Start", new Num.Vector2(75, 60)); Set(lane, "End", new Num.Vector2(265, 60));
+            Set(lane, "StartDirection", Num.Vector2.UnitX); Set(lane, "EndDirection", -Num.Vector2.UnitX);
+            Set(lane, "LaneOffset", denseOffsets[i]);
+            denseRequests.SetValue(lane, i);
+        }
+        Array denseObstacles = Array.CreateInstance(Front("WorldMapOrthogonalRouter+Obstacle"), 3);
+        denseObstacles.SetValue(Obstacle(0, 0, 0, 80, 120), 0);
+        denseObstacles.SetValue(Obstacle(1, 260, 0, 340, 120), 1);
+        denseObstacles.SetValue(Obstacle(2, 130, 20, 210, 100), 2);
+        Array denseRoutes = (Array)router.GetMethod("BuildRoutesCore", Flags)
+            .Invoke(null, new object[] { denseRequests, denseObstacles, false, null, null });
+        var denseSignatures = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < denseRoutes.Length; i++)
+        {
+            var densePath = (Num.Vector2[])Get(denseRoutes.GetValue(i), "Points");
+            Check(densePath[0] == new Num.Vector2(75, 60) &&
+                  densePath[densePath.Length - 1] == new Num.Vector2(265, 60),
+                "Dense routes preserve real socket anchors.");
+            bool reverses = false, crossesBlocker = false;
+            for (int p = 0; p + 1 < densePath.Length; p++)
+            {
+                if (p > 0)
+                    reverses |= Num.Vector2.Dot(densePath[p] - densePath[p - 1], densePath[p + 1] - densePath[p]) < -0.01f;
+                crossesBlocker |= (bool)router.GetMethod("SegmentIntersectsRect", Flags).Invoke(null,
+                    new object[] { densePath[p], densePath[p + 1], new Num.Vector2(130, 20), new Num.Vector2(210, 100) });
+            }
+            Check(!reverses, "Dense obstacle routes never reverse back toward their source.");
+            Check(!crossesBlocker, "Dense obstacle routes never cut through the blocking room.");
+            Check(Length(densePath) < 520f, "Dense obstacle routes stay locally bounded instead of taking a screen-spanning detour.");
+            denseSignatures.Add(string.Join(";", densePath.Select(pt => Math.Round(pt.X, 1) + "," + Math.Round(pt.Y, 1))));
+        }
+        Check(denseSignatures.Count >= 3, "Parallel obstacle routes retain multiple visually distinct corridors.");
     }
 
     private static object Geometry(float width, int stamp, float nodeX = 2)
