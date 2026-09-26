@@ -47,6 +47,16 @@ internal static class CartographyIconCatalog
             Add("DevToken",98,24,10,20); Add("GreenToken",111,0,10,20);
             Add("DataPearl",39,39,11,11); Add("UniqueDataPearl",39,39,11,11); Add("Slugcat",51,39,20,19);
             Add("ScavengerOutpost",109,21,11,15); Add("KarmaShrine",72,45,17,17); Add("MoonCloak",1,49,21,25);
+
+            // DeadTokenStalk appears in vanilla/mod room settings but Sandbox_Unlock is not
+            // guaranteed to be available in Futile when Cartography prepares the live scene.
+            // Keep a guaranteed embedded fallback under the semantic Object_* name. If the real
+            // Sandbox_Unlock sprite becomes available later, RegisterObjectSprites replaces this
+            // fallback with the preferred tinted glyph.
+            if (CartographyAssets.Sprite("Object_DevToken") is CartographyRaster deadTokenFallback)
+                CartographyAssets.Register(
+                    "Object_DeadTokenStalk",
+                    deadTokenFallback.Tint(0xFF888888));
         }
         using (Bitmap sheet = Sheet("MiscSprites"))
         {
