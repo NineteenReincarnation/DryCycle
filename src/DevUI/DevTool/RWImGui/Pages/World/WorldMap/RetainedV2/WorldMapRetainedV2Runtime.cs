@@ -667,6 +667,14 @@ internal static class WorldMapRetainedV2Runtime
             RoomResources.GeometryBuildPeakMilliseconds.ToString("F2") +
             " ms | completed " +
             RoomResources.GeometryBuildCount);
+        ImGui.TextUnformatted(
+            "minimap readbacks: " +
+            MapRoomGeometryPresentationHub.RasterReadbackCount +
+            " | avg " +
+            MapRoomGeometryPresentationHub.RasterReadbackAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            MapRoomGeometryPresentationHub.RasterReadbackPeakMilliseconds.ToString("F2") +
+            " ms");
         ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
