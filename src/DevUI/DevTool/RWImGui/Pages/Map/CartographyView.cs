@@ -12,7 +12,20 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>Presentation and gestures only. Every author edit is a document-scoped backend command.</summary>
 internal static partial class CartographyView
 {
-    private enum Tool { Select, Route, Text, Marker, Line, Box, ExportArea }
+    private enum Tool { Select, Route, Text, Marker, Line, Box }
+    private enum ExportAreaDrag
+    {
+        None,
+        Move,
+        Left,
+        Right,
+        Top,
+        Bottom,
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight
+    }
     private static CartographyPresentation observed;
     private static readonly HashSet<string> Selection = new(StringComparer.Ordinal);
     private static string activeLayer = "notes", exportPath = string.Empty, copyPath = string.Empty;
@@ -33,6 +46,10 @@ internal static partial class CartographyView
     private static string pendingSelection = string.Empty;
     private static long pendingSelectionRevision;
     private static bool diagnosticsWindowOpen;
+    private static ExportAreaDrag exportAreaDrag;
+    private static Num.Vector2 exportAreaDragStart;
+    private static Num.Vector4 exportAreaStartRect;
+    private static Num.Vector4 exportAreaPreviewRect;
 
     internal static void Leave()
     {
@@ -52,6 +69,7 @@ internal static partial class CartographyView
         }
         routeGesture = null;
         routeHandle = -1;
+        exportAreaDrag = ExportAreaDrag.None;
         dragging = marquee = false; delta = default;
     }
 
@@ -98,6 +116,7 @@ internal static partial class CartographyView
         {
             LeaveDrafts();
             Selection.Clear(); selectedItem = pendingSelection = string.Empty; selectedRoutePoint = -1; draft = null; layerDraft = null; styleDraft = null;
+            exportAreaDrag = ExportAreaDrag.None;
             activeLayer = "notes"; fit = true; fitSelection = false;
             string directory = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), "Exports");
             exportPath = Path.Combine(directory, snapshot.Document.Region + "-map.png");
@@ -251,13 +270,217 @@ internal static partial class CartographyView
             draw.AddRect(Num.Vector2.Min(a, b), Num.Vector2.Max(a, b), 0xCC58C6EF);
         }
         DrawRouteHandles(draw, snapshot, origin);
-        if (snapshot.Document.Options.ExportArea)
-        {
-            var area = snapshot.Document.Options;
-            draw.AddRect(Screen(origin,area.AreaX,area.AreaY,default),Screen(origin,area.AreaX+area.AreaWidth,area.AreaY+area.AreaHeight,default),0xFF77CFFF,0,ImDrawFlags.None,2);
-        }
+        bool exportAreaConsumed = DrawExportAreaEditor(draw, snapshot, origin, hovered, mouse, io);
         draw.PopClipRect();
-        if (!RouteGesture(snapshot, hovered, mouse, io)) Interaction(snapshot, hovered, mouse, io);
+        if (!exportAreaConsumed && !RouteGesture(snapshot, hovered, mouse, io))
+            Interaction(snapshot, hovered, mouse, io);
+    }
+
+    private static bool DrawExportAreaEditor(
+        ImDrawListPtr draw,
+        CartographyPresentation snapshot,
+        Num.Vector2 origin,
+        bool hovered,
+        Num.Vector2 mouse,
+        ImGuiIOPtr io)
+    {
+        CartographyOptions persisted = snapshot?.Document?.Options;
+        if (persisted?.ExportArea != true)
+        {
+            exportAreaDrag = ExportAreaDrag.None;
+            return false;
+        }
+
+        Num.Vector4 area = exportAreaDrag != ExportAreaDrag.None
+            ? exportAreaPreviewRect
+            : new Num.Vector4(
+                persisted.AreaX,
+                persisted.AreaY,
+                Math.Max(1f, persisted.AreaWidth),
+                Math.Max(1f, persisted.AreaHeight));
+
+        Num.Vector2 a = Screen(origin, area.X, area.Y, default);
+        Num.Vector2 b = Screen(origin, area.X + area.Z, area.Y + area.W, default);
+        Num.Vector2 min = Num.Vector2.Min(a, b);
+        Num.Vector2 max = Num.Vector2.Max(a, b);
+
+        const float handleRadius = 6f;
+        ExportAreaDrag hoverHandle = hovered
+            ? HitExportAreaHandle(io.MousePos, min, max, handleRadius)
+            : ExportAreaDrag.None;
+
+        uint outline = 0xFF77CFFF;
+        uint handle = 0xFFB7E8FF;
+        draw.AddRect(min, max, outline, 0f, ImDrawFlags.None, 2f);
+
+        Num.Vector2 center = (min + max) * 0.5f;
+        DrawExportAreaHandle(draw, min, handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(max.X, min.Y), handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(min.X, max.Y), handleRadius, handle);
+        DrawExportAreaHandle(draw, max, handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(center.X, min.Y), handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(center.X, max.Y), handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(min.X, center.Y), handleRadius, handle);
+        DrawExportAreaHandle(draw, new Num.Vector2(max.X, center.Y), handleRadius, handle);
+
+        if (exportAreaDrag == ExportAreaDrag.None && hoverHandle != ExportAreaDrag.None)
+        {
+            ImGui.SetMouseCursor(
+                hoverHandle == ExportAreaDrag.Move
+                    ? ImGuiMouseCursor.ResizeAll
+                    : hoverHandle == ExportAreaDrag.Left || hoverHandle == ExportAreaDrag.Right
+                        ? ImGuiMouseCursor.ResizeEW
+                        : hoverHandle == ExportAreaDrag.Top || hoverHandle == ExportAreaDrag.Bottom
+                            ? ImGuiMouseCursor.ResizeNS
+                            : hoverHandle == ExportAreaDrag.TopLeft || hoverHandle == ExportAreaDrag.BottomRight
+                                ? ImGuiMouseCursor.ResizeNWSE
+                                : ImGuiMouseCursor.ResizeNESW);
+        }
+
+        if (hovered &&
+            exportAreaDrag == ExportAreaDrag.None &&
+            hoverHandle != ExportAreaDrag.None &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            SaveStyle();
+            exportAreaDrag = hoverHandle;
+            exportAreaDragStart = mouse;
+            exportAreaStartRect = new Num.Vector4(
+                persisted.AreaX,
+                persisted.AreaY,
+                Math.Max(1f, persisted.AreaWidth),
+                Math.Max(1f, persisted.AreaHeight));
+            exportAreaPreviewRect = exportAreaStartRect;
+        }
+
+        if (exportAreaDrag != ExportAreaDrag.None)
+        {
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                Num.Vector2 d = mouse - exportAreaDragStart;
+                exportAreaPreviewRect = ResizeExportArea(exportAreaStartRect, d, exportAreaDrag);
+            }
+
+            if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            {
+                styleDraft = snapshot.Document.Clone();
+                CartographyOptions options = styleDraft.Options;
+                options.ExportArea = true;
+                options.AreaX = exportAreaPreviewRect.X;
+                options.AreaY = exportAreaPreviewRect.Y;
+                options.AreaWidth = exportAreaPreviewRect.Z;
+                options.AreaHeight = exportAreaPreviewRect.W;
+                styleDirty = true;
+                SaveStyle();
+                exportAreaDrag = ExportAreaDrag.None;
+            }
+
+            return true;
+        }
+
+        return hoverHandle != ExportAreaDrag.None && ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+    }
+
+    private static ExportAreaDrag HitExportAreaHandle(
+        Num.Vector2 mouse,
+        Num.Vector2 min,
+        Num.Vector2 max,
+        float radius)
+    {
+        Num.Vector2 center = (min + max) * 0.5f;
+        bool Near(Num.Vector2 p) => Num.Vector2.DistanceSquared(mouse, p) <= radius * radius * 2.25f;
+
+        if (Near(min)) return ExportAreaDrag.TopLeft;
+        if (Near(new Num.Vector2(max.X, min.Y))) return ExportAreaDrag.TopRight;
+        if (Near(new Num.Vector2(min.X, max.Y))) return ExportAreaDrag.BottomLeft;
+        if (Near(max)) return ExportAreaDrag.BottomRight;
+        if (Near(new Num.Vector2(center.X, min.Y))) return ExportAreaDrag.Top;
+        if (Near(new Num.Vector2(center.X, max.Y))) return ExportAreaDrag.Bottom;
+        if (Near(new Num.Vector2(min.X, center.Y))) return ExportAreaDrag.Left;
+        if (Near(new Num.Vector2(max.X, center.Y))) return ExportAreaDrag.Right;
+
+        // The empty interior is the move handle. Keep a small tolerance so a click directly on the
+        // border still manipulates the frame instead of selecting a room underneath it.
+        if (mouse.X >= min.X - 2f &&
+            mouse.X <= max.X + 2f &&
+            mouse.Y >= min.Y - 2f &&
+            mouse.Y <= max.Y + 2f)
+            return ExportAreaDrag.Move;
+
+        return ExportAreaDrag.None;
+    }
+
+    private static void DrawExportAreaHandle(
+        ImDrawListPtr draw,
+        Num.Vector2 center,
+        float radius,
+        uint color)
+    {
+        float half = Math.Max(2f, radius * 0.45f);
+        draw.AddRectFilled(
+            center - new Num.Vector2(half, half),
+            center + new Num.Vector2(half, half),
+            color);
+    }
+
+    private static Num.Vector4 ResizeExportArea(
+        Num.Vector4 start,
+        Num.Vector2 delta,
+        ExportAreaDrag mode)
+    {
+        float left = start.X;
+        float top = start.Y;
+        float right = start.X + Math.Max(1f, start.Z);
+        float bottom = start.Y + Math.Max(1f, start.W);
+
+        if (mode == ExportAreaDrag.Move)
+        {
+            left += delta.X;
+            right += delta.X;
+            top += delta.Y;
+            bottom += delta.Y;
+        }
+        else
+        {
+            if (mode == ExportAreaDrag.Left ||
+                mode == ExportAreaDrag.TopLeft ||
+                mode == ExportAreaDrag.BottomLeft)
+                left += delta.X;
+            if (mode == ExportAreaDrag.Right ||
+                mode == ExportAreaDrag.TopRight ||
+                mode == ExportAreaDrag.BottomRight)
+                right += delta.X;
+            if (mode == ExportAreaDrag.Top ||
+                mode == ExportAreaDrag.TopLeft ||
+                mode == ExportAreaDrag.TopRight)
+                top += delta.Y;
+            if (mode == ExportAreaDrag.Bottom ||
+                mode == ExportAreaDrag.BottomLeft ||
+                mode == ExportAreaDrag.BottomRight)
+                bottom += delta.Y;
+        }
+
+        const float minimum = 8f;
+        if (right - left < minimum)
+        {
+            if (mode == ExportAreaDrag.Left ||
+                mode == ExportAreaDrag.TopLeft ||
+                mode == ExportAreaDrag.BottomLeft)
+                left = right - minimum;
+            else
+                right = left + minimum;
+        }
+        if (bottom - top < minimum)
+        {
+            if (mode == ExportAreaDrag.Top ||
+                mode == ExportAreaDrag.TopLeft ||
+                mode == ExportAreaDrag.TopRight)
+                top = bottom - minimum;
+            else
+                bottom = top + minimum;
+        }
+
+        return new Num.Vector4(left, top, right - left, bottom - top);
     }
 
     private static void Interaction(CartographyPresentation snapshot, bool hovered, Num.Vector2 mouse, ImGuiIOPtr io)
@@ -374,12 +597,6 @@ internal static partial class CartographyView
 
     private static void AddAnnotation(Num.Vector2 a, Num.Vector2 b)
     {
-        if (tool == Tool.ExportArea)
-        {
-            styleDraft ??= observed.Document.Clone(); var area = styleDraft.Options;
-            area.ExportArea = true; area.AreaX = Math.Min(a.X,b.X); area.AreaY = Math.Min(a.Y,b.Y); area.AreaWidth = Math.Max(1,Math.Abs(b.X-a.X)); area.AreaHeight = Math.Max(1,Math.Abs(b.Y-a.Y));
-            styleDirty = true; SaveStyle(); tool = Tool.Select; return;
-        }
         CartographyItem item = new() { Kind = tool == Tool.Text ? CartographyItemKind.Text : tool == Tool.Marker ? CartographyItemKind.Marker : tool == Tool.Line ? CartographyItemKind.Line : CartographyItemKind.Box,
             LayerId = activeLayer, X = a.X, Y = a.Y, Width = b.X - a.X, Height = b.Y - a.Y, Marker = marker, Text = tool == Tool.Text ? T("标注", "Label") : string.Empty };
         Send(CartographyCommandKind.Add, command => command.Item = item);
