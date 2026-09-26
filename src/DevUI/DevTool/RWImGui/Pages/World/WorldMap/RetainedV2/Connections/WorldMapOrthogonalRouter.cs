@@ -194,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 16;
+    private const int RoutingPolicyVersion = 17;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -216,6 +216,10 @@ internal static class WorldMapOrthogonalRouter
     private const float DirectRouteDetourExtra = 72f;
     private const float CongestedRerouteDetourRatio = 1.52f;
     private const float CongestedRerouteDetourExtra = 112f;
+    private const float DirectRouteDetourSlack = 24f;
+    private const float CongestedRerouteDetourSlack = 32f;
+    private const float SearchCostReferenceCell = 18f;
+    private const float LocalDetourClearance = 12f;
     private const int RerouteAvoidanceOccupancyWeight = 12;
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
@@ -375,34 +379,67 @@ internal static class WorldMapOrthogonalRouter
         Route previous,
         bool preferAlternativeCorridor)
     {
-        Num.Vector2 startDirection = Cardinalize(request.StartDirection, request.End - request.Start);
-        Num.Vector2 endDirection = Cardinalize(request.EndDirection, request.Start - request.End);
+        Num.Vector2 startDirection =
+            Cardinalize(
+                request.StartDirection,
+                request.End -
+                request.Start);
+        Num.Vector2 endDirection =
+            Cardinalize(
+                request.EndDirection,
+                request.Start -
+                request.End);
 
-        Num.Vector2 startPerp = new(-startDirection.Y, startDirection.X);
-        Num.Vector2 endPerp = new(-endDirection.Y, endDirection.X);
+        Num.Vector2 startPerp =
+            new(
+                -startDirection.Y,
+                startDirection.X);
+        Num.Vector2 endPerp =
+            new(
+                -endDirection.Y,
+                endDirection.X);
 
         // Facing ports naturally produce opposite local normals. Align their lane normals before
         // applying the lane offset, otherwise lane +1 leaves one room above the centreline and
         // enters the other room below it, causing multi-links to cross each other in the middle.
-        float perpAgreement = Num.Vector2.Dot(startPerp, endPerp);
+        float perpAgreement =
+            Num.Vector2.Dot(
+                startPerp,
+                endPerp);
         if (perpAgreement < -0.25f)
         {
-            endPerp = -endPerp;
+            endPerp =
+                -endPerp;
         }
         else if (Math.Abs(perpAgreement) <= 0.25f)
         {
-            Num.Vector2 pairDelta = request.End - request.Start;
-            Num.Vector2 stableNormal = Math.Abs(pairDelta.X) >= Math.Abs(pairDelta.Y)
-                ? new Num.Vector2(0f, 1f)
-                : new Num.Vector2(1f, 0f);
-            if (Num.Vector2.Dot(startPerp, stableNormal) < 0f) startPerp = -startPerp;
-            if (Num.Vector2.Dot(endPerp, stableNormal) < 0f) endPerp = -endPerp;
+            Num.Vector2 pairDelta =
+                request.End -
+                request.Start;
+            Num.Vector2 stableNormal =
+                Math.Abs(pairDelta.X) >=
+                Math.Abs(pairDelta.Y)
+                    ? new Num.Vector2(0f, 1f)
+                    : new Num.Vector2(1f, 0f);
+
+            if (Num.Vector2.Dot(
+                    startPerp,
+                    stableNormal) < 0f)
+            {
+                startPerp =
+                    -startPerp;
+            }
+
+            if (Num.Vector2.Dot(
+                    endPerp,
+                    stableNormal) < 0f)
+            {
+                endPerp =
+                    -endPerp;
+            }
         }
 
-        // Every connection gets a real terminal stub before any global routing decision. Compact
-        // routes used to bypass this block entirely, so adjacent rooms could leave the socket and
-        // turn immediately on top of other links. That was the main source of "all arrows on one
-        // line" and ambiguous T-junction shapes around dense room edges.
+        // Every connection gets a real terminal stub before any global routing decision.
         Num.Vector2 startBaseEscape =
             EscapeOutsideRoom(
                 request.Start,
@@ -417,8 +454,14 @@ internal static class WorldMapOrthogonalRouter
                 request.EndRoom,
                 obstacles,
                 request.EndTerminalExtraDepth);
-        Num.Vector2 startEscape = startBaseEscape + startPerp * request.LaneOffset;
-        Num.Vector2 endEscape = endBaseEscape + endPerp * request.LaneOffset;
+        Num.Vector2 startEscape =
+            startBaseEscape +
+            startPerp *
+            request.LaneOffset;
+        Num.Vector2 endEscape =
+            endBaseEscape +
+            endPerp *
+            request.LaneOffset;
 
         if (TryBuildCompactRoute(
                 request,
@@ -440,39 +483,12 @@ internal static class WorldMapOrthogonalRouter
                 endDirection);
         }
 
-        if (CanUseBridge(request, startDirection, endDirection, startEscape, endEscape, obstacles))
-        {
-            Num.Vector2[] bridge =
-                SimplifyRoute(
-                    BuildBridgePath(
-                        request.Start,
-                        startBaseEscape,
-                        startEscape,
-                        endEscape,
-                        endBaseEscape,
-                        request.End));
-
-            if (RouteClear(
-                    bridge,
-                    request.StartRoom,
-                    request.EndRoom,
-                    obstacles) &&
-                RouteCongestionPenalty(
-                    bridge,
-                    occupancy) <=
-                DirectRouteCongestionLimit)
-            {
-                return NewRoute(
-                    request,
-                    RouteKind.Bridge,
-                    bridge,
-                    startDirection,
-                    endDirection);
-            }
-        }
-
-        Num.Vector2[] directSimple = null;
-        float directSimpleCongestion = float.MaxValue;
+        // Straight / one-bend geometry is the canonical baseline and must be established before
+        // Bridge or A*. Previously Bridge could win first and add two unnecessary bends.
+        Num.Vector2[] directSimple =
+            null;
+        float directSimpleCongestion =
+            float.MaxValue;
 
         if (TrySimpleOrthogonal(
                 startEscape,
@@ -484,7 +500,7 @@ internal static class WorldMapOrthogonalRouter
                 out Num.Vector2[] simple,
                 out directSimpleCongestion))
         {
-            directSimple =
+            Num.Vector2[] candidate =
                 BuildFullRoute(
                     request,
                     startBaseEscape,
@@ -493,30 +509,141 @@ internal static class WorldMapOrthogonalRouter
                     endEscape,
                     endBaseEscape);
 
-            // A clean straight/L-shaped route is the canonical answer. Soft occupancy pressure may
-            // suggest another corridor, but it should only get that chance once the simple route is
-            // genuinely crowded.
-            if (directSimpleCongestion <=
-                DirectRouteCongestionLimit)
+            if (FullRouteClear(
+                    request,
+                    candidate,
+                    obstacles))
             {
+                directSimple =
+                    candidate;
+
+                if (directSimpleCongestion <=
+                    DirectRouteCongestionLimit)
+                {
+                    return NewRoute(
+                        request,
+                        RouteKind.Orthogonal,
+                        directSimple,
+                        startDirection,
+                        endDirection);
+                }
+            }
+        }
+
+        // Bridge remains a compact visual alternative for facing ports, but only after the simpler
+        // straight/L answer had a chance to win and only while the bridge stays inside the same
+        // bounded-detour envelope.
+        Num.Vector2[] bridgeCandidate =
+            null;
+
+        if (CanUseBridge(
+                request,
+                startDirection,
+                endDirection,
+                startEscape,
+                endEscape,
+                obstacles))
+        {
+            Num.Vector2[] bridge =
+                SimplifyRoute(
+                    BuildBridgePath(
+                        request.Start,
+                        startBaseEscape,
+                        startEscape,
+                        endEscape,
+                        endBaseEscape,
+                        request.End));
+
+            if (FullRouteClear(
+                    request,
+                    bridge,
+                    obstacles) &&
+                RouteCongestionPenalty(
+                    bridge,
+                    occupancy) <=
+                DirectRouteCongestionLimit &&
+                (directSimple == null ||
+                 !PreferDirectRouteOverDetour(
+                     directSimple,
+                     bridge,
+                     congestionReroute: false)))
+            {
+                bridgeCandidate =
+                    bridge;
+
                 return NewRoute(
                     request,
-                    RouteKind.Orthogonal,
-                    directSimple,
+                    RouteKind.Bridge,
+                    bridgeCandidate,
                     startDirection,
                     endDirection);
             }
         }
 
-        Num.Vector2[] searched = SearchOrthogonal(
-            startEscape,
-            endEscape,
-            request.StartRoom,
-            request.EndRoom,
-            obstacles,
-            occupancy,
-            previous,
-            preferAlternativeCorridor);
+        // If both one-bend candidates are blocked, probe obstacle-edge two-bend corridors before
+        // invoking A*. This gives the search a local geometric upper bound instead of letting soft
+        // congestion invent a screen-spanning route simply because no L-path exists.
+        Num.Vector2[] localDetour =
+            null;
+        float localDetourCongestion =
+            float.MaxValue;
+
+        if (TryLocalOrthogonalDetour(
+                startEscape,
+                endEscape,
+                request.StartRoom,
+                request.EndRoom,
+                obstacles,
+                occupancy,
+                out Num.Vector2[] localMiddle,
+                out localDetourCongestion))
+        {
+            Num.Vector2[] candidate =
+                BuildFullRoute(
+                    request,
+                    startBaseEscape,
+                    startEscape,
+                    localMiddle,
+                    endEscape,
+                    endBaseEscape);
+
+            if (FullRouteClear(
+                    request,
+                    candidate,
+                    obstacles))
+            {
+                localDetour =
+                    candidate;
+
+                if (directSimple == null &&
+                    localDetourCongestion <=
+                    DirectRouteCongestionLimit)
+                {
+                    return NewRoute(
+                        request,
+                        RouteKind.Orthogonal,
+                        localDetour,
+                        startDirection,
+                        endDirection);
+                }
+            }
+        }
+
+        Num.Vector2[] geometricBound =
+            ShorterRoute(
+                directSimple,
+                localDetour);
+
+        Num.Vector2[] searched =
+            SearchOrthogonal(
+                startEscape,
+                endEscape,
+                request.StartRoom,
+                request.EndRoom,
+                obstacles,
+                occupancy,
+                previous,
+                preferAlternativeCorridor);
 
         if (searched.Length > 0)
         {
@@ -529,54 +656,62 @@ internal static class WorldMapOrthogonalRouter
                     endEscape,
                     endBaseEscape);
 
-            if (directSimple != null &&
-                PreferDirectRouteOverDetour(
-                    directSimple,
+            if (FullRouteClear(
+                    request,
                     searchedFull,
-                    preferAlternativeCorridor))
+                    obstacles))
             {
+                if (geometricBound != null &&
+                    PreferDirectRouteOverDetour(
+                        geometricBound,
+                        searchedFull,
+                        preferAlternativeCorridor))
+                {
+                    return NewRoute(
+                        request,
+                        RouteKind.Orthogonal,
+                        geometricBound,
+                        startDirection,
+                        endDirection);
+                }
+
                 return NewRoute(
                     request,
                     RouteKind.Orthogonal,
-                    directSimple,
+                    searchedFull,
                     startDirection,
                     endDirection);
             }
-
-            return NewRoute(
-                request,
-                RouteKind.Orthogonal,
-                searchedFull,
-                startDirection,
-                endDirection);
         }
 
-        // If A* cannot find anything better, never throw away a geometrically valid one-bend route
-        // merely because its soft congestion score is high. Falling back to an outer rectangle here
-        // is exactly how short obvious links turned into giant screen-spanning detours.
-        if (directSimple != null)
+        // A geometrically valid local route is always safer than escalating to an outer fallback.
+        if (geometricBound != null)
         {
             return NewRoute(
                 request,
                 RouteKind.Orthogonal,
-                directSimple,
+                geometricBound,
                 startDirection,
                 endDirection);
         }
 
-        Num.Vector2[] fallback = BuildOuterFallback(
-            request.Start,
-            startBaseEscape,
-            startEscape,
-            endEscape,
-            endBaseEscape,
-            request.End,
-            request.StartRoom,
-            request.EndRoom,
-            obstacles,
-            occupancy,
-            preferAlternativeCorridor);
-        return NewRoute(request, RouteKind.Fallback, SimplifyRoute(fallback), startDirection, endDirection);
+        Num.Vector2[] fallback =
+            BuildOuterFallback(
+                request,
+                startBaseEscape,
+                startEscape,
+                endEscape,
+                endBaseEscape,
+                obstacles,
+                occupancy,
+                preferAlternativeCorridor);
+
+        return NewRoute(
+            request,
+            RouteKind.Fallback,
+            fallback,
+            startDirection,
+            endDirection);
     }
 
     private static Route NewRoute(
@@ -627,7 +762,11 @@ internal static class WorldMapOrthogonalRouter
                 request.EndTerminalExtraDepth) > 0.01f)
             return false;
 
-        if (!RouteClear(cached.Route.Points, request.StartRoom, request.EndRoom, obstacles)) return false;
+        if (!FullRouteClear(
+                request,
+                cached.Route.Points,
+                obstacles))
+            return false;
         route = Clone(cached.Route);
         return true;
     }
@@ -772,10 +911,9 @@ internal static class WorldMapOrthogonalRouter
 
             if (candidate == null ||
                 candidate.Length < 2 ||
-                !RouteClear(
+                !FullRouteClear(
+                    request,
                     candidate,
-                    request.StartRoom,
-                    request.EndRoom,
                     obstacles))
                 continue;
 
@@ -1277,15 +1415,400 @@ internal static class WorldMapOrthogonalRouter
                 ? CongestedRerouteDetourExtra
                 : DirectRouteDetourExtra;
 
-        float maximumReasonableDetour =
-            Math.Max(
+        float slack =
+            congestionReroute
+                ? CongestedRerouteDetourSlack
+                : DirectRouteDetourSlack;
+        float allowedExtra =
+            Math.Min(
                 directLength *
-                ratio,
-                directLength +
-                extra);
+                Math.Max(
+                    0f,
+                    ratio - 1f),
+                extra) +
+            slack;
+        float maximumReasonableDetour =
+            directLength +
+            allowedExtra;
 
         return detourLength >
                maximumReasonableDetour;
+    }
+
+    private static Num.Vector2[] ShorterRoute(
+        Num.Vector2[] a,
+        Num.Vector2[] b)
+    {
+        if (a == null ||
+            a.Length < 2)
+        {
+            return b;
+        }
+
+        if (b == null ||
+            b.Length < 2)
+        {
+            return a;
+        }
+
+        return PathLength(a) <=
+               PathLength(b)
+            ? a
+            : b;
+    }
+
+    private static bool TryLocalOrthogonalDetour(
+        Num.Vector2 start,
+        Num.Vector2 end,
+        int startRoom,
+        int endRoom,
+        List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
+        out Num.Vector2[] points,
+        out float congestionScore)
+    {
+        points =
+            null;
+        congestionScore =
+            float.MaxValue;
+
+        if (obstacles == null ||
+            obstacles.Count == 0)
+            return false;
+
+        Num.Vector2 corridorMin =
+            Num.Vector2.Min(
+                start,
+                end) -
+            new Num.Vector2(
+                48f,
+                48f);
+        Num.Vector2 corridorMax =
+            Num.Vector2.Max(
+                start,
+                end) +
+            new Num.Vector2(
+                48f,
+                48f);
+
+        List<float> xs =
+            new();
+        List<float> ys =
+            new();
+
+        float envelopeLeft =
+            float.MaxValue;
+        float envelopeRight =
+            float.MinValue;
+        float envelopeTop =
+            float.MaxValue;
+        float envelopeBottom =
+            float.MinValue;
+        bool hasRelevantObstacle =
+            false;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
+        {
+            Obstacle obstacle =
+                obstacles[i];
+
+            if (!obstacle.IntersectsBounds(
+                    corridorMin,
+                    corridorMax,
+                    0f))
+                continue;
+
+            hasRelevantObstacle =
+                true;
+
+            float left =
+                obstacle.Min.X -
+                LocalDetourClearance;
+            float right =
+                obstacle.Max.X +
+                LocalDetourClearance;
+            float top =
+                obstacle.Min.Y -
+                LocalDetourClearance;
+            float bottom =
+                obstacle.Max.Y +
+                LocalDetourClearance;
+
+            xs.Add(left);
+            xs.Add(right);
+            ys.Add(top);
+            ys.Add(bottom);
+
+            envelopeLeft =
+                Math.Min(
+                    envelopeLeft,
+                    left);
+            envelopeRight =
+                Math.Max(
+                    envelopeRight,
+                    right);
+            envelopeTop =
+                Math.Min(
+                    envelopeTop,
+                    top);
+            envelopeBottom =
+                Math.Max(
+                    envelopeBottom,
+                    bottom);
+        }
+
+        if (!hasRelevantObstacle)
+            return false;
+
+        xs.Add(envelopeLeft);
+        xs.Add(envelopeRight);
+        ys.Add(envelopeTop);
+        ys.Add(envelopeBottom);
+
+        float bestScore =
+            float.MaxValue;
+
+        for (int i = 0;
+             i < xs.Count;
+             i++)
+        {
+            Num.Vector2[] candidate =
+                Simplify(
+                    new[]
+                    {
+                        start,
+                        new Num.Vector2(
+                            xs[i],
+                            start.Y),
+                        new Num.Vector2(
+                            xs[i],
+                            end.Y),
+                        end
+                    });
+
+            ScoreLocalDetour(
+                candidate,
+                obstacles,
+                occupancy,
+                ref bestScore,
+                ref points,
+                ref congestionScore);
+        }
+
+        for (int i = 0;
+             i < ys.Count;
+             i++)
+        {
+            Num.Vector2[] candidate =
+                Simplify(
+                    new[]
+                    {
+                        start,
+                        new Num.Vector2(
+                            start.X,
+                            ys[i]),
+                        new Num.Vector2(
+                            end.X,
+                            ys[i]),
+                        end
+                    });
+
+            ScoreLocalDetour(
+                candidate,
+                obstacles,
+                occupancy,
+                ref bestScore,
+                ref points,
+                ref congestionScore);
+        }
+
+        return points != null &&
+               points.Length >= 2;
+    }
+
+    private static void ScoreLocalDetour(
+        Num.Vector2[] candidate,
+        List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
+        ref float bestScore,
+        ref Num.Vector2[] best,
+        ref float bestCongestion)
+    {
+        if (candidate == null ||
+            candidate.Length < 2 ||
+            !CorridorRouteClear(
+                candidate,
+                obstacles))
+        {
+            return;
+        }
+
+        float congestion =
+            RouteCongestionPenalty(
+                candidate,
+                occupancy);
+        float score =
+            PathLength(
+                candidate) +
+            Math.Max(
+                0,
+                candidate.Length - 2) *
+            BendPenalty *
+            SearchCostReferenceCell +
+            Math.Min(
+                congestion,
+                DirectRouteCongestionLimit) *
+            0.20f *
+            SearchCostReferenceCell;
+
+        if (score >= bestScore)
+            return;
+
+        bestScore =
+            score;
+        best =
+            candidate;
+        bestCongestion =
+            congestion;
+    }
+
+    private static bool FullRouteClear(
+        Request request,
+        Num.Vector2[] points,
+        IReadOnlyList<Obstacle> obstacles)
+    {
+        if (request == null ||
+            points == null ||
+            points.Length < 2)
+            return false;
+
+        int lastSegment =
+            points.Length - 2;
+
+        for (int i = 0;
+             i <= lastSegment;
+             i++)
+        {
+            Num.Vector2 a =
+                points[i];
+            Num.Vector2 b =
+                points[i + 1];
+
+            if (i == 0)
+            {
+                if (TerminalSegmentBlocked(
+                        a,
+                        b,
+                        request.StartRoom,
+                        request.EndRoom,
+                        request.EndRoomMin,
+                        request.EndRoomMax,
+                        obstacles))
+                    return false;
+
+                continue;
+            }
+
+            if (i == lastSegment)
+            {
+                if (TerminalSegmentBlocked(
+                        a,
+                        b,
+                        request.EndRoom,
+                        request.StartRoom,
+                        request.StartRoomMin,
+                        request.StartRoomMax,
+                        obstacles))
+                    return false;
+
+                continue;
+            }
+
+            if (SegmentBlocked(
+                    a,
+                    b,
+                    request.StartRoom,
+                    request.EndRoom,
+                    obstacles))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool TerminalSegmentBlocked(
+        Num.Vector2 a,
+        Num.Vector2 b,
+        int ownRoom,
+        int counterpartRoom,
+        Num.Vector2 counterpartRawMin,
+        Num.Vector2 counterpartRawMax,
+        IReadOnlyList<Obstacle> obstacles)
+    {
+        if (obstacles == null)
+            return false;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
+        {
+            Obstacle obstacle =
+                obstacles[i];
+
+            if (obstacle.RoomIndex ==
+                ownRoom)
+                continue;
+
+            if (obstacle.RoomIndex ==
+                counterpartRoom)
+            {
+                // Adjacent rooms can have overlapping inflated clearance margins. Permit a terminal
+                // stub to enter the counterpart margin, but never the actual room body.
+                if (SegmentIntersectsRect(
+                        a,
+                        b,
+                        counterpartRawMin,
+                        counterpartRawMax))
+                    return true;
+
+                continue;
+            }
+
+            if (SegmentIntersectsRect(
+                    a,
+                    b,
+                    obstacle.Min,
+                    obstacle.Max))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool CorridorRouteClear(
+        Num.Vector2[] points,
+        IReadOnlyList<Obstacle> obstacles)
+    {
+        if (points == null ||
+            points.Length < 2)
+            return false;
+
+        for (int i = 0;
+             i < points.Length - 1;
+             i++)
+        {
+            if (SegmentBlocked(
+                    points[i],
+                    points[i + 1],
+                    -1,
+                    -1,
+                    obstacles))
+                return false;
+        }
+
+        return true;
     }
 
     private static Num.Vector2[] SearchOrthogonal(
@@ -1314,12 +1837,56 @@ internal static class WorldMapOrthogonalRouter
                 searchPadding,
                 searchPadding);
 
-        for (int i = 0; i < obstacles.Count; i++)
+        // Grow the search envelope to a fixed point. A single order-dependent pass can miss an
+        // obstacle that only becomes relevant after a later obstacle expands the bounds.
+        for (int pass = 0;
+             pass < obstacles.Count;
+             pass++)
         {
-            Obstacle obstacle = obstacles[i];
-            if (!obstacle.IntersectsBounds(min, max, 40f)) continue;
-            min = Num.Vector2.Min(min, obstacle.Min - new Num.Vector2(36f, 36f));
-            max = Num.Vector2.Max(max, obstacle.Max + new Num.Vector2(36f, 36f));
+            bool expanded =
+                false;
+
+            for (int i = 0;
+                 i < obstacles.Count;
+                 i++)
+            {
+                Obstacle obstacle =
+                    obstacles[i];
+                if (!obstacle.IntersectsBounds(
+                        min,
+                        max,
+                        40f))
+                    continue;
+
+                Num.Vector2 nextMin =
+                    Num.Vector2.Min(
+                        min,
+                        obstacle.Min -
+                        new Num.Vector2(
+                            36f,
+                            36f));
+                Num.Vector2 nextMax =
+                    Num.Vector2.Max(
+                        max,
+                        obstacle.Max +
+                        new Num.Vector2(
+                            36f,
+                            36f));
+
+                if (nextMin != min ||
+                    nextMax != max)
+                {
+                    min =
+                        nextMin;
+                    max =
+                        nextMax;
+                    expanded =
+                        true;
+                }
+            }
+
+            if (!expanded)
+                break;
         }
 
         Num.Vector2 span = Num.Vector2.Max(max - min, new Num.Vector2(1f, 1f));
@@ -1353,7 +1920,12 @@ internal static class WorldMapOrthogonalRouter
             Y = sy,
             Direction = 4,
             G = 0f,
-            F = Manhattan(sx, sy, ex, ey)
+            F = Manhattan(
+                    sx,
+                    sy,
+                    ex,
+                    ey) *
+                cell
         };
         nodes.Add(seed);
         bestByState[StateKey(sx, sy, 4, width, height)] = 0;
@@ -1383,14 +1955,36 @@ internal static class WorldMapOrthogonalRouter
                 if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
                 if (blocked[ny * width + nx]) continue;
 
-                float step = 1f;
+                float step =
+                    cell;
                 if (current.Direction < 4)
                 {
-                    if (current.Direction != direction) step += BendPenalty;
-                    if (((current.Direction + 2) & 3) == direction) step += BacktrackPenalty;
+                    if (current.Direction != direction)
+                    {
+                        step +=
+                            BendPenalty *
+                            SearchCostReferenceCell;
+                    }
+
+                    if (((current.Direction + 2) & 3) == direction)
+                    {
+                        step +=
+                            BacktrackPenalty *
+                            SearchCostReferenceCell;
+                    }
                 }
-                if (IsNearBlockedCell(nx, ny, blocked, width, height))
-                    step += ProximityPenalty;
+
+                if (IsNearBlockedCell(
+                        nx,
+                        ny,
+                        blocked,
+                        width,
+                        height))
+                {
+                    step +=
+                        ProximityPenalty *
+                        SearchCostReferenceCell;
+                }
 
                 Num.Vector2 worldNeighbor = new(min.X + nx * cell, min.Y + ny * cell);
                 int occupancyX =
@@ -1415,7 +2009,8 @@ internal static class WorldMapOrthogonalRouter
                         OccupancyPenalty(
                             occupied,
                             direction,
-                            turning);
+                            turning) *
+                        SearchCostReferenceCell;
                 }
 
                 step +=
@@ -1423,12 +2018,25 @@ internal static class WorldMapOrthogonalRouter
                         occupancy,
                         occupancyX,
                         occupancyY,
-                        turning);
+                        turning) *
+                    SearchCostReferenceCell;
 
-                if (stableCells.Contains(GridKey(nx, ny)))
-                    step = Math.Max(0.25f, step - StabilityBonus);
+                if (stableCells.Contains(
+                        GridKey(
+                            nx,
+                            ny)))
+                {
+                    step =
+                        Math.Max(
+                            cell * 0.20f,
+                            step -
+                            StabilityBonus *
+                            SearchCostReferenceCell);
+                }
 
-                float g = current.G + step;
+                float g =
+                    current.G +
+                    step;
                 int stateKey = StateKey(nx, ny, direction, width, height);
                 if (bestByState.TryGetValue(stateKey, out int existingIndex) && nodes[existingIndex].G <= g)
                     continue;
@@ -1439,7 +2047,14 @@ internal static class WorldMapOrthogonalRouter
                     Y = ny,
                     Direction = direction,
                     G = g,
-                    F = g + Manhattan(nx, ny, ex, ey),
+                    F =
+                        g +
+                        Manhattan(
+                            nx,
+                            ny,
+                            ex,
+                            ey) *
+                        cell,
                     Parent = currentIndex
                 };
                 int nextIndex = nodes.Count;
@@ -1475,7 +2090,9 @@ internal static class WorldMapOrthogonalRouter
         route.Add(end);
 
         Num.Vector2[] simplified = Simplify(route.ToArray());
-        return RouteClear(simplified, startRoom, endRoom, obstacles)
+        return CorridorRouteClear(
+                simplified,
+                obstacles)
             ? simplified
             : Array.Empty<Num.Vector2>();
     }
@@ -1496,7 +2113,20 @@ internal static class WorldMapOrthogonalRouter
                 Num.Vector2 point = new(origin.X + x * cell, py);
                 for (int i = 0; i < obstacles.Count; i++)
                 {
-                    if (!obstacles[i].Contains(point)) continue;
+                    Obstacle obstacle =
+                        obstacles[i];
+
+                    float halfCell =
+                        cell *
+                        0.48f;
+                    if (point.X + halfCell <= obstacle.Min.X ||
+                        point.X - halfCell >= obstacle.Max.X ||
+                        point.Y + halfCell <= obstacle.Min.Y ||
+                        point.Y - halfCell >= obstacle.Max.Y)
+                    {
+                        continue;
+                    }
+
                     blocked[y * width + x] = true;
                     break;
                 }
@@ -1551,18 +2181,24 @@ internal static class WorldMapOrthogonalRouter
     }
 
     private static Num.Vector2[] BuildOuterFallback(
-        Num.Vector2 start,
+        Request request,
         Num.Vector2 startBaseEscape,
         Num.Vector2 startEscape,
         Num.Vector2 endEscape,
         Num.Vector2 endBaseEscape,
-        Num.Vector2 end,
-        int startRoom,
-        int endRoom,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
         bool preferAlternativeCorridor)
     {
+        Num.Vector2 start =
+            request.Start;
+        Num.Vector2 end =
+            request.End;
+        int startRoom =
+            request.StartRoom;
+        int endRoom =
+            request.EndRoom;
+
         Num.Vector2 min = Num.Vector2.Min(startEscape, endEscape);
         Num.Vector2 max = Num.Vector2.Max(startEscape, endEscape);
         for (int i = 0; i < obstacles.Count; i++)
@@ -1581,8 +2217,8 @@ internal static class WorldMapOrthogonalRouter
         // onto the same outer edge again.
         float[] gutters =
             preferAlternativeCorridor
-                ? new[] { 42f, 72f, 108f }
-                : new[] { 34f, 58f };
+                ? new[] { 42f, 72f, 108f, 156f, 220f }
+                : new[] { 34f, 58f, 92f, 138f, 196f };
 
         float bestCost = float.MaxValue;
         Num.Vector2[] best = null;
@@ -1648,10 +2284,9 @@ internal static class WorldMapOrthogonalRouter
                 Num.Vector2[] candidate =
                     SimplifyRoute(candidates[i]);
 
-                if (!RouteClear(
+                if (!FullRouteClear(
+                        request,
                         candidate,
-                        startRoom,
-                        endRoom,
                         obstacles))
                     continue;
 
@@ -1680,28 +2315,10 @@ internal static class WorldMapOrthogonalRouter
         if (best != null)
             return best;
 
-        // Last-resort deterministic path. It may intersect a room only if no valid fallback exists,
-        // matching the previous failure semantics while keeping the choice stable.
-        float emergencyLeft =
-            min.X -
-            gutters[gutters.Length - 1];
-
-        return SimplifyRoute(
-            new[]
-            {
-                start,
-                startBaseEscape,
-                startEscape,
-                new Num.Vector2(
-                    emergencyLeft,
-                    startEscape.Y),
-                new Num.Vector2(
-                    emergencyLeft,
-                    endEscape.Y),
-                endEscape,
-                endBaseEscape,
-                end
-            });
+        // Obstacles are a hard constraint. An unroutable connection is preferable to drawing a
+        // false line through a room thumbnail; callers can keep the route pending/degraded until the
+        // layout changes instead of inventing geometry that contradicts the map.
+        return Array.Empty<Num.Vector2>();
     }
 
     private static float RouteCongestionPenalty(
