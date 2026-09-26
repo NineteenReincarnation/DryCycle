@@ -215,6 +215,7 @@ internal sealed class WorldMapRoomResourceStore
             budget = 1;
 
         long workStarted = Stopwatch.GetTimestamp();
+        bool didMainThreadWork = false;
         double workBudgetMilliseconds =
             canvasVisible
                 ? VisibleWorkBudgetMilliseconds
@@ -224,9 +225,12 @@ internal sealed class WorldMapRoomResourceStore
             (long)(Stopwatch.Frequency *
                    workBudgetMilliseconds / 1000d);
 
-        budget -= DrainBuildResults(
-            budget,
-            workDeadline);
+        int drainedBuildResults =
+            DrainBuildResults(
+                budget,
+                workDeadline);
+        budget -= drainedBuildResults;
+        didMainThreadWork |= drainedBuildResults > 0;
 
         while (budget > 0 &&
                Stopwatch.GetTimestamp() < workDeadline &&
@@ -238,6 +242,7 @@ internal sealed class WorldMapRoomResourceStore
                 continue;
 
             ProcessRoom(page, scene, roomIndex);
+            didMainThreadWork = true;
             budget--;
         }
 
@@ -258,7 +263,8 @@ internal sealed class WorldMapRoomResourceStore
             Stopwatch.GetTimestamp() >= workDeadline ||
             UnityEngine.Time.frameCount < nextAuditFrame)
         {
-            RecordMainThreadWork(workStarted);
+            if (didMainThreadWork)
+                RecordMainThreadWork(workStarted);
             UpdateThumbnailLoadSession();
             return;
         }
@@ -277,7 +283,8 @@ internal sealed class WorldMapRoomResourceStore
             }
         }
 
-        RecordMainThreadWork(workStarted);
+        if (didMainThreadWork)
+            RecordMainThreadWork(workStarted);
         UpdateThumbnailLoadSession();
     }
 
