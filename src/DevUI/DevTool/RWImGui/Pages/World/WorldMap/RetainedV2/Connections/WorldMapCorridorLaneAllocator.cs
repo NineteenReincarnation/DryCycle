@@ -928,6 +928,12 @@ internal static class WorldMapCorridorLaneAllocator
     {
         CorridorComponent best =
             null;
+        int bestRouteCount =
+            -1;
+        int bestConflictScore =
+            int.MaxValue;
+        float bestSpan =
+            -1f;
 
         for (int i = 0; i < components.Count; i++)
         {
@@ -937,51 +943,117 @@ internal static class WorldMapCorridorLaneAllocator
             if (candidate == null)
                 continue;
 
-            if (best == null)
-            {
-                best = candidate;
-                continue;
-            }
-
             int routeCount =
-                candidate.RouteIds.Count.CompareTo(
-                    best.RouteIds.Count);
-
-            if (routeCount > 0)
-            {
-                best = candidate;
-                continue;
-            }
-
-            if (routeCount < 0)
-                continue;
-
-            float candidateSpan =
+                candidate.RouteIds.Count;
+            int conflictScore =
+                ContinuityRootConflictScore(
+                    candidate,
+                    components);
+            float span =
                 Math.Max(
                     0f,
                     candidate.Max -
                     candidate.Min);
-            float bestSpan =
-                Math.Max(
-                    0f,
-                    best.Max -
-                    best.Min);
 
-            int span =
-                candidateSpan.CompareTo(
-                    bestSpan);
-
-            if (span > 0 ||
-                span == 0 &&
+            // Coverage remains the primary criterion: the root should establish as many stable
+            // slots as possible. Among equally strong roots, prefer the one whose geometric order
+            // already agrees with the largest number of neighbouring corridors (allowing mirrors).
+            bool better =
+                best == null ||
+                routeCount > bestRouteCount ||
+                routeCount == bestRouteCount &&
+                conflictScore < bestConflictScore ||
+                routeCount == bestRouteCount &&
+                conflictScore == bestConflictScore &&
+                span > bestSpan ||
+                routeCount == bestRouteCount &&
+                conflictScore == bestConflictScore &&
+                Math.Abs(span - bestSpan) < 0.001f &&
                 CompareComponents(
                     candidate,
-                    best) < 0)
-            {
-                best = candidate;
-            }
+                    best) < 0;
+
+            if (!better)
+                continue;
+
+            best =
+                candidate;
+            bestRouteCount =
+                routeCount;
+            bestConflictScore =
+                conflictScore;
+            bestSpan =
+                span;
         }
 
         return best;
+    }
+
+    private static int ContinuityRootConflictScore(
+        CorridorComponent root,
+        List<CorridorComponent> components)
+    {
+        if (root == null ||
+            components == null)
+            return int.MaxValue;
+
+        List<string> rootOrder =
+            LocalComponentOrder(
+                root);
+        if (rootOrder.Count < 2)
+            return 0;
+
+        Dictionary<string, int> positions =
+            new(StringComparer.Ordinal);
+        for (int i = 0; i < rootOrder.Count; i++)
+            positions[rootOrder[i]] = i;
+
+        int score = 0;
+
+        for (int c = 0; c < components.Count; c++)
+        {
+            CorridorComponent component =
+                components[c];
+
+            if (component == null ||
+                ReferenceEquals(
+                    component,
+                    root))
+                continue;
+
+            List<string> local =
+                LocalComponentOrder(
+                    component);
+
+            int known = 0;
+            for (int i = 0; i < local.Count; i++)
+            {
+                if (positions.ContainsKey(
+                        local[i]))
+                    known++;
+            }
+
+            if (known < 2)
+                continue;
+
+            int forward =
+                CountKnownInversions(
+                    local,
+                    positions,
+                    reverse: false);
+            int reversed =
+                CountKnownInversions(
+                    local,
+                    positions,
+                    reverse: true);
+
+            score +=
+                Math.Min(
+                    forward,
+                    reversed);
+        }
+
+        return score;
     }
 
     private static int ChooseNextContinuityComponent(
