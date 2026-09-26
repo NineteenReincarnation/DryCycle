@@ -22,7 +22,7 @@ internal static partial class CartographyView
     private static bool fit = true, fitSelection, snap = true, dragging, marquee, addSelection, subtractSelection;
     private static long gestureRevision;
     private static Tool tool;
-    private static CartographyMarker marker;
+    private static CartographyMarker marker = default;
     private static CartographyExportFormat format;
     private static CartographyItem draft;
     private static bool draftDirty;
