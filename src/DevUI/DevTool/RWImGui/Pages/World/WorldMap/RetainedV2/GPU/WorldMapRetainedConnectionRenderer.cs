@@ -625,8 +625,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
         Color32 shadow,
         Color32 core)
     {
-        float length = PathLength(path);
-        if (length < 34f)
+        float totalLength =
+            PathLength(path);
+        if (totalLength < 34f)
             return;
 
         float markerScale =
@@ -636,84 +637,147 @@ internal sealed class WorldMapRetainedConnectionRenderer
                     ? 0.86f
                     : 1f;
 
-        if (direction == WorldConnectionDirection.Bidirectional)
+        Num.Vector2 point;
+        Num.Vector2 tangent;
+        float straightLength;
+
+        if (!TryLongestRouteSegment(
+                path,
+                out point,
+                out tangent,
+                out straightLength))
         {
-            // One compact opposing pair communicates bidirectionality without turning the route into
-            // a sequence of large traffic signs.
-            AddChevronAt(
+            if (!TryPointAtFraction(
+                    path,
+                    0.5f,
+                    out point,
+                    out tangent))
+                return;
+
+            straightLength =
+                0f;
+        }
+
+        if (direction ==
+            WorldConnectionDirection.Bidirectional)
+        {
+            float separation =
+                Math.Min(
+                    9f,
+                    Math.Max(
+                        4f,
+                        straightLength * 0.12f));
+
+            AddChevronAtPoint(
                 vertices,
                 colors,
                 indices,
-                path,
-                0.43f,
-                reverse: true,
+                point - tangent * separation,
+                -tangent,
                 markerScale,
                 shadow,
                 core);
-            AddChevronAt(
+            AddChevronAtPoint(
                 vertices,
                 colors,
                 indices,
-                path,
-                0.57f,
-                reverse: false,
+                point + tangent * separation,
+                tangent,
                 markerScale,
                 shadow,
                 core);
             return;
         }
 
-        bool reverse =
-            direction ==
-            WorldConnectionDirection.BToA;
-
-        int count =
-            densityTier > 0
-                ? 1
-                : length >= 420f
-                    ? 2
-                    : 1;
-
-        for (int i = 0; i < count; i++)
+        if (direction ==
+            WorldConnectionDirection.BToA)
         {
-            float fraction =
-                count == 1
-                    ? 0.5f
-                    : (i == 0 ? 0.34f : 0.66f);
-
-            AddChevronAt(
-                vertices,
-                colors,
-                indices,
-                path,
-                fraction,
-                reverse,
-                markerScale,
-                shadow,
-                core);
+            tangent =
+                -tangent;
         }
+
+        AddChevronAtPoint(
+            vertices,
+            colors,
+            indices,
+            point,
+            tangent,
+            markerScale,
+            shadow,
+            core);
     }
 
-    private static void AddChevronAt(
+    private static bool TryLongestRouteSegment(
+        Num.Vector2[] path,
+        out Num.Vector2 point,
+        out Num.Vector2 tangent,
+        out float length)
+    {
+        point =
+            default;
+        tangent =
+            Num.Vector2.UnitX;
+        length =
+            0f;
+
+        if (path == null ||
+            path.Length < 2)
+            return false;
+
+        int firstSegment =
+            path.Length >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            path.Length >= 4
+                ? path.Length - 3
+                : path.Length - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
+        {
+            Num.Vector2 delta =
+                path[i + 1] -
+                path[i];
+            float candidateLength =
+                delta.Length();
+
+            if (candidateLength <=
+                length + 0.01f)
+                continue;
+
+            length =
+                candidateLength;
+            tangent =
+                delta /
+                candidateLength;
+            point =
+                (path[i] +
+                 path[i + 1]) *
+                0.5f;
+        }
+
+        return length > 0.001f;
+    }
+
+    private static void AddChevronAtPoint(
         List<Vector3> vertices,
         List<Color32> colors,
         List<int> indices,
-        Num.Vector2[] path,
-        float fraction,
-        bool reverse,
+        Num.Vector2 point,
+        Num.Vector2 tangent,
         float sizeScale,
         Color32 shadow,
         Color32 core)
     {
-        if (!TryPointAtFraction(
-                path,
-                fraction,
-                out Num.Vector2 point,
-                out Num.Vector2 tangent))
+        float tangentLength =
+            tangent.Length();
+        if (tangentLength <= 0.001f)
             return;
 
-        if (reverse)
-            tangent = -tangent;
+        tangent /=
+            tangentLength;
 
         Num.Vector2 normal =
             new(-tangent.Y, tangent.X);
