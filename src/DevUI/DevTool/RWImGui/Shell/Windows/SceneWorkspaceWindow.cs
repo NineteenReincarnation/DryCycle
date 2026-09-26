@@ -46,7 +46,9 @@ internal static class SceneWorkspaceWindow
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
             primaryWorkspace ? new Num.Vector2(560f, 360f) : new Num.Vector2(420f, 300f),
-            new Num.Vector2(Math.Max(560f, display.X - 16f), Math.Max(360f, display.Y - 16f)));
+            primaryWorkspace
+                ? new Num.Vector2(Math.Max(560f, display.X - 16f), Math.Max(360f, display.Y - 16f))
+                : new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(300f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         string title = DevToolUiSettings.T("场景###DevToolSceneWorkspace", "Scene###DevToolSceneWorkspace");
