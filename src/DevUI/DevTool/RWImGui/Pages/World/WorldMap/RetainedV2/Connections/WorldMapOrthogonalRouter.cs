@@ -207,6 +207,7 @@ internal static class WorldMapOrthogonalRouter
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
+    private const float CongestionRerouteSearchPadding = 240f;
     private const int MaxGridExtent = 112;
 
     private static readonly Dictionary<string, CachedRoute> cache = new(StringComparer.Ordinal);
@@ -273,11 +274,14 @@ internal static class WorldMapOrthogonalRouter
             }
         }
 
+        bool hasAvoidancePressure =
+            avoidanceSeedPaths != null &&
+            avoidanceSeedPaths.Count > 0;
+
         bool hasSeedCongestion =
             occupancySeedPaths != null &&
             occupancySeedPaths.Count > 0 ||
-            avoidanceSeedPaths != null &&
-            avoidanceSeedPaths.Count > 0;
+            hasAvoidancePressure;
 
         Route[] result = new Route[requests.Count];
 
@@ -295,7 +299,13 @@ internal static class WorldMapOrthogonalRouter
             }
             else
             {
-                route = BuildRoute(request, obstacles, occupancy, previous?.Route);
+                route =
+                    BuildRoute(
+                        request,
+                        obstacles,
+                        occupancy,
+                        previous?.Route,
+                        hasAvoidancePressure);
                 if (!string.IsNullOrEmpty(request.Id))
                 {
                     cache[request.Id] = new CachedRoute
@@ -349,7 +359,8 @@ internal static class WorldMapOrthogonalRouter
         Request request,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
-        Route previous)
+        Route previous,
+        bool preferAlternativeCorridor)
     {
         Num.Vector2 startDirection = Cardinalize(request.StartDirection, request.End - request.Start);
         Num.Vector2 endDirection = Cardinalize(request.EndDirection, request.Start - request.End);
@@ -467,7 +478,8 @@ internal static class WorldMapOrthogonalRouter
             request.EndRoom,
             obstacles,
             occupancy,
-            previous);
+            previous,
+            preferAlternativeCorridor);
 
         if (searched.Length > 0)
         {
@@ -1136,10 +1148,24 @@ internal static class WorldMapOrthogonalRouter
         int endRoom,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
-        Route previous)
+        Route previous,
+        bool preferAlternativeCorridor)
     {
-        Num.Vector2 min = Num.Vector2.Min(start, end) - new Num.Vector2(SearchPadding, SearchPadding);
-        Num.Vector2 max = Num.Vector2.Max(start, end) + new Num.Vector2(SearchPadding, SearchPadding);
+        float searchPadding =
+            preferAlternativeCorridor
+                ? CongestionRerouteSearchPadding
+                : SearchPadding;
+
+        Num.Vector2 min =
+            Num.Vector2.Min(start, end) -
+            new Num.Vector2(
+                searchPadding,
+                searchPadding);
+        Num.Vector2 max =
+            Num.Vector2.Max(start, end) +
+            new Num.Vector2(
+                searchPadding,
+                searchPadding);
 
         for (int i = 0; i < obstacles.Count; i++)
         {
