@@ -629,14 +629,15 @@ internal static class WorldMapRetainedV2Runtime
                     continue;
                 }
 
-                // Surface publication is a frame boundary. Clone the route points once here so
-                // direction markers and hover hit testing remain tied to the rendered frame even
-                // if the live router publishes a newer route before the next Camera.Render.
+                // Surface publication is a frame boundary. Route point arrays are immutable
+                // after publication (updates replace the array rather than mutating it), so keeping
+                // this exact reference preserves the rendered frame without cloning every visible
+                // path on each pan/zoom redraw.
                 ConnectionRouteResource snapshotRoute =
                     new()
                     {
                         ConnectionId = id,
-                        Points = (Num.Vector2[])route.Points.Clone()
+                        Points = route.Points
                     };
 
                 index.Upsert(snapshotRoute);
