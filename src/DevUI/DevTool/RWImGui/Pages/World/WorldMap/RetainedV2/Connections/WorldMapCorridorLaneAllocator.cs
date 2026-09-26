@@ -153,6 +153,8 @@ internal static class WorldMapCorridorLaneAllocator
     };
 
     private const float PointEpsilonSquared = 0.04f;
+    private const float BundleCrossingShoulder = 3f;
+    private const int MaxBundleCrossingSegmentChecks = 16384;
 
     internal static WorldMapCorridorLaneApplyResult Apply(
         Dictionary<string, ConnectionRouteResource> routes,
@@ -296,6 +298,14 @@ internal static class WorldMapCorridorLaneAllocator
         foreach (string routeId in planSet.PermutationConflictRoutes)
             reroute.Add(routeId);
 
+        // Validate the final woven geometry as well. Two members of the same continuity bundle
+        // should never cross each other and rely on the generic bridge renderer to explain it; that
+        // would defeat the lane model. Any residual perpendicular crossing gets a bounded reroute.
+        CollectBundleCrossingConflicts(
+            routes,
+            planSet,
+            reroute);
+
         // Severe compression is already a readability failure before it reaches a literal
         // centreline collapse. If a bundle drops below the minimum readable scale, surface those
         // routes to the resource store for one congestion-aware reroute pass. If no alternative
@@ -321,6 +331,195 @@ internal static class WorldMapCorridorLaneAllocator
         reroute.CopyTo(rerouteIds);
         Array.Sort(rerouteIds, StringComparer.Ordinal);
         return new WorldMapCorridorLaneApplyResult(rerouteIds);
+    }
+
+    private static void CollectBundleCrossingConflicts(
+        Dictionary<string, ConnectionRouteResource> routes,
+        ContinuityPlanSet planSet,
+        HashSet<string> reroute)
+    {
+        if (routes == null ||
+            planSet == null ||
+            reroute == null ||
+            planSet.GroupRoutes.Count == 0)
+            return;
+
+        List<int> groupIds =
+            new(planSet.GroupRoutes.Keys);
+        groupIds.Sort();
+
+        HashSet<string> checkedPairs =
+            new(StringComparer.Ordinal);
+        int segmentChecks = 0;
+
+        for (int g = 0;
+             g < groupIds.Count &&
+             segmentChecks < MaxBundleCrossingSegmentChecks;
+             g++)
+        {
+            if (!planSet.GroupRoutes.TryGetValue(
+                    groupIds[g],
+                    out List<string> ids) ||
+                ids == null ||
+                ids.Count < 2)
+                continue;
+
+            for (int i = 0;
+                 i < ids.Count - 1 &&
+                 segmentChecks < MaxBundleCrossingSegmentChecks;
+                 i++)
+            {
+                string aId =
+                    ids[i];
+
+                if (!routes.TryGetValue(
+                        aId,
+                        out ConnectionRouteResource aRoute))
+                    continue;
+
+                for (int j = i + 1;
+                     j < ids.Count &&
+                     segmentChecks < MaxBundleCrossingSegmentChecks;
+                     j++)
+                {
+                    string bId =
+                        ids[j];
+
+                    string pairKey =
+                        string.CompareOrdinal(
+                            aId,
+                            bId) <= 0
+                            ? aId + "\n" + bId
+                            : bId + "\n" + aId;
+
+                    if (!checkedPairs.Add(
+                            pairKey) ||
+                        !routes.TryGetValue(
+                            bId,
+                            out ConnectionRouteResource bRoute))
+                        continue;
+
+                    if (!RoutesCrossInsideBundle(
+                            aRoute?.Points,
+                            bRoute?.Points,
+                            ref segmentChecks))
+                        continue;
+
+                    reroute.Add(aId);
+                    reroute.Add(bId);
+                }
+            }
+        }
+    }
+
+    private static bool RoutesCrossInsideBundle(
+        Num.Vector2[] a,
+        Num.Vector2[] b,
+        ref int checks)
+    {
+        if (a == null ||
+            b == null ||
+            a.Length < 4 ||
+            b.Length < 4)
+            return false;
+
+        int aFirst = 1;
+        int aLast = a.Length - 3;
+        int bFirst = 1;
+        int bLast = b.Length - 3;
+
+        for (int ai = aFirst;
+             ai <= aLast &&
+             checks < MaxBundleCrossingSegmentChecks;
+             ai++)
+        {
+            Num.Vector2 a0 = a[ai];
+            Num.Vector2 a1 = a[ai + 1];
+            bool aVertical =
+                Math.Abs(
+                    a0.X -
+                    a1.X) < 0.01f;
+            bool aHorizontal =
+                Math.Abs(
+                    a0.Y -
+                    a1.Y) < 0.01f;
+
+            if (!aVertical &&
+                !aHorizontal)
+                continue;
+
+            for (int bi = bFirst;
+                 bi <= bLast &&
+                 checks < MaxBundleCrossingSegmentChecks;
+                 bi++)
+            {
+                Num.Vector2 b0 = b[bi];
+                Num.Vector2 b1 = b[bi + 1];
+                bool bVertical =
+                    Math.Abs(
+                        b0.X -
+                        b1.X) < 0.01f;
+                bool bHorizontal =
+                    Math.Abs(
+                        b0.Y -
+                        b1.Y) < 0.01f;
+
+                if (!bVertical &&
+                    !bHorizontal ||
+                    aVertical == bVertical)
+                    continue;
+
+                checks++;
+
+                Num.Vector2 vertical0 =
+                    aVertical ? a0 : b0;
+                Num.Vector2 vertical1 =
+                    aVertical ? a1 : b1;
+                Num.Vector2 horizontal0 =
+                    aVertical ? b0 : a0;
+                Num.Vector2 horizontal1 =
+                    aVertical ? b1 : a1;
+
+                float x =
+                    vertical0.X;
+                float y =
+                    horizontal0.Y;
+                float verticalMin =
+                    Math.Min(
+                        vertical0.Y,
+                        vertical1.Y);
+                float verticalMax =
+                    Math.Max(
+                        vertical0.Y,
+                        vertical1.Y);
+                float horizontalMin =
+                    Math.Min(
+                        horizontal0.X,
+                        horizontal1.X);
+                float horizontalMax =
+                    Math.Max(
+                        horizontal0.X,
+                        horizontal1.X);
+
+                if (y <=
+                        verticalMin +
+                        BundleCrossingShoulder ||
+                    y >=
+                        verticalMax -
+                        BundleCrossingShoulder ||
+                    x <=
+                        horizontalMin +
+                        BundleCrossingShoulder ||
+                    x >=
+                        horizontalMax -
+                        BundleCrossingShoulder)
+                    continue;
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Dictionary<BucketKey, List<SegmentRef>> BuildBuckets(
