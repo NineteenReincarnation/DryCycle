@@ -2123,25 +2123,121 @@ internal static class WorldMapOrthogonalRouter
         }
         reversed.Reverse();
 
-        List<Num.Vector2> route = new(reversed.Count + 6) { start };
-        if (reversed.Count > 0)
-        {
-            Num.Vector2 first = reversed[0];
-            if (Math.Abs(start.X - first.X) > 0.5f && Math.Abs(start.Y - first.Y) > 0.5f)
-                route.Add(new Num.Vector2(first.X, start.Y));
-            route.AddRange(reversed);
-            Num.Vector2 last = reversed[reversed.Count - 1];
-            if (Math.Abs(end.X - last.X) > 0.5f && Math.Abs(end.Y - last.Y) > 0.5f)
-                route.Add(new Num.Vector2(end.X, last.Y));
-        }
-        route.Add(end);
+        return BuildSnappedSearchRoute(
+            start,
+            end,
+            reversed,
+            obstacles);
+    }
 
-        Num.Vector2[] simplified = Simplify(route.ToArray());
-        return CorridorRouteClear(
-                simplified,
-                obstacles)
-            ? simplified
-            : Array.Empty<Num.Vector2>();
+    private static Num.Vector2[] BuildSnappedSearchRoute(
+        Num.Vector2 start,
+        Num.Vector2 end,
+        List<Num.Vector2> reversed,
+        IReadOnlyList<Obstacle> obstacles)
+    {
+        if (reversed == null ||
+            reversed.Count == 0)
+            return Array.Empty<Num.Vector2>();
+
+        Num.Vector2 first =
+            reversed[0];
+        Num.Vector2 last =
+            reversed[reversed.Count - 1];
+
+        Num.Vector2[] startCorners =
+        {
+            new Num.Vector2(
+                first.X,
+                start.Y),
+            new Num.Vector2(
+                start.X,
+                first.Y)
+        };
+        Num.Vector2[] endCorners =
+        {
+            new Num.Vector2(
+                end.X,
+                last.Y),
+            new Num.Vector2(
+                last.X,
+                end.Y)
+        };
+
+        Num.Vector2[] best =
+            null;
+        float bestLength =
+            float.MaxValue;
+
+        for (int startMode = 0;
+             startMode < 2;
+             startMode++)
+        {
+            for (int endMode = 0;
+                 endMode < 2;
+                 endMode++)
+            {
+                List<Num.Vector2> route =
+                    new(
+                        reversed.Count +
+                        6)
+                    {
+                        start
+                    };
+
+                if (Math.Abs(
+                        start.X -
+                        first.X) > 0.5f &&
+                    Math.Abs(
+                        start.Y -
+                        first.Y) > 0.5f)
+                {
+                    route.Add(
+                        startCorners[startMode]);
+                }
+
+                route.AddRange(
+                    reversed);
+
+                if (Math.Abs(
+                        end.X -
+                        last.X) > 0.5f &&
+                    Math.Abs(
+                        end.Y -
+                        last.Y) > 0.5f)
+                {
+                    route.Add(
+                        endCorners[endMode]);
+                }
+
+                route.Add(
+                    end);
+
+                Num.Vector2[] candidate =
+                    Simplify(
+                        route.ToArray());
+
+                if (!CorridorRouteClear(
+                        candidate,
+                        obstacles))
+                    continue;
+
+                float length =
+                    PathLength(
+                        candidate);
+
+                if (length >= bestLength)
+                    continue;
+
+                bestLength =
+                    length;
+                best =
+                    candidate;
+            }
+        }
+
+        return best ??
+               Array.Empty<Num.Vector2>();
     }
 
     private static bool[] BuildBlockedGrid(
