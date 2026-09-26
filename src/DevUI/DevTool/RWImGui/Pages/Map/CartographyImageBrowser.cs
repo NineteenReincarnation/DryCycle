@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using DryCycle.DevUI.DevTool.Map.Cartography;
 using ImGuiNET;
 using Num = System.Numerics;
 
@@ -59,7 +60,6 @@ internal static partial class CartographyView
                     Math.Max(16f, (display.Y - height) * 0.5f)),
                 ImGuiCond.Appearing);
             ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Appearing);
-            ImGui.SetNextWindowFocus();
             imageBrowserJustOpened = false;
         }
         else
