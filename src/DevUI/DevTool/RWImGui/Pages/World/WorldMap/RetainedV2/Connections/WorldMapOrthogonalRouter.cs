@@ -404,7 +404,7 @@ internal static class WorldMapOrthogonalRouter
         if (CanUseBridge(request, startDirection, endDirection, startEscape, endEscape, obstacles))
         {
             Num.Vector2[] bridge =
-                Simplify(
+                SimplifyRoute(
                     BuildBridgePath(
                         request.Start,
                         startBaseEscape,
@@ -442,7 +442,7 @@ internal static class WorldMapOrthogonalRouter
             if (Num.Vector2.DistanceSquared(endEscape, endBaseEscape) > 0.25f) points.Add(endEscape);
             points.Add(endBaseEscape);
             points.Add(request.End);
-            return NewRoute(request, RouteKind.Orthogonal, Simplify(points.ToArray()), startDirection, endDirection);
+            return NewRoute(request, RouteKind.Orthogonal, SimplifyRoute(points.ToArray()), startDirection, endDirection);
         }
 
         Num.Vector2[] searched = SearchOrthogonal(
@@ -462,7 +462,7 @@ internal static class WorldMapOrthogonalRouter
             if (Num.Vector2.DistanceSquared(endEscape, endBaseEscape) > 0.25f) points.Add(endEscape);
             points.Add(endBaseEscape);
             points.Add(request.End);
-            return NewRoute(request, RouteKind.Orthogonal, Simplify(points.ToArray()), startDirection, endDirection);
+            return NewRoute(request, RouteKind.Orthogonal, SimplifyRoute(points.ToArray()), startDirection, endDirection);
         }
 
         Num.Vector2[] fallback = BuildOuterFallback(
@@ -475,7 +475,7 @@ internal static class WorldMapOrthogonalRouter
             request.StartRoom,
             request.EndRoom,
             obstacles);
-        return NewRoute(request, RouteKind.Fallback, Simplify(fallback), startDirection, endDirection);
+        return NewRoute(request, RouteKind.Fallback, SimplifyRoute(fallback), startDirection, endDirection);
     }
 
     private static Route NewRoute(
@@ -666,7 +666,8 @@ internal static class WorldMapOrthogonalRouter
             full.Add(request.End);
 
             Num.Vector2[] candidate =
-                Simplify(full.ToArray());
+                SimplifyRoute(
+                    full.ToArray());
 
             if (candidate == null ||
                 candidate.Length < 2 ||
@@ -1384,7 +1385,7 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2[] best = candidates[0];
         for (int i = 0; i < candidates.Length; i++)
         {
-            Num.Vector2[] candidate = Simplify(candidates[i]);
+            Num.Vector2[] candidate = SimplifyRoute(candidates[i]);
             float cost = RouteClear(candidate, startRoom, endRoom, obstacles) ? PathLength(candidate) : PathLength(candidate) + 100000f;
             if (cost >= bestCost) continue;
             bestCost = cost;
@@ -1629,6 +1630,63 @@ internal static class WorldMapOrthogonalRouter
             if (r < t1) t1 = r;
         }
         return true;
+    }
+
+    private static Num.Vector2[] SimplifyRoute(
+        Num.Vector2[] source)
+    {
+        if (source == null ||
+            source.Length <= 3)
+            return source == null
+                ? Array.Empty<Num.Vector2>()
+                : (Num.Vector2[])source.Clone();
+
+        // Route point 1 and point N-2 are semantic terminal anchors: they mark the end of the
+        // socket-owned stub and the beginning of corridor-owned geometry. Generic collinear
+        // simplification used to erase those anchors on straight/compact links, which made the lane
+        // allocator and crossing resolver treat the whole connection as one inseparable centreline.
+        Num.Vector2[] middle =
+            new Num.Vector2[
+                source.Length - 2];
+        Array.Copy(
+            source,
+            1,
+            middle,
+            0,
+            middle.Length);
+
+        Num.Vector2[] simplifiedMiddle =
+            Simplify(middle);
+
+        List<Num.Vector2> result =
+            new(
+                simplifiedMiddle.Length + 2);
+
+        result.Add(source[0]);
+
+        for (int i = 0; i < simplifiedMiddle.Length; i++)
+        {
+            Num.Vector2 point =
+                simplifiedMiddle[i];
+
+            if (Num.Vector2.DistanceSquared(
+                    result[result.Count - 1],
+                    point) >= 0.0001f)
+            {
+                result.Add(point);
+            }
+        }
+
+        Num.Vector2 last =
+            source[source.Length - 1];
+        if (Num.Vector2.DistanceSquared(
+                result[result.Count - 1],
+                last) >= 0.0001f)
+        {
+            result.Add(last);
+        }
+
+        return result.ToArray();
     }
 
     internal static Num.Vector2[] Simplify(Num.Vector2[] source)
