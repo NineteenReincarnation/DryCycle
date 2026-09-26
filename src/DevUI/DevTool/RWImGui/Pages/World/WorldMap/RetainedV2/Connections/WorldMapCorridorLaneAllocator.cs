@@ -1067,6 +1067,7 @@ internal static class WorldMapCorridorLaneAllocator
 
         int bestIndex = 0;
         int bestOverlap = -1;
+        int bestConflictScore = int.MaxValue;
         int bestRoutes = -1;
         float bestSpan = -1f;
 
@@ -1082,6 +1083,11 @@ internal static class WorldMapCorridorLaneAllocator
                     overlap++;
             }
 
+            int conflictScore =
+                ComponentMergeConflictScore(
+                    component,
+                    slots);
+
             int routeCount =
                 component.RouteIds.Count;
             float span =
@@ -1090,14 +1096,23 @@ internal static class WorldMapCorridorLaneAllocator
                     component.Max -
                     component.Min);
 
+            // Grow the slot table from the most strongly connected corridor first. For equal
+            // overlap, prefer the component that needs the fewest true permutations after allowing
+            // a whole-corridor mirror; this avoids creating a conflict merely because merge order
+            // happened to visit a harder branch first.
             bool better =
                 overlap > bestOverlap ||
                 overlap == bestOverlap &&
+                conflictScore < bestConflictScore ||
+                overlap == bestOverlap &&
+                conflictScore == bestConflictScore &&
                 routeCount > bestRoutes ||
                 overlap == bestOverlap &&
+                conflictScore == bestConflictScore &&
                 routeCount == bestRoutes &&
                 span > bestSpan ||
                 overlap == bestOverlap &&
+                conflictScore == bestConflictScore &&
                 routeCount == bestRoutes &&
                 Math.Abs(span - bestSpan) < 0.001f &&
                 CompareComponents(
@@ -1109,11 +1124,48 @@ internal static class WorldMapCorridorLaneAllocator
 
             bestIndex = i;
             bestOverlap = overlap;
+            bestConflictScore =
+                conflictScore;
             bestRoutes = routeCount;
             bestSpan = span;
         }
 
         return bestIndex;
+    }
+
+    private static int ComponentMergeConflictScore(
+        CorridorComponent component,
+        List<string> slots)
+    {
+        if (component == null ||
+            slots == null ||
+            slots.Count < 2)
+            return 0;
+
+        Dictionary<string, int> positions =
+            new(StringComparer.Ordinal);
+
+        for (int i = 0; i < slots.Count; i++)
+            positions[slots[i]] = i;
+
+        List<string> local =
+            LocalComponentOrder(
+                component);
+
+        int forward =
+            CountKnownInversions(
+                local,
+                positions,
+                reverse: false);
+        int reversed =
+            CountKnownInversions(
+                local,
+                positions,
+                reverse: true);
+
+        return Math.Min(
+            forward,
+            reversed);
     }
 
     private static void MergeComponentOrder(
