@@ -106,6 +106,22 @@ internal static class WorldMapExactShortcuts
             return;
         }
 
+        string liveRegion =
+            session.World?.name ?? string.Empty;
+        bool urgentRegion =
+            !string.Equals(
+                region,
+                liveRegion,
+                StringComparison.OrdinalIgnoreCase);
+        int interval =
+            WorldMapBackgroundSchedulingPolicy.ExactShortcutIntervalFrames(
+                WorldMapRetainedV2Runtime.CanvasVisible);
+
+        if (!urgentRegion &&
+            lastUpdateFrame >= 0 &&
+            Time.frameCount - lastUpdateFrame < interval)
+            return;
+
         UpdateExactCache(session, selectedRoomIndex);
     }
 
