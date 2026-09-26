@@ -926,9 +926,9 @@ internal static class WorldMapView
                 : ConnectionColor(connection.Direction);
 
         float coreThickness =
-            selected ? 4.2f : 3.5f;
+            selected ? 3.7f : 3.1f;
         float isolationThickness =
-            selected ? 9.0f : 7.5f;
+            selected ? 6.5f : 5.5f;
 
         DrawConnectionPathStroke(
             draw,
