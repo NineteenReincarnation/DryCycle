@@ -2190,76 +2190,135 @@ internal static class WorldMapView
         if (length < 25f)
             return;
 
-        if (direction == WorldConnectionDirection.Bidirectional)
+        Num.Vector2 markerPoint;
+        Num.Vector2 markerTangent;
+        float straightLength;
+
+        if (!TryLongestPathSegment(
+                points,
+                out markerPoint,
+                out markerTangent,
+                out straightLength))
         {
-            DrawArrowOnPath(
-                draw,
-                points,
-                0.35f,
-                reverse: true,
-                shadow,
-                core,
-                coreThickness);
-            DrawArrowOnPath(
-                draw,
-                points,
-                0.65f,
-                reverse: false,
-                shadow,
-                core,
-                coreThickness);
-            return;
+            if (!TryPointOnPath(
+                    points,
+                    0.5f,
+                    out markerPoint,
+                    out markerTangent))
+                return;
+
+            straightLength = 0f;
         }
 
-        int count =
-            length >= 420f ? 2 : 1;
-        bool reverse =
-            direction == WorldConnectionDirection.BToA;
-        for (int i = 0; i < count; i++)
-        {
-            DrawArrowOnPath(
-                draw,
-                points,
-                (i + 1f) / (count + 1f),
-                reverse,
-                shadow,
-                core,
-                coreThickness);
-        }
-    }
-
-    private static void DrawArrowOnPath(
-        ImDrawListPtr draw,
-        IReadOnlyList<Num.Vector2> points,
-        float fraction,
-        bool reverse,
-        uint shadow,
-        uint core,
-        float coreThickness)
-    {
-        if (!TryPointOnPath(
-                points,
-                fraction,
-                out Num.Vector2 point,
-                out Num.Vector2 tangent))
-            return;
-
-        if (reverse)
-            tangent = -tangent;
-
-        float size =
+        float markerSize =
             Math.Max(
                 6.5f,
                 Math.Min(
                     8.0f,
-                    5.7f + coreThickness * 0.55f));
+                    5.7f +
+                    coreThickness *
+                    0.55f));
+
+        if (direction ==
+            WorldConnectionDirection.Bidirectional)
+        {
+            float separation =
+                Math.Min(
+                    9f,
+                    Math.Max(
+                        4f,
+                        straightLength *
+                        0.12f));
+
+            DrawArrowHead(
+                draw,
+                markerPoint -
+                    markerTangent *
+                    separation,
+                -markerTangent,
+                shadow,
+                core,
+                markerSize);
+            DrawArrowHead(
+                draw,
+                markerPoint +
+                    markerTangent *
+                    separation,
+                markerTangent,
+                shadow,
+                core,
+                markerSize);
+            return;
+        }
+
+        if (direction ==
+            WorldConnectionDirection.BToA)
+        {
+            markerTangent =
+                -markerTangent;
+        }
+
         DrawArrowHead(
             draw,
-            point,
-            tangent,
+            markerPoint,
+            markerTangent,
             shadow,
             core,
-            size);
+            markerSize);
+    }
+
+    private static bool TryLongestPathSegment(
+        IReadOnlyList<Num.Vector2> points,
+        out Num.Vector2 point,
+        out Num.Vector2 tangent,
+        out float length)
+    {
+        point =
+            Num.Vector2.Zero;
+        tangent =
+            Num.Vector2.Zero;
+        length =
+            0f;
+
+        if (points == null ||
+            points.Count < 2)
+            return false;
+
+        int firstSegment =
+            points.Count >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            points.Count >= 4
+                ? points.Count - 3
+                : points.Count - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
+        {
+            Num.Vector2 delta =
+                points[i + 1] -
+                points[i];
+            float candidateLength =
+                delta.Length();
+
+            if (candidateLength <=
+                length + 0.01f)
+                continue;
+
+            length =
+                candidateLength;
+            tangent =
+                delta /
+                candidateLength;
+            point =
+                (points[i] +
+                 points[i + 1]) *
+                0.5f;
+        }
+
+        return length > 0.001f;
     }
 
     private static bool TryPointOnPath(
