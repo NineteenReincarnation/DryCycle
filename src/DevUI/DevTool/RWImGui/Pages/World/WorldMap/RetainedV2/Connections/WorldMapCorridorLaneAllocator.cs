@@ -816,8 +816,13 @@ internal static class WorldMapCorridorLaneAllocator
                             ref segmentChecks))
                         continue;
 
-                    reroute.Add(aId);
-                    reroute.Add(bId);
+                    AddPairConflictRerouteVictim(
+                        routes,
+                        aId,
+                        aRoute,
+                        bId,
+                        bRoute,
+                        reroute);
                 }
             }
         }
