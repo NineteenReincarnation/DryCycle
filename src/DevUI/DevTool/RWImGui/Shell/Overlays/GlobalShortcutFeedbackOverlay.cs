@@ -77,64 +77,64 @@ internal static class GlobalShortcutFeedbackOverlay
         float x = Math.Max(8f, (display.X - width) * 0.5f);
         float y = 9f - (1f - enter) * 11f;
 
-        ImGui.SetNextWindowPos(new Num.Vector2(x, y), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Always);
-        ImGui.SetNextWindowBgAlpha(Background.W * alpha);
+        // Do not use an ImGui window here. Even a window submitted last can still end up below
+        // popup/menu/title-bar layers. Shortcut feedback is a HUD notification and must always be
+        // visible, so render it into ImGui's foreground draw list, which is composited after every
+        // normal window/popup in this viewport.
+        ImDrawListPtr draw = ImGui.GetForegroundDrawList();
+        Num.Vector2 min = new(x, y);
+        Num.Vector2 max = new(x + width, y + height);
 
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 7f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Num.Vector2(10f, 7f));
-
+        Num.Vector4 background = Background;
+        background.W *= alpha;
         Num.Vector4 border = accent;
         border.W = 0.90f * alpha;
-        ImGui.PushStyleColor(ImGuiCol.Border, border);
 
-        ImGuiWindowFlags flags =
-            ImGuiWindowFlags.NoDecoration |
-            ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoSavedSettings |
-            ImGuiWindowFlags.NoInputs |
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse;
+        draw.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(background),
+            7f);
+        draw.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(border),
+            7f,
+            ImDrawFlags.None,
+            1f);
 
-        if (ImGui.Begin("##DevToolGlobalShortcutFeedback", flags))
-        {
-            DrawAnimatedMark(age, alpha, accent, feedback);
+        DrawAnimatedMark(draw, min, age, alpha, accent, feedback);
 
-            ImGui.SetCursorPos(new Num.Vector2(48f, 6f));
-            Num.Vector4 titleColor = MainText;
-            titleColor.W *= alpha;
-            ImGui.TextColored(titleColor, title);
+        Num.Vector4 titleColor = MainText;
+        titleColor.W *= alpha;
+        draw.AddText(
+            min + new Num.Vector2(48f, 6f),
+            ImGui.GetColorU32(titleColor),
+            title);
 
-            ImGui.SetCursorPos(new Num.Vector2(48f, Math.Max(25f, height - 24f)));
-            Num.Vector4 detailColor = SecondaryText;
-            detailColor.W *= alpha;
-            ImGui.TextColored(detailColor, detail);
+        Num.Vector4 detailColor = SecondaryText;
+        detailColor.W *= alpha;
+        draw.AddText(
+            min + new Num.Vector2(48f, Math.Max(25f, height - 24f)),
+            ImGui.GetColorU32(detailColor),
+            detail);
 
-            ImDrawListPtr draw = ImGui.GetWindowDrawList();
-            Num.Vector2 min = ImGui.GetWindowPos();
-            Num.Vector2 max = min + ImGui.GetWindowSize();
-            float remaining =
-                (float)Math.Max(
-                    0d,
-                    Math.Min(
-                        1d,
-                        1d - age / VisibleSeconds));
+        float remaining =
+            (float)Math.Max(
+                0d,
+                Math.Min(
+                    1d,
+                    1d - age / VisibleSeconds));
 
-            Num.Vector4 rail = accent;
-            rail.W = 0.86f * alpha;
-            draw.AddRectFilled(
-                new Num.Vector2(min.X + 5f, max.Y - 3f),
-                new Num.Vector2(
-                    min.X + 5f + (max.X - min.X - 10f) * remaining,
-                    max.Y - 1f),
-                ImGui.GetColorU32(rail),
-                1f);
-        }
-        ImGui.End();
-
-        ImGui.PopStyleColor();
-        ImGui.PopStyleVar(3);
+        Num.Vector4 rail = accent;
+        rail.W = 0.86f * alpha;
+        draw.AddRectFilled(
+            new Num.Vector2(min.X + 5f, max.Y - 3f),
+            new Num.Vector2(
+                min.X + 5f + (max.X - min.X - 10f) * remaining,
+                max.Y - 1f),
+            ImGui.GetColorU32(rail),
+            1f);
     }
 
     private static void ObserveSignal()
@@ -181,13 +181,13 @@ internal static class GlobalShortcutFeedbackOverlay
     }
 
     private static void DrawAnimatedMark(
+        ImDrawListPtr draw,
+        Num.Vector2 window,
         double age,
         float alpha,
         Num.Vector4 accent,
         EditorShortcutFeedbackSnapshot item)
     {
-        ImDrawListPtr draw = ImGui.GetWindowDrawList();
-        Num.Vector2 window = ImGui.GetWindowPos();
 
         float pop = Smooth01((float)(age / EnterSeconds));
         float mark = Smooth01((float)(age / MarkSeconds));
