@@ -769,7 +769,17 @@ internal static class RoomSettingsView
         float available = ImGui.GetContentRegionAvail().X;
         ImGuiStylePtr style = ImGui.GetStyle();
         float gap = Math.Max(6f, style.ItemSpacing.X);
-        float labelWidth = Math.Max(118f, Math.Min(240f, available * 0.30f));
+
+        // Never place the control on top of a long label. The previous fixed 30% label column
+        // could be narrower than strings such as "Terrain Fade Palette", so SameLine(controlX)
+        // moved the combo back underneath the rendered text.
+        float textWidth = ImGui.CalcTextSize(label ?? string.Empty).X;
+        float labelWidth = Math.Max(
+            118f,
+            Math.Min(
+                300f,
+                Math.Max(available * 0.30f, textWidth + gap * 1.5f)));
+
         trailingX = startX + Math.Max(0f, available - trailingWidth);
         float controlX = startX + labelWidth;
         float controlWidth = Math.Max(72f, trailingX - gap - controlX);
@@ -784,7 +794,13 @@ internal static class RoomSettingsView
     {
         float startX = ImGui.GetCursorPosX();
         float available = ImGui.GetContentRegionAvail().X;
-        float labelWidth = Math.Max(118f, Math.Min(240f, available * 0.30f));
+        float gap = Math.Max(6f, ImGui.GetStyle().ItemSpacing.X);
+        float textWidth = ImGui.CalcTextSize(label ?? string.Empty).X;
+        float labelWidth = Math.Max(
+            118f,
+            Math.Min(
+                300f,
+                Math.Max(available * 0.30f, textWidth + gap * 1.5f)));
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted(label);
         ImGui.SameLine(startX + labelWidth);
