@@ -58,6 +58,14 @@ internal static class WorldMapRetainedV2Runtime
     private static int lastRenderedLayerMask = int.MinValue;
     private static int lastRenderedShowConnections = int.MinValue;
 
+    private static string readinessRegion = string.Empty;
+    private static long readinessStartedTicks;
+    private static long firstSurfaceReadyTicks;
+    private static long readinessCompletedTicks;
+    private static int readinessExpectedRooms;
+    private static int readinessExpectedConnections;
+    private static bool readinessComplete;
+
     internal static WorldMapScene Scene => RenderSceneState;
     internal static WorldMapScene MainSceneForPersistence => MainSceneState;
     internal static WorldMapDirtySet LastDirty => lastDirty;
@@ -71,6 +79,12 @@ internal static class WorldMapRetainedV2Runtime
             return enabled && value > 0.0001f ? value : 1f;
         }
     }
+
+    internal static bool ViewReadinessComplete => readinessComplete;
+    internal static double FirstSurfaceReadyMilliseconds =>
+        ElapsedMilliseconds(readinessStartedTicks, firstSurfaceReadyTicks);
+    internal static double ViewReadinessMilliseconds =>
+        ElapsedMilliseconds(readinessStartedTicks, readinessCompletedTicks);
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -98,7 +112,13 @@ internal static class WorldMapRetainedV2Runtime
         WorldMapViewTransform viewTransform)
     {
         if (!enabled) return;
-        Interlocked.Exchange(ref canvasSeenAt, Stopwatch.GetTimestamp());
+
+        long now = Stopwatch.GetTimestamp();
+        Interlocked.Exchange(ref canvasSeenAt, now);
+        TrackViewReadinessStart(
+            snapshot,
+            now);
+
         Volatile.Write(ref activeLayerMask, layerMask);
         Volatile.Write(ref activeShowConnections, showConnections ? 1 : 0);
         Volatile.Write(ref activeZoom, viewTransform.Zoom > 0.0001f ? viewTransform.Zoom : 1f);
@@ -306,6 +326,8 @@ internal static class WorldMapRetainedV2Runtime
                 }
             }
         }
+
+        UpdateViewReadiness();
     }
 
     internal static bool TryPresentSurface(
@@ -616,7 +638,119 @@ internal static class WorldMapRetainedV2Runtime
         lastRenderedRouteRevision = long.MinValue;
         lastRenderedLayerMask = int.MinValue;
         lastRenderedShowConnections = int.MinValue;
+        readinessRegion = string.Empty;
+        readinessStartedTicks = 0L;
+        firstSurfaceReadyTicks = 0L;
+        readinessCompletedTicks = 0L;
+        readinessExpectedRooms = 0;
+        readinessExpectedConnections = 0;
+        readinessComplete = false;
         lastDirty = new WorldMapDirtySet();
+    }
+
+    private static void TrackViewReadinessStart(
+        EditorMapPresentationSnapshot snapshot,
+        long now)
+    {
+        string nextRegion =
+            snapshot?.RegionName ?? string.Empty;
+        int roomCount =
+            snapshot?.Rooms?.Length ?? 0;
+        int connectionCount =
+            snapshot?.Connections?.Length ?? 0;
+
+        bool newRegion =
+            readinessStartedTicks <= 0L ||
+            !string.Equals(
+                readinessRegion,
+                nextRegion,
+                StringComparison.OrdinalIgnoreCase);
+
+        if (newRegion)
+        {
+            readinessRegion = nextRegion;
+            readinessStartedTicks = now;
+            firstSurfaceReadyTicks = 0L;
+            readinessCompletedTicks = 0L;
+            readinessExpectedRooms = roomCount;
+            readinessExpectedConnections = connectionCount;
+            readinessComplete = false;
+            return;
+        }
+
+        if (roomCount > readinessExpectedRooms ||
+            connectionCount > readinessExpectedConnections)
+        {
+            readinessExpectedRooms =
+                Math.Max(readinessExpectedRooms, roomCount);
+            readinessExpectedConnections =
+                Math.Max(readinessExpectedConnections, connectionCount);
+
+            if (readinessComplete)
+            {
+                readinessComplete = false;
+                readinessCompletedTicks = 0L;
+            }
+        }
+    }
+
+    private static void UpdateViewReadiness()
+    {
+        if (readinessStartedTicks <= 0L)
+            return;
+
+        long now = Stopwatch.GetTimestamp();
+        if (firstSurfaceReadyTicks <= 0L &&
+            Surface.Ready)
+        {
+            firstSurfaceReadyTicks = now;
+        }
+
+        if (readinessComplete)
+            return;
+
+        bool roomsReady =
+            readinessExpectedRooms <= 0 ||
+            (RoomResources.ThumbnailLoadComplete &&
+             RoomResources.ThumbnailLoadCommitted >= readinessExpectedRooms);
+        bool routesReady =
+            readinessExpectedConnections <= 0 ||
+            (ConnectionResources.RouteSessionComplete &&
+             ConnectionResources.Count >= readinessExpectedConnections);
+
+        if (!roomsReady ||
+            !routesReady ||
+            !Surface.Ready)
+            return;
+
+        readinessComplete = true;
+        readinessCompletedTicks = now;
+
+        log?.LogInfo(
+            "WorldMap view ready: first surface " +
+            FirstSurfaceReadyMilliseconds.ToString("F0") +
+            " ms, full retained readiness " +
+            ViewReadinessMilliseconds.ToString("F0") +
+            " ms, rooms " +
+            RoomResources.ThumbnailLoadCommitted + "/" +
+            readinessExpectedRooms +
+            ", routes " +
+            ConnectionResources.Count + "/" +
+            readinessExpectedConnections + ".");
+    }
+
+    private static double ElapsedMilliseconds(
+        long start,
+        long end)
+    {
+        if (start <= 0L ||
+            end <= 0L ||
+            end < start)
+            return 0d;
+
+        return (end - start) *
+               1000d /
+               Stopwatch.Frequency;
     }
 
     internal static void DrawToolbarDiagnostics()
@@ -633,6 +767,17 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted("World Map Retained V2 | hardened + cache V3");
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
+        ImGui.TextUnformatted(
+            "view readiness: first surface " +
+            FirstSurfaceReadyMilliseconds.ToString("F0") +
+            " ms | " +
+            (ViewReadinessComplete
+                ? "complete "
+                : "active ") +
+            ViewReadinessMilliseconds.ToString("F0") +
+            " ms | expected " +
+            readinessExpectedRooms + " rooms / " +
+            readinessExpectedConnections + " routes");
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
             " | thumbnails " + RoomResources.CommittedThumbnailCount +
