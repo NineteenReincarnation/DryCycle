@@ -417,6 +417,15 @@ internal static class WorldMapPersistentRetainedCache
             topologyRejected = true;
             routes.Clear();
         }
+
+        log?.LogInfo(
+            "WorldMap persistent cache validation complete: " +
+            RestoreValidationMilliseconds.ToString("F0") +
+            " ms, valid rooms " +
+            validRooms.Count + "/" + expectedRoomCount +
+            ", invalid rooms " + invalidRooms.Count +
+            ", staged routes " + routes.Count +
+            (topologyRejected ? ", topology rejected." : "."));
     }
 
     private static void Clear()
