@@ -1195,20 +1195,56 @@ internal static class WorldMapOrthogonalRouter
                 roomIndex)
                 continue;
 
-            if (!TryForwardRawRoomDistance(
-                    mouth,
-                    direction,
-                    obstacle,
-                    out float rawDistance))
-                continue;
+            float safeDistance;
 
-            float safeDistance =
-                obstacle.RoomIndex ==
-                counterpartRoom
-                    ? rawDistance *
-                      0.5f
-                    : rawDistance -
-                      clearance;
+            if (obstacle.RoomIndex == counterpartRoom)
+            {
+                if (!TryForwardRawRoomDistance(
+                        mouth,
+                        direction,
+                        obstacle,
+                        out float rawDistance))
+                    continue;
+
+                // Opposing terminals are allowed to meet inside overlapping visual margins, but
+                // never inside the physical counterpart room.
+                safeDistance =
+                    rawDistance *
+                    0.5f;
+            }
+            else
+            {
+                // For an unrelated blocker, stop before its inflated routing margin whenever
+                // possible. The old raw-body-only clamp could place startEscape *inside* the
+                // blocker's inflated obstacle; A* then had an unblocked start cell surrounded by
+                // blocked neighbours and returned an empty route. When endpoint/blocker margins
+                // overlap, sacrificing some of the source room's preferred neck clearance is much
+                // better than trapping the route or drawing through the blocker.
+                if (TryForwardInflatedObstacleDistance(
+                        mouth,
+                        direction,
+                        obstacle,
+                        out float inflatedDistance))
+                {
+                    safeDistance =
+                        inflatedDistance -
+                        clearance;
+                }
+                else if (TryForwardRawRoomDistance(
+                             mouth,
+                             direction,
+                             obstacle,
+                             out float rawDistance))
+                {
+                    safeDistance =
+                        rawDistance -
+                        clearance;
+                }
+                else
+                {
+                    continue;
+                }
+            }
 
             if (safeDistance <= 0f)
                 continue;
@@ -1224,6 +1260,58 @@ internal static class WorldMapOrthogonalRouter
         return mouth +
                direction *
                distance;
+    }
+
+    private static bool TryForwardInflatedObstacleDistance(
+        Num.Vector2 mouth,
+        Num.Vector2 direction,
+        Obstacle obstacle,
+        out float distance)
+    {
+        distance = float.MaxValue;
+        Num.Vector2 min = obstacle.Min;
+        Num.Vector2 max = obstacle.Max;
+
+        if (direction.X > 0.5f)
+        {
+            if (mouth.Y < min.Y ||
+                mouth.Y > max.Y ||
+                min.X <= mouth.X)
+                return false;
+
+            distance = min.X - mouth.X;
+            return true;
+        }
+
+        if (direction.X < -0.5f)
+        {
+            if (mouth.Y < min.Y ||
+                mouth.Y > max.Y ||
+                max.X >= mouth.X)
+                return false;
+
+            distance = mouth.X - max.X;
+            return true;
+        }
+
+        if (direction.Y > 0.5f)
+        {
+            if (mouth.X < min.X ||
+                mouth.X > max.X ||
+                min.Y <= mouth.Y)
+                return false;
+
+            distance = min.Y - mouth.Y;
+            return true;
+        }
+
+        if (mouth.X < min.X ||
+            mouth.X > max.X ||
+            max.Y >= mouth.Y)
+            return false;
+
+        distance = mouth.Y - max.Y;
+        return true;
     }
 
     private static bool TryForwardRawRoomDistance(
