@@ -499,16 +499,20 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapScene scene,
         WorldMapRoomResourceStore roomResources)
     {
-        RebuildPairLaneOffsets(scene);
+        RebuildPairLaneOffsets(scene, roomResources);
         RebuildTerminalFanouts(scene, roomResources);
     }
 
-    private void RebuildPairLaneOffsets(WorldMapScene scene)
+    private void RebuildPairLaneOffsets(
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
     {
         laneOffsets.Clear();
-        Dictionary<long, List<string>> groups = new();
+        Dictionary<long, List<WorldMapScene.ConnectionNode>> groups =
+            new();
 
-        foreach (WorldMapScene.ConnectionNode connection in scene.Connections.Values)
+        foreach (WorldMapScene.ConnectionNode connection
+                 in scene.Connections.Values)
         {
             int a =
                 Math.Min(
@@ -522,30 +526,227 @@ internal sealed class WorldMapConnectionResourceStore
                 ((long)(uint)a << 32) |
                 (uint)b;
 
-            if (!groups.TryGetValue(key, out List<string> ids))
+            if (!groups.TryGetValue(
+                    key,
+                    out List<WorldMapScene.ConnectionNode> members))
             {
-                ids = new List<string>();
-                groups.Add(key, ids);
+                members =
+                    new List<WorldMapScene.ConnectionNode>();
+                groups.Add(key, members);
             }
 
-            ids.Add(connection.Id);
+            members.Add(connection);
         }
 
-        foreach (List<string> ids in groups.Values)
+        foreach (KeyValuePair<long, List<WorldMapScene.ConnectionNode>> pair
+                 in groups)
         {
-            ids.Sort(StringComparer.Ordinal);
+            List<WorldMapScene.ConnectionNode> members =
+                pair.Value;
+            if (members.Count == 0)
+                continue;
+
+            int roomA =
+                unchecked(
+                    (int)(uint)(pair.Key >> 32));
+            int roomB =
+                unchecked(
+                    (int)(uint)pair.Key);
+
+            bool horizontalPair = true;
+            if (scene.TryGetRoom(
+                    roomA,
+                    out WorldMapScene.RoomNode aRoom) &&
+                scene.TryGetRoom(
+                    roomB,
+                    out WorldMapScene.RoomNode bRoom))
+            {
+                WorldMapWorldSpaceRouter.GetRoomBounds(
+                    aRoom,
+                    roomResources,
+                    out System.Numerics.Vector2 aMin,
+                    out System.Numerics.Vector2 aMax);
+                WorldMapWorldSpaceRouter.GetRoomBounds(
+                    bRoom,
+                    roomResources,
+                    out System.Numerics.Vector2 bMin,
+                    out System.Numerics.Vector2 bMax);
+
+                System.Numerics.Vector2 delta =
+                    (bMin + bMax) * 0.5f -
+                    (aMin + aMax) * 0.5f;
+                horizontalPair =
+                    Math.Abs(delta.X) >=
+                    Math.Abs(delta.Y);
+            }
+
+            members.Sort(
+                (left, right) =>
+                    ComparePairLaneMembers(
+                        left,
+                        right,
+                        roomA,
+                        roomB,
+                        horizontalPair,
+                        scene,
+                        roomResources));
+
             float[] offsets =
                 BuildPairLaneOffsets(
-                    ids.Count);
+                    members.Count);
 
-            for (int i = 0; i < ids.Count; i++)
+            for (int i = 0; i < members.Count; i++)
             {
-                // Do not clamp offsets to a fixed maximum. Dense same-room-pair links instead gain
-                // stable eight-lane bank gutters so high counts remain visually grouped.
-                laneOffsets[ids[i]] =
+                laneOffsets[members[i].Id] =
                     offsets[i];
             }
         }
+    }
+
+    private static int ComparePairLaneMembers(
+        WorldMapScene.ConnectionNode left,
+        WorldMapScene.ConnectionNode right,
+        int roomA,
+        int roomB,
+        bool horizontalPair,
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        GetCanonicalPairEndpoints(
+            left,
+            roomA,
+            roomB,
+            scene,
+            roomResources,
+            out System.Numerics.Vector2 leftA,
+            out System.Numerics.Vector2 leftB);
+        GetCanonicalPairEndpoints(
+            right,
+            roomA,
+            roomB,
+            scene,
+            roomResources,
+            out System.Numerics.Vector2 rightA,
+            out System.Numerics.Vector2 rightB);
+
+        float leftAlongA =
+            horizontalPair
+                ? leftA.Y
+                : leftA.X;
+        float leftAlongB =
+            horizontalPair
+                ? leftB.Y
+                : leftB.X;
+        float rightAlongA =
+            horizontalPair
+                ? rightA.Y
+                : rightA.X;
+        float rightAlongB =
+            horizontalPair
+                ? rightB.Y
+                : rightB.X;
+
+        // Average endpoint order is the primary lane order. Endpoint-specific tie breakers stop
+        // sibling links from crossing merely because their connection IDs sort differently.
+        float leftAverage =
+            (leftAlongA + leftAlongB) *
+            0.5f;
+        float rightAverage =
+            (rightAlongA + rightAlongB) *
+            0.5f;
+
+        int average =
+            leftAverage.CompareTo(
+                rightAverage);
+        if (average != 0)
+            return average;
+
+        int aOrder =
+            leftAlongA.CompareTo(
+                rightAlongA);
+        if (aOrder != 0)
+            return aOrder;
+
+        int bOrder =
+            leftAlongB.CompareTo(
+                rightAlongB);
+        if (bOrder != 0)
+            return bOrder;
+
+        int leftNodeA =
+            left.FromRoomIndex == roomA
+                ? left.FromNodeIndex
+                : left.ToNodeIndex;
+        int rightNodeA =
+            right.FromRoomIndex == roomA
+                ? right.FromNodeIndex
+                : right.ToNodeIndex;
+        int node =
+            leftNodeA.CompareTo(
+                rightNodeA);
+        if (node != 0)
+            return node;
+
+        return string.CompareOrdinal(
+            left.Id,
+            right.Id);
+    }
+
+    private static void GetCanonicalPairEndpoints(
+        WorldMapScene.ConnectionNode connection,
+        int roomA,
+        int roomB,
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources,
+        out System.Numerics.Vector2 pointA,
+        out System.Numerics.Vector2 pointB)
+    {
+        pointA =
+            ResolvePairEndpoint(
+                connection,
+                roomA,
+                scene,
+                roomResources);
+        pointB =
+            ResolvePairEndpoint(
+                connection,
+                roomB,
+                scene,
+                roomResources);
+    }
+
+    private static System.Numerics.Vector2 ResolvePairEndpoint(
+        WorldMapScene.ConnectionNode connection,
+        int roomIndex,
+        WorldMapScene scene,
+        WorldMapRoomResourceStore roomResources)
+    {
+        if (connection == null ||
+            scene == null ||
+            !scene.TryGetRoom(
+                roomIndex,
+                out WorldMapScene.RoomNode room))
+            return System.Numerics.Vector2.Zero;
+
+        int nodeIndex =
+            connection.FromRoomIndex == roomIndex
+                ? connection.FromNodeIndex
+                : connection.ToNodeIndex;
+
+        if (nodeIndex >= 0)
+        {
+            return WorldMapWorldSpaceRouter.EndpointPosition(
+                room,
+                nodeIndex,
+                roomResources);
+        }
+
+        WorldMapWorldSpaceRouter.GetRoomBounds(
+            room,
+            roomResources,
+            out System.Numerics.Vector2 min,
+            out System.Numerics.Vector2 max);
+        return (min + max) * 0.5f;
     }
 
     private void RebuildTerminalFanouts(
