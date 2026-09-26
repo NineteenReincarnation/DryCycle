@@ -258,6 +258,8 @@ internal static class CartographyExporter
             xml.WriteStartElement("image", "http://www.w3.org/2000/svg");
             Attr(xml,"x",shape.Rect.X); Attr(xml,"y",shape.Rect.Y); Attr(xml,"width",shape.Rect.Width); Attr(xml,"height",shape.Rect.Height);
             Attr(xml,"opacity",(shape.Color>>24)/255f);
+            if (shape.PixelPerfect)
+                xml.WriteAttributeString("style", "image-rendering:pixelated;image-rendering:crisp-edges");
             xml.WriteAttributeString("href","data:image/png;base64,"+Convert.ToBase64String(shape.Raster.Png()));
             if(shape.Text.Length>0)xml.WriteElementString("title",shape.Text);
             xml.WriteEndElement(); return;
