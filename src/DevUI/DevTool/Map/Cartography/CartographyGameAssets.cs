@@ -33,6 +33,11 @@ internal static class CartographyGameAssets
         }
 
         TryLoadPending(force: true);
+
+        // Raw sprites can already be present in CartographyAssets (for example after a warm source
+        // switch). Alias registration is semantic and must run even when no new atlas readback was
+        // needed in this call.
+        CartographyIconCatalog.RegisterObjectSprites();
     }
 
     /// <summary>
