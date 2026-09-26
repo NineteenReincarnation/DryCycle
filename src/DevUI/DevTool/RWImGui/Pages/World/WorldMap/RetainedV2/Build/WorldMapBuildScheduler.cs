@@ -90,10 +90,15 @@ internal sealed class WorldMapBuildScheduler
         }
     }
 
-    internal int Drain(int maxResults, Action<RoomBuildResult> consumer)
+    internal int Drain(
+        int maxResults,
+        long deadlineTicks,
+        Action<RoomBuildResult> consumer)
     {
         int drained = 0;
-        while (drained < maxResults && completed.TryDequeue(out RoomBuildResult result))
+        while (drained < maxResults &&
+               Stopwatch.GetTimestamp() < deadlineTicks &&
+               completed.TryDequeue(out RoomBuildResult result))
         {
             drained++;
 
