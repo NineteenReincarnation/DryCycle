@@ -223,6 +223,18 @@ internal static class WorldMapShortcutPresentation
     {
         if (entry?.Room == null || entry.RoomRep == null) return false;
 
+        // Exact shortcut data is authoritative and is already read from the realized room or room
+        // file by WorldMapExactShortcuts. Once it has published this room, repeating a MapTex
+        // GetPixels scan here only burns main-thread time and duplicates the same endpoint work.
+        if (WorldMapExactShortcuts.HasPublishedRoom(entry.RoomIndex))
+        {
+            entry.NextPollFrame =
+                Time.frameCount +
+                SourcePollIntervalFrames +
+                Math.Abs(entry.RoomIndex % 41);
+            return false;
+        }
+
         global::Room realized = entry.Room.realizedRoom;
         if (realized?.shortcuts != null && realized.shortcuts.Length > 0)
         {
