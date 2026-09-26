@@ -675,7 +675,30 @@ internal static class WorldMapRetainedV2Runtime
             " ms | peak " +
             MapRoomGeometryPresentationHub.RasterReadbackPeakMilliseconds.ToString("F2") +
             " ms");
-        ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
+        ImGui.TextUnformatted(
+            "world-space routes: " + ConnectionResources.Count +
+            " | pending " + ConnectionResources.PendingCount);
+        ImGui.TextUnformatted(
+            "route batches: " + ConnectionResources.RouteBuildCount +
+            " routes | avg " +
+            ConnectionResources.RouteBuildAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            ConnectionResources.RouteBuildPeakMilliseconds.ToString("F2") +
+            " ms");
+        ImGui.TextUnformatted(
+            "corridor layout: " + ConnectionResources.CorridorLayoutCount +
+            " | avg " +
+            ConnectionResources.CorridorLayoutAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            ConnectionResources.CorridorLayoutPeakMilliseconds.ToString("F2") +
+            " ms");
+        ImGui.TextUnformatted(
+            "crossing rebuild: " + ConnectionResources.CrossingBuildCount +
+            " | avg " +
+            ConnectionResources.CrossingBuildAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            ConnectionResources.CrossingBuildPeakMilliseconds.ToString("F2") +
+            " ms");
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
             (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " | " + Surface.Error));
