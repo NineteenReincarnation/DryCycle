@@ -66,6 +66,14 @@ internal static class WorldMapView
     private static string selectedConnectionId = string.Empty;
     private static string hoveredConnectionId = string.Empty;
 
+    // Viewport navigation freezes the last hover presentation instead of deleting it. Expensive
+    // hit-tests stop while panning/zooming, but the information already on screen remains visible.
+    private static int navigationHoverRoomIndex = -1;
+    private static int navigationHoverPortRoomIndex = -1;
+    private static int navigationHoverPortNodeIndex = -1;
+    private static string navigationHoverPortConnectionId = string.Empty;
+    private static string navigationHoverConnectionId = string.Empty;
+
     internal static string SelectedConnectionId => selectedConnectionId;
 
     internal static void SelectConnection(string connectionId) =>
@@ -114,6 +122,11 @@ internal static class WorldMapView
         linkDirection = WorldConnectionDirection.Bidirectional;
         selectedConnectionId = string.Empty;
         hoveredConnectionId = string.Empty;
+        navigationHoverRoomIndex = -1;
+        navigationHoverPortRoomIndex = -1;
+        navigationHoverPortNodeIndex = -1;
+        navigationHoverPortConnectionId = string.Empty;
+        navigationHoverConnectionId = string.Empty;
 
         WorldMapRetainedV2Runtime.ResetRetainedState();
     }
@@ -273,61 +286,118 @@ internal static class WorldMapView
         bool retainedRoomsPresented =
             WorldMapRetainedV2Runtime.TryPresentSurface(draw, canvasMin, canvasMax);
 
-        EditorMapRoomSnapshot hoveredRoom = !viewportInteraction && canvasHovered
-            ? FindHoveredRoom(snapshot, canvasMin, canvasSize, io.MousePos)
-            : null;
-        ExitPortHit hoveredPort = !viewportInteraction && canvasHovered
-            ? FindHoveredExitPort(snapshot, canvasMin, canvasSize, io.MousePos, hoveredRoom)
-            : null;
+        EditorMapRoomSnapshot hoveredRoom;
+        ExitPortHit hoveredPort;
+
+        if (!viewportInteraction)
+        {
+            hoveredRoom =
+                canvasHovered
+                    ? FindHoveredRoom(
+                        snapshot,
+                        canvasMin,
+                        canvasSize,
+                        io.MousePos)
+                    : null;
+            hoveredPort =
+                canvasHovered
+                    ? FindHoveredExitPort(
+                        snapshot,
+                        canvasMin,
+                        canvasSize,
+                        io.MousePos,
+                        hoveredRoom)
+                    : null;
+
+            navigationHoverRoomIndex =
+                hoveredRoom?.RoomIndex ??
+                -1;
+            navigationHoverPortRoomIndex =
+                hoveredPort?.Room?.RoomIndex ??
+                -1;
+            navigationHoverPortNodeIndex =
+                hoveredPort?.Node?.NodeIndex ??
+                -1;
+            navigationHoverPortConnectionId =
+                hoveredPort?.Connection?.ConnectionId ??
+                string.Empty;
+        }
+        else
+        {
+            hoveredRoom =
+                navigationHoverRoomIndex >= 0
+                    ? FindRoom(
+                        snapshot,
+                        navigationHoverRoomIndex)
+                    : null;
+            hoveredPort =
+                ResolveNavigationHoverPort(
+                    snapshot,
+                    canvasMin);
+        }
 
         bool retainedConnectionsPresented =
             retainedRoomsPresented &&
             showConnections;
 
         EdgeHit hoveredEdge = null;
-        hoveredConnectionId = string.Empty;
-        if (!viewportInteraction &&
-            canvasHovered &&
-            hoveredPort == null &&
-            showConnections)
+
+        if (!viewportInteraction)
         {
-            float retainedScreenDistanceSq = float.MaxValue;
-            if (retainedConnectionsPresented)
+            hoveredConnectionId = string.Empty;
+
+            if (canvasHovered &&
+                hoveredPort == null &&
+                showConnections)
             {
-                float safeZoom = Math.Max(0.0001f, zoom);
-                Num.Vector2 worldPoint =
-                    (io.MousePos - canvasMin - pan) / safeZoom;
-                float worldRadius = 12f / safeZoom;
-                if (WorldMapRetainedV2Runtime.TryHitConnection(
-                        worldPoint,
-                        worldRadius,
-                        out string retainedConnectionId,
-                        out float retainedWorldDistanceSq))
+                float retainedScreenDistanceSq = float.MaxValue;
+                if (retainedConnectionsPresented)
                 {
-                    hoveredConnectionId = retainedConnectionId;
-                    retainedScreenDistanceSq =
-                        retainedWorldDistanceSq *
-                        safeZoom *
-                        safeZoom;
+                    float safeZoom = Math.Max(0.0001f, zoom);
+                    Num.Vector2 worldPoint =
+                        (io.MousePos - canvasMin - pan) / safeZoom;
+                    float worldRadius = 12f / safeZoom;
+                    if (WorldMapRetainedV2Runtime.TryHitConnection(
+                            worldPoint,
+                            worldRadius,
+                            out string retainedConnectionId,
+                            out float retainedWorldDistanceSq))
+                    {
+                        hoveredConnectionId = retainedConnectionId;
+                        retainedScreenDistanceSq =
+                            retainedWorldDistanceSq *
+                            safeZoom *
+                            safeZoom;
+                    }
+                }
+
+                hoveredEdge = FindHoveredEdge(
+                    snapshot,
+                    canvasMin,
+                    canvasSize,
+                    io.MousePos,
+                    skipRetainedRoutes: retainedConnectionsPresented);
+
+                if (hoveredEdge != null &&
+                    hoveredEdge.DistanceSq < retainedScreenDistanceSq)
+                {
+                    hoveredConnectionId = string.Empty;
+                }
+                else if (!string.IsNullOrEmpty(hoveredConnectionId))
+                {
+                    hoveredEdge = null;
                 }
             }
 
-            hoveredEdge = FindHoveredEdge(
-                snapshot,
-                canvasMin,
-                canvasSize,
-                io.MousePos,
-                skipRetainedRoutes: retainedConnectionsPresented);
-
-            if (hoveredEdge != null &&
-                hoveredEdge.DistanceSq < retainedScreenDistanceSq)
-            {
-                hoveredConnectionId = string.Empty;
-            }
-            else if (!string.IsNullOrEmpty(hoveredConnectionId))
-            {
-                hoveredEdge = null;
-            }
+            navigationHoverConnectionId =
+                hoveredPort?.Connection?.ConnectionId ??
+                hoveredConnectionId ??
+                string.Empty;
+        }
+        else
+        {
+            hoveredConnectionId =
+                navigationHoverConnectionId;
         }
 
         DrawRooms(
@@ -368,7 +438,6 @@ internal static class WorldMapView
         WorldMapRenderOrder.UseOverlay(draw);
 
         if (retainedConnectionsPresented &&
-            !viewportInteraction &&
             canvasHovered &&
             hoveredPort == null &&
             !string.IsNullOrEmpty(hoveredConnectionId))
@@ -1458,7 +1527,6 @@ internal static class WorldMapView
                     room.RoomIndex == linkingRoom &&
                     node.NodeIndex == linkingNode;
                 bool hovered =
-                    !presentationOnly &&
                     hoveredPort != null &&
                     hoveredPort.Room.RoomIndex == room.RoomIndex &&
                     hoveredPort.Node.NodeIndex == node.NodeIndex;
@@ -2228,6 +2296,63 @@ internal static class WorldMapView
             EditorMapRoomSnapshot room = rooms[i];
             if (room != null) hoverRoomLookup[room.RoomIndex] = room;
         }
+    }
+
+    private static ExitPortHit ResolveNavigationHoverPort(
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin)
+    {
+        if (navigationHoverPortRoomIndex < 0 ||
+            navigationHoverPortNodeIndex < 0)
+            return null;
+
+        EditorMapRoomSnapshot room =
+            FindRoom(
+                snapshot,
+                navigationHoverPortRoomIndex);
+        if (room == null)
+            return null;
+
+        EditorMapRoomNodeSnapshot[] nodes =
+            room.Nodes ??
+            Array.Empty<EditorMapRoomNodeSnapshot>();
+        EditorMapRoomNodeSnapshot node =
+            null;
+
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            if (nodes[i]?.NodeIndex !=
+                navigationHoverPortNodeIndex)
+                continue;
+
+            node =
+                nodes[i];
+            break;
+        }
+
+        if (node == null ||
+            !node.Exit)
+            return null;
+
+        EditorMapConnectionSnapshot connection =
+            string.IsNullOrEmpty(
+                navigationHoverPortConnectionId)
+                ? null
+                : FindConnection(
+                    snapshot,
+                    navigationHoverPortConnectionId);
+
+        return new ExitPortHit
+        {
+            Room = room,
+            Node = node,
+            Position = EndpointPosition(
+                room,
+                node.NodeIndex,
+                canvasMin),
+            Free = node.ConnectedRoomIndex < 0,
+            Connection = connection
+        };
     }
 
     private static ExitPortHit FindHoveredExitPort(
