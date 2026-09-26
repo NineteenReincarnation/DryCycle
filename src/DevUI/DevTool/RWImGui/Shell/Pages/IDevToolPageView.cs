@@ -70,8 +70,6 @@ internal interface IDevToolPageView
     string NavigationTooltip { get; }
     bool UsesDedicatedWorkspace { get; }
     bool SupportsSceneSurface { get; }
-    bool AlwaysShowSceneSurface { get; }
-    bool SupportsScenePlacement { get; }
     bool SupportsPlacementInput { get; }
     string LegacyFallbackTooltip { get; }
 
@@ -114,8 +112,6 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public virtual string NavigationTooltip => NavigationLabel;
     public virtual bool UsesDedicatedWorkspace => false;
     public virtual bool SupportsSceneSurface => false;
-    public virtual bool AlwaysShowSceneSurface => false;
-    public virtual bool SupportsScenePlacement => SupportsSceneSurface;
     public virtual bool SupportsPlacementInput => false;
     public virtual string LegacyFallbackTooltip => string.Empty;
 
