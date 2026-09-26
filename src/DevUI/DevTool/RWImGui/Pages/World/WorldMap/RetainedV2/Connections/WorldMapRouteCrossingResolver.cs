@@ -75,6 +75,42 @@ internal static class WorldMapRouteCrossingResolver
         internal readonly List<SegmentRef> Horizontals = new();
     }
 
+    private readonly struct RoutePairKey : IEquatable<RoutePairKey>
+    {
+        internal RoutePairKey(string routeA, string routeB)
+        {
+            if (string.CompareOrdinal(routeA, routeB) <= 0)
+            {
+                RouteA = routeA ?? string.Empty;
+                RouteB = routeB ?? string.Empty;
+            }
+            else
+            {
+                RouteA = routeB ?? string.Empty;
+                RouteB = routeA ?? string.Empty;
+            }
+        }
+
+        private string RouteA { get; }
+        private string RouteB { get; }
+
+        public bool Equals(RoutePairKey other) =>
+            string.Equals(RouteA, other.RouteA, StringComparison.Ordinal) &&
+            string.Equals(RouteB, other.RouteB, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) =>
+            obj is RoutePairKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return ((RouteA?.GetHashCode() ?? 0) * 397) ^
+                       (RouteB?.GetHashCode() ?? 0);
+            }
+        }
+    }
+
     private readonly struct CrossingKey : IEquatable<CrossingKey>
     {
         internal CrossingKey(string routeA, string routeB, Num.Vector2 point)
@@ -207,6 +243,8 @@ internal static class WorldMapRouteCrossingResolver
 
         HashSet<long> checkedPairs = new();
         HashSet<CrossingKey> emittedCrossings = new();
+        Dictionary<RoutePairKey, string> preferredOverRouteByPair =
+            new();
         List<WorldMapCrossingMark> marks = new();
         List<WorldMapCrossingMark> localMarks = new();
         bool budgetLimited = false;
@@ -298,10 +336,18 @@ internal static class WorldMapRouteCrossingResolver
 
                     SegmentRef over;
                     SegmentRef under;
+                    RoutePairKey routePair =
+                        new(
+                            vertical.RouteId,
+                            horizontal.RouteId);
 
-                    // If the intersection lands on an internal bend/end of one segment, put the
-                    // bridge on the route that actually has shoulders on both sides. This converts
-                    // the old fake T-junction into an explicit "passes over" crossing.
+                    preferredOverRouteByPair.TryGetValue(
+                        routePair,
+                        out string preferredOverRouteId);
+
+                    // Keep bridge hierarchy stable for a route pair. Without pair-level precedence
+                    // the same two routes could alternate over/under at successive crossings merely
+                    // because local shoulder capacity changed, producing a woven-knot appearance.
                     if (verticalCanBridge != horizontalCanBridge)
                     {
                         over = verticalCanBridge
@@ -310,6 +356,30 @@ internal static class WorldMapRouteCrossingResolver
                         under = verticalCanBridge
                             ? horizontal
                             : vertical;
+
+                        if (string.IsNullOrEmpty(
+                                preferredOverRouteId))
+                        {
+                            preferredOverRouteByPair[routePair] =
+                                over.RouteId;
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(
+                                 preferredOverRouteId))
+                    {
+                        over =
+                            string.Equals(
+                                vertical.RouteId,
+                                preferredOverRouteId,
+                                StringComparison.Ordinal)
+                                ? vertical
+                                : horizontal;
+                        under =
+                            ReferenceEquals(
+                                over,
+                                vertical)
+                                ? horizontal
+                                : vertical;
                     }
                     else
                     {
@@ -332,25 +402,26 @@ internal static class WorldMapRouteCrossingResolver
                                 horizontalCapacity
                                     ? vertical
                                     : horizontal;
-                            under =
-                                ReferenceEquals(
-                                    over,
-                                    vertical)
-                                    ? horizontal
-                                    : vertical;
-                        }
-                        else if (string.CompareOrdinal(
-                                     vertical.RouteId,
-                                     horizontal.RouteId) >= 0)
-                        {
-                            over = vertical;
-                            under = horizontal;
                         }
                         else
                         {
-                            over = horizontal;
-                            under = vertical;
+                            over =
+                                string.CompareOrdinal(
+                                    vertical.RouteId,
+                                    horizontal.RouteId) >= 0
+                                    ? vertical
+                                    : horizontal;
                         }
+
+                        under =
+                            ReferenceEquals(
+                                over,
+                                vertical)
+                                ? horizontal
+                                : vertical;
+
+                        preferredOverRouteByPair[routePair] =
+                            over.RouteId;
                     }
 
                     Num.Vector2 tangent =
