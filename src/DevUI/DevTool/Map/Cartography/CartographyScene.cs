@@ -152,7 +152,7 @@ internal static class CartographySceneBuilder
                 CartographyItem item=Resolve(document,author);
                 if(item.Kind==CartographyItemKind.Marker && CartographyDrawing.SpriteName(item) is string spriteName &&
                     spriteName.Length>0 && CartographyAssets.Sprite(spriteName)==null)
-                    warnings.Add(item.Id+": missing sprite '"+spriteName+"'");
+                    warnings.Add(MissingSpriteWarning(item,spriteName));
                 source.Rooms.TryGetValue(item.Room,out CartographyRoomSource room);
                 if(item.Kind==CartographyItemKind.Connection)
                 {
@@ -200,7 +200,39 @@ internal static class CartographySceneBuilder
             }
         }
         cache?.Prune(document);
-        return new CartographyScene{Nodes=nodes.ToArray(),Bounds=nodes.Count>0?nodes.Select(n=>n.Bounds).Aggregate(CartographyRect.Union):new CartographyRect(0,0,640,480),Errors=errors.ToArray(),Warnings=warnings.ToArray()};
+        return new CartographyScene
+        {
+            Nodes=nodes.ToArray(),
+            Bounds=nodes.Count>0?nodes.Select(n=>n.Bounds).Aggregate(CartographyRect.Union):new CartographyRect(0,0,640,480),
+            Errors=errors.Distinct(StringComparer.Ordinal).ToArray(),
+            Warnings=warnings.Distinct(StringComparer.Ordinal).ToArray()
+        };
+    }
+
+    private static string MissingSpriteWarning(
+        CartographyItem item,
+        string spriteName)
+    {
+        string room =
+            item?.Appearance?.ParentId ?? string.Empty;
+        if (room.StartsWith(
+                "room:",
+                StringComparison.Ordinal))
+        {
+            room =
+                room.Substring(
+                    "room:".Length);
+        }
+
+        if (string.IsNullOrEmpty(room))
+            room = item?.Room ?? string.Empty;
+
+        return
+            "Missing sprite" +
+            " | room=" + (string.IsNullOrEmpty(room) ? "<none>" : room) +
+            " | object=" + (item?.Id ?? "<unknown>") +
+            " | type=" + (string.IsNullOrEmpty(item?.Text) ? "<unknown>" : item.Text) +
+            " | sprite=" + spriteName;
     }
     private static CartographyRect Normalized(CartographyRect r)=>new(Math.Min(r.X,r.Right),Math.Min(r.Y,r.Bottom),Math.Abs(r.Width),Math.Abs(r.Height));
     internal static CartographySceneNode AnnotationLine(CartographyItem item, CartographyLayer layer)
