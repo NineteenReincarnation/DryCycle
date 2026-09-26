@@ -54,6 +54,7 @@ internal static partial class CartographyView
     internal static void Leave()
     {
         LeaveDrafts();
+        imageBrowserOpen = false;
         CartographyRuntime.SetActive(false);
     }
 
@@ -91,6 +92,7 @@ internal static partial class CartographyView
         try
         {
             DrawContent(editor);
+            DrawImageBrowser(CartographyRuntime.Presentation);
             DrawDiagnosticsWindow(CartographyRuntime.Presentation);
         }
         finally
