@@ -10,6 +10,7 @@ internal static class Program
         try
         {
             GeometryCadence();
+            SnapshotCadence();
             SourceRecoveryCadence();
             ShortcutCadence();
             SurfaceGate();
@@ -62,6 +63,19 @@ internal static class Program
                 thumbnailWorkIncomplete: false,
                 catchupAgeMilliseconds: 0d) == 12,
             "Completed hidden maps use maintenance cadence instead of visible-map cadence.");
+    }
+
+    private static void SnapshotCadence()
+    {
+        Check(
+            WorldMapBackgroundSchedulingPolicy.SnapshotIntervalFrames(
+                overlayVisible: true) == 2,
+            "Visible World Map keeps responsive detached snapshot publication.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.SnapshotIntervalFrames(
+                overlayVisible: false) == 12,
+            "OH/hidden World Map reduces detached snapshot publication overhead.");
     }
 
     private static void SourceRecoveryCadence()
