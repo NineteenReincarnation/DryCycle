@@ -237,6 +237,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
         long perfStarted = Stopwatch.GetTimestamp();
         int completed = 0;
+        bool didWork = false;
         try
         {
             // Bound the whole queue as well as each incremental shortcut-mapping job.
@@ -248,6 +249,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 if (completed >= 2 || Stopwatch.GetTimestamp() >= deadline) return;
                 if (mapObject.roomPrep != null)
                 {
+                    didWork = true;
                     RoomPreparer preparer = mapObject.roomPrep;
                     ApplyPreparedRoomDimensions(preparer.room);
 
@@ -274,6 +276,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
                 if (!allowStartNew || !SelectNextMissingRoom(mapObject, roomCount)) return;
 
+                didWork = true;
                 int localIndex = mapObject.roomLoaderIndex;
                 MapObject.RoomRepresentation roomRep = mapObject.roomReps[localIndex];
                 if (roomRep == null || roomRep.room == null)
@@ -347,11 +350,16 @@ internal static partial class MapRoomGeometryPresentationHub
         }
         finally
         {
-            long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - perfStarted);
-            recoveryPerfTotalTicks += elapsed;
-            recoveryPerfPeakTicks = Math.Max(recoveryPerfPeakTicks, elapsed);
-            recoveryPerfSamples++;
-            recoveryPerfCompletedRooms += completed;
+            // Do not dilute the diagnostic with thousands of idle no-op frames after the queue has
+            // completed. The average/peak should describe actual thumbnail recovery work.
+            if (didWork)
+            {
+                long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - perfStarted);
+                recoveryPerfTotalTicks += elapsed;
+                recoveryPerfPeakTicks = Math.Max(recoveryPerfPeakTicks, elapsed);
+                recoveryPerfSamples++;
+                recoveryPerfCompletedRooms += completed;
+            }
         }
     }
 
