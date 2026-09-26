@@ -120,6 +120,9 @@ internal static class WorldMapCorridorLaneAllocator
     private const float MinimumLaneSpacing = 5.5f;
     private const float TargetLaneSpan = 72f;
     private const float MinimumReadableGroupScale = 0.55f;
+    private const float MaximumAdjacentGroupScaleDelta = 0.16f;
+    private const float MinimumReadableParallelClearance = 4.0f;
+    private const float MinimumReadableParallelRun = 18f;
 
     // Dense bundles are visually split into stable banks. The lane order never changes; a wider
     // gutter every eight lanes gives the eye a grouping landmark without endpoint codes/colors.
@@ -180,6 +183,14 @@ internal static class WorldMapCorridorLaneAllocator
                 routes,
                 planSet,
                 obstacles);
+
+        // Keep spacing changes gradual across neighbouring corridor components. A route should not
+        // leave a 100% lane bank and enter a 54% bank at the very next junction; that visual
+        // "pinch" is almost as hard to follow as an actual crossing.
+        SmoothAdjacentGroupScales(
+            planSet,
+            groupScales);
+
         HashSet<string> reroute =
             new(StringComparer.Ordinal);
 
@@ -306,6 +317,14 @@ internal static class WorldMapCorridorLaneAllocator
             planSet,
             reroute);
 
+        // Parallel members that remain closer than the readable lane floor for a meaningful run
+        // are a local-clearance failure even if they never literally intersect. Ask the bounded
+        // rerouter for another corridor instead of accepting a visually merged pair.
+        CollectBundleClearanceConflicts(
+            routes,
+            planSet,
+            reroute);
+
         // Severe compression is already a readability failure before it reaches a literal
         // centreline collapse. If a bundle drops below the minimum readable scale, surface those
         // routes to the resource store for one congestion-aware reroute pass. If no alternative
@@ -331,6 +350,346 @@ internal static class WorldMapCorridorLaneAllocator
         reroute.CopyTo(rerouteIds);
         Array.Sort(rerouteIds, StringComparer.Ordinal);
         return new WorldMapCorridorLaneApplyResult(rerouteIds);
+    }
+
+    private static void SmoothAdjacentGroupScales(
+        ContinuityPlanSet planSet,
+        Dictionary<int, float> scales)
+    {
+        if (planSet == null ||
+            scales == null ||
+            scales.Count < 2)
+            return;
+
+        Dictionary<int, HashSet<int>> adjacency =
+            new();
+
+        foreach (KeyValuePair<string, RouteLanePlan> pair
+                 in planSet.Routes)
+        {
+            RouteLanePlan plan =
+                pair.Value;
+            if (plan == null ||
+                plan.GroupIds.Length == 0)
+                continue;
+
+            int previousGroup = -1;
+            int previousIndex = -100;
+
+            for (int i = 0;
+                 i < plan.GroupIds.Length;
+                 i++)
+            {
+                int groupId =
+                    plan.GroupIds[i];
+                if (groupId < 0)
+                    continue;
+
+                if (previousGroup >= 0 &&
+                    groupId != previousGroup &&
+                    i - previousIndex <= 2)
+                {
+                    AddGroupNeighbor(
+                        adjacency,
+                        previousGroup,
+                        groupId);
+                    AddGroupNeighbor(
+                        adjacency,
+                        groupId,
+                        previousGroup);
+                }
+
+                previousGroup =
+                    groupId;
+                previousIndex =
+                    i;
+            }
+        }
+
+        if (adjacency.Count == 0)
+            return;
+
+        // Only reduce the roomier neighbour. Never inflate the constrained corridor because its
+        // scale has already been proven against room obstacles.
+        for (int pass = 0;
+             pass < scales.Count;
+             pass++)
+        {
+            bool changed = false;
+
+            foreach (KeyValuePair<int, HashSet<int>> pair
+                     in adjacency)
+            {
+                if (!scales.TryGetValue(
+                        pair.Key,
+                        out float sourceScale))
+                    continue;
+
+                foreach (int neighbor in pair.Value)
+                {
+                    if (!scales.TryGetValue(
+                            neighbor,
+                            out float neighborScale))
+                        continue;
+
+                    float maximum =
+                        sourceScale +
+                        MaximumAdjacentGroupScaleDelta;
+
+                    if (neighborScale <=
+                        maximum +
+                        0.0001f)
+                        continue;
+
+                    scales[neighbor] =
+                        Math.Max(
+                            0f,
+                            Math.Min(
+                                1f,
+                                maximum));
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+                break;
+        }
+    }
+
+    private static void AddGroupNeighbor(
+        Dictionary<int, HashSet<int>> adjacency,
+        int groupId,
+        int neighborId)
+    {
+        if (groupId < 0 ||
+            neighborId < 0 ||
+            groupId == neighborId)
+            return;
+
+        if (!adjacency.TryGetValue(
+                groupId,
+                out HashSet<int> neighbors))
+        {
+            neighbors =
+                new HashSet<int>();
+            adjacency.Add(
+                groupId,
+                neighbors);
+        }
+
+        neighbors.Add(
+            neighborId);
+    }
+
+    private static void CollectBundleClearanceConflicts(
+        Dictionary<string, ConnectionRouteResource> routes,
+        ContinuityPlanSet planSet,
+        HashSet<string> reroute)
+    {
+        if (routes == null ||
+            planSet == null ||
+            reroute == null ||
+            planSet.GroupRoutes.Count == 0)
+            return;
+
+        List<int> groupIds =
+            new(planSet.GroupRoutes.Keys);
+        groupIds.Sort();
+
+        HashSet<string> checkedPairs =
+            new(StringComparer.Ordinal);
+        int checks = 0;
+
+        for (int g = 0;
+             g < groupIds.Count &&
+             checks < MaxBundleCrossingSegmentChecks;
+             g++)
+        {
+            if (!planSet.GroupRoutes.TryGetValue(
+                    groupIds[g],
+                    out List<string> ids) ||
+                ids == null ||
+                ids.Count < 2)
+                continue;
+
+            for (int i = 0;
+                 i < ids.Count - 1 &&
+                 checks < MaxBundleCrossingSegmentChecks;
+                 i++)
+            {
+                string aId =
+                    ids[i];
+
+                if (!routes.TryGetValue(
+                        aId,
+                        out ConnectionRouteResource aRoute))
+                    continue;
+
+                for (int j = i + 1;
+                     j < ids.Count &&
+                     checks < MaxBundleCrossingSegmentChecks;
+                     j++)
+                {
+                    string bId =
+                        ids[j];
+                    string pairKey =
+                        string.CompareOrdinal(
+                            aId,
+                            bId) <= 0
+                            ? aId + "\n" + bId
+                            : bId + "\n" + aId;
+
+                    if (!checkedPairs.Add(
+                            pairKey) ||
+                        !routes.TryGetValue(
+                            bId,
+                            out ConnectionRouteResource bRoute))
+                        continue;
+
+                    if (!RoutesRunTooClose(
+                            aRoute?.Points,
+                            bRoute?.Points,
+                            ref checks))
+                        continue;
+
+                    reroute.Add(aId);
+                    reroute.Add(bId);
+                }
+            }
+        }
+    }
+
+    private static bool RoutesRunTooClose(
+        Num.Vector2[] a,
+        Num.Vector2[] b,
+        ref int checks)
+    {
+        if (a == null ||
+            b == null ||
+            a.Length < 4 ||
+            b.Length < 4)
+            return false;
+
+        int aFirst = 1;
+        int aLast = a.Length - 3;
+        int bFirst = 1;
+        int bLast = b.Length - 3;
+
+        for (int ai = aFirst;
+             ai <= aLast &&
+             checks < MaxBundleCrossingSegmentChecks;
+             ai++)
+        {
+            Num.Vector2 a0 = a[ai];
+            Num.Vector2 a1 = a[ai + 1];
+            bool aVertical =
+                Math.Abs(
+                    a0.X -
+                    a1.X) < 0.01f;
+            bool aHorizontal =
+                Math.Abs(
+                    a0.Y -
+                    a1.Y) < 0.01f;
+
+            if (!aVertical &&
+                !aHorizontal)
+                continue;
+
+            for (int bi = bFirst;
+                 bi <= bLast &&
+                 checks < MaxBundleCrossingSegmentChecks;
+                 bi++)
+            {
+                Num.Vector2 b0 = b[bi];
+                Num.Vector2 b1 = b[bi + 1];
+                bool bVertical =
+                    Math.Abs(
+                        b0.X -
+                        b1.X) < 0.01f;
+                bool bHorizontal =
+                    Math.Abs(
+                        b0.Y -
+                        b1.Y) < 0.01f;
+
+                if ((!bVertical &&
+                     !bHorizontal) ||
+                    aVertical != bVertical)
+                    continue;
+
+                checks++;
+
+                float separation;
+                float overlap;
+
+                if (aVertical)
+                {
+                    separation =
+                        Math.Abs(
+                            a0.X -
+                            b0.X);
+                    overlap =
+                        IntervalOverlap(
+                            a0.Y,
+                            a1.Y,
+                            b0.Y,
+                            b1.Y);
+                }
+                else
+                {
+                    separation =
+                        Math.Abs(
+                            a0.Y -
+                            b0.Y);
+                    overlap =
+                        IntervalOverlap(
+                            a0.X,
+                            a1.X,
+                            b0.X,
+                            b1.X);
+                }
+
+                if (overlap >=
+                        MinimumReadableParallelRun &&
+                    separation <
+                        MinimumReadableParallelClearance)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static float IntervalOverlap(
+        float a0,
+        float a1,
+        float b0,
+        float b1)
+    {
+        float aMin =
+            Math.Min(
+                a0,
+                a1);
+        float aMax =
+            Math.Max(
+                a0,
+                a1);
+        float bMin =
+            Math.Min(
+                b0,
+                b1);
+        float bMax =
+            Math.Max(
+                b0,
+                b1);
+
+        return Math.Max(
+            0f,
+            Math.Min(
+                aMax,
+                bMax) -
+            Math.Max(
+                aMin,
+                bMin));
     }
 
     private static void CollectBundleCrossingConflicts(
