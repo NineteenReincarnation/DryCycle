@@ -876,7 +876,17 @@ internal static class WorldMapOrthogonalRouter
             full[full.Length - 1] = request.End;
             Num.Vector2[] candidate = SimplifyRoute(full);
             if (HasReversal(candidate) || !FullRouteClear(request, candidate, obstacles)) continue;
-            float congestion = RouteCongestionPenalty(candidate, occupancy);
+
+            // Every parallel link necessarily shares the tiny socket-owned terminal stubs before
+            // its lane fans out. Counting those unavoidable overlaps as route congestion caused the
+            // third/fourth short lane to reject its requested offset and fall back onto another
+            // corridor. For an explicit LaneOffset, score congestion only on the corridor-owned
+            // portion between the near-room boundaries; the full path is still used for collision
+            // validation and final length.
+            float congestion =
+                laneRequested
+                    ? RouteCongestionPenalty(middle, occupancy)
+                    : RouteCongestionPenalty(candidate, occupancy);
             if (congestion > DirectRouteCongestionLimit) continue;
             float score = PathLength(candidate) + CompactBendPenalty * Simplify(candidate).Length + congestion;
             if (score >= best) continue;
