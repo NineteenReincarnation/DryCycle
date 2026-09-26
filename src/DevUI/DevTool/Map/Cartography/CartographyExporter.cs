@@ -122,7 +122,55 @@ internal static class CartographyExporter
                         break;
                     case CartographyPrimitiveKind.Outline: graphics.DrawRectangle(pen, r.X, r.Y, r.Width, r.Height); break;
                     case CartographyPrimitiveKind.Ellipse: graphics.DrawEllipse(pen, r.X, r.Y, r.Width, r.Height); break;
-                    case CartographyPrimitiveKind.Line: graphics.DrawLine(pen, r.X, r.Y, r.Right, r.Bottom); break;
+                    case CartographyPrimitiveKind.Line:
+                    {
+                        SmoothingMode smoothing =
+                            graphics.SmoothingMode;
+                        PixelOffsetMode pixelOffset =
+                            graphics.PixelOffsetMode;
+                        LineCap startCap =
+                            pen.StartCap;
+                        LineCap endCap =
+                            pen.EndCap;
+                        DashCap dashCap =
+                            pen.DashCap;
+
+                        if (shape.PixelPerfect)
+                        {
+                            graphics.SmoothingMode =
+                                SmoothingMode.None;
+                            graphics.PixelOffsetMode =
+                                PixelOffsetMode.Half;
+                            pen.StartCap =
+                                LineCap.Flat;
+                            pen.EndCap =
+                                LineCap.Flat;
+                            pen.DashCap =
+                                DashCap.Flat;
+                        }
+
+                        graphics.DrawLine(
+                            pen,
+                            r.X,
+                            r.Y,
+                            r.Right,
+                            r.Bottom);
+
+                        if (shape.PixelPerfect)
+                        {
+                            graphics.SmoothingMode =
+                                smoothing;
+                            graphics.PixelOffsetMode =
+                                pixelOffset;
+                            pen.StartCap =
+                                startCap;
+                            pen.EndCap =
+                                endCap;
+                            pen.DashCap =
+                                dashCap;
+                        }
+                        break;
+                    }
                     case CartographyPrimitiveKind.Text:
                         using (Font font = new(document.FontFamily, shape.Size, FontStyle.Regular, GraphicsUnit.Pixel))
                         using (StringFormat textFormat = new(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap })
@@ -217,7 +265,17 @@ internal static class CartographyExporter
         bool fill = shape.Kind == CartographyPrimitiveKind.Fill || shape.Kind == CartographyPrimitiveKind.Text;
         xml.WriteAttributeString(fill ? "fill" : "stroke", "#" + (shape.Color & 0xFFFFFF).ToString("X6", CultureInfo.InvariantCulture));
         Attr(xml, "opacity", (shape.Color >> 24) / 255f);
-        if (!fill) { xml.WriteAttributeString("fill", "none"); Attr(xml, "stroke-width", shape.Stroke); }
+        if (!fill)
+        {
+            xml.WriteAttributeString("fill", "none");
+            Attr(xml, "stroke-width", shape.Stroke);
+
+            if (shape.PixelPerfect)
+            {
+                xml.WriteAttributeString("shape-rendering", "crispEdges");
+                xml.WriteAttributeString("stroke-linecap", "butt");
+            }
+        }
         if (shape.Dashed) { xml.WriteAttributeString("stroke-dasharray", F(shape.DashLength)+" "+F(shape.DashGap)); Attr(xml,"stroke-dashoffset",-shape.DashOffset); }
         if (shape.Kind == CartographyPrimitiveKind.Line)
         { Attr(xml, "x1", r.X); Attr(xml, "y1", r.Y); Attr(xml, "x2", r.Right); Attr(xml, "y2", r.Bottom); }
