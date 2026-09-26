@@ -56,6 +56,13 @@ internal static class CartographyStorage
             });
         CartographyRecord.Read(root.Element("options"), document.Options);
 
+        // BorderSize was historically hard-coded to 3 and was not exposed by the editor. That
+        // produced a noticeably thinner silhouette than Cornifer. Treat that exact legacy default
+        // as old presentation data and migrate it to the corrected 5 px outline; non-default values
+        // remain untouched.
+        if (Math.Abs(document.Options.BorderSize - 3f) < 0.001f)
+            document.Options.BorderSize = 5f;
+
         // Cartography background is now an invariant rather than an author option. Older project
         // files may contain an opaque export/background setting; migrate them on load so reopening
         // an existing map behaves exactly like a new transparent composition.
