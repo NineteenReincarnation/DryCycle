@@ -104,6 +104,13 @@ internal static class WorldMapCorridorLaneAllocator
             new();
         internal readonly Dictionary<int, List<string>> GroupRoutes =
             new();
+
+        // A local corridor may ask for the opposite ordering of routes that already have stable
+        // global slots in the same continuity bundle. Reordering existing slots would create an
+        // internal lane permutation/X-crossing, so keep the established order and ask the routing
+        // store for a bounded alternate-corridor retry instead.
+        internal readonly HashSet<string> PermutationConflictRoutes =
+            new(StringComparer.Ordinal);
     }
 
     private const float CoordinateBucketSize = 4f;
@@ -282,6 +289,12 @@ internal static class WorldMapCorridorLaneAllocator
             changedIds?.Add(routeId);
             unchecked { storeRevision++; }
         }
+
+        // A contradictory local permutation is also a readability failure: the global slot order
+        // deliberately stays stable, while the involved routes get the same bounded alternate-
+        // corridor reroute treatment as an over-compressed bundle.
+        foreach (string routeId in planSet.PermutationConflictRoutes)
+            reroute.Add(routeId);
 
         // Severe compression is already a readability failure before it reaches a literal
         // centreline collapse. If a bundle drops below the minimum readable scale, surface those
@@ -744,21 +757,18 @@ internal static class WorldMapCorridorLaneAllocator
         if (unique.Count < 2)
             return;
 
-        // One slot table is authoritative for the whole bundle. If B/C peel off after a four-lane
-        // corridor, A/D keep the outer slots instead of snapping inward to a newly centred two-lane
-        // corridor. Empty slots are deliberate visual memory, not wasted state.
-        List<string> slotIds = new(unique);
-
-        // Stable IDs are only a tie breaker. Primary slot order follows the geometry by which each
-        // route approaches the first shared corridor. Sorting solely by ConnectionId made two
-        // perfectly valid routes swap sides at a bundle entrance, producing an artificial X before
-        // the lanes even reached the shared run.
-        slotIds.Sort(
-            (left, right) =>
-                CompareNaturalLaneOrder(
-                    left,
-                    right,
-                    components));
+        // One slot table is authoritative for the whole bundle. Build it incrementally from the
+        // strongest shared corridor and then insert branch-in routes around already-established
+        // neighbours. Existing routes are never permuted when another corridor is visited.
+        //
+        // This is the key invariant for metro-style readability:
+        //   branch-out => vacated slots remain empty;
+        //   branch-in  => new routes are inserted, existing routes never swap sides.
+        List<string> slotIds =
+            BuildContinuitySlotOrder(
+                components,
+                unique,
+                planSet.PermutationConflictRoutes);
 
         float[] slotOffsets =
             BuildStableSlotOffsets(
@@ -830,110 +840,472 @@ internal static class WorldMapCorridorLaneAllocator
         }
     }
 
-    private static int CompareNaturalLaneOrder(
-        string left,
-        string right,
-        List<CorridorComponent> components)
+    private static List<string> BuildContinuitySlotOrder(
+        List<CorridorComponent> components,
+        HashSet<string> unique,
+        HashSet<string> conflictRoutes)
     {
-        float leftOrder =
-            NaturalLaneOrder(
-                left,
-                components);
-        float rightOrder =
-            NaturalLaneOrder(
-                right,
-                components);
+        List<string> slots =
+            new();
 
-        int order =
-            leftOrder.CompareTo(
-                rightOrder);
-        if (order != 0)
-            return order;
+        if (components == null ||
+            components.Count == 0 ||
+            unique == null ||
+            unique.Count == 0)
+            return slots;
 
-        return string.CompareOrdinal(
-            left,
-            right);
+        List<CorridorComponent> remaining =
+            new(components);
+
+        CorridorComponent root =
+            ChooseContinuityRoot(
+                remaining);
+
+        if (root != null)
+        {
+            List<string> rootOrder =
+                LocalComponentOrder(
+                    root);
+
+            for (int i = 0; i < rootOrder.Count; i++)
+            {
+                if (unique.Contains(rootOrder[i]) &&
+                    !slots.Contains(rootOrder[i]))
+                {
+                    slots.Add(rootOrder[i]);
+                }
+            }
+
+            remaining.Remove(root);
+        }
+
+        while (remaining.Count > 0)
+        {
+            int nextIndex =
+                ChooseNextContinuityComponent(
+                    remaining,
+                    slots);
+
+            CorridorComponent component =
+                remaining[nextIndex];
+            remaining.RemoveAt(nextIndex);
+
+            MergeComponentOrder(
+                slots,
+                LocalComponentOrder(component),
+                conflictRoutes);
+        }
+
+        // Defensive completion for routes that were members of the continuity group but happened
+        // not to survive a local component's segment filtering. Deterministic append is preferable
+        // to silently losing a slot identity.
+        List<string> missing =
+            new();
+
+        foreach (string id in unique)
+        {
+            if (!slots.Contains(id))
+                missing.Add(id);
+        }
+
+        missing.Sort(StringComparer.Ordinal);
+        slots.AddRange(missing);
+        return slots;
     }
 
-    private static float NaturalLaneOrder(
-        string routeId,
+    private static CorridorComponent ChooseContinuityRoot(
         List<CorridorComponent> components)
     {
-        if (string.IsNullOrEmpty(routeId) ||
-            components == null)
-            return 0f;
+        CorridorComponent best =
+            null;
 
-        for (int c = 0; c < components.Count; c++)
+        for (int i = 0; i < components.Count; i++)
         {
-            CorridorComponent component =
-                components[c];
-            for (int s = 0; s < component.Segments.Count; s++)
+            CorridorComponent candidate =
+                components[i];
+
+            if (candidate == null)
+                continue;
+
+            if (best == null)
             {
-                SegmentRef segment =
-                    component.Segments[s];
-                if (!string.Equals(
-                        segment.RouteId,
-                        routeId,
-                        StringComparison.Ordinal))
-                    continue;
+                best = candidate;
+                continue;
+            }
 
-                Num.Vector2[] points =
-                    BasePoints(segment.Route);
-                int i =
-                    segment.SegmentIndex;
-                if (points == null ||
-                    i < 0 ||
-                    i + 1 >= points.Length)
-                    return 0f;
+            int routeCount =
+                candidate.RouteIds.Count.CompareTo(
+                    best.RouteIds.Count);
 
-                float corridorCoordinate =
-                    segment.Coordinate;
-                float total = 0f;
-                int count = 0;
+            if (routeCount > 0)
+            {
+                best = candidate;
+                continue;
+            }
 
-                // Look immediately outside the shared run. The side from which a branch approaches
-                // is the most intuitive lane order and remains stable when unrelated routes are
-                // added elsewhere in the region.
-                if (i > 0)
-                {
-                    float value =
-                        segment.Vertical
-                            ? points[i - 1].X
-                            : points[i - 1].Y;
-                    if (Math.Abs(
-                            value -
-                            corridorCoordinate) > 0.01f)
-                    {
-                        total += value;
-                        count++;
-                    }
-                }
+            if (routeCount < 0)
+                continue;
 
-                if (i + 2 < points.Length)
-                {
-                    float value =
-                        segment.Vertical
-                            ? points[i + 2].X
-                            : points[i + 2].Y;
-                    if (Math.Abs(
-                            value -
-                            corridorCoordinate) > 0.01f)
-                    {
-                        total += value;
-                        count++;
-                    }
-                }
+            float candidateSpan =
+                Math.Max(
+                    0f,
+                    candidate.Max -
+                    candidate.Min);
+            float bestSpan =
+                Math.Max(
+                    0f,
+                    best.Max -
+                    best.Min);
 
-                if (count > 0)
-                    return total / count;
+            int span =
+                candidateSpan.CompareTo(
+                    bestSpan);
 
-                // Completely straight members have no branch-side preference. Their centreline is
-                // still a deterministic geometric key; ConnectionId resolves exact ties.
-                return corridorCoordinate;
+            if (span > 0 ||
+                span == 0 &&
+                CompareComponents(
+                    candidate,
+                    best) < 0)
+            {
+                best = candidate;
             }
         }
 
-        return 0f;
+        return best;
+    }
+
+    private static int ChooseNextContinuityComponent(
+        List<CorridorComponent> remaining,
+        List<string> slots)
+    {
+        HashSet<string> known =
+            new(
+                slots,
+                StringComparer.Ordinal);
+
+        int bestIndex = 0;
+        int bestOverlap = -1;
+        int bestRoutes = -1;
+        float bestSpan = -1f;
+
+        for (int i = 0; i < remaining.Count; i++)
+        {
+            CorridorComponent component =
+                remaining[i];
+
+            int overlap = 0;
+            for (int r = 0; r < component.RouteIds.Count; r++)
+            {
+                if (known.Contains(component.RouteIds[r]))
+                    overlap++;
+            }
+
+            int routeCount =
+                component.RouteIds.Count;
+            float span =
+                Math.Max(
+                    0f,
+                    component.Max -
+                    component.Min);
+
+            bool better =
+                overlap > bestOverlap ||
+                overlap == bestOverlap &&
+                routeCount > bestRoutes ||
+                overlap == bestOverlap &&
+                routeCount == bestRoutes &&
+                span > bestSpan ||
+                overlap == bestOverlap &&
+                routeCount == bestRoutes &&
+                Math.Abs(span - bestSpan) < 0.001f &&
+                CompareComponents(
+                    component,
+                    remaining[bestIndex]) < 0;
+
+            if (!better)
+                continue;
+
+            bestIndex = i;
+            bestOverlap = overlap;
+            bestRoutes = routeCount;
+            bestSpan = span;
+        }
+
+        return bestIndex;
+    }
+
+    private static void MergeComponentOrder(
+        List<string> slots,
+        List<string> localOrder,
+        HashSet<string> conflictRoutes)
+    {
+        if (slots == null ||
+            localOrder == null ||
+            localOrder.Count == 0)
+            return;
+
+        Dictionary<string, int> existingPositions =
+            new(StringComparer.Ordinal);
+
+        for (int i = 0; i < slots.Count; i++)
+            existingPositions[slots[i]] = i;
+
+        // First detect whether this corridor wants already-established routes in the opposite
+        // order. Never honour that permutation; mark both sides so the route store can search for
+        // an alternate corridor without destabilising the rest of the bundle.
+        int previousPosition = -1;
+        string previousId = null;
+
+        for (int i = 0; i < localOrder.Count; i++)
+        {
+            string id =
+                localOrder[i];
+
+            if (!existingPositions.TryGetValue(
+                    id,
+                    out int position))
+                continue;
+
+            if (position < previousPosition)
+            {
+                conflictRoutes?.Add(id);
+                if (!string.IsNullOrEmpty(previousId))
+                    conflictRoutes?.Add(previousId);
+            }
+            else
+            {
+                previousPosition = position;
+                previousId = id;
+            }
+        }
+
+        // Insert only new routes. Processing in local geometric order lets a newly inserted route
+        // become the predecessor of the next one in the same branch-in block, preserving that block
+        // without moving any route that was already assigned a slot.
+        for (int i = 0; i < localOrder.Count; i++)
+        {
+            string id =
+                localOrder[i];
+
+            if (slots.Contains(id))
+                continue;
+
+            string previous =
+                FindPreviousPresent(
+                    localOrder,
+                    i,
+                    slots);
+            string next =
+                FindNextPresent(
+                    localOrder,
+                    i,
+                    slots);
+
+            int insertIndex;
+
+            if (!string.IsNullOrEmpty(previous) &&
+                !string.IsNullOrEmpty(next))
+            {
+                int previousIndex =
+                    slots.IndexOf(previous);
+                int nextIndex =
+                    slots.IndexOf(next);
+
+                if (previousIndex < nextIndex)
+                {
+                    insertIndex =
+                        previousIndex + 1;
+                }
+                else
+                {
+                    // The local corridor itself contradicts the established order. Preserve global
+                    // continuity and put the new branch beside the preceding anchor while flagging
+                    // all participants for a bounded reroute attempt.
+                    conflictRoutes?.Add(id);
+                    conflictRoutes?.Add(previous);
+                    conflictRoutes?.Add(next);
+                    insertIndex =
+                        Math.Min(
+                            slots.Count,
+                            previousIndex + 1);
+                }
+            }
+            else if (!string.IsNullOrEmpty(previous))
+            {
+                insertIndex =
+                    slots.IndexOf(previous) + 1;
+            }
+            else if (!string.IsNullOrEmpty(next))
+            {
+                insertIndex =
+                    slots.IndexOf(next);
+            }
+            else
+            {
+                insertIndex =
+                    slots.Count;
+            }
+
+            insertIndex =
+                Math.Max(
+                    0,
+                    Math.Min(
+                        slots.Count,
+                        insertIndex));
+
+            slots.Insert(
+                insertIndex,
+                id);
+        }
+    }
+
+    private static string FindPreviousPresent(
+        List<string> localOrder,
+        int index,
+        List<string> slots)
+    {
+        for (int i = index - 1; i >= 0; i--)
+        {
+            if (slots.Contains(localOrder[i]))
+                return localOrder[i];
+        }
+
+        return null;
+    }
+
+    private static string FindNextPresent(
+        List<string> localOrder,
+        int index,
+        List<string> slots)
+    {
+        for (int i = index + 1; i < localOrder.Count; i++)
+        {
+            if (slots.Contains(localOrder[i]))
+                return localOrder[i];
+        }
+
+        return null;
+    }
+
+    private static List<string> LocalComponentOrder(
+        CorridorComponent component)
+    {
+        List<string> order =
+            component == null
+                ? new List<string>()
+                : new List<string>(
+                    component.RouteIds);
+
+        order.Sort(
+            (left, right) =>
+            {
+                float leftOrder =
+                    ComponentLaneOrder(
+                        left,
+                        component);
+                float rightOrder =
+                    ComponentLaneOrder(
+                        right,
+                        component);
+
+                int geometry =
+                    leftOrder.CompareTo(
+                        rightOrder);
+
+                if (geometry != 0)
+                    return geometry;
+
+                return string.CompareOrdinal(
+                    left,
+                    right);
+            });
+
+        return order;
+    }
+
+    private static float ComponentLaneOrder(
+        string routeId,
+        CorridorComponent component)
+    {
+        if (string.IsNullOrEmpty(routeId) ||
+            component == null)
+            return 0f;
+
+        float total = 0f;
+        int count = 0;
+
+        for (int s = 0; s < component.Segments.Count; s++)
+        {
+            SegmentRef segment =
+                component.Segments[s];
+
+            if (!string.Equals(
+                    segment.RouteId,
+                    routeId,
+                    StringComparison.Ordinal))
+                continue;
+
+            Num.Vector2[] points =
+                BasePoints(
+                    segment.Route);
+            int i =
+                segment.SegmentIndex;
+
+            if (points == null ||
+                i < 0 ||
+                i + 1 >= points.Length)
+                continue;
+
+            float corridorCoordinate =
+                segment.Coordinate;
+            bool foundBranch =
+                false;
+
+            if (i > 0)
+            {
+                float value =
+                    segment.Vertical
+                        ? points[i - 1].X
+                        : points[i - 1].Y;
+
+                if (Math.Abs(
+                        value -
+                        corridorCoordinate) > 0.01f)
+                {
+                    total += value;
+                    count++;
+                    foundBranch = true;
+                }
+            }
+
+            if (i + 2 < points.Length)
+            {
+                float value =
+                    segment.Vertical
+                        ? points[i + 2].X
+                        : points[i + 2].Y;
+
+                if (Math.Abs(
+                        value -
+                        corridorCoordinate) > 0.01f)
+                {
+                    total += value;
+                    count++;
+                    foundBranch = true;
+                }
+            }
+
+            if (!foundBranch)
+            {
+                total +=
+                    corridorCoordinate;
+                count++;
+            }
+        }
+
+        return count > 0
+            ? total / count
+            : component.Coordinate;
     }
 
     private static Dictionary<int, float> ResolveGroupScales(
