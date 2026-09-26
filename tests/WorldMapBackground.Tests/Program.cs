@@ -10,6 +10,7 @@ internal static class Program
         try
         {
             GeometryCadence();
+            SourceRecoveryCadence();
             SurfaceGate();
 
             Console.WriteLine(
@@ -60,6 +61,30 @@ internal static class Program
                 thumbnailWorkIncomplete: false,
                 catchupAgeMilliseconds: 0d) == 12,
             "Completed hidden maps use maintenance cadence instead of visible-map cadence.");
+    }
+
+    private static void SourceRecoveryCadence()
+    {
+        Check(
+            WorldMapBackgroundSchedulingPolicy.SourceRecoveryIntervalFrames(
+                canvasVisible: true,
+                recoveryIncomplete: true,
+                recoveryAgeMilliseconds: 0d) == 1,
+            "Visible World Map source recovery remains every-frame for fast first-open loading.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.SourceRecoveryIntervalFrames(
+                canvasVisible: false,
+                recoveryIncomplete: true,
+                recoveryAgeMilliseconds: 1000d) == 6,
+            "Hidden/OH source recovery continues at bounded catch-up cadence.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.SourceRecoveryIntervalFrames(
+                canvasVisible: false,
+                recoveryIncomplete: false,
+                recoveryAgeMilliseconds: 20000d) == 12,
+            "Hidden/OH completed source recovery falls back to low-frequency maintenance.");
     }
 
     private static void SurfaceGate()
