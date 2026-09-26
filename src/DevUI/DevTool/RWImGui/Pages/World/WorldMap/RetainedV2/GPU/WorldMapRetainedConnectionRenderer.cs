@@ -35,6 +35,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private const float DirectionMarkerShadowHalfWidth = 1.55f;
     private const float MinimumDirectionMarkerRun = 20f;
     private const float MaximumDirectionMarkerShift = 16f;
+    private const float SecondaryDirectionMarkerRouteLength = 420f;
+    private const float SecondaryDirectionMarkerMinimumDistance = 90f;
 
     private const float CrossingRadius = 6.4f;
     private const float CrossingRise = 4.8f;
@@ -689,7 +691,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 path,
                 out point,
                 out tangent,
-                out straightLength) ||
+                out straightLength,
+                out int primarySegment) ||
             straightLength <
                 MinimumDirectionMarkerRun)
         {
@@ -704,7 +707,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
             StableDirectionMarkerShift(
                 routeId,
                 straightLength,
-                densityTier);
+                densityTier,
+                primarySegment);
 
         if (direction ==
             WorldConnectionDirection.Bidirectional)
@@ -753,13 +757,53 @@ internal sealed class WorldMapRetainedConnectionRenderer
             markerScale,
             shadow,
             core);
+
+        if (totalLength <
+                SecondaryDirectionMarkerRouteLength ||
+            !TrySecondaryRouteSegment(
+                path,
+                primarySegment,
+                point,
+                out Num.Vector2 secondaryPoint,
+                out Num.Vector2 secondaryTangent,
+                out float secondaryLength,
+                out int secondarySegment))
+        {
+            return;
+        }
+
+        secondaryPoint +=
+            secondaryTangent *
+            StableDirectionMarkerShift(
+                routeId,
+                secondaryLength,
+                densityTier,
+                secondarySegment);
+
+        if (direction ==
+            WorldConnectionDirection.BToA)
+        {
+            secondaryTangent =
+                -secondaryTangent;
+        }
+
+        AddChevronAtPoint(
+            vertices,
+            colors,
+            indices,
+            secondaryPoint,
+            secondaryTangent,
+            markerScale,
+            shadow,
+            core);
     }
 
     private static bool TryLongestRouteSegment(
         Num.Vector2[] path,
         out Num.Vector2 point,
         out Num.Vector2 tangent,
-        out float length)
+        out float length,
+        out int segmentIndex)
     {
         point =
             default;
@@ -767,6 +811,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
             Num.Vector2.UnitX;
         length =
             0f;
+        segmentIndex =
+            -1;
 
         if (path == null ||
             path.Length < 2)
@@ -804,15 +850,94 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 (path[i] +
                  path[i + 1]) *
                 0.5f;
+            segmentIndex =
+                i;
         }
 
         return length > 0.001f;
     }
 
+    private static bool TrySecondaryRouteSegment(
+        Num.Vector2[] path,
+        int primarySegment,
+        Num.Vector2 primaryPoint,
+        out Num.Vector2 point,
+        out Num.Vector2 tangent,
+        out float length,
+        out int segmentIndex)
+    {
+        point =
+            default;
+        tangent =
+            Num.Vector2.UnitX;
+        length =
+            0f;
+        segmentIndex =
+            -1;
+
+        if (path == null ||
+            path.Length < 3)
+            return false;
+
+        int firstSegment =
+            path.Length >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            path.Length >= 4
+                ? path.Length - 3
+                : path.Length - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
+        {
+            if (i == primarySegment)
+                continue;
+
+            Num.Vector2 delta =
+                path[i + 1] -
+                path[i];
+            float candidateLength =
+                delta.Length();
+
+            if (candidateLength <
+                    MinimumDirectionMarkerRun *
+                    1.5f ||
+                candidateLength <=
+                    length + 0.01f)
+                continue;
+
+            Num.Vector2 candidatePoint =
+                (path[i] +
+                 path[i + 1]) *
+                0.5f;
+
+            if (Num.Vector2.Distance(
+                    candidatePoint,
+                    primaryPoint) <
+                SecondaryDirectionMarkerMinimumDistance)
+                continue;
+
+            length =
+                candidateLength;
+            tangent =
+                delta /
+                candidateLength;
+            point =
+                candidatePoint;
+            segmentIndex =
+                i;
+        }
+
+        return segmentIndex >= 0;
+    }
+
     private static float StableDirectionMarkerShift(
         string routeId,
         float straightLength,
-        byte densityTier)
+        byte densityTier,
+        int salt)
     {
         if (string.IsNullOrEmpty(routeId) ||
             straightLength <= MinimumDirectionMarkerRun)
@@ -845,6 +970,9 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 hash ^= routeId[i];
                 hash *= 16777619u;
             }
+
+            hash ^= (uint)(salt + 1);
+            hash *= 16777619u;
         }
 
         float normalized =
