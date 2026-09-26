@@ -11,6 +11,7 @@ internal static class Program
         {
             GeometryCadence();
             SourceRecoveryCadence();
+            ShortcutCadence();
             SurfaceGate();
 
             Console.WriteLine(
@@ -85,6 +86,29 @@ internal static class Program
                 recoveryIncomplete: false,
                 recoveryAgeMilliseconds: 20000d) == 12,
             "Hidden/OH completed source recovery falls back to low-frequency maintenance.");
+    }
+
+    private static void ShortcutCadence()
+    {
+        Check(
+            WorldMapBackgroundSchedulingPolicy.ShortcutPrimeIntervalFrames(
+                canvasVisible: true) == 2,
+            "Visible shortcut presentation keeps its responsive two-frame cadence.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.ShortcutPrimeIntervalFrames(
+                canvasVisible: false) == 12,
+            "Hidden/OH shortcut presentation uses low-frequency maintenance cadence.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.ExactShortcutIntervalFrames(
+                canvasVisible: true) == 1,
+            "Visible exact shortcut updates remain every-frame.");
+
+        Check(
+            WorldMapBackgroundSchedulingPolicy.ExactShortcutIntervalFrames(
+                canvasVisible: false) == 12,
+            "Hidden/OH exact room-file shortcut scans are throttled.");
     }
 
     private static void SurfaceGate()
