@@ -15,10 +15,10 @@ internal static partial class Program
         Check(segment == 0 && hit != null, "A route without bends can be edited by clicking its actual segment.");
         var edit = CartographyRouteEditing.Manual(route, node);
         edit.Points.Insert(segment, hit);
-        edit.Points[segment] = CartographyRouteEditing.Drag(hit.X + 34, hit.Y - 57, hit, 12, false);
+        edit.Points[segment] = CartographyRouteEditing.Drag(hit.X + 34, hit.Y - 57, hit, false);
         var changed = CartographyEditing.Apply(original, source, new CartographyCommand { Kind = CartographyCommandKind.UpdateItem, Item = edit });
         var result = CartographySceneBuilder.Build(changed, source).Nodes.First(n => n.Id == route.Id);
-        Check(result.Points.Length == node.Points.Length + 1 && result.Points[1].Y % 12 == 0, "Dragging a new bend commits snapped geometry.");
+        Check(result.Points.Length == node.Points.Length + 1 && Math.Abs(result.Points[1].X - edit.Points[0].X) < .001f && Math.Abs(result.Points[1].Y - edit.Points[0].Y) < .001f, "Dragging a new bend commits free-position geometry without grid snapping.");
         Check(result.FromX == node.FromX && result.ToY == node.ToY && route.Points.Count == 0, "Manual routing retains live source ports and leaves the original snapshot unchanged.");
         string saved = CartographyStorage.Serialize(changed);
         var restored = CartographyStorage.Deserialize(saved, changed.Identity);
@@ -30,8 +30,8 @@ internal static partial class Program
         var points = new[] { new CartographyPoint { X = 0 }, new CartographyPoint { X = 10 }, new CartographyPoint { X = 20 }, new CartographyPoint { X = 30 } };
         Check(CartographyRouteEditing.NearestHandle(points, 19, 0, 225) == 1, "At 4% zoom overlapping handle hit areas choose the nearest bend, not the first bend.");
         Check(CartographyRouteEditing.NearestHandle(new[] { points[0], points[3] }, 0, 0, 8) == -1, "Room endpoints are not editable author handles.");
-        var horizontal = CartographyRouteEditing.Drag(50, 17, new CartographyPoint { X = 3, Y = 5 }, 12, true);
-        Check(horizontal.X == 48 && horizontal.Y == 5, "Shift constrains against the original handle, with snapped movement on the free axis.");
+        var horizontal = CartographyRouteEditing.Drag(50, 17, new CartographyPoint { X = 3, Y = 5 }, true);
+        Check(horizontal.X == 50 && horizontal.Y == 5, "Shift constrains against the original handle without snapping the free axis.");
         var diagonal = new[] { new CartographyPoint(), new CartographyPoint { X = 100, Y = 100 } };
         Check(CartographyRouteEditing.NearestSegment(diagonal, 0, 100, 8, out _) < 0, "Empty space inside a diagonal connection's bounding box is not a line hit.");
         Check(CartographyRouteEditing.NearestSegment(new[] { points[0], points[0] }, 1, 0, 8, out var zero) == 0 && zero.X == 0,
