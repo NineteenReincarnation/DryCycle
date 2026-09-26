@@ -55,6 +55,8 @@ internal static class WorldMapJunctionWeavePlanner
     private const float OffsetEpsilon = 0.05f;
     private const float PointEpsilonSquared = 0.04f;
     private const float WeaveLeadDistance = 36f;
+    private const float WeaveLaneStaggerFactor = 0.55f;
+    private const float MaximumWeaveLaneStagger = 24f;
     private const float MinimumAxisRun = 4f;
 
     internal static bool NeedsTransition(
@@ -184,6 +186,30 @@ internal static class WorldMapJunctionWeavePlanner
                     transitionDistance =
                         run * 0.5f;
                 }
+
+                // Do not let every lane change at exactly the same longitudinal coordinate. That
+                // produces a comb of coincident perpendicular connectors and visually recreates the
+                // fake junction we are trying to remove. Stagger the dogleg by the carried slot
+                // offset so neighbouring lanes peel/merge in a stable staircase order.
+                float carriedOffset =
+                    Math.Abs(profile.EntryOffset) >=
+                    Math.Abs(profile.ExitOffset)
+                        ? profile.EntryOffset
+                        : profile.ExitOffset;
+                float maxStagger =
+                    Math.Min(
+                        MaximumWeaveLaneStagger,
+                        run * 0.25f);
+                float stagger =
+                    Math.Max(
+                        -maxStagger,
+                        Math.Min(
+                            maxStagger,
+                            carriedOffset *
+                            WeaveLaneStaggerFactor));
+
+                transitionDistance +=
+                    stagger;
 
                 transitionDistance =
                     Math.Max(
