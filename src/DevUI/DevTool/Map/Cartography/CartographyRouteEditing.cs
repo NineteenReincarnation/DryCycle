@@ -49,9 +49,8 @@ internal static class CartographyRouteEditing
         return edit;
     }
 
-    internal static CartographyPoint Drag(float x, float y, CartographyPoint anchor, float grid, bool constrainAxis)
+    internal static CartographyPoint Drag(float x, float y, CartographyPoint anchor, bool constrainAxis)
     {
-        if (grid > 0) { x = (float)Math.Round(x / grid) * grid; y = (float)Math.Round(y / grid) * grid; }
         if (constrainAxis)
         {
             if (Math.Abs(x - anchor.X) > Math.Abs(y - anchor.Y)) y = anchor.Y;
