@@ -75,6 +75,11 @@ internal static class CartographyStorage
         {
             CartographyItem item = document.Items.Find(i => i.Id == Str(element, "id"));
             CartographyRecord.Read(element.Element("appearance"), item.Appearance);
+            // Room opacity was never meant to be a visual authoring dimension. Older project
+            // states can nevertheless contain a reduced value, making a room mysteriously dark.
+            // Normalize it on load so the next save permanently cleans that stale state.
+            if (item.Kind == CartographyItemKind.Room)
+                item.Appearance.Opacity = 1f;
             foreach (XElement p in element.Element("points")?.Elements("point") ?? Enumerable.Empty<XElement>())
             { CartographyPoint point = new(); CartographyRecord.Read(p, point); item.Points.Add(point); }
         }
