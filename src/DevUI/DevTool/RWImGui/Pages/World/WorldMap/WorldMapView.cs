@@ -1065,9 +1065,31 @@ internal static class WorldMapView
                     1.8f,
                     rise);
 
-            // Remove the straight focus stroke through the crossing before restoring the bridge.
-            // When the focused route is the under-route this also re-establishes the visible gap
-            // that says "crossing, not junction".
+            // Mirror the retained crossing grammar in the interaction overlay: first carve a
+            // perpendicular gap through the under-route, then remove the straight over-route span
+            // that is replaced by the bridge arc. This keeps hover/selection from turning a clear
+            // crossover back into a false junction.
+            uint crossingMask =
+                ImGui.GetColorU32(
+                    ImGuiCol.WindowBg);
+            float underGap =
+                Math.Max(
+                    3.2f,
+                    (mark.Dense ? 4.8f : 6.4f) *
+                    zoom);
+
+            draw.AddLine(
+                point -
+                    normal *
+                    underGap,
+                point +
+                    normal *
+                    underGap,
+                crossingMask,
+                Math.Max(
+                    5.2f,
+                    focusIsolationThickness));
+
             draw.AddLine(
                 point -
                     tangent *
