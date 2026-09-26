@@ -13,7 +13,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static partial class CartographyView
 {
     private enum Tool { Select, Route, Text, Marker, Line, Box, ExportArea }
-    private enum Surface { Composite, Browser, Center, Inspector }
     private static CartographyPresentation observed;
     private static readonly HashSet<string> Selection = new(StringComparer.Ordinal);
     private static string activeLayer = "notes", exportPath = string.Empty, copyPath = string.Empty;
@@ -56,59 +55,25 @@ internal static partial class CartographyView
         dragging = marquee = false; delta = default;
     }
 
-    internal static unsafe void Draw(EditorPresentationSnapshot editor) =>
-        DrawSurface(editor, Surface.Composite);
-
-    internal static unsafe void DrawBrowser(EditorPresentationSnapshot editor) =>
-        DrawSurface(editor, Surface.Browser);
-
-    internal static unsafe void DrawCenter(EditorPresentationSnapshot editor) =>
-        DrawSurface(editor, Surface.Center);
-
-    internal static unsafe void DrawInspectorPane(EditorPresentationSnapshot editor) =>
-        DrawSurface(editor, Surface.Inspector);
-
-    private static unsafe void DrawSurface(EditorPresentationSnapshot editor, Surface surface)
+    internal static unsafe void Draw(EditorPresentationSnapshot editor)
     {
         // Layer names, room/subregion names and author text may be Chinese in either UI language.
         ImGuiIOPtr io = ImGui.GetIO();
         float oldScale = io.FontGlobalScale;
         float oldBaseSize = ImGui.GetFont().FontSize;
-        bool resolvedFont = DevToolFontCatalog.TryResolveRegisteredFace(
-            DevToolUiSettings.ChineseFontFamily,
-            DevToolUiSettings.FontWeight,
-            true,
-            out ImFontPtr font,
-            out _,
-            out _,
-            out _);
+        bool resolvedFont = DevToolFontCatalog.TryResolveRegisteredFace(DevToolUiSettings.ChineseFontFamily,
+            DevToolUiSettings.FontWeight, true, out ImFontPtr font, out _, out _, out _);
         bool pushedFont = resolvedFont &&
             DevToolFrontend.TryPushRegisteredFont(font, "Cartography content font");
         if (pushedFont)
             io.FontGlobalScale = oldScale * oldBaseSize / Math.Max(1, font.FontSize);
-
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(.045f, .06f, .08f, 1));
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Num.Vector4(.10f, .14f, .19f, 1));
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Num.Vector4(.06f, .08f, .11f, 1));
         try
         {
-            switch (surface)
-            {
-                case Surface.Browser:
-                    DrawBrowserContent(editor);
-                    break;
-                case Surface.Center:
-                    DrawCenterContent(editor);
-                    DrawDiagnosticsWindow(CartographyRuntime.Presentation);
-                    break;
-                case Surface.Inspector:
-                    DrawInspectorContent(editor);
-                    break;
-                default:
-                    DrawCompositeContent(editor);
-                    DrawDiagnosticsWindow(CartographyRuntime.Presentation);
-                    break;
-            }
+            DrawContent(editor);
+            DrawDiagnosticsWindow(CartographyRuntime.Presentation);
         }
         finally
         {
@@ -118,12 +83,39 @@ internal static partial class CartographyView
         }
     }
 
-    private static void DrawCompositeContent(EditorPresentationSnapshot editor)
+    private static void DrawContent(EditorPresentationSnapshot editor)
     {
         CartographyPresentation snapshot = CartographyRuntime.Presentation;
         SourcePicker();
-        if (!PrepareContent(snapshot))
+        if (snapshot.Document == null || snapshot.Scene == null)
+        {
+            ImGui.TextWrapped(snapshot.Status.Length > 0 ? snapshot.Status : T("正在准备制图工作区...", "Preparing cartography workspace..."));
+            if (snapshot.Identity.Length > 0 && ImGui.Button(T("重试读取项目", "Retry project load")))
+                CartographyRuntime.Enqueue(new CartographyCommand { DocumentId = snapshot.Identity, Revision = snapshot.Revision, Kind = CartographyCommandKind.Open, Path = snapshot.ProjectPath });
             return;
+        }
+        if (observed?.Identity != snapshot.Identity)
+        {
+            LeaveDrafts();
+            Selection.Clear(); selectedItem = pendingSelection = string.Empty; selectedRoutePoint = -1; draft = null; layerDraft = null; styleDraft = null;
+            activeLayer = "notes"; fit = true; fitSelection = false;
+            string directory = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), "Exports");
+            exportPath = Path.Combine(directory, snapshot.Document.Region + "-map.png");
+            copyPath = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), snapshot.Document.Region + "-copy.xml");
+        }
+        if (observed?.Revision != snapshot.Revision || observed?.Identity != snapshot.Identity)
+        {
+            if (draftDirty && CartographyEditing.SameItem(snapshot.Document.Items.Find(item => item.Id == draft?.Id), draft)) draftDirty = false;
+            if (!draftDirty) draft = null;
+            if (layerDirty && CartographyEditing.SameLayer(snapshot.Document.Layer(layerDraft?.Id), layerDraft)) layerDirty = false;
+            if (!layerDirty) layerDraft = null;
+            if (!styleDirty) styleDraft = null;
+            if (dragging || marquee) { dragging = marquee = false; delta = default; }
+        }
+        observed = snapshot;
+        if (snapshot.Revision != pendingSelectionRevision || snapshot.Document.Items.Any(item => item.Id == pendingSelection)) pendingSelection = string.Empty;
+        Selection.RemoveWhere(id => id != pendingSelection && !snapshot.Document.Items.Any(item => item.Id == id));
+        if (snapshot.Document.Layer(activeLayer) == null) activeLayer = snapshot.Document.Layers.Last().Id;
 
         Toolbar(snapshot);
         Num.Vector2 available = ImGui.GetContentRegionAvail();
@@ -131,160 +123,24 @@ internal static partial class CartographyView
         bool inspector = editor.InspectorOpen && available.X >= em * 30;
         float right = inspector ? Math.Min(em * 24, available.X * .35f) : 0;
         float center = Math.Max(180, available.X - right - (inspector ? 8 : 0));
-
+        // The map composition itself has no baked background. Use a transparent child so the
+        // editor preview follows the same compositing model as PNG/SVG export; grid and map content
+        // are still drawn explicitly on top.
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
-        if (ImGui.BeginChild(
-                "##CartographyCanvas",
-                new Num.Vector2(center, available.Y),
-                ImGuiChildFlags.Borders,
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-            Canvas(snapshot);
+        if (ImGui.BeginChild("##CartographyCanvas", new Num.Vector2(center, available.Y), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)) Canvas(snapshot);
         ImGui.EndChild();
         ImGui.PopStyleColor();
-
         if (inspector)
         {
             ImGui.SameLine(0, 8);
             if (ImGui.BeginChild("##CartographyInspector", new Num.Vector2(0, available.Y), ImGuiChildFlags.Borders))
             {
                 ImGui.PushItemWidth(ImGui.GetContentRegionAvail().X * .52f);
-                try
-                {
-                    Inspector(snapshot);
-                }
-                finally
-                {
-                    ImGui.PopItemWidth();
-                }
+                try { Inspector(snapshot); }
+                finally { ImGui.PopItemWidth(); }
             }
             ImGui.EndChild();
         }
-    }
-
-    private static void DrawBrowserContent(EditorPresentationSnapshot editor)
-    {
-        CartographyPresentation snapshot = CartographyRuntime.Presentation;
-        SourcePicker();
-        PrepareContent(snapshot);
-    }
-
-    private static void DrawCenterContent(EditorPresentationSnapshot editor)
-    {
-        CartographyPresentation snapshot = CartographyRuntime.Presentation;
-        if (!PrepareContent(snapshot))
-            return;
-
-        Toolbar(snapshot);
-        Num.Vector2 available = ImGui.GetContentRegionAvail();
-        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
-        if (ImGui.BeginChild(
-                "##CartographyCanvasShared",
-                new Num.Vector2(0f, available.Y),
-                ImGuiChildFlags.Borders,
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-            Canvas(snapshot);
-        ImGui.EndChild();
-        ImGui.PopStyleColor();
-    }
-
-    private static void DrawInspectorContent(EditorPresentationSnapshot editor)
-    {
-        CartographyPresentation snapshot = CartographyRuntime.Presentation;
-        if (!PrepareContent(snapshot))
-            return;
-
-        ImGui.PushItemWidth(Math.Max(80f, ImGui.GetContentRegionAvail().X * .52f));
-        try
-        {
-            Inspector(snapshot);
-        }
-        finally
-        {
-            ImGui.PopItemWidth();
-        }
-    }
-
-    private static bool PrepareContent(CartographyPresentation snapshot)
-    {
-        if (snapshot?.Document == null || snapshot.Scene == null)
-        {
-            string status = snapshot?.Status ?? string.Empty;
-            ImGui.TextWrapped(status.Length > 0
-                ? status
-                : T("正在准备制图工作区...", "Preparing cartography workspace..."));
-            if (snapshot != null &&
-                snapshot.Identity.Length > 0 &&
-                ImGui.Button(T("重试读取项目", "Retry project load")))
-            {
-                CartographyRuntime.Enqueue(new CartographyCommand
-                {
-                    DocumentId = snapshot.Identity,
-                    Revision = snapshot.Revision,
-                    Kind = CartographyCommandKind.Open,
-                    Path = snapshot.ProjectPath
-                });
-            }
-            return false;
-        }
-
-        if (observed?.Identity != snapshot.Identity)
-        {
-            LeaveDrafts();
-            Selection.Clear();
-            selectedItem = pendingSelection = string.Empty;
-            selectedRoutePoint = -1;
-            draft = null;
-            layerDraft = null;
-            styleDraft = null;
-            activeLayer = "notes";
-            fit = true;
-            fitSelection = false;
-            string directory = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), "Exports");
-            exportPath = Path.Combine(directory, snapshot.Document.Region + "-map.png");
-            copyPath = Path.Combine(Path.GetDirectoryName(snapshot.ProjectPath), snapshot.Document.Region + "-copy.xml");
-        }
-
-        if (observed?.Revision != snapshot.Revision || observed?.Identity != snapshot.Identity)
-        {
-            if (draftDirty &&
-                CartographyEditing.SameItem(
-                    snapshot.Document.Items.Find(item => item.Id == draft?.Id),
-                    draft))
-                draftDirty = false;
-            if (!draftDirty)
-                draft = null;
-
-            if (layerDirty &&
-                CartographyEditing.SameLayer(
-                    snapshot.Document.Layer(layerDraft?.Id),
-                    layerDraft))
-                layerDirty = false;
-            if (!layerDirty)
-                layerDraft = null;
-
-            if (!styleDirty)
-                styleDraft = null;
-
-            if (dragging || marquee)
-            {
-                dragging = marquee = false;
-                delta = default;
-            }
-        }
-
-        observed = snapshot;
-        if (snapshot.Revision != pendingSelectionRevision ||
-            snapshot.Document.Items.Any(item => item.Id == pendingSelection))
-            pendingSelection = string.Empty;
-
-        Selection.RemoveWhere(
-            id => id != pendingSelection &&
-                  !snapshot.Document.Items.Any(item => item.Id == id));
-
-        if (snapshot.Document.Layer(activeLayer) == null)
-            activeLayer = snapshot.Document.Layers.Last().Id;
-
-        return true;
     }
 
     private static void Toolbar(CartographyPresentation snapshot)
