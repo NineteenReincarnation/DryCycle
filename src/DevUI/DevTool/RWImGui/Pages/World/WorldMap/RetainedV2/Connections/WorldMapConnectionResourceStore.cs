@@ -852,13 +852,24 @@ internal sealed class WorldMapConnectionResourceStore
                     }
                 }
 
+                // Fan terminal stubs from the visual centre of the side instead of making
+                // every later endpoint progressively longer. The old one-sided staircase could push
+                // the final few routes dozens of pixels farther out and create a comb-like shape.
+                // Centre-out depth keeps ownership clear while leaving more corridor space.
+                float center =
+                    (endpoints.Count - 1) *
+                    0.5f;
+                float rankFromCenter =
+                    Math.Abs(i - center);
                 float extraDepth =
-                    i * spacing;
+                    rankFromCenter *
+                    spacing;
 
                 if (endpoints.Count > DenseLaneBankThreshold)
                 {
                     extraDepth +=
-                        (i / DenseLaneBankCapacity) *
+                        ((int)(rankFromCenter /
+                               DenseLaneBankCapacity)) *
                         DenseTerminalDepthGap;
                 }
 
