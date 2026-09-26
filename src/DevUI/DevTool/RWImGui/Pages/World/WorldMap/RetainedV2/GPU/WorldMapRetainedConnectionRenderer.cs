@@ -488,6 +488,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         float z)
     {
         for (int i = 0; i < path.Length - 1; i++)
+        {
             AddThickSegment(
                 vertices,
                 colors,
@@ -497,6 +498,45 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 halfWidth,
                 color,
                 z);
+        }
+
+        for (int i = 1; i < path.Length - 1; i++)
+            AddRoundJoin(vertices, colors, indices, path[i], halfWidth, color, z);
+    }
+
+    private static void AddRoundJoin(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> indices,
+        Num.Vector2 center,
+        float radius,
+        Color32 color,
+        float z)
+    {
+        const int segments = 8;
+        if (radius <= 0.001f)
+            return;
+
+        int first = vertices.Count;
+        vertices.Add(ToUnity(center, z));
+        colors.Add(color);
+
+        for (int i = 0; i <= segments; i++)
+        {
+            float angle = (float)(Math.PI * 2.0 * i / segments);
+            Num.Vector2 point = center + new Num.Vector2(
+                (float)Math.Cos(angle),
+                (float)Math.Sin(angle)) * radius;
+            vertices.Add(ToUnity(point, z));
+            colors.Add(color);
+        }
+
+        for (int i = 0; i < segments; i++)
+        {
+            indices.Add(first);
+            indices.Add(first + i + 1);
+            indices.Add(first + i + 2);
+        }
     }
 
     private static void AddDashedPath(
