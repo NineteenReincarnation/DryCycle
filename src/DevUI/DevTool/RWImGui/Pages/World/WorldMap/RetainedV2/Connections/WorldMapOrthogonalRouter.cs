@@ -603,6 +603,7 @@ internal static class WorldMapOrthogonalRouter
                 request.EndRoom,
                 obstacles,
                 occupancy,
+                request.LaneOffset,
                 out Num.Vector2[] localMiddle,
                 out localDetourCongestion))
         {
@@ -1723,6 +1724,7 @@ internal static class WorldMapOrthogonalRouter
         int endRoom,
         List<Obstacle> obstacles,
         Dictionary<long, Occupancy> occupancy,
+        float laneOffset,
         out Num.Vector2[] points,
         out float congestionScore)
     {
@@ -1795,10 +1797,25 @@ internal static class WorldMapOrthogonalRouter
                 obstacle.Max.Y +
                 LocalDetourClearance;
 
-            xs.Add(left);
-            xs.Add(right);
-            ys.Add(top);
-            ys.Add(bottom);
+            if (Math.Abs(laneOffset) > 0.01f)
+            {
+                // Once an obstacle blocks the direct corridor, lane identity must survive the
+                // detour as well. Shift candidate gutters by the allocated lane offset; candidates
+                // shifted inward into an obstacle are rejected by CorridorRouteClear, leaving the
+                // matching outward gutter. This prevents 3+ sibling pipes from collapsing onto the
+                // same top/bottom edge after their terminal fanout was already separated.
+                xs.Add(left + laneOffset);
+                xs.Add(right + laneOffset);
+                ys.Add(top + laneOffset);
+                ys.Add(bottom + laneOffset);
+            }
+            else
+            {
+                xs.Add(left);
+                xs.Add(right);
+                ys.Add(top);
+                ys.Add(bottom);
+            }
 
             envelopeLeft =
                 Math.Min(
@@ -1821,10 +1838,20 @@ internal static class WorldMapOrthogonalRouter
         if (!hasRelevantObstacle)
             return false;
 
-        xs.Add(envelopeLeft);
-        xs.Add(envelopeRight);
-        ys.Add(envelopeTop);
-        ys.Add(envelopeBottom);
+        if (Math.Abs(laneOffset) > 0.01f)
+        {
+            xs.Add(envelopeLeft + laneOffset);
+            xs.Add(envelopeRight + laneOffset);
+            ys.Add(envelopeTop + laneOffset);
+            ys.Add(envelopeBottom + laneOffset);
+        }
+        else
+        {
+            xs.Add(envelopeLeft);
+            xs.Add(envelopeRight);
+            ys.Add(envelopeTop);
+            ys.Add(envelopeBottom);
+        }
 
         float bestScore =
             float.MaxValue;
