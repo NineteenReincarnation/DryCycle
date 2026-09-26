@@ -173,14 +173,15 @@ internal static class CartographyDrawing
     private static uint TerrainColor(
         EditorMapGeometryKind kind,
         uint background,
-        uint wall) =>
-        kind switch
-        {
-            EditorMapGeometryKind.Solid => wall,
-            EditorMapGeometryKind.Structure => Blend(wall, background, .35f),
-            EditorMapGeometryKind.BackWall => Blend(wall, background, .75f),
-            _ => background
-        };
+        uint wall)
+    {
+        // Cartography presents authored curved terrain as ordinary floor geometry. Its material
+        // semantics still drive topology, water/deathpit handling and masking, but the visible fill
+        // uses exactly the same floor color as the room's normal terrain instead of the dark wall
+        // palette. This keeps TerrainHandle / CurvedSlope / SuperSlope / LocalTerrain visually
+        // continuous with adjacent ordinary floor.
+        return background;
+    }
 
     private static void AddCurveSegmentToMask(
         bool[] mask,
