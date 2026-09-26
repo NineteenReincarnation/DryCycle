@@ -146,6 +146,13 @@ dotnet run --project tests/WorldMapDirection.Tests/WorldMapDirection.Tests.cspro
   --configuration Release \
   --no-launch-profile
 
+# Hidden/OH map mode has a distinct scheduling contract: background thumbnail preparation continues
+# at a bounded cadence while the retained GPU surface must never render. Keep that policy executable
+# in hosted CI instead of relying only on Unity/runtime smoke tests.
+dotnet run --project tests/WorldMapBackground.Tests/WorldMapBackground.Tests.csproj \
+  --configuration Release \
+  --no-launch-profile
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
