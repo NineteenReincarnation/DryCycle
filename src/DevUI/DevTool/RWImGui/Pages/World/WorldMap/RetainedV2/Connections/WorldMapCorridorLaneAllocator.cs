@@ -170,6 +170,8 @@ internal static class WorldMapCorridorLaneAllocator
                 routes,
                 planSet,
                 obstacles);
+        HashSet<string> reroute =
+            new(StringComparer.Ordinal);
 
         for (int i = 0; i < routeIds.Count; i++)
         {
@@ -223,13 +225,26 @@ internal static class WorldMapCorridorLaneAllocator
                             effectiveOffsets,
                             lanePlan.Assigned);
 
-                    if (weaveCandidate != null &&
-                        IsDerivedRouteClear(
-                            weaveCandidate,
-                            route,
-                            obstacles))
+                    if (weaveCandidate != null)
                     {
-                        candidate = weaveCandidate;
+                        if (IsDerivedRouteClear(
+                                weaveCandidate,
+                                route,
+                                obstacles))
+                        {
+                            candidate = weaveCandidate;
+                        }
+                        else
+                        {
+                            // The lane itself fits, but its branch transition does not. Falling back
+                            // to an abrupt lane collapse at the shared junction recreates the exact
+                            // false merge we are trying to eliminate, so give the whole touched
+                            // bundle one bounded reroute opportunity.
+                            AddTouchedGroupRoutes(
+                                lanePlan,
+                                planSet,
+                                reroute);
+                        }
                     }
                 }
             }
@@ -265,9 +280,6 @@ internal static class WorldMapCorridorLaneAllocator
         // centreline collapse. If a bundle drops below the minimum readable scale, surface those
         // routes to the resource store for one congestion-aware reroute pass. If no alternative
         // corridor exists, the store keeps the safe compressed fallback after that bounded retry.
-        HashSet<string> reroute =
-            new(StringComparer.Ordinal);
-
         foreach (KeyValuePair<int, float> pair in groupScales)
         {
             if (pair.Value >= MinimumReadableGroupScale ||
@@ -1006,6 +1018,40 @@ internal static class WorldMapCorridorLaneAllocator
         }
 
         return true;
+    }
+
+    private static void AddTouchedGroupRoutes(
+        RouteLanePlan plan,
+        ContinuityPlanSet planSet,
+        HashSet<string> output)
+    {
+        if (plan == null ||
+            planSet == null ||
+            output == null)
+            return;
+
+        HashSet<int> groups =
+            new();
+
+        for (int i = 0; i < plan.GroupIds.Length; i++)
+        {
+            int groupId =
+                plan.GroupIds[i];
+            if (groupId >= 0)
+                groups.Add(groupId);
+        }
+
+        foreach (int groupId in groups)
+        {
+            if (!planSet.GroupRoutes.TryGetValue(
+                    groupId,
+                    out List<string> routeIds) ||
+                routeIds == null)
+                continue;
+
+            for (int i = 0; i < routeIds.Count; i++)
+                output.Add(routeIds[i]);
+        }
     }
 
     private static byte CompressionDensityTier(
