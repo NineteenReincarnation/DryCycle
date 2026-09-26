@@ -133,6 +133,19 @@ internal static class Program
             ys.Add(y);
         }
 
+        Console.WriteLine(
+            "short lanes: " +
+            string.Join(
+                " | ",
+                routes.Select(
+                    route =>
+                        string.Join(
+                            " -> ",
+                            route.Points.Select(
+                                point =>
+                                    "(" + point.X.ToString("F1") + "," +
+                                    point.Y.ToString("F1") + ")")))));
+
         Check(
             ys.Max() - ys.Min() >= 18f,
             "Parallel short links must preserve visibly separated lane offsets.");
