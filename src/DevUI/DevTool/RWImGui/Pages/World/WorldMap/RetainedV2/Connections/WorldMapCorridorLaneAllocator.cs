@@ -795,6 +795,14 @@ internal static class WorldMapCorridorLaneAllocator
             CorridorComponent component =
                 components[c];
 
+            // A corridor can be the mirrored continuation of the same bundle after a 90-degree
+            // turn. Resolve that orientation once per component; doing it per segment needlessly
+            // repeated the local-order/inversion scan on dense bundles.
+            int orientation =
+                ComponentOrientation(
+                    component,
+                    slotIds);
+
             for (int s = 0;
                  s < component.Segments.Count;
                  s++)
@@ -807,14 +815,6 @@ internal static class WorldMapCorridorLaneAllocator
                         out float offset))
                     continue;
 
-                // A corridor can be the mirrored continuation of the same bundle after a 90-degree
-                // turn. In that case the global slot order is still correct, but its world-axis
-                // normal is reversed. Mirror the numeric offset for this component instead of
-                // forcing the routes to cross or asking the router to detour unnecessarily.
-                int orientation =
-                    ComponentOrientation(
-                        component,
-                        slotIds);
                 offset *= orientation;
 
                 if (!lanePlans.TryGetValue(
