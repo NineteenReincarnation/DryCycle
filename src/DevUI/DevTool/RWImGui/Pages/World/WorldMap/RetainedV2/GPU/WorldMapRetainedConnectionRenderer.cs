@@ -33,6 +33,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private const float DirectionMarkerSpread = 3.4f;
     private const float DirectionMarkerCoreHalfWidth = 0.78f;
     private const float DirectionMarkerShadowHalfWidth = 1.55f;
+    private const float MinimumDirectionMarkerRun = 20f;
 
     private const float CrossingRadius = 6.4f;
     private const float CrossingRise = 4.8f;
@@ -645,17 +646,11 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 path,
                 out point,
                 out tangent,
-                out straightLength))
+                out straightLength) ||
+            straightLength <
+                MinimumDirectionMarkerRun)
         {
-            if (!TryPointAtFraction(
-                    path,
-                    0.5f,
-                    out point,
-                    out tangent))
-                return;
-
-            straightLength =
-                0f;
+            return;
         }
 
         if (direction ==
