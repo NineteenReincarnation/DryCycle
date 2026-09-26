@@ -219,32 +219,35 @@ internal static class WorldMapCorridorLaneAllocator
                 {
                     candidate = continuityCandidate;
 
+                    bool needsTransition =
+                        WorldMapJunctionWeavePlanner.NeedsTransition(
+                            effectiveOffsets,
+                            lanePlan.Assigned);
                     Num.Vector2[] weaveCandidate =
                         WorldMapJunctionWeavePlanner.Build(
                             basePoints,
                             effectiveOffsets,
                             lanePlan.Assigned);
 
-                    if (weaveCandidate != null)
+                    if (weaveCandidate != null &&
+                        IsDerivedRouteClear(
+                            weaveCandidate,
+                            route,
+                            obstacles))
                     {
-                        if (IsDerivedRouteClear(
-                                weaveCandidate,
-                                route,
-                                obstacles))
-                        {
-                            candidate = weaveCandidate;
-                        }
-                        else
-                        {
-                            // The lane itself fits, but its branch transition does not. Falling back
-                            // to an abrupt lane collapse at the shared junction recreates the exact
-                            // false merge we are trying to eliminate, so give the whole touched
-                            // bundle one bounded reroute opportunity.
-                            AddTouchedGroupRoutes(
-                                lanePlan,
-                                planSet,
-                                reroute);
-                        }
+                        candidate = weaveCandidate;
+                    }
+                    else if (needsTransition)
+                    {
+                        // BuildLanePath averages adjacent offsets and can create a diagonal leader at
+                        // a lane boundary. If the explicit orthogonal dogleg/weave cannot be built,
+                        // prefer the original orthogonal base route while the bundle gets its one
+                        // reroute attempt; never display a fake diagonal shortcut as a fallback.
+                        candidate = basePoints;
+                        AddTouchedGroupRoutes(
+                            lanePlan,
+                            planSet,
+                            reroute);
                     }
                 }
             }
