@@ -1004,21 +1004,13 @@ internal static class DevToolFrontend
                             DevToolOverlay.Draw(snapshot, frameContext);
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
                             FontSettingsWindow.Draw(frameContext.DisplaySize);
-                        IDevToolPageView scenePage = null;
-                        bool scenePageResolved =
-                            DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out scenePage);
-                        bool sceneSurfaceSupported =
-                            !snapshot.FocusMode &&
-                            scenePageResolved &&
-                            scenePage != null &&
-                            scenePage.SupportsSceneSurface;
-                        if (sceneSurfaceSupported &&
-                            (DevToolUiSettings.SceneInCenter || scenePage.AlwaysShowSceneSurface))
+                        bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
+                        if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
                         {
                             using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
                                 SceneWorkspaceWindow.Draw(snapshot, frameContext.DisplaySize);
                         }
-                        if (!snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode))
+                        if (sceneSurfaceSupported)
                         {
                             using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
                                 ScenePlacementWindow.Draw(snapshot, frameContext.DisplaySize);
