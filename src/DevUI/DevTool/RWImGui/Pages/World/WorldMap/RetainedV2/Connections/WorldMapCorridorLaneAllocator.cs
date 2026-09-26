@@ -4,6 +4,20 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
+internal readonly struct WorldMapCorridorLaneApplyResult
+{
+    internal WorldMapCorridorLaneApplyResult(string[] rerouteRouteIds)
+    {
+        RerouteRouteIds = rerouteRouteIds ?? Array.Empty<string>();
+    }
+
+    internal string[] RerouteRouteIds { get; }
+    internal bool HasRerouteCandidates => RerouteRouteIds.Length > 0;
+
+    internal static WorldMapCorridorLaneApplyResult Empty =>
+        new(Array.Empty<string>());
+}
+
 /// <summary>
 /// Derives stable parallel lanes for overlapping middle corridors across the complete retained route
 /// set. Phase 4 extends Phase 2 with bundle continuity: corridor components that carry at least two
@@ -131,14 +145,14 @@ internal static class WorldMapCorridorLaneAllocator
 
     private const float PointEpsilonSquared = 0.04f;
 
-    internal static void Apply(
+    internal static WorldMapCorridorLaneApplyResult Apply(
         Dictionary<string, ConnectionRouteResource> routes,
         IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> obstacles,
         HashSet<string> changedIds,
         ref long storeRevision)
     {
         if (routes == null || routes.Count == 0)
-            return;
+            return WorldMapCorridorLaneApplyResult.Empty;
 
         List<string> routeIds = new(routes.Keys);
         routeIds.Sort(StringComparer.Ordinal);
@@ -238,6 +252,36 @@ internal static class WorldMapCorridorLaneAllocator
             changedIds?.Add(routeId);
             unchecked { storeRevision++; }
         }
+
+        // A zero scale means the current corridor physically cannot preserve even the narrowest
+        // readable lane bundle without intersecting a room obstacle. Do not silently accept a
+        // centreline collapse: surface those routes to the resource store for one congestion-aware
+        // reroute pass. If no alternative corridor exists, the store will keep the safe fallback
+        // after that bounded retry rather than loop forever.
+        HashSet<string> reroute =
+            new(StringComparer.Ordinal);
+
+        foreach (KeyValuePair<int, float> pair in groupScales)
+        {
+            if (pair.Value > 0.001f ||
+                !planSet.GroupRoutes.TryGetValue(
+                    pair.Key,
+                    out List<string> groupRoutes) ||
+                groupRoutes == null ||
+                groupRoutes.Count < 2)
+                continue;
+
+            for (int i = 0; i < groupRoutes.Count; i++)
+                reroute.Add(groupRoutes[i]);
+        }
+
+        if (reroute.Count == 0)
+            return WorldMapCorridorLaneApplyResult.Empty;
+
+        string[] rerouteIds = new string[reroute.Count];
+        reroute.CopyTo(rerouteIds);
+        Array.Sort(rerouteIds, StringComparer.Ordinal);
+        return new WorldMapCorridorLaneApplyResult(rerouteIds);
     }
 
     private static Dictionary<BucketKey, List<SegmentRef>> BuildBuckets(
