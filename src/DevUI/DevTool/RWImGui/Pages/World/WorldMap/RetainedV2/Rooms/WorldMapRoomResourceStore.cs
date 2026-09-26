@@ -48,6 +48,7 @@ internal sealed class WorldMapRoomResourceStore
     private EditorMapRoomSnapshot[] auditRooms = Array.Empty<EditorMapRoomSnapshot>();
     private int auditCursor;
     private int nextAuditFrame;
+    private int nextDormantWorkFrame;
     private long revision;
 
     private long thumbnailSessionStartedTicks;
@@ -187,6 +188,38 @@ internal sealed class WorldMapRoomResourceStore
 
         UpdateThumbnailLoadExpected(scene.Rooms.Count);
 
+        bool canvasVisible =
+            WorldMapRetainedV2Runtime.CanvasVisible;
+        if (canvasVisible)
+        {
+            nextDormantWorkFrame = 0;
+        }
+        else
+        {
+            bool incomplete =
+                !thumbnailSessionComplete ||
+                !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete;
+            double catchupAge =
+                Math.Max(
+                    ThumbnailLoadElapsedMilliseconds,
+                    MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds);
+            int dormantInterval =
+                WorldMapBackgroundSchedulingPolicy.GeometrySweepIntervalFrames(
+                    canvasVisible: false,
+                    thumbnailWorkIncomplete: incomplete,
+                    catchupAgeMilliseconds: catchupAge);
+
+            if (UnityEngine.Time.frameCount < nextDormantWorkFrame)
+            {
+                UpdateThumbnailLoadSession();
+                return;
+            }
+
+            nextDormantWorkFrame =
+                UnityEngine.Time.frameCount +
+                Math.Max(1, dormantInterval);
+        }
+
         EditorMapRoomSnapshot[] snapshotRooms =
             snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         if (!ReferenceEquals(auditRooms, snapshotRooms))
@@ -203,8 +236,6 @@ internal sealed class WorldMapRoomResourceStore
 
         // Navigation/room drag owns the frame budget. Keep committed thumbnails/geometry stable
         // and resume source capture/build commits after the interaction cooldown.
-        bool canvasVisible =
-            WorldMapRetainedV2Runtime.CanvasVisible;
         int budget =
             WorldMapPersistentRetainedCache.ValidatedRoomCount > 0
                 ? HotStartRoomsPerFrame
@@ -301,6 +332,7 @@ internal sealed class WorldMapRoomResourceStore
         auditRooms = Array.Empty<EditorMapRoomSnapshot>();
         auditCursor = 0;
         nextAuditFrame = 0;
+        nextDormantWorkFrame = 0;
         thumbnailSessionStartedTicks = 0L;
         thumbnailSessionCompletedTicks = 0L;
         thumbnailSessionExpected = 0;
