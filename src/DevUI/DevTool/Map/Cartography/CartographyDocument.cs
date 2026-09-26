@@ -76,7 +76,7 @@ internal sealed class CartographyDocument
     public uint Connections = 0xFFB8C3D0;
     public bool ShowRoomNames = true;
     public bool ShowConnections = true;
-    public bool Transparent;
+    public bool Transparent = true;
     public bool CropSolid = true;
     public float ExportScale = 2;
     public int Padding = 32;
