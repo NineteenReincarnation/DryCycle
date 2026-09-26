@@ -2200,11 +2200,16 @@ internal static class WorldMapCorridorLaneAllocator
         }
 
         // Cross-bundle transition geometry can make a route invalid only after several independent
-        // bundle scales have been chosen. Collapse every bundle touched by such a route together,
-        // then recheck until no new group changes are required. This is conservative but preserves
-        // the "same bundle = same scale" invariant.
+        // bundle scales have been chosen. Reduce touched bundles one scale step at a time instead of
+        // collapsing them straight to the centreline. The old all-or-nothing fallback produced an
+        // abrupt "wide -> zero" pinch at exactly the junction where readability matters most.
+        int maximumPasses =
+            Math.Max(
+                8,
+                groupIds.Count * 3);
+
         for (int pass = 0;
-             pass <= groupIds.Count;
+             pass < maximumPasses;
              pass++)
         {
             bool changed = false;
@@ -2244,14 +2249,29 @@ internal static class WorldMapCorridorLaneAllocator
 
                 foreach (int groupId in touched)
                 {
-                    if (scales.TryGetValue(
+                    if (!scales.TryGetValue(
                             groupId,
-                            out float current) &&
-                        current > 0f)
-                    {
-                        scales[groupId] = 0f;
-                        changed = true;
-                    }
+                            out float current) ||
+                        current <= 0f)
+                        continue;
+
+                    planSet.GroupDensity.TryGetValue(
+                        groupId,
+                        out byte densityTier);
+
+                    float reduced =
+                        NextLowerGroupScale(
+                            current,
+                            densityTier);
+
+                    if (reduced >=
+                        current -
+                        0.0001f)
+                        continue;
+
+                    scales[groupId] =
+                        reduced;
+                    changed = true;
                 }
             }
 
@@ -2259,7 +2279,44 @@ internal static class WorldMapCorridorLaneAllocator
                 break;
         }
 
+        // The iterative safety pass above may have reduced one corridor more than its neighbour.
+        // Re-apply the continuity constraint so the final lane bank narrows gradually toward any
+        // constrained junction.
+        SmoothAdjacentGroupScales(
+            planSet,
+            scales);
+
         return scales;
+    }
+
+    private static float NextLowerGroupScale(
+        float current,
+        byte densityTier)
+    {
+        float[] candidates =
+            densityTier > 0
+                ? DenseGroupScales
+                : NormalGroupScales;
+
+        float best = 0f;
+
+        for (int i = 0;
+             i < candidates.Length;
+             i++)
+        {
+            float candidate =
+                candidates[i];
+
+            if (candidate >=
+                current -
+                0.0001f)
+                continue;
+
+            if (candidate > best)
+                best = candidate;
+        }
+
+        return best;
     }
 
     private static bool GroupRoutesClear(
