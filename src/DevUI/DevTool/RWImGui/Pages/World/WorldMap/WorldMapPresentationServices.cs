@@ -347,6 +347,8 @@ internal enum WorldMapInteractionKind
 internal static class WorldMapBackgroundBudget
 {
     private const int GeometrySweepIntervalFrames = 4;
+    private const int DormantCatchupGeometrySweepIntervalFrames = 6;
+    private const int DormantMaintenanceGeometrySweepIntervalFrames = 12;
     private const int ShortcutSweepIntervalFrames = 4;
     private const int InteractionCooldownMilliseconds = 90;
 
@@ -434,8 +436,21 @@ internal static class WorldMapBackgroundBudget
             return false;
         }
 
-        // Zoom changes presentation, never whether a room is allowed to finish loading.
-        int interval = WorldMapRetainedV2Runtime.CanvasVisible ? GeometrySweepIntervalFrames : 12;
+        // OH/hidden UI must keep preparing thumbnails, but there is no reason to spend the
+        // visible-map cadence forever after the background queue has converged. Catch up at a
+        // moderate cadence while either MapTex recovery or retained thumbnail population is still
+        // incomplete, then fall back to a low-frequency maintenance sweep.
+        bool canvasVisible =
+            WorldMapRetainedV2Runtime.CanvasVisible;
+        bool backgroundCatchup =
+            !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete ||
+            !WorldMapRetainedV2Runtime.Resources.ThumbnailLoadComplete;
+        int interval =
+            canvasVisible
+                ? GeometrySweepIntervalFrames
+                : backgroundCatchup
+                    ? DormantCatchupGeometrySweepIntervalFrames
+                    : DormantMaintenanceGeometrySweepIntervalFrames;
         if (Time.frameCount - lastGeometrySweepFrame < interval)
             return false;
 
