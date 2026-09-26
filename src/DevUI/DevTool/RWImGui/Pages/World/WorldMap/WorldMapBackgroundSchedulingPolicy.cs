@@ -10,6 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static class WorldMapBackgroundSchedulingPolicy
 {
     internal const int VisibleGeometrySweepIntervalFrames = 4;
+    internal const int VisibleSourceRecoveryIntervalFrames = 1;
     internal const int DormantCatchupGeometrySweepIntervalFrames = 6;
     internal const int DormantMaintenanceGeometrySweepIntervalFrames = 12;
     internal const double DormantCatchupWindowMilliseconds = 15000d;
@@ -31,6 +32,17 @@ internal static class WorldMapBackgroundSchedulingPolicy
             ? DormantCatchupGeometrySweepIntervalFrames
             : DormantMaintenanceGeometrySweepIntervalFrames;
     }
+
+    internal static int SourceRecoveryIntervalFrames(
+        bool canvasVisible,
+        bool recoveryIncomplete,
+        double recoveryAgeMilliseconds) =>
+        canvasVisible
+            ? VisibleSourceRecoveryIntervalFrames
+            : GeometrySweepIntervalFrames(
+                canvasVisible: false,
+                thumbnailWorkIncomplete: recoveryIncomplete,
+                catchupAgeMilliseconds: recoveryAgeMilliseconds);
 
     internal static bool CanRenderRetainedSurface(
         bool canvasVisible,
