@@ -372,6 +372,9 @@ internal static partial class CartographyRuntime
             throw new InvalidOperationException(
                 "An export is already running / 导出正在进行。");
 
+        workspace.ExportPath =
+            string.Empty;
+
         CartographyDocument frozen =
             workspace.Document.Clone();
         CartographyScene scene =
