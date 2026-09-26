@@ -10,7 +10,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 internal static partial class CartographyView
 {
     private static string importPath = "", iconSearch = "", regionSearch = "";
-    private static string imagePickerError = "";
     private static bool sourcePanel;
 
     private static void SourcePicker()
@@ -256,25 +255,9 @@ internal static partial class CartographyView
         }
         if(ImGui.CollapsingHeader(T("图片与叠加层##AtlasImages","IMAGES & OVERLAYS##AtlasImages")))
         {
-            if(ImGui.Button(T("选择并导入图片","Select and import image")))
-            {
-                imagePickerError = "";
-                if(CartographyNativeFileDialog.TryPickImage(out string selectedImage, out string pickerError))
-                {
-                    Send(CartographyCommandKind.AddImage,c=>{c.Path=selectedImage;c.Item=new CartographyItem{Kind=CartographyItemKind.Image,LayerId=activeLayer,X=snapshot.Scene.Bounds.X,Y=snapshot.Scene.Bounds.Y,Color=0xFFFFFFFF};});
-                }
-                else if(!string.IsNullOrEmpty(pickerError))
-                {
-                    imagePickerError = pickerError;
-                }
-            }
-            if(imagePickerError.Length>0)
-            {
-                ImGui.PushStyleColor(ImGuiCol.Text,new Num.Vector4(1f,.48f,.36f,1f));
-                ImGui.TextWrapped(imagePickerError);
-                ImGui.PopStyleColor();
-            }
-            ImGui.TextWrapped(T("从系统文件选择器选择 PNG、JPG/JPEG 或 BMP；默认打开桌面。导入后可调整位置、尺寸和透明度，图层顺序决定前景或背景叠加。","Choose a PNG, JPG/JPEG, or BMP from the system file picker; it opens on the Desktop by default. After import, adjust position, size, and opacity; layer order controls foreground/background placement."));
+            if(ImGui.Button(T("打开图片资源管理器","Open image browser")))
+                OpenImageBrowser();
+            ImGui.TextWrapped(T("在 DryCycle 自己的制图 UI 中浏览文件；默认打开桌面，只显示 PNG、JPG/JPEG 和 BMP。选中后直接导入当前活动图层。","Browse files inside DryCycle's own Cartography UI. It opens on the Desktop by default and only shows PNG, JPG/JPEG, and BMP files. Import goes to the active layer."));
         }
         if(styleDirty)Stage(CartographyCommandKind.Style,"style",c=>c.Style=styleDraft);
     }
