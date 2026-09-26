@@ -21,6 +21,116 @@ internal sealed class CartographyPresentation
     internal CartographySource Source;
 }
 
+internal enum CartographyDiagnosticSeverity
+{
+    Warning,
+    Error
+}
+
+internal sealed class CartographyDiagnosticEntry
+{
+    internal long Sequence;
+    internal DateTime TimestampUtc;
+    internal CartographyDiagnosticSeverity Severity;
+    internal string Category = string.Empty;
+    internal string Context = string.Empty;
+    internal string Message = string.Empty;
+
+    internal string CopyText =>
+        "[" + TimestampUtc.ToString("u") + "] " +
+        Severity.ToString().ToUpperInvariant() +
+        " | " + Category +
+        (string.IsNullOrEmpty(Context) ? string.Empty : " | " + Context) +
+        " | " + Message;
+}
+
+internal static class CartographyDiagnostics
+{
+    private const int MaximumEntries = 256;
+    private static readonly object Gate = new();
+    private static readonly List<CartographyDiagnosticEntry> Entries = new();
+    private static readonly HashSet<string> Keys = new(StringComparer.Ordinal);
+    private static long sequence;
+    private static int openRequested;
+
+    internal static void Add(
+        CartographyDiagnosticSeverity severity,
+        string category,
+        string context,
+        string message,
+        bool requestOpen = false)
+    {
+        category ??= string.Empty;
+        context ??= string.Empty;
+        message ??= string.Empty;
+
+        string key =
+            severity + "\n" +
+            category + "\n" +
+            context + "\n" +
+            message;
+
+        lock (Gate)
+        {
+            if (Keys.Add(key))
+            {
+                Entries.Add(
+                    new CartographyDiagnosticEntry
+                    {
+                        Sequence = ++sequence,
+                        TimestampUtc = DateTime.UtcNow,
+                        Severity = severity,
+                        Category = category,
+                        Context = context,
+                        Message = message
+                    });
+
+                if (Entries.Count > MaximumEntries)
+                {
+                    CartographyDiagnosticEntry oldest =
+                        Entries[0];
+                    Entries.RemoveAt(0);
+                    Keys.Remove(
+                        oldest.Severity + "\n" +
+                        oldest.Category + "\n" +
+                        oldest.Context + "\n" +
+                        oldest.Message);
+                }
+            }
+        }
+
+        if (requestOpen)
+            Interlocked.Exchange(
+                ref openRequested,
+                1);
+    }
+
+    internal static CartographyDiagnosticEntry[] Snapshot()
+    {
+        lock (Gate)
+            return Entries.ToArray();
+    }
+
+    internal static void Clear()
+    {
+        lock (Gate)
+        {
+            Entries.Clear();
+            Keys.Clear();
+        }
+    }
+
+    internal static void RequestOpen() =>
+        Interlocked.Exchange(
+            ref openRequested,
+            1);
+
+    internal static bool ConsumeOpenRequest() =>
+        Interlocked.Exchange(
+            ref openRequested,
+            0) != 0;
+}
+
 internal static partial class CartographyRuntime
 {
     private sealed class Workspace
@@ -101,7 +211,16 @@ internal static partial class CartographyRuntime
                 workspace.ExportPath = result.Path;
                 workspace.Status = "Exported / 已导出 " + result.Width + " × " + result.Height + " · " + result.Path + " " + result.Note;
             }
-            catch (Exception error) { Report(workspace, "Export failed / 导出失败", error); }
+            catch (Exception error)
+            {
+                CartographyDiagnostics.Add(
+                    CartographyDiagnosticSeverity.Error,
+                    "Export",
+                    workspace.Identity,
+                    error.ToString(),
+                    requestOpen: true);
+                Report(workspace, "Export failed / 导出失败", error);
+            }
             workspace.Export = null;
             if (ReferenceEquals(current, workspace)) Publish(workspace);
         }
@@ -182,7 +301,33 @@ internal static partial class CartographyRuntime
                     _ => Restore(workspace, before), _ => Restore(workspace, after)));
             }
             catch (Exception error)
-            { failed.Add(workspace); success = false; Report(workspace, "Cartography edit failed / 制图操作失败", error); PublishIfCurrent(workspace); }
+            {
+                failed.Add(workspace);
+                success = false;
+
+                if (command.Kind == CartographyCommandKind.Export)
+                {
+                    CartographyDiagnostics.Add(
+                        CartographyDiagnosticSeverity.Error,
+                        "Export",
+                        workspace.Identity,
+                        error.ToString(),
+                        requestOpen: true);
+                    Report(
+                        workspace,
+                        "Export failed / 导出失败",
+                        error);
+                }
+                else
+                {
+                    Report(
+                        workspace,
+                        "Cartography edit failed / 制图操作失败",
+                        error);
+                }
+
+                PublishIfCurrent(workspace);
+            }
         }
         return success;
     }
@@ -219,18 +364,124 @@ internal static partial class CartographyRuntime
         catch (Exception error) { Report(workspace, "Save failed; edits retained / 保存失败，修改已保留", error); PublishIfCurrent(workspace); return false; }
     }
 
-    private static void Export(Workspace workspace, CartographyCommand command)
+    private static void Export(
+        Workspace workspace,
+        CartographyCommand command)
     {
-        if (workspace.Export != null) throw new InvalidOperationException("An export is already running / 导出正在进行。");
-        CartographyDocument frozen = workspace.Document.Clone();
-        CartographyScene scene = workspace.Scene;
-        if (scene.Errors.Length != 0) throw new InvalidOperationException("Wait for terrain or hide unavailable rooms before export / 请等待地形就绪，或隐藏无法读取的房间。\n" + string.Join("; ", scene.Errors.Take(5)));
-        CartographyExporter.Dimensions(frozen, scene, out _, out _);
-        string path = Path.GetFullPath(command.Path);
-        string expectedHash = CartographyStorage.HashFile(path);
-        workspace.Export = Task.Run(() => CartographyExporter.Export(frozen, scene, path, (CartographyExportFormat)command.Integer, expectedHash, Log));
-        workspace.Status = "Exporting frozen map snapshot / 正在导出地图快照…";
+        if (workspace.Export != null)
+            throw new InvalidOperationException(
+                "An export is already running / 导出正在进行。");
+
+        CartographyDocument frozen =
+            workspace.Document.Clone();
+        CartographyScene scene =
+            workspace.Scene;
+
+        string context =
+            string.IsNullOrEmpty(workspace.Identity)
+                ? "<unknown project>"
+                : workspace.Identity;
+
+        foreach (string error in scene.Errors ??
+                 Array.Empty<string>())
+        {
+            CartographyDiagnostics.Add(
+                CartographyDiagnosticSeverity.Error,
+                "Scene validation",
+                context,
+                error);
+        }
+
+        foreach (string warning in scene.Warnings ??
+                 Array.Empty<string>())
+        {
+            CartographyDiagnostics.Add(
+                CartographyDiagnosticSeverity.Warning,
+                "Scene warning",
+                context,
+                warning);
+        }
+
+        string[] blockingWarnings =
+            (scene.Warnings ??
+             Array.Empty<string>())
+            .Where(IsExportBlockingWarning)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if ((scene.Errors?.Length ?? 0) != 0 ||
+            blockingWarnings.Length != 0)
+        {
+            CartographyDiagnostics.RequestOpen();
+
+            var problems =
+                new List<string>();
+
+            if ((scene.Errors?.Length ?? 0) != 0)
+            {
+                problems.AddRange(
+                    scene.Errors.Take(5));
+            }
+
+            problems.AddRange(
+                blockingWarnings.Take(
+                    Math.Max(
+                        0,
+                        5 - problems.Count)));
+
+            throw new InvalidOperationException(
+                "Export blocked by unresolved cartography resources / " +
+                "导出已阻止：仍有未解析的制图资源。\n" +
+                string.Join(
+                    "\n",
+                    problems));
+        }
+
+        CartographyExporter.Dimensions(
+            frozen,
+            scene,
+            out _,
+            out _);
+
+        string path =
+            Path.GetFullPath(
+                command.Path);
+        string expectedHash =
+            CartographyStorage.HashFile(path);
+
+        workspace.Export =
+            Task.Run(
+                () =>
+                    CartographyExporter.Export(
+                        frozen,
+                        scene,
+                        path,
+                        (CartographyExportFormat)command.Integer,
+                        expectedHash,
+                        Log));
+
+        workspace.Status =
+            scene.Warnings != null &&
+            scene.Warnings.Length > 0
+                ? "Exporting frozen map snapshot with warnings / 正在导出地图快照（有警告）…"
+                : "Exporting frozen map snapshot / 正在导出地图快照…";
+
         PublishIfCurrent(workspace);
+    }
+
+    internal static bool IsExportBlockingWarning(
+        string warning)
+    {
+        if (string.IsNullOrWhiteSpace(warning))
+            return false;
+
+        return
+            warning.StartsWith(
+                "Missing sprite",
+                StringComparison.OrdinalIgnoreCase) ||
+            warning.IndexOf(
+                "missing sprite",
+                StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static void Open(Workspace workspace, string path)
