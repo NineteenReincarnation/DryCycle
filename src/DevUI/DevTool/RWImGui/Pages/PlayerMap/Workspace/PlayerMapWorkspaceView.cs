@@ -69,6 +69,44 @@ internal static class PlayerMapWorkspaceView
         defB = default;
     }
 
+    internal static void DrawBrowserPane(EditorMapPresentationSnapshot worldSnapshot)
+    {
+        if (!TryGetPresentation(out PlayerMapPresentationSnapshot snapshot))
+            return;
+
+        DrawExplorer(snapshot);
+    }
+
+    internal static void DrawCenterPane(EditorMapPresentationSnapshot worldSnapshot)
+    {
+        if (!TryGetPresentation(out PlayerMapPresentationSnapshot snapshot))
+            return;
+
+        DrawToolbar(snapshot);
+        ImGui.Separator();
+        DrawCanvas(snapshot, worldSnapshot);
+    }
+
+    internal static void DrawInspectorPane(EditorMapPresentationSnapshot worldSnapshot)
+    {
+        if (!TryGetPresentation(out PlayerMapPresentationSnapshot snapshot))
+            return;
+
+        DrawInspector(snapshot);
+    }
+
+    private static bool TryGetPresentation(out PlayerMapPresentationSnapshot snapshot)
+    {
+        snapshot = PlayerMapWorkspaceRuntime.GetPresentation(DevToolRuntime.ActiveSession);
+        if (snapshot?.Available == true)
+            return true;
+
+        DevToolWidgets.MutedText(
+            DevToolUiSettings.T("玩家地图工作区正在初始化。", "Player Map workspace is initializing."),
+            true);
+        return false;
+    }
+
     internal static void DrawBody(EditorPresentationSnapshot editor, EditorMapPresentationSnapshot worldSnapshot)
     {
         PlayerMapPresentationSnapshot snapshot =
