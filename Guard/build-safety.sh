@@ -134,6 +134,12 @@ dotnet run --project tests/WorldMapPersistentCache.Tests/WorldMapPersistentCache
   --configuration Release \
   --no-launch-profile
 
+# The orthogonal router is pure System.Numerics code, so unlike GPU presentation it can and should
+# execute on hosted CI. This catches short-link, dense-lane and obstacle-detour regressions on main.
+dotnet run --project tests/WorldMapRouting.Tests/WorldMapRouting.Tests.csproj \
+  --configuration Release \
+  --no-launch-profile
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
