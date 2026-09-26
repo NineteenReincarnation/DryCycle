@@ -2112,6 +2112,25 @@ internal static class WorldMapView
             }
         }
 
+        if (!dashed)
+        {
+            // Match the retained GPU renderer: independent line segments otherwise leave harsh
+            // square seams at every 90-degree turn and make the route read like plumbing.
+            for (int i = 1; i < points.Count - 1; i++)
+            {
+                draw.AddCircleFilled(
+                    points[i],
+                    shadowThickness * 0.5f,
+                    shadow,
+                    10);
+                draw.AddCircleFilled(
+                    points[i],
+                    coreThickness * 0.5f,
+                    core,
+                    10);
+            }
+        }
+
         float length = PathLength(points);
         if (length < 25f)
             return;
