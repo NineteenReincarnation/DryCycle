@@ -175,12 +175,11 @@ internal static class CartographyDrawing
         uint background,
         uint wall)
     {
-        // Cartography presents authored curved terrain as ordinary floor geometry. Its material
-        // semantics still drive topology, water/deathpit handling and masking, but the visible fill
-        // uses exactly the same floor color as the room's normal terrain instead of the dark wall
-        // palette. This keeps TerrainHandle / CurvedSlope / SuperSlope / LocalTerrain visually
-        // continuous with adjacent ordinary floor.
-        return background;
+        // "Normal floor" in Cartography is ordinary Solid terrain (kind == 2), whose visible
+        // color is the room/palette wall color. Curved terrain changes geometry only, so every
+        // authored curve uses that exact same floor color. The original semantic kind is still
+        // retained for topology, water/deathpit behavior and masking.
+        return wall;
     }
 
     private static void AddCurveSegmentToMask(
