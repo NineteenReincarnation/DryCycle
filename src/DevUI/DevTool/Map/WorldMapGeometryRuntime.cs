@@ -361,6 +361,7 @@ internal static partial class MapRoomGeometryPresentationHub
         lastSubNodeCount = -1;
         nextStructureSyncFrame = 0;
         backgroundCursor = 0;
+        rasterFrameDeadlineTicks = 0L;
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
@@ -439,7 +440,10 @@ internal static partial class MapRoomGeometryPresentationHub
             rasterLoadsRemaining = Math.Max(0, rasterLoadsRemaining - 1);
         if (RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
             curveLoadsRemaining = Math.Max(0, curveLoadsRemaining - 1);
-        Publish(entry, allowRasterReadback: true);
+        bool fallbackBudgetAvailable =
+            allowOverBudget ||
+            Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks;
+        Publish(entry, allowRasterReadback: fallbackBudgetAvailable);
     }
 
     private static void ProcessBackground(global::World world, int currentRoom, int selectedRoom)
@@ -468,7 +472,10 @@ internal static partial class MapRoomGeometryPresentationHub
                 RefreshDimensions(priority, priority.RoomRep);
                 RefreshNodes(priority, priority.RoomRep, force: false);
                 if (RefreshRaster(priority, priority.RoomRep, allowDecode: true, forcePoll: false)) rasterLoadsRemaining--;
-                Publish(priority, allowRasterReadback: true);
+                Publish(
+                    priority,
+                    allowRasterReadback:
+                        Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks);
             }
 
         int checks = Math.Min(count, BackgroundRoomsPerFrame);
@@ -493,7 +500,11 @@ internal static partial class MapRoomGeometryPresentationHub
                 RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
                 curveLoadsRemaining--;
 
-            Publish(entry, allowRasterReadback: processVisuals);
+            Publish(
+                entry,
+                allowRasterReadback:
+                    processVisuals &&
+                    Stopwatch.GetTimestamp() < rasterFrameDeadlineTicks);
         }
     }
 
