@@ -344,8 +344,12 @@ internal sealed class WorldMapConnectionResourceStore
 
     private void EnqueueAll(WorldMapScene scene)
     {
-        foreach (string id in scene.Connections.Keys)
-            Enqueue(id);
+        List<string> ids =
+            new(scene.Connections.Keys);
+        ids.Sort(StringComparer.Ordinal);
+
+        for (int i = 0; i < ids.Count; i++)
+            Enqueue(ids[i]);
 
         List<string> stale = null;
         foreach (string id in routes.Keys)
