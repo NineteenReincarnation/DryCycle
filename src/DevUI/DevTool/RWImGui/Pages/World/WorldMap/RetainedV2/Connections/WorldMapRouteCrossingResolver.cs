@@ -123,8 +123,8 @@ internal static class WorldMapRouteCrossingResolver
 
     private const float CellSize = 96f;
     private const float AxisEpsilon = 0.01f;
-    private const float BridgeShoulder = 13f;
-    private const float RouteEndpointClearance = 20f;
+    private const float BridgeShoulder = 10f;
+    private const float RouteEndpointClearance = 18f;
 
     private const int DenseCellPairThreshold = 96;
     private const int MaxUniquePairChecksPerCell = 4096;
