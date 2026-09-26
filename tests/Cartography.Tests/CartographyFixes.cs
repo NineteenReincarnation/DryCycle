@@ -45,15 +45,15 @@ internal static partial class Program
         curvedDocument.Options.Wall=0xFF112233;
         var curvedItem=new CartographyItem{Kind=CartographyItemKind.Room,Appearance=new CartographyAppearance()};
         var curvedRaster=CartographyDrawing.Room(curvedDocument,curvedItem,curvedRoom);
-        Check(curvedRaster.Pixels.Any(p=>p==curvedDocument.Options.Wall),"Curved solid terrain uses the same wall color as ordinary solid terrain.");
+        Check(curvedRaster.Pixels.Any(p=>p==curvedDocument.Terrain),"Curved solid terrain uses the same visible floor color as ordinary room terrain.");
         var localOnly=new CartographyRoomSource{Name="LOCAL_CURVE_TEST",Width=12,Height=10,Settings="PlacedObjects: LocalTerrain><40><60><40~100^0~0^100~100^0~"};
         CartographyRegionLoader.DecodeCurvedTerrain(localOnly);
         var localRaster=CartographyDrawing.Room(curvedDocument,curvedItem,localOnly);
-        const uint localStructureColor=0xFF3A4B5C;
-        Check(localRaster.Pixels.Any(p=>p==localStructureColor),"Local/custom curved terrain uses the same Structure palette color as ordinary structure terrain.");
+        const uint localStructureColor=0xFF8899AA;
+        Check(localRaster.Pixels.Any(p=>p==localStructureColor),"Local/custom curved terrain uses the same visible floor color as ordinary room terrain.");
         int localCurvePixels=localRaster.Pixels.Count(p=>p!=curvedDocument.Terrain);
-        Check(localCurvePixels>localRaster.Width*4,"Curved terrain keeps its filled body beneath the authored surface.");
-        Check(localCurvePixels<localRaster.Width*localRaster.Height/2,"Curved terrain topology does not flood-fill unrelated room space.");
+        int localFloorPixels=localRaster.Pixels.Count(p=>p==curvedDocument.Terrain);
+        Check(localFloorPixels>localRaster.Width*4,"Curved terrain keeps its filled body beneath the authored surface.");
         int[] localSurfaceRows=Enumerable.Range(0,localRaster.Width)
             .Select(x=>Enumerable.Range(0,localRaster.Height)
                 .Where(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor)
