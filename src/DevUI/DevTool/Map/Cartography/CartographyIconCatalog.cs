@@ -21,6 +21,10 @@ internal static class CartographyIconCatalog
         ["LillyPuck"] = ("Symbol_LillyPuck", 0xFF2CF5FF), ["GlowWeed"] = ("Symbol_GlowWeed", 0xFFF2FF45),
         ["FireEgg"] = ("Symbol_FireEgg", 0xFFFF7878), ["EggBugEgg"] = ("Symbol_EggBugEgg", 0xFFFFFFFF),
         ["NeedleEgg"] = ("needleEggSymbol", 0xFF2D0D14), ["WhiteToken"] = ("Symbol_Satellite", 0xFFFFFFFF),
+        // Chatlog tokens are communication/log collectibles. Symbol_Satellite is the closest
+        // existing Rain World atlas glyph and is already used by Cartography's broadcast marker.
+        ["CustomChatlogToken"] = ("Symbol_Satellite", 0xFFFFD85A),
+        ["ChatlogToken"] = ("Symbol_Satellite", 0xFFFFD85A),
         ["DeadTokenStalk"] = ("Sandbox_Unlock", 0xFF888888)
     };
 
