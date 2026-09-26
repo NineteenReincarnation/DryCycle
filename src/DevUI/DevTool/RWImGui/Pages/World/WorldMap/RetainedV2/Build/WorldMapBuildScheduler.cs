@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using BepInEx.Logging;
@@ -44,6 +45,21 @@ internal sealed class WorldMapBuildScheduler
     private ManualLogSource log;
     private int activeWorkers;
     private int generation;
+    private long totalBuildTicks;
+    private long peakBuildTicks;
+    private int completedBuilds;
+
+    internal int CompletedBuildCount => Volatile.Read(ref completedBuilds);
+    internal double AverageBuildMilliseconds
+    {
+        get
+        {
+            int count = Math.Max(1, Volatile.Read(ref completedBuilds));
+            return Interlocked.Read(ref totalBuildTicks) * 1000d / Stopwatch.Frequency / count;
+        }
+    }
+    internal double PeakBuildMilliseconds =>
+        Interlocked.Read(ref peakBuildTicks) * 1000d / Stopwatch.Frequency;
 
     internal void Initialize(ManualLogSource logger) => log = logger;
 
@@ -116,6 +132,9 @@ internal sealed class WorldMapBuildScheduler
             unchecked { generation++; }
             pending.Clear();
             latestRequestedStamp.Clear();
+            Interlocked.Exchange(ref totalBuildTicks, 0L);
+            Interlocked.Exchange(ref peakBuildTicks, 0L);
+            Volatile.Write(ref completedBuilds, 0);
         }
 
         while (completed.TryDequeue(out _))
@@ -148,6 +167,7 @@ internal sealed class WorldMapBuildScheduler
             Generation = request.Generation
         };
 
+        long started = Stopwatch.GetTimestamp();
         try
         {
             result.Geometry = RoomGeometryBuilder.Build(
@@ -161,12 +181,27 @@ internal sealed class WorldMapBuildScheduler
         }
         finally
         {
+            long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - started);
+            Interlocked.Add(ref totalBuildTicks, elapsed);
+            UpdatePeak(ref peakBuildTicks, elapsed);
+            Interlocked.Increment(ref completedBuilds);
             completed.Enqueue(result);
             lock (gate)
             {
                 activeWorkers = Math.Max(0, activeWorkers - 1);
                 StartWorkersLocked();
             }
+        }
+    }
+
+    private static void UpdatePeak(ref long target, long value)
+    {
+        while (true)
+        {
+            long current = Interlocked.Read(ref target);
+            if (current >= value) return;
+            if (Interlocked.CompareExchange(ref target, value, current) == current)
+                return;
         }
     }
 }
