@@ -169,10 +169,12 @@ internal static class WorldMapRetainedV2Runtime
                 Volatile.Write(ref retainedConnectionsReady, 0);
         }
 
-        if (CanvasVisible && session?.ToolMode == EditorToolMode.Map &&
-            snapshot?.Available == true &&
-            MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
-            MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
+        if (WorldMapBackgroundSchedulingPolicy.CanRenderRetainedSurface(
+                CanvasVisible,
+                session?.ToolMode == EditorToolMode.Map,
+                snapshot?.Available == true,
+                MainSceneState.ViewTransform.CanvasSize.X,
+                MainSceneState.ViewTransform.CanvasSize.Y))
         {
             // Promote guard-band rooms ahead of the region-wide initial queue. This changes only
             // processing order; the retained store remains the single owner of room resources.
@@ -231,10 +233,12 @@ internal static class WorldMapRetainedV2Runtime
             ref retainedConnectionsReady,
             ConnectionResources.HasCompleteRoutes(MainSceneState) ? 1 : 0);
 
-        if (CanvasVisible && session?.ToolMode == EditorToolMode.Map &&
-            snapshot?.Available == true &&
-            MainSceneState.ViewTransform.CanvasSize.X >= 2f &&
-            MainSceneState.ViewTransform.CanvasSize.Y >= 2f)
+        if (WorldMapBackgroundSchedulingPolicy.CanRenderRetainedSurface(
+                CanvasVisible,
+                session?.ToolMode == EditorToolMode.Map,
+                snapshot?.Available == true,
+                MainSceneState.ViewTransform.CanvasSize.X,
+                MainSceneState.ViewTransform.CanvasSize.Y))
         {
             WorldMapViewTransform view = MainSceneState.ViewTransform;
 
