@@ -434,6 +434,16 @@ internal static partial class MapRoomGeometryPresentationHub
 
         recoverySessionComplete = true;
         recoverySessionCompletedTicks = Stopwatch.GetTimestamp();
+
+        global::DryCycle.Plugin.Logger?.LogInfo(
+            "WorldMap thumbnail recovery complete: " +
+            recoverySessionInitialMissing + " room(s) required recovery, " +
+            SourceRecoverySessionElapsedMilliseconds.ToString("F0") +
+            " ms total, avg active frame " +
+            SourceRecoveryAverageMilliseconds.ToString("F2") +
+            " ms, peak active frame " +
+            SourceRecoveryPeakMilliseconds.ToString("F2") +
+            " ms.");
     }
 
     private static int CountMissingMapTextures(
