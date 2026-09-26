@@ -93,10 +93,29 @@ internal static class ControlCenterWindow
         DevToolWidgets.MutedText(DevToolUiSettings.T("语言", "Language"));
         ImGui.SameLine(keyColumn);
         bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
-        if (DevToolWidgets.ActionButton(
+
+        // English mode normally uses RWImGUI's default Latin font, so a literal "中文" label would
+        // render as "??" even though the HarmonyOS CJK face is already present in the shared atlas.
+        // Push only that registered CJK face for this one language button and normalize its base
+        // font size to the current English face so the two buttons keep matching geometry.
+        bool pushedChineseLabelFont =
+            TryPushChineseLanguageLabelFont(
+                bodyScale);
+
+        bool chooseChinese =
+            DevToolWidgets.ActionButton(
                 "中文",
                 "ControlCenterChinese",
-                chinese ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+                chinese ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle);
+
+        if (pushedChineseLabelFont)
+        {
+            ImGui.SetWindowFontScale(
+                bodyScale);
+            ImGui.PopFont();
+        }
+
+        if (chooseChinese)
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
 
         ImGui.SameLine();
@@ -125,6 +144,42 @@ internal static class ControlCenterWindow
                 DevToolFrontendPerformanceMonitor.SetEnabled(enable);
             }
         }
+    }
+
+    private static unsafe bool TryPushChineseLanguageLabelFont(
+        float bodyScale)
+    {
+        // Chinese mode already has the HarmonyOS face pushed for the whole frame.
+        if (DevToolUiSettings.IsChinese)
+            return false;
+
+        if (!DevToolFontCatalog.TryResolveRegisteredFace(
+                DevToolFontCatalog.DefaultChineseFamily,
+                DevToolUiSettings.DefaultChineseFontWeight,
+                requireChinese: true,
+                out ImFontPtr chineseFont,
+                out _,
+                out _,
+                out _))
+            return false;
+
+        ImFontPtr currentFont =
+            ImGui.GetFont();
+
+        if (chineseFont.NativePtr == null ||
+            currentFont.NativePtr == null ||
+            chineseFont.FontSize <= 0.01f ||
+            currentFont.FontSize <= 0.01f ||
+            !DevToolFrontend.TryPushRegisteredFont(
+                chineseFont,
+                "Control Center Chinese language label"))
+            return false;
+
+        ImGui.SetWindowFontScale(
+            bodyScale *
+            currentFont.FontSize /
+            chineseFont.FontSize);
+        return true;
     }
 
     private static float BodyScale() =>
