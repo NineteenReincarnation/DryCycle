@@ -114,7 +114,7 @@ internal static class WorldMapCorridorLaneAllocator
     }
 
     private const float CoordinateBucketSize = 4f;
-    private const float CoordinateMergeTolerance = 4f;
+    private const float CoordinateMergeTolerance = 5.5f;
     private const float MinimumSharedRun = 16f;
     private const float PreferredLaneSpacing = 10f;
     private const float MinimumLaneSpacing = 5.5f;
