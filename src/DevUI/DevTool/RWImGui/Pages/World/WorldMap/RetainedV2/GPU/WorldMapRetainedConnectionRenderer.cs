@@ -392,7 +392,10 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
             if (!resources.TryGet(
                     mark.OverRouteId,
-                    out ConnectionRouteResource overRoute))
+                    out ConnectionRouteResource overRoute) ||
+                !resources.TryGet(
+                    mark.UnderRouteId,
+                    out ConnectionRouteResource underRoute))
                 continue;
 
             Num.Vector2 tangent =
@@ -418,6 +421,28 @@ internal sealed class WorldMapRetainedConnectionRenderer
             float overCoreHalfWidth =
                 RouteCoreHalfWidth(
                     overRoute);
+            float underShadowHalfWidth =
+                RouteShadowHalfWidth(
+                    underRoute);
+            float underGapHalfLength =
+                mark.Dense
+                    ? 4.8f
+                    : 6.4f;
+
+            // Crossing grammar has two separate operations:
+            //  1) cut a real gap in the under-route;
+            //  2) remove the straight over-route segment that will be replaced by the bridge arc.
+            // The old renderer did only (2), so a dark shadow could still read as a welded junction
+            // when several routes crossed in a compact area.
+            AddThickSegment(
+                vertices,
+                colors,
+                indices,
+                point - normal * underGapHalfLength,
+                point + normal * underGapHalfLength,
+                underShadowHalfWidth + 1.35f,
+                mask,
+                -0.018f);
 
             AddThickSegment(
                 vertices,
