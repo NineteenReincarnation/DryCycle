@@ -104,8 +104,8 @@ internal static class FontSettingsWindow
         ImGui.TextDisabled(projectedFontStatus);
         ImGui.TextDisabled(projectedResolvedWeightStatus);
         ImGui.TextDisabled(DevToolUiSettings.T(
-            "默认字号：中文 42 px / 英文 36 px",
-            "Default size: Chinese 42 px / English 36 px"));
+            "默认字号：中文 21 px / 英文 18 px",
+            "Default size: Chinese 21 px / English 18 px"));
 
         if (DevToolUiSettings.IsChinese && weightVariants <= 1)
         {
