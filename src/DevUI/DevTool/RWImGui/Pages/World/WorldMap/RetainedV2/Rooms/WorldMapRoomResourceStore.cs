@@ -47,6 +47,9 @@ internal sealed class WorldMapRoomResourceStore
     internal IReadOnlyDictionary<int, RoomResource> Rooms => rooms;
     internal int Count => rooms.Count;
     internal long Revision => revision;
+    internal int GeometryBuildCount => buildScheduler.CompletedBuildCount;
+    internal double GeometryBuildAverageMilliseconds => buildScheduler.AverageBuildMilliseconds;
+    internal double GeometryBuildPeakMilliseconds => buildScheduler.PeakBuildMilliseconds;
 
     internal int CommittedThumbnailCount
     {
