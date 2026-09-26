@@ -50,6 +50,12 @@ public static partial class MapRenderIsolationTests
                 ExerciseCartographySprites();
                 ExerciseRenderer();
                 ExerciseTexturePresentation();
+
+                // "all" is the high-fidelity local gate. Keep the world-map optimization suite in
+                // that gate as well as its focused -testScope worldmap entry so a normal validation
+                // run cannot silently skip the route/thumbnail regressions added for Retained V2.
+                // Run it last because the suite owns and releases its dedicated ImGui/DX11 context.
+                ExerciseWorldMapOptimization();
             }
             results.Add("PASS: " + checks + " real Unity/GPU assertions.");
         }
