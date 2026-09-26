@@ -559,7 +559,6 @@ internal static partial class CartographyView
         if (ImGui.Button(snapshot.Exporting ? T("正在导出...", "Exporting...") : T("导出图片##AtlasRender", "Export image##AtlasRender")))
             Send(CartographyCommandKind.Export, command => { command.Path = exportPath; command.Integer = (int)format; });
         if (!valid || snapshot.Exporting) ImGui.EndDisabled();
-        ImGui.TextWrapped(T("制图项目独立保存；Ctrl+S / Ctrl+Z 在此操作当前制图。图层 PNG 使用相同画布。", "This view saves its own project. Ctrl+S / Ctrl+Z target this composition. Layer PNGs share a canvas."));
         if (styleDirty) Stage(CartographyCommandKind.Style, "style", command => command.Style = styleDraft);
     }
 
