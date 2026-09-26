@@ -194,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 18;
+    private const int RoutingPolicyVersion = 19;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -723,11 +723,15 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 startDirection,
         Num.Vector2 endDirection)
     {
+        Num.Vector2[] normalized =
+            CollapseImmediateBacktracks(
+                points ?? Array.Empty<Num.Vector2>());
+
         return new Route
         {
             Id = request.Id ?? string.Empty,
             Kind = kind,
-            Points = points ?? Array.Empty<Num.Vector2>(),
+            Points = normalized,
             StartDirection = startDirection,
             EndDirection = endDirection,
             LaneOffset = request.LaneOffset,
@@ -3204,6 +3208,90 @@ internal static class WorldMapOrthogonalRouter
             if (r < t1) t1 = r;
         }
         return true;
+    }
+
+    private static Num.Vector2[] CollapseImmediateBacktracks(
+        Num.Vector2[] source)
+    {
+        if (source == null ||
+            source.Length <= 2)
+        {
+            return source == null
+                ? Array.Empty<Num.Vector2>()
+                : (Num.Vector2[])source.Clone();
+        }
+
+        List<Num.Vector2> result =
+            new(source.Length);
+
+        for (int i = 0;
+             i < source.Length;
+             i++)
+        {
+            Num.Vector2 point =
+                source[i];
+
+            if (result.Count > 0 &&
+                Num.Vector2.DistanceSquared(
+                    result[result.Count - 1],
+                    point) < 0.0001f)
+            {
+                continue;
+            }
+
+            result.Add(point);
+
+            bool reduced = true;
+            while (reduced &&
+                   result.Count >= 3)
+            {
+                reduced = false;
+
+                int count =
+                    result.Count;
+                Num.Vector2 a =
+                    result[count - 3];
+                Num.Vector2 b =
+                    result[count - 2];
+                Num.Vector2 d =
+                    result[count - 1];
+
+                Num.Vector2 ab =
+                    b - a;
+                Num.Vector2 bd =
+                    d - b;
+
+                // A->B->D on one axis with a negative dot product is a literal U-turn. B is an
+                // overshoot: replacing both segments with A->D can only shorten the path and the
+                // replacement lies entirely inside the already validated segment union. Terminal
+                // fanout/stub anchors are not exempt from this rule; visual ownership must never
+                // create "go right, then immediately go left" geometry.
+                if (Math.Abs(
+                        Cross(
+                            ab,
+                            bd)) <= 0.01f &&
+                    Num.Vector2.Dot(
+                        ab,
+                        bd) < -0.01f)
+                {
+                    result.RemoveAt(
+                        count - 2);
+
+                    if (result.Count >= 2 &&
+                        Num.Vector2.DistanceSquared(
+                            result[result.Count - 2],
+                            result[result.Count - 1]) < 0.0001f)
+                    {
+                        result.RemoveAt(
+                            result.Count - 1);
+                    }
+
+                    reduced = true;
+                }
+            }
+        }
+
+        return result.ToArray();
     }
 
     private static Num.Vector2[] SimplifyRoute(
