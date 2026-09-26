@@ -27,6 +27,7 @@ internal sealed class WorldMapConnectionResourceStore
     private const float DensePairLaneSpacing = 6.25f;
     private const float DensePairBankGutter = 9f;
     private const float DenseTerminalDepthGap = 10f;
+    private const float MaximumTerminalExtraDepth = 36f;
 
     private readonly Dictionary<string, ConnectionRouteResource> routes =
         new(StringComparer.Ordinal);
@@ -1120,6 +1121,14 @@ internal sealed class WorldMapConnectionResourceStore
                                DenseLaneBankCapacity)) *
                         DenseTerminalDepthGap;
                 }
+
+                // Terminal depth is only an ownership cue. It must never become a route-scale
+                // detour by itself; large endpoint groups previously pushed a socket far past the
+                // useful turn point and then forced the solver to reverse along the same axis.
+                extraDepth =
+                    Math.Min(
+                        MaximumTerminalExtraDepth,
+                        extraDepth);
 
                 terminalFanouts.TryGetValue(
                     endpoint.ConnectionId,
