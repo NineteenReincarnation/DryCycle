@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using BepInEx.Logging;
 using DryCycle.DevUI.DevTool.Map;
 using Num = System.Numerics;
@@ -32,6 +33,11 @@ internal static class WorldMapPersistentRetainedCache
     private static long verifiedTopologyFingerprint;
     private static bool topologyRejected;
     private static bool roomValidationComplete;
+    private static bool restoreSnapshotLoaded;
+    private static long restoreValidationStartedTicks;
+    private static long restoreValidationCompletedTicks;
+    private static int restoredRouteCount;
+    private static int restoredThumbnailCount;
 
     internal static int ValidatedRoomCount =>
         enabled ? validRooms.Count : 0;
@@ -44,6 +50,30 @@ internal static class WorldMapPersistentRetainedCache
 
     internal static bool TopologyRejected =>
         enabled && topologyRejected;
+
+    internal static bool RestoreSnapshotLoaded =>
+        enabled && restoreSnapshotLoaded;
+
+    internal static int RestoredRouteCount =>
+        enabled ? restoredRouteCount : 0;
+
+    internal static int RestoredThumbnailCount =>
+        enabled ? restoredThumbnailCount : 0;
+
+    internal static double RestoreValidationMilliseconds
+    {
+        get
+        {
+            if (!enabled || restoreValidationStartedTicks <= 0L)
+                return 0d;
+            long end =
+                restoreValidationCompletedTicks > 0L
+                    ? restoreValidationCompletedTicks
+                    : Stopwatch.GetTimestamp();
+            return Math.Max(0L, end - restoreValidationStartedTicks) *
+                   1000d / Stopwatch.Frequency;
+        }
+    }
 
     internal static void Enable(ManualLogSource logger)
     {
@@ -94,6 +124,7 @@ internal static class WorldMapPersistentRetainedCache
             return false;
 
         consumedThumbnailHints.Add(roomIndex);
+        restoredThumbnailCount++;
         return true;
     }
 
@@ -196,6 +227,7 @@ internal static class WorldMapPersistentRetainedCache
         };
 
         routes.Remove(connectionId);
+        restoredRouteCount++;
         return WorldMapPersistentRouteRestoreResult.Restored;
     }
 
@@ -300,12 +332,22 @@ internal static class WorldMapPersistentRetainedCache
         Clear();
         if (!enabled || snapshot == null) return;
 
+        restoreSnapshotLoaded = true;
+        restoreValidationStartedTicks = Stopwatch.GetTimestamp();
+        restoreValidationCompletedTicks = 0L;
+        restoredRouteCount = 0;
+        restoredThumbnailCount = 0;
         expectedRoomCount = snapshot.Rooms.Count;
         cachedTopologyFingerprint =
             snapshot.FrontendTopologyFingerprint;
         verifiedTopologyFingerprint = 0L;
         topologyRejected = false;
         roomValidationComplete = false;
+        restoreSnapshotLoaded = false;
+        restoreValidationStartedTicks = 0L;
+        restoreValidationCompletedTicks = 0L;
+        restoredRouteCount = 0;
+        restoredThumbnailCount = 0;
 
         for (int i = 0; i < snapshot.Routes.Count; i++)
         {
@@ -344,6 +386,7 @@ internal static class WorldMapPersistentRetainedCache
             return;
 
         roomValidationComplete = true;
+        restoreValidationCompletedTicks = Stopwatch.GetTimestamp();
         int liveCount = roomIndices?.Count ?? 0;
 
         if (liveCount != expectedRoomCount)
