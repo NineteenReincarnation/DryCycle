@@ -897,6 +897,28 @@ internal static class WorldMapRetainedV2Runtime
             (CanvasVisible
                 ? " | visible budget 1.35 ms"
                 : " | dormant budget 2.00 ms"));
+
+        bool backgroundIncomplete =
+            !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete ||
+            !RoomResources.ThumbnailLoadComplete;
+        double backgroundCatchupAge =
+            Math.Max(
+                MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds,
+                RoomResources.ThumbnailLoadElapsedMilliseconds);
+        int backgroundCadence =
+            WorldMapBackgroundSchedulingPolicy.GeometrySweepIntervalFrames(
+                CanvasVisible,
+                backgroundIncomplete,
+                backgroundCatchupAge);
+        ImGui.TextUnformatted(
+            "thumbnail background cadence: every " +
+            backgroundCadence +
+            " frame(s) | " +
+            (CanvasVisible
+                ? "canvas visible"
+                : backgroundIncomplete
+                    ? "OH/hidden catch-up"
+                    : "OH/hidden maintenance"));
         ImGui.TextUnformatted(
             "minimap readbacks: " +
             MapRoomGeometryPresentationHub.RasterReadbackCount +
