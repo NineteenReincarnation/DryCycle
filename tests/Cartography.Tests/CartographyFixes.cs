@@ -54,7 +54,10 @@ internal static partial class Program
         int localCurvePixels=localRaster.Pixels.Count(p=>p!=curvedDocument.Terrain);
         Check(localCurvePixels>localRaster.Width*4,"Curved terrain keeps its filled body beneath the authored surface.");
         int[] localSurfaceRows=Enumerable.Range(0,localRaster.Width)
-            .Select(x=>Enumerable.Range(0,localRaster.Height).FirstOrDefault(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor,-1))
+            .Select(x=>Enumerable.Range(0,localRaster.Height)
+                .Where(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor)
+                .DefaultIfEmpty(-1)
+                .First())
             .Where(y=>y>=0)
             .ToArray();
         Check(localSurfaceRows.Distinct().Count()>3,"Curved terrain uses the sampled spline as a smooth surface instead of tile-sized rectangular steps.");
