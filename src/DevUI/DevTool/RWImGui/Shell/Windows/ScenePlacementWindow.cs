@@ -26,9 +26,14 @@ internal static class ScenePlacementWindow
     private static string projectedLeft = string.Empty;
     private static string projectedCenter = string.Empty;
 
-    internal static bool Supports(EditorToolMode mode) =>
-        !DevToolOverlay.SuppressesSharedPageSurfaces &&
-        DevToolPageViewRegistry.SupportsSceneSurface(mode);
+    internal static bool Supports(EditorToolMode mode)
+    {
+        if (DevToolOverlay.SuppressesSharedPageSurfaces ||
+            !DevToolPageViewRegistry.TryGet(mode, out IDevToolPageView page))
+            return false;
+
+        return page.SupportsScenePlacement;
+    }
 
     internal static void Draw(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
