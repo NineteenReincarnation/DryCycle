@@ -189,7 +189,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 7;
+    private const int RoutingPolicyVersion = 8;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -199,7 +199,9 @@ internal static class WorldMapOrthogonalRouter
     private const float BendPenalty = 1.60f;
     private const float BacktrackPenalty = 3.40f;
     private const float CrossingPenalty = 11.0f;
-    private const float ParallelCongestionPenalty = 0.40f;
+    private const float ParallelCongestionPenalty = 0.26f;
+    private const int PreferredParallelCapacity = 8;
+    private const float ParallelOverflowPenalty = 0.92f;
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
@@ -220,7 +222,8 @@ internal static class WorldMapOrthogonalRouter
     internal static Route[] BuildRoutesCore(
         IReadOnlyList<Request> requests,
         IReadOnlyList<Obstacle> sourceObstacles,
-        bool sourceObstaclesAlreadyInflated = false)
+        bool sourceObstaclesAlreadyInflated = false,
+        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null)
     {
         generation++;
         if (requests == null || requests.Count == 0)
@@ -249,6 +252,17 @@ internal static class WorldMapOrthogonalRouter
         }
 
         Dictionary<long, Occupancy> occupancy = new();
+
+        if (occupancySeedPaths != null)
+        {
+            for (int i = 0; i < occupancySeedPaths.Count; i++)
+                RegisterOccupancy(occupancySeedPaths[i], occupancy);
+        }
+
+        bool hasSeedCongestion =
+            occupancySeedPaths != null &&
+            occupancySeedPaths.Count > 0;
+
         Route[] result = new Route[requests.Count];
 
         for (int i = 0; i < requests.Count; i++)
@@ -258,7 +272,8 @@ internal static class WorldMapOrthogonalRouter
             if (!string.IsNullOrEmpty(request.Id)) cache.TryGetValue(request.Id, out previous);
 
             Route route;
-            if (TryReuse(request, obstacles, previous, out route))
+            if (!hasSeedCongestion &&
+                TryReuse(request, obstacles, previous, out route))
             {
                 route.Reused = true;
             }
@@ -1061,10 +1076,49 @@ internal static class WorldMapOrthogonalRouter
                 long occupancyKey = GridKey((int)Math.Round(worldNeighbor.X / 18f), (int)Math.Round(worldNeighbor.Y / 18f));
                 if (occupancy.TryGetValue(occupancyKey, out Occupancy occupied))
                 {
-                    byte perpendicular = (byte)(occupied.DirectionMask & PerpendicularMask(direction));
-                    step += perpendicular != 0
-                        ? CrossingPenalty * Math.Max(1, (int)occupied.Count)
-                        : ParallelCongestionPenalty * Math.Max(1, (int)occupied.Count);
+                    int occupancyCount =
+                        Math.Max(
+                            1,
+                            (int)occupied.Count);
+                    byte perpendicular =
+                        (byte)(
+                            occupied.DirectionMask &
+                            PerpendicularMask(direction));
+
+                    if (perpendicular != 0)
+                    {
+                        step +=
+                            CrossingPenalty *
+                            occupancyCount;
+                    }
+                    else
+                    {
+                        int preferred =
+                            Math.Min(
+                                occupancyCount,
+                                PreferredParallelCapacity);
+                        int overflow =
+                            Math.Max(
+                                0,
+                                occupancyCount -
+                                PreferredParallelCapacity);
+
+                        step +=
+                            ParallelCongestionPenalty *
+                            preferred;
+
+                        if (overflow > 0)
+                        {
+                            // Shared corridors are desirable until they can no longer present a
+                            // readable lane bank. Past that visual capacity, the cost rises
+                            // quadratically so a slightly longer independent corridor wins instead
+                            // of another line collapsing onto the same centreline.
+                            step +=
+                                ParallelOverflowPenalty *
+                                overflow *
+                                overflow;
+                        }
+                    }
                 }
 
                 if (stableCells.Contains(GridKey(nx, ny)))
@@ -1240,8 +1294,19 @@ internal static class WorldMapOrthogonalRouter
 
     private static void RegisterOccupancy(Route route, Dictionary<long, Occupancy> occupancy)
     {
-        Num.Vector2[] points = route?.Points;
-        if (points == null || points.Length < 2) return;
+        RegisterOccupancy(
+            route?.Points,
+            occupancy);
+    }
+
+    private static void RegisterOccupancy(
+        Num.Vector2[] points,
+        Dictionary<long, Occupancy> occupancy)
+    {
+        if (points == null ||
+            points.Length < 2 ||
+            occupancy == null)
+            return;
 
         for (int i = 0; i < points.Length - 1; i++)
         {
