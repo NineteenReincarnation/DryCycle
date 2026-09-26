@@ -17,8 +17,8 @@ internal static partial class CartographyView
     private static readonly HashSet<string> Selection = new(StringComparer.Ordinal);
     private static string activeLayer = "notes", exportPath = string.Empty, copyPath = string.Empty;
     private static Num.Vector2 pan, startMouse, delta, marqueeStart;
-    private static float zoom = 1, grid = 12;
-    private static bool fit = true, fitSelection, snap = true, dragging, marquee, addSelection, subtractSelection;
+    private static float zoom = 1;
+    private static bool fit = true, fitSelection, dragging, marquee, addSelection, subtractSelection;
     private static long gestureRevision;
     private static Tool tool;
     private static CartographyMarker marker = default;
@@ -124,8 +124,8 @@ internal static partial class CartographyView
         float right = inspector ? Math.Min(em * 24, available.X * .35f) : 0;
         float center = Math.Max(180, available.X - right - (inspector ? 8 : 0));
         // The map composition itself has no baked background. Use a transparent child so the
-        // editor preview follows the same compositing model as PNG/SVG export; grid and map content
-        // are still drawn explicitly on top.
+        // editor preview follows the same compositing model as PNG/SVG export; map content is
+        // still drawn explicitly on top.
         ImGui.PushStyleColor(ImGuiCol.ChildBg, new Num.Vector4(0f, 0f, 0f, 0f));
         if (ImGui.BeginChild("##CartographyCanvas", new Num.Vector2(center, available.Y), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)) Canvas(snapshot);
         ImGui.EndChild();
@@ -148,12 +148,6 @@ internal static partial class CartographyView
         ImGui.TextUnformatted(T("制图", "CARTOGRAPHY") + " | " + snapshot.Document.Region + (snapshot.Dirty ? " *" : string.Empty));
         Inline(T("定位所选", "Focus selection"));
         if (ImGui.Button(T("定位所选##AtlasFocus", "Focus selection##AtlasFocus"))) { fit = true; fitSelection = true; }
-        Inline(T("吸附", "Snap"), ImGui.GetFrameHeight());
-        ImGui.Checkbox(T("吸附##AtlasSnap", "Snap##AtlasSnap"), ref snap);
-        Inline("000", ImGui.GetFontSize() * 3);
-        ImGui.SetNextItemWidth(ImGui.GetFontSize() * 3.5f);
-        ImGui.DragFloat("##AtlasGrid", ref grid, 1, 1, 256, "%.0f");
-        grid = float.IsNaN(grid) || float.IsInfinity(grid) ? 12 : Math.Max(1, Math.Min(256, grid));
         Inline("100%"); ImGui.TextDisabled((zoom * 100).ToString("0") + "%");
 
         ToolButton(Tool.Select, T("选择", "Select"), false);
@@ -211,7 +205,6 @@ internal static partial class CartographyView
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         draw.PushClipRect(origin, origin + size, true);
         draw.AddRectFilled(origin, origin + size, Color(snapshot.Document.Options.Canvas));
-        if (snap) DrawGrid(draw, origin, size);
         CartographyDocument moving = snapshot.Document;
         if (dragging)
         {
@@ -295,7 +288,6 @@ internal static partial class CartographyView
         if (dragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))
         {
             delta = (io.MousePos - startMouse) / zoom;
-            if (snap) delta = new Num.Vector2((float)Math.Round(delta.X / grid) * grid, (float)Math.Round(delta.Y / grid) * grid);
         }
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
@@ -388,7 +380,6 @@ internal static partial class CartographyView
             area.ExportArea = true; area.AreaX = Math.Min(a.X,b.X); area.AreaY = Math.Min(a.Y,b.Y); area.AreaWidth = Math.Max(1,Math.Abs(b.X-a.X)); area.AreaHeight = Math.Max(1,Math.Abs(b.Y-a.Y));
             styleDirty = true; SaveStyle(); tool = Tool.Select; return;
         }
-        if (snap) a = new Num.Vector2((float)Math.Round(a.X / grid) * grid, (float)Math.Round(a.Y / grid) * grid);
         CartographyItem item = new() { Kind = tool == Tool.Text ? CartographyItemKind.Text : tool == Tool.Marker ? CartographyItemKind.Marker : tool == Tool.Line ? CartographyItemKind.Line : CartographyItemKind.Box,
             LayerId = activeLayer, X = a.X, Y = a.Y, Width = b.X - a.X, Height = b.Y - a.Y, Marker = marker, Text = tool == Tool.Text ? T("标注", "Label") : string.Empty };
         Send(CartographyCommandKind.Add, command => command.Item = item);
@@ -917,14 +908,6 @@ internal static partial class CartographyView
         if (observed == null) return;
         CartographyCommand command = new() { DocumentId = observed.Identity, Revision = observed.Revision, Kind = kind };
         configure?.Invoke(command); CartographyRuntime.Enqueue(command);
-    }
-
-    private static void DrawGrid(ImDrawListPtr draw, Num.Vector2 origin, Num.Vector2 size)
-    {
-        float spacing = Math.Max(1, grid) * zoom;
-        while (spacing < 28) spacing *= 4;
-        for (float x = (pan.X % spacing + spacing) % spacing; x < size.X; x += spacing) draw.AddLine(origin + new Num.Vector2(x, 0), origin + new Num.Vector2(x, size.Y), 0x133B7188);
-        for (float y = (pan.Y % spacing + spacing) % spacing; y < size.Y; y += spacing) draw.AddLine(origin + new Num.Vector2(0, y), origin + new Num.Vector2(size.X, y), 0x133B7188);
     }
 
     private static void DrawPrimitive(ImDrawListPtr draw, CartographyPrimitive shape, Num.Vector2 origin, Num.Vector2 offset, CartographyRect viewport)
