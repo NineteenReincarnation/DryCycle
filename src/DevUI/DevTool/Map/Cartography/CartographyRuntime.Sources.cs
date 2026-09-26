@@ -110,6 +110,26 @@ internal static partial class CartographyRuntime
             }
             catch (Exception error) { SourceFailure(error, preparingGeneration != sourceGeneration); }
         }
+        // Some Futile/mod atlases become available after the source itself is ready. Retry only
+        // the unresolved names on the game thread and rebuild the current scene when a late sprite
+        // arrives so missing-icon warnings disappear without requiring a region reload.
+        if (current?.Document != null &&
+            current.Source != null &&
+            CartographyGameAssets.HasPending &&
+            CartographyGameAssets.RetryPending())
+        {
+            current.SceneCache =
+                new CartographySceneCache();
+            current.Scene =
+                CartographySceneBuilder.Build(
+                    current.Document,
+                    current.Source,
+                    current.SceneCache);
+            icons =
+                CartographyAssets.IconNames;
+            Publish(current);
+        }
+
         if (loadingSource == null && preparingSource == null && pendingSource != null)
         {
             SourceRequest request = pendingSource;
