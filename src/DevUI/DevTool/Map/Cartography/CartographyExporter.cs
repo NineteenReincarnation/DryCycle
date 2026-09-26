@@ -92,7 +92,10 @@ internal static class CartographyExporter
     {
         Bitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
         using Graphics graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(layerId != null || document.Transparent ? Color.Transparent : ToColor(document.Background));
+        // Cartography exports are always compositing assets. Never bake a document background
+        // into PNG/PSD/layer output; legacy Transparent/Background fields are retained only for
+        // project-file compatibility.
+        graphics.Clear(Color.Transparent);
         graphics.CompositingMode = CompositingMode.SourceOver;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
@@ -233,8 +236,6 @@ internal static class CartographyExporter
         Attr(xml, "width", width); Attr(xml, "height", height);
         xml.WriteAttributeString("viewBox", F(bounds.X) + " " + F(bounds.Y) + " " + F(bounds.Width) + " " + F(bounds.Height));
         xml.WriteElementString("title", ns, document.Title);
-        if (!document.Transparent)
-            SvgPrimitive(xml, new CartographyPrimitive { Kind = CartographyPrimitiveKind.Fill, Rect = bounds, Color = document.Background }, document.FontFamily);
         foreach (CartographyLayer layer in document.Layers.Where(layer => layer.Visible && layer.Opacity > 0))
         {
             xml.WriteStartElement("g", ns); xml.WriteAttributeString("id", "layer-" + document.Layers.IndexOf(layer));
