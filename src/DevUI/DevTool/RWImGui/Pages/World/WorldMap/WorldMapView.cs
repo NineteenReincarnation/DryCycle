@@ -476,36 +476,36 @@ internal static class WorldMapView
             }
         }
 
-        // Pipe sockets, creature holes and their labels are interaction affordances, not navigation
-        // content. Omitting them only while the camera is moving removes thousands of draw/hit-test
-        // operations from large regions and they return on the first idle frame.
-        if (!fastNavigation)
-        {
-            IReadOnlyList<int> overlayRooms =
-                useSpatial ? retainedVisibleRoomIds : null;
+        // Navigation must preserve the map's semantic overlay. Hiding room/pipe labels while the
+        // middle/right mouse button is held makes the map visually jump and removes exactly the
+        // information the user is panning to inspect. Keep these overlays visible, but switch exit
+        // sockets to a presentation-only path during navigation so expensive endpoint/link hover
+        // resolution is still skipped.
+        IReadOnlyList<int> overlayRooms =
+            useSpatial ? retainedVisibleRoomIds : null;
 
-            PrepareOverlayLabelLayout(
-                snapshot,
-                canvasMin,
-                canvasSize,
-                hoveredRoom,
-                overlayRooms);
+        PrepareOverlayLabelLayout(
+            snapshot,
+            canvasMin,
+            canvasSize,
+            hoveredRoom,
+            overlayRooms);
 
-            DrawExitPorts(
-                draw,
-                snapshot,
-                canvasMin,
-                canvasSize,
-                hoveredRoom,
-                hoveredPort,
-                overlayRooms);
-            DrawCreatureShortcuts(
-                draw,
-                snapshot,
-                canvasMin,
-                canvasSize,
-                overlayRooms);
-        }
+        DrawExitPorts(
+            draw,
+            snapshot,
+            canvasMin,
+            canvasSize,
+            hoveredRoom,
+            hoveredPort,
+            overlayRooms,
+            presentationOnly: fastNavigation);
+        DrawCreatureShortcuts(
+            draw,
+            snapshot,
+            canvasMin,
+            canvasSize,
+            overlayRooms);
     }
 
     private static void DrawRoomEntry(
@@ -539,8 +539,9 @@ internal static class WorldMapView
             DrawRoomGeometry(draw, room, visual, min, selected, hovered);
         }
 
-        if (!fastNavigation || selected || room.CurrentRoom)
-            DrawRoomLabel(draw, room, min, max, selected, hovered);
+        // Labels are navigation content. Keep them visible while panning; DrawRoomLabel already
+        // applies the zoom LOD threshold so this does not turn low-zoom navigation into a text wall.
+        DrawRoomLabel(draw, room, min, max, selected, hovered);
     }
 
     private static void DrawRoomNavigationLod(
@@ -1396,7 +1397,8 @@ internal static class WorldMapView
         Num.Vector2 canvasSize,
         EditorMapRoomSnapshot hoveredRoom,
         ExitPortHit hoveredPort,
-        IReadOnlyList<int> candidateRooms)
+        IReadOnlyList<int> candidateRooms,
+        bool presentationOnly = false)
     {
         if (!WorldMapPipeLayers.RoomPipesVisible) return;
 
@@ -1430,21 +1432,50 @@ internal static class WorldMapView
                 EditorMapRoomNodeSnapshot node = nodes[n];
                 if (!node.Exit) continue;
 
-                EditorMapConnectionSnapshot endpointConnection = FindConnectionAtEndpoint(snapshot, room.RoomIndex, node.NodeIndex);
-                bool free = IsEndpointFree(snapshot, room.RoomIndex, node);
-                bool connected = endpointConnection != null || node.ConnectedRoomIndex >= 0;
+                EditorMapConnectionSnapshot endpointConnection =
+                    presentationOnly
+                        ? null
+                        : FindConnectionAtEndpoint(
+                            snapshot,
+                            room.RoomIndex,
+                            node.NodeIndex);
+                bool free =
+                    presentationOnly
+                        ? node.ConnectedRoomIndex < 0
+                        : IsEndpointFree(
+                            snapshot,
+                            room.RoomIndex,
+                            node);
+                bool connected =
+                    presentationOnly
+                        ? node.ConnectedRoomIndex >= 0
+                        : endpointConnection != null ||
+                          node.ConnectedRoomIndex >= 0;
 
                 Num.Vector2 point = EndpointPosition(room, node.NodeIndex, canvasMin);
-                bool source = room.RoomIndex == linkingRoom && node.NodeIndex == linkingNode;
-                bool hovered = hoveredPort != null && hoveredPort.Room.RoomIndex == room.RoomIndex && hoveredPort.Node.NodeIndex == node.NodeIndex;
-                bool validTarget = linking && free && room.RoomIndex != linkingRoom;
+                bool source =
+                    !presentationOnly &&
+                    room.RoomIndex == linkingRoom &&
+                    node.NodeIndex == linkingNode;
+                bool hovered =
+                    !presentationOnly &&
+                    hoveredPort != null &&
+                    hoveredPort.Room.RoomIndex == room.RoomIndex &&
+                    hoveredPort.Node.NodeIndex == node.NodeIndex;
+                bool validTarget =
+                    !presentationOnly &&
+                    linking &&
+                    free &&
+                    room.RoomIndex != linkingRoom;
                 bool selectedLink =
+                    !presentationOnly &&
                     endpointConnection != null &&
                     string.Equals(
                         selectedConnectionId,
                         endpointConnection.ConnectionId,
                         StringComparison.Ordinal);
                 bool hoveredLink =
+                    !presentationOnly &&
                     endpointConnection != null &&
                     !string.IsNullOrEmpty(hoveredLinkId) &&
                     string.Equals(
