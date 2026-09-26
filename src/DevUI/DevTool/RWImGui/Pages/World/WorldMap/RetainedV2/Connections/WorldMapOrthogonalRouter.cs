@@ -887,7 +887,14 @@ internal static class WorldMapOrthogonalRouter
                 laneRequested
                     ? RouteCongestionPenalty(middle, occupancy)
                     : RouteCongestionPenalty(candidate, occupancy);
-            if (congestion > DirectRouteCongestionLimit) continue;
+            // An explicit lane offset is already the lane allocator's decision. Do not let
+            // coarse occupancy cells veto that identity merely because nearby lanes quantize into
+            // the same congestion bucket. Geometry/collision checks above remain hard; congestion
+            // is only a soft score for non-lane candidates.
+            if (!laneRequested &&
+                congestion > DirectRouteCongestionLimit)
+                continue;
+
             float score = PathLength(candidate) + CompactBendPenalty * Simplify(candidate).Length + congestion;
             if (score >= best) continue;
             best = score;
