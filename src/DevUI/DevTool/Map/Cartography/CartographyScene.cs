@@ -171,7 +171,15 @@ internal static class CartographySceneBuilder
                 if(cache!=null&&cache.TryGet(document,item,layer,room,out CartographySceneNode retained,out string retainedError))
                 {nodes.Add(retained);if(retainedError!=null)errors.Add(retainedError);continue;}
                 string error=null;List<CartographyPrimitive> shapes=new();CartographyRect bounds=Bounds(item,source);
-                float opacity=layer.Opacity*item.Appearance.Opacity;uint color=Alpha(item.Color,opacity);
+                // Rooms are source geometry, not translucent annotations. Historical/stale author
+                // data could carry Appearance.Opacity or room-layer opacity below 1 and dim the
+                // whole room (including its name) even when the developer never changed a setting.
+                // Keep room visibility on layer.Visible/item.Visible, but render room geometry and
+                // labels at full opacity. Other author objects retain normal opacity semantics.
+                float opacity=item.Kind==CartographyItemKind.Room
+                    ? 1f
+                    : layer.Opacity*item.Appearance.Opacity;
+                uint color=Alpha(item.Color,opacity);
                 switch(item.Kind)
                 {
                     case CartographyItemKind.Room:

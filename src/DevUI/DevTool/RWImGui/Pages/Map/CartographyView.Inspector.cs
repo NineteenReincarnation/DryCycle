@@ -152,7 +152,8 @@ internal static partial class CartographyView
         void C(string cn,string en,ref uint v){if(EditColor(T(cn,en),ref v))draftDirty=true;if(ImGui.IsItemDeactivatedAfterEdit())CommitDraft();}
         void F(string cn,string en,ref float v,float min,float max){if(ImGui.DragFloat(T(cn,en),ref v,.25f,min,max))draftDirty=true;if(ImGui.IsItemDeactivatedAfterEdit())CommitDraft();}
         void S(string cn,string en,ref string v,int length=160){if(ImGui.InputText(T(cn,en),ref v,(uint)length))draftDirty=true;if(ImGui.IsItemDeactivatedAfterEdit())CommitDraft();}
-        F("对象透明度","Object opacity",ref a.Opacity,0,1);
+        if(draft.Kind!=CartographyItemKind.Room)
+            F("对象透明度","Object opacity",ref a.Opacity,0,1);
         if(draft.Kind==CartographyItemKind.Room)
         {
             if(ImGui.BeginCombo(T("子区域","Subregion"),a.Subregion.Length==0?T("主区域","Main region"):a.Subregion))

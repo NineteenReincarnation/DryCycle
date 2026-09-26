@@ -24,6 +24,15 @@ internal static partial class Program
         Check(verticalNode.Points.Length==3&&Math.Abs(verticalNode.Points[1].X-verticalNode.FromX)<.0001f&&Math.Abs(verticalNode.Points[1].Y-verticalNode.ToY)<.0001f,"Vertical-first cartography routes use one Cornifer-style right-angle control point.");
         Check(diagonal.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Line).Any(p=>p.GuideOnly&&Math.Abs(p.DashLength-11)<.0001f&&Math.Abs(p.DashGap-5)<.0001f),"Diagonal guides use Cornifer's black 11/5 dash silhouette.");
 
+        var opacityDocument=source.CreateDocument("opacity-regression","SU");
+        var opacityRoom=opacityDocument.Items.First(i=>i.Kind==CartographyItemKind.Room);
+        opacityRoom.Appearance.Opacity=.18f;
+        opacityDocument.Layer(opacityRoom.LayerId).Opacity=.27f;
+        var opacityScene=CartographySceneBuilder.Build(opacityDocument,source);
+        var opacityNode=opacityScene.Nodes.First(n=>n.Id==opacityRoom.Id);
+        Check(opacityNode.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Image).All(p=>(p.Color>>24)==255),"Room geometry ignores stale object/layer opacity and stays fully opaque.");
+        Check(opacityNode.Primitives.Where(p=>p.Text==opacityRoom.Room).All(p=>(p.Color>>24)==255),"Room labels stay fully opaque with room geometry.");
+
         var curvedRoom=new CartographyRoomSource
         {
             Name="CURVE_TEST",
