@@ -2173,14 +2173,24 @@ internal static class WorldMapView
             // square seams at every 90-degree turn and make the route read like plumbing.
             for (int i = 1; i < points.Count - 1; i++)
             {
+                float joinScale =
+                    i == 1 ||
+                    i == points.Count - 2
+                        ? 0.86f
+                        : 1f;
+
                 draw.AddCircleFilled(
                     points[i],
-                    shadowThickness * 0.5f,
+                    shadowThickness *
+                    0.5f *
+                    joinScale,
                     shadow,
                     10);
                 draw.AddCircleFilled(
                     points[i],
-                    coreThickness * 0.5f,
+                    coreThickness *
+                    0.5f *
+                    joinScale,
                     core,
                     10);
             }
