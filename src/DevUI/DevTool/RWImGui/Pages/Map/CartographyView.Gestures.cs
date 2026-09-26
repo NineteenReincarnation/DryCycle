@@ -87,7 +87,7 @@ internal static partial class CartographyView
             }
             Num.Vector2 delta = mouse - routeMouseOrigin;
             CartographyPoint point = CartographyRouteEditing.Drag(handleOrigin.X + delta.X, handleOrigin.Y + delta.Y,
-                new CartographyPoint { X = handleOrigin.X, Y = handleOrigin.Y }, 0, io.KeyShift);
+                new CartographyPoint { X = handleOrigin.X, Y = handleOrigin.Y }, io.KeyShift);
             if (routeGesture.Kind == CartographyItemKind.Line)
             {
                 CartographyItem original = s.Document.Items.Find(i => i.Id == routeGesture.Id);
