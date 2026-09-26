@@ -552,10 +552,62 @@ internal static class WorldMapCorridorLaneAllocator
                             ref checks))
                         continue;
 
-                    reroute.Add(aId);
-                    reroute.Add(bId);
+                    AddPairConflictRerouteVictim(
+                        routes,
+                        aId,
+                        aRoute,
+                        bId,
+                        bRoute,
+                        reroute);
                 }
             }
+        }
+    }
+
+    private static void AddPairConflictRerouteVictim(
+        Dictionary<string, ConnectionRouteResource> routes,
+        string aId,
+        ConnectionRouteResource aRoute,
+        string bId,
+        ConnectionRouteResource bRoute,
+        HashSet<string> reroute)
+    {
+        if (reroute == null)
+            return;
+
+        byte aDensity =
+            aRoute?.DensityTier ??
+            0;
+        byte bDensity =
+            bRoute?.DensityTier ??
+            0;
+
+        // Keep one route as a stable anchor. Move the member already under greater density pressure;
+        // ties use route ID so the same geometry always picks the same victim.
+        string victim;
+
+        if (aDensity != bDensity)
+        {
+            victim =
+                aDensity > bDensity
+                    ? aId
+                    : bId;
+        }
+        else
+        {
+            victim =
+                string.CompareOrdinal(
+                    aId,
+                    bId) >= 0
+                    ? aId
+                    : bId;
+        }
+
+        if (!string.IsNullOrEmpty(
+                victim))
+        {
+            reroute.Add(
+                victim);
         }
     }
 
