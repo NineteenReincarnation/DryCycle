@@ -668,6 +668,26 @@ internal static class WorldMapRetainedV2Runtime
             " ms | completed " +
             RoomResources.GeometryBuildCount);
         ImGui.TextUnformatted(
+            "retained thumbnail readiness: " +
+            (RoomResources.ThumbnailLoadComplete ? "complete " : "active ") +
+            RoomResources.ThumbnailLoadElapsedMilliseconds.ToString("F0") +
+            " ms | " +
+            RoomResources.ThumbnailLoadCommitted + "/" +
+            RoomResources.ThumbnailLoadExpected +
+            " | persistent " +
+            RoomResources.ThumbnailPersistentHits +
+            " | live " +
+            RoomResources.ThumbnailLiveCommits);
+        ImGui.TextUnformatted(
+            "thumbnail main-thread pump: avg " +
+            RoomResources.MainThreadAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            RoomResources.MainThreadPeakMilliseconds.ToString("F2") +
+            " ms" +
+            (CanvasVisible
+                ? " | visible budget 1.35 ms"
+                : " | dormant budget 2.00 ms"));
+        ImGui.TextUnformatted(
             "minimap readbacks: " +
             MapRoomGeometryPresentationHub.RasterReadbackCount +
             " | avg " +
