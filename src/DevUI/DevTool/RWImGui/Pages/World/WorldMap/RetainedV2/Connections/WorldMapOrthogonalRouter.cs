@@ -724,7 +724,7 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 endDirection)
     {
         Num.Vector2[] normalized =
-            CollapseImmediateBacktracks(
+            NormalizeNoBacktracking(
                 points ?? Array.Empty<Num.Vector2>());
 
         return new Route
@@ -3210,7 +3210,7 @@ internal static class WorldMapOrthogonalRouter
         return true;
     }
 
-    private static Num.Vector2[] CollapseImmediateBacktracks(
+    internal static Num.Vector2[] NormalizeNoBacktracking(
         Num.Vector2[] source)
     {
         if (source == null ||
