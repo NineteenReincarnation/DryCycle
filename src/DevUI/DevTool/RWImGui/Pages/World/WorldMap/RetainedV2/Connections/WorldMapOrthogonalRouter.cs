@@ -206,6 +206,8 @@ internal static class WorldMapOrthogonalRouter
     private const float CrossingPenalty = 11.0f;
     private const float JunctionHotspotTurnPenalty = 2.8f;
     private const float JunctionHotspotPassPenalty = 0.38f;
+    private const float JunctionNeighborTurnPenalty = 1.15f;
+    private const float JunctionNeighborPassPenalty = 0.14f;
     private const float ParallelCongestionPenalty = 0.26f;
     private const int PreferredParallelCapacity = 8;
     private const float ParallelOverflowPenalty = 0.92f;
@@ -1236,19 +1238,37 @@ internal static class WorldMapOrthogonalRouter
                     step += ProximityPenalty;
 
                 Num.Vector2 worldNeighbor = new(min.X + nx * cell, min.Y + ny * cell);
-                long occupancyKey = GridKey((int)Math.Round(worldNeighbor.X / 18f), (int)Math.Round(worldNeighbor.Y / 18f));
-                if (occupancy.TryGetValue(occupancyKey, out Occupancy occupied))
-                {
-                    bool turning =
-                        current.Direction < 4 &&
-                        current.Direction != direction;
+                int occupancyX =
+                    (int)Math.Round(
+                        worldNeighbor.X / 18f);
+                int occupancyY =
+                    (int)Math.Round(
+                        worldNeighbor.Y / 18f);
+                long occupancyKey =
+                    GridKey(
+                        occupancyX,
+                        occupancyY);
+                bool turning =
+                    current.Direction < 4 &&
+                    current.Direction != direction;
 
+                if (occupancy.TryGetValue(
+                        occupancyKey,
+                        out Occupancy occupied))
+                {
                     step +=
                         OccupancyPenalty(
                             occupied,
                             direction,
                             turning);
                 }
+
+                step +=
+                    NearbyBendPenalty(
+                        occupancy,
+                        occupancyX,
+                        occupancyY,
+                        turning);
 
                 if (stableCells.Contains(GridKey(nx, ny)))
                     step = Math.Max(0.25f, step - StabilityBonus);
@@ -1652,18 +1672,27 @@ internal static class WorldMapOrthogonalRouter
                     (int)Math.Round(
                         points[i].Y / 18f));
 
-            if (!occupancy.TryGetValue(
+            if (occupancy.TryGetValue(
                     key,
-                    out Occupancy occupied) ||
-                occupied.BendCount == 0)
-                continue;
+                    out Occupancy occupied) &&
+                occupied.BendCount > 0)
+            {
+                penalty +=
+                    Math.Max(
+                        0f,
+                        JunctionHotspotTurnPenalty -
+                        JunctionHotspotPassPenalty) *
+                    occupied.BendCount;
+            }
 
             penalty +=
-                Math.Max(
-                    0f,
-                    JunctionHotspotTurnPenalty -
-                    JunctionHotspotPassPenalty) *
-                occupied.BendCount;
+                NearbyBendPenalty(
+                    occupancy,
+                    (int)Math.Round(
+                        points[i].X / 18f),
+                    (int)Math.Round(
+                        points[i].Y / 18f),
+                    turning: true);
         }
 
         return penalty;
@@ -1723,6 +1752,56 @@ internal static class WorldMapOrthogonalRouter
                     ? JunctionHotspotTurnPenalty
                     : JunctionHotspotPassPenalty) *
                 occupied.BendCount;
+        }
+
+        return penalty;
+    }
+
+    private static float NearbyBendPenalty(
+        Dictionary<long, Occupancy> occupancy,
+        int gridX,
+        int gridY,
+        bool turning)
+    {
+        if (occupancy == null ||
+            occupancy.Count == 0)
+            return 0f;
+
+        float penalty = 0f;
+
+        for (int oy = -1;
+             oy <= 1;
+             oy++)
+        {
+            for (int ox = -1;
+                 ox <= 1;
+                 ox++)
+            {
+                if (ox == 0 &&
+                    oy == 0)
+                    continue;
+
+                if (!occupancy.TryGetValue(
+                        GridKey(
+                            gridX + ox,
+                            gridY + oy),
+                        out Occupancy neighbor) ||
+                    neighbor.BendCount == 0)
+                    continue;
+
+                float distanceWeight =
+                    ox != 0 &&
+                    oy != 0
+                        ? 0.72f
+                        : 1f;
+
+                penalty +=
+                    (turning
+                        ? JunctionNeighborTurnPenalty
+                        : JunctionNeighborPassPenalty) *
+                    neighbor.BendCount *
+                    distanceWeight;
+            }
         }
 
         return penalty;
