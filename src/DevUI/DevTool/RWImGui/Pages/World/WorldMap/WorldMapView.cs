@@ -2198,16 +2198,10 @@ internal static class WorldMapView
                 points,
                 out markerPoint,
                 out markerTangent,
-                out straightLength))
+                out straightLength) ||
+            straightLength < 20f)
         {
-            if (!TryPointOnPath(
-                    points,
-                    0.5f,
-                    out markerPoint,
-                    out markerTangent))
-                return;
-
-            straightLength = 0f;
+            return;
         }
 
         float markerSize =
