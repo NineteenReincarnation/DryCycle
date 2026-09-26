@@ -38,6 +38,9 @@ internal sealed class WorldMapConnectionResourceStore
     private readonly HashSet<string> queued = new(StringComparer.Ordinal);
     private readonly HashSet<string> routeChanged = new(StringComparer.Ordinal);
     private readonly List<WorldMapScene.ConnectionNode> buildBatch = new();
+    private readonly List<System.Numerics.Vector2[]> routeOccupancySeeds = new();
+    private readonly HashSet<string> corridorRerouteAttempted =
+        new(StringComparer.Ordinal);
     private readonly Dictionary<int, WorldMapOrthogonalRouter.Obstacle> routingObstacles =
         new();
     private readonly List<WorldMapOrthogonalRouter.Obstacle> routingObstacleSnapshot =
@@ -122,6 +125,7 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (dirty.FullRebuild || dirty.TopologyChanged)
         {
+            corridorRerouteAttempted.Clear();
             dependencies.Rebuild(scene);
             RebuildLanePlan(scene, roomResources);
             RebuildRoutingObstacles(scene, roomResources);
@@ -132,7 +136,13 @@ internal sealed class WorldMapConnectionResourceStore
         }
 
         if (dirty.RoomPorts.Count > 0)
+        {
+            corridorRerouteAttempted.Clear();
             RebuildTerminalFanouts(scene, roomResources);
+        }
+
+        if (dirty.RoomTransforms.Count > 0)
+            corridorRerouteAttempted.Clear();
 
         foreach (string id in dirty.Connections)
             Enqueue(id);
@@ -264,6 +274,8 @@ internal sealed class WorldMapConnectionResourceStore
             null;
 
         if (buildBatch.Count > 0)
+        {
+            BuildRouteOccupancySeeds();
             rebuilt =
                 WorldMapWorldSpaceRouter.Build(
                     scene,
@@ -271,7 +283,9 @@ internal sealed class WorldMapConnectionResourceStore
                     buildBatch,
                     laneOffsets,
                     terminalFanouts,
-                    GetRoutingObstacleSnapshot());
+                    GetRoutingObstacleSnapshot(),
+                    routeOccupancySeeds);
+        }
 
         for (int i = 0; i < buildBatch.Count; i++)
         {
@@ -313,6 +327,8 @@ internal sealed class WorldMapConnectionResourceStore
         queued.Clear();
         routeChanged.Clear();
         buildBatch.Clear();
+        routeOccupancySeeds.Clear();
+        corridorRerouteAttempted.Clear();
         routingObstacles.Clear();
         routingObstacleSnapshot.Clear();
         routingObstacleSnapshotDirty = true;
@@ -417,19 +433,101 @@ internal sealed class WorldMapConnectionResourceStore
 
         corridorLayoutDirty = false;
         ApplyEndpointDensityTiers();
-        WorldMapCorridorLaneAllocator.Apply(
-            routes,
-            GetRoutingObstacleSnapshot(),
-            routeChanged,
-            ref revision);
+
+        WorldMapCorridorLaneApplyResult laneResult =
+            WorldMapCorridorLaneAllocator.Apply(
+                routes,
+                GetRoutingObstacleSnapshot(),
+                routeChanged,
+                ref revision);
 
         crossingLayoutDirty = true;
+
+        // Only reroute after the current route queue has converged. Doing this in the middle of a
+        // progressive cold start would react to an incomplete map and cause avoidable route churn.
+        if (queue.Count == 0 &&
+            laneResult.HasRerouteCandidates)
+        {
+            int scheduled =
+                ScheduleCorridorReroutes(
+                    laneResult.RerouteRouteIds);
+
+            if (scheduled > 0)
+                return;
+        }
 
         // During progressive cold-start batches, crossings are presentation sugar and may wait until
         // all currently queued base routes exist. This avoids rebuilding the crossing index 24 routes
         // at a time across a large region.
         if (queue.Count == 0)
             RebuildCrossings();
+    }
+
+    private int ScheduleCorridorReroutes(
+        IReadOnlyList<string> routeIds)
+    {
+        if (routeIds == null ||
+            routeIds.Count == 0)
+            return 0;
+
+        int scheduled = 0;
+
+        for (int i = 0; i < routeIds.Count; i++)
+        {
+            string id =
+                routeIds[i];
+
+            if (string.IsNullOrEmpty(id) ||
+                !routes.ContainsKey(id) ||
+                !corridorRerouteAttempted.Add(id))
+                continue;
+
+            Enqueue(id);
+            scheduled++;
+        }
+
+        return scheduled;
+    }
+
+    private void BuildRouteOccupancySeeds()
+    {
+        routeOccupancySeeds.Clear();
+
+        if (routes.Count == 0)
+            return;
+
+        HashSet<string> rebuilding =
+            new(StringComparer.Ordinal);
+
+        for (int i = 0; i < buildBatch.Count; i++)
+        {
+            string id =
+                buildBatch[i]?.Id;
+
+            if (!string.IsNullOrEmpty(id))
+                rebuilding.Add(id);
+        }
+
+        foreach (KeyValuePair<string, ConnectionRouteResource> pair
+                 in routes)
+        {
+            if (rebuilding.Contains(pair.Key))
+                continue;
+
+            ConnectionRouteResource route =
+                pair.Value;
+            System.Numerics.Vector2[] points =
+                route?.BasePoints != null &&
+                route.BasePoints.Length >= 2
+                    ? route.BasePoints
+                    : route?.Points;
+
+            if (points == null ||
+                points.Length < 2)
+                continue;
+
+            routeOccupancySeeds.Add(points);
+        }
     }
 
     private void RebuildCrossings()
