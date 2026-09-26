@@ -53,6 +53,7 @@ internal static partial class Program
         Check(localRaster.Pixels.Any(p=>p==localStructureColor),"Local/custom curved terrain uses the same Structure palette color as ordinary structure terrain.");
         int localCurvePixels=localRaster.Pixels.Count(p=>p!=curvedDocument.Terrain);
         Check(localCurvePixels>localRaster.Width*4,"Curved terrain keeps its filled body beneath the authored surface.");
+        Check(localCurvePixels<localRaster.Width*localRaster.Height/2,"Curved terrain topology does not flood-fill unrelated room space.");
         int[] localSurfaceRows=Enumerable.Range(0,localRaster.Width)
             .Select(x=>Enumerable.Range(0,localRaster.Height)
                 .Where(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor)
@@ -61,6 +62,16 @@ internal static partial class Program
             .Where(y=>y>=0)
             .ToArray();
         Check(localSurfaceRows.Distinct().Count()>3,"Curved terrain uses the sampled spline as a smooth surface instead of tile-sized rectangular steps.");
+        bool localMaskHasNoVerticalHoles=Enumerable.Range(0,localRaster.Width).All(x=>
+        {
+            int[] rows=Enumerable.Range(0,localRaster.Height)
+                .Where(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor)
+                .ToArray();
+            if(rows.Length<2)return true;
+            return Enumerable.Range(rows[0],rows[rows.Length-1]-rows[0]+1)
+                .All(y=>localRaster.Pixels[y*localRaster.Width+x]==localStructureColor);
+        });
+        Check(localMaskHasNoVerticalHoles,"Curved terrain mask is a continuous solid body rather than a hollow surface shell.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
@@ -79,7 +90,7 @@ internal static partial class Program
         var scene=CartographySceneBuilder.Build(document,source);
         CartographyExporter.Dimensions(document,scene,out int transparentWidth,out int transparentHeight);
         using(var transparentProbe=CartographyExporter.RenderBitmap(document,scene,transparentWidth,transparentHeight,null))
-            Check((transparentProbe.GetPixel(0,0).ToArgb()>>24&255)==0,"Cartography bitmap export stays transparent even if a legacy document carries Transparent=false.");
+            Check((transparentProbe.GetPixel(0,0).ToArgb()>>24&255)==0,"Cartography bitmap export stays transparent after curved-terrain mask composition, even if a legacy document carries Transparent=false.");
         CartographyExporter.Dimensions(document,scene,out int width,out int height);
         string path=Path.Combine(output,"band-parity.png");
         CartographyExporter.Export(document,scene,path,CartographyExportFormat.Png,CartographyStorage.HashFile(path));
