@@ -168,14 +168,19 @@ internal static class WorldMapOrthogonalRouter
 
     private readonly struct Occupancy
     {
-        internal Occupancy(byte directionMask, byte count)
+        internal Occupancy(
+            byte directionMask,
+            byte count,
+            byte bendCount)
         {
             DirectionMask = directionMask;
             Count = count;
+            BendCount = bendCount;
         }
 
         internal byte DirectionMask { get; }
         internal byte Count { get; }
+        internal byte BendCount { get; }
     }
 
     // Keep routing corridors visibly detached from room silhouettes. The old 15/22px margins were
@@ -189,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 11;
+    private const int RoutingPolicyVersion = 12;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -199,6 +204,8 @@ internal static class WorldMapOrthogonalRouter
     private const float BendPenalty = 1.60f;
     private const float BacktrackPenalty = 3.40f;
     private const float CrossingPenalty = 11.0f;
+    private const float JunctionHotspotTurnPenalty = 2.8f;
+    private const float JunctionHotspotPassPenalty = 0.38f;
     private const float ParallelCongestionPenalty = 0.26f;
     private const int PreferredParallelCapacity = 8;
     private const float ParallelOverflowPenalty = 0.92f;
@@ -1232,10 +1239,15 @@ internal static class WorldMapOrthogonalRouter
                 long occupancyKey = GridKey((int)Math.Round(worldNeighbor.X / 18f), (int)Math.Round(worldNeighbor.Y / 18f));
                 if (occupancy.TryGetValue(occupancyKey, out Occupancy occupied))
                 {
+                    bool turning =
+                        current.Direction < 4 &&
+                        current.Direction != direction;
+
                     step +=
                         OccupancyPenalty(
                             occupied,
-                            direction);
+                            direction,
+                            turning);
                 }
 
                 if (stableCells.Contains(GridKey(nx, ny)))
@@ -1601,7 +1613,8 @@ internal static class WorldMapOrthogonalRouter
 
     private static float OccupancyPenalty(
         Occupancy occupied,
-        int direction)
+        int direction,
+        bool turning = false)
     {
         int occupancyCount =
             Math.Max(
@@ -1612,32 +1625,46 @@ internal static class WorldMapOrthogonalRouter
                 occupied.DirectionMask &
                 PerpendicularMask(direction));
 
+        float penalty;
+
         if (perpendicular != 0)
         {
-            return CrossingPenalty *
-                   occupancyCount;
+            penalty =
+                CrossingPenalty *
+                occupancyCount;
+        }
+        else
+        {
+            int preferred =
+                Math.Min(
+                    occupancyCount,
+                    PreferredParallelCapacity);
+            int overflow =
+                Math.Max(
+                    0,
+                    occupancyCount -
+                    PreferredParallelCapacity);
+
+            penalty =
+                ParallelCongestionPenalty *
+                preferred;
+
+            if (overflow > 0)
+            {
+                penalty +=
+                    ParallelOverflowPenalty *
+                    overflow *
+                    overflow;
+            }
         }
 
-        int preferred =
-            Math.Min(
-                occupancyCount,
-                PreferredParallelCapacity);
-        int overflow =
-            Math.Max(
-                0,
-                occupancyCount -
-                PreferredParallelCapacity);
-
-        float penalty =
-            ParallelCongestionPenalty *
-            preferred;
-
-        if (overflow > 0)
+        if (occupied.BendCount > 0)
         {
             penalty +=
-                ParallelOverflowPenalty *
-                overflow *
-                overflow;
+                (turning
+                    ? JunctionHotspotTurnPenalty
+                    : JunctionHotspotPassPenalty) *
+                occupied.BendCount;
         }
 
         return penalty;
@@ -1682,19 +1709,45 @@ internal static class WorldMapOrthogonalRouter
             Num.Vector2 b = points[i + 1];
             Num.Vector2 delta = b - a;
             float length = delta.Length();
-            if (length < 1f) continue;
-            int direction = Math.Abs(delta.X) >= Math.Abs(delta.Y)
-                ? (delta.X >= 0f ? 0 : 2)
-                : (delta.Y >= 0f ? 1 : 3);
-            int steps = Math.Max(1, (int)Math.Ceiling(length / 18f));
+            if (length < 1f)
+                continue;
+
+            int direction =
+                Math.Abs(delta.X) >=
+                Math.Abs(delta.Y)
+                    ? (delta.X >= 0f ? 0 : 2)
+                    : (delta.Y >= 0f ? 1 : 3);
+
+            int steps =
+                Math.Max(
+                    1,
+                    (int)Math.Ceiling(
+                        length / 18f));
+
             for (int s = 0; s <= steps; s++)
             {
-                Num.Vector2 p = Num.Vector2.Lerp(a, b, s / (float)steps);
-                int gx = (int)Math.Round(p.X / 18f);
-                int gy = (int)Math.Round(p.Y / 18f);
-                long key = GridKey(gx, gy);
-                byte mask = DirectionBit(direction);
-                if (occupancy.TryGetValue(key, out Occupancy current))
+                Num.Vector2 p =
+                    Num.Vector2.Lerp(
+                        a,
+                        b,
+                        s / (float)steps);
+                int gx =
+                    (int)Math.Round(
+                        p.X / 18f);
+                int gy =
+                    (int)Math.Round(
+                        p.Y / 18f);
+                long key =
+                    GridKey(
+                        gx,
+                        gy);
+                byte mask =
+                    DirectionBit(
+                        direction);
+
+                if (occupancy.TryGetValue(
+                        key,
+                        out Occupancy current))
                 {
                     occupancy[key] =
                         new Occupancy(
@@ -1704,7 +1757,8 @@ internal static class WorldMapOrthogonalRouter
                             (byte)Math.Min(
                                 255,
                                 current.Count +
-                                weight));
+                                weight),
+                            current.BendCount);
                 }
                 else
                 {
@@ -1713,8 +1767,82 @@ internal static class WorldMapOrthogonalRouter
                             mask,
                             (byte)Math.Min(
                                 255,
-                                weight));
+                                weight),
+                            0);
                 }
+            }
+        }
+
+        // Register corridor bends separately. A dozen unrelated routes turning on the same grid
+        // point creates the visual equivalent of an electrical solder joint even when none of
+        // those routes are topologically connected. Future routes should prefer a nearby bend
+        // location instead of piling another corner onto that hotspot.
+        int firstVertex =
+            firstSegment + 1;
+        int lastVertex =
+            lastSegment;
+
+        for (int i = firstVertex;
+             i <= lastVertex &&
+             i > 0 &&
+             i + 1 < points.Length;
+             i++)
+        {
+            Num.Vector2 before =
+                points[i] -
+                points[i - 1];
+            Num.Vector2 after =
+                points[i + 1] -
+                points[i];
+
+            if (before.LengthSquared() < 0.01f ||
+                after.LengthSquared() < 0.01f)
+                continue;
+
+            bool beforeHorizontal =
+                Math.Abs(before.X) >=
+                Math.Abs(before.Y);
+            bool afterHorizontal =
+                Math.Abs(after.X) >=
+                Math.Abs(after.Y);
+
+            if (beforeHorizontal ==
+                afterHorizontal)
+                continue;
+
+            int gx =
+                (int)Math.Round(
+                    points[i].X / 18f);
+            int gy =
+                (int)Math.Round(
+                    points[i].Y / 18f);
+            long key =
+                GridKey(
+                    gx,
+                    gy);
+
+            if (occupancy.TryGetValue(
+                    key,
+                    out Occupancy current))
+            {
+                occupancy[key] =
+                    new Occupancy(
+                        current.DirectionMask,
+                        current.Count,
+                        (byte)Math.Min(
+                            255,
+                            current.BendCount +
+                            weight));
+            }
+            else
+            {
+                occupancy[key] =
+                    new Occupancy(
+                        0,
+                        0,
+                        (byte)Math.Min(
+                            255,
+                            weight));
             }
         }
     }
