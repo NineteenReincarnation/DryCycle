@@ -23,6 +23,29 @@ internal static partial class Program
         var verticalNode=CartographySceneBuilder.Route(document,source,vertical,document.Layer(vertical.LayerId));
         Check(verticalNode.Points.Length==3&&Math.Abs(verticalNode.Points[1].X-verticalNode.FromX)<.0001f&&Math.Abs(verticalNode.Points[1].Y-verticalNode.ToY)<.0001f,"Vertical-first cartography routes use one Cornifer-style right-angle control point.");
         Check(diagonal.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Line).Any(p=>p.GuideOnly&&Math.Abs(p.DashLength-11)<.0001f&&Math.Abs(p.DashGap-5)<.0001f),"Diagonal guides use Cornifer's black 11/5 dash silhouette.");
+
+        var curvedRoom=new CartographyRoomSource
+        {
+            Name="CURVE_TEST",
+            Width=20,
+            Height=12,
+            Settings=
+                "PlacedObjects: "+
+                "TerrainHandle><0><120><-40~0~40~0~20,"+
+                "TerrainHandle><400><140><-40~0~40~0~20,"+
+                "LocalTerrain><40><60><40~100^0~0^100~100^0~,"+
+                "CurvedSlope><120><80><24~120^0~0^80~120^-40~,"+
+                "SuperSlope><240><40><120~80~20"
+        };
+        CartographyRegionLoader.DecodeCurvedTerrain(curvedRoom);
+        Check(curvedRoom.CurvedTerrainFills.Length>0&&curvedRoom.CurvedTerrainCurves.Length>0,"Cartography decodes TerrainHandle, LocalTerrain, CurvedSlope and SuperSlope authored geometry.");
+        Check(curvedRoom.CurvedTerrainFills.Any(r=>r.Kind==DryCycle.DevUI.DevTool.Map.EditorMapGeometryKind.Solid)&&curvedRoom.CurvedTerrainFills.Any(r=>r.Kind==DryCycle.DevUI.DevTool.Map.EditorMapGeometryKind.Structure),"Curved cartography terrain retains ordinary Solid/Structure material semantics.");
+        var curvedDocument=new CartographyDocument{Terrain=0xFF8899AA,CropSolid=false};
+        curvedDocument.Options.Borders=false;
+        curvedDocument.Options.Wall=0xFF112233;
+        var curvedItem=new CartographyItem{Kind=CartographyItemKind.Room,Appearance=new CartographyAppearance()};
+        var curvedRaster=CartographyDrawing.Room(curvedDocument,curvedItem,curvedRoom);
+        Check(curvedRaster.Pixels.Any(p=>p==curvedDocument.Options.Wall),"Curved solid terrain uses the same wall color as ordinary solid terrain.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
