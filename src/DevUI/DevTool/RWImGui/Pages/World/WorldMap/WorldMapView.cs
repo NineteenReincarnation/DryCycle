@@ -2858,7 +2858,8 @@ internal static class WorldMapView
                 points,
                 out markerPoint,
                 out markerTangent,
-                out straightLength) ||
+                out straightLength,
+                out int primarySegment) ||
             straightLength < 20f)
         {
             return;
@@ -2868,7 +2869,8 @@ internal static class WorldMapView
             markerTangent *
             StableDirectionMarkerShift(
                 markerKey,
-                straightLength);
+                straightLength,
+                primarySegment);
 
         float markerSize =
             Math.Max(
@@ -2925,11 +2927,47 @@ internal static class WorldMapView
             shadow,
             core,
             markerSize);
+
+        if (length < 420f ||
+            !TrySecondaryPathSegment(
+                points,
+                primarySegment,
+                markerPoint,
+                out Num.Vector2 secondaryPoint,
+                out Num.Vector2 secondaryTangent,
+                out float secondaryLength,
+                out int secondarySegment))
+        {
+            return;
+        }
+
+        secondaryPoint +=
+            secondaryTangent *
+            StableDirectionMarkerShift(
+                markerKey,
+                secondaryLength,
+                secondarySegment);
+
+        if (direction ==
+            WorldConnectionDirection.BToA)
+        {
+            secondaryTangent =
+                -secondaryTangent;
+        }
+
+        DrawArrowHead(
+            draw,
+            secondaryPoint,
+            secondaryTangent,
+            shadow,
+            core,
+            markerSize);
     }
 
     private static float StableDirectionMarkerShift(
         string markerKey,
-        float straightLength)
+        float straightLength,
+        int salt)
     {
         if (string.IsNullOrEmpty(markerKey) ||
             straightLength <= 20f)
@@ -2953,6 +2991,9 @@ internal static class WorldMapView
                 hash ^= markerKey[i];
                 hash *= 16777619u;
             }
+
+            hash ^= (uint)(salt + 1);
+            hash *= 16777619u;
         }
 
         float normalized =
@@ -2970,7 +3011,8 @@ internal static class WorldMapView
         IReadOnlyList<Num.Vector2> points,
         out Num.Vector2 point,
         out Num.Vector2 tangent,
-        out float length)
+        out float length,
+        out int segmentIndex)
     {
         point =
             Num.Vector2.Zero;
@@ -2978,6 +3020,8 @@ internal static class WorldMapView
             Num.Vector2.Zero;
         length =
             0f;
+        segmentIndex =
+            -1;
 
         if (points == null ||
             points.Count < 2)
@@ -3015,9 +3059,84 @@ internal static class WorldMapView
                 (points[i] +
                  points[i + 1]) *
                 0.5f;
+            segmentIndex =
+                i;
         }
 
         return length > 0.001f;
+    }
+
+    private static bool TrySecondaryPathSegment(
+        IReadOnlyList<Num.Vector2> points,
+        int primarySegment,
+        Num.Vector2 primaryPoint,
+        out Num.Vector2 point,
+        out Num.Vector2 tangent,
+        out float length,
+        out int segmentIndex)
+    {
+        point =
+            Num.Vector2.Zero;
+        tangent =
+            Num.Vector2.Zero;
+        length =
+            0f;
+        segmentIndex =
+            -1;
+
+        if (points == null ||
+            points.Count < 3)
+            return false;
+
+        int firstSegment =
+            points.Count >= 4
+                ? 1
+                : 0;
+        int lastSegment =
+            points.Count >= 4
+                ? points.Count - 3
+                : points.Count - 2;
+
+        for (int i = firstSegment;
+             i <= lastSegment;
+             i++)
+        {
+            if (i == primarySegment)
+                continue;
+
+            Num.Vector2 delta =
+                points[i + 1] -
+                points[i];
+            float candidateLength =
+                delta.Length();
+
+            if (candidateLength < 30f ||
+                candidateLength <=
+                    length + 0.01f)
+                continue;
+
+            Num.Vector2 candidatePoint =
+                (points[i] +
+                 points[i + 1]) *
+                0.5f;
+
+            if (Num.Vector2.Distance(
+                    candidatePoint,
+                    primaryPoint) < 90f)
+                continue;
+
+            length =
+                candidateLength;
+            tangent =
+                delta /
+                candidateLength;
+            point =
+                candidatePoint;
+            segmentIndex =
+                i;
+        }
+
+        return segmentIndex >= 0;
     }
 
     private static bool TryPointOnPath(
