@@ -1687,6 +1687,27 @@ internal static class WorldMapOrthogonalRouter
         int lastSegment =
             points.Length - 2;
 
+        if (lastSegment == 0)
+        {
+            return
+                !TerminalSegmentBlocked(
+                    points[0],
+                    points[1],
+                    request.StartRoom,
+                    request.EndRoom,
+                    request.EndRoomMin,
+                    request.EndRoomMax,
+                    obstacles) &&
+                !TerminalSegmentBlocked(
+                    points[0],
+                    points[1],
+                    request.EndRoom,
+                    request.StartRoom,
+                    request.StartRoomMin,
+                    request.StartRoomMax,
+                    obstacles);
+        }
+
         for (int i = 0;
              i <= lastSegment;
              i++)
@@ -1776,11 +1797,25 @@ internal static class WorldMapOrthogonalRouter
                 continue;
             }
 
+            // Routing obstacles include a generous visual margin. Terminal stubs may cross that
+            // margin when rooms sit close together, but they must never cross the actual foreign
+            // room body. Deflate back to the source room bounds for this terminal-only check.
+            Num.Vector2 rawMin =
+                obstacle.Min +
+                new Num.Vector2(
+                    ObstacleMargin,
+                    ObstacleMargin);
+            Num.Vector2 rawMax =
+                obstacle.Max -
+                new Num.Vector2(
+                    ObstacleMargin,
+                    ObstacleMargin);
+
             if (SegmentIntersectsRect(
                     a,
                     b,
-                    obstacle.Min,
-                    obstacle.Max))
+                    rawMin,
+                    rawMax))
                 return true;
         }
 
@@ -1837,56 +1872,40 @@ internal static class WorldMapOrthogonalRouter
                 searchPadding,
                 searchPadding);
 
-        // Grow the search envelope to a fixed point. A single order-dependent pass can miss an
-        // obstacle that only becomes relevant after a later obstacle expands the bounds.
-        for (int pass = 0;
-             pass < obstacles.Count;
-             pass++)
+        // Include every obstacle that intersects the original search envelope, then expand once
+        // around that fixed set. This is order-independent without recursively chaining across the
+        // whole map and accidentally coarsening the A* grid.
+        Num.Vector2 selectionMin =
+            min;
+        Num.Vector2 selectionMax =
+            max;
+
+        for (int i = 0;
+             i < obstacles.Count;
+             i++)
         {
-            bool expanded =
-                false;
+            Obstacle obstacle =
+                obstacles[i];
+            if (!obstacle.IntersectsBounds(
+                    selectionMin,
+                    selectionMax,
+                    40f))
+                continue;
 
-            for (int i = 0;
-                 i < obstacles.Count;
-                 i++)
-            {
-                Obstacle obstacle =
-                    obstacles[i];
-                if (!obstacle.IntersectsBounds(
-                        min,
-                        max,
-                        40f))
-                    continue;
-
-                Num.Vector2 nextMin =
-                    Num.Vector2.Min(
-                        min,
-                        obstacle.Min -
-                        new Num.Vector2(
-                            36f,
-                            36f));
-                Num.Vector2 nextMax =
-                    Num.Vector2.Max(
-                        max,
-                        obstacle.Max +
-                        new Num.Vector2(
-                            36f,
-                            36f));
-
-                if (nextMin != min ||
-                    nextMax != max)
-                {
-                    min =
-                        nextMin;
-                    max =
-                        nextMax;
-                    expanded =
-                        true;
-                }
-            }
-
-            if (!expanded)
-                break;
+            min =
+                Num.Vector2.Min(
+                    min,
+                    obstacle.Min -
+                    new Num.Vector2(
+                        36f,
+                        36f));
+            max =
+                Num.Vector2.Max(
+                    max,
+                    obstacle.Max +
+                    new Num.Vector2(
+                        36f,
+                        36f));
         }
 
         Num.Vector2 span = Num.Vector2.Max(max - min, new Num.Vector2(1f, 1f));
