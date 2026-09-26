@@ -1767,22 +1767,6 @@ internal static class WorldMapView
              roomMax.Y) *
             0.5f;
 
-        Num.Vector2[] directions =
-        {
-            preferLeft
-                ? new Num.Vector2(-1f, 0f)
-                : new Num.Vector2(1f, 0f),
-            preferLeft
-                ? new Num.Vector2(1f, 0f)
-                : new Num.Vector2(-1f, 0f),
-            preferUp
-                ? new Num.Vector2(0f, -1f)
-                : new Num.Vector2(0f, 1f),
-            preferUp
-                ? new Num.Vector2(0f, 1f)
-                : new Num.Vector2(0f, -1f)
-        };
-
         float baseGap =
             13f +
             ((nodeIndex & 1) != 0
@@ -1799,11 +1783,37 @@ internal static class WorldMapView
                 9f;
 
             for (int d = 0;
-                 d < directions.Length;
+                 d < 4;
                  d++)
             {
-                Num.Vector2 direction =
-                    directions[d];
+                Num.Vector2 direction;
+                switch (d)
+                {
+                    case 0:
+                        direction =
+                            preferLeft
+                                ? new Num.Vector2(-1f, 0f)
+                                : new Num.Vector2(1f, 0f);
+                        break;
+                    case 1:
+                        direction =
+                            preferLeft
+                                ? new Num.Vector2(1f, 0f)
+                                : new Num.Vector2(-1f, 0f);
+                        break;
+                    case 2:
+                        direction =
+                            preferUp
+                                ? new Num.Vector2(0f, -1f)
+                                : new Num.Vector2(0f, 1f);
+                        break;
+                    default:
+                        direction =
+                            preferUp
+                                ? new Num.Vector2(0f, 1f)
+                                : new Num.Vector2(0f, -1f);
+                        break;
+                }
                 Num.Vector2 center =
                     point +
                     new Num.Vector2(
