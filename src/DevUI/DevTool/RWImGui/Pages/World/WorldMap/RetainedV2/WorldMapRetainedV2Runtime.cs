@@ -633,14 +633,9 @@ internal static class WorldMapRetainedV2Runtime
                 // after publication (updates replace the array rather than mutating it), so keeping
                 // this exact reference preserves the rendered frame without cloning every visible
                 // path on each pan/zoom redraw.
-                ConnectionRouteResource snapshotRoute =
-                    new()
-                    {
-                        ConnectionId = id,
-                        Points = route.Points
-                    };
-
-                index.Upsert(snapshotRoute);
+                index.Upsert(
+                    id,
+                    route.Points);
                 ids.Add(id);
             }
         }
