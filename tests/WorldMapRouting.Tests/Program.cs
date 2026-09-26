@@ -188,28 +188,26 @@ internal static class Program
                 "Parallel short routes must retain real socket anchors.");
             Check(!HasReversal(points), "Parallel short routes must never backtrack.");
 
-            float y = points.Length > 2
-                ? points.Skip(1).Take(points.Length - 2).Average(p => p.Y)
-                : 50f;
-            ys.Add(y);
-        }
+            float longestHorizontal = -1f;
+            float corridorY = points[0].Y;
+            for (int p = 0; p + 1 < points.Length; p++)
+            {
+                if (Math.Abs(points[p].Y - points[p + 1].Y) > 0.01f)
+                    continue;
 
-        Console.WriteLine(
-            "short lanes: " +
-            string.Join(
-                " | ",
-                routes.Select(
-                    route =>
-                        string.Join(
-                            " -> ",
-                            route.Points.Select(
-                                point =>
-                                    "(" + point.X.ToString("F1") + "," +
-                                    point.Y.ToString("F1") + ")")))));
+                float length = Math.Abs(points[p + 1].X - points[p].X);
+                if (length <= longestHorizontal)
+                    continue;
+
+                longestHorizontal = length;
+                corridorY = points[p].Y;
+            }
+            ys.Add(corridorY);
+        }
 
         Check(
             ys.Max() - ys.Min() >= 18f,
-            "Parallel short links must preserve visibly separated lane offsets.");
+            "Parallel short links must preserve visibly separated lane corridors.");
     }
 
     private static void DenseObstacleLanes()
