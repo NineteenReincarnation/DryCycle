@@ -500,14 +500,27 @@ internal static class CartographySceneBuilder
                 shapes.Add(line);
             }
 
-            // DrawGuideLines in Cornifer overlays a one-screen-pixel solid white center on the
-            // aligned pipe. The wide black map shadow still scales with the terrain underneath.
-            var guideShadow = Line(px, py, qx, qy, Alpha(0xFF000000, opacity), 3);
-            guideShadow.GuideOnly = guideShadow.ScreenSpace = guideShadow.PixelPerfect = true;
-            shapes.Add(guideShadow);
-            var guide = Line(px, py, qx, qy, Alpha(0xFFFFFFFF, opacity), 1);
-            guide.GuideOnly = guide.ScreenSpace = guide.PixelPerfect = true;
-            shapes.Add(guide);
+            // Keep the thin editor guide on the visible connection span only. The old full-span
+            // guide started at the exit-tile centre and visibly cut across the room silhouette.
+            // Reusing the same endpoint trim as the dashed core makes the connection emerge from
+            // the black outer room border instead of drawing through it.
+            float guideStart = start;
+            float guideEnd = end;
+            float guideAx = px + dx * guideStart / length;
+            float guideAy = py + dy * guideStart / length;
+            float guideBx = qx - dx * guideEnd / length;
+            float guideBy = qy - dy * guideEnd / length;
+
+            if (length > guideStart + guideEnd)
+            {
+                var guideShadow = Line(guideAx, guideAy, guideBx, guideBy, Alpha(0xFF000000, opacity), 3);
+                guideShadow.GuideOnly = guideShadow.ScreenSpace = guideShadow.PixelPerfect = true;
+                shapes.Add(guideShadow);
+
+                var guide = Line(guideAx, guideAy, guideBx, guideBy, Alpha(0xFFFFFFFF, opacity), 1);
+                guide.GuideOnly = guide.ScreenSpace = guide.PixelPerfect = true;
+                shapes.Add(guide);
+            }
 
             phase +=
                 Math.Max(
