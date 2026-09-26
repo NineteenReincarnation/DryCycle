@@ -363,7 +363,9 @@ internal static partial class CartographyView
 
             if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
             {
-                styleDraft = snapshot.Document.Clone();
+                // Preserve any already-staged style edits made in the inspector while the
+                // selection frame was being manipulated; only replace the export-area rectangle.
+                styleDraft ??= snapshot.Document.Clone();
                 CartographyOptions options = styleDraft.Options;
                 options.ExportArea = true;
                 options.AreaX = exportAreaPreviewRect.X;
