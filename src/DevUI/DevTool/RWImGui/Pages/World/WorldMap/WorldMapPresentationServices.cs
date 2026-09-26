@@ -277,8 +277,25 @@ internal static class WorldMapUpdateThrottle
             selected != lastGeometrySelection ||
             currentRoom != lastGeometryCurrentRoom;
 
+        int interval = PreviewPrimeIntervalFrames;
+        if (!WorldMapRetainedV2Runtime.CanvasVisible)
+        {
+            bool incomplete =
+                !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete ||
+                !WorldMapRetainedV2Runtime.Resources.ThumbnailLoadComplete;
+            double catchupAge =
+                Math.Max(
+                    MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds,
+                    WorldMapRetainedV2Runtime.Resources.ThumbnailLoadElapsedMilliseconds);
+            interval =
+                WorldMapBackgroundSchedulingPolicy.GeometrySweepIntervalFrames(
+                    canvasVisible: false,
+                    thumbnailWorkIncomplete: incomplete,
+                    catchupAgeMilliseconds: catchupAge);
+        }
+
         if (!urgent &&
-            Time.frameCount - lastGeometryPrimeFrame < PreviewPrimeIntervalFrames)
+            Time.frameCount - lastGeometryPrimeFrame < interval)
             return false;
 
         lastGeometryPrimeFrame = Time.frameCount;
