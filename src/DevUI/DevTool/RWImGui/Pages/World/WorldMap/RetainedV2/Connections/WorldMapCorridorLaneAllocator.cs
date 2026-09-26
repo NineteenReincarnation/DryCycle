@@ -807,6 +807,16 @@ internal static class WorldMapCorridorLaneAllocator
                         out float offset))
                     continue;
 
+                // A corridor can be the mirrored continuation of the same bundle after a 90-degree
+                // turn. In that case the global slot order is still correct, but its world-axis
+                // normal is reversed. Mirror the numeric offset for this component instead of
+                // forcing the routes to cross or asking the router to detour unnecessarily.
+                int orientation =
+                    ComponentOrientation(
+                        component,
+                        slotIds);
+                offset *= orientation;
+
                 if (!lanePlans.TryGetValue(
                         segment.RouteId,
                         out RouteLanePlan plan))
@@ -1044,40 +1054,26 @@ internal static class WorldMapCorridorLaneAllocator
             localOrder.Count == 0)
             return;
 
+        // A 90-degree turn can mirror the perpendicular world axis. Treat a complete reversal as a
+        // valid orientation change, not as a lane permutation. Choose the orientation that produces
+        // the fewest inversions against already-established slots before inserting branch routes.
+        OrientLocalOrderToSlots(
+            localOrder,
+            slots);
+
         Dictionary<string, int> existingPositions =
             new(StringComparer.Ordinal);
 
         for (int i = 0; i < slots.Count; i++)
             existingPositions[slots[i]] = i;
 
-        // First detect whether this corridor wants already-established routes in the opposite
-        // order. Never honour that permutation; mark both sides so the route store can search for
-        // an alternate corridor without destabilising the rest of the bundle.
-        int previousPosition = -1;
-        string previousId = null;
-
-        for (int i = 0; i < localOrder.Count; i++)
-        {
-            string id =
-                localOrder[i];
-
-            if (!existingPositions.TryGetValue(
-                    id,
-                    out int position))
-                continue;
-
-            if (position < previousPosition)
-            {
-                conflictRoutes?.Add(id);
-                if (!string.IsNullOrEmpty(previousId))
-                    conflictRoutes?.Add(previousId);
-            }
-            else
-            {
-                previousPosition = position;
-                previousId = id;
-            }
-        }
+        // Any inversion that remains after the optional mirror is a real permutation conflict.
+        // Mark every participant in an inverted pair so the bounded alternate-corridor pass can
+        // move the smallest affected set instead of destabilising the whole bundle.
+        MarkPermutationConflicts(
+            localOrder,
+            existingPositions,
+            conflictRoutes);
 
         // Insert only new routes. Processing in local geometric order lets a newly inserted route
         // become the predecessor of the next one in the same branch-in block, preserving that block
@@ -1118,9 +1114,9 @@ internal static class WorldMapCorridorLaneAllocator
                 }
                 else
                 {
-                    // The local corridor itself contradicts the established order. Preserve global
-                    // continuity and put the new branch beside the preceding anchor while flagging
-                    // all participants for a bounded reroute attempt.
+                    // A true local permutation remains after mirror normalisation. Preserve global
+                    // continuity and place the new route beside its preceding anchor while the
+                    // involved routes are queued for a congestion-aware alternate corridor.
                     conflictRoutes?.Add(id);
                     conflictRoutes?.Add(previous);
                     conflictRoutes?.Add(next);
@@ -1157,6 +1153,155 @@ internal static class WorldMapCorridorLaneAllocator
                 insertIndex,
                 id);
         }
+    }
+
+    private static void OrientLocalOrderToSlots(
+        List<string> localOrder,
+        List<string> slots)
+    {
+        if (localOrder == null ||
+            localOrder.Count < 2 ||
+            slots == null ||
+            slots.Count < 2)
+            return;
+
+        Dictionary<string, int> positions =
+            new(StringComparer.Ordinal);
+
+        for (int i = 0; i < slots.Count; i++)
+            positions[slots[i]] = i;
+
+        int forward =
+            CountKnownInversions(
+                localOrder,
+                positions,
+                reverse: false);
+        int reversed =
+            CountKnownInversions(
+                localOrder,
+                positions,
+                reverse: true);
+
+        if (reversed < forward)
+            localOrder.Reverse();
+    }
+
+    private static int CountKnownInversions(
+        List<string> order,
+        Dictionary<string, int> positions,
+        bool reverse)
+    {
+        if (order == null ||
+            positions == null)
+            return 0;
+
+        List<int> known =
+            new();
+
+        if (!reverse)
+        {
+            for (int i = 0; i < order.Count; i++)
+            {
+                if (positions.TryGetValue(
+                        order[i],
+                        out int position))
+                    known.Add(position);
+            }
+        }
+        else
+        {
+            for (int i = order.Count - 1; i >= 0; i--)
+            {
+                if (positions.TryGetValue(
+                        order[i],
+                        out int position))
+                    known.Add(position);
+            }
+        }
+
+        int inversions = 0;
+        for (int i = 0; i < known.Count; i++)
+        {
+            for (int j = i + 1; j < known.Count; j++)
+            {
+                if (known[i] > known[j])
+                    inversions++;
+            }
+        }
+
+        return inversions;
+    }
+
+    private static void MarkPermutationConflicts(
+        List<string> localOrder,
+        Dictionary<string, int> positions,
+        HashSet<string> conflictRoutes)
+    {
+        if (localOrder == null ||
+            positions == null ||
+            conflictRoutes == null)
+            return;
+
+        for (int i = 0; i < localOrder.Count; i++)
+        {
+            string left =
+                localOrder[i];
+
+            if (!positions.TryGetValue(
+                    left,
+                    out int leftPosition))
+                continue;
+
+            for (int j = i + 1; j < localOrder.Count; j++)
+            {
+                string right =
+                    localOrder[j];
+
+                if (!positions.TryGetValue(
+                        right,
+                        out int rightPosition) ||
+                    leftPosition <= rightPosition)
+                    continue;
+
+                conflictRoutes.Add(left);
+                conflictRoutes.Add(right);
+            }
+        }
+    }
+
+    private static int ComponentOrientation(
+        CorridorComponent component,
+        List<string> globalSlots)
+    {
+        if (component == null ||
+            globalSlots == null ||
+            globalSlots.Count < 2)
+            return 1;
+
+        List<string> local =
+            LocalComponentOrder(
+                component);
+
+        Dictionary<string, int> positions =
+            new(StringComparer.Ordinal);
+
+        for (int i = 0; i < globalSlots.Count; i++)
+            positions[globalSlots[i]] = i;
+
+        int forward =
+            CountKnownInversions(
+                local,
+                positions,
+                reverse: false);
+        int reversed =
+            CountKnownInversions(
+                local,
+                positions,
+                reverse: true);
+
+        return reversed < forward
+            ? -1
+            : 1;
     }
 
     private static string FindPreviousPresent(
