@@ -205,7 +205,9 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
     public override int NavigationOrder => 500;
     public override string NavigationLabel => DevToolUiSettings.T("地图", "Map");
     public override string NavigationTooltip => DevToolUiSettings.T("地图", "Map");
-    public override bool UsesDedicatedWorkspace => true;
+    public override bool SupportsSceneSurface => true;
+    public override bool AlwaysShowSceneSurface => true;
+    public override bool SupportsScenePlacement => false;
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
@@ -215,13 +217,13 @@ internal sealed class MapDevToolPage : DevToolFrontendPageBase
     }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
-        MapEditorView.DrawBrowser(MapEditorPresentationHub.Current);
+        WorldWorkspaceView.DrawBrowser(snapshot);
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
-        MapEditorView.DrawInspector(MapEditorPresentationHub.Current);
+        WorldWorkspaceView.DrawInspector(snapshot);
 
-    public override void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
-        WorldWorkspaceView.Draw(snapshot, display);
+    public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
+        WorldWorkspaceView.DrawSceneWorkspace(snapshot);
 
     protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot)
     {
