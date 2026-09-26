@@ -1928,7 +1928,15 @@ internal static class WorldMapOrthogonalRouter
         blocked[sy * width + sx] = false;
         blocked[ey * width + ex] = false;
 
-        HashSet<long> stableCells = BuildStableCells(previous, min, cell, width, height);
+        HashSet<long> stableCells =
+            preferAlternativeCorridor
+                ? new HashSet<long>()
+                : BuildStableCells(
+                    previous,
+                    min,
+                    cell,
+                    width,
+                    height);
         List<SearchNode> nodes = new(width * height * 2);
         Dictionary<int, int> bestByState = new();
         MinHeap open = new(nodes);
@@ -1958,7 +1966,27 @@ internal static class WorldMapOrthogonalRouter
         {
             int currentIndex = open.Pop();
             SearchNode current = nodes[currentIndex];
-            if (current.Closed) continue;
+            if (current.Closed)
+                continue;
+
+            int currentStateKey =
+                StateKey(
+                    current.X,
+                    current.Y,
+                    current.Direction,
+                    width,
+                    height);
+            if (bestByState.TryGetValue(
+                    currentStateKey,
+                    out int bestCurrentIndex) &&
+                bestCurrentIndex != currentIndex)
+            {
+                // A better copy of this same state was queued after this node. Do not expand the
+                // stale higher-cost copy; doing so used to waste a large part of the bounded grid
+                // budget on dense maps.
+                continue;
+            }
+
             current.Closed = true;
 
             if (current.X == ex && current.Y == ey)
@@ -2135,9 +2163,12 @@ internal static class WorldMapOrthogonalRouter
                     Obstacle obstacle =
                         obstacles[i];
 
+                    // Cover a small fraction of the cell footprint so a grid edge cannot skim
+                    // through a room between two free centres, without effectively inflating every
+                    // room by another half-cell and closing narrow but legitimate corridors.
                     float halfCell =
                         cell *
-                        0.48f;
+                        0.20f;
                     if (point.X + halfCell <= obstacle.Min.X ||
                         point.X - halfCell >= obstacle.Max.X ||
                         point.Y + halfCell <= obstacle.Min.Y ||
