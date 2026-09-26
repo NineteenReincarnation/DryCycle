@@ -223,10 +223,37 @@ internal static class DevToolOverlay
         IDevToolPageView page)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float defaultWidth = Math.Min(display.X * 0.94f, Math.Max(1f, display.X - 16f));
+
+        // Keep the default Editor Panel compact and balanced instead of stretching it across almost
+        // the entire display. The target is roughly the proportions of the room-settings reference:
+        // about 45% of a 16:9 desktop width with a ~1.38:1 panel aspect, while still adapting to
+        // smaller resolutions and UI scale.
+        float scaledTargetWidth =
+            700f *
+            Math.Min(
+                1.16f,
+                scale);
+        float defaultWidth = Math.Min(
+            Math.Max(
+                scaledTargetWidth,
+                display.X * 0.45f),
+            Math.Min(
+                860f *
+                Math.Min(
+                    1.10f,
+                    scale),
+                Math.Max(
+                    620f,
+                    display.X - 32f)));
+
         float defaultHeight = Math.Min(
-            Math.Max(440f * Math.Min(1.25f, scale), display.Y * 0.52f),
-            Math.Max(320f, display.Y - 120f));
+            Math.Max(
+                440f,
+                defaultWidth * 0.72f),
+            Math.Max(
+                320f,
+                display.Y - 120f));
+
         Num.Vector2 defaultPos = new(
             (display.X - defaultWidth) * 0.5f,
             Math.Max(92f, (display.Y - defaultHeight) * 0.50f));
@@ -246,8 +273,8 @@ internal static class DevToolOverlay
             return;
         }
 
-        // Apply the wider layout even when an older ImGui window size was saved. Afterwards
-        // manual resizing is retained until the display resolution changes.
+        // Apply the balanced default once per display width even when an older oversized ImGui
+        // window size was saved. Manual resizing is retained afterwards until resolution changes.
         if (Math.Abs(browserInspectorDisplayWidth - display.X) > 0.5f)
         {
             ImGui.SetWindowSize(new Num.Vector2(defaultWidth, ImGui.GetWindowSize().Y));
