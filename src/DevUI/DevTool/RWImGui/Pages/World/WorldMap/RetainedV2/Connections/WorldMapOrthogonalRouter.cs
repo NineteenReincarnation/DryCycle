@@ -189,7 +189,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 9;
+    private const int RoutingPolicyVersion = 10;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -506,7 +506,9 @@ internal static class WorldMapOrthogonalRouter
             request.End,
             request.StartRoom,
             request.EndRoom,
-            obstacles);
+            obstacles,
+            occupancy,
+            preferAlternativeCorridor);
         return NewRoute(request, RouteKind.Fallback, SimplifyRoute(fallback), startDirection, endDirection);
     }
 
@@ -1370,41 +1372,149 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 end,
         int startRoom,
         int endRoom,
-        List<Obstacle> obstacles)
+        List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
+        bool preferAlternativeCorridor)
     {
         Num.Vector2 min = Num.Vector2.Min(startEscape, endEscape);
         Num.Vector2 max = Num.Vector2.Max(startEscape, endEscape);
         for (int i = 0; i < obstacles.Count; i++)
         {
-            if (!obstacles[i].IntersectsBounds(min, max, 80f)) continue;
+            if (!obstacles[i].IntersectsBounds(min, max, 80f))
+                continue;
+
             min = Num.Vector2.Min(min, obstacles[i].Min);
             max = Num.Vector2.Max(max, obstacles[i].Max);
         }
 
-        float left = min.X - 34f;
-        float right = max.X + 34f;
-        float top = min.Y - 34f;
-        float bottom = max.Y + 34f;
-
-        Num.Vector2[][] candidates =
-        {
-            new[] { start, startBaseEscape, startEscape, new Num.Vector2(left, startEscape.Y), new Num.Vector2(left, endEscape.Y), endEscape, endBaseEscape, end },
-            new[] { start, startBaseEscape, startEscape, new Num.Vector2(right, startEscape.Y), new Num.Vector2(right, endEscape.Y), endEscape, endBaseEscape, end },
-            new[] { start, startBaseEscape, startEscape, new Num.Vector2(startEscape.X, top), new Num.Vector2(endEscape.X, top), endEscape, endBaseEscape, end },
-            new[] { start, startBaseEscape, startEscape, new Num.Vector2(startEscape.X, bottom), new Num.Vector2(endEscape.X, bottom), endEscape, endBaseEscape, end }
-        };
+        // The fallback is still part of the routing policy, not an emergency "draw anything" path.
+        // Give it several progressively wider outside corridors and score them against occupancy.
+        // This matters most after a compressed bundle asks for an alternate corridor: the previous
+        // implementation ignored congestion here, so several failed searches could all collapse
+        // onto the same outer edge again.
+        float[] gutters =
+            preferAlternativeCorridor
+                ? new[] { 42f, 72f, 108f }
+                : new[] { 34f, 58f };
 
         float bestCost = float.MaxValue;
-        Num.Vector2[] best = candidates[0];
-        for (int i = 0; i < candidates.Length; i++)
+        Num.Vector2[] best = null;
+
+        for (int g = 0; g < gutters.Length; g++)
         {
-            Num.Vector2[] candidate = SimplifyRoute(candidates[i]);
-            float cost = RouteClear(candidate, startRoom, endRoom, obstacles) ? PathLength(candidate) : PathLength(candidate) + 100000f;
-            if (cost >= bestCost) continue;
-            bestCost = cost;
-            best = candidate;
+            float gutter = gutters[g];
+            float left = min.X - gutter;
+            float right = max.X + gutter;
+            float top = min.Y - gutter;
+            float bottom = max.Y + gutter;
+
+            Num.Vector2[][] candidates =
+            {
+                new[]
+                {
+                    start,
+                    startBaseEscape,
+                    startEscape,
+                    new Num.Vector2(left, startEscape.Y),
+                    new Num.Vector2(left, endEscape.Y),
+                    endEscape,
+                    endBaseEscape,
+                    end
+                },
+                new[]
+                {
+                    start,
+                    startBaseEscape,
+                    startEscape,
+                    new Num.Vector2(right, startEscape.Y),
+                    new Num.Vector2(right, endEscape.Y),
+                    endEscape,
+                    endBaseEscape,
+                    end
+                },
+                new[]
+                {
+                    start,
+                    startBaseEscape,
+                    startEscape,
+                    new Num.Vector2(startEscape.X, top),
+                    new Num.Vector2(endEscape.X, top),
+                    endEscape,
+                    endBaseEscape,
+                    end
+                },
+                new[]
+                {
+                    start,
+                    startBaseEscape,
+                    startEscape,
+                    new Num.Vector2(startEscape.X, bottom),
+                    new Num.Vector2(endEscape.X, bottom),
+                    endEscape,
+                    endBaseEscape,
+                    end
+                }
+            };
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                Num.Vector2[] candidate =
+                    SimplifyRoute(candidates[i]);
+
+                if (!RouteClear(
+                        candidate,
+                        startRoom,
+                        endRoom,
+                        obstacles))
+                    continue;
+
+                float congestion =
+                    RouteCongestionPenalty(
+                        candidate,
+                        occupancy);
+
+                // Wider gutters cost a little so routes do not drift outward for no reason, but
+                // congestion dominates once an existing corridor becomes unreadable.
+                float widthCost =
+                    g * 18f;
+                float cost =
+                    PathLength(candidate) +
+                    congestion * 1.35f +
+                    widthCost;
+
+                if (cost >= bestCost)
+                    continue;
+
+                bestCost = cost;
+                best = candidate;
+            }
         }
-        return best;
+
+        if (best != null)
+            return best;
+
+        // Last-resort deterministic path. It may intersect a room only if no valid fallback exists,
+        // matching the previous failure semantics while keeping the choice stable.
+        float emergencyLeft =
+            min.X -
+            gutters[gutters.Length - 1];
+
+        return SimplifyRoute(
+            new[]
+            {
+                start,
+                startBaseEscape,
+                startEscape,
+                new Num.Vector2(
+                    emergencyLeft,
+                    startEscape.Y),
+                new Num.Vector2(
+                    emergencyLeft,
+                    endEscape.Y),
+                endEscape,
+                endBaseEscape,
+                end
+            });
     }
 
     private static float RouteCongestionPenalty(
