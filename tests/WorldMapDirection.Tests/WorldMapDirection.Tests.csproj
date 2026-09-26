@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/DevUI/DevTool/RWImGui/Pages/World/WorldMap/WorldMapDirectionMarkerGeometry.cs"
+             Link="Production/WorldMapDirectionMarkerGeometry.cs" />
+  </ItemGroup>
+</Project>
