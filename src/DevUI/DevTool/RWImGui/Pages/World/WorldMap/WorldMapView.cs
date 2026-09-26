@@ -926,9 +926,9 @@ internal static class WorldMapView
                 : ConnectionColor(connection.Direction);
 
         float coreThickness =
-            selected ? 5.8f : 4.8f;
+            selected ? 4.2f : 3.5f;
         float isolationThickness =
-            selected ? 15.5f : 12.5f;
+            selected ? 9.0f : 7.5f;
 
         DrawConnectionPathStroke(
             draw,
@@ -1041,19 +1041,19 @@ internal static class WorldMapView
                     ? focusCoreThickness
                     : overConnection.Direction ==
                       WorldConnectionDirection.Bidirectional
-                        ? 3.4f
-                        : 3.2f;
+                        ? 2.5f
+                        : 2.35f;
 
             float bridgeShadowThickness =
                 focusedIsOver
                     ? focusIsolationThickness
-                    : bridgeCoreThickness + 4.8f;
+                    : bridgeCoreThickness + 3.4f;
 
             float radius =
-                (mark.Dense ? 5.7f : 7f) *
+                (mark.Dense ? 5.2f : 6.4f) *
                 zoom;
             float rise =
-                (mark.Dense ? 4.2f : 5.5f) *
+                (mark.Dense ? 3.7f : 4.8f) *
                 zoom;
 
             radius =
