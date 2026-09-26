@@ -78,7 +78,7 @@ internal static class WorldMapRouteCrossingResolver
     private const float CellSize = 96f;
     private const float AxisEpsilon = 0.01f;
     private const float BridgeShoulder = 13f;
-    private const float RouteEndpointClearance = 30f;
+    private const float RouteEndpointClearance = 20f;
 
     private const int DenseCellPairThreshold = 96;
     private const int MaxUniquePairChecksPerCell = 4096;
@@ -106,11 +106,14 @@ internal static class WorldMapRouteCrossingResolver
                 continue;
 
             Num.Vector2[] points = route?.Points;
-            if (points == null || points.Length < 6)
+            if (points == null || points.Length < 4)
                 continue;
 
-            int firstEligible = 2;
-            int lastEligible = points.Length - 4;
+            // First/last segments are the terminal stubs; every middle segment is fair crossing
+            // territory. The previous two-segment exclusion made compact routes visually intersect
+            // without a bridge/gap marker and therefore read as topology junctions.
+            int firstEligible = 1;
+            int lastEligible = points.Length - 3;
             if (lastEligible < firstEligible)
                 continue;
 
