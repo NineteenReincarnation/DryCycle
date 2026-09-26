@@ -400,11 +400,12 @@ internal static class WorldMapJunctionWeavePlanner
         int segmentIndex,
         int segmentCount)
     {
-        // Match Phase 2/4's terminal protection: two segments beside each endpoint stay entirely
-        // under Phase 1 fan-out ownership.
-        return segmentIndex >= 2 &&
+        // Phase 1 now owns exactly the physical socket stub at each end. Keeping a second
+        // protected segment prevented short routes from carrying their lane cleanly away from a
+        // bundle and made several independent links visually collapse at the same junction.
+        return segmentIndex >= 1 &&
                segmentIndex <=
-               segmentCount - 3;
+               segmentCount - 2;
     }
 
     private static Num.Vector2 CardinalDirection(
