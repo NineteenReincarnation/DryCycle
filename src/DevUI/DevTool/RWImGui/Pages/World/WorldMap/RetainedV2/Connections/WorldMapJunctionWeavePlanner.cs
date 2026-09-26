@@ -217,23 +217,31 @@ internal static class WorldMapJunctionWeavePlanner
         bool[] assigned,
         int segmentCount)
     {
-        for (int i = 0; i < segmentCount; i++)
+        if (offsets == null ||
+            assigned == null ||
+            segmentCount <= 1)
+            return false;
+
+        // Any visible offset discontinuity needs explicit junction geometry, including the boundary
+        // between the protected terminal stub and the first corridor lane. The previous test only
+        // considered unassigned interior segments, so a lane could begin immediately after the
+        // socket with BuildLanePath averaging the two offsets into a diagonal terminal leader.
+        for (int i = 0;
+             i < segmentCount - 1;
+             i++)
         {
-            if (assigned[i] ||
-                !IsWeaveEligible(
-                    i,
-                    segmentCount))
-                continue;
+            float left =
+                assigned[i]
+                    ? offsets[i]
+                    : 0f;
+            float right =
+                assigned[i + 1]
+                    ? offsets[i + 1]
+                    : 0f;
 
-            if (i > 0 &&
-                assigned[i - 1] &&
-                Math.Abs(offsets[i - 1]) >
-                OffsetEpsilon)
-                return true;
-
-            if (i + 1 < segmentCount &&
-                assigned[i + 1] &&
-                Math.Abs(offsets[i + 1]) >
+            if (Math.Abs(
+                    left -
+                    right) >
                 OffsetEpsilon)
                 return true;
         }
