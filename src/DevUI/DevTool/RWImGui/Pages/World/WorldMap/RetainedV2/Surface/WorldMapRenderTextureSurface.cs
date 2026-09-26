@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using BepInEx.Logging;
 using ImGuiNET;
 using UnityEngine;
@@ -61,6 +62,9 @@ internal sealed class WorldMapRenderTextureSurface
     private bool releaseRetiredRequested;
     private bool initialized;
     private int presentReaders;
+    private long renderPerfTotalTicks;
+    private long renderPerfPeakTicks;
+    private int renderPerfCount;
 
     private string error = string.Empty;
     private ManualLogSource log;
@@ -99,6 +103,14 @@ internal sealed class WorldMapRenderTextureSurface
                 return string.IsNullOrEmpty(error) ? bridge.Error : error;
         }
     }
+
+    internal int RenderCount => renderPerfCount;
+    internal double AverageRenderMilliseconds =>
+        renderPerfCount <= 0
+            ? 0d
+            : renderPerfTotalTicks * 1000d / Stopwatch.Frequency / renderPerfCount;
+    internal double PeakRenderMilliseconds =>
+        renderPerfPeakTicks * 1000d / Stopwatch.Frequency;
 
     internal Camera Camera => camera;
 
@@ -227,6 +239,7 @@ internal sealed class WorldMapRenderTextureSurface
         if (target == null)
             return false;
 
+        long renderPerfStarted = Stopwatch.GetTimestamp();
         try
         {
             ConfigureCamera(renderTransform, target);
@@ -299,6 +312,11 @@ internal sealed class WorldMapRenderTextureSurface
         }
         finally
         {
+            long elapsed = Math.Max(0L, Stopwatch.GetTimestamp() - renderPerfStarted);
+            renderPerfTotalTicks += elapsed;
+            renderPerfPeakTicks = Math.Max(renderPerfPeakTicks, elapsed);
+            renderPerfCount++;
+
             camera.targetTexture = null;
             if (ownsCandidate)
                 ReleaseTarget(target);
@@ -458,6 +476,9 @@ internal sealed class WorldMapRenderTextureSurface
             renderInvalidated = true;
             rollbackRequested = false;
             releaseRetiredRequested = false;
+            renderPerfTotalTicks = 0L;
+            renderPerfPeakTicks = 0L;
+            renderPerfCount = 0;
 
             camera = null;
             cameraObject = null;
