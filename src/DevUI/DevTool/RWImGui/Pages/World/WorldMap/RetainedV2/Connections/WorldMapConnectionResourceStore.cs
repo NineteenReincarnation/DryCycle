@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using DryCycle.DevUI.DevTool.Map;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
@@ -61,6 +62,17 @@ internal sealed class WorldMapConnectionResourceStore
     private long crossingRevision;
     private long revision;
 
+    private long routeBuildPerfTotalTicks;
+    private long routeBuildPerfPeakTicks;
+    private int routeBuildPerfBatches;
+    private int routeBuildPerfRoutes;
+    private long corridorPerfTotalTicks;
+    private long corridorPerfPeakTicks;
+    private int corridorPerfCount;
+    private long crossingPerfTotalTicks;
+    private long crossingPerfPeakTicks;
+    private int crossingPerfCount;
+
     internal IReadOnlyDictionary<string, ConnectionRouteResource> Routes => routes;
     internal IReadOnlyList<WorldMapCrossingMark> Crossings => crossings;
     internal long CrossingRevision => crossingRevision;
@@ -70,6 +82,27 @@ internal sealed class WorldMapConnectionResourceStore
     internal int Count => routes.Count;
     internal int PendingCount => queue.Count;
     internal long Revision => revision;
+    internal int RouteBuildCount => routeBuildPerfRoutes;
+    internal double RouteBuildAverageMilliseconds =>
+        routeBuildPerfBatches <= 0
+            ? 0d
+            : routeBuildPerfTotalTicks * 1000d / Stopwatch.Frequency / routeBuildPerfBatches;
+    internal double RouteBuildPeakMilliseconds =>
+        routeBuildPerfPeakTicks * 1000d / Stopwatch.Frequency;
+    internal int CorridorLayoutCount => corridorPerfCount;
+    internal double CorridorLayoutAverageMilliseconds =>
+        corridorPerfCount <= 0
+            ? 0d
+            : corridorPerfTotalTicks * 1000d / Stopwatch.Frequency / corridorPerfCount;
+    internal double CorridorLayoutPeakMilliseconds =>
+        corridorPerfPeakTicks * 1000d / Stopwatch.Frequency;
+    internal int CrossingBuildCount => crossingPerfCount;
+    internal double CrossingBuildAverageMilliseconds =>
+        crossingPerfCount <= 0
+            ? 0d
+            : crossingPerfTotalTicks * 1000d / Stopwatch.Frequency / crossingPerfCount;
+    internal double CrossingBuildPeakMilliseconds =>
+        crossingPerfPeakTicks * 1000d / Stopwatch.Frequency;
 
 
     internal bool TryGet(string id, out ConnectionRouteResource route)
@@ -296,6 +329,7 @@ internal sealed class WorldMapConnectionResourceStore
                         right?.Id));
 
             BuildRouteOccupancySeeds();
+            long routeBuildStarted = Stopwatch.GetTimestamp();
             rebuilt =
                 WorldMapWorldSpaceRouter.Build(
                     scene,
@@ -306,6 +340,13 @@ internal sealed class WorldMapConnectionResourceStore
                     GetRoutingObstacleSnapshot(),
                     routeOccupancySeeds,
                     routeAvoidanceSeeds);
+            long routeBuildElapsed =
+                Math.Max(0L, Stopwatch.GetTimestamp() - routeBuildStarted);
+            routeBuildPerfTotalTicks += routeBuildElapsed;
+            routeBuildPerfPeakTicks =
+                Math.Max(routeBuildPerfPeakTicks, routeBuildElapsed);
+            routeBuildPerfBatches++;
+            routeBuildPerfRoutes += buildBatch.Count;
         }
 
         for (int i = 0; i < buildBatch.Count; i++)
@@ -330,9 +371,12 @@ internal sealed class WorldMapConnectionResourceStore
 
         if (routeSetChanged || corridorLayoutDirty)
         {
-            // Room dragging keeps only incident base-route rebuilds on the hot path. Global corridor
-            // reflow is deferred until the interaction cooldown expires, then converges once.
-            if (!WorldMapBackgroundBudget.RoomDragInteractionActive)
+            // Do not globally reflow every partial cold-start batch. Base routes already carry their
+            // pair/terminal lane identity, so the map stays readable while the queue drains. Run the
+            // expensive whole-route corridor allocation once after the current base-route queue has
+            // converged. Interactive edits normally drain their small queue in the same frame.
+            if (!WorldMapBackgroundBudget.RoomDragInteractionActive &&
+                queue.Count == 0)
                 ApplyCorridorLanes();
         }
     }
@@ -360,6 +404,16 @@ internal sealed class WorldMapConnectionResourceStore
         crossingBudgetLimited = false;
         crossingCandidateChecks = 0;
         crossingRevision = 0L;
+        routeBuildPerfTotalTicks = 0L;
+        routeBuildPerfPeakTicks = 0L;
+        routeBuildPerfBatches = 0;
+        routeBuildPerfRoutes = 0;
+        corridorPerfTotalTicks = 0L;
+        corridorPerfPeakTicks = 0L;
+        corridorPerfCount = 0;
+        crossingPerfTotalTicks = 0L;
+        crossingPerfPeakTicks = 0L;
+        crossingPerfCount = 0;
         WorldMapOrthogonalRouter.Clear();
         revision = 0L;
     }
@@ -457,6 +511,7 @@ internal sealed class WorldMapConnectionResourceStore
         if (!corridorLayoutDirty)
             return;
 
+        long perfStarted = Stopwatch.GetTimestamp();
         corridorLayoutDirty = false;
         ApplyEndpointDensityTiers();
 
@@ -466,6 +521,12 @@ internal sealed class WorldMapConnectionResourceStore
                 GetRoutingObstacleSnapshot(),
                 routeChanged,
                 ref revision);
+        long perfElapsed =
+            Math.Max(0L, Stopwatch.GetTimestamp() - perfStarted);
+        corridorPerfTotalTicks += perfElapsed;
+        corridorPerfPeakTicks =
+            Math.Max(corridorPerfPeakTicks, perfElapsed);
+        corridorPerfCount++;
 
         crossingLayoutDirty = true;
 
@@ -601,8 +662,15 @@ internal sealed class WorldMapConnectionResourceStore
         if (!crossingLayoutDirty)
             return;
 
+        long perfStarted = Stopwatch.GetTimestamp();
         WorldMapCrossingResolveResult resolved =
             WorldMapRouteCrossingResolver.Build(routes);
+        long perfElapsed =
+            Math.Max(0L, Stopwatch.GetTimestamp() - perfStarted);
+        crossingPerfTotalTicks += perfElapsed;
+        crossingPerfPeakTicks =
+            Math.Max(crossingPerfPeakTicks, perfElapsed);
+        crossingPerfCount++;
 
         crossings = resolved.Marks;
         crossingBudgetLimited =
