@@ -1208,15 +1208,6 @@ internal static class WorldMapOrthogonalRouter
                 long occupancyKey = GridKey((int)Math.Round(worldNeighbor.X / 18f), (int)Math.Round(worldNeighbor.Y / 18f));
                 if (occupancy.TryGetValue(occupancyKey, out Occupancy occupied))
                 {
-                    int occupancyCount =
-                        Math.Max(
-                            1,
-                            (int)occupied.Count);
-                    byte perpendicular =
-                        (byte)(
-                            occupied.DirectionMask &
-                            PerpendicularMask(direction));
-
                     step +=
                         OccupancyPenalty(
                             occupied,
