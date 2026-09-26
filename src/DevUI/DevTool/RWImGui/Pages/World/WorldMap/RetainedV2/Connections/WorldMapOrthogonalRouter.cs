@@ -203,6 +203,7 @@ internal static class WorldMapOrthogonalRouter
     private const int PreferredParallelCapacity = 8;
     private const float ParallelOverflowPenalty = 0.92f;
     private const float DirectRouteCongestionLimit = 28f;
+    private const int RerouteAvoidanceOccupancyWeight = 12;
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
@@ -224,7 +225,8 @@ internal static class WorldMapOrthogonalRouter
         IReadOnlyList<Request> requests,
         IReadOnlyList<Obstacle> sourceObstacles,
         bool sourceObstaclesAlreadyInflated = false,
-        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null)
+        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null,
+        IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null)
     {
         generation++;
         if (requests == null || requests.Count == 0)
@@ -260,9 +262,22 @@ internal static class WorldMapOrthogonalRouter
                 RegisterOccupancy(occupancySeedPaths[i], occupancy);
         }
 
+        if (avoidanceSeedPaths != null)
+        {
+            for (int i = 0; i < avoidanceSeedPaths.Count; i++)
+            {
+                RegisterOccupancy(
+                    avoidanceSeedPaths[i],
+                    occupancy,
+                    RerouteAvoidanceOccupancyWeight);
+            }
+        }
+
         bool hasSeedCongestion =
             occupancySeedPaths != null &&
-            occupancySeedPaths.Count > 0;
+            occupancySeedPaths.Count > 0 ||
+            avoidanceSeedPaths != null &&
+            avoidanceSeedPaths.Count > 0;
 
         Route[] result = new Route[requests.Count];
 
@@ -1520,12 +1535,18 @@ internal static class WorldMapOrthogonalRouter
 
     private static void RegisterOccupancy(
         Num.Vector2[] points,
-        Dictionary<long, Occupancy> occupancy)
+        Dictionary<long, Occupancy> occupancy,
+        int weight = 1)
     {
         if (points == null ||
             points.Length < 2 ||
             occupancy == null)
             return;
+
+        weight =
+            Math.Max(
+                1,
+                weight);
 
         int firstSegment =
             points.Length >= 4
@@ -1557,9 +1578,26 @@ internal static class WorldMapOrthogonalRouter
                 long key = GridKey(gx, gy);
                 byte mask = DirectionBit(direction);
                 if (occupancy.TryGetValue(key, out Occupancy current))
-                    occupancy[key] = new Occupancy((byte)(current.DirectionMask | mask), (byte)Math.Min(255, current.Count + 1));
+                {
+                    occupancy[key] =
+                        new Occupancy(
+                            (byte)(
+                                current.DirectionMask |
+                                mask),
+                            (byte)Math.Min(
+                                255,
+                                current.Count +
+                                weight));
+                }
                 else
-                    occupancy[key] = new Occupancy(mask, 1);
+                {
+                    occupancy[key] =
+                        new Occupancy(
+                            mask,
+                            (byte)Math.Min(
+                                255,
+                                weight));
+                }
             }
         }
     }
