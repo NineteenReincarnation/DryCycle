@@ -439,7 +439,12 @@ internal static class WorldMapOrthogonalRouter
                         endBaseEscape,
                         request.End));
 
-            if (RouteCongestionPenalty(
+            if (RouteClear(
+                    bridge,
+                    request.StartRoom,
+                    request.EndRoom,
+                    obstacles) &&
+                RouteCongestionPenalty(
                     bridge,
                     occupancy) <=
                 DirectRouteCongestionLimit)
