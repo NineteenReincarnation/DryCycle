@@ -255,6 +255,19 @@ internal static class Program
                             Math.Round(point.Y, 1))));
         }
 
+        Console.WriteLine(
+            "dense lanes: " +
+            string.Join(
+                " | ",
+                routes.Select(
+                    route =>
+                        string.Join(
+                            " -> ",
+                            route.Points.Select(
+                                point =>
+                                    "(" + point.X.ToString("F1") + "," +
+                                    point.Y.ToString("F1") + ")")))));
+
         Check(
             signatures.Count >= 3,
             "Four dense parallel connections must retain multiple distinct corridors.");
