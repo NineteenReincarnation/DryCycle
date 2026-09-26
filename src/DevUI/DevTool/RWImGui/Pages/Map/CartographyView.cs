@@ -565,10 +565,31 @@ internal static partial class CartographyView
         switch (shape.Kind)
         {
             case CartographyPrimitiveKind.Image: CartographyCanvasImages.Draw(draw, shape, a, b, color); break;
-            case CartographyPrimitiveKind.Fill: draw.AddRectFilled(a, b, color); break;
+            case CartographyPrimitiveKind.Fill:
+                if (shape.PixelPerfect)
+                {
+                    a = new Num.Vector2((float)Math.Round(a.X), (float)Math.Round(a.Y));
+                    b = new Num.Vector2((float)Math.Round(b.X), (float)Math.Round(b.Y));
+                }
+                draw.AddRectFilled(a, b, color);
+                break;
             case CartographyPrimitiveKind.Outline: draw.AddRect(a, b, color, 0, ImDrawFlags.None, stroke); break;
             case CartographyPrimitiveKind.Ellipse: draw.AddCircle((a + b) / 2, (b.X - a.X) / 2, color, 24, stroke); break;
             case CartographyPrimitiveKind.Line:
+                if (shape.PixelPerfect &&
+                    (Math.Abs(a.X - b.X) < 0.01f ||
+                     Math.Abs(a.Y - b.Y) < 0.01f))
+                {
+                    DrawPixelPerfectRouteLine(
+                        draw,
+                        shape,
+                        r,
+                        a,
+                        b,
+                        color);
+                    break;
+                }
+
                 if (!shape.Dashed) draw.AddLine(a, b, color, stroke);
                 else
                 {
@@ -587,6 +608,221 @@ internal static partial class CartographyView
                 string[] lines = shape.Text.Replace("\r", "").Replace("\t", "    ").Split('\n');
                 for (int i = 0; i < lines.Length; i++) draw.AddText(ImGui.GetFont(), shape.Size * zoom, a + new Num.Vector2(0, i * shape.Size * 1.4f * zoom), color, lines[i]);
                 break;
+        }
+    }
+
+    private static void DrawPixelPerfectRouteLine(
+        ImDrawListPtr draw,
+        CartographyPrimitive shape,
+        CartographyRect clippedRect,
+        Num.Vector2 a,
+        Num.Vector2 b,
+        uint color)
+    {
+        bool horizontal =
+            Math.Abs(
+                a.Y -
+                b.Y) < 0.01f;
+
+        float stroke =
+            Math.Max(
+                1f,
+                (float)Math.Round(
+                    shape.Stroke *
+                    zoom));
+        float half =
+            stroke *
+            0.5f;
+
+        Num.Vector2 start =
+            new(
+                (float)Math.Round(a.X),
+                (float)Math.Round(a.Y));
+        Num.Vector2 end =
+            new(
+                (float)Math.Round(b.X),
+                (float)Math.Round(b.Y));
+
+        if (!shape.Dashed)
+        {
+            if (horizontal)
+            {
+                float x0 =
+                    Math.Min(
+                        start.X,
+                        end.X);
+                float x1 =
+                    Math.Max(
+                        start.X,
+                        end.X);
+                float y =
+                    (float)Math.Round(
+                        (start.Y +
+                         end.Y) *
+                        0.5f);
+
+                draw.AddRectFilled(
+                    new Num.Vector2(
+                        x0,
+                        y - half),
+                    new Num.Vector2(
+                        x1,
+                        y + half),
+                    color);
+            }
+            else
+            {
+                float y0 =
+                    Math.Min(
+                        start.Y,
+                        end.Y);
+                float y1 =
+                    Math.Max(
+                        start.Y,
+                        end.Y);
+                float x =
+                    (float)Math.Round(
+                        (start.X +
+                         end.X) *
+                        0.5f);
+
+                draw.AddRectFilled(
+                    new Num.Vector2(
+                        x - half,
+                        y0),
+                    new Num.Vector2(
+                        x + half,
+                        y1),
+                    color);
+            }
+
+            return;
+        }
+
+        float distance =
+            horizontal
+                ? Math.Abs(
+                    end.X -
+                    start.X)
+                : Math.Abs(
+                    end.Y -
+                    start.Y);
+        if (distance < 0.1f)
+            return;
+
+        float dash =
+            Math.Max(
+                1f,
+                (float)Math.Round(
+                    shape.DashLength *
+                    zoom));
+        float gap =
+            Math.Max(
+                1f,
+                (float)Math.Round(
+                    shape.DashGap *
+                    zoom));
+        float clipped =
+            new Num.Vector2(
+                clippedRect.X -
+                shape.Rect.X,
+                clippedRect.Y -
+                shape.Rect.Y)
+            .Length();
+        float phase =
+            ((clipped +
+              shape.DashOffset) *
+             zoom) %
+            (dash + gap);
+
+        float sign =
+            horizontal
+                ? Math.Sign(
+                    end.X -
+                    start.X)
+                : Math.Sign(
+                    end.Y -
+                    start.Y);
+        if (Math.Abs(sign) < 0.5f)
+            sign = 1f;
+
+        for (float step = -phase;
+             step < distance;
+             step += dash + gap)
+        {
+            float from =
+                Math.Max(
+                    0f,
+                    step);
+            float to =
+                Math.Min(
+                    distance,
+                    step + dash);
+            if (to <= from)
+                continue;
+
+            if (horizontal)
+            {
+                float x0 =
+                    start.X +
+                    sign *
+                    from;
+                float x1 =
+                    start.X +
+                    sign *
+                    to;
+                float minX =
+                    Math.Min(
+                        x0,
+                        x1);
+                float maxX =
+                    Math.Max(
+                        x0,
+                        x1);
+                float y =
+                    (float)Math.Round(
+                        start.Y);
+
+                draw.AddRectFilled(
+                    new Num.Vector2(
+                        minX,
+                        y - half),
+                    new Num.Vector2(
+                        maxX,
+                        y + half),
+                    color);
+            }
+            else
+            {
+                float y0 =
+                    start.Y +
+                    sign *
+                    from;
+                float y1 =
+                    start.Y +
+                    sign *
+                    to;
+                float minY =
+                    Math.Min(
+                        y0,
+                        y1);
+                float maxY =
+                    Math.Max(
+                        y0,
+                        y1);
+                float x =
+                    (float)Math.Round(
+                        start.X);
+
+                draw.AddRectFilled(
+                    new Num.Vector2(
+                        x - half,
+                        minY),
+                    new Num.Vector2(
+                        x + half,
+                        maxY),
+                    color);
+            }
         }
     }
 
