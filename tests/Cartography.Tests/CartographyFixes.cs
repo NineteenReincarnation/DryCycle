@@ -9,6 +9,7 @@ internal static partial class Program
     private static void CartographyFixes()
     {
         var source=Source();var document=source.CreateDocument("fixes","SU");
+        Check(document.Transparent&&(document.Options.Canvas>>24)==0,"New cartography documents use a transparent composition and editor canvas by default.");
         var route=document.Items.First(i=>i.Kind==CartographyItemKind.Connection);
         var diagonal=CartographySceneBuilder.Route(document,source,route,document.Layer(route.LayerId));
         Check(diagonal.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Line).All(p=>p.GuideOnly),"Diagonal Cornifer connections are editor guides.");
@@ -36,8 +37,11 @@ internal static partial class Program
         Check(CartographyDrawing.SpriteName(old)=="my-mod-icon","Explicit mod icon choices remain intact.");
 
         // Compare the streaming encoder against one ordinary render across several strip boundaries.
-        document=Annotated();document.Transparent=true;document.ExportScale=1.25f;
+        document=Annotated();document.Transparent=false;document.ExportScale=1.25f;
         var scene=CartographySceneBuilder.Build(document,source);
+        CartographyExporter.Dimensions(document,scene,out int transparentWidth,out int transparentHeight);
+        using(var transparentProbe=CartographyExporter.RenderBitmap(document,scene,transparentWidth,transparentHeight,null))
+            Check((transparentProbe.GetPixel(0,0).ToArgb()>>24&255)==0,"Cartography bitmap export stays transparent even if a legacy document carries Transparent=false.");
         CartographyExporter.Dimensions(document,scene,out int width,out int height);
         string path=Path.Combine(output,"band-parity.png");
         CartographyExporter.Export(document,scene,path,CartographyExportFormat.Png,CartographyStorage.HashFile(path));
