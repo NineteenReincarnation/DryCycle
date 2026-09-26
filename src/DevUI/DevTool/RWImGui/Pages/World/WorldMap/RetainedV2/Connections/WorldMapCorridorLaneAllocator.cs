@@ -244,6 +244,9 @@ internal static class WorldMapCorridorLaneAllocator
                         // prefer the original orthogonal base route while the bundle gets its one
                         // reroute attempt; never display a fake diagonal shortcut as a fallback.
                         candidate = basePoints;
+                        if (densityTier < 1)
+                            densityTier = 1;
+
                         AddTouchedGroupRoutes(
                             lanePlan,
                             planSet,
