@@ -39,6 +39,12 @@ internal static partial class MapRoomGeometryPresentationHub
     private static long recoveryPerfPeakTicks;
     private static int recoveryPerfSamples;
     private static int recoveryPerfCompletedRooms;
+    private static long recoverySessionStartedTicks;
+    private static long recoverySessionCompletedTicks;
+    private static int recoverySessionInitialMissing;
+    private static int recoverySessionRemaining;
+    private static bool recoverySessionComplete;
+    private static int recoverySessionNextCompletionCheckFrame;
 
     internal static int SourceRecoveryBackoffCount => recoveryRetryFrame.Count;
     internal static int SourceRecoveryCompletedRooms => recoveryPerfCompletedRooms;
@@ -48,6 +54,28 @@ internal static partial class MapRoomGeometryPresentationHub
             : recoveryPerfTotalTicks * 1000d / Stopwatch.Frequency / recoveryPerfSamples;
     internal static double SourceRecoveryPeakMilliseconds =>
         recoveryPerfPeakTicks * 1000d / Stopwatch.Frequency;
+    internal static int SourceRecoverySessionInitialMissingRooms =>
+        recoverySessionInitialMissing;
+    internal static int SourceRecoverySessionRemainingRooms =>
+        recoverySessionRemaining;
+    internal static bool SourceRecoverySessionComplete =>
+        recoverySessionComplete;
+    internal static bool SourceRecoverySessionReadyAtEntry =>
+        recoverySessionStartedTicks > 0L &&
+        recoverySessionInitialMissing == 0;
+    internal static double SourceRecoverySessionElapsedMilliseconds
+    {
+        get
+        {
+            long started = recoverySessionStartedTicks;
+            if (started <= 0L) return 0d;
+            long ended =
+                recoverySessionCompletedTicks > 0L
+                    ? recoverySessionCompletedTicks
+                    : Stopwatch.GetTimestamp();
+            return Math.Max(0L, ended - started) * 1000d / Stopwatch.Frequency;
+        }
+    }
 
     internal static void RecoverMissingSources(EditorSession session)
     {
@@ -93,6 +121,7 @@ internal static partial class MapRoomGeometryPresentationHub
             for (int i = 0; i < page.map.roomReps.Length; i++)
                 if (page.map.roomReps[i]?.room != null) recoveryRoomIndices[page.map.roomReps[i].room.index] = i;
             sourceDimensionCursor = 0;
+            BeginSourceRecoverySession(page.map);
         }
 
         // Prime() owns cache structure creation. If plugin Update happens before Prime on the first
@@ -114,6 +143,12 @@ internal static partial class MapRoomGeometryPresentationHub
         recoveryPerfPeakTicks = 0L;
         recoveryPerfSamples = 0;
         recoveryPerfCompletedRooms = 0;
+        recoverySessionStartedTicks = 0L;
+        recoverySessionCompletedTicks = 0L;
+        recoverySessionInitialMissing = 0;
+        recoverySessionRemaining = 0;
+        recoverySessionComplete = false;
+        recoverySessionNextCompletionCheckFrame = 0;
         sourceDimensionCursor = 0;
         lastSourceRecoveryFrame = -1;
         sourceRecoveryMapActive = false;
@@ -360,7 +395,71 @@ internal static partial class MapRoomGeometryPresentationHub
                 recoveryPerfSamples++;
                 recoveryPerfCompletedRooms += completed;
             }
+
+            UpdateSourceRecoverySession(mapObject, roomCount, force: didWork || completed > 0);
         }
+    }
+
+    private static void BeginSourceRecoverySession(MapObject mapObject)
+    {
+        recoverySessionStartedTicks = Stopwatch.GetTimestamp();
+        recoverySessionCompletedTicks = 0L;
+        recoverySessionNextCompletionCheckFrame = 0;
+        recoverySessionInitialMissing = CountMissingMapTextures(mapObject);
+        recoverySessionRemaining = recoverySessionInitialMissing;
+        recoverySessionComplete = recoverySessionRemaining == 0;
+        if (recoverySessionComplete)
+            recoverySessionCompletedTicks = recoverySessionStartedTicks;
+    }
+
+    private static void UpdateSourceRecoverySession(
+        MapObject mapObject,
+        int roomCount,
+        bool force)
+    {
+        if (recoverySessionStartedTicks <= 0L || recoverySessionComplete)
+            return;
+        if (!force &&
+            Time.frameCount < recoverySessionNextCompletionCheckFrame)
+            return;
+
+        recoverySessionNextCompletionCheckFrame =
+            Time.frameCount + 15;
+        recoverySessionRemaining =
+            CountMissingMapTextures(mapObject, roomCount);
+
+        if (recoverySessionRemaining != 0 ||
+            mapObject?.roomPrep != null)
+            return;
+
+        recoverySessionComplete = true;
+        recoverySessionCompletedTicks = Stopwatch.GetTimestamp();
+    }
+
+    private static int CountMissingMapTextures(
+        MapObject mapObject,
+        int explicitCount = -1)
+    {
+        if (mapObject?.roomReps == null)
+            return 0;
+
+        int count =
+            explicitCount >= 0
+                ? Math.Min(explicitCount, mapObject.roomReps.Length)
+                : mapObject.world != null
+                    ? Math.Min(mapObject.world.NumberOfRooms, mapObject.roomReps.Length)
+                    : mapObject.roomReps.Length;
+        int missing = 0;
+        for (int i = 0; i < count; i++)
+        {
+            MapObject.RoomRepresentation roomRep = mapObject.roomReps[i];
+            if (roomRep?.room == null)
+                continue;
+            if (roomRep.texture == null &&
+                roomRep.mapTex == null)
+                missing++;
+        }
+        return missing;
     }
 
     private static bool SelectNextMissingRoom(MapObject mapObject, int count)
