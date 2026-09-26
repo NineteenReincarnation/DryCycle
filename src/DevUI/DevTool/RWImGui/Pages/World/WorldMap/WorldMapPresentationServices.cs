@@ -351,8 +351,10 @@ internal static class WorldMapBackgroundBudget
 
     private static volatile bool enabled;
     private static int lastGeometrySweepFrame = -1000;
+    private static int lastSourceRecoveryFrame = -1000;
     private static int lastShortcutSweepFrame = -1000;
     private static string geometryRegion = string.Empty;
+    private static string sourceRecoveryRegion = string.Empty;
     private static string shortcutRegion = string.Empty;
     private static long viewportUntilTimestamp;
     private static long roomDragUntilTimestamp;
@@ -417,8 +419,41 @@ internal static class WorldMapBackgroundBudget
         return Math.Max(0, idleBudget);
     }
 
-    internal static bool AllowSourceRecovery() =>
-        !enabled || !InteractionActive;
+    internal static bool AllowSourceRecovery(
+        EditorSession session)
+    {
+        if (!enabled)
+            return true;
+        if (InteractionActive)
+            return false;
+
+        string region =
+            session?.World?.name ?? string.Empty;
+        if (!string.Equals(
+                region,
+                sourceRecoveryRegion,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            sourceRecoveryRegion = region;
+            lastSourceRecoveryFrame = -1000;
+        }
+
+        bool canvasVisible =
+            WorldMapRetainedV2Runtime.CanvasVisible;
+        int interval =
+            WorldMapBackgroundSchedulingPolicy.SourceRecoveryIntervalFrames(
+                canvasVisible,
+                recoveryIncomplete:
+                    !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete,
+                recoveryAgeMilliseconds:
+                    MapRoomGeometryPresentationHub.SourceRecoverySessionElapsedMilliseconds);
+
+        if (Time.frameCount - lastSourceRecoveryFrame < interval)
+            return false;
+
+        lastSourceRecoveryFrame = Time.frameCount;
+        return true;
+    }
 
     internal static bool ShouldProcessGeometry(global::World world)
     {
@@ -499,8 +534,10 @@ internal static class WorldMapBackgroundBudget
     private static void ResetState()
     {
         lastGeometrySweepFrame = -1000;
+        lastSourceRecoveryFrame = -1000;
         lastShortcutSweepFrame = -1000;
         geometryRegion = string.Empty;
+        sourceRecoveryRegion = string.Empty;
         shortcutRegion = string.Empty;
         Interlocked.Exchange(ref viewportUntilTimestamp, 0L);
         Interlocked.Exchange(ref roomDragUntilTimestamp, 0L);
