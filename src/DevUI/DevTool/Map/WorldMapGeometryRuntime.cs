@@ -1041,11 +1041,26 @@ internal static partial class MapRoomGeometryPresentationHub
         RoomSettings settings,
         float roomWidthTiles,
         out List<EditorMapPolylineSnapshot> curves,
+        out List<EditorMapRectSnapshot> fills) =>
+        BuildCurveGeometry(
+            settings?.placedObjects,
+            roomWidthTiles,
+            out curves,
+            out fills);
+
+    /// <summary>
+    /// Shared authored-terrain geometry compiler used by World Map and Cartography. It deliberately
+    /// returns semantic geometry only: callers decide presentation colors. That keeps curved terrain
+    /// visually identical to ordinary Solid/Structure terrain instead of inventing a map-only style.
+    /// </summary>
+    internal static void BuildCurveGeometry(
+        IReadOnlyList<PlacedObject> objects,
+        float roomWidthTiles,
+        out List<EditorMapPolylineSnapshot> curves,
         out List<EditorMapRectSnapshot> fills)
     {
         curves = new List<EditorMapPolylineSnapshot>();
         fills = new List<EditorMapRectSnapshot>();
-        List<PlacedObject> objects = settings?.placedObjects;
         if (objects == null) return;
 
         AddRoomTerrainCurve(objects, roomWidthTiles, curves, fills);
@@ -1130,7 +1145,7 @@ internal static partial class MapRoomGeometryPresentationHub
     }
 
     private static void AddRoomTerrainCurve(
-        List<PlacedObject> objects,
+        IReadOnlyList<PlacedObject> objects,
         float roomWidthTiles,
         List<EditorMapPolylineSnapshot> curves,
         List<EditorMapRectSnapshot> fills)
