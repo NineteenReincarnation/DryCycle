@@ -107,6 +107,7 @@ internal static class WorldMapCorridorLaneAllocator
     }
 
     private const float CoordinateBucketSize = 4f;
+    private const float CoordinateMergeTolerance = 4f;
     private const float MinimumSharedRun = 16f;
     private const float PreferredLaneSpacing = 10f;
     private const float MinimumLaneSpacing = 5.5f;
@@ -400,31 +401,123 @@ internal static class WorldMapCorridorLaneAllocator
     private static List<CorridorComponent> BuildComponents(
         Dictionary<BucketKey, List<SegmentRef>> buckets)
     {
-        List<CorridorComponent> components = new();
-        if (buckets == null || buckets.Count == 0)
+        List<CorridorComponent> components =
+            new();
+
+        if (buckets == null ||
+            buckets.Count == 0)
             return components;
 
-        List<BucketKey> keys = new(buckets.Keys);
-        keys.Sort(
-            (a, b) =>
-            {
-                int axis = a.Vertical.CompareTo(b.Vertical);
-                if (axis != 0) return axis;
-                return a.Coordinate.CompareTo(b.Coordinate);
-            });
+        // Quantized dictionary buckets are useful for ingestion, but they must not define visual
+        // topology. Two almost-coincident lines can fall on opposite sides of a rounding boundary
+        // (for example 1.9 and 2.1 with a 4px bucket) and previously escaped lane separation even
+        // though they rendered on top of each other. Flatten once, sort by actual coordinate, then
+        // build bounded coordinate bands from geometry rather than hash-bucket identity.
+        List<SegmentRef> segments =
+            new();
 
-        for (int k = 0; k < keys.Count; k++)
+        foreach (List<SegmentRef> bucket
+                 in buckets.Values)
         {
-            List<SegmentRef> bucket =
-                buckets[keys[k]];
-            BuildBucketComponents(
-                bucket,
-                components);
+            if (bucket == null)
+                continue;
+
+            for (int i = 0; i < bucket.Count; i++)
+            {
+                SegmentRef segment =
+                    bucket[i];
+
+                if (segment != null)
+                    segments.Add(segment);
+            }
         }
 
-        components.Sort(CompareComponents);
-        for (int i = 0; i < components.Count; i++)
-            components[i].Id = i;
+        if (segments.Count < 2)
+            return components;
+
+        segments.Sort(
+            (a, b) =>
+            {
+                int axis =
+                    a.Vertical.CompareTo(
+                        b.Vertical);
+                if (axis != 0)
+                    return axis;
+
+                int coordinate =
+                    a.Coordinate.CompareTo(
+                        b.Coordinate);
+                if (coordinate != 0)
+                    return coordinate;
+
+                return CompareSegments(
+                    a,
+                    b);
+            });
+
+        int cursor = 0;
+        while (cursor < segments.Count)
+        {
+            SegmentRef first =
+                segments[cursor];
+            bool vertical =
+                first.Vertical;
+            float bandStart =
+                first.Coordinate;
+
+            int endCursor =
+                cursor + 1;
+
+            while (endCursor < segments.Count)
+            {
+                SegmentRef next =
+                    segments[endCursor];
+
+                if (next.Vertical != vertical ||
+                    next.Coordinate -
+                    bandStart >
+                    CoordinateMergeTolerance)
+                    break;
+
+                endCursor++;
+            }
+
+            int bandCount =
+                endCursor -
+                cursor;
+
+            if (bandCount >= 2)
+            {
+                List<SegmentRef> band =
+                    new(bandCount);
+
+                for (int i = cursor;
+                     i < endCursor;
+                     i++)
+                {
+                    band.Add(
+                        segments[i]);
+                }
+
+                BuildBucketComponents(
+                    band,
+                    components);
+            }
+
+            cursor =
+                endCursor;
+        }
+
+        components.Sort(
+            CompareComponents);
+
+        for (int i = 0;
+             i < components.Count;
+             i++)
+        {
+            components[i].Id =
+                i;
+        }
 
         return components;
     }
