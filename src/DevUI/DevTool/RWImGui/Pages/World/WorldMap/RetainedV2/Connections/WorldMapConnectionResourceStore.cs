@@ -107,6 +107,8 @@ internal sealed class WorldMapConnectionResourceStore
 
         foreach (string id in dirty.RemovedConnections)
         {
+            corridorRerouteAttempted.Remove(id);
+
             if (routes.Remove(id))
             {
                 corridorLayoutDirty = true;
@@ -146,7 +148,10 @@ internal sealed class WorldMapConnectionResourceStore
             corridorRerouteAttempted.Clear();
 
         foreach (string id in dirty.Connections)
+        {
+            corridorRerouteAttempted.Remove(id);
             Enqueue(id);
+        }
 
         InvalidateRooms(
             scene,
