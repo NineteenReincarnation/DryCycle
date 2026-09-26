@@ -40,7 +40,17 @@ internal static unsafe class DevToolFontAtlasIntegration
             MethodInfo getHandle = typeof(ImGUIBackendInterface).GetMethod("GetCImGUIAIOLibHandle", BindingFlags.Public | BindingFlags.Static);
             if (getHandle == null) throw new MissingMethodException(typeof(ImGUIBackendInterface).FullName, "GetCImGUIAIOLibHandle");
             hook = new Hook(getHandle, (Func<Func<IntPtr>, IntPtr>)GetBackendHandle);
-            log?.LogInfo("DevTool font integration installed; waiting for RWImGUI's backend exports.");
+
+            // Normal startup reaches GetCImGUIAIOLibHandle later from RainWorld.Start. Some loader
+            // orders resolve the export earlier, though; if the pointer is already available, arm
+            // the pre-frame callback immediately instead of waiting for a method call that will
+            // never happen again.
+            AttachBeforeBackendFrame();
+
+            log?.LogInfo(
+                originalNewFrame != null
+                    ? "DevTool font integration installed and attached to RWImGUI's backend pre-frame boundary."
+                    : "DevTool font integration installed; waiting for RWImGUI's backend exports.");
         }
         catch (Exception error)
         {
