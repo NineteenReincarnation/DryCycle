@@ -1221,17 +1221,60 @@ internal static class WorldMapView
                 {
                     string label = node.NodeIndex.ToString();
                     Num.Vector2 labelSize = ImGui.CalcTextSize(label);
-                    bool left = point.X <= (min.X + max.X) * 0.5f;
-                    float offset = emphasized ? 15f : 13f;
-                    float x = left ? point.X - labelSize.X - offset : point.X + offset;
-                    Num.Vector2 labelPos = new(x, point.Y - labelSize.Y * 0.5f);
-                    Num.Vector2 pad = new(4f, 2f);
+
+                    // Keep the label out of the terminal stub. The previous left/right placement put
+                    // the number box directly on top of the connection line, so dense exits looked
+                    // like labels were part of the topology. Place labels tangentially to the room
+                    // edge instead; the route owns the outward normal.
+                    Num.Vector2 labelPos =
+                        PortLabelPosition(
+                            point,
+                            min,
+                            max,
+                            labelSize,
+                            node.NodeIndex,
+                            emphasized);
+                    Num.Vector2 pad = new(3f, 1.5f);
                     draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 3f);
                     draw.AddRect(labelPos - pad, labelPos + labelSize + pad, ShortcutGold(false), 3f, ImDrawFlags.None, 1f);
                     draw.AddText(labelPos, ShortcutGold(true), label);
                 }
             }
         }
+    }
+
+    private static Num.Vector2 PortLabelPosition(
+        Num.Vector2 point,
+        Num.Vector2 roomMin,
+        Num.Vector2 roomMax,
+        Num.Vector2 labelSize,
+        int nodeIndex,
+        bool emphasized)
+    {
+        float left = Math.Abs(point.X - roomMin.X);
+        float right = Math.Abs(roomMax.X - point.X);
+        float top = Math.Abs(point.Y - roomMin.Y);
+        float bottom = Math.Abs(roomMax.Y - point.Y);
+        float nearest = Math.Min(Math.Min(left, right), Math.Min(top, bottom));
+        float gap = emphasized ? 9f : 7f;
+        bool alternate = (nodeIndex & 1) != 0;
+
+        if (nearest == left || nearest == right)
+        {
+            float x = point.X - labelSize.X * 0.5f;
+            float y = alternate
+                ? point.Y + gap
+                : point.Y - labelSize.Y - gap;
+            return new Num.Vector2(x, y);
+        }
+
+        float horizontal =
+            alternate
+                ? point.X + gap
+                : point.X - labelSize.X - gap;
+        return new Num.Vector2(
+            horizontal,
+            point.Y - labelSize.Y * 0.5f);
     }
 
     private static void DrawCreatureShortcuts(
@@ -1452,7 +1495,7 @@ internal static class WorldMapView
         Num.Vector2 target = validTarget ? hoveredPort.Position : mouse;
         uint color = ConnectionColor(linkDirection);
         uint shadow = ImGui.GetColorU32(ImGuiCol.WindowBg);
-        DrawConnectionStroke(draw, source, target, shadow, color, 9f, 3.8f, linkDirection, false);
+        DrawConnectionStroke(draw, source, target, shadow, color, 6.5f, 2.5f, linkDirection, false);
         DrawShortcutSocket(draw, source, shadow, ShortcutGold(true), true, true);
         if (validTarget)
             DrawShortcutSocket(draw, target, shadow, ShortcutGold(true), false, true);
