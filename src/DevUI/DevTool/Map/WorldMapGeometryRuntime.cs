@@ -124,6 +124,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private const int RasterLoadsPerFrame = 2;
     private const int RasterBuildCommitsPerFrame = 4;
     private const double RasterMainThreadBudgetMilliseconds = 1.50d;
+    private const double GeometryMainThreadBudgetMilliseconds = 2.25d;
     private const int MaxRasterBuildWorkers = 2;
     private const int UnloadedCurveLoadsPerFrame = 3;
     private const int BackgroundRoomsPerFrame = 24;
@@ -227,6 +228,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private static int rasterLoadsRemaining;
     private static int curveLoadsRemaining;
     private static long rasterFrameDeadlineTicks;
+    private static long geometryFrameDeadlineTicks;
     private static long rasterReadbackTotalTicks;
     private static long rasterReadbackPeakTicks;
     private static int rasterReadbackCount;
@@ -283,10 +285,16 @@ internal static partial class MapRoomGeometryPresentationHub
         if (structureDue)
             SynchronizeStructure(page);
 
+        long frameBudgetStarted =
+            Stopwatch.GetTimestamp();
         rasterFrameDeadlineTicks =
-            Stopwatch.GetTimestamp() +
+            frameBudgetStarted +
             (long)(Stopwatch.Frequency *
                    RasterMainThreadBudgetMilliseconds / 1000d);
+        geometryFrameDeadlineTicks =
+            frameBudgetStarted +
+            (long)(Stopwatch.Frequency *
+                   GeometryMainThreadBudgetMilliseconds / 1000d);
         DrainRasterBuildResults(
             RasterBuildCommitsPerFrame,
             rasterFrameDeadlineTicks);
@@ -343,6 +351,7 @@ internal static partial class MapRoomGeometryPresentationHub
         rasterLoadsRemaining = 0;
         curveLoadsRemaining = 0;
         rasterFrameDeadlineTicks = 0L;
+        geometryFrameDeadlineTicks = 0L;
         rasterReadbackTotalTicks = 0L;
         rasterReadbackPeakTicks = 0L;
         rasterReadbackCount = 0;
@@ -438,7 +447,12 @@ internal static partial class MapRoomGeometryPresentationHub
         if (rasterBudgetAvailable &&
             RefreshRaster(entry, entry.RoomRep, allowDecode: true, forcePoll: true))
             rasterLoadsRemaining = Math.Max(0, rasterLoadsRemaining - 1);
-        if (RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
+        bool curveBudgetAvailable =
+            curveLoadsRemaining > 0 &&
+            (allowOverBudget ||
+             Stopwatch.GetTimestamp() < geometryFrameDeadlineTicks);
+        if (curveBudgetAvailable &&
+            RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
             curveLoadsRemaining = Math.Max(0, curveLoadsRemaining - 1);
         bool fallbackBudgetAvailable =
             allowOverBudget ||
@@ -472,6 +486,10 @@ internal static partial class MapRoomGeometryPresentationHub
                 RefreshDimensions(priority, priority.RoomRep);
                 RefreshNodes(priority, priority.RoomRep, force: false);
                 if (RefreshRaster(priority, priority.RoomRep, allowDecode: true, forcePoll: false)) rasterLoadsRemaining--;
+                if (curveLoadsRemaining > 0 &&
+                    Stopwatch.GetTimestamp() < geometryFrameDeadlineTicks &&
+                    RefreshCurves(priority, world, priority.Room, allowDiskLoad: true, forceLivePoll: false))
+                    curveLoadsRemaining--;
                 Publish(
                     priority,
                     allowRasterReadback:
@@ -497,6 +515,7 @@ internal static partial class MapRoomGeometryPresentationHub
             }
 
             if (curveLoadsRemaining > 0 &&
+                Stopwatch.GetTimestamp() < geometryFrameDeadlineTicks &&
                 RefreshCurves(entry, world, entry.Room, allowDiskLoad: true, forceLivePoll: false))
                 curveLoadsRemaining--;
 
