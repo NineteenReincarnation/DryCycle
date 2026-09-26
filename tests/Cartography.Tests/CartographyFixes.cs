@@ -14,7 +14,14 @@ internal static partial class Program
         Check(diagonal.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Line).All(p=>p.GuideOnly),"Diagonal Cornifer connections are editor guides.");
         var aligned=CartographyEditing.Apply(document,source,new CartographyCommand{Kind=CartographyCommandKind.AlignPorts,Ids=new[]{route.Id},Integer=0});
         var pipe=CartographySceneBuilder.Route(aligned,source,aligned.Items.Find(i=>i.Id==route.Id),aligned.Layer(route.LayerId));
-        Check(pipe.Primitives.Any(p=>p.Dashed&&!p.GuideOnly&&p.DashLength==3&&p.DashGap==3),"Exactly aligned exits produce the alternating Cornifer pipe pattern, including old Dashed=true documents.");
+        Check(pipe.Primitives.Any(p=>p.Dashed&&!p.GuideOnly&&p.DashLength==3&&p.DashGap==3&&p.PixelPerfect),"Exactly aligned exits produce the crisp alternating Cornifer pipe pattern, including old Dashed=true documents.");
+        var horizontal=route.Clone();horizontal.Appearance.Route=CartographyRouteMode.HorizontalFirst;
+        var horizontalNode=CartographySceneBuilder.Route(document,source,horizontal,document.Layer(horizontal.LayerId));
+        Check(horizontalNode.Points.Length==3&&Math.Abs(horizontalNode.Points[1].X-horizontalNode.ToX)<.0001f&&Math.Abs(horizontalNode.Points[1].Y-horizontalNode.FromY)<.0001f,"Horizontal-first cartography routes use one Cornifer-style right-angle control point.");
+        var vertical=route.Clone();vertical.Appearance.Route=CartographyRouteMode.VerticalFirst;
+        var verticalNode=CartographySceneBuilder.Route(document,source,vertical,document.Layer(vertical.LayerId));
+        Check(verticalNode.Points.Length==3&&Math.Abs(verticalNode.Points[1].X-verticalNode.FromX)<.0001f&&Math.Abs(verticalNode.Points[1].Y-verticalNode.ToY)<.0001f,"Vertical-first cartography routes use one Cornifer-style right-angle control point.");
+        Check(diagonal.Primitives.Where(p=>p.Kind==CartographyPrimitiveKind.Line).Any(p=>p.GuideOnly&&Math.Abs(p.DashLength-11)<.0001f&&Math.Abs(p.DashGap-5)<.0001f),"Diagonal guides use Cornifer's black 11/5 dash silhouette.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
 
