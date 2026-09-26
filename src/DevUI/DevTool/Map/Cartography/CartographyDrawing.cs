@@ -66,6 +66,18 @@ internal static class CartographyDrawing
             : raster;
     }
 
+    private readonly struct CurveFillInterval
+    {
+        internal readonly float MinY;
+        internal readonly float MaxY;
+
+        internal CurveFillInterval(float minY, float maxY)
+        {
+            MinY = minY;
+            MaxY = maxY;
+        }
+    }
+
     private static CartographyRaster PaintCurvedTerrainBands(
         CartographyDocument document,
         CartographyAppearance appearance,
@@ -89,6 +101,10 @@ internal static class CartographyDrawing
 
         uint[] pixels = (uint[])source.Pixels.Clone();
 
+        // CurvedTerrainFills are topology hints only. They tell us which side of the authored
+        // surface is solid and how far that solid body extends; they are never drawn as rectangles.
+        // The visible body is rebuilt into a mask from the real curve, then composited using the
+        // same material colors/rules as ordinary room terrain.
         for (int curveIndex = 0; curveIndex < curves.Length; curveIndex++)
         {
             EditorMapPolylineSnapshot curve = curves[curveIndex];
@@ -99,47 +115,48 @@ internal static class CartographyDrawing
                 continue;
 
             EditorMapGeometryKind fillKind = CurveFillKind(curve.Kind);
-            uint baseColor = TerrainColor(fillKind, background, wall);
+            bool[] mask = new bool[source.Width * source.Height];
 
             for (int pointIndex = 1; pointIndex < points.Length; pointIndex++)
             {
-                PaintCurveBandSegment(
-                    pixels,
+                AddCurveSegmentToMask(
+                    mask,
                     source.Width,
                     source.Height,
                     room,
-                    kinds,
-                    water,
-                    appearance,
-                    document,
                     fills,
-                    points[pointIndex - 1],
-                    points[pointIndex],
                     fillKind,
-                    baseColor,
-                    wall,
-                    waterColor);
+                    points[pointIndex - 1],
+                    points[pointIndex]);
             }
 
             if (curve.Closed && points.Length > 2)
             {
-                PaintCurveBandSegment(
-                    pixels,
+                AddCurveSegmentToMask(
+                    mask,
                     source.Width,
                     source.Height,
                     room,
-                    kinds,
-                    water,
-                    appearance,
-                    document,
                     fills,
-                    points[points.Length - 1],
-                    points[0],
                     fillKind,
-                    baseColor,
-                    wall,
-                    waterColor);
+                    points[points.Length - 1],
+                    points[0]);
             }
+
+            PaintCurvedTerrainMask(
+                pixels,
+                mask,
+                source.Width,
+                source.Height,
+                room,
+                kinds,
+                water,
+                appearance,
+                document,
+                fillKind,
+                TerrainColor(fillKind, background, wall),
+                wall,
+                waterColor);
         }
 
         return new CartographyRaster(source.Width, source.Height, pixels);
@@ -165,52 +182,47 @@ internal static class CartographyDrawing
             _ => background
         };
 
-    private static void PaintCurveBandSegment(
-        uint[] pixels,
+    private static void AddCurveSegmentToMask(
+        bool[] mask,
         int rasterWidth,
         int rasterHeight,
         CartographyRoomSource room,
-        byte[] kinds,
-        bool[] water,
-        CartographyAppearance appearance,
-        CartographyDocument document,
         EditorMapRectSnapshot[] fills,
-        EditorMapPointSnapshot a,
-        EditorMapPointSnapshot b,
         EditorMapGeometryKind fillKind,
-        uint baseColor,
-        uint wall,
-        uint waterColor)
+        EditorMapPointSnapshot a,
+        EditorMapPointSnapshot b)
     {
         float ax = a.X * 3f;
         float bx = b.X * 3f;
-        int minX = Math.Max(0, (int)Math.Floor(Math.Min(ax, bx)));
-        int maxX = Math.Min(rasterWidth - 1, (int)Math.Ceiling(Math.Max(ax, bx)));
         float span = bx - ax;
 
         if (Math.Abs(span) < 0.0001f)
         {
+            // Vertical authored segments are uncommon but valid. Sample them densely enough that
+            // the topology lookup still produces one connected body instead of a pinhole.
+            float ay = a.Y * 3f;
+            float by = b.Y * 3f;
+            int samples = Math.Max(1, (int)Math.Ceiling(Math.Abs(by - ay)));
             int x = Math.Max(0, Math.Min(rasterWidth - 1, (int)Math.Round(ax)));
-            float surfaceY = (a.Y + b.Y) * .5f;
-            if (TryResolveFillSpan(fills, fillKind, (x + .5f) / 3f, surfaceY, out float otherY))
-                PaintCurveColumn(
-                    pixels,
+            for (int sample = 0; sample <= samples; sample++)
+            {
+                float t = samples == 0 ? 0f : (float)sample / samples;
+                float surfaceY = a.Y + (b.Y - a.Y) * t;
+                AddCurveColumnToMask(
+                    mask,
                     rasterWidth,
                     rasterHeight,
                     room,
-                    kinds,
-                    water,
-                    appearance,
-                    document,
-                    x,
-                    surfaceY,
-                    otherY,
+                    fills,
                     fillKind,
-                    baseColor,
-                    wall,
-                    waterColor);
+                    x,
+                    surfaceY);
+            }
             return;
         }
+
+        int minX = Math.Max(0, (int)Math.Floor(Math.Min(ax, bx)));
+        int maxX = Math.Min(rasterWidth - 1, (int)Math.Ceiling(Math.Max(ax, bx)));
 
         for (int x = minX; x <= maxX; x++)
         {
@@ -221,75 +233,145 @@ internal static class CartographyDrawing
 
             t = Math.Max(0f, Math.Min(1f, t));
             float surfaceY = a.Y + (b.Y - a.Y) * t;
-            float tileX = sampleX / 3f;
 
-            if (!TryResolveFillSpan(
-                    fills,
-                    fillKind,
-                    tileX,
-                    surfaceY,
-                    out float otherY))
-                continue;
-
-            PaintCurveColumn(
-                pixels,
+            AddCurveColumnToMask(
+                mask,
                 rasterWidth,
                 rasterHeight,
                 room,
-                kinds,
-                water,
-                appearance,
-                document,
-                x,
-                surfaceY,
-                otherY,
+                fills,
                 fillKind,
-                baseColor,
-                wall,
-                waterColor);
+                x,
+                surfaceY);
         }
     }
 
-    private static bool TryResolveFillSpan(
+    private static void AddCurveColumnToMask(
+        bool[] mask,
+        int rasterWidth,
+        int rasterHeight,
+        CartographyRoomSource room,
+        EditorMapRectSnapshot[] fills,
+        EditorMapGeometryKind fillKind,
+        int x,
+        float surfaceY)
+    {
+        float tileX = (x + .5f) / 3f;
+        if (!TryResolveSolidBoundary(
+                fills,
+                fillKind,
+                tileX,
+                surfaceY,
+                out float solidBoundaryY))
+            return;
+
+        float surfacePixel = (room.Height - surfaceY) * 3f;
+        float boundaryPixel = (room.Height - solidBoundaryY) * 3f;
+        int minY = Math.Max(
+            0,
+            (int)Math.Floor(Math.Min(surfacePixel, boundaryPixel)));
+        int maxY = Math.Min(
+            rasterHeight - 1,
+            (int)Math.Ceiling(Math.Max(surfacePixel, boundaryPixel)));
+
+        for (int y = minY; y <= maxY; y++)
+            mask[y * rasterWidth + x] = true;
+    }
+
+    private static bool TryResolveSolidBoundary(
         EditorMapRectSnapshot[] fills,
         EditorMapGeometryKind fillKind,
         float tileX,
         float surfaceY,
-        out float otherY)
+        out float solidBoundaryY)
     {
-        otherY = surfaceY;
-        float bestScore = float.MaxValue;
-        bool found = false;
+        solidBoundaryY = surfaceY;
+        List<CurveFillInterval> intervals = new();
 
+        // Merge every topology run intersecting this sample column. The old renderer picked a
+        // single tiny rectangle and could leave gaps between simplified curve samples; the merged
+        // interval represents the complete solid body at this x position.
         for (int i = 0; i < fills.Length; i++)
         {
             EditorMapRectSnapshot fill = fills[i];
             if (fill.Kind != fillKind ||
                 fill.Width <= 0f ||
-                fill.Height <= 0f ||
-                tileX < fill.X - .025f ||
-                tileX > fill.X + fill.Width + .025f)
+                fill.Height <= 0f)
                 continue;
 
-            float minY = fill.Y;
-            float maxY = fill.Y + fill.Height;
-            float distanceToMin = Math.Abs(surfaceY - minY);
-            float distanceToMax = Math.Abs(surfaceY - maxY);
-            float score = Math.Min(distanceToMin, distanceToMax);
-
-            if (score >= bestScore)
+            const float xTolerance = .08f;
+            if (tileX < fill.X - xTolerance ||
+                tileX > fill.X + fill.Width + xTolerance)
                 continue;
 
-            bestScore = score;
-            otherY = distanceToMax <= distanceToMin ? minY : maxY;
-            found = true;
+            intervals.Add(
+                new CurveFillInterval(
+                    fill.Y,
+                    fill.Y + fill.Height));
         }
 
-        return found;
+        if (intervals.Count == 0)
+            return false;
+
+        intervals.Sort((left, right) => left.MinY.CompareTo(right.MinY));
+        List<CurveFillInterval> merged = new(intervals.Count);
+        CurveFillInterval current = intervals[0];
+
+        for (int i = 1; i < intervals.Count; i++)
+        {
+            CurveFillInterval next = intervals[i];
+            if (next.MinY <= current.MaxY + .08f)
+            {
+                current = new CurveFillInterval(
+                    current.MinY,
+                    Math.Max(current.MaxY, next.MaxY));
+                continue;
+            }
+
+            merged.Add(current);
+            current = next;
+        }
+        merged.Add(current);
+
+        int bestIndex = -1;
+        float bestDistance = float.MaxValue;
+        for (int i = 0; i < merged.Count; i++)
+        {
+            CurveFillInterval interval = merged[i];
+            float distance =
+                surfaceY < interval.MinY
+                    ? interval.MinY - surfaceY
+                    : surfaceY > interval.MaxY
+                        ? surfaceY - interval.MaxY
+                        : 0f;
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+
+        // Fill geometry and its surface originate from the same authored object, so a large
+        // separation means this is another curve of the same material rather than our solid side.
+        if (bestIndex < 0 || bestDistance > .75f)
+            return false;
+
+        CurveFillInterval best = merged[bestIndex];
+        float toMin = Math.Abs(surfaceY - best.MinY);
+        float toMax = Math.Abs(surfaceY - best.MaxY);
+
+        // The farther side of the topology interval is the interior/back side. This works for
+        // floors, ceilings, reversed slopes and finite-thickness bands without assuming "down".
+        solidBoundaryY = toMin >= toMax
+            ? best.MinY
+            : best.MaxY;
+        return true;
     }
 
-    private static void PaintCurveColumn(
+    private static void PaintCurvedTerrainMask(
         uint[] pixels,
+        bool[] mask,
         int rasterWidth,
         int rasterHeight,
         CartographyRoomSource room,
@@ -297,51 +379,63 @@ internal static class CartographyDrawing
         bool[] water,
         CartographyAppearance appearance,
         CartographyDocument document,
-        int x,
-        float surfaceY,
-        float otherY,
         EditorMapGeometryKind fillKind,
         uint baseColor,
         uint wall,
         uint waterColor)
     {
-        float surfacePixel = (room.Height - surfaceY) * 3f;
-        float otherPixel = (room.Height - otherY) * 3f;
-        int minY = Math.Max(0, (int)Math.Floor(Math.Min(surfacePixel, otherPixel)));
-        int maxY = Math.Min(rasterHeight - 1, (int)Math.Ceiling(Math.Max(surfacePixel, otherPixel)));
+        bool solid = fillKind == EditorMapGeometryKind.Solid;
 
-        for (int y = minY; y <= maxY; y++)
+        for (int y = 0; y < rasterHeight; y++)
         {
-            int tileColumn = Math.Max(0, Math.Min(room.Width - 1, x / 3));
-            int tileRow = Math.Max(0, Math.Min(room.Height - 1, y / 3));
-            int tileIndex = tileRow * room.Width + tileColumn;
-
-            // Preserve shortcut/transport marker pixels exactly as the ordinary room pass does.
-            if (kinds[tileIndex] >= 4)
-                continue;
-
-            uint color = baseColor;
-            bool solid = fillKind == EditorMapGeometryKind.Solid;
-            bool wet =
-                appearance.WaterLevel == -2
-                    ? water[tileIndex]
-                    : appearance.WaterLevel >= 0 &&
-                      room.Height - 1 - tileRow <= appearance.WaterLevel;
-
-            if (wet && (!solid || appearance.WaterFront))
-                color = Blend(color, waterColor, document.Options.WaterOpacity);
-
-            if (appearance.Deathpit &&
-                tileRow >= room.Height - 5 &&
-                IsAirTile(kinds, room.Width, room.Height, tileColumn, room.Height - 1))
+            for (int x = 0; x < rasterWidth; x++)
             {
-                color = Blend(
-                    wall,
-                    color,
-                    (room.Height - tileRow - .5f) / 5f);
-            }
+                int pixelIndex = y * rasterWidth + x;
+                if (!mask[pixelIndex])
+                    continue;
 
-            pixels[y * rasterWidth + x] = color;
+                int tileColumn = Math.Max(
+                    0,
+                    Math.Min(room.Width - 1, x / 3));
+                int tileRow = Math.Max(
+                    0,
+                    Math.Min(room.Height - 1, y / 3));
+                int tileIndex = tileRow * room.Width + tileColumn;
+
+                // Shortcut/transport pixels are authored overlays and keep precedence over terrain.
+                if (kinds[tileIndex] >= 4)
+                    continue;
+
+                uint color = baseColor;
+                bool wet =
+                    appearance.WaterLevel == -2
+                        ? water[tileIndex]
+                        : appearance.WaterLevel >= 0 &&
+                          room.Height - 1 - tileRow <= appearance.WaterLevel;
+
+                if (wet && (!solid || appearance.WaterFront))
+                    color = Blend(
+                        color,
+                        waterColor,
+                        document.Options.WaterOpacity);
+
+                if (appearance.Deathpit &&
+                    tileRow >= room.Height - 5 &&
+                    IsAirTile(
+                        kinds,
+                        room.Width,
+                        room.Height,
+                        tileColumn,
+                        room.Height - 1))
+                {
+                    color = Blend(
+                        wall,
+                        color,
+                        (room.Height - tileRow - .5f) / 5f);
+                }
+
+                pixels[pixelIndex] = color;
+            }
         }
     }
 
