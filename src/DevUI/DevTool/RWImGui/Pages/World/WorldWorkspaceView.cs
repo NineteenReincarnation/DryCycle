@@ -951,7 +951,6 @@ internal static class WorldWorkspaceView
     {
         using (WorldInspectorReadability.Enter())
         {
-        DevToolWidgets.PaneTitle(DevToolUiSettings.T("检查器", "INSPECTOR"));
         if (selectionKind == SelectionKind.Connection && !string.IsNullOrEmpty(selectedConnectionId))
         {
             EditorMapConnectionSnapshot connection = FindConnection(snapshot, selectedConnectionId);
