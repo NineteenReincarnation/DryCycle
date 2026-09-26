@@ -17,6 +17,7 @@ internal sealed class CartographyPrimitive
     internal bool Dashed;
     internal float DashLength = 6, DashGap = 4, DashOffset;
     internal bool GuideOnly;
+    internal bool PixelPerfect;
     internal CartographyRaster Raster;
 }
 
@@ -218,45 +219,432 @@ internal static class CartographySceneBuilder
         CartographyRaster raster=CartographyText.Render(item,font);
         shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Image,Rect=new CartographyRect(item.X,item.Y,raster.Width/2f,raster.Height/2f),Color=Alpha(0xFFFFFFFF,opacity),Raster=raster,Text=item.Text});
     }
-    internal static CartographySceneNode Route(CartographyDocument d,CartographySource source,CartographyItem item,CartographyLayer layer)
+    internal static CartographySceneNode Route(
+        CartographyDocument d,
+        CartographySource source,
+        CartographyItem item,
+        CartographyLayer layer)
     {
-        var a=item.Appearance;
-        CartographyItem from=d.Items.Find(i=>i.Kind==CartographyItemKind.Room&&i.Room==a.From),to=d.Items.Find(i=>i.Kind==CartographyItemKind.Room&&i.Room==a.To);
-        if(from==null||to==null||!IsVisible(d,from)||!IsVisible(d,to))return null;
-        bool exactA=Port(from,a.FromPort,source,out float ax,out float ay),exactB=Port(to,a.ToPort,source,out float bx,out float by);
-        List<CartographyPoint> points=new(){new CartographyPoint{X=ax,Y=ay}};
-        if(a.Route==CartographyRouteMode.Manual)points.AddRange(item.Points.Select(p=>p.Clone()));
-        else if(a.Route==CartographyRouteMode.HorizontalFirst){float mid=(ax+bx)/2;points.Add(new CartographyPoint{X=mid,Y=ay});points.Add(new CartographyPoint{X=mid,Y=by});}
-        else if(a.Route==CartographyRouteMode.VerticalFirst){float mid=(ay+by)/2;points.Add(new CartographyPoint{X=ax,Y=mid});points.Add(new CartographyPoint{X=bx,Y=mid});}
-        points.Add(new CartographyPoint{X=bx,Y=by});
-        List<CartographyPrimitive> shapes=new();float opacity=layer.Opacity*a.Opacity;bool ambiguous=!exactA||!exactB;
-        float phase=0;
-        for(int n=1;n<points.Count;n++)
-        {
-            var p=points[n-1];var q=points[n];
-            float dx=q.X-p.X,dy=q.Y-p.Y,length=(float)Math.Sqrt(dx*dx+dy*dy);
-            if(length<.001f)continue;
-            bool aligned=!ambiguous && (Math.Floor(p.X/TileSize)==Math.Floor(q.X/TileSize)||Math.Floor(p.Y/TileSize)==Math.Floor(q.Y/TileSize));
-            // Aligned pipes use Cornifer's alternating pixel pattern. Diagonal lines are
-            // editor guides; their geometry remains selectable but is excluded from export.
-            if(a.Shade)
+        CartographyAppearance a = item.Appearance;
+        CartographyItem from =
+            d.Items.Find(
+                i =>
+                    i.Kind == CartographyItemKind.Room &&
+                    i.Room == a.From);
+        CartographyItem to =
+            d.Items.Find(
+                i =>
+                    i.Kind == CartographyItemKind.Room &&
+                    i.Room == a.To);
+
+        if (from == null ||
+            to == null ||
+            !IsVisible(d, from) ||
+            !IsVisible(d, to))
+            return null;
+
+        bool exactA =
+            Port(
+                from,
+                a.FromPort,
+                source,
+                out float ax,
+                out float ay);
+        bool exactB =
+            Port(
+                to,
+                a.ToPort,
+                source,
+                out float bx,
+                out float by);
+
+        List<CartographyPoint> points =
+            new()
             {
-                var shadow=Line(p.X,p.Y,q.X,q.Y,Alpha(a.ShadeColor,opacity),item.Stroke+a.Outline*2,!aligned);
-                shadow.GuideOnly=!aligned; shadow.DashLength=8; shadow.DashGap=8;
+                new CartographyPoint
+                {
+                    X = ax,
+                    Y = ay
+                }
+            };
+
+        if (a.Route == CartographyRouteMode.Manual)
+        {
+            points.AddRange(
+                item.Points.Select(
+                    p => p.Clone()));
+        }
+        else if (a.Route == CartographyRouteMode.HorizontalFirst)
+        {
+            // Cornifer routes are a chain of straight segments between authored control points.
+            // "Horizontal first" therefore needs one real corner at the destination X, not the
+            // old symmetric three-segment dogleg around the midpoint.
+            AddRoutePoint(
+                points,
+                bx,
+                ay);
+        }
+        else if (a.Route == CartographyRouteMode.VerticalFirst)
+        {
+            AddRoutePoint(
+                points,
+                ax,
+                by);
+        }
+
+        AddRoutePoint(
+            points,
+            bx,
+            by);
+
+        List<CartographyPrimitive> shapes =
+            new();
+        float opacity =
+            layer.Opacity *
+            a.Opacity;
+        bool ambiguous =
+            !exactA ||
+            !exactB;
+        float phase = 0f;
+
+        NumPoint visualOffset =
+            new(
+                TileSize * 0.5f,
+                TileSize * 0.5f);
+
+        for (int n = 1;
+             n < points.Count;
+             n++)
+        {
+            CartographyPoint p =
+                points[n - 1];
+            CartographyPoint q =
+                points[n];
+
+            float dx =
+                q.X -
+                p.X;
+            float dy =
+                q.Y -
+                p.Y;
+            float length =
+                (float)Math.Sqrt(
+                    dx * dx +
+                    dy * dy);
+
+            if (length < 0.001f)
+                continue;
+
+            bool aligned =
+                !ambiguous &&
+                CorniferAligned(
+                    p,
+                    q);
+
+            float px =
+                p.X +
+                visualOffset.X;
+            float py =
+                p.Y +
+                visualOffset.Y;
+            float qx =
+                q.X +
+                visualOffset.X;
+            float qy =
+                q.Y +
+                visualOffset.Y;
+
+            if (!aligned)
+            {
+                AddCorniferGuide(
+                    shapes,
+                    px,
+                    py,
+                    qx,
+                    qy,
+                    item,
+                    a,
+                    opacity);
+                continue;
+            }
+
+            // Cornifer starts the repeating connection texture two source pixels after the first
+            // exit and stops one (white->red) or two pixels before the destination. One Cornifer
+            // map pixel corresponds to TileSize in this scaled cartography scene.
+            float start =
+                n == 1
+                    ? Math.Min(
+                        length,
+                        2f * TileSize)
+                    : 0f;
+            float end =
+                n == points.Count - 1
+                    ? Math.Min(
+                        Math.Max(
+                            0f,
+                            length - start),
+                        (a.WhiteRed ? 1f : 2f) *
+                        TileSize)
+                    : 0f;
+
+            if (a.Shade)
+            {
+                CartographyPrimitive shadow =
+                    Line(
+                        px,
+                        py,
+                        qx,
+                        qy,
+                        Alpha(
+                            a.ShadeColor,
+                            opacity),
+                        item.Stroke +
+                        a.Outline * 2f);
+                shadow.PixelPerfect = true;
                 shapes.Add(shadow);
             }
-            float start=aligned&&n==1?Math.Min(length,2*TileSize):0;
-            float end=aligned&&n==points.Count-1?Math.Min(length-start,(a.WhiteRed?1:2)*TileSize):0;
-            if(length>start+end)
+
+            if (length >
+                start + end)
             {
-                var line=Line(p.X+dx*start/length,p.Y+dy*start/length,q.X-dx*end/length,q.Y-dy*end/length,Alpha(item.Color,opacity),item.Stroke,true);
-                line.GuideOnly=!aligned; line.DashLength=aligned?TileSize:8; line.DashGap=line.DashLength;
-                line.DashOffset=aligned?phase:0; shapes.Add(line);
+                CartographyPrimitive line =
+                    Line(
+                        px +
+                        dx *
+                        start /
+                        length,
+                        py +
+                        dy *
+                        start /
+                        length,
+                        qx -
+                        dx *
+                        end /
+                        length,
+                        qy -
+                        dy *
+                        end /
+                        length,
+                        Alpha(
+                            item.Color,
+                            opacity),
+                        item.Stroke,
+                        true);
+
+                line.PixelPerfect = true;
+                line.DashLength = TileSize;
+                line.DashGap = TileSize;
+                line.DashOffset = phase;
+                shapes.Add(line);
             }
-            phase+=length-start-end;
+
+            phase +=
+                Math.Max(
+                    0f,
+                    length -
+                    start -
+                    end);
         }
-        if(a.WhiteRed)foreach(CartographyPoint p in new[]{points[0],points[points.Count-1]})shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Fill,Rect=new CartographyRect(p.X-1.5f,p.Y-1.5f,3,3),Color=Alpha(0xFFFF3333,opacity)});
-        return new CartographySceneNode{Id=item.Id,LayerId=layer.Id,Locked=layer.Locked,FromId=from.Id,ToId=to.Id,FromX=ax,FromY=ay,ToX=bx,ToY=by,LinkColor=item.Color,Ambiguous=ambiguous,Points=points.ToArray(),Primitives=shapes.ToArray(),Bounds=shapes.Select(p=>Normalized(p.Rect).Inflate(p.Stroke)).Aggregate(CartographyRect.Union)};
+
+        if (a.WhiteRed)
+        {
+            CartographyPoint first =
+                points[0];
+            CartographyPoint last =
+                points[points.Count - 1];
+
+            AddCorniferEndpointPixel(
+                shapes,
+                first.X + visualOffset.X,
+                first.Y + visualOffset.Y,
+                opacity);
+            AddCorniferEndpointPixel(
+                shapes,
+                last.X + visualOffset.X,
+                last.Y + visualOffset.Y,
+                opacity);
+        }
+
+        CartographyRect bounds =
+            shapes.Count > 0
+                ? shapes
+                    .Select(
+                        primitive =>
+                            Normalized(
+                                primitive.Rect)
+                            .Inflate(
+                                primitive.Stroke))
+                    .Aggregate(
+                        CartographyRect.Union)
+                : new CartographyRect(
+                    Math.Min(ax, bx),
+                    Math.Min(ay, by),
+                    Math.Abs(bx - ax),
+                    Math.Abs(by - ay))
+                    .Inflate(2f);
+
+        return new CartographySceneNode
+        {
+            Id = item.Id,
+            LayerId = layer.Id,
+            Locked = layer.Locked,
+            FromId = from.Id,
+            ToId = to.Id,
+            FromX = ax,
+            FromY = ay,
+            ToX = bx,
+            ToY = by,
+            LinkColor = item.Color,
+            Ambiguous = ambiguous,
+            Points = points.ToArray(),
+            Primitives = shapes.ToArray(),
+            Bounds = bounds
+        };
+    }
+
+    private struct NumPoint
+    {
+        internal NumPoint(
+            float x,
+            float y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        internal float X;
+        internal float Y;
+    }
+
+    private static void AddRoutePoint(
+        List<CartographyPoint> points,
+        float x,
+        float y)
+    {
+        if (points.Count > 0)
+        {
+            CartographyPoint previous =
+                points[points.Count - 1];
+
+            if (Math.Abs(
+                    previous.X -
+                    x) < 0.001f &&
+                Math.Abs(
+                    previous.Y -
+                    y) < 0.001f)
+                return;
+        }
+
+        points.Add(
+            new CartographyPoint
+            {
+                X = x,
+                Y = y
+            });
+    }
+
+    private static bool CorniferAligned(
+        CartographyPoint a,
+        CartographyPoint b)
+    {
+        // Cornifer floors connection endpoints before checking whether a segment is drawable. The
+        // cartography scene is scaled by TileSize, so reproduce that test in source-pixel space.
+        return
+            Math.Floor(
+                a.X /
+                TileSize) ==
+            Math.Floor(
+                b.X /
+                TileSize) ||
+            Math.Floor(
+                a.Y /
+                TileSize) ==
+            Math.Floor(
+                b.Y /
+                TileSize);
+    }
+
+    private static void AddCorniferGuide(
+        List<CartographyPrimitive> shapes,
+        float ax,
+        float ay,
+        float bx,
+        float by,
+        CartographyItem item,
+        CartographyAppearance appearance,
+        float opacity)
+    {
+        // This is the same visual grammar Cornifer uses for a segment that is not horizontally or
+        // vertically aligned: a chunky black 11/5 dashed guide with a thinner 8/8 light guide on
+        // top. It remains editor-only and is omitted from PNG/SVG exports until the author creates
+        // an axis-aligned route.
+        CartographyPrimitive shadow =
+            Line(
+                ax,
+                ay,
+                bx,
+                by,
+                Alpha(
+                    appearance.Shade
+                        ? appearance.ShadeColor
+                        : 0xFF000000,
+                    opacity),
+                Math.Max(
+                    3f,
+                    item.Stroke +
+                    appearance.Outline * 2f),
+                true);
+        shadow.GuideOnly = true;
+        shadow.DashLength = 11f;
+        shadow.DashGap = 5f;
+        shadow.DashOffset = -1.5f;
+        shapes.Add(shadow);
+
+        CartographyPrimitive guide =
+            Line(
+                ax,
+                ay,
+                bx,
+                by,
+                Alpha(
+                    item.Color,
+                    opacity * 0.60f),
+                Math.Max(
+                    1f,
+                    item.Stroke * 0.5f),
+                true);
+        guide.GuideOnly = true;
+        guide.DashLength = 8f;
+        guide.DashGap = 8f;
+        shapes.Add(guide);
+    }
+
+    private static void AddCorniferEndpointPixel(
+        List<CartographyPrimitive> shapes,
+        float x,
+        float y,
+        float opacity)
+    {
+        CartographyPrimitive pixel =
+            new()
+            {
+                Kind = CartographyPrimitiveKind.Fill,
+                Rect =
+                    new CartographyRect(
+                        x -
+                        TileSize * 0.5f,
+                        y -
+                        TileSize * 0.5f,
+                        TileSize,
+                        TileSize),
+                Color =
+                    Alpha(
+                        0xFFFF3333,
+                        opacity),
+                PixelPerfect = true
+            };
+
+        shapes.Add(pixel);
     }
 
     internal static CartographySceneNode Connection(string from, string to, float ax, float ay, float bx, float by, uint color, bool ambiguous)
