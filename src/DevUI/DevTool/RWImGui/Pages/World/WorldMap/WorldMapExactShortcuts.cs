@@ -125,6 +125,16 @@ internal static class WorldMapExactShortcuts
         UpdateExactCache(session, selectedRoomIndex);
     }
 
+    internal static bool HasPublishedRoom(
+        int roomIndex)
+    {
+        if (!enabled)
+            return false;
+
+        lock (publishedGate)
+            return published.ContainsKey(roomIndex);
+    }
+
     internal static bool TryGetExitMouth(
         int roomIndex,
         int nodeIndex,
