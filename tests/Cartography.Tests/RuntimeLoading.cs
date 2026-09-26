@@ -68,7 +68,61 @@ internal static partial class Program
         Select("B5"); Finish();
         Check(CartographyRuntime.HistoryFor(session).Redo(session), "Evicting derived previews retains the author's redo history.");
         Check(CartographyRuntime.Presentation.Document.Items[0].X == edited.Document.Items[0].X, "Rebuilt source preserves authored positions after eviction.");
-        Check(CartographyRuntime.SaveActive(session), "The retained author document saves through the existing persistence boundary.");
+
+        // Regression: Ctrl+S must be a complete authoring-state barrier. A style draft can still be
+        // focused/staged while an unrelated room move advances the document revision; save must
+        // preserve both the layout and subregion palette instead of rejecting the stale style draft
+        // or serializing the older document.
+        var saveBase = CartographyRuntime.Presentation;
+        var saveStyle = saveBase.Document.Clone();
+        saveStyle.Palettes.RemoveAll(palette => palette.Name == "__CtrlSSaveProbe");
+        saveStyle.Palettes.Add(new CartographyPalette
+        {
+            Name = "__CtrlSSaveProbe",
+            Background = 0xFF123456,
+            Wall = 0xFF0A0B0C,
+            Water = 0xFF654321,
+            Visible = true
+        });
+        CartographyRuntime.StageDraft(
+            saveBase.Identity + "/style",
+            new CartographyCommand
+            {
+                DocumentId = saveBase.Identity,
+                Revision = saveBase.Revision,
+                Kind = CartographyCommandKind.Style,
+                Style = saveStyle
+            });
+        CartographyRuntime.Enqueue(
+            new CartographyCommand
+            {
+                DocumentId = saveBase.Identity,
+                Revision = saveBase.Revision,
+                Kind = CartographyCommandKind.Move,
+                Ids = new[] { "room:B5_A01" },
+                X = 17
+            });
+        CartographyRuntime.Process(session);
+        var preSave = CartographyRuntime.Presentation;
+        bool saveBarrierCalled = false;
+        CartographyRuntime.SetFrontendSaveBarrier(() => saveBarrierCalled = true);
+        Check(CartographyRuntime.SaveActive(session), "Ctrl+S save commits queued layout and staged style state before writing.");
+        CartographyRuntime.SetFrontendSaveBarrier(null);
+        Check(saveBarrierCalled, "Ctrl+S invokes the Cartography frontend save barrier for still-focused UI drafts.");
+        string savedXml = File.ReadAllText(preSave.ProjectPath);
+        CartographyDocument savedDocument = CartographyStorage.Deserialize(savedXml, preSave.Identity);
+        Check(
+            savedDocument.Items.Find(item => item.Id == "room:B5_A01").X ==
+            preSave.Document.Items.Find(item => item.Id == "room:B5_A01").X,
+            "Ctrl+S persists the current Cartography room layout.");
+        CartographyPalette savedPalette = savedDocument.Palettes.Find(palette => palette.Name == "__CtrlSSaveProbe");
+        Check(
+            savedPalette != null &&
+            savedPalette.Background == 0xFF123456 &&
+            savedPalette.Wall == 0xFF0A0B0C &&
+            savedPalette.Water == 0xFF654321,
+            "Ctrl+S persists subregion palette colors.");
+
         Select("B5", true); CartographyRuntime.Process(session);
         Check(CartographyRuntime.SaveActive(session), "Saving while a refresh is pending succeeds.");
         Finish();
