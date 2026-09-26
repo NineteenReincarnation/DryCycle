@@ -38,6 +38,7 @@ internal static class WorldMapView
     private static readonly List<int> retainedVisibleRoomIds = new();
     private static readonly List<int> retainedHoverRoomIds = new();
     private static readonly List<Num.Vector2> connectionPathScratch = new(12);
+    private static readonly List<Num.Vector4> overlayLabelRects = new(128);
     private static long localPositionRevision;
     private static EditorMapRoomSnapshot[] synchronizedPositionRooms;
     private static readonly Dictionary<int, EditorMapRoomSnapshot> hoverRoomLookup = new();
@@ -88,6 +89,7 @@ internal static class WorldMapView
         retainedVisibleRoomIds.Clear();
         retainedHoverRoomIds.Clear();
         connectionPathScratch.Clear();
+        overlayLabelRects.Clear();
         localPositionRevision = 0L;
         synchronizedPositionRooms = null;
         hoverRoomLookup.Clear();
@@ -481,6 +483,14 @@ internal static class WorldMapView
         {
             IReadOnlyList<int> overlayRooms =
                 useSpatial ? retainedVisibleRoomIds : null;
+
+            PrepareOverlayLabelLayout(
+                snapshot,
+                canvasMin,
+                canvasSize,
+                hoveredRoom,
+                overlayRooms);
+
             DrawExitPorts(
                 draw,
                 snapshot,
@@ -1461,15 +1471,20 @@ internal static class WorldMapView
                     // the number box directly on top of the connection line, so dense exits looked
                     // like labels were part of the topology. Place labels tangentially to the room
                     // edge instead; the route owns the outward normal.
+                    Num.Vector2 pad = new(3f, 1.5f);
                     Num.Vector2 labelPos =
                         PortLabelPosition(
                             point,
                             min,
                             max,
                             labelSize,
+                            pad,
                             node.NodeIndex,
                             emphasized);
-                    Num.Vector2 pad = new(3f, 1.5f);
+                    ReserveOverlayLabelRect(
+                        labelPos,
+                        labelSize,
+                        pad);
                     draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 3f);
                     draw.AddRect(labelPos - pad, labelPos + labelSize + pad, ShortcutGold(false), 3f, ImDrawFlags.None, 1f);
                     draw.AddText(labelPos, ShortcutGold(true), label);
@@ -1478,38 +1493,418 @@ internal static class WorldMapView
         }
     }
 
+    private static void PrepareOverlayLabelLayout(
+        EditorMapPresentationSnapshot snapshot,
+        Num.Vector2 canvasMin,
+        Num.Vector2 canvasSize,
+        EditorMapRoomSnapshot hoveredRoom,
+        IReadOnlyList<int> candidateRooms)
+    {
+        overlayLabelRects.Clear();
+
+        if (snapshot == null)
+            return;
+
+        EditorMapRoomSnapshot[] rooms =
+            candidateRooms == null
+                ? snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>()
+                : null;
+        int count =
+            candidateRooms?.Count ??
+            rooms.Length;
+
+        for (int i = 0; i < count; i++)
+        {
+            EditorMapRoomSnapshot room =
+                candidateRooms != null
+                    ? FindRoom(
+                        snapshot,
+                        candidateRooms[i])
+                    : rooms[i];
+
+            if (room == null ||
+                !IsLayerVisible(
+                    room.Layer))
+                continue;
+
+            EditorMapRoomVisualSnapshot visual =
+                WorldMapPresentationIndex.GetRoomVisual(
+                    room.RoomIndex);
+            GetRoomRect(
+                room,
+                visual,
+                canvasMin,
+                out Num.Vector2 min,
+                out Num.Vector2 max);
+
+            if (!Intersects(
+                    min,
+                    max,
+                    canvasMin,
+                    canvasMin + canvasSize,
+                    48f))
+                continue;
+
+            bool selected =
+                room.RoomIndex ==
+                snapshot.SelectedRoomIndex;
+            bool hovered =
+                ReferenceEquals(
+                    room,
+                    hoveredRoom);
+
+            if (zoom >= 0.34f ||
+                selected ||
+                hovered)
+            {
+                Num.Vector2 size =
+                    ImGui.CalcTextSize(
+                        room.Name);
+                Num.Vector2 pos =
+                    new(
+                        (min.X +
+                         max.X -
+                         size.X) *
+                        0.5f,
+                        min.Y -
+                        size.Y -
+                        3f);
+
+                ReserveOverlayLabelRect(
+                    pos,
+                    size,
+                    new Num.Vector2(
+                        2f,
+                        1f));
+            }
+
+            if (!showSubregionLabels ||
+                zoom < 0.75f ||
+                string.IsNullOrEmpty(
+                    room.Subregion))
+                continue;
+
+            string meta =
+                MapRoomLayer.Label(
+                    room.Layer) +
+                " | " +
+                room.Subregion;
+            if (room.OffScreenDen)
+                meta += " | DEN";
+
+            Num.Vector2 metaSize =
+                ImGui.CalcTextSize(
+                    meta);
+            Num.Vector2 metaPos =
+                new(
+                    (min.X +
+                     max.X -
+                     metaSize.X) *
+                    0.5f,
+                    max.Y + 2f);
+
+            ReserveOverlayLabelRect(
+                metaPos,
+                metaSize,
+                new Num.Vector2(
+                    2f,
+                    1f));
+        }
+    }
+
     private static Num.Vector2 PortLabelPosition(
         Num.Vector2 point,
         Num.Vector2 roomMin,
         Num.Vector2 roomMax,
         Num.Vector2 labelSize,
+        Num.Vector2 pad,
         int nodeIndex,
         bool emphasized)
     {
-        float left = Math.Abs(point.X - roomMin.X);
-        float right = Math.Abs(roomMax.X - point.X);
-        float top = Math.Abs(point.Y - roomMin.Y);
-        float bottom = Math.Abs(roomMax.Y - point.Y);
-        float nearest = Math.Min(Math.Min(left, right), Math.Min(top, bottom));
-        float gap = emphasized ? 9f : 7f;
-        bool alternate = (nodeIndex & 1) != 0;
+        float left =
+            Math.Abs(
+                point.X -
+                roomMin.X);
+        float right =
+            Math.Abs(
+                roomMax.X -
+                point.X);
+        float top =
+            Math.Abs(
+                point.Y -
+                roomMin.Y);
+        float bottom =
+            Math.Abs(
+                roomMax.Y -
+                point.Y);
+        float nearest =
+            Math.Min(
+                Math.Min(
+                    left,
+                    right),
+                Math.Min(
+                    top,
+                    bottom));
 
-        if (nearest == left || nearest == right)
+        bool verticalSide =
+            nearest == left ||
+            nearest == right;
+        float gap =
+            emphasized
+                ? 9f
+                : 7f;
+        float primarySign =
+            (nodeIndex & 1) != 0
+                ? 1f
+                : -1f;
+
+        for (int attempt = 0;
+             attempt < 6;
+             attempt++)
         {
-            float x = point.X - labelSize.X * 0.5f;
-            float y = alternate
-                ? point.Y + gap
-                : point.Y - labelSize.Y - gap;
-            return new Num.Vector2(x, y);
+            float sign =
+                (attempt & 1) == 0
+                    ? primarySign
+                    : -primarySign;
+            int ring =
+                attempt / 2;
+            float extra =
+                ring *
+                10f;
+
+            Num.Vector2 candidate;
+
+            if (verticalSide)
+            {
+                float centerY =
+                    point.Y +
+                    sign *
+                    (labelSize.Y *
+                     0.5f +
+                     gap +
+                     extra);
+                candidate =
+                    new Num.Vector2(
+                        point.X -
+                        labelSize.X *
+                        0.5f,
+                        centerY -
+                        labelSize.Y *
+                        0.5f);
+            }
+            else
+            {
+                float centerX =
+                    point.X +
+                    sign *
+                    (labelSize.X *
+                     0.5f +
+                     gap +
+                     extra);
+                candidate =
+                    new Num.Vector2(
+                        centerX -
+                        labelSize.X *
+                        0.5f,
+                        point.Y -
+                        labelSize.Y *
+                        0.5f);
+            }
+
+            if (!OverlayLabelRectOccupied(
+                    candidate,
+                    labelSize,
+                    pad))
+                return candidate;
         }
 
-        float horizontal =
-            alternate
-                ? point.X + gap
-                : point.X - labelSize.X - gap;
+        // Deterministic far fallback: never place the label back on the terminal line merely
+        // because the local cluster is crowded.
+        float fallbackOffset =
+            gap +
+            30f;
+
+        if (verticalSide)
+        {
+            return new Num.Vector2(
+                point.X -
+                labelSize.X *
+                0.5f,
+                point.Y +
+                primarySign *
+                fallbackOffset -
+                labelSize.Y *
+                0.5f);
+        }
+
         return new Num.Vector2(
-            horizontal,
-            point.Y - labelSize.Y * 0.5f);
+            point.X +
+            primarySign *
+            fallbackOffset -
+            labelSize.X *
+            0.5f,
+            point.Y -
+            labelSize.Y *
+            0.5f);
+    }
+
+    private static Num.Vector2 PointLabelPosition(
+        Num.Vector2 point,
+        Num.Vector2 roomMin,
+        Num.Vector2 roomMax,
+        Num.Vector2 labelSize,
+        Num.Vector2 pad,
+        int nodeIndex)
+    {
+        bool preferLeft =
+            point.X <=
+            (roomMin.X +
+             roomMax.X) *
+            0.5f;
+        bool preferUp =
+            point.Y <=
+            (roomMin.Y +
+             roomMax.Y) *
+            0.5f;
+
+        Num.Vector2[] directions =
+        {
+            preferLeft
+                ? new Num.Vector2(-1f, 0f)
+                : new Num.Vector2(1f, 0f),
+            preferLeft
+                ? new Num.Vector2(1f, 0f)
+                : new Num.Vector2(-1f, 0f),
+            preferUp
+                ? new Num.Vector2(0f, -1f)
+                : new Num.Vector2(0f, 1f),
+            preferUp
+                ? new Num.Vector2(0f, 1f)
+                : new Num.Vector2(0f, -1f)
+        };
+
+        float baseGap =
+            13f +
+            ((nodeIndex & 1) != 0
+                ? 2f
+                : 0f);
+
+        for (int ring = 0;
+             ring < 2;
+             ring++)
+        {
+            float gap =
+                baseGap +
+                ring *
+                9f;
+
+            for (int d = 0;
+                 d < directions.Length;
+                 d++)
+            {
+                Num.Vector2 direction =
+                    directions[d];
+                Num.Vector2 center =
+                    point +
+                    new Num.Vector2(
+                        direction.X *
+                        (gap +
+                         labelSize.X *
+                         0.5f),
+                        direction.Y *
+                        (gap +
+                         labelSize.Y *
+                         0.5f));
+                Num.Vector2 candidate =
+                    center -
+                    labelSize *
+                    0.5f;
+
+                if (!OverlayLabelRectOccupied(
+                        candidate,
+                        labelSize,
+                        pad))
+                    return candidate;
+            }
+        }
+
+        return point +
+               new Num.Vector2(
+                   preferLeft
+                       ? -labelSize.X - 31f
+                       : 31f,
+                   -labelSize.Y *
+                   0.5f);
+    }
+
+    private static bool OverlayLabelRectOccupied(
+        Num.Vector2 position,
+        Num.Vector2 size,
+        Num.Vector2 pad)
+    {
+        Num.Vector4 rect =
+            OverlayLabelRect(
+                position,
+                size,
+                pad);
+
+        for (int i = 0;
+             i < overlayLabelRects.Count;
+             i++)
+        {
+            Num.Vector4 occupied =
+                overlayLabelRects[i];
+
+            if (rect.Z <
+                    occupied.X ||
+                rect.X >
+                    occupied.Z ||
+                rect.W <
+                    occupied.Y ||
+                rect.Y >
+                    occupied.W)
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void ReserveOverlayLabelRect(
+        Num.Vector2 position,
+        Num.Vector2 size,
+        Num.Vector2 pad)
+    {
+        overlayLabelRects.Add(
+            OverlayLabelRect(
+                position,
+                size,
+                pad));
+    }
+
+    private static Num.Vector4 OverlayLabelRect(
+        Num.Vector2 position,
+        Num.Vector2 size,
+        Num.Vector2 pad)
+    {
+        const float separation = 2f;
+
+        return new Num.Vector4(
+            position.X -
+            pad.X -
+            separation,
+            position.Y -
+            pad.Y -
+            separation,
+            position.X +
+            size.X +
+            pad.X +
+            separation,
+            position.Y +
+            size.Y +
+            pad.Y +
+            separation);
     }
 
     private static void DrawCreatureShortcuts(
@@ -1557,10 +1952,19 @@ internal static class WorldMapView
 
                 string label = hole.NodeIndex.ToString();
                 Num.Vector2 labelSize = ImGui.CalcTextSize(label);
-                bool left = point.X <= (min.X + max.X) * 0.5f;
-                float x = left ? point.X - labelSize.X - 13f : point.X + 13f;
-                Num.Vector2 labelPos = new(x, point.Y - labelSize.Y * 0.5f);
                 Num.Vector2 pad = new(4f, 2f);
+                Num.Vector2 labelPos =
+                    PointLabelPosition(
+                        point,
+                        min,
+                        max,
+                        labelSize,
+                        pad,
+                        hole.NodeIndex);
+                ReserveOverlayLabelRect(
+                    labelPos,
+                    labelSize,
+                    pad);
                 draw.AddRectFilled(labelPos - pad, labelPos + labelSize + pad, shadow, 3f);
                 draw.AddRect(labelPos - pad, labelPos + labelSize + pad, labelBorder, 3f, ImDrawFlags.None, 1f);
                 draw.AddText(labelPos, labelText, label);
