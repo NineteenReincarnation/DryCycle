@@ -360,7 +360,18 @@ internal sealed class WorldMapRoomResourceStore
 
     private void Enqueue(int roomIndex)
     {
-        if (roomIndex < 0 || !queued.Add(roomIndex)) return;
+        if (roomIndex < 0)
+            return;
+
+        // Explicit scene/source invalidation is stronger than the steady-state thumbnail poll
+        // throttle. Let the next queued pass resolve the live descriptor immediately so an edited
+        // room never waits up to the maintenance interval before its thumbnail refreshes.
+        if (rooms.TryGetValue(roomIndex, out RoomResource resource))
+            resource.NextThumbnailPollFrame = 0;
+
+        if (!queued.Add(roomIndex))
+            return;
+
         priorityQueue.Enqueue(roomIndex);
     }
 
