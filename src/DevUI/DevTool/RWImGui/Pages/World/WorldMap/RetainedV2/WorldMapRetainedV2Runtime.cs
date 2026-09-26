@@ -671,6 +671,12 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
             (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " | " + Surface.Error));
+        ImGui.TextUnformatted(
+            "offscreen renders: " + Surface.RenderCount +
+            " | avg " + Surface.AverageRenderMilliseconds.ToString("F2") +
+            " ms | peak " + Surface.PeakRenderMilliseconds.ToString("F2") +
+            " ms" +
+            (CanvasVisible ? " | canvas visible" : " | canvas dormant"));
         ImGui.TextUnformatted("retained room objects: " + RoomRenderer.RetainedRoomCount);
         ImGui.TextUnformatted(
             "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
