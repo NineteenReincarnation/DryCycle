@@ -55,6 +55,13 @@ internal static class CartographyStorage
                 Marker = (CartographyMarker)Enum.Parse(typeof(CartographyMarker), Str(item, "marker")), Text = item.Element("text")?.Value ?? string.Empty
             });
         CartographyRecord.Read(root.Element("options"), document.Options);
+
+        // Cartography background is now an invariant rather than an author option. Older project
+        // files may contain an opaque export/background setting; migrate them on load so reopening
+        // an existing map behaves exactly like a new transparent composition.
+        document.Transparent = true;
+        document.Options.Canvas &= 0x00FFFFFF;
+
         foreach (XElement p in root.Element("palettes")?.Elements("palette") ?? Enumerable.Empty<XElement>())
         { CartographyPalette palette = new(); CartographyRecord.Read(p, palette); document.Palettes.Add(palette); }
         foreach (XElement element in root.Element("objects").Elements("object"))
