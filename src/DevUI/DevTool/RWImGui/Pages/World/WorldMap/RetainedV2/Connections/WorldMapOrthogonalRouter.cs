@@ -194,7 +194,7 @@ internal static class WorldMapOrthogonalRouter
     private const float CompactDirectionPenalty = 18f;
     private const float CompactBendPenalty = 3f;
     private const int CacheRetentionGenerations = 32;
-    private const int RoutingPolicyVersion = 12;
+    private const int RoutingPolicyVersion = 13;
     internal static int PersistentPolicyVersion => RoutingPolicyVersion;
     private const float BridgeDistance = 170f;
     private const float BridgeAlignmentTolerance = 56f;
@@ -1606,6 +1606,64 @@ internal static class WorldMapOrthogonalRouter
                         occupied,
                         direction);
             }
+        }
+
+        // Segment sampling above sees a bend hotspot as ordinary pass-through congestion. If this
+        // candidate actually turns at the same occupied vertex, promote that cell to the stronger
+        // junction penalty so compact/L-shaped fast paths obey the same anti-solder-joint rule as
+        // the full A* search.
+        int firstVertex =
+            firstSegment + 1;
+        int lastVertex =
+            lastSegment;
+
+        for (int i = firstVertex;
+             i <= lastVertex &&
+             i > 0 &&
+             i + 1 < points.Length;
+             i++)
+        {
+            Num.Vector2 before =
+                points[i] -
+                points[i - 1];
+            Num.Vector2 after =
+                points[i + 1] -
+                points[i];
+
+            if (before.LengthSquared() < 0.01f ||
+                after.LengthSquared() < 0.01f)
+                continue;
+
+            bool beforeHorizontal =
+                Math.Abs(before.X) >=
+                Math.Abs(before.Y);
+            bool afterHorizontal =
+                Math.Abs(after.X) >=
+                Math.Abs(after.Y);
+
+            if (beforeHorizontal ==
+                afterHorizontal)
+                continue;
+
+            long key =
+                GridKey(
+                    (int)Math.Round(
+                        points[i].X / 18f),
+                    (int)Math.Round(
+                        points[i].Y / 18f));
+
+            if (!occupancy.TryGetValue(
+                    key,
+                    out Occupancy occupied) ||
+                occupied.BendCount == 0)
+                continue;
+
+            penalty +=
+                Math.Max(
+                    0f,
+                    JunctionHotspotTurnPenalty -
+                    JunctionHotspotPassPenalty) *
+                occupied.BendCount;
         }
 
         return penalty;
