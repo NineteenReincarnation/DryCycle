@@ -42,6 +42,7 @@ public static partial class MapRenderIsolationTests
             results.Add("GPU: " + SystemInfo.graphicsDeviceType + " / " + SystemInfo.graphicsDeviceName);
             Check(SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null, "A real graphics device is active.");
             InitializeTextureDevice();
+            ExerciseCartographySprites();
             ExerciseRenderer();
             ExerciseTexturePresentation();
             results.Add("PASS: " + checks + " real Unity/GPU assertions.");

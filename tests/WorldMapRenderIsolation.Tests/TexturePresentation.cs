@@ -203,7 +203,7 @@ public static partial class MapRenderIsolationTests
         Array points = (Array)Get(routeNode, "Points");
         object a = points.GetValue(0), b = points.GetValue(1);
         Num.Vector2 mouse = new(((float)Get(a, "X") + (float)Get(b, "X")) / 2, ((float)Get(a, "Y") + (float)Get(b, "Y")) / 2);
-        view.GetField("tool", Flags).SetValue(null, Enum.Parse(view.GetNestedType("Tool", Flags), "Route"));
+        view.GetField("tool", Flags).SetValue(null, Enum.Parse(view.GetNestedType("Tool", Flags), "Select"));
         view.GetField("zoom", Flags).SetValue(null, 1f); view.GetField("snap", Flags).SetValue(null, false);
         view.GetField("observed", Flags).SetValue(null, snapshot);
         var commands = (IEnumerable)Core("Map.Cartography.CartographyRuntime").GetField("Commands", Flags).GetValue(null);

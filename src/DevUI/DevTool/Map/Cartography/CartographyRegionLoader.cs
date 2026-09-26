@@ -159,7 +159,7 @@ internal static class CartographyRegionLoader
         }
     }
     private static bool Interesting(string t) => t.Contains("Token") || t.Contains("Pearl") || t.Contains("Ghost") || new[] { "DangleFruit", "JellyFish", "BubbleGrass", "Mushroom", "SlimeMold", "Lantern", "SeedCob", "KarmaFlower", "VultureGrub", "FirecrackerPlant", "SporePlant", "FlyLure", "NeedleEgg", "EggBugEgg", "WaterNut", "GooieDuck", "DandelionPeach", "LillyPuck", "GlowWeed", "FireEgg", "Hazer", "DeadTokenStalk" }.Contains(t);
-    internal static string IconFor(string t) => t switch { "ShelterMarker" => "ShelterMarker", "DangleFruit" => "Symbol_DangleFruit", "Mushroom" => "Symbol_Mushroom", "KarmaFlower" => "Symbol_KarmaFlower", _ => "Symbol_" + t };
+    internal static string IconFor(string t) => CartographyIconCatalog.IconFor(t);
     private static void Special(CartographySource source, CartographyRoomSource room, string text, CartographyMarker marker, float x, float y)
     { AddMarker(source, room, text + "Icon", marker, x, y, "Special"); AddLabel(source, room, text, text, x + 26, y - 12, 20); }
     internal static CartographyItem AddMarker(CartographySource source, CartographyRoomSource room, string key, CartographyMarker marker, float x, float y, string category)

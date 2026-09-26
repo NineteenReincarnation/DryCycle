@@ -76,28 +76,37 @@ internal static class CartographyDrawing
         if(i.Marker==CartographyMarker.Gate)
         {
             float scale=size/42;uint c=CartographySceneBuilder.Alpha(a.Splitter,opacity);
-            shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Line,Rect=new CartographyRect(i.X,i.Y-size,i.X-i.X,size*2),Color=a.ShadeColor,Stroke=5*scale+a.Outline*2});
-            shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Line,Rect=new CartographyRect(i.X,i.Y-size,0,size*2),Color=c,Stroke=5*scale});
-            Karma(shapes,a.LeftKarma,i.X-size*.75f,i.Y+size*.3f,size*.68f,a.LeftColor,a,opacity);
-            Karma(shapes,a.RightKarma,i.X+size*.75f,i.Y+size*.3f,size*.68f,a.RightColor,a,opacity);
-            Arrow(shapes,i.X-size*.75f,i.Y-size*.75f,1,size*.45f,a.RightArrow,a,opacity);
-            Arrow(shapes,i.X+size*.75f,i.Y-size*.75f,-1,size*.45f,a.LeftArrow,a,opacity);return true;
+            // Cornifer's 107 x 64 gate group retains native symbol proportions below the arrows.
+            if(a.Shade)shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Line,Rect=new CartographyRect(i.X,i.Y-32*scale,0,64*scale),Color=CartographySceneBuilder.Alpha(a.ShadeColor,opacity),Stroke=5*scale+a.Outline*2});
+            shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Line,Rect=new CartographyRect(i.X,i.Y-32*scale,0,64*scale),Color=c,Stroke=5*scale});
+            Karma(shapes,a.LeftKarma,i.X,i.Y+12*scale,scale,-1,a.LeftColor,a,opacity);
+            Karma(shapes,a.RightKarma,i.X,i.Y+12*scale,scale,1,a.RightColor,a,opacity);
+            AddSprite(shapes,CartographyAssets.Sprite("Misc_ArrowRight"),i.X-33.5f*scale,i.Y-25.5f*scale,22*scale,a.RightArrow,a,opacity);
+            AddSprite(shapes,CartographyAssets.Sprite("Misc_ArrowLeft"),i.X+33.5f*scale,i.Y-25.5f*scale,22*scale,a.LeftArrow,a,opacity);return true;
         }
-        string name=a.Icon.Length>0?a.Icon:i.Marker switch
-        {CartographyMarker.Shelter=>"ShelterMarker",CartographyMarker.AncientShelter=>"ShelterMarker",CartographyMarker.Trader or CartographyMarker.Outpost or CartographyMarker.Treasury=>"ChieftainA",CartographyMarker.Echo=>"GhostSymbol",CartographyMarker.Broadcast=>"Symbol_Broadcast",CartographyMarker.Token=>"Sandbox_Unlock",CartographyMarker.Slugcat=>"Kill_Slugcat",CartographyMarker.Pearl=>"Symbol_Pearl",_=>""};
+        string name=SpriteName(i);
         if(i.Marker==CartographyMarker.Diamond){Diamond(shapes,i.X,i.Y,size,i.Color,false,opacity);return true;}
         CartographyRaster sprite=CartographyAssets.Sprite(name);
         if(sprite==null)return false;
         AddSprite(shapes,sprite,i.X,i.Y,size*2,i.Color,a,opacity);return true;
     }
-    private static void Karma(List<CartographyPrimitive> shapes,string value,float x,float y,float size,uint color,CartographyAppearance a,float opacity)
+    internal static string SpriteName(CartographyItem i)
+    {
+        var a=i.Appearance;
+        // Correct old generated names at presentation time; retain custom choices and author data.
+        if((a.Category=="Pickup"||a.Category=="Object")&&a.Icon=="Symbol_"+i.Text)
+            return CartographyIconCatalog.IconFor(i.Text);
+        return a.Icon.Length>0?a.Icon:i.Marker switch
+        {CartographyMarker.Shelter=>"ShelterMarker",CartographyMarker.AncientShelter=>"ShelterMarker",CartographyMarker.Trader or CartographyMarker.Outpost or CartographyMarker.Treasury=>"ChieftainA",CartographyMarker.Echo=>"Object_GhostSpot",CartographyMarker.Broadcast=>"Symbol_Satellite",CartographyMarker.Token=>"Sandbox_Unlock",CartographyMarker.Slugcat=>"Kill_Slugcat",CartographyMarker.Pearl=>"Symbol_Pearl",_=>""};
+    }
+    private static void Karma(List<CartographyPrimitive> shapes,string value,float x,float y,float scale,int side,uint color,CartographyAppearance a,float opacity)
     {
         string name=int.TryParse(value,out int n)?"karma"+Math.Max(0,n-1):value=="R"?"Misc_KarmaR":"karma9";
         CartographyRaster sprite=CartographyAssets.Sprite(name)??CartographyAssets.Sprite(name+"-9");
-        if(sprite!=null)AddSprite(shapes,sprite,x,y,size*2,color,a,opacity);
+        if(sprite!=null)AddSprite(shapes,sprite,x+side*(14.5f+sprite.Width/2f)*scale,y,sprite.Width*scale,color,a,opacity);
         else
         {
-            CartographyItem label=new(){Kind=CartographyItemKind.Text,Text=value,Size=size,Color=color,Appearance=a.Clone()};
+            CartographyItem label=new(){Kind=CartographyItemKind.Text,Text=value,Size=30*scale,Color=color,Appearance=a.Clone()};
             CartographyRaster text=CartographyText.Render(label,"Arial");shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Image,Rect=new CartographyRect(x-text.Width/4f,y-text.Height/4f,text.Width/2f,text.Height/2f),Color=CartographySceneBuilder.Alpha(0xFFFFFFFF,opacity),Raster=text});
         }
     }

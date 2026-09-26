@@ -16,6 +16,7 @@ internal static class DevToolOverlay
 {
     private static bool lanceDebugPage;
     private static float browserInspectorSplit = 0.23f;
+    private static float browserInspectorDisplayWidth;
     private static bool browserInspectorSplitterDragging;
     private const float BrowserPaneFontScale = 1.22f;
 
@@ -222,14 +223,12 @@ internal static class DevToolOverlay
         IDevToolPageView page)
     {
         float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float defaultWidth = Math.Min(
-            Math.Max(760f * Math.Min(1.4f, scale), display.X * 0.58f),
-            Math.Max(520f, display.X - 80f));
+        float defaultWidth = Math.Min(display.X * 0.94f, Math.Max(1f, display.X - 16f));
         float defaultHeight = Math.Min(
             Math.Max(440f * Math.Min(1.25f, scale), display.Y * 0.52f),
             Math.Max(320f, display.Y - 120f));
         Num.Vector2 defaultPos = new(
-            Math.Max(80f, (display.X - defaultWidth) * 0.58f),
+            (display.X - defaultWidth) * 0.5f,
             Math.Max(92f, (display.Y - defaultHeight) * 0.50f));
 
         ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
@@ -247,6 +246,14 @@ internal static class DevToolOverlay
             return;
         }
 
+        // Apply the wider layout even when an older ImGui window size was saved. Afterwards
+        // manual resizing is retained until the display resolution changes.
+        if (Math.Abs(browserInspectorDisplayWidth - display.X) > 0.5f)
+        {
+            ImGui.SetWindowSize(new Num.Vector2(defaultWidth, ImGui.GetWindowSize().Y));
+            ImGui.SetWindowPos(new Num.Vector2(defaultPos.X, ImGui.GetWindowPos().Y));
+            browserInspectorDisplayWidth = display.X;
+        }
         FloatingWindowSnap.TrackCurrentWindow("BrowserInspector");
 
         bool suppressInspector = page?.SuppressInspector(snapshot) == true;

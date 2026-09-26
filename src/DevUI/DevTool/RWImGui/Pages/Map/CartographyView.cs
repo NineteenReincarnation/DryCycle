@@ -15,7 +15,7 @@ internal static partial class CartographyView
     private enum Tool { Select, Route, Text, Marker, Line, Box, ExportArea }
     private static CartographyPresentation observed;
     private static readonly HashSet<string> Selection = new(StringComparer.Ordinal);
-    private static string activeLayer = "notes", search = string.Empty, exportPath = string.Empty, copyPath = string.Empty;
+    private static string activeLayer = "notes", exportPath = string.Empty, copyPath = string.Empty;
     private static Num.Vector2 pan, startMouse, delta, marqueeStart;
     private static float zoom = 1, grid = 12;
     private static bool fit = true, fitSelection, snap = true, dragging, marquee, addSelection, subtractSelection;
@@ -115,16 +115,9 @@ internal static partial class CartographyView
         Toolbar(snapshot);
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         float em = ImGui.GetFontSize();
-        bool explorer = editor.BrowserOpen && available.X >= em * 48;
         bool inspector = editor.InspectorOpen && available.X >= em * 30;
-        float left = explorer ? Math.Min(em * 17, available.X * .23f) : 0;
         float right = inspector ? Math.Min(em * 24, available.X * .35f) : 0;
-        float center = Math.Max(180, available.X - left - right - (explorer ? 8 : 0) - (inspector ? 8 : 0));
-        if (explorer)
-        {
-            if (ImGui.BeginChild("##CartographyExplorer", new Num.Vector2(left, available.Y), ImGuiChildFlags.Borders)) Explorer(snapshot);
-            ImGui.EndChild(); ImGui.SameLine(0, 8);
-        }
+        float center = Math.Max(180, available.X - right - (inspector ? 8 : 0));
         if (ImGui.BeginChild("##CartographyCanvas", new Num.Vector2(center, available.Y), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)) Canvas(snapshot);
         ImGui.EndChild();
         if (inspector)
@@ -154,23 +147,11 @@ internal static partial class CartographyView
         Inline("100%"); ImGui.TextDisabled((zoom * 100).ToString("0") + "%");
 
         ToolButton(Tool.Select, T("选择", "Select"), false);
-        ToolButton(Tool.Route, T("编辑连线", "Edit connections"));
         ToolButton(Tool.Text, T("文字", "Text"));
-        ToolButton(Tool.Marker, T("图标", "Icon"));
-        ToolButton(Tool.Line, T("线条", "Line"));
-        ToolButton(Tool.Box, T("区域框", "Box"));
-        Inline(T("导出范围", "Export area"));
-        ExtraToolbar();
-        if (tool == Tool.Marker)
-        {
-            int icon = (int)marker;
-            ImGui.SetNextItemWidth(ImGui.GetFontSize() * 12);
-            if (ImGui.Combo("##AtlasIcon", ref icon, string.Join("\0", Enum.GetNames(typeof(CartographyMarker))) + "\0")) marker = (CartographyMarker)icon;
-        }
         ImGui.TextWrapped(tool == Tool.Route
             ? T("点击连线加拐点并拖动 | Alt+点击 / Delete 删点 | Shift 限制方向 | Esc 取消", "Click a connection to add/drag a bend | Alt-click / Delete removes it | Shift constrains | Esc cancels")
             : tool == Tool.Select ? T("左键拖动 / 框选 | 点击连线编辑 | Shift 加选 | Ctrl 减选 | 右键平移 | 滚轮缩放", "Drag / marquee | Click connections to edit | Shift add | Ctrl subtract | Right drag pan | Wheel zoom")
-            : T("在画布点击放置；线条和区域框需拖动。右键取消。", "Click to place; drag for a line or box. Right click cancels."));
+            : T("在画布点击放置文字，右键取消。", "Click to place text. Right click cancels."));
         ImGui.Separator();
     }
 
@@ -184,38 +165,6 @@ internal static partial class CartographyView
         if (active) ImGui.PushStyleColor(ImGuiCol.Button, new Num.Vector4(.2f, .43f, .69f, 1));
         if (ImGui.Button(label + "##AtlasTool" + value)) { CommitDraft(); CancelRoute(); tool = value; }
         if (active) ImGui.PopStyleColor();
-    }
-
-    private static void Explorer(CartographyPresentation snapshot)
-    {
-        ImGui.TextUnformatted(T("图层（上方在前）", "LAYERS | FRONT TO BACK"));
-        if (ImGui.SmallButton(T("添加图层", "Add layer")))
-            Send(CartographyCommandKind.AddLayer, command => command.Layer = new CartographyLayer { Name = T("新图层", "New layer") });
-        for (int i = snapshot.Document.Layers.Count - 1; i >= 0; i--)
-        {
-            CartographyLayer layer = snapshot.Document.Layers[i];
-            ImGui.PushID(layer.Id);
-            bool visible = layer.Visible;
-            if (ImGui.Checkbox("##visible", ref visible)) Send(CartographyCommandKind.UpdateLayer, command => { command.Layer = layer.Clone(); command.Layer.Visible = visible; });
-            ImGui.SameLine();
-            if (ImGui.Selectable((layer.Locked ? "[L] " : "") + layer.Name, activeLayer == layer.Id)) { CommitDraft(); CommitLayer(); activeLayer = layer.Id; layerDraft = null; }
-            ImGui.PopID();
-        }
-        ImGui.Separator();
-        ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##AtlasSearch", T("搜索房间和标注", "Search rooms / annotations"), ref search, 160);
-        ImGui.TextDisabled(Selection.Count + T(" 项已选", " selected"));
-        foreach (CartographyItem item in snapshot.Document.Items)
-        {
-            string label = ItemName(item);
-            if (search.Length > 0 && label.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
-            ImGui.PushID(item.Id);
-            if (ImGui.Selectable((item.Visible ? "" : "[-] ") + label, Selection.Contains(item.Id)))
-            {
-                Select(item.Id, ImGui.GetIO().KeyShift, ImGui.GetIO().KeyCtrl);
-                CommitLayer(); activeLayer = item.LayerId; layerDraft = null;
-            }
-            ImGui.PopID();
-        }
     }
 
     private static void Canvas(CartographyPresentation snapshot)
@@ -436,7 +385,7 @@ internal static partial class CartographyView
         if (Selection.Count > 1) SelectionInspector(snapshot);
         else if (item != null) ItemInspector(item, snapshot);
         ExtendedWorkspaceInspector(snapshot);
-        LayerInspector(snapshot);
+
         StyleInspector(snapshot);
         ExportInspector(snapshot);
     }
@@ -497,25 +446,6 @@ internal static partial class CartographyView
         if (ImGui.Button(T("删除所选##AtlasDeleteMany", "Delete selected##AtlasDeleteMany"))) Send(CartographyCommandKind.Delete, command => command.Ids = Selection.ToArray());
     }
 
-    private static void LayerInspector(CartographyPresentation snapshot)
-    {
-        if (!ImGui.CollapsingHeader(T("活动图层##AtlasLayer", "ACTIVE LAYER##AtlasLayer"), ImGuiTreeNodeFlags.DefaultOpen)) return;
-        CartographyLayer layer = snapshot.Document.Layer(activeLayer);
-        if (layer == null) return;
-        layerDraft ??= layer.Clone();
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##AtlasLayerName", ref layerDraft.Name, 160)) layerDirty = true;
-        if (ImGui.IsItemDeactivatedAfterEdit()) CommitLayer();
-        if (ImGui.Checkbox(T("锁定##AtlasLock", "Locked##AtlasLock"), ref layerDraft.Locked)) { layerDirty = true; CommitLayer(); }
-        if (ImGui.SliderFloat(T("透明度##AtlasOpacity", "Opacity##AtlasOpacity"), ref layerDraft.Opacity, 0, 1)) layerDirty = true;
-        if (ImGui.IsItemDeactivatedAfterEdit()) CommitLayer();
-        if (ImGui.SmallButton(T("上移##AtlasLayerUp", "Up##AtlasLayerUp"))) Send(CartographyCommandKind.MoveLayer, command => { command.LayerId = activeLayer; command.Integer = 1; });
-        ImGui.SameLine(); if (ImGui.SmallButton(T("下移##AtlasLayerDown", "Down##AtlasLayerDown"))) Send(CartographyCommandKind.MoveLayer, command => { command.LayerId = activeLayer; command.Integer = -1; });
-        if (ImGui.Button(T("将选择移入此层##AtlasAssign", "Move selection here##AtlasAssign"))) Send(CartographyCommandKind.AssignLayer, command => { command.LayerId = activeLayer; command.Ids = Selection.ToArray(); });
-        if (ImGui.SmallButton(T("移除空层 / 迁移对象##AtlasRemoveLayer", "Remove layer / retain objects##AtlasRemoveLayer"))) Send(CartographyCommandKind.DeleteLayer, command => command.LayerId = activeLayer);
-        if (layerDirty) Stage(CartographyCommandKind.UpdateLayer, "layer:" + layerDraft.Id, command => command.Layer = layerDraft);
-    }
-
     private static void StyleInspector(CartographyPresentation snapshot)
     {
         if (!ImGui.CollapsingHeader(T("地图样式##AtlasStyle", "MAP STYLE##AtlasStyle"))) return;
@@ -555,11 +485,11 @@ internal static partial class CartographyView
         if (ImGui.IsItemDeactivatedAfterEdit()) SaveStyle();
         if (ImGui.Checkbox(T("透明背景##AtlasTransparent", "Transparent background##AtlasTransparent"), ref styleDraft.Transparent)) { styleDirty = true; SaveStyle(); }
         bool valid = true;
-        try { CartographyExporter.Dimensions(snapshot.Document, snapshot.Scene, out int width, out int height); ImGui.TextDisabled(width + " x " + height + " px"); }
+        try { CartographyExporter.Dimensions(styleDraft, snapshot.Scene, out int width, out int height, format); ImGui.TextDisabled(width + " x " + height + " px"); }
         catch (InvalidOperationException error) { ImGui.TextWrapped(error.Message); valid = false; }
         if (snapshot.Scene.Errors.Length > 0)
         { valid = false; ImGui.TextWrapped(T("以下可见房间尚不可导出：", "Visible rooms awaiting terrain:") + "\n" + string.Join("\n", snapshot.Scene.Errors.Take(4))); }
-        if (snapshot.Scene.Warnings.Length > 0) ImGui.TextWrapped(snapshot.Scene.Warnings.Length + T(" 条连接缺少精确端口，以虚线绘制。", " connections use dashed unresolved-port guides."));
+        if (snapshot.Scene.Warnings.Length > 0) ImGui.TextWrapped(string.Join("\n",snapshot.Scene.Warnings.Take(3)));
         ImGui.SetNextItemWidth(-1); ImGui.InputText("##AtlasExportPath", ref exportPath, 1024);
         if (!valid || snapshot.Exporting) ImGui.BeginDisabled();
         if (ImGui.Button(snapshot.Exporting ? T("正在导出...", "Exporting...") : T("导出图片##AtlasRender", "Export image##AtlasRender")))
@@ -645,8 +575,11 @@ internal static partial class CartographyView
                     float distance = (b - a).Length();
                     if (distance < .1f) break;
                     Num.Vector2 direction = (b - a) / distance;
-                    float dash = Math.Max(4, 6 * zoom);
-                    for (float step = 0; step < distance; step += dash * 1.7f) draw.AddLine(a + direction * step, a + direction * Math.Min(distance, step + dash), color, stroke);
+                    float dash = Math.Max(1, shape.DashLength * zoom), gap = Math.Max(1, shape.DashGap * zoom);
+                    float clipped = new Num.Vector2(r.X-shape.Rect.X,r.Y-shape.Rect.Y).Length();
+                    float phase = ((clipped+shape.DashOffset)*zoom) % (dash+gap);
+                    for (float step = -phase; step < distance; step += dash + gap)
+                        if(step+dash>0) draw.AddLine(a + direction * Math.Max(0,step), a + direction * Math.Min(distance, step + dash), color, stroke);
                 }
                 break;
             case CartographyPrimitiveKind.Text:

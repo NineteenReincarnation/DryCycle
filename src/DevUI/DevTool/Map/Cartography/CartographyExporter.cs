@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml;
 
@@ -24,17 +25,20 @@ internal sealed class CartographyExportResult
 /// <summary>Consumes frozen managed data on a worker; does not touch Unity, ImGui or the author document.</summary>
 internal static class CartographyExporter
 {
-    internal const long MaxPixels = 32L * 1024 * 1024;
-    internal const int MaxDimension = 16384;
+    internal const long MaxPixels = 1024L * 1024 * 1024;
+    internal const int MaxDimension = 65535;
 
     internal static CartographyRect OutputBounds(CartographyDocument document, CartographyScene scene) => document.Options.ExportArea ? new CartographyRect(document.Options.AreaX, document.Options.AreaY, document.Options.AreaWidth, document.Options.AreaHeight) : scene.Bounds.Inflate(document.Padding);
 
-    internal static void Dimensions(CartographyDocument document, CartographyScene scene, out int width, out int height)
+    internal static void Dimensions(CartographyDocument document, CartographyScene scene, out int width, out int height, CartographyExportFormat format = CartographyExportFormat.Png)
     {
         CartographyRect bounds = OutputBounds(document, scene);
         double w = Math.Ceiling(bounds.Width * document.ExportScale), h = Math.Ceiling(bounds.Height * document.ExportScale);
-        if (w < 1 || h < 1 || double.IsNaN(w) || double.IsNaN(h) || w > MaxDimension || h > MaxDimension || w * h > MaxPixels)
-            throw new InvalidOperationException("The export exceeds 16,384 pixels per side or 32 megapixels. Reduce scale or map bounds.");
+        bool vector = format == CartographyExportFormat.Svg || format == CartographyExportFormat.ImageMap;
+        int limit = vector ? 1000000 : format == CartographyExportFormat.Psd ? 30000 : MaxDimension;
+        long pixels = format == CartographyExportFormat.Psd ? 32L*1024*1024 : MaxPixels;
+        if (w < 1 || h < 1 || double.IsNaN(w) || double.IsNaN(h) || w > limit || h > limit || !vector && w * h > pixels)
+            throw new InvalidOperationException("Export " + w + " x " + h + " exceeds " + format + " limits (" + limit + " px/side" + (vector ? "" : ", " + pixels/1024/1024 + " MP") + ").");
         width = (int)w; height = (int)h;
     }
 
@@ -47,7 +51,7 @@ internal static class CartographyExporter
         string extension = format == CartographyExportFormat.Png ? ".png" : format == CartographyExportFormat.Svg ? ".svg" : format == CartographyExportFormat.Psd ? ".psd" : format == CartographyExportFormat.ImageMap ? ".json" : ".zip";
         if (!string.Equals(System.IO.Path.GetExtension(path), extension, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Choose a " + extension + " output path.");
-        Dimensions(document, scene, out int width, out int height);
+        Dimensions(document, scene, out int width, out int height, format);
         CartographyStorage.WriteAtomic(path, expectedHash, stream =>
         {
             if (format == CartographyExportFormat.Svg) WriteSvg(stream, document, scene, width, height);
@@ -64,9 +68,7 @@ internal static class CartographyExporter
                     // Numeric filenames are safe even for imported layer IDs and have a shared canvas.
                     ZipArchiveEntry entry = archive.CreateEntry((ordinal++).ToString("D3", CultureInfo.InvariantCulture) + ".png", CompressionLevel.Fastest);
                     using Stream target = entry.Open();
-                    using MemoryStream png = new(); // GDI+ PNG encoder requires a seekable stream.
-                    WritePng(png, document, scene, width, height, layer.Id);
-                    png.Position = 0; png.CopyTo(target);
+                    WritePng(target, document, scene, width, height, layer.Id);
                 }
                 using Stream manifest = archive.CreateEntry("layers.txt").Open();
                 using StreamWriter writer = new(manifest, new UTF8Encoding(false));
@@ -83,11 +85,10 @@ internal static class CartographyExporter
 
     private static void WritePng(Stream output, CartographyDocument document, CartographyScene scene, int width, int height, string layerId)
     {
-        using Bitmap bitmap = RenderBitmap(document, scene, width, height, layerId);
-        bitmap.Save(output, ImageFormat.Png);
+        CartographyPngEncoder.Write(output,width,height,(top,rows)=>RenderBitmap(document,scene,width,rows,layerId,top));
     }
 
-    internal static Bitmap RenderBitmap(CartographyDocument document, CartographyScene scene, int width, int height, string layerId)
+    internal static Bitmap RenderBitmap(CartographyDocument document, CartographyScene scene, int width, int height, string layerId, int pixelTop = 0)
     {
         Bitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
         using Graphics graphics = Graphics.FromImage(bitmap);
@@ -97,27 +98,22 @@ internal static class CartographyExporter
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         CartographyRect bounds = OutputBounds(document, scene);
         graphics.ScaleTransform(document.ExportScale, document.ExportScale);
-        graphics.TranslateTransform(-bounds.X, -bounds.Y);
+        graphics.TranslateTransform(-bounds.X, -bounds.Y - pixelTop/document.ExportScale);
+        var visible = new CartographyRect(bounds.X,bounds.Y+pixelTop/document.ExportScale,width/document.ExportScale,height/document.ExportScale).Inflate(2/document.ExportScale);
         foreach (CartographySceneNode node in scene.Nodes)
         {
-            if (layerId != null && node.LayerId != layerId) continue;
+            if (layerId != null && node.LayerId != layerId || !visible.Intersects(node.Bounds)) continue;
             foreach (CartographyPrimitive shape in node.Primitives)
             {
+                if(shape.GuideOnly)continue;
                 CartographyRect r = shape.Rect;
                 using SolidBrush brush = new(ToColor(shape.Color));
-                using Pen pen = new(brush, shape.Stroke) { DashStyle = shape.Dashed ? DashStyle.Dash : DashStyle.Solid };
+                using Pen pen = new(brush, shape.Stroke);
+                if(shape.Dashed){pen.DashPattern=new[]{shape.DashLength/shape.Stroke,shape.DashGap/shape.Stroke};pen.DashOffset=shape.DashOffset/shape.Stroke;}
                 switch (shape.Kind)
                 {
                     case CartographyPrimitiveKind.Image:
-                        using (Bitmap image = shape.Raster.Bitmap())
-                        using (ImageAttributes attributes = new())
-                        {
-                            ColorMatrix tint = new() { Matrix00 = (shape.Color >> 16 & 255) / 255f, Matrix11 = (shape.Color >> 8 & 255) / 255f, Matrix22 = (shape.Color & 255) / 255f, Matrix33 = (shape.Color >> 24) / 255f };
-                            attributes.SetColorMatrix(tint);
-                            graphics.InterpolationMode = shape.Text.Length > 0 ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
-                            graphics.PixelOffsetMode = PixelOffsetMode.Half;
-                            graphics.DrawImage(image, new[] { new PointF(r.X,r.Y), new PointF(r.Right,r.Y), new PointF(r.X,r.Bottom) }, new RectangleF(0,0,image.Width,image.Height), GraphicsUnit.Pixel, attributes);
-                        }
+                        DrawRasterBand(graphics, shape, bounds, document.ExportScale, width, height, pixelTop);
                         break;
                     case CartographyPrimitiveKind.Fill:
                         graphics.SmoothingMode = SmoothingMode.None;
@@ -140,6 +136,44 @@ internal static class CartographyExporter
             }
         }
         return bitmap;
+    }
+
+    private static void DrawRasterBand(Graphics graphics, CartographyPrimitive shape, CartographyRect bounds, float scale, int width, int height, int pixelTop)
+    {
+        CartographyRect r=shape.Rect;
+        int left=(int)Math.Round((r.X-bounds.X)*scale),top=(int)Math.Round((r.Y-bounds.Y)*scale);
+        int fullWidth=Math.Max(1,(int)Math.Round((r.Right-bounds.X)*scale)-left);
+        int fullHeight=Math.Max(1,(int)Math.Round((r.Bottom-bounds.Y)*scale)-top);
+        int x0=Math.Max(0,left),y0=Math.Max(pixelTop,top);
+        int x1=Math.Min(width,left+fullWidth),y1=Math.Min(pixelTop+height,top+fullHeight);
+        if(x1<=x0||y1<=y0)return;
+        // GDI+ scales a clipped DrawImage differently depending on the destination bitmap's
+        // height. Sample against full-image coordinates first, then composite at 1:1 so stripes
+        // cannot introduce seams, even at fractional export scales or with transparent sprites.
+        CartographyRaster raster=shape.Raster;
+        using Bitmap sampled=new(x1-x0,y1-y0,PixelFormat.Format32bppArgb);
+        BitmapData data=sampled.LockBits(new Rectangle(0,0,sampled.Width,sampled.Height),ImageLockMode.WriteOnly,PixelFormat.Format32bppArgb);
+        int[] row=new int[sampled.Width];
+        uint tint=shape.Color;
+        try
+        {
+            for(int y=y0;y<y1;y++)
+            {
+                int sy=Math.Min(raster.Height-1,(int)((y-top+.5)*raster.Height/fullHeight));
+                for(int x=x0;x<x1;x++)
+                {
+                    int sx=Math.Min(raster.Width-1,(int)((x-left+.5)*raster.Width/fullWidth));
+                    uint c=raster.Pixels[sy*raster.Width+sx];
+                    row[x-x0]=unchecked((int)(((c>>24)*(tint>>24)/255)<<24|((c>>16&255)*(tint>>16&255)/255)<<16|((c>>8&255)*(tint>>8&255)/255)<<8|(c&255)*(tint&255)/255));
+                }
+                Marshal.Copy(row,0,IntPtr.Add(data.Scan0,(y-y0)*data.Stride),row.Length);
+            }
+        }
+        finally{sampled.UnlockBits(data);}
+        GraphicsState state=graphics.Save();
+        graphics.ResetTransform();
+        graphics.DrawImageUnscaled(sampled,x0,y0-pixelTop);
+        graphics.Restore(state);
     }
 
     private static void WriteSvg(Stream output, CartographyDocument document, CartographyScene scene, int width, int height)
@@ -166,6 +200,7 @@ internal static class CartographyExporter
 
     private static void SvgPrimitive(XmlWriter xml, CartographyPrimitive shape, string font)
     {
+        if(shape.GuideOnly)return;
         if (shape.Kind == CartographyPrimitiveKind.Image)
         {
             xml.WriteStartElement("image", "http://www.w3.org/2000/svg");
@@ -183,7 +218,7 @@ internal static class CartographyExporter
         xml.WriteAttributeString(fill ? "fill" : "stroke", "#" + (shape.Color & 0xFFFFFF).ToString("X6", CultureInfo.InvariantCulture));
         Attr(xml, "opacity", (shape.Color >> 24) / 255f);
         if (!fill) { xml.WriteAttributeString("fill", "none"); Attr(xml, "stroke-width", shape.Stroke); }
-        if (shape.Dashed) xml.WriteAttributeString("stroke-dasharray", "6 4");
+        if (shape.Dashed) { xml.WriteAttributeString("stroke-dasharray", F(shape.DashLength)+" "+F(shape.DashGap)); Attr(xml,"stroke-dashoffset",-shape.DashOffset); }
         if (shape.Kind == CartographyPrimitiveKind.Line)
         { Attr(xml, "x1", r.X); Attr(xml, "y1", r.Y); Attr(xml, "x2", r.Right); Attr(xml, "y2", r.Bottom); }
         else if (shape.Kind == CartographyPrimitiveKind.Ellipse)

@@ -15,6 +15,8 @@ internal sealed class CartographyPrimitive
     internal float Size = 16;
     internal string Text = string.Empty;
     internal bool Dashed;
+    internal float DashLength = 6, DashGap = 4, DashOffset;
+    internal bool GuideOnly;
     internal CartographyRaster Raster;
 }
 
@@ -147,6 +149,9 @@ internal static class CartographySceneBuilder
             {
                 if(!IsVisible(document,author))continue;
                 CartographyItem item=Resolve(document,author);
+                if(item.Kind==CartographyItemKind.Marker && CartographyDrawing.SpriteName(item) is string spriteName &&
+                    spriteName.Length>0 && CartographyAssets.Sprite(spriteName)==null)
+                    warnings.Add(item.Id+": missing sprite '"+spriteName+"'");
                 source.Rooms.TryGetValue(item.Room,out CartographyRoomSource room);
                 if(item.Kind==CartographyItemKind.Connection)
                 {
@@ -225,11 +230,30 @@ internal static class CartographySceneBuilder
         else if(a.Route==CartographyRouteMode.VerticalFirst){float mid=(ay+by)/2;points.Add(new CartographyPoint{X=ax,Y=mid});points.Add(new CartographyPoint{X=bx,Y=mid});}
         points.Add(new CartographyPoint{X=bx,Y=by});
         List<CartographyPrimitive> shapes=new();float opacity=layer.Opacity*a.Opacity;bool ambiguous=!exactA||!exactB;
+        float phase=0;
         for(int n=1;n<points.Count;n++)
         {
             var p=points[n-1];var q=points[n];
-            if(a.Shade)shapes.Add(Line(p.X,p.Y,q.X,q.Y,Alpha(a.ShadeColor,opacity),item.Stroke+a.Outline*2));
-            shapes.Add(Line(p.X,p.Y,q.X,q.Y,Alpha(item.Color,opacity),item.Stroke,a.Dashed||ambiguous));
+            float dx=q.X-p.X,dy=q.Y-p.Y,length=(float)Math.Sqrt(dx*dx+dy*dy);
+            if(length<.001f)continue;
+            bool aligned=!ambiguous && (Math.Floor(p.X/TileSize)==Math.Floor(q.X/TileSize)||Math.Floor(p.Y/TileSize)==Math.Floor(q.Y/TileSize));
+            // Aligned pipes use Cornifer's alternating pixel pattern. Diagonal lines are
+            // editor guides; their geometry remains selectable but is excluded from export.
+            if(a.Shade)
+            {
+                var shadow=Line(p.X,p.Y,q.X,q.Y,Alpha(a.ShadeColor,opacity),item.Stroke+a.Outline*2,!aligned);
+                shadow.GuideOnly=!aligned; shadow.DashLength=8; shadow.DashGap=8;
+                shapes.Add(shadow);
+            }
+            float start=aligned&&n==1?Math.Min(length,2*TileSize):0;
+            float end=aligned&&n==points.Count-1?Math.Min(length-start,(a.WhiteRed?1:2)*TileSize):0;
+            if(length>start+end)
+            {
+                var line=Line(p.X+dx*start/length,p.Y+dy*start/length,q.X-dx*end/length,q.Y-dy*end/length,Alpha(item.Color,opacity),item.Stroke,true);
+                line.GuideOnly=!aligned; line.DashLength=aligned?TileSize:8; line.DashGap=line.DashLength;
+                line.DashOffset=aligned?phase:0; shapes.Add(line);
+            }
+            phase+=length-start-end;
         }
         if(a.WhiteRed)foreach(CartographyPoint p in new[]{points[0],points[points.Count-1]})shapes.Add(new CartographyPrimitive{Kind=CartographyPrimitiveKind.Fill,Rect=new CartographyRect(p.X-1.5f,p.Y-1.5f,3,3),Color=Alpha(0xFFFF3333,opacity)});
         return new CartographySceneNode{Id=item.Id,LayerId=layer.Id,Locked=layer.Locked,FromId=from.Id,ToId=to.Id,FromX=ax,FromY=ay,ToX=bx,ToY=by,LinkColor=item.Color,Ambiguous=ambiguous,Points=points.ToArray(),Primitives=shapes.ToArray(),Bounds=shapes.Select(p=>Normalized(p.Rect).Inflate(p.Stroke)).Aggregate(CartographyRect.Union)};

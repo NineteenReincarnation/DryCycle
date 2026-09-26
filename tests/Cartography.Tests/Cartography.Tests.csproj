@@ -7,6 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../src/DevUI/DevTool/Map/Cartography/Assets/*.png" LogicalName="DryCycle.Cartography.%(Filename)%(Extension)" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Xml.Linq" />

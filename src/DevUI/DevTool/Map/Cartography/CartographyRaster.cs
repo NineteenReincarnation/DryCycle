@@ -59,6 +59,7 @@ internal static class CartographyAssets
     internal static string[] IconNames => Sprites.Keys.OrderBy(n=>n).ToArray();
     internal static string[] FontNames => new[] { "Microsoft YaHei UI", "Arial", "Consolas" }.Concat(BitmapFonts.Keys).Concat(new InstalledFontCollection().Families.Select(f=>f.Name)).Distinct().OrderBy(n=>n).ToArray();
     internal static readonly ConcurrentDictionary<string, CartographyBitmapFont> BitmapFonts = new(StringComparer.OrdinalIgnoreCase);
+    static CartographyAssets() => CartographyIconCatalog.LoadEmbedded();
     internal static void Register(string name, CartographyRaster raster) => Sprites[name]=raster;
     internal static CartographyRaster Sprite(string name) => Sprites.TryGetValue(name??"",out CartographyRaster raster)?raster:null;
     internal static CartographyRaster Image(string base64) => Images.GetOrAdd(CartographyStorage.HashText(base64),_=>CartographyRaster.Decode(Convert.FromBase64String(base64)));
@@ -82,6 +83,7 @@ internal static class CartographyAssets
                 Register(Path.GetFileNameWithoutExtension(pair.Key),CartographyRaster.FromBitmap(crop));
             }
         }
+        CartographyIconCatalog.RegisterObjectSprites();
         string content=Path.Combine(directory,"Content");
         if(Directory.Exists(content)) foreach(string file in Directory.EnumerateFiles(content,"*.txt"))
             if(File.ReadLines(file).FirstOrDefault()?.StartsWith("texture ")==true) BitmapFonts[Path.GetFileNameWithoutExtension(file)]=CartographyBitmapFont.Load(file);

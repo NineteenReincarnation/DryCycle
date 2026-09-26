@@ -97,10 +97,6 @@ internal static partial class CartographyView
     }
 
     private static void LeaveDrafts() { CommitDraft(); CommitLayer(); SaveStyle(); FinishGesture(); }
-    private static void ExtraToolbar()
-    {
-        if(ImGui.Button(T("导出选区","Export area"))){CommitDraft();CancelRoute();tool=Tool.ExportArea;}
-    }
     private static void ExtendedItemInspector(CartographyPresentation snapshot)
     {
         var a=draft.Appearance;
@@ -220,12 +216,6 @@ internal static partial class CartographyView
             B("使用画布选区","Use selected area",ref o.ExportArea);
             Num.Vector4 r=new(o.AreaX,o.AreaY,o.AreaWidth,o.AreaHeight);
             if(ImGui.DragFloat4("X / Y / W / H",ref r,1)){o.AreaX=r.X;o.AreaY=r.Y;o.AreaWidth=Math.Max(1,r.Z);o.AreaHeight=Math.Max(1,r.W);styleDirty=true;}if(ImGui.IsItemDeactivatedAfterEdit())SaveStyle();
-        }
-        if(ImGui.CollapsingHeader(T("快捷键##AtlasKeys","KEYBINDINGS##AtlasKeys")))
-        {
-            void Key(string label,ref string value){if(ImGui.InputText(label,ref value,64))styleDirty=true;if(ImGui.IsItemDeactivatedAfterEdit())SaveStyle();}
-            Key(T("删除","Delete"),ref o.DeleteKey);Key(T("复制对象","Duplicate"),ref o.DuplicateKey);Key(T("复制","Copy"),ref o.CopyKey);Key(T("剪切","Cut"),ref o.CutKey);Key(T("粘贴","Paste"),ref o.PasteKey);
-            ImGui.TextWrapped(T("例如 Ctrl+D。保存 Ctrl+S、撤销 Ctrl+Z / Ctrl+Y 由编辑器统一管理。","Example: Ctrl+D. Save and Undo use the editor-wide Ctrl+S / Ctrl+Z / Ctrl+Y bindings."));
         }
         if(styleDirty)Stage(CartographyCommandKind.Style,"style",c=>c.Style=styleDraft);
     }

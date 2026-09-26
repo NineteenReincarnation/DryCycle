@@ -565,7 +565,7 @@ internal sealed class WorldMapConnectionResourceStore
                     int copies =
                         Math.Max(
                             1,
-                            attempts);
+                            (int)attempts);
 
                     for (int copy = 0;
                          copy < copies;

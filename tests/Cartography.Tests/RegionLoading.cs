@@ -90,13 +90,15 @@ internal static partial class Program
             Check(source.Rooms.Count > 20 && source.Rooms.Values.All(room => room.Ready), region + " actual room files all decode: " +
                 string.Join("; ", source.Rooms.Values.Where(room => !room.Ready).Select(room => room.Error)));
             var document = source.CreateDocument("real|" + region, region);
-            document.ExportScale = .25f;
+            document.ExportScale = 2;
             timer.Restart();
             var scene = CartographySceneBuilder.Build(document, source, new CartographySceneCache());
             long sceneTime = timer.ElapsedMilliseconds;
             Check(scene.Errors.Length == 0, region + " creates a complete scene from the actual installation.");
             string image = Path.Combine(output, region + "-game.png");
             var result = CartographyExporter.Export(document, scene, image, CartographyExportFormat.Png, CartographyStorage.HashFile(image));
+            using (var decoded = new System.Drawing.Bitmap(image))
+                Check(decoded.Width==result.Width && decoded.Height==result.Height, region+" full-size PNG decodes successfully.");
             Console.WriteLine(region + ": " + source.Rooms.Count + " rooms; cold=" + cold + " ms, warm=" + warmTime + " ms, scene=" + sceneTime + " ms; " + result.Width + "x" + result.Height);
         }
     }

@@ -18,7 +18,8 @@ internal static partial class Program
         Directory.CreateDirectory(output);
         try
         {
-            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity(); RouteGestures(); RegionLoading(); RuntimeLoading();
+            if (args.Length > 3) CartographyAssets.LoadDirectory(args[3]);
+            Authoring(); Persistence(); Rendering(); IncrementalScene(); Parity(); RouteGestures(); RegionLoading(); RuntimeLoading(); CartographyFixes();
             if (args.Length > 2 && args[1] == "--game") GameRegions(args[2]);
             else if (args.Length > 1) CorniferRegion(args[1]);
             Console.WriteLine("PASS: " + assertions + " assertions; production authoring / atomic persistence / PNG, SVG and layer export.");
@@ -95,7 +96,7 @@ internal static partial class Program
         CartographySource source = Source();
         CartographyDocument document = Annotated();
         CartographyScene scene = CartographySceneBuilder.Build(document, source);
-        Check(scene.Errors.Length == 0 && scene.Warnings.Length == 0, "Ready terrain and exact ports are exportable.");
+        Check(scene.Errors.Length == 0 && !scene.Warnings.Any(w=>w.Contains("unresolved port")), "Ready terrain and exact ports are exportable.");
         CartographySceneNode connection = scene.Nodes.First(node => node.FromId != null);
         Check(Math.Abs(connection.FromX - 28.5f) < .01f, "Room-local source port X is translated exactly once.");
         Check(Math.Abs(connection.FromY + 1.5f) < .01f, "Room-local source port Y flips only once.");
@@ -103,7 +104,7 @@ internal static partial class Program
         missingPort.Items.First(item => item.Kind == CartographyItemKind.Connection).Appearance.ToPort = 99;
         CartographyScene unresolved = CartographySceneBuilder.Build(missingPort, source);
         CartographySceneNode unresolvedLink = unresolved.Nodes.First(node => node.FromId != null);
-        Check(unresolved.Warnings.Length == 1 && unresolvedLink.Ambiguous && unresolvedLink.Primitives.Any(primitive => primitive.Dashed), "Unresolved authored endpoints must remain visibly approximate (outlines and endpoint markers are separate primitives).");
+        Check(unresolved.Warnings.Count(w=>w.Contains("unresolved port")) == 1 && unresolvedLink.Ambiguous && unresolvedLink.Primitives.Any(primitive => primitive.Dashed), "Unresolved authored endpoints must remain visibly approximate (outlines and endpoint markers are separate primitives).");
         source.Rooms["SU_A02"].Ready = false;
         CartographyScene incomplete = CartographySceneBuilder.Build(document, source);
         Check(incomplete.Errors.Length == 1, "Missing visible terrain is reported.");

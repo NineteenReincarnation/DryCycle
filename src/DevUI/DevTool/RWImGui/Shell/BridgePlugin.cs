@@ -882,7 +882,7 @@ internal static class DevToolFrontend
         Interlocked.Exchange(ref contextAttachedLogged, 0);
         Interlocked.Exchange(ref firstRenderLogged, 0);
         Interlocked.Exchange(ref drawFailureLogged, 0);
-        DevToolFontCatalog.ResetConsumerContextState();
+        // Input contexts share the native atlas; the catalog tracks the atlas's own lifetime.
         DevToolGlyphs.ResetCache();
     }
 

@@ -47,6 +47,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="DevUI/DevTool/Map/Cartography/Assets/*.png" LogicalName="DryCycle.Cartography.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="MantleCrab.Tests" />
     <InternalsVisibleTo Include="IteratorFramework.Tests" />
     <InternalsVisibleTo Include="LanceScavenger.Tests" />
