@@ -10,5 +10,7 @@
   <ItemGroup>
     <Compile Include="../../src/DevUI/DevTool/RWImGui/Pages/World/WorldMap/RetainedV2/Connections/WorldMapOrthogonalRouter.cs"
              Link="Production/WorldMapOrthogonalRouter.cs" />
+    <Compile Include="../../src/DevUI/DevTool/RWImGui/Pages/World/WorldMap/RetainedV2/Spatial/WorldMapRouteSpatialIndex.cs"
+             Link="Production/WorldMapRouteSpatialIndex.cs" />
   </ItemGroup>
 </Project>
