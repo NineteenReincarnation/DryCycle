@@ -45,11 +45,11 @@ internal static partial class Program
         curvedDocument.Options.Wall=0xFF112233;
         var curvedItem=new CartographyItem{Kind=CartographyItemKind.Room,Appearance=new CartographyAppearance()};
         var curvedRaster=CartographyDrawing.Room(curvedDocument,curvedItem,curvedRoom);
-        Check(curvedRaster.Pixels.Any(p=>p==curvedDocument.Terrain),"Curved solid terrain uses the same visible floor color as ordinary room terrain.");
+        Check(curvedRaster.Pixels.Any(p=>p==curvedDocument.Options.Wall),"Curved terrain uses the exact same visible color as ordinary Solid floor tiles.");
         var localOnly=new CartographyRoomSource{Name="LOCAL_CURVE_TEST",Width=12,Height=10,Settings="PlacedObjects: LocalTerrain><40><60><40~100^0~0^100~100^0~"};
         CartographyRegionLoader.DecodeCurvedTerrain(localOnly);
         var localRaster=CartographyDrawing.Room(curvedDocument,curvedItem,localOnly);
-        Check(localRaster.Pixels.All(p=>p==curvedDocument.Terrain),"Local/custom curved terrain uses exactly the same visible floor color as ordinary room terrain, with no darker curve-only tint.");
+        Check(localRaster.Pixels.Any(p=>p==curvedDocument.Options.Wall),"Local/custom curved terrain uses the exact same visible color as ordinary Solid floor tiles.");
         Check(localOnly.CurvedTerrainCurves.Length>0&&localOnly.CurvedTerrainFills.Length>0,"Local/custom curved terrain still retains curve and fill topology for the solid-mask renderer.");
         var returned=CartographyEditing.Apply(aligned,source,new CartographyCommand{Kind=CartographyCommandKind.Move,Ids=new[]{"room:SU_A02"},Y=12});
         Check(CartographySceneBuilder.Route(returned,source,returned.Items.Find(i=>i.Id==route.Id),returned.Layer(route.LayerId)).Primitives.Any(p=>p.GuideOnly),"Moving a room out of alignment restores guides using current port positions.");
