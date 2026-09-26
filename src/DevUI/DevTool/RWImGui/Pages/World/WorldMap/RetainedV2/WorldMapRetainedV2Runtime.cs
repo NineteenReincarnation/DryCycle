@@ -637,6 +637,22 @@ internal static class WorldMapRetainedV2Runtime
             "room resources: " + RoomResources.Count +
             " | thumbnails " + RoomResources.CommittedThumbnailCount +
             " | source-priority " + sourcePriorityRooms.Count);
+        ImGui.TextUnformatted(
+            "thumbnail source recovery: avg " +
+            MapRoomGeometryPresentationHub.SourceRecoveryAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            MapRoomGeometryPresentationHub.SourceRecoveryPeakMilliseconds.ToString("F2") +
+            " ms | completed " +
+            MapRoomGeometryPresentationHub.SourceRecoveryCompletedRooms +
+            " | retrying " +
+            MapRoomGeometryPresentationHub.SourceRecoveryBackoffCount);
+        ImGui.TextUnformatted(
+            "retained geometry builds: avg " +
+            RoomResources.GeometryBuildAverageMilliseconds.ToString("F2") +
+            " ms | peak " +
+            RoomResources.GeometryBuildPeakMilliseconds.ToString("F2") +
+            " ms | completed " +
+            RoomResources.GeometryBuildCount);
         ImGui.TextUnformatted("world-space routes: " + ConnectionResources.Count);
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
