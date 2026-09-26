@@ -185,6 +185,8 @@ internal sealed class WorldMapRoomResourceStore
                 Enqueue(roomIndex);
         }
 
+        UpdateThumbnailLoadExpected(scene.Rooms.Count);
+
         EditorMapRoomSnapshot[] snapshotRooms =
             snapshot.Rooms ?? Array.Empty<EditorMapRoomSnapshot>();
         if (!ReferenceEquals(auditRooms, snapshotRooms))
@@ -403,9 +405,24 @@ internal sealed class WorldMapRoomResourceStore
         thumbnailSessionCommitted = 0;
         thumbnailSessionPersistentHits = 0;
         thumbnailSessionLiveCommits = 0;
-        thumbnailSessionComplete = thumbnailSessionExpected == 0;
-        if (thumbnailSessionComplete)
-            thumbnailSessionCompletedTicks = thumbnailSessionStartedTicks;
+        // Initial retained deltas can arrive one frame before the full room set. Do not declare a
+        // zero-room snapshot complete; UpdateThumbnailLoadExpected can grow the target as the scene
+        // converges without losing the original cold/warm-start timestamp.
+        thumbnailSessionComplete = false;
+    }
+
+    private void UpdateThumbnailLoadExpected(int expectedRooms)
+    {
+        int next = Math.Max(0, expectedRooms);
+        if (next == thumbnailSessionExpected)
+            return;
+
+        thumbnailSessionExpected = next;
+        if (thumbnailSessionCommitted < thumbnailSessionExpected)
+        {
+            thumbnailSessionComplete = false;
+            thumbnailSessionCompletedTicks = 0L;
+        }
     }
 
     private void UpdateThumbnailLoadSession()
@@ -414,7 +431,8 @@ internal sealed class WorldMapRoomResourceStore
             thumbnailSessionComplete)
             return;
 
-        if (thumbnailSessionCommitted < thumbnailSessionExpected)
+        if (thumbnailSessionExpected <= 0 ||
+            thumbnailSessionCommitted < thumbnailSessionExpected)
             return;
 
         thumbnailSessionComplete = true;
