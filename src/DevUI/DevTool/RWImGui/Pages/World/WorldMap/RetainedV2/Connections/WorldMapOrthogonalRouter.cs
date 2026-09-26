@@ -202,6 +202,7 @@ internal static class WorldMapOrthogonalRouter
     private const float ParallelCongestionPenalty = 0.26f;
     private const int PreferredParallelCapacity = 8;
     private const float ParallelOverflowPenalty = 0.92f;
+    private const float DirectRouteCongestionLimit = 28f;
     private const float ProximityPenalty = 0.50f;
     private const float StabilityBonus = 0.22f;
     private const float SearchPadding = 150f;
@@ -389,6 +390,7 @@ internal static class WorldMapOrthogonalRouter
                 endEscape,
                 endBaseEscape,
                 obstacles,
+                occupancy,
                 out Num.Vector2[] compact))
         {
             return NewRoute(
@@ -401,9 +403,28 @@ internal static class WorldMapOrthogonalRouter
 
         if (CanUseBridge(request, startDirection, endDirection, startEscape, endEscape, obstacles))
         {
-            Num.Vector2[] bridge = BuildBridgePath(
-                request.Start, startBaseEscape, startEscape, endEscape, endBaseEscape, request.End);
-            return NewRoute(request, RouteKind.Bridge, Simplify(bridge), startDirection, endDirection);
+            Num.Vector2[] bridge =
+                Simplify(
+                    BuildBridgePath(
+                        request.Start,
+                        startBaseEscape,
+                        startEscape,
+                        endEscape,
+                        endBaseEscape,
+                        request.End));
+
+            if (RouteCongestionPenalty(
+                    bridge,
+                    occupancy) <=
+                DirectRouteCongestionLimit)
+            {
+                return NewRoute(
+                    request,
+                    RouteKind.Bridge,
+                    bridge,
+                    startDirection,
+                    endDirection);
+            }
         }
 
         if (TrySimpleOrthogonal(
@@ -412,6 +433,7 @@ internal static class WorldMapOrthogonalRouter
                 request.StartRoom,
                 request.EndRoom,
                 obstacles,
+                occupancy,
                 out Num.Vector2[] simple))
         {
             List<Num.Vector2> points = new(simple.Length + 6) { request.Start, startBaseEscape };
@@ -538,6 +560,7 @@ internal static class WorldMapOrthogonalRouter
         Num.Vector2 endEscape,
         Num.Vector2 endBaseEscape,
         List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
         out Num.Vector2[] route)
     {
         route = null;
@@ -654,9 +677,18 @@ internal static class WorldMapOrthogonalRouter
                     obstacles))
                 continue;
 
+            float congestion =
+                RouteCongestionPenalty(
+                    candidate,
+                    occupancy);
+            if (congestion >
+                DirectRouteCongestionLimit)
+                continue;
+
             float score =
                 PathLength(candidate) +
-                Math.Max(0, candidate.Length - 2) * CompactBendPenalty;
+                Math.Max(0, candidate.Length - 2) * CompactBendPenalty +
+                congestion;
             score += EndpointDirectionPenalty(
                 candidate,
                 startDirection,
@@ -945,40 +977,139 @@ internal static class WorldMapOrthogonalRouter
         int startRoom,
         int endRoom,
         List<Obstacle> obstacles,
+        Dictionary<long, Occupancy> occupancy,
         out Num.Vector2[] points)
     {
         points = null;
-        if (Math.Abs(start.X - end.X) < 0.5f || Math.Abs(start.Y - end.Y) < 0.5f)
+        List<Num.Vector2[]> candidates =
+            new(3);
+
+        if (Math.Abs(start.X - end.X) < 0.5f ||
+            Math.Abs(start.Y - end.Y) < 0.5f)
         {
-            if (!SegmentBlocked(start, end, startRoom, endRoom, obstacles))
+            if (!SegmentBlocked(
+                    start,
+                    end,
+                    startRoom,
+                    endRoom,
+                    obstacles))
             {
-                points = new[] { start, end };
-                return true;
+                candidates.Add(
+                    new[]
+                    {
+                        start,
+                        end
+                    });
             }
         }
 
-        Num.Vector2 hv = new(end.X, start.Y);
-        Num.Vector2 vh = new(start.X, end.Y);
-        bool hvClear = !SegmentBlocked(start, hv, startRoom, endRoom, obstacles) &&
-                       !SegmentBlocked(hv, end, startRoom, endRoom, obstacles);
-        bool vhClear = !SegmentBlocked(start, vh, startRoom, endRoom, obstacles) &&
-                       !SegmentBlocked(vh, end, startRoom, endRoom, obstacles);
+        Num.Vector2 hv =
+            new(
+                end.X,
+                start.Y);
+        Num.Vector2 vh =
+            new(
+                start.X,
+                end.Y);
 
-        if (!hvClear && !vhClear) return false;
-        if (hvClear && !vhClear)
+        bool hvClear =
+            !SegmentBlocked(
+                start,
+                hv,
+                startRoom,
+                endRoom,
+                obstacles) &&
+            !SegmentBlocked(
+                hv,
+                end,
+                startRoom,
+                endRoom,
+                obstacles);
+
+        bool vhClear =
+            !SegmentBlocked(
+                start,
+                vh,
+                startRoom,
+                endRoom,
+                obstacles) &&
+            !SegmentBlocked(
+                vh,
+                end,
+                startRoom,
+                endRoom,
+                obstacles);
+
+        if (hvClear)
         {
-            points = new[] { start, hv, end };
-            return true;
-        }
-        if (vhClear && !hvClear)
-        {
-            points = new[] { start, vh, end };
-            return true;
+            candidates.Add(
+                new[]
+                {
+                    start,
+                    hv,
+                    end
+                });
         }
 
-        float hvShape = Math.Abs(start.Y - end.Y) + Math.Abs(start.X - end.X) * 0.001f;
-        float vhShape = Math.Abs(start.X - end.X) + Math.Abs(start.Y - end.Y) * 0.001f;
-        points = hvShape <= vhShape ? new[] { start, hv, end } : new[] { start, vh, end };
+        if (vhClear)
+        {
+            candidates.Add(
+                new[]
+                {
+                    start,
+                    vh,
+                    end
+                });
+        }
+
+        float bestScore =
+            float.MaxValue;
+        Num.Vector2[] best =
+            null;
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            Num.Vector2[] candidate =
+                Simplify(
+                    candidates[i]);
+            if (candidate == null ||
+                candidate.Length < 2)
+                continue;
+
+            float congestion =
+                RouteCongestionPenalty(
+                    candidate,
+                    occupancy);
+
+            // A direct L/straight path is only preferred while the corridor still has useful visual
+            // capacity. Once crowded, hand control to the search router so it can choose a slightly
+            // longer independent corridor rather than stacking another centreline.
+            if (congestion >
+                DirectRouteCongestionLimit)
+                continue;
+
+            float score =
+                PathLength(candidate) +
+                Math.Max(
+                    0,
+                    candidate.Length - 2) *
+                BendPenalty +
+                congestion;
+
+            if (score >= bestScore)
+                continue;
+
+            bestScore =
+                score;
+            best =
+                candidate;
+        }
+
+        if (best == null)
+            return false;
+
+        points =
+            best;
         return true;
     }
 
@@ -1085,40 +1216,10 @@ internal static class WorldMapOrthogonalRouter
                             occupied.DirectionMask &
                             PerpendicularMask(direction));
 
-                    if (perpendicular != 0)
-                    {
-                        step +=
-                            CrossingPenalty *
-                            occupancyCount;
-                    }
-                    else
-                    {
-                        int preferred =
-                            Math.Min(
-                                occupancyCount,
-                                PreferredParallelCapacity);
-                        int overflow =
-                            Math.Max(
-                                0,
-                                occupancyCount -
-                                PreferredParallelCapacity);
-
-                        step +=
-                            ParallelCongestionPenalty *
-                            preferred;
-
-                        if (overflow > 0)
-                        {
-                            // Shared corridors are desirable until they can no longer present a
-                            // readable lane bank. Past that visual capacity, the cost rises
-                            // quadratically so a slightly longer independent corridor wins instead
-                            // of another line collapsing onto the same centreline.
-                            step +=
-                                ParallelOverflowPenalty *
-                                overflow *
-                                overflow;
-                        }
-                    }
+                    step +=
+                        OccupancyPenalty(
+                            occupied,
+                            direction);
                 }
 
                 if (stableCells.Contains(GridKey(nx, ny)))
@@ -1290,6 +1391,121 @@ internal static class WorldMapOrthogonalRouter
             best = candidate;
         }
         return best;
+    }
+
+    private static float RouteCongestionPenalty(
+        Num.Vector2[] points,
+        Dictionary<long, Occupancy> occupancy)
+    {
+        if (points == null ||
+            points.Length < 2 ||
+            occupancy == null ||
+            occupancy.Count == 0)
+            return 0f;
+
+        float penalty =
+            0f;
+        HashSet<long> sampled =
+            new();
+
+        for (int i = 0; i < points.Length - 1; i++)
+        {
+            Num.Vector2 a =
+                points[i];
+            Num.Vector2 b =
+                points[i + 1];
+            Num.Vector2 delta =
+                b - a;
+            float length =
+                delta.Length();
+
+            if (length < 1f)
+                continue;
+
+            int direction =
+                Math.Abs(delta.X) >=
+                Math.Abs(delta.Y)
+                    ? (delta.X >= 0f ? 0 : 2)
+                    : (delta.Y >= 0f ? 1 : 3);
+
+            int steps =
+                Math.Max(
+                    1,
+                    (int)Math.Ceiling(
+                        length / 18f));
+
+            for (int s = 0; s <= steps; s++)
+            {
+                Num.Vector2 point =
+                    Num.Vector2.Lerp(
+                        a,
+                        b,
+                        s / (float)steps);
+                long key =
+                    GridKey(
+                        (int)Math.Round(
+                            point.X / 18f),
+                        (int)Math.Round(
+                            point.Y / 18f));
+
+                if (!sampled.Add(key) ||
+                    !occupancy.TryGetValue(
+                        key,
+                        out Occupancy occupied))
+                    continue;
+
+                penalty +=
+                    OccupancyPenalty(
+                        occupied,
+                        direction);
+            }
+        }
+
+        return penalty;
+    }
+
+    private static float OccupancyPenalty(
+        Occupancy occupied,
+        int direction)
+    {
+        int occupancyCount =
+            Math.Max(
+                1,
+                (int)occupied.Count);
+        byte perpendicular =
+            (byte)(
+                occupied.DirectionMask &
+                PerpendicularMask(direction));
+
+        if (perpendicular != 0)
+        {
+            return CrossingPenalty *
+                   occupancyCount;
+        }
+
+        int preferred =
+            Math.Min(
+                occupancyCount,
+                PreferredParallelCapacity);
+        int overflow =
+            Math.Max(
+                0,
+                occupancyCount -
+                PreferredParallelCapacity);
+
+        float penalty =
+            ParallelCongestionPenalty *
+            preferred;
+
+        if (overflow > 0)
+        {
+            penalty +=
+                ParallelOverflowPenalty *
+                overflow *
+                overflow;
+        }
+
+        return penalty;
     }
 
     private static void RegisterOccupancy(Route route, Dictionary<long, Occupancy> occupancy)
