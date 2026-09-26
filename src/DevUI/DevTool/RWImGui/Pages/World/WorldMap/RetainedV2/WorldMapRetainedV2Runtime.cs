@@ -1023,6 +1023,14 @@ internal static class WorldMapRetainedV2Runtime
                     ? "OH/hidden catch-up"
                     : "OH/hidden maintenance"));
         ImGui.TextUnformatted(
+            "shortcut cadence: presentation every " +
+            WorldMapBackgroundSchedulingPolicy.ShortcutPrimeIntervalFrames(
+                CanvasVisible) +
+            "f | exact-file every " +
+            WorldMapBackgroundSchedulingPolicy.ExactShortcutIntervalFrames(
+                CanvasVisible) +
+            "f");
+        ImGui.TextUnformatted(
             "minimap readbacks: " +
             MapRoomGeometryPresentationHub.RasterReadbackCount +
             " | avg " +
