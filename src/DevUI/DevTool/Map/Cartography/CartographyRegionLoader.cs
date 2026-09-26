@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using DryCycle.DevUI.DevTool.World;
+using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map.Cartography;
 
@@ -118,9 +120,166 @@ internal static class CartographyRegionLoader
         room.Width = bake.Width; room.Height = bake.Height; room.Ready = true;
         room.Runs = bake.Runs.Select(r => new CartographyTileRun(r.X, r.Y, r.Length, (int)r.Kind, r.Water)).ToArray();
         room.Terrain = decoded.Tiles.Select(t => t.Terrain).ToArray();
+        DecodeCurvedTerrain(room);
         foreach (RoomMapNodeAnchorSnapshot port in bake.NodeAnchors) room.Ports[port.NodeIndex] = new CartographyRect(port.EntranceX, port.EntranceY, 0, 0);
         // Trace only genuine in-room passages; the compiler owns shortcut traversal/order.
         room.Shortcuts = RoomMapSemanticCompiler.TraceInternal(decoded).Select(path => path.Select(p => new CartographyPoint { X = p.X, Y = p.Y }).ToArray()).ToList();
+    }
+
+    /// <summary>
+    /// Rebuilds the authored continuous terrain stored in RoomSettings without creating a live Room.
+    /// The same semantic geometry compiler powers World Map, so TerrainHandle, LocalTerrain,
+    /// CurvedSlope and SuperSlope stay consistent across both map systems.
+    /// </summary>
+    internal static void DecodeCurvedTerrain(CartographyRoomSource room)
+    {
+        if (room == null || room.Width <= 0)
+            return;
+
+        List<PlacedObject> terrain =
+            ParseCurvedTerrainObjects(
+                room.Settings);
+
+        if (terrain.Count == 0)
+        {
+            room.CurvedTerrainFills =
+                Array.Empty<EditorMapRectSnapshot>();
+            room.CurvedTerrainCurves =
+                Array.Empty<EditorMapPolylineSnapshot>();
+            return;
+        }
+
+        MapRoomGeometryPresentationHub.BuildCurveGeometry(
+            terrain,
+            room.Width,
+            out List<EditorMapPolylineSnapshot> curves,
+            out List<EditorMapRectSnapshot> fills);
+
+        room.CurvedTerrainCurves =
+            curves.ToArray();
+        room.CurvedTerrainFills =
+            fills.ToArray();
+    }
+
+    private static List<PlacedObject> ParseCurvedTerrainObjects(
+        string settings)
+    {
+        List<PlacedObject> result =
+            new();
+
+        foreach (string line in Lines(settings))
+        {
+            if (!line.StartsWith(
+                    "PlacedObjects:",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string payload =
+                line.Substring(
+                    line.IndexOf(':') + 1);
+
+            foreach (string value in payload.Split(','))
+            {
+                string[] parts =
+                    value.Trim().Split(
+                        new[] { "><" },
+                        StringSplitOptions.None);
+
+                if (parts.Length < 3 ||
+                    !TryCurvedTerrainType(
+                        parts[0],
+                        out PlacedObject.Type type) ||
+                    !float.TryParse(
+                        parts[1],
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out float x) ||
+                    !float.TryParse(
+                        parts[2],
+                        NumberStyles.Float,
+                        CultureInfo.InvariantCulture,
+                        out float y))
+                    continue;
+
+                try
+                {
+                    PlacedObject placed =
+                        new(
+                            type,
+                            null)
+                        {
+                            pos =
+                                new Vector2(
+                                    x,
+                                    y)
+                        };
+
+                    if (parts.Length > 3 &&
+                        placed.data != null)
+                    {
+                        placed.data.FromString(
+                            parts[3]);
+                    }
+
+                    result.Add(
+                        placed);
+                }
+                catch
+                {
+                    // One malformed authored object must not suppress the rest of the room map.
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryCurvedTerrainType(
+        string value,
+        out PlacedObject.Type type)
+    {
+        value =
+            value?.Trim() ??
+            string.Empty;
+
+        if (value.Equals(
+                PlacedObject.Type.TerrainHandle.value,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            type =
+                PlacedObject.Type.TerrainHandle;
+            return true;
+        }
+
+        if (value.Equals(
+                PlacedObject.Type.LocalTerrain.value,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            type =
+                PlacedObject.Type.LocalTerrain;
+            return true;
+        }
+
+        if (value.Equals(
+                PlacedObject.Type.CurvedSlope.value,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            type =
+                PlacedObject.Type.CurvedSlope;
+            return true;
+        }
+
+        if (value.Equals(
+                PlacedObject.Type.SuperSlope.value,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            type =
+                PlacedObject.Type.SuperSlope;
+            return true;
+        }
+
+        type = null;
+        return false;
     }
 
     private static void SeedDecorations(CartographySource source, CartographyRoomSource room, string region, string locks, string campaign)
