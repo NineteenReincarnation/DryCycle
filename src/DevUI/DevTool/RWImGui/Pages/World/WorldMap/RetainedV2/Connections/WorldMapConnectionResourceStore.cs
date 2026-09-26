@@ -39,6 +39,7 @@ internal sealed class WorldMapConnectionResourceStore
     private readonly HashSet<string> routeChanged = new(StringComparer.Ordinal);
     private readonly List<WorldMapScene.ConnectionNode> buildBatch = new();
     private readonly List<System.Numerics.Vector2[]> routeOccupancySeeds = new();
+    private readonly List<System.Numerics.Vector2[]> routeAvoidanceSeeds = new();
     private readonly HashSet<string> corridorRerouteAttempted =
         new(StringComparer.Ordinal);
     private readonly Dictionary<int, WorldMapOrthogonalRouter.Obstacle> routingObstacles =
@@ -284,7 +285,8 @@ internal sealed class WorldMapConnectionResourceStore
                     laneOffsets,
                     terminalFanouts,
                     GetRoutingObstacleSnapshot(),
-                    routeOccupancySeeds);
+                    routeOccupancySeeds,
+                    routeAvoidanceSeeds);
         }
 
         for (int i = 0; i < buildBatch.Count; i++)
@@ -328,6 +330,7 @@ internal sealed class WorldMapConnectionResourceStore
         routeChanged.Clear();
         buildBatch.Clear();
         routeOccupancySeeds.Clear();
+        routeAvoidanceSeeds.Clear();
         corridorRerouteAttempted.Clear();
         routingObstacles.Clear();
         routingObstacleSnapshot.Clear();
@@ -496,6 +499,7 @@ internal sealed class WorldMapConnectionResourceStore
     private void BuildRouteOccupancySeeds()
     {
         routeOccupancySeeds.Clear();
+        routeAvoidanceSeeds.Clear();
 
         if (routes.Count == 0)
             return;
@@ -515,9 +519,6 @@ internal sealed class WorldMapConnectionResourceStore
         foreach (KeyValuePair<string, ConnectionRouteResource> pair
                  in routes)
         {
-            if (rebuilding.Contains(pair.Key))
-                continue;
-
             ConnectionRouteResource route =
                 pair.Value;
             System.Numerics.Vector2[] points =
@@ -530,7 +531,24 @@ internal sealed class WorldMapConnectionResourceStore
                 points.Length < 2)
                 continue;
 
-            routeOccupancySeeds.Add(points);
+            if (rebuilding.Contains(pair.Key))
+            {
+                // A route that collapsed its lane bank gets one bounded retry. Its previous base
+                // corridor is supplied as strong soft avoidance rather than as a hard obstacle, so
+                // the router actively searches another corridor but can still fall back here if no
+                // valid alternative exists.
+                if (corridorRerouteAttempted.Contains(
+                        pair.Key))
+                {
+                    routeAvoidanceSeeds.Add(
+                        points);
+                }
+
+                continue;
+            }
+
+            routeOccupancySeeds.Add(
+                points);
         }
     }
 
