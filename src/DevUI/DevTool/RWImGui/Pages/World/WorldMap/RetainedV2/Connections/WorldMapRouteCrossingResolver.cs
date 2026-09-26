@@ -75,6 +75,52 @@ internal static class WorldMapRouteCrossingResolver
         internal readonly List<SegmentRef> Horizontals = new();
     }
 
+    private readonly struct CrossingKey : IEquatable<CrossingKey>
+    {
+        internal CrossingKey(string routeA, string routeB, Num.Vector2 point)
+        {
+            if (string.CompareOrdinal(routeA, routeB) <= 0)
+            {
+                RouteA = routeA ?? string.Empty;
+                RouteB = routeB ?? string.Empty;
+            }
+            else
+            {
+                RouteA = routeB ?? string.Empty;
+                RouteB = routeA ?? string.Empty;
+            }
+
+            X = (int)Math.Round(point.X * 4f);
+            Y = (int)Math.Round(point.Y * 4f);
+        }
+
+        private string RouteA { get; }
+        private string RouteB { get; }
+        private int X { get; }
+        private int Y { get; }
+
+        public bool Equals(CrossingKey other) =>
+            X == other.X &&
+            Y == other.Y &&
+            string.Equals(RouteA, other.RouteA, StringComparison.Ordinal) &&
+            string.Equals(RouteB, other.RouteB, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) =>
+            obj is CrossingKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = RouteA?.GetHashCode() ?? 0;
+                hash = (hash * 397) ^ (RouteB?.GetHashCode() ?? 0);
+                hash = (hash * 397) ^ X;
+                hash = (hash * 397) ^ Y;
+                return hash;
+            }
+        }
+    }
+
     private const float CellSize = 96f;
     private const float AxisEpsilon = 0.01f;
     private const float BridgeShoulder = 13f;
@@ -160,6 +206,7 @@ internal static class WorldMapRouteCrossingResolver
             return WorldMapCrossingResolveResult.Empty;
 
         HashSet<long> checkedPairs = new();
+        HashSet<CrossingKey> emittedCrossings = new();
         List<WorldMapCrossingMark> marks = new();
         List<WorldMapCrossingMark> localMarks = new();
         bool budgetLimited = false;
@@ -236,15 +283,37 @@ internal static class WorldMapRouteCrossingResolver
                     if (!TryCross(
                             vertical,
                             horizontal,
-                            out Num.Vector2 point))
+                            out Num.Vector2 point,
+                            out bool verticalCanBridge,
+                            out bool horizontalCanBridge))
+                        continue;
+
+                    CrossingKey crossingKey =
+                        new(
+                            vertical.RouteId,
+                            horizontal.RouteId,
+                            point);
+                    if (!emittedCrossings.Add(crossingKey))
                         continue;
 
                     SegmentRef over;
                     SegmentRef under;
 
-                    if (string.CompareOrdinal(
-                            vertical.RouteId,
-                            horizontal.RouteId) >= 0)
+                    // If the intersection lands on an internal bend/end of one segment, put the
+                    // bridge on the route that actually has shoulders on both sides. This converts
+                    // the old fake T-junction into an explicit "passes over" crossing.
+                    if (verticalCanBridge != horizontalCanBridge)
+                    {
+                        over = verticalCanBridge
+                            ? vertical
+                            : horizontal;
+                        under = verticalCanBridge
+                            ? horizontal
+                            : vertical;
+                    }
+                    else if (string.CompareOrdinal(
+                                 vertical.RouteId,
+                                 horizontal.RouteId) >= 0)
                     {
                         over = vertical;
                         under = horizontal;
@@ -422,21 +491,24 @@ internal static class WorldMapRouteCrossingResolver
     private static bool TryCross(
         SegmentRef vertical,
         SegmentRef horizontal,
-        out Num.Vector2 point)
+        out Num.Vector2 point,
+        out bool verticalCanBridge,
+        out bool horizontalCanBridge)
     {
         point =
             new Num.Vector2(
                 vertical.Fixed,
                 horizontal.Fixed);
+        verticalCanBridge = false;
+        horizontalCanBridge = false;
 
-        if (point.Y <=
-                vertical.Min + BridgeShoulder ||
-            point.Y >=
-                vertical.Max - BridgeShoulder ||
-            point.X <=
-                horizontal.Min + BridgeShoulder ||
-            point.X >=
-                horizontal.Max - BridgeShoulder)
+        // Accept endpoint-touch intersections as well as strict interior crossings. Internal route
+        // bends are not topology nodes between different connections; rejecting them here made a
+        // perpendicular route appear to terminate into another route as a false T-junction.
+        if (point.Y < vertical.Min - AxisEpsilon ||
+            point.Y > vertical.Max + AxisEpsilon ||
+            point.X < horizontal.Min - AxisEpsilon ||
+            point.X > horizontal.Max + AxisEpsilon)
             return false;
 
         float endpointClearanceSquared =
@@ -453,7 +525,37 @@ internal static class WorldMapRouteCrossingResolver
                 endpointClearanceSquared))
             return false;
 
-        return true;
+        verticalCanBridge =
+            HasBridgeShoulders(
+                vertical,
+                point);
+        horizontalCanBridge =
+            HasBridgeShoulders(
+                horizontal,
+                point);
+
+        // The bridge renderer needs one route with enough straight run on both sides. If both
+        // segments terminate exactly at this internal point, corridor/lane separation remains the
+        // safer representation than inventing an arc with no shoulders.
+        return verticalCanBridge ||
+               horizontalCanBridge;
+    }
+
+    private static bool HasBridgeShoulders(
+        SegmentRef segment,
+        Num.Vector2 point)
+    {
+        float along =
+            segment.Vertical
+                ? point.Y
+                : point.X;
+
+        return along >=
+                   segment.Min +
+                   BridgeShoulder &&
+               along <=
+                   segment.Max -
+                   BridgeShoulder;
     }
 
     private static bool NearRouteEndpoint(
