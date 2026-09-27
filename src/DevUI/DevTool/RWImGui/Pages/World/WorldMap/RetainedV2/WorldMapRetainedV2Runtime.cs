@@ -966,17 +966,16 @@ internal static class WorldMapRetainedV2Runtime
                Stopwatch.Frequency;
     }
 
-    internal static void DrawToolbarDiagnostics()
+    internal static void DrawDebugPanel()
     {
-        ImGui.SameLine(0f, 12f);
-        ImGui.TextDisabled(
-            "| WorldMap retained " +
-            RenderSceneState.Rooms.Count + "/" +
-            RenderSceneState.Connections.Count);
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T(
+                    "世界地图 Retained / 缓存",
+                    "WORLD MAP RETAINED / CACHE") +
+                "##WorldMapRetainedDiagnostics",
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return;
 
-        if (!ImGui.IsItemHovered()) return;
-
-        ImGui.BeginTooltip();
         ImGui.TextUnformatted("World Map Retained V2 | hardened + cache V3");
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
@@ -1184,6 +1183,6 @@ internal static class WorldMapRetainedV2Runtime
         ImGui.TextUnformatted("scene delta backlog: " + SceneTransfer.PendingCount);
         ImGui.TextUnformatted("last scene dirty count: " + lastDirty.ChangeCount);
         ImGui.TextDisabled("pan/zoom changes only the view revision");
-        ImGui.EndTooltip();
     }
+
 }
