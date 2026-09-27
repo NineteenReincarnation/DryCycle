@@ -320,7 +320,7 @@ if 'DrawResidentInspector(snapshot, selected, display);' not in workspace:
     raise SystemExit("Trigger Inspector must remain resident even while Scene is visible.")
 if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
     raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
-if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV4' not in workspace:
+if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV5' not in workspace:
     raise SystemExit("Trigger Scene/Inspector must use the movable lower-right window identities.")
 scene_start = workspace.find('private static void DrawCompactScene')
 scene_end = workspace.find('private static void DrawResidentInspector', scene_start)
@@ -333,8 +333,12 @@ if 'advancedInspectorOpen' in workspace or 'DrawAdvancedInspector' in workspace 
     raise SystemExit("Trigger workspace must remain single-inspector; Advanced mode must not return.")
 if 'ImGuiWindowFlags.AlwaysAutoResize' in workspace[inspector_start:]:
     raise SystemExit("Trigger Inspector must stay manually resizable; AlwaysAutoResize must not return.")
-if 'TriggerInspectorResidentV4' not in workspace or '"TriggerInspectorResidentV4"' not in workspace:
-    raise SystemExit("Trigger Inspector must use the resizable/persisted V4 geometry identity.")
+if 'TriggerInspectorResidentV5' not in workspace or '"TriggerInspectorResidentV5"' not in workspace:
+    raise SystemExit("Trigger Inspector must use the resizable/persisted V5 geometry identity.")
+if 'new Num.Vector2(335f, 260f)' not in workspace:
+    raise SystemExit("Trigger Inspector minimum width must remain large enough to show field labels fully.")
+if 'Math.Min(\n                380f' not in workspace or 'Math.Max(\n                    350f' not in workspace:
+    raise SystemExit("Trigger Inspector compact default width must remain within the readable 350-380 px range.")
 if 'TriggerEditorKeys.Name' not in view or 'trigger.Name + "  ["' not in view:
     raise SystemExit("Trigger inspector/scene list must expose custom names.")
 if 'SPOT AREA' in view or 'DevToolUiSettings.T("区域", "SPOT AREA")' in view:
