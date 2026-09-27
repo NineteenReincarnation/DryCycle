@@ -318,6 +318,22 @@ if 'private static bool scenePanelOpen = true;' not in workspace:
     raise SystemExit("Trigger Scene must default visible in the canvas-first workspace.")
 if 'DrawResidentInspector(snapshot, selected, display);' not in workspace:
     raise SystemExit("Trigger Inspector must remain resident even while Scene is visible.")
+
+scene_list_start = workspace.find('private static void DrawCompactScene')
+scene_list_end = workspace.find('private static void DrawResidentInspector', scene_list_start)
+if scene_list_start < 0 or scene_list_end < 0:
+    raise SystemExit("Could not isolate compact Trigger Scene list.")
+scene_list = workspace[scene_list_start:scene_list_end]
+if 'DrawSceneCategory(' not in scene_list or 'ImGui.CollapsingHeader(' not in scene_list:
+    raise SystemExit("Trigger Scene must remain grouped into collapsible type categories.")
+if 'snapshot.TriggerTypes ?? Array.Empty<string>()' not in scene_list:
+    raise SystemExit("Trigger Scene category order must follow the Trigger type catalog.")
+if 'visibleLabel =\n                string.IsNullOrWhiteSpace(trigger.Name)' not in scene_list:
+    raise SystemExit("Trigger Scene category rows must use authored names with a clear unnamed fallback.")
+if 'projectedSceneLabels[i]' in scene_list:
+    raise SystemExit("Compact Trigger Scene must not regress to the old flat projected-label list.")
+if 'No matching triggers.' not in scene_list or '没有匹配的触发器。' not in scene_list:
+    raise SystemExit("Grouped Trigger Scene must preserve clear empty-search feedback.")
 if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
     raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
 if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV5' not in workspace:
