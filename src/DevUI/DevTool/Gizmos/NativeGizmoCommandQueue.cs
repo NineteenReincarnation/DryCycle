@@ -184,7 +184,7 @@ public static class NativeGizmoCommandQueue
             NativeGizmoTargetKind.SoundRadius => SetSoundRadius(session, command.Index, command.X),
             NativeGizmoTargetKind.SoundDirection => SetSoundDirection(session, command.Index, command.X, command.Y),
             NativeGizmoTargetKind.TriggerPosition => SetTriggerPosition(session, command.Index, command.X, command.Y),
-            NativeGizmoTargetKind.TriggerRadius => SetTriggerRadius(session, command.Index, command.X),
+            NativeGizmoTargetKind.TriggerRadius => SetTriggerRadius(session, command.Index, command.X, command.Y),
             _ => false
         };
 
@@ -249,16 +249,30 @@ public static class NativeGizmoCommandQueue
         return true;
     }
 
-    private static bool SetTriggerRadius(EditorSession session, int index, float radius)
+    private static bool SetTriggerRadius(
+        EditorSession session,
+        int index,
+        float handleX,
+        float handleY)
     {
-        if (TriggerAt(session, index) is not SpotTrigger trigger) return false;
-        float next = Mathf.Max(0f, radius);
-        if (Mathf.Approximately(trigger.rad, next)) return false;
-        Vector2 direction = trigger.radHandlePosition.sqrMagnitude > 0.0001f
-            ? trigger.radHandlePosition.normalized
-            : Vector2.right;
-        trigger.rad = next;
-        trigger.radHandlePosition = direction * next;
+        if (TriggerAt(session, index) is not SpotTrigger trigger)
+            return false;
+
+        Vector2 handle =
+            new(handleX, handleY);
+        float radius =
+            handle.magnitude;
+
+        if (Mathf.Approximately(trigger.rad, radius) &&
+            (trigger.radHandlePosition - handle).sqrMagnitude <= 0.000001f)
+            return false;
+
+        // Preserve the full authored handle vector. Its magnitude is the radius and its direction
+        // is the 360-degree gizmo angle, matching Rain World's SpotTrigger model.
+        trigger.rad =
+            radius;
+        trigger.radHandlePosition =
+            handle;
         return true;
     }
 
