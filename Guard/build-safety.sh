@@ -208,6 +208,10 @@ if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
     raise SystemExit("Trigger must not recreate a private top command-bar window.")
 if 'ImGui.BeginPopup("##TriggerAddPopup")' not in workspace or 'ImGui.CloseCurrentPopup()' not in workspace:
     raise SystemExit("Trigger Add must remain a compact popup menu attached to the shared top bar.")
+if 'new Num.Vector2(245f, 0f)' not in workspace or 'new Num.Vector2(390f, 760f)' not in workspace:
+    raise SystemExit("Trigger Add popup must remain large enough to read the complete type catalog comfortably.")
+if 'new Num.Vector2(285f, 0f)' not in workspace or 'new Num.Vector2(430f, 300f)' not in workspace:
+    raise SystemExit("Trigger naming confirmation popup must retain its enlarged readable bounds.")
 add_start = workspace.find('private static void DrawAddPopup')
 confirm_start = workspace.find('private static void DrawCreateConfirmPopup', add_start)
 scene_start = workspace.find('private static void DrawCompactScene', confirm_start)
@@ -282,6 +286,8 @@ if '(display.X - windowSize.X) * 0.5f' not in top or '6f));' not in top:
     raise SystemExit("Shared top status must remain locked to the physical screen top-center.")
 if 'DevToolWidgets.CenteredPrimaryTitle' not in top or '1.68f' not in top:
     raise SystemExit("Shared top status must retain the enlarged primary gold title treatment.")
+if 'new Num.Vector2(13f, 9f)' not in top or 'ImGui.SetWindowFontScale(1.14f)' not in top:
+    raise SystemExit("Shared top status must keep its enlarged padding and readable action row.")
 if 'page?.HasTopControls == true' not in top or 'page.DrawTopControls(snapshot)' not in top:
     raise SystemExit("Shared top status must host the active page's optional special controls.")
 if 'devToolsLabel.isVisible' not in label or 'newUiOwnsStatus' not in label:
