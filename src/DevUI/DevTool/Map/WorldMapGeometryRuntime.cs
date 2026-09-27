@@ -1309,18 +1309,30 @@ internal static partial class MapRoomGeometryPresentationHub
         float roomWidthPixels = Math.Max(PixelsPerTile, roomWidthTiles * PixelsPerTile);
         int sampleCount = Mathf.Clamp(Mathf.CeilToInt(roomWidthPixels / 10f) + 1, 16, MaxCurveSamples);
         List<EditorMapPointSnapshot> surface = new(sampleCount);
+        List<EditorMapPointSnapshot> back = new(sampleCount);
         int handle = 0;
         for (int i = 0; i < sampleCount; i++)
         {
             float x = Mathf.Lerp(0f, roomWidthPixels, (float)i / (sampleCount - 1));
             while (handle < handles.Count - 2 && handles[handle + 1].Middle.x < x) handle++;
+
             float y = TerrainCurve.Handle.Sample(handles[handle], handles[handle + 1], x);
-            if (float.IsNaN(y) || float.IsInfinity(y)) continue;
+            float backY = TerrainCurve.Handle.SampleBack(handles[handle], handles[handle + 1], x);
+            if (float.IsNaN(y) || float.IsInfinity(y) ||
+                float.IsNaN(backY) || float.IsInfinity(backY))
+                continue;
+
             surface.Add(new EditorMapPointSnapshot(x / PixelsPerTile, y / PixelsPerTile));
+            back.Add(new EditorMapPointSnapshot(x / PixelsPerTile, backY / PixelsPerTile));
         }
 
-        if (surface.Count < 2) return;
-        AddFlatFillRuns(fills, surface, 0f, EditorMapGeometryKind.Solid);
+        if (surface.Count < 2 || back.Count != surface.Count) return;
+
+        // World Map only needs the authored curved surface itself. Filling TerrainHandle all the
+        // way to the room floor turns a curve into a room-wide black slab and was the source of
+        // the long protruding silhouettes around curved rooms. Preserve the real front/back strip
+        // used by TerrainCurve instead.
+        AddPairedFillRuns(curves, fills, surface, back, EditorMapGeometryKind.Solid);
         AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
     }
 
@@ -1339,7 +1351,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (surface.Count < 2) return;
 
         float bottomY = (origin.y - Math.Max(1f, depthPixels)) / PixelsPerTile;
-        AddFlatFillRuns(fills, surface, bottomY, fillKind);
+        AddFlatFillRuns(curves, fills, surface, bottomY, fillKind);
         AddSurfaceCurve(curves, surface, lineKind);
     }
 
@@ -1362,7 +1374,7 @@ internal static partial class MapRoomGeometryPresentationHub
         for (int i = 0; i < surface.Count; i++)
             back.Add(new EditorMapPointSnapshot(surface[i].X, surface[i].Y - thicknessTiles));
 
-        AddPairedFillRuns(fills, surface, back, fillKind);
+        AddPairedFillRuns(curves, fills, surface, back, fillKind);
         AddSurfaceCurve(curves, surface, lineKind);
     }
 
@@ -1394,7 +1406,7 @@ internal static partial class MapRoomGeometryPresentationHub
             back.Add(new EditorMapPointSnapshot(top.X, top.Y - thicknessTiles));
         }
 
-        AddPairedFillRuns(fills, surface, back, EditorMapGeometryKind.Solid);
+        AddPairedFillRuns(curves, fills, surface, back, EditorMapGeometryKind.Solid);
         AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
     }
 
@@ -1436,6 +1448,7 @@ internal static partial class MapRoomGeometryPresentationHub
     }
 
     private static void AddFlatFillRuns(
+        List<EditorMapPolylineSnapshot> geometry,
         List<EditorMapRectSnapshot> output,
         List<EditorMapPointSnapshot> surface,
         float bottomY,
@@ -1445,11 +1458,16 @@ internal static partial class MapRoomGeometryPresentationHub
         {
             EditorMapPointSnapshot a = surface[i];
             EditorMapPointSnapshot b = surface[i + 1];
+            EditorMapPointSnapshot c = new(a.X, bottomY);
+            EditorMapPointSnapshot d = new(b.X, bottomY);
+
+            AddFillQuad(geometry, a, b, d, c, kind);
             AddFillRun(output, a.X, b.X, a.Y, b.Y, bottomY, bottomY, kind);
         }
     }
 
     private static void AddPairedFillRuns(
+        List<EditorMapPolylineSnapshot> geometry,
         List<EditorMapRectSnapshot> output,
         List<EditorMapPointSnapshot> front,
         List<EditorMapPointSnapshot> back,
@@ -1462,8 +1480,37 @@ internal static partial class MapRoomGeometryPresentationHub
             EditorMapPointSnapshot b = front[i + 1];
             EditorMapPointSnapshot c = back[i];
             EditorMapPointSnapshot d = back[i + 1];
+
+            AddFillQuad(geometry, a, b, d, c, kind);
             AddFillRun(output, a.X, b.X, a.Y, b.Y, c.Y, d.Y, kind);
         }
+    }
+
+    private static void AddFillQuad(
+        List<EditorMapPolylineSnapshot> output,
+        EditorMapPointSnapshot a,
+        EditorMapPointSnapshot b,
+        EditorMapPointSnapshot c,
+        EditorMapPointSnapshot d,
+        EditorMapGeometryKind kind)
+    {
+        if (output == null)
+            return;
+
+        float twiceArea =
+            a.X * b.Y - a.Y * b.X +
+            b.X * c.Y - b.Y * c.X +
+            c.X * d.Y - c.Y * d.X +
+            d.X * a.Y - d.Y * a.X;
+        if (Math.Abs(twiceArea) < 0.0005f)
+            return;
+
+        output.Add(new EditorMapPolylineSnapshot
+        {
+            Kind = kind,
+            Closed = true,
+            Points = new[] { a, b, c, d }
+        });
     }
 
     private static void AddFillRun(
@@ -1670,7 +1717,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 DetailedRasterAvailable = entry.RasterInitialized || entry.TerrainFillRuns.Length > 0,
                 WidthTiles = Math.Max(1f, entry.WidthTiles),
                 HeightTiles = Math.Max(1f, entry.HeightTiles),
-                RasterRuns = MergeRuns(entry.BaseRasterRuns, entry.TerrainFillRuns),
+                RasterRuns = entry.BaseRasterRuns ?? Array.Empty<EditorMapRectSnapshot>(),
                 TerrainRuns = CompactRasterRuns(entry.TerrainFillRuns ?? Array.Empty<EditorMapRectSnapshot>()),
                 Curves = entry.Curves,
                 Nodes = entry.Nodes
