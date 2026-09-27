@@ -54,8 +54,13 @@ internal static class DevToolOverlay
             }
         }
 
-        // Control Center and the collapsed shortcut orb are shared editor chrome rather than page content.
+        // Control Center, the compact top status surface and the collapsed shortcut orb are
+        // shared editor chrome rather than page content.
         ControlCenterWindow.Draw(snapshot, display);
+        DevToolTopStatusWindow.Draw(
+            snapshot,
+            page,
+            display);
         ShortcutWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
