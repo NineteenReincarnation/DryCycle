@@ -151,9 +151,6 @@ internal static partial class TriggerEditorView
         if (!ImGui.BeginPopup("##TriggerAddPopup"))
             return;
 
-        if (ImGui.IsWindowAppearing())
-            ImGui.SetKeyboardFocusHere();
-
         ImGui.SetNextItemWidth(
             Math.Max(
                 170f,
