@@ -83,7 +83,7 @@ internal static class WorldMapOrthogonalRouter
         internal bool Reused;
     }
 
-    private sealed class CachedRoute
+    internal sealed class CachedRoute
     {
         internal Route Route;
         internal Num.Vector2 Start;
@@ -227,8 +227,12 @@ internal static class WorldMapOrthogonalRouter
     private const float CongestionRerouteSearchPadding = 240f;
     private const int MaxGridExtent = 112;
 
-    private static readonly Dictionary<string, CachedRoute> cache = new(StringComparer.Ordinal);
-    private static int generation;
+    internal sealed class CacheContext
+    {
+        internal readonly Dictionary<string, CachedRoute> Routes = new(StringComparer.Ordinal);
+        internal int Generation;
+    }
+    private static readonly CacheContext defaultContext = new();
 
     internal static Route[] BuildRoutes(IReadOnlyList<Request> requests, IReadOnlyList<Obstacle> sourceObstacles) =>
         BuildRoutesCore(requests, sourceObstacles);
@@ -244,12 +248,23 @@ internal static class WorldMapOrthogonalRouter
         IReadOnlyList<Obstacle> sourceObstacles,
         bool sourceObstaclesAlreadyInflated = false,
         IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null,
-        IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null)
+        IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null) =>
+        BuildRoutesWithContext(requests, sourceObstacles, sourceObstaclesAlreadyInflated, occupancySeedPaths, avoidanceSeedPaths, defaultContext);
+
+    internal static Route[] BuildRoutesWithContext(
+        IReadOnlyList<Request> requests,
+        IReadOnlyList<Obstacle> sourceObstacles,
+        bool sourceObstaclesAlreadyInflated = false,
+        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null,
+        IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null,
+        CacheContext context = null)
     {
-        generation++;
+        context ??= defaultContext;
+        Dictionary<string, CachedRoute> cache = context.Routes;
+        int generation = ++context.Generation;
         if (requests == null || requests.Count == 0)
         {
-            PruneCache();
+            PruneCache(context);
             return Array.Empty<Route>();
         }
 
@@ -348,14 +363,14 @@ internal static class WorldMapOrthogonalRouter
             RegisterOccupancy(route, occupancy);
         }
 
-        PruneCache();
+        PruneCache(context);
         return result;
     }
 
     internal static void Clear()
     {
-        cache.Clear();
-        generation = 0;
+        defaultContext.Routes.Clear();
+        defaultContext.Generation = 0;
     }
 
     internal static Num.Vector2 InferPortDirection(Num.Vector2 point, Num.Vector2 roomMin, Num.Vector2 roomMax)
@@ -3645,8 +3660,10 @@ internal static class WorldMapOrthogonalRouter
 
     private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 
-    private static void PruneCache()
+    private static void PruneCache(CacheContext context)
     {
+        Dictionary<string, CachedRoute> cache = context.Routes;
+        int generation = context.Generation;
         if (cache.Count == 0) return;
         List<string> stale = null;
         foreach (KeyValuePair<string, CachedRoute> pair in cache)

@@ -395,14 +395,14 @@ public sealed class BridgePlugin : BaseUnityPlugin
         {
             try
             {
+                MapRoomGeometryPresentationHub.Prime(mapSession);
                 if (WorldMapBackgroundBudget.AllowSourceRecovery(mapSession))
                     MapRoomGeometryPresentationHub.RecoverMissingSources(mapSession);
 
-                MapRoomGeometryPresentationHub.Prime(mapSession);
                 int selectedRoomIndex =
                     MapEditorStateHub.Get(mapSession)?.SelectedRoomIndex ?? -1;
-                WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
                 WorldMapExactShortcuts.UpdateMainThread(mapSession, selectedRoomIndex);
+                WorldMapShortcutPresentation.Prime(mapSession, selectedRoomIndex);
                 WorldMapRetainedV2Runtime.UpdateMainThread();
                 CartographyCanvasImages.UpdateMainThread();
             }

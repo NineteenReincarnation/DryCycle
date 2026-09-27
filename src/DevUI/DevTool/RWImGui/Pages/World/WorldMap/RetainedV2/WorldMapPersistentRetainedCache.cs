@@ -343,11 +343,6 @@ internal static class WorldMapPersistentRetainedCache
         verifiedTopologyFingerprint = 0L;
         topologyRejected = false;
         roomValidationComplete = false;
-        restoreSnapshotLoaded = false;
-        restoreValidationStartedTicks = 0L;
-        restoreValidationCompletedTicks = 0L;
-        restoredRouteCount = 0;
-        restoredThumbnailCount = 0;
 
         for (int i = 0; i < snapshot.Routes.Count; i++)
         {
@@ -430,6 +425,9 @@ internal static class WorldMapPersistentRetainedCache
 
     private static void Clear()
     {
+        restoreSnapshotLoaded = false;
+        restoreValidationStartedTicks = restoreValidationCompletedTicks = 0L;
+        restoredRouteCount = restoredThumbnailCount = 0;
         validRooms.Clear();
         invalidRooms.Clear();
         consumedThumbnailHints.Clear();

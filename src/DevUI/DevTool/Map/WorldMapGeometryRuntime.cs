@@ -168,6 +168,11 @@ internal static partial class MapRoomGeometryPresentationHub
         internal EditorMapRoomVisualSnapshot Snapshot = EditorMapRoomVisualSnapshot.Empty;
         internal int Revision = 1;
         internal int PublishedRevision;
+        internal WorldMapRoomSource DecodedSource, UploadedSource, AppliedTerrainSource;
+        internal Texture2D OwnedSourceTexture;
+        internal MapViewFileStamp SourceRoomStamp, SourceSettingsStamp;
+        internal int NextSourceAuditFrame;
+        internal bool SourceFailed;
     }
 
     private readonly struct PixelClassification
@@ -296,6 +301,8 @@ internal static partial class MapRoomGeometryPresentationHub
         if (structureDue)
             SynchronizeStructure(page);
 
+        PersistentPumpRestore(page.world);
+
         long frameBudgetStarted =
             Stopwatch.GetTimestamp();
         rasterFrameDeadlineTicks =
@@ -348,6 +355,7 @@ internal static partial class MapRoomGeometryPresentationHub
     internal static void Clear()
     {
         PersistentBeforeClear();
+        ReleaseSourceTextures();
         ResetRasterBuildScheduler();
         cache.Clear();
         lock (publishedGate) published.Clear();
@@ -373,6 +381,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void ResetRegion(string nextRegion)
     {
+        ReleaseSourceTextures();
         ResetRasterBuildScheduler();
         cache.Clear();
         lock (publishedGate) published.Clear();
@@ -420,7 +429,6 @@ internal static partial class MapRoomGeometryPresentationHub
             entry.RoomRep = panel.roomRep;
             entry.RoomName = room.name ?? entry.RoomName;
 
-            PersistentTryRestore(entry, page.world, room, panel.roomRep);
             RefreshDimensions(entry, panel.roomRep);
             RefreshNodes(entry, panel.roomRep, force: !entry.NodesInitialized);
             Publish(entry, allowRasterReadback: false);
@@ -442,8 +450,6 @@ internal static partial class MapRoomGeometryPresentationHub
                 PersistentOnRoomRemoved(stale[i]);
             }
         }
-
-        WorldMapFrontendBridge.CompletePersistentRoomValidation(alive);
 
         if (backgroundCursor >= roomOrder.Count) backgroundCursor = 0;
         lastSubNodeCount = page.subNodes.Count;
@@ -759,7 +765,7 @@ internal static partial class MapRoomGeometryPresentationHub
         }
     }
 
-    private static EditorMapRectSnapshot[] BuildRasterRuns(
+    internal static EditorMapRectSnapshot[] BuildRasterRuns(
         Color[] pixels,
         int width,
         int height)
@@ -1055,8 +1061,6 @@ internal static partial class MapRoomGeometryPresentationHub
         bool allowDiskLoad,
         bool forceLivePoll)
     {
-        PersistentPrepareSettingsPath(entry, world, room);
-
         RoomSettings liveSettings = room?.realizedRoom?.roomSettings;
         if (liveSettings != null)
         {
@@ -1070,50 +1074,22 @@ internal static partial class MapRoomGeometryPresentationHub
             return true;
         }
 
-        if (!entry.CurvesInitialized && Time.frameCount < entry.NextSettingsPollFrame)
-            return false;
-
-        if (entry.CurvesInitialized)
-        {
-            if (string.IsNullOrWhiteSpace(entry.SettingsPath)) return false;
-            if (Time.frameCount < entry.NextSettingsPollFrame) return false;
-            entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames + Math.Abs(entry.RoomIndex % 30);
-            if (FileWriteTime(entry.SettingsPath) == entry.SettingsWriteTimeUtc) return false;
-        }
-
-        if (!allowDiskLoad) return false;
-
-        RoomSettings settings = null;
-        long curveLoadStarted = Stopwatch.GetTimestamp();
-        try
-        {
-            string roomName = WorldLoader.RoomNameManipulator(room.FileName, world.game);
-            SlugcatStats.Timeline timeline = world.game != null ? world.game.TimelinePoint : null;
-            settings = new RoomSettings(roomName, world.region, false, false, timeline, world.game);
-            if (settings != null)
-                RebuildCurves(entry, settings, GeometrySettingsFingerprint(settings));
-        }
-        catch (Exception error)
-        {
-            entry.NextSettingsPollFrame = Time.frameCount + SettingsPollIntervalFrames;
-            global::DryCycle.Plugin.Logger?.LogDebug(
-                "WorldMap could not load room settings for " + entry.RoomName + ": " + error.Message);
-        }
-        finally
-        {
-            long elapsed =
-                Math.Max(0L, Stopwatch.GetTimestamp() - curveLoadStarted);
-            curveLoadTotalTicks += elapsed;
-            curveLoadPeakTicks =
-                Math.Max(curveLoadPeakTicks, elapsed);
-            curveLoadCount++;
-        }
-
-        return settings != null;
+        if (!allowDiskLoad || !EnsureDecodedRoomSource(entry, world)) return false;
+        WorldMapRoomSource decoded = entry.DecodedSource;
+        if (entry.CurvesInitialized && ReferenceEquals(entry.AppliedTerrainSource, decoded)) return false;
+        entry.AppliedTerrainSource = decoded;
+        entry.SettingsPath = decoded.SettingsStamp.Path;
+        entry.SettingsWriteTimeUtc = decoded.SettingsStamp.WriteTicks > 0 ? new DateTime(decoded.SettingsStamp.WriteTicks, DateTimeKind.Utc) : DateTime.MinValue;
+        entry.Curves = decoded.Curves;
+        entry.TerrainFillRuns = decoded.Terrain;
+        entry.CurvesInitialized = true;
+        entry.Revision++;
+        PersistentOnCurvesRebuilt(entry);
+        return true;
     }
-
     private static void RebuildCurves(CacheEntry entry, RoomSettings settings, int fingerprint)
     {
+        entry.AppliedTerrainSource = null;
         entry.SettingsFingerprint = fingerprint;
         entry.SettingsPath = settings.filePath ?? string.Empty;
         entry.SettingsWriteTimeUtc = FileWriteTime(entry.SettingsPath);

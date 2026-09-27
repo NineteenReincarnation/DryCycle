@@ -33,6 +33,9 @@ internal static partial class MapRoomGeometryPresentationHub
     private static long loadedTemplateFingerprint = long.MinValue;
     private static bool persistentDirty;
     private static float persistentDirtyAt;
+    private static System.Threading.Tasks.Task<MapViewPersistentSnapshot> persistentLoad;
+    private static int persistentRestoreCursor;
+    private static bool persistentRestoreComplete;
 
     private static bool PersistentContextChanged(global::World world)
     {
@@ -63,12 +66,39 @@ internal static partial class MapRoomGeometryPresentationHub
         persistentDirty = false;
         persistentDirtyAt = 0f;
 
-        MapViewPersistentSnapshot snapshot =
-            MapViewPersistentCacheStore.Load(
-                persistentCachePath,
-                persistentContextKey);
-        if (snapshot == null) return;
+        string path = persistentCachePath, context = persistentContextKey;
+        persistentLoad = System.Threading.Tasks.Task.Run(() => MapViewPersistentCacheStore.Load(path, context));
+        persistentRestoreCursor = 0;
+        persistentRestoreComplete = false;
+    }
 
+    private static void PersistentPumpRestore(global::World world)
+    {
+        if (persistentRestoreComplete) return;
+        if (persistentLoad != null)
+        {
+            if (!persistentLoad.IsCompleted) return;
+            MapViewPersistentSnapshot snapshot = persistentLoad.GetAwaiter().GetResult();
+            persistentLoad = null;
+            if (snapshot == null) { persistentRestoreComplete = true; return; }
+            AcceptPersistentSnapshot(snapshot);
+        }
+        long deadline = System.Diagnostics.Stopwatch.GetTimestamp() + System.Diagnostics.Stopwatch.Frequency / 1000;
+        int budget = 6;
+        while (persistentRestoreCursor < roomOrder.Count && budget-- > 0 && System.Diagnostics.Stopwatch.GetTimestamp() < deadline)
+        {
+            int index = roomOrder[persistentRestoreCursor++];
+            if (!cache.TryGetValue(index, out CacheEntry entry)) continue;
+            PersistentTryRestore(entry, world, entry.Room, entry.RoomRep);
+            Publish(entry, allowRasterReadback: false);
+        }
+        if (persistentRestoreCursor < roomOrder.Count) return;
+        persistentRestoreComplete = true;
+        WorldMapFrontendBridge.CompletePersistentRoomValidation(roomOrder);
+    }
+
+    private static void AcceptPersistentSnapshot(MapViewPersistentSnapshot snapshot)
+    {
         loadedTemplateFingerprint = snapshot.TemplateFingerprint;
         for (int i = 0; i < snapshot.Rooms.Count; i++)
         {
@@ -112,6 +142,8 @@ internal static partial class MapRoomGeometryPresentationHub
         loadedTemplateFingerprint = long.MinValue;
         persistentDirty = false;
         persistentDirtyAt = 0f;
+        persistentLoad = null;
+        persistentRestoreComplete = true;
     }
 
     private static void PersistentTryRestore(
@@ -140,7 +172,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
         MapViewFileStamp roomSource = MapViewFileStamp.Capture(ResolveRoomGeometryPath(world, room));
         MapViewFileStamp settingsSource = MapViewFileStamp.Capture(ResolveRoomSettingsPath(world, room));
-        bool roomValid = !string.IsNullOrWhiteSpace(roomSource.Path) && roomSource.Matches(stored.RoomSource);
+        bool roomValid = room.offScreenDen || (!string.IsNullOrWhiteSpace(roomSource.Path) && roomSource.Matches(stored.RoomSource));
         bool settingsValid = settingsSource.Matches(stored.SettingsSource);
         bool templateValid = loadedTemplateFingerprint == persistentTemplateFingerprint;
         bool restored = false;
@@ -162,7 +194,7 @@ internal static partial class MapRoomGeometryPresentationHub
             entry.WidthTiles = Math.Max(1f, stored.WidthTiles);
             entry.HeightTiles = Math.Max(1f, stored.HeightTiles);
 
-            if (stored.RasterInitialized)
+            if (stored.RasterInitialized && !entry.RasterInitialized)
             {
                 entry.RasterInitialized = true;
                 entry.RasterWidth = stored.RasterWidth;
@@ -173,7 +205,7 @@ internal static partial class MapRoomGeometryPresentationHub
                 restored = true;
             }
 
-            if (stored.NodesInitialized)
+            if (stored.NodesInitialized && !HasMeaningfulNodePositions(roomRep?.nodePositions))
             {
                 entry.NodesInitialized = true;
                 entry.NodeFingerprint = stored.NodeFingerprint;
@@ -192,6 +224,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (roomValid &&
             settingsValid &&
             templateValid &&
+            entry.AppliedTerrainSource == null &&
             stored.CurvesInitialized &&
             authoredTerrainPayloadCurrent)
         {
@@ -296,6 +329,7 @@ internal static partial class MapRoomGeometryPresentationHub
         if (entry == null) return;
         PersistentEntryState state = GetPersistentEntryState(entry.RoomIndex);
         state.NodesRestored = false;
+        if (!changed && !string.IsNullOrWhiteSpace(state.RoomSource.Path)) return;
         state.RoomSource = MapViewFileStamp.Capture(ResolveRoomGeometryPath(persistentWorld, entry.Room));
         if (changed) PersistentMarkDirty();
     }
@@ -368,6 +402,7 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static void PersistentTryScheduleSave(bool force)
     {
+        if (!persistentRestoreComplete) return;
         if (!persistentDirty || string.IsNullOrWhiteSpace(persistentCachePath)) return;
         if (!force && Time.realtimeSinceStartup - persistentDirtyAt < PersistentSaveDebounceSeconds) return;
 

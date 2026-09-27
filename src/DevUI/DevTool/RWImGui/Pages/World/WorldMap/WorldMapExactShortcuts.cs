@@ -30,11 +30,10 @@ internal static class WorldMapExactShortcuts
     {
         internal int RoomIndex;
         internal AbstractRoom Room;
-        internal string FilePath = string.Empty;
-        internal DateTime FileWriteUtc;
         internal int NextPollFrame;
         internal bool Ready;
         internal bool FromRealizedRoom;
+        internal WorldMapRoomSource DecodedSource;
         internal readonly Dictionary<int, WorldMapShortcutPresentation.ShortcutMarker> ExitMouths = new();
         internal WorldMapShortcutPresentation.ShortcutMarker[] CreatureHoles =
             Array.Empty<WorldMapShortcutPresentation.ShortcutMarker>();
@@ -295,60 +294,26 @@ internal static class WorldMapExactShortcuts
         if (entry.Ready && !force && Time.frameCount < entry.NextPollFrame)
             return false;
 
-        string roomName = WorldLoader.RoomNameManipulator(entry.Room.FileName, world?.game);
-        string path = WorldLoader.FindRoomFile(
-            roomName,
-            includeRootDirectory: false,
-            additionalAppend: ".txt",
-            showWarning: false);
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (!MapRoomGeometryPresentationHub.TryGetDecodedRoomSource(roomIndex, out WorldMapRoomSource source)) return false;
+        if (entry.Ready && ReferenceEquals(entry.DecodedSource, source)) return false;
+        entry.ExitMouths.Clear();
+        List<WorldMapShortcutPresentation.ShortcutMarker> holes = new();
+        foreach (var anchor in source.Bake.NodeAnchors)
         {
-            entry.NextPollFrame = Time.frameCount + FilePollFrames;
-            return false;
+            WorldMapShortcutPresentation.ShortcutMarker marker = new(anchor.EntranceX, anchor.EntranceY, anchor.NodeIndex);
+            if (anchor.Kind == DryCycle.DevUI.DevTool.Map.PlayerMap.RoomMapPixelKind.RoomExit)
+                entry.ExitMouths[anchor.NodeIndex] = marker;
+            else if (anchor.Kind == DryCycle.DevUI.DevTool.Map.PlayerMap.RoomMapPixelKind.CreatureHole)
+                holes.Add(marker);
         }
-
-        DateTime writeTime;
-        try { writeTime = File.GetLastWriteTimeUtc(path); }
-        catch { writeTime = DateTime.MinValue; }
-
-        if (entry.Ready && string.Equals(entry.FilePath, path, StringComparison.OrdinalIgnoreCase) &&
-            entry.FileWriteUtc == writeTime)
-        {
-            entry.NextPollFrame = Time.frameCount + FilePollFrames + Math.Abs(roomIndex % 37);
-            return false;
-        }
-
-        try
-        {
-            string[] lines = File.ReadAllLines(path);
-            RoomPreprocessor.VersionFix(ref lines);
-            if (!TryParseRoomShortcuts(lines, out Dictionary<int, WorldMapShortcutPresentation.ShortcutMarker> exits,
-                    out WorldMapShortcutPresentation.ShortcutMarker[] creatureHoles))
-            {
-                entry.NextPollFrame = Time.frameCount + FilePollFrames;
-                return false;
-            }
-
-            entry.ExitMouths.Clear();
-            foreach (KeyValuePair<int, WorldMapShortcutPresentation.ShortcutMarker> pair in exits)
-                entry.ExitMouths[pair.Key] = pair.Value;
-            entry.CreatureHoles = creatureHoles;
-            entry.FilePath = path;
-            entry.FileWriteUtc = writeTime;
-            entry.Ready = true;
-            entry.FromRealizedRoom = false;
-            entry.NextPollFrame = Time.frameCount + FilePollFrames + Math.Abs(roomIndex % 37);
-            Publish(entry);
-            return true;
-        }
-        catch (Exception error)
-        {
-            entry.NextPollFrame = Time.frameCount + FilePollFrames;
-            log?.LogDebug("Exact shortcut parse failed for " + (entry.Room.name ?? roomIndex.ToString()) + ": " + error.Message);
-            return false;
-        }
+        entry.CreatureHoles = holes.ToArray();
+        entry.DecodedSource = source;
+        entry.Ready = true;
+        entry.FromRealizedRoom = false;
+        entry.NextPollFrame = Time.frameCount + 30;
+        Publish(entry);
+        return true;
     }
-
     private static void BuildFromRealized(Entry entry, global::Room room)
     {
         entry.ExitMouths.Clear();

@@ -10,7 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// pan/zoom. Only affected routes are rebuilt after room movement; topology changes rebuild the
 /// dependency/lane index and route set.
 /// </summary>
-internal sealed class WorldMapConnectionResourceStore
+internal sealed partial class WorldMapConnectionResourceStore
 {
     private const int IdleRoutesPerFrame = 24;
     private const int InteractiveRoutesPerFrame = 8;
@@ -84,7 +84,7 @@ internal sealed class WorldMapConnectionResourceStore
     internal bool CrossingBudgetLimited => crossingBudgetLimited;
     internal int CrossingCandidateChecks => crossingCandidateChecks;
     internal int Count => routes.Count;
-    internal int PendingCount => queue.Count;
+    internal int PendingCount => queue.Count + (routeWork == null ? 0 : Math.Max(1, pendingRouteIds.Length));
     internal long Revision => revision;
     internal int RouteBuildCount => routeBuildPerfRoutes;
     internal double RouteBuildAverageMilliseconds =>
@@ -250,6 +250,8 @@ internal sealed class WorldMapConnectionResourceStore
         WorldMapScene scene,
         WorldMapRoomResourceStore roomResources)
     {
+        DrainRouteWork(scene);
+        if (routeWork != null) return;
         if (scene == null ||
             (queue.Count == 0 &&
              !corridorLayoutDirty &&
@@ -268,9 +270,9 @@ internal sealed class WorldMapConnectionResourceStore
                 return;
 
             if (corridorLayoutDirty)
-                ApplyCorridorLanes();
+                StartLayoutWork();
             else if (crossingLayoutDirty)
-                RebuildCrossings();
+                StartLayoutWork();
 
             UpdateRouteLoadSession();
             return;
@@ -336,76 +338,23 @@ internal sealed class WorldMapConnectionResourceStore
             budget--;
         }
 
-        Dictionary<string, ConnectionRouteResource> rebuilt =
-            null;
-
         if (buildBatch.Count > 0)
         {
-            // Occupancy is incremental inside one router batch, so solve the same set in a stable
-            // order regardless of which dirty notification enqueued the connections first.
-            buildBatch.Sort(
-                (left, right) =>
-                    string.CompareOrdinal(
-                        left?.Id,
-                        right?.Id));
-
+            buildBatch.Sort((left, right) => string.CompareOrdinal(left.Id, right.Id));
             BuildRouteOccupancySeeds();
-            long routeBuildStarted = Stopwatch.GetTimestamp();
-            rebuilt =
-                WorldMapWorldSpaceRouter.Build(
-                    scene,
-                    roomResources,
-                    buildBatch,
-                    laneOffsets,
-                    terminalFanouts,
-                    GetRoutingObstacleSnapshot(),
-                    routeOccupancySeeds,
-                    routeAvoidanceSeeds);
-            long routeBuildElapsed =
-                Math.Max(0L, Stopwatch.GetTimestamp() - routeBuildStarted);
-            routeBuildPerfTotalTicks += routeBuildElapsed;
-            routeBuildPerfPeakTicks =
-                Math.Max(routeBuildPerfPeakTicks, routeBuildElapsed);
-            routeBuildPerfBatches++;
-            routeBuildPerfRoutes += buildBatch.Count;
+            var input = WorldMapWorldSpaceRouter.Capture(scene, roomResources, buildBatch, laneOffsets,
+                terminalFanouts, GetRoutingObstacleSnapshot(), routeOccupancySeeds, routeAvoidanceSeeds);
+            StartRouteWork(input);
         }
-
-        for (int i = 0; i < buildBatch.Count; i++)
-        {
-            WorldMapScene.ConnectionNode connection = buildBatch[i];
-            if (!rebuilt.TryGetValue(connection.Id, out ConnectionRouteResource route))
-                continue;
-
-            if (routes.TryGetValue(connection.Id, out ConnectionRouteResource previous))
-                route.Revision = previous.Revision + 1L;
-            else
-                route.Revision = 1L;
-
-            routes[connection.Id] = route;
-            corridorLayoutDirty = true;
-            crossingLayoutDirty = true;
-            routeSetChanged = true;
-            routeChanged.Add(connection.Id);
-            unchecked { revision++; }
-            MapRoomGeometryPresentationHub.MarkPersistentFrontendDirty();
-        }
-
-        if (routeSetChanged || corridorLayoutDirty)
-        {
-            // Do not globally reflow every partial cold-start batch. Base routes already carry their
-            // pair/terminal lane identity, so the map stays readable while the queue drains. Run the
-            // expensive whole-route corridor allocation once after the current base-route queue has
-            // converged. Interactive edits normally drain their small queue in the same frame.
-            if (!WorldMapBackgroundBudget.RoomDragInteractionActive &&
-                queue.Count == 0)
-                ApplyCorridorLanes();
-        }
-
+        else if ((routeSetChanged || corridorLayoutDirty) && queue.Count == 0 && !WorldMapBackgroundBudget.RoomDragInteractionActive)
+            StartLayoutWork();
         UpdateRouteLoadSession();
     }
 
     internal void Reset()
     {
+        unchecked { workGeneration++; workRevision++; }
+        routingContext = new WorldMapOrthogonalRouter.CacheContext();
         routes.Clear();
         dependencies.Reset();
         laneOffsets.Clear();
@@ -490,6 +439,7 @@ internal sealed class WorldMapConnectionResourceStore
     {
         if (routeSessionStartedTicks <= 0L ||
             routeSessionComplete ||
+            routeWork != null ||
             queue.Count > 0 ||
             corridorLayoutDirty ||
             crossingLayoutDirty ||
@@ -512,6 +462,7 @@ internal sealed class WorldMapConnectionResourceStore
 
     private void Enqueue(string id)
     {
+        unchecked { workRevision++; }
         if (string.IsNullOrEmpty(id) || !queued.Add(id)) return;
         queue.Enqueue(id);
     }

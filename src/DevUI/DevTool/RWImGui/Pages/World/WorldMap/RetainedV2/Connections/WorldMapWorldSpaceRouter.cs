@@ -67,7 +67,21 @@ internal static class WorldMapWorldSpaceRouter
 
     private const float TileDisplaySize = 2f;
 
+    internal sealed class BuildInput
+    {
+        internal List<WorldMapOrthogonalRouter.Request> Requests = new();
+        internal List<WorldMapScene.ConnectionNode> Accepted = new();
+        internal WorldMapOrthogonalRouter.Obstacle[] Obstacles = Array.Empty<WorldMapOrthogonalRouter.Obstacle>();
+        internal Num.Vector2[][] Occupancy, Avoidance;
+    }
+
     internal static Dictionary<string, ConnectionRouteResource> Build(
+        WorldMapScene scene, WorldMapRoomResourceStore roomResources,
+        IReadOnlyList<WorldMapScene.ConnectionNode> connections, IReadOnlyDictionary<string, float> laneOffsets,
+        IReadOnlyDictionary<string, TerminalFanout> terminalFanouts, IReadOnlyList<WorldMapOrthogonalRouter.Obstacle> routingObstacles,
+        IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null, IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null) =>
+        Execute(Capture(scene, roomResources, connections, laneOffsets, terminalFanouts, routingObstacles, occupancySeedPaths, avoidanceSeedPaths), null);
+    internal static BuildInput Capture(
         WorldMapScene scene,
         WorldMapRoomResourceStore roomResources,
         IReadOnlyList<WorldMapScene.ConnectionNode> connections,
@@ -77,10 +91,7 @@ internal static class WorldMapWorldSpaceRouter
         IReadOnlyList<Num.Vector2[]> occupancySeedPaths = null,
         IReadOnlyList<Num.Vector2[]> avoidanceSeedPaths = null)
     {
-        Dictionary<string, ConnectionRouteResource> result =
-            new(StringComparer.Ordinal);
-        if (scene == null || connections == null || connections.Count == 0)
-            return result;
+        if (scene == null || connections == null) return new BuildInput();
 
         List<WorldMapOrthogonalRouter.Request> requests = new(connections.Count);
         List<WorldMapScene.ConnectionNode> accepted = new(connections.Count);
@@ -135,16 +146,29 @@ internal static class WorldMapWorldSpaceRouter
                 EndTerminalLaneCount = terminalFanout.EndLaneCount,
                 EndTerminalExtraDepth = terminalFanout.EndExtraDepth
             });
-            accepted.Add(connection);
+            accepted.Add(new WorldMapScene.ConnectionNode { Id = connection.Id, FromRoomIndex = connection.FromRoomIndex, ToRoomIndex = connection.ToRoomIndex, Direction = connection.Direction, Ambiguous = connection.Ambiguous });
         }
 
+        return new BuildInput
+        {
+            Requests = requests, Accepted = accepted,
+            Obstacles = routingObstacles == null ? Array.Empty<WorldMapOrthogonalRouter.Obstacle>() : new List<WorldMapOrthogonalRouter.Obstacle>(routingObstacles).ToArray(),
+            Occupancy = occupancySeedPaths == null ? null : new List<Num.Vector2[]>(occupancySeedPaths).ToArray(),
+            Avoidance = avoidanceSeedPaths == null ? null : new List<Num.Vector2[]>(avoidanceSeedPaths).ToArray()
+        };
+    }
+
+    internal static Dictionary<string, ConnectionRouteResource> Execute(BuildInput input, WorldMapOrthogonalRouter.CacheContext context)
+    {
+        Dictionary<string, ConnectionRouteResource> result = new(StringComparer.Ordinal);
+        var accepted = input.Accepted;
         WorldMapOrthogonalRouter.Route[] routes =
-            WorldMapOrthogonalRouter.BuildRoutesCore(
-                requests,
-                routingObstacles,
+            WorldMapOrthogonalRouter.BuildRoutesWithContext(
+                input.Requests,
+                input.Obstacles,
                 sourceObstaclesAlreadyInflated: true,
-                occupancySeedPaths: occupancySeedPaths,
-                avoidanceSeedPaths: avoidanceSeedPaths);
+                occupancySeedPaths: input.Occupancy,
+                avoidanceSeedPaths: input.Avoidance, context: context);
         int count = Math.Min(accepted.Count, routes.Length);
         for (int i = 0; i < count; i++)
         {

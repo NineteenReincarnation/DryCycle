@@ -3,7 +3,7 @@ param(
     [string]$RainWorldDir = 'D:/Steam/steamapps/common/Rain World',
     [string]$BuildRoot = '',
     [string]$FrontendPluginDir = '',
-    [ValidateSet('all', 'connections', 'worldmap', 'terrain', 'terrain-baseline')][string]$TestScope = 'all'
+    [ValidateSet('all', 'connections', 'worldmap', 'terrain', 'terrain-baseline', 'loading')][string]$TestScope = 'all'
 )
 
 $ErrorActionPreference = 'Stop'

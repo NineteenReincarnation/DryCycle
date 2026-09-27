@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using DryCycle.DevUI.DevTool.Map;
 using UnityEngine;
 
@@ -40,6 +41,7 @@ internal sealed class WorldMapRetainedRoomRenderer
     private Shader spriteShader;
 
     internal int RetainedRoomCount => roomObjects.Count;
+    internal bool HasPendingUploads { get; private set; }
 
     internal void ApplyDirty(WorldMapDirtySet dirty)
     {
@@ -63,6 +65,9 @@ internal sealed class WorldMapRetainedRoomRenderer
         if (!EnsureResources(renderScene)) return false;
 
         visibleNow.Clear();
+        HasPendingUploads = false;
+        long deadline = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * .0015d);
+        int uploads = 0;
 
         for (int i = 0; i < visibleRoomIds.Count; i++)
         {
@@ -71,7 +76,12 @@ internal sealed class WorldMapRetainedRoomRenderer
                 continue;
 
             visibleNow.Add(roomIndex);
-            RoomObject obj = GetOrCreate(roomIndex);
+            if (!roomObjects.TryGetValue(roomIndex, out RoomObject obj))
+            {
+                if (uploads >= 6 || (uploads > 0 && Stopwatch.GetTimestamp() >= deadline))
+                { HasPendingUploads = true; continue; }
+                obj = GetOrCreate(roomIndex);
+            }
 
             if (resources.TryGet(roomIndex, out WorldMapRoomResourceStore.RoomResource resource))
             {
@@ -79,9 +89,15 @@ internal sealed class WorldMapRetainedRoomRenderer
                 bool thumbnailChanged = obj.ThumbnailGeneration != resource.Thumbnail.Generation;
                 if (geometryChanged || thumbnailChanged)
                 {
-                    RebuildRoom(obj, resource, geometryChanged, thumbnailChanged);
-                    obj.GeometryGeneration = resource.GeometryGeneration;
-                    obj.ThumbnailGeneration = resource.Thumbnail.Generation;
+                    if (uploads >= 6 || (uploads > 0 && Stopwatch.GetTimestamp() >= deadline))
+                        HasPendingUploads = true;
+                    else
+                    {
+                        RebuildRoom(obj, resource, geometryChanged, thumbnailChanged);
+                        obj.GeometryGeneration = resource.GeometryGeneration;
+                        obj.ThumbnailGeneration = resource.Thumbnail.Generation;
+                        uploads++;
+                    }
                 }
             }
             else if (obj.GeometryGeneration != -1L)
@@ -95,6 +111,7 @@ internal sealed class WorldMapRetainedRoomRenderer
                 obj.GeometryGeneration = -1L;
                 obj.ThumbnailGeneration = -1L;
                 obj.Textured = false;
+                uploads++;
             }
 
             if (obj.TransformRevision != room.TransformRevision || obj.Layer != room.Layer)

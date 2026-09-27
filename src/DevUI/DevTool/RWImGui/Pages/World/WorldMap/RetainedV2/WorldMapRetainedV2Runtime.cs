@@ -286,6 +286,7 @@ internal static class WorldMapRetainedV2Runtime
             bool viewChanged =
                 viewRevision != lastRenderedViewRevision;
             bool nonViewDirty =
+                RoomRenderer.HasPendingUploads ||
                 Surface.NeedsRender ||
                 sceneRevision != lastRenderedSceneRevision ||
                 roomResourceRevision != lastRenderedRoomResourceRevision ||

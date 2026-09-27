@@ -27,6 +27,7 @@ internal sealed class WorldMapRoomResourceStore
         internal int RequestedVisualStamp = int.MinValue;
         internal long GeometryGeneration;
         internal int NextThumbnailPollFrame;
+        internal bool OffScreenDen;
     }
 
     private const int IdleRoomsPerFrame = 6;
@@ -181,12 +182,12 @@ internal sealed class WorldMapRoomResourceStore
         {
             Reset();
             region = nextRegion;
-            BeginThumbnailLoadSession(scene.Rooms.Count);
+            BeginThumbnailLoadSession(DrawableRoomCount(scene));
             foreach (int roomIndex in scene.Rooms.Keys)
                 Enqueue(roomIndex);
         }
 
-        UpdateThumbnailLoadExpected(scene.Rooms.Count);
+        UpdateThumbnailLoadExpected(DrawableRoomCount(scene));
 
         bool canvasVisible =
             WorldMapRetainedV2Runtime.CanvasVisible;
@@ -368,6 +369,8 @@ internal sealed class WorldMapRoomResourceStore
         }
 
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(roomIndex);
+        resource.OffScreenDen = sceneRoom.OffScreenDen;
+        if (resource.OffScreenDen) return;
         int visualStamp = ComputeVisualStamp(visual);
         if (visual?.Available == true &&
             visualStamp != resource.VisualStamp &&
@@ -450,6 +453,13 @@ internal sealed class WorldMapRoomResourceStore
         // zero-room snapshot complete; UpdateThumbnailLoadExpected can grow the target as the scene
         // converges without losing the original cold/warm-start timestamp.
         thumbnailSessionComplete = false;
+    }
+
+    private static int DrawableRoomCount(WorldMapScene scene)
+    {
+        int count = 0;
+        foreach (var room in scene.Rooms.Values) if (!room.OffScreenDen) count++;
+        return count;
     }
 
     private void UpdateThumbnailLoadExpected(int expectedRooms)
@@ -547,6 +557,8 @@ internal sealed class WorldMapRoomResourceStore
     {
         if (!rooms.TryGetValue(roomIndex, out RoomResource resource))
             return true;
+
+        if (resource.OffScreenDen) return false;
 
         if (!resource.Thumbnail.HasCommitted)
             return true;

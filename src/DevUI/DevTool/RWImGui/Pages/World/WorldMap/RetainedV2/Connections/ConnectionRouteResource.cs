@@ -32,4 +32,12 @@ internal sealed class ConnectionRouteResource
     internal byte DensityTier;
 
     internal long Revision;
+
+    internal ConnectionRouteResource CloneForWorker()
+    {
+        ConnectionRouteResource copy = (ConnectionRouteResource)MemberwiseClone();
+        copy.BasePoints = (Num.Vector2[])BasePoints.Clone();
+        copy.Points = (Num.Vector2[])Points.Clone();
+        return copy;
+    }
 }
