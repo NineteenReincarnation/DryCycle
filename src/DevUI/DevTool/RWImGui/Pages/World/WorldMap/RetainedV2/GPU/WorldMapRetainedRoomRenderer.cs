@@ -102,6 +102,8 @@ internal sealed class WorldMapRetainedRoomRenderer
             }
             else if (obj.GeometryGeneration != -1L)
             {
+                if (uploads >= 6 || (uploads > 0 && Stopwatch.GetTimestamp() >= deadline))
+                { HasPendingUploads = true; continue; }
                 // Resource capture may lag the first visible frame. Render a visible neutral room
                 // rather than omitting it or showing an uninitialised/black surface.
                 RoomGeometryBlob neutral = RoomGeometryBuilder.BuildNeutral(roomIndex);
@@ -142,6 +144,7 @@ internal sealed class WorldMapRetainedRoomRenderer
 
     internal void Reset()
     {
+        HasPendingUploads = false;
         foreach (RoomObject room in roomObjects.Values)
             DestroyRoomObject(room);
         roomObjects.Clear();

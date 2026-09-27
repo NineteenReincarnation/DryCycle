@@ -14,8 +14,9 @@ internal static class MapTerrainSourceDecoder
         List<PlacedObject> result =
             new();
 
-        foreach (string line in (settings ?? string.Empty).Replace("\r", "").Split('\n'))
+        foreach (string rawLine in (settings ?? string.Empty).Replace("\r", "").Split('\n'))
         {
+            string line = rawLine.Trim();
             if (!line.StartsWith(
                     "PlacedObjects:",
                     StringComparison.OrdinalIgnoreCase))

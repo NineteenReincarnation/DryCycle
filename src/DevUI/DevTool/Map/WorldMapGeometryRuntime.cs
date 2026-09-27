@@ -1078,6 +1078,7 @@ internal static partial class MapRoomGeometryPresentationHub
         WorldMapRoomSource decoded = entry.DecodedSource;
         if (entry.CurvesInitialized && ReferenceEquals(entry.AppliedTerrainSource, decoded)) return false;
         entry.AppliedTerrainSource = decoded;
+        entry.SettingsFingerprint = decoded.SettingsFingerprint;
         entry.SettingsPath = decoded.SettingsStamp.Path;
         entry.SettingsWriteTimeUtc = decoded.SettingsStamp.WriteTicks > 0 ? new DateTime(decoded.SettingsStamp.WriteTicks, DateTimeKind.Utc) : DateTime.MinValue;
         entry.Curves = decoded.Curves;
@@ -1121,12 +1122,14 @@ internal static partial class MapRoomGeometryPresentationHub
         }
     }
 
-    private static int GeometrySettingsFingerprint(RoomSettings settings)
+    private static int GeometrySettingsFingerprint(RoomSettings settings) =>
+        GeometrySettingsFingerprint(settings?.placedObjects);
+
+    internal static int GeometrySettingsFingerprint(IReadOnlyList<PlacedObject> objects)
     {
         unchecked
         {
             int hash = 17;
-            List<PlacedObject> objects = settings?.placedObjects;
             if (objects == null) return hash;
             for (int i = 0; i < objects.Count; i++)
             {

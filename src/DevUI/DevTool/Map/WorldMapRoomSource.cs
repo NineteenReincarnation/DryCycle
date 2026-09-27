@@ -14,6 +14,7 @@ internal sealed class WorldMapRoomSource
     internal RoomMapBake Bake;
     internal Color[] Pixels;
     internal int WaterLevel;
+    internal int SettingsFingerprint;
     internal EditorMapRectSnapshot[] Raster;
     internal EditorMapRectSnapshot[] Terrain;
     internal EditorMapPolylineSnapshot[] Curves;
@@ -45,7 +46,8 @@ internal sealed class WorldMapRoomSource
             pixels[i] = pixel.Water ? Color.Lerp(color, Color.blue, .3f) : color;
         }
         string terrainText = settings.Length > 0 ? File.ReadAllText(settings.Path) : string.Empty;
-        MapRoomGeometryPresentationHub.BuildCurveGeometry(MapTerrainSourceDecoder.Parse(terrainText, name),
+        var terrainObjects = MapTerrainSourceDecoder.Parse(terrainText, name);
+        MapRoomGeometryPresentationHub.BuildCurveGeometry(terrainObjects,
             bake.Width, out List<EditorMapPolylineSnapshot> curves, out List<EditorMapRectSnapshot> terrain);
         if (!room.Matches(MapViewFileStamp.Capture(room.Path)) ||
             !settings.Matches(MapViewFileStamp.Capture(settings.Path)))
@@ -54,6 +56,7 @@ internal sealed class WorldMapRoomSource
         return new WorldMapRoomSource
         {
             Bake = bake, Pixels = pixels, WaterLevel = water,
+            SettingsFingerprint = MapRoomGeometryPresentationHub.GeometrySettingsFingerprint(terrainObjects),
             Raster = MapRoomGeometryPresentationHub.BuildRasterRuns(pixels, bake.Width, bake.Height),
             Terrain = terrain.ToArray(), Curves = curves.ToArray(), RoomStamp = room, SettingsStamp = settings
         };

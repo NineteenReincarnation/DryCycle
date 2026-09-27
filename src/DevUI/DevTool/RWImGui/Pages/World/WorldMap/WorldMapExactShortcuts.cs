@@ -65,6 +65,7 @@ internal static class WorldMapExactShortcuts
     private static readonly Dictionary<int, PublishedEntry> published = new();
     private static readonly List<int> roomOrder = new();
     private static string region = string.Empty;
+    private static global::World sourceWorld;
     private static int lastSubNodeCount = -1;
     private static int nextStructurePollFrame;
     private static int backgroundCursor;
@@ -85,6 +86,7 @@ internal static class WorldMapExactShortcuts
         lock (publishedGate) published.Clear();
         roomOrder.Clear();
         region = string.Empty;
+        sourceWorld = null;
         lastSubNodeCount = -1;
         nextStructurePollFrame = 0;
         backgroundCursor = 0;
@@ -108,7 +110,7 @@ internal static class WorldMapExactShortcuts
         string liveRegion =
             session.World?.name ?? string.Empty;
         bool urgentRegion =
-            !string.Equals(
+            !ReferenceEquals(sourceWorld, session.World) || !string.Equals(
                 region,
                 liveRegion,
                 StringComparison.OrdinalIgnoreCase);
@@ -188,13 +190,15 @@ internal static class WorldMapExactShortcuts
         }
 
         string nextRegion = page.world.name ?? string.Empty;
-        bool regionChanged = !string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase);
+        bool regionChanged = !ReferenceEquals(sourceWorld, page.world) ||
+            !string.Equals(region, nextRegion, StringComparison.OrdinalIgnoreCase);
         if (regionChanged)
         {
             entries.Clear();
             lock (publishedGate) published.Clear();
             roomOrder.Clear();
             region = nextRegion;
+            sourceWorld = page.world;
             lastSubNodeCount = -1;
             nextStructurePollFrame = 0;
             backgroundCursor = 0;
@@ -598,6 +602,7 @@ internal static class WorldMapExactShortcuts
 
     private static void ClearForNoMap()
     {
+        sourceWorld = null;
         entries.Clear();
         lock (publishedGate) published.Clear();
         roomOrder.Clear();

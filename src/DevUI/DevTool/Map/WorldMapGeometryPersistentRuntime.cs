@@ -39,6 +39,9 @@ internal static partial class MapRoomGeometryPresentationHub
 
     private static bool PersistentContextChanged(global::World world)
     {
+        // Warp/restart can replace World without changing the region/campaign cache key.
+        // Runtime room references and in-flight completions still belong to the old instance.
+        if (persistentWorld != null && !ReferenceEquals(persistentWorld, world)) return true;
         // Stable Map frames already point at the exact same World object. Avoid rebuilding the
         // region/map/timeline key (and calling MapNameManipulator) on every DevUI update.
         if (ReferenceEquals(persistentWorld, world) && !string.IsNullOrEmpty(persistentContextKey))
