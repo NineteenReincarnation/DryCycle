@@ -241,6 +241,7 @@ storage = Path("src/DevUI/DevTool/Map/Cartography/CartographyStorage.cs").read_t
 raster = Path("src/DevUI/DevTool/Map/Cartography/CartographyRoomRasterizer.cs").read_text(encoding="utf-8")
 inspector = Path("src/DevUI/DevTool/RWImGui/Pages/Map/CartographyView.Inspector.cs").read_text(encoding="utf-8")
 scene = Path("src/DevUI/DevTool/Map/Cartography/CartographyScene.cs").read_text(encoding="utf-8")
+editing = Path("src/DevUI/DevTool/Map/Cartography/CartographyEditing.cs").read_text(encoding="utf-8")
 
 if "public bool SolidTerrain = true;" not in document:
     raise SystemExit("Cartography SolidTerrain must default to enabled.")
@@ -258,6 +259,8 @@ if room_names < 0 or solid < 0 or solid <= room_names:
     raise SystemExit("Solid terrain toggle must remain immediately after room-name visibility controls.")
 if "SetSolidTerrain" not in inspector:
     raise SystemExit("Cartography SolidTerrain must commit through document style state.")
+if "next.SolidTerrain = style.SolidTerrain" not in editing:
+    raise SystemExit("Cartography Style commands must apply SolidTerrain so the toolbar toggle can turn off and back on.")
 if "entry.SolidTerrain != document.SolidTerrain" not in scene:
     raise SystemExit("Cartography room cache must invalidate when SolidTerrain changes.")
 
