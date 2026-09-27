@@ -157,11 +157,23 @@ internal static partial class TriggerEditorView
             position,
             ImGuiCond.Appearing);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(170f, 0f),
-            new Num.Vector2(320f, 720f));
+            new Num.Vector2(245f, 0f),
+            new Num.Vector2(390f, 760f));
+
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.WindowPadding,
+            new Num.Vector2(13f, 10f));
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.ItemSpacing,
+            new Num.Vector2(9f, 7f));
 
         if (!ImGui.BeginPopup("##TriggerAddPopup"))
+        {
+            ImGui.PopStyleVar(2);
             return;
+        }
+
+        ImGui.SetWindowFontScale(1.14f);
 
         string[] types =
             snapshot.TriggerTypes ??
@@ -186,7 +198,9 @@ internal static partial class TriggerEditorView
             break;
         }
 
+        ImGui.SetWindowFontScale(1f);
         ImGui.EndPopup();
+        ImGui.PopStyleVar(2);
     }
 
     private static void DrawCreateConfirmPopup(
@@ -196,11 +210,23 @@ internal static partial class TriggerEditorView
             position,
             ImGuiCond.Appearing);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(220f, 0f),
-            new Num.Vector2(360f, 240f));
+            new Num.Vector2(285f, 0f),
+            new Num.Vector2(430f, 300f));
+
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.WindowPadding,
+            new Num.Vector2(14f, 11f));
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.ItemSpacing,
+            new Num.Vector2(10f, 8f));
 
         if (!ImGui.BeginPopup("##TriggerCreateConfirmPopup"))
+        {
+            ImGui.PopStyleVar(2);
             return;
+        }
+
+        ImGui.SetWindowFontScale(1.12f);
 
         ImGui.TextDisabled(
             DevToolUiSettings.T(
@@ -256,7 +282,9 @@ internal static partial class TriggerEditorView
             ImGui.CloseCurrentPopup();
         }
 
+        ImGui.SetWindowFontScale(1f);
         ImGui.EndPopup();
+        ImGui.PopStyleVar(2);
     }
 
     private static void DrawCompactScene(
