@@ -77,6 +77,15 @@ public sealed class BridgePlugin : BaseUnityPlugin
                 "BridgePlugin/DevToolFrontend.SetLogger",
                 () => DevToolFrontend.SetLogger(Logger));
 
+            global::DryCycle.StartupDiagnostics.Step(
+                "BridgePlugin/DevToolUserSettingsStore.Load",
+                () =>
+                {
+                    DevToolUserSettingsStore.Load(Logger);
+                    FloatingWindowSnap.ReloadPersistedLayout();
+                    DevToolOverlay.ReloadPersistedPresentationState();
+                });
+
             // RWImGUI owns one shared native font atlas. The HarmonyOS CJK face must be inserted
             // before RWImGUI's first DX11 backend frame uploads that atlas; waiting until the user
             // switches the consumer context to Chinese is already too late.
@@ -452,6 +461,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         bridgeEnabled = false;
 
+        SafeFrontendCleanup("DevTool user settings", DevToolUserSettingsStore.FlushNow);
         SafeFrontendCleanup("RainWorld.Start hook", () => On.RainWorld.Start -= RainWorld_Start);
         SafeFrontendCleanup("RainWorld.OnModsInit hook", () => On.RainWorld.OnModsInit -= RainWorld_OnModsInit);
         SafeFrontendCleanup(
@@ -783,14 +793,18 @@ internal static class DevToolFrontend
             }
 
             DevToolInputContext context = inputContext;
+            bool createdContext = false;
             if (context == null)
             {
                 context = new DevToolInputContext();
                 inputContext = context;
+                createdContext = true;
             }
 
             ImGUIAPI.SwitchContext(context);
             contextAttached = true;
+            if (createdContext)
+                FloatingWindowSnap.BeginContextSession();
             nextContextAttemptAt = 0f;
 
             // The shared atlas is immutable by this point. HarmonyOS is registered by
