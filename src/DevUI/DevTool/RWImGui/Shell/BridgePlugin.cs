@@ -224,6 +224,19 @@ public sealed class BridgePlugin : BaseUnityPlugin
     {
         if (!bridgeEnabled) return;
 
+        EditorSession labelSession =
+            DevToolSessionHub.Current;
+        RainWorldGame labelGame =
+            labelSession?.Owner?.game;
+        bool newUiOwnsDevToolsStatus =
+            DevToolFrontend.NativeBackendReady &&
+            !EditorUiModeState.UseVanilla &&
+            DevToolSessionHub.IsCurrentSessionLive;
+
+        VanillaDevToolsLabelVisibility.Apply(
+            labelGame,
+            newUiOwnsDevToolsStatus);
+
         if (!legacyVisualGuardFaulted)
         {
             try
@@ -462,6 +475,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         bridgeEnabled = false;
 
         SafeFrontendCleanup("DevTool user settings", DevToolUserSettingsStore.FlushNow);
+        SafeFrontendCleanup("vanilla DevTools label", VanillaDevToolsLabelVisibility.Restore);
         SafeFrontendCleanup("RainWorld.Start hook", () => On.RainWorld.Start -= RainWorld_Start);
         SafeFrontendCleanup("RainWorld.OnModsInit hook", () => On.RainWorld.OnModsInit -= RainWorld_OnModsInit);
         SafeFrontendCleanup(
