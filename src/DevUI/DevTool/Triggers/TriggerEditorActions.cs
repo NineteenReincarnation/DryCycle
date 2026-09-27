@@ -9,6 +9,7 @@ namespace DryCycle.DevUI.DevTool.Triggers;
 
 public static class TriggerEditorKeys
 {
+    public const string Name = "name";
     public const string ActiveFromCycle = "activeFromCycle";
     public const string ActiveToCycle = "activeToCycle";
     public const string DelaySeconds = "delaySeconds";
@@ -109,6 +110,9 @@ internal static class TriggerEditorActions
         {
             switch (key)
             {
+                case TriggerEditorKeys.Name:
+                    if (value.Kind != EditorPropertyKind.String) return false;
+                    return TriggerEditorMetadata.SetName(trigger, value.Text);
                 case TriggerEditorKeys.ActiveFromCycle:
                     if (value.Kind != EditorPropertyKind.Integer) return false;
                     int from = Mathf.Clamp(value.Integer, 0, 80);
