@@ -190,7 +190,7 @@ trigger_page = pages[start:end]
 
 required_workspace = (
     "DrawTopControls",
-    "DrawAddPalette",
+    "DrawAddPopup",
     "DrawCompactScene",
     "DrawResidentInspector",
 )
@@ -206,6 +206,12 @@ if "HasTopControls => true" not in trigger_page or "TriggerEditorView.DrawTopCon
     raise SystemExit("Trigger special controls must remain registered with the shared top-status window.")
 if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
     raise SystemExit("Trigger must not recreate a private top command-bar window.")
+if 'ImGui.BeginPopup("##TriggerAddPopup")' not in workspace or 'ImGui.CloseCurrentPopup()' not in workspace:
+    raise SystemExit("Trigger Add must remain a compact popup menu attached to the shared top bar.")
+if 'DrawAddPalette' in workspace or 'TriggerAddPalette' in workspace or 'TriggerWorkspaceAddSearch' in workspace:
+    raise SystemExit("Trigger Add must not regress to an independent/search window.")
+if 'snapshot.TriggerTypes ??' not in workspace or 'for (int i = 0; i < types.Length; i++)' not in workspace:
+    raise SystemExit("Trigger Add popup must expose the full trigger-type catalog directly.")
 if "Select a trigger in the room to edit it" in workspace or "选择场景中的触发器进行编辑" in workspace:
     raise SystemExit("Trigger top controls must not restore the empty-selection instruction text.")
 if "DrawSlugcatCompactSelector" not in view or "TriggerEditorCommandKind.SetSlugcats" not in view:
