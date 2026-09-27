@@ -11,21 +11,11 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class FontSettingsWindow
 {
-    private static bool fontStatusProjectionValid;
-    private static bool projectedFontStatusChinese;
-    private static string projectedFontName = string.Empty;
-    private static int projectedActualWeight = int.MinValue;
-    private static int projectedWeightVariants = int.MinValue;
-    private static string projectedFontStatus = string.Empty;
-    private static string projectedResolvedWeightStatus = string.Empty;
-    private static string projectedFamilyWeightsStatus = string.Empty;
-
     internal static void Draw(Num.Vector2 display)
     {
-        // Typography inspection touches the font catalog and local font diagnostics. It is useful
-        // once the editor is interactive, but it is not part of the minimum first-visible frame.
-        // Progressive hydration keeps this secondary window out of O/H activation and page-restore
-        // frames, then resumes the exact same UI on the next fully hydrated frame.
+        // Typography controls are presentation-only and do not belong to the minimum first-visible
+        // frame. Progressive hydration keeps this secondary window out of O/H activation and
+        // page-restore frames.
         if (!EditorPresentationHub.Current.Hydrated)
             return;
 
@@ -35,13 +25,11 @@ internal static class FontSettingsWindow
             EditorPresentationHub.Current.ToolMode == EditorToolMode.Triggers)
             return;
 
-        // Keep the typography window compact but large enough to show the whole default panel.
-        // These dimensions match the intended top-right footprint instead of scaling the entire
-        // floating window with the font-size preference.
+        // Only editable controls are shown in this window, so keep its footprint compact.
         const float preferredWidth = 468f;
-        const float preferredHeight = 420f;
+        float preferredHeight = DevToolUiSettings.IsChinese ? 238f : 274f;
         float width = Math.Min(preferredWidth, Math.Max(320f, display.X - 16f));
-        float height = Math.Min(preferredHeight, Math.Max(300f, display.Y - 16f));
+        float height = Math.Min(preferredHeight, Math.Max(190f, display.Y - 16f));
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 8f), 8f),
@@ -50,8 +38,8 @@ internal static class FontSettingsWindow
         // allowing the developer to resize the window afterwards during the current session.
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Once);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(420f, Math.Max(320f, display.X - 16f)), 340f),
-            new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(340f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(420f, Math.Max(320f, display.X - 16f)), 190f),
+            new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(190f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"), ImGuiWindowFlags.NoCollapse))
@@ -64,9 +52,6 @@ internal static class FontSettingsWindow
         ImGui.SetWindowFontScale(DevToolUiSettings.IsChinese ? 1.18f : 1.12f);
 
         ImGui.TextDisabled(DevToolUiSettings.T("排版", "TYPOGRAPHY"));
-
-        if (DevToolUiSettings.IsChinese)
-            DrawChineseFontSelector();
 
         float size = DevToolUiSettings.FontSize;
         if (ImGui.SliderFloat(
@@ -82,14 +67,10 @@ internal static class FontSettingsWindow
             // footprint. Keep the requested top-right window size stable.
             ImGui.SetWindowSize(new Num.Vector2(
                 Math.Min(preferredWidth, Math.Max(320f, display.X - 16f)),
-                Math.Min(preferredHeight, Math.Max(300f, display.Y - 16f))));
+                Math.Min(preferredHeight, Math.Max(190f, display.Y - 16f))));
         }
 
-        if (DevToolUiSettings.IsChinese)
-        {
-            ImGui.TextDisabled("字重：Medium (500)");
-        }
-        else
+        if (!DevToolUiSettings.IsChinese)
         {
             int weight = DevToolUiSettings.FontWeight;
             if (ImGui.SliderInt(
@@ -101,27 +82,6 @@ internal static class FontSettingsWindow
                 weight = Math.Max(100, Math.Min(900, ((weight + 50) / 100) * 100));
                 DevToolUiSettings.FontWeight = weight;
             }
-        }
-
-        string fontName = DevToolFrontend.ResolvedFontName;
-        int actualWeight = DevToolFrontend.ResolvedFontWeight;
-        int weightVariants = DevToolFrontend.ResolvedFontWeightVariantCount;
-        EnsureFontStatusProjection(fontName, actualWeight, weightVariants);
-        ImGui.TextDisabled(projectedFontStatus);
-        ImGui.TextDisabled(projectedResolvedWeightStatus);
-        ImGui.TextDisabled(DevToolUiSettings.T(
-            "默认字号：中文 21 px / 英文 18 px",
-            "Default size: Chinese 21 px / English 18 px"));
-
-        if (DevToolUiSettings.IsChinese && weightVariants <= 1)
-        {
-            ImGui.TextWrapped(DevToolUiSettings.T(
-                "当前所选中文字体只有一个可识别字重。字重偏好会保留；同一字体族存在其他字重时会自动选择最接近的版本。",
-                "The selected CJK family exposes one identifiable weight. The preference is retained and the closest family variant is used when available."));
-        }
-        else
-        {
-            ImGui.TextDisabled(projectedFamilyWeightsStatus);
         }
 
         ImGui.Separator();
@@ -136,67 +96,10 @@ internal static class FontSettingsWindow
             DevToolUiSettings.DisabledTextColor = disabled;
 
         ImGui.Separator();
-        ImGui.TextDisabled(DevToolUiSettings.T("预览", "PREVIEW"));
-        ImGui.Text(DevToolUiSettings.T("雨世界开发工具 | 字体预览 123 ABC", "Rain World DevTool | Font preview 123 ABC"));
-        ImGui.TextDisabled(DevToolUiSettings.T("弱化文字预览 | 参数说明", "Muted text preview | parameter hint"));
-        ImGui.TextDisabled(DevToolUiSettings.T("窗口描边：黑色 2 px", "Window outline: black 2 px"));
 
         if (ImGui.Button(DevToolUiSettings.T("恢复默认", "Reset Defaults")))
             DevToolUiSettings.ResetFontAppearance();
 
         ImGui.End();
     }
-
-    private static void EnsureFontStatusProjection(string fontName, int actualWeight, int weightVariants)
-    {
-        bool chinese = DevToolUiSettings.IsChinese;
-        string stableFontName = fontName ?? string.Empty;
-        if (fontStatusProjectionValid &&
-            projectedFontStatusChinese == chinese &&
-            projectedActualWeight == actualWeight &&
-            projectedWeightVariants == weightVariants &&
-            string.Equals(projectedFontName, stableFontName, StringComparison.Ordinal))
-            return;
-
-        projectedFontStatusChinese = chinese;
-        projectedFontName = stableFontName;
-        projectedActualWeight = actualWeight;
-        projectedWeightVariants = weightVariants;
-
-        string friendlyFace = DevToolFontCatalog.FriendlyFaceName(stableFontName);
-        projectedFontStatus = DevToolUiSettings.T("当前字体：", "Font: ") +
-                              (string.IsNullOrEmpty(friendlyFace)
-                                  ? DevToolUiSettings.T("默认", "Default")
-                                  : friendlyFace);
-        projectedResolvedWeightStatus = DevToolUiSettings.T("实际字重：", "Resolved weight: ") + actualWeight;
-        projectedFamilyWeightsStatus = DevToolUiSettings.T("当前字体族字重：", "Family weights: ") + Math.Max(1, weightVariants);
-        fontStatusProjectionValid = true;
-    }
-
-    private static void DrawChineseFontSelector()
-    {
-        int registeredLocalFaces = DevToolFontCatalog.RegisteredLocalFaceCount;
-
-        DevToolWidgets.MutedText("中文字体");
-        ImGui.TextDisabled("HarmonyOS Sans SC Medium");
-        ImGui.TextDisabled(DevToolFontCatalog.ChineseFontFileName);
-
-        DevToolWidgets.MutedText("字体目录");
-        ImGui.TextWrapped(DevToolFontCatalog.FontDirectory);
-
-        if (!DevToolFontCatalog.RegistrationSucceeded)
-        {
-            ImGui.TextWrapped("注册状态：" + DevToolFontCatalog.RegistrationMessage);
-        }
-        else
-        {
-            ImGui.TextDisabled(
-                "固定中文字体已加载 | DevTool Context 已注册 " +
-                registeredLocalFaces +
-                " 个字体面");
-        }
-
-        ImGui.Spacing();
-    }
-
 }
