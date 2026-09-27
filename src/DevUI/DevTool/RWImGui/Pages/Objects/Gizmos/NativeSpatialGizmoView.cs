@@ -109,7 +109,12 @@ internal static class NativeSpatialGizmoView
         {
             Num.Vector2 center = WorldToScreen(viewport, display, selected.X, selected.Y);
             float radius = WorldRadiusToScreen(viewport, display, selected.Radius);
-            Num.Vector2 radiusHandle = new(center.X + radius, center.Y);
+            Num.Vector2 handleDirection = TriggerRadiusDirectionToScreen(
+                viewport,
+                display,
+                selected.RadiusHandleX,
+                selected.RadiusHandleY);
+            Num.Vector2 radiusHandle = center + handleDirection * radius;
             DrawSecondaryHandle(draw, radiusHandle);
             if (!drag.Active && CanStartInteraction() && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
                 DistanceSquared(mouse, radiusHandle) <= HitRadius * HitRadius)
@@ -162,7 +167,18 @@ internal static class NativeSpatialGizmoView
             Num.Vector2 center = WorldToScreen(viewport, display, trigger.X, trigger.Y);
             DrawPoint(draw, center, trigger.Selected);
             if (trigger.Selected)
-                DrawRadius(draw, center, WorldRadiusToScreen(viewport, display, trigger.Radius));
+            {
+                Num.Vector2 handleDirection = TriggerRadiusDirectionToScreen(
+                    viewport,
+                    display,
+                    trigger.RadiusHandleX,
+                    trigger.RadiusHandleY);
+                DrawRadius(
+                    draw,
+                    center,
+                    WorldRadiusToScreen(viewport, display, trigger.Radius),
+                    handleDirection);
+            }
 
             float distance = DistanceSquared(mouse, center);
             if (distance < nearestDistance && distance <= HitRadius * HitRadius)
@@ -362,13 +378,12 @@ internal static class NativeSpatialGizmoView
             Num.Vector2 world = ScreenToWorld(viewport, display, ImGui.GetIO().MousePos);
             float dx = world.X - drag.CenterWorldX;
             float dy = world.Y - drag.CenterWorldY;
-            float radius = (float)Math.Sqrt(dx * dx + dy * dy);
             NativeGizmoCommandQueue.Enqueue(new NativeGizmoCommand(
                 NativeGizmoCommandKind.Update,
                 drag.Target,
                 drag.Index,
-                radius,
-                0f));
+                dx,
+                dy));
         }
 
         CommitIfReleased();
@@ -456,6 +471,21 @@ internal static class NativeSpatialGizmoView
         return length > 0.0001f ? value / length : new Num.Vector2(0f, 1f);
     }
 
+    private static Num.Vector2 TriggerRadiusDirectionToScreen(
+        EditorViewportSnapshot viewport,
+        Num.Vector2 display,
+        float x,
+        float y)
+    {
+        Num.Vector2 value = new(
+            x * display.X / viewport.Width,
+            -y * display.Y / viewport.Height);
+        float length = value.Length();
+        return length > 0.0001f
+            ? value / length
+            : new Num.Vector2(1f, 0f);
+    }
+
     private static void DrawPoint(ImDrawListPtr draw, Num.Vector2 point, bool selected)
     {
         uint outer = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.06f, 0.08f, 0.10f, 0.95f));
@@ -472,11 +502,18 @@ internal static class NativeSpatialGizmoView
         draw.AddCircleFilled(point, PointRadius, color, 16);
     }
 
-    private static void DrawRadius(ImDrawListPtr draw, Num.Vector2 center, float radius)
+    private static void DrawRadius(ImDrawListPtr draw, Num.Vector2 center, float radius) =>
+        DrawRadius(draw, center, radius, new Num.Vector2(1f, 0f));
+
+    private static void DrawRadius(
+        ImDrawListPtr draw,
+        Num.Vector2 center,
+        float radius,
+        Num.Vector2 direction)
     {
         uint color = ImGui.ColorConvertFloat4ToU32(new Num.Vector4(0.28f, 0.78f, 1f, 0.58f));
         draw.AddCircle(center, radius, color, 64, 1.5f);
-        draw.AddLine(center, new Num.Vector2(center.X + radius, center.Y), color, 1.2f);
+        draw.AddLine(center, center + direction * radius, color, 1.2f);
     }
 
     private static void DrawDirection(ImDrawListPtr draw, Num.Vector2 center, Num.Vector2 end)
