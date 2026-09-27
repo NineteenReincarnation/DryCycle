@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ImGuiNET;
+using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -106,6 +107,8 @@ internal static class DevToolNumericWidgets
 
     private static readonly Dictionary<EditKey, FloatState> FloatStates = new();
     private static readonly Dictionary<EditKey, IntState> IntStates = new();
+    private static readonly HashSet<EditKey> FloatTextEditors = new();
+    private static readonly HashSet<EditKey> FloatTextEditorFocusPending = new();
     private static readonly List<EditKey> StaleKeys = new();
     private static int nextPruneFrame;
 
@@ -148,6 +151,140 @@ internal static class DevToolNumericWidgets
         float value = state.LocalValue;
         bool changed = ImGui.InputFloat(label, ref value, step, 0f, format);
         return EndFloat(key, authoritativeValue, value, changed, state, frame);
+    }
+
+    internal static DevToolNumericEditResult<float> RotaryFloat(
+        string scope,
+        string stateKey,
+        float authoritativeValue,
+        float min,
+        float max,
+        float diameter = 54f,
+        string displayFormat = "0.000",
+        int instance = -1)
+    {
+        int frame = PrepareFrame();
+        EditKey key = new(scope, instance, stateKey);
+        FloatState state = BeginFloat(key, authoritativeValue, frame);
+        float value = state.LocalValue;
+        bool changed = false;
+
+        ImGui.PushID(scope);
+        ImGui.PushID(instance);
+        ImGui.PushID(stateKey);
+
+        if (FloatTextEditors.Contains(key))
+        {
+            ImGui.SetNextItemWidth(Math.Max(54f, diameter));
+            if (FloatTextEditorFocusPending.Remove(key))
+                ImGui.SetKeyboardFocusHere();
+
+            changed = ImGui.InputFloat(
+                "##RotaryInput",
+                ref value,
+                0f,
+                0f,
+                "%.3f",
+                ImGuiInputTextFlags.EnterReturnsTrue);
+            value = Math.Max(min, Math.Min(max, value));
+
+            bool leaveEditor =
+                ImGui.IsItemDeactivated() ||
+                (ImGui.IsItemActive() && ImGui.IsKeyPressed(ImGuiKey.Enter));
+            DevToolNumericEditResult<float> result =
+                EndFloat(key, authoritativeValue, value, changed, state, frame);
+
+            if (leaveEditor)
+            {
+                FloatTextEditors.Remove(key);
+                FloatTextEditorFocusPending.Remove(key);
+            }
+
+            ImGui.PopID();
+            ImGui.PopID();
+            ImGui.PopID();
+            return result;
+        }
+
+        ImGui.InvisibleButton(
+            "##Rotary",
+            new Num.Vector2(diameter, diameter));
+
+        bool hovered = ImGui.IsItemHovered();
+        bool active = ImGui.IsItemActive();
+        if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        {
+            FloatTextEditors.Add(key);
+            FloatTextEditorFocusPending.Add(key);
+        }
+        else if (active && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
+        {
+            Num.Vector2 delta = ImGui.GetIO().MouseDelta;
+            float span = Math.Max(0.0001f, max - min);
+            float next = value + (delta.X - delta.Y) * span / 180f;
+            next = Math.Max(min, Math.Min(max, next));
+            if (!NearlyEqual(next, value))
+            {
+                value = next;
+                changed = true;
+            }
+        }
+
+        Num.Vector2 rectMin = ImGui.GetItemRectMin();
+        Num.Vector2 rectMax = ImGui.GetItemRectMax();
+        Num.Vector2 center = new(
+            (rectMin.X + rectMax.X) * 0.5f,
+            (rectMin.Y + rectMax.Y) * 0.5f);
+        float radius = Math.Max(8f, diameter * 0.5f - 2f);
+
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+        uint background = ImGui.GetColorU32(
+            active ? ImGuiCol.FrameBgActive :
+            hovered ? ImGuiCol.FrameBgHovered :
+            ImGuiCol.FrameBg);
+        uint border = ImGui.GetColorU32(ImGuiCol.Border);
+        uint indicator = ImGui.GetColorU32(
+            active ? ImGuiCol.SliderGrabActive : ImGuiCol.SliderGrab);
+        uint text = ImGui.GetColorU32(ImGuiCol.Text);
+
+        draw.AddCircleFilled(center, radius, background, 32);
+        draw.AddCircle(center, radius, border, 32, 1.5f);
+
+        float normalized =
+            max <= min
+                ? 0f
+                : Math.Max(0f, Math.Min(1f, (value - min) / (max - min)));
+        float angle = 2.3561945f + normalized * 4.712389f;
+        Num.Vector2 pointer = new(
+            center.X + (float)Math.Cos(angle) * radius * 0.72f,
+            center.Y + (float)Math.Sin(angle) * radius * 0.72f);
+        draw.AddLine(center, pointer, indicator, active ? 3.4f : 2.8f);
+        draw.AddCircleFilled(center, Math.Max(2.5f, radius * 0.10f), indicator, 16);
+
+        string valueText = value.ToString(displayFormat);
+        Num.Vector2 valueSize = ImGui.CalcTextSize(valueText);
+        draw.AddText(
+            new Num.Vector2(
+                center.X - valueSize.X * 0.5f,
+                rectMax.Y - valueSize.Y - 5f),
+            text,
+            valueText);
+
+        DevToolNumericEditResult<float> rotaryResult =
+            EndFloat(key, authoritativeValue, value, changed, state, frame);
+
+        if (hovered)
+        {
+            DevToolTooltip.Show(
+                DevToolUiSettings.T(
+                    "拖动旋钮调节；双击输入数字",
+                    "Drag to adjust; double-click to type a value"));
+        }
+
+        ImGui.PopID();
+        ImGui.PopID();
+        ImGui.PopID();
+        return rotaryResult;
     }
 
     internal static DevToolNumericEditResult<int> SliderInt(
@@ -200,12 +337,16 @@ internal static class DevToolNumericWidgets
         EditKey key = new(scope, instance, stateKey);
         FloatStates.Remove(key);
         IntStates.Remove(key);
+        FloatTextEditors.Remove(key);
+        FloatTextEditorFocusPending.Remove(key);
     }
 
     internal static void Reset()
     {
         FloatStates.Clear();
         IntStates.Clear();
+        FloatTextEditors.Clear();
+        FloatTextEditorFocusPending.Clear();
         StaleKeys.Clear();
         nextPruneFrame = 0;
     }
