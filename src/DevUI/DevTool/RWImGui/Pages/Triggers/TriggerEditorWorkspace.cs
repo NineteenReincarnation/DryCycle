@@ -131,8 +131,7 @@ internal static partial class TriggerEditorView
                     ? DevToolButtonTone.Primary
                     : DevToolButtonTone.Subtle))
         {
-            scenePanelOpen =
-                !scenePanelOpen;
+            scenePanelOpen = !scenePanelOpen;
         }
     }
 
