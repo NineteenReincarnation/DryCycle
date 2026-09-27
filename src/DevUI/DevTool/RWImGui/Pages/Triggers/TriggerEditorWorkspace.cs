@@ -305,10 +305,16 @@ internal static partial class TriggerEditorView
                 Math.Max(
                     240f,
                     display.Y * 0.40f));
+        float defaultHeight =
+            Math.Min(
+                440f,
+                Math.Max(
+                    340f,
+                    display.Y * 0.48f));
         float y =
             scenePanelOpen
-                ? display.Y - sceneHeight - 330f
-                : display.Y - 310f;
+                ? display.Y - sceneHeight - defaultHeight - 28f
+                : display.Y - defaultHeight - 14f;
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(
@@ -318,11 +324,7 @@ internal static partial class TriggerEditorView
         ImGui.SetNextWindowSize(
             new Num.Vector2(
                 width,
-                Math.Min(
-                    520f,
-                    Math.Max(
-                        360f,
-                        display.Y * 0.56f))),
+                defaultHeight),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(235f, 260f),
