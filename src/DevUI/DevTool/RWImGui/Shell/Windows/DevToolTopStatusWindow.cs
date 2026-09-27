@@ -133,6 +133,7 @@ internal static class DevToolTopStatusWindow
         float modeWidth = ModeButtonWidth * 2f + SegmentGap;
         float languageWidth = LanguageButtonWidth * 2f + SegmentGap;
         float sideWidth = Math.Max(modeWidth, languageWidth) + 8f;
+        float contentStartX = ImGui.GetCursorPosX();
         float available = ImGui.GetContentRegionAvail().X;
 
         // Use three real layout columns instead of drawing the centered title and then moving the
@@ -176,10 +177,8 @@ internal static class DevToolTopStatusWindow
         DrawModeSegment();
         ImGui.SameLine();
 
-        float rightEdge =
-            ImGui.GetWindowContentRegionMax().X;
         float languageX =
-            rightEdge - languageWidth;
+            contentStartX + available - languageWidth;
         if (languageX > ImGui.GetCursorPosX())
             ImGui.SetCursorPosX(languageX);
         DrawLanguageSegment();
