@@ -17,12 +17,13 @@ internal static class UiModeSwitch
         Num.Vector2 display = ImGui.GetIO().DisplaySize;
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
-        // In New UI mode the switch, language controls, commands and session status all live in
-        // ControlCenterWindow. Vanilla keeps only this deliberately small return surface so the
-        // original DevUI remains readable and the developer can always switch back.
+        // Mode and language are global controls owned by the shared top bar. Keep that same bar
+        // visible while Vanilla DevUI is primary so switching back never requires a separate panel.
         if (EditorUiModeState.UseVanilla)
         {
-            DrawVanillaReturnPanel();
+            DevToolTopStatusWindow.DrawGlobalOnly(
+                snapshot,
+                display);
             return;
         }
 
@@ -104,52 +105,6 @@ internal static class UiModeSwitch
         if (DevToolWidgets.ActionButton(
                 "English",
                 "DevToolWaitingEnglish",
-                chinese ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
-            DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
-
-        ImGui.End();
-    }
-
-    private static void DrawVanillaReturnPanel()
-    {
-        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 8f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(300f * Math.Min(1.25f, scale), 106f * Math.Min(1.20f, scale)), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(240f, 92f),
-            new Num.Vector2(520f, 220f));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
-
-        if (!ImGui.Begin(
-                DevToolUiSettings.T("界面###DevToolUiModeSwitch", "UI###DevToolUiModeSwitch"),
-                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow("UI");
-
-        DevToolWidgets.MutedText(DevToolUiSettings.T("显示模式", "Display mode"));
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("切换到新 UI", "Switch to New UI"),
-                "DevToolUseNewUi",
-                DevToolButtonTone.Primary))
-            EditorUiModeState.SetVanilla(false);
-
-        ImGui.Spacing();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("语言", "Language"));
-        ImGui.SameLine(92f);
-        bool chinese = DevToolUiSettings.Language == DevToolUiLanguage.Chinese;
-        if (DevToolWidgets.ActionButton(
-                "中文",
-                "DevToolChinese",
-                chinese ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                "English",
-                "DevToolEnglish",
                 chinese ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.English);
 
