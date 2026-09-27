@@ -42,7 +42,11 @@ namespace DryCycle.DevUI.DevTool.Map
         Structure = 3,
         Shortcut = 4,
         Transport = 5,
-        Water = 6
+        Water = 6,
+        LocalTerrain = 7,
+        CurvedSlope = 8,
+        QuicksandBody = 9,
+        QuicksandMaterial = 10
     }
 
     public readonly struct EditorMapPointSnapshot
@@ -86,6 +90,24 @@ namespace DryCycle.DevUI.DevTool.Map
         public bool Closed { get; init; }
         public EditorMapPointSnapshot[] Points { get; init; } =
             Array.Empty<EditorMapPointSnapshot>();
+    }
+
+    public sealed class EditorMapRoomVisualSnapshot
+    {
+        public static readonly EditorMapRoomVisualSnapshot Empty = new();
+
+        public bool Available { get; init; }
+        public bool DetailedRasterAvailable { get; init; }
+        public float WidthTiles { get; init; } = 12f;
+        public float HeightTiles { get; init; } = 6f;
+        public EditorMapRectSnapshot[] RasterRuns { get; init; } =
+            Array.Empty<EditorMapRectSnapshot>();
+        public EditorMapRectSnapshot[] TerrainRuns { get; init; } =
+            Array.Empty<EditorMapRectSnapshot>();
+        public EditorMapPolylineSnapshot[] Curves { get; init; } =
+            Array.Empty<EditorMapPolylineSnapshot>();
+        public EditorMapNodeVisualSnapshot[] Nodes { get; init; } =
+            Array.Empty<EditorMapNodeVisualSnapshot>();
     }
 
     public readonly struct EditorMapNodeVisualSnapshot
