@@ -429,6 +429,9 @@ internal static class WorldCreatureCatalogPicker
             new Num.Vector2(0.5f, 0.5f));
 
         if (!ImGui.BeginPopup(popupId)) return false;
+
+        FloatingWindowSnap.TrackCurrentWindow(
+            "CreatureCatalog:" + popupId);
         pickerSizeByPopup[popupId] = ClampPickerSize(ImGui.GetWindowSize(), minSize, maxSize);
 
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("生物图鉴", "CREATURE CATALOG"));
