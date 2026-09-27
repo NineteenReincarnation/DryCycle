@@ -208,6 +208,8 @@ if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
     raise SystemExit("Trigger must not recreate a private top command-bar window.")
 if 'ImGui.BeginPopup("##TriggerAddPopup")' not in workspace or 'ImGui.CloseCurrentPopup()' not in workspace:
     raise SystemExit("Trigger Add must remain a compact popup menu attached to the shared top bar.")
+if 'Name##TriggerCreateName' not in workspace or 'name: addTriggerName' not in workspace:
+    raise SystemExit("Trigger name must be authored in the compact popup before the trigger is created.")
 if 'DrawAddPalette' in workspace or 'TriggerAddPalette' in workspace or 'TriggerWorkspaceAddSearch' in workspace:
     raise SystemExit("Trigger Add must not regress to an independent/search window.")
 if 'snapshot.TriggerTypes ??' not in workspace or 'for (int i = 0; i < types.Length; i++)' not in workspace:
@@ -289,6 +291,8 @@ if 'public string Name { get; init; }' not in runtime or 'Name = TriggerEditorMe
     raise SystemExit("Trigger presentation must expose persisted custom names.")
 if 'public const string Name = "name";' not in actions or 'TriggerEditorMetadata.SetName(trigger, value.Text)' not in actions:
     raise SystemExit("Trigger names must remain editable through the normal history-backed SetValue path.")
+if 'TriggerEditorMetadata.SetName(' not in actions or 'name = null' not in actions:
+    raise SystemExit("Trigger creation must accept and persist the author name before the creation snapshot.")
 if 'unrecognizedSaveStrings' not in metadata or 'DryCycleName64' not in metadata or 'Convert.ToBase64String' not in metadata:
     raise SystemExit("Trigger names must persist safely through Rain World's forward-compatible trigger metadata.")
 if 'private static bool scenePanelOpen = true;' not in workspace:
@@ -297,7 +301,7 @@ if 'DrawResidentInspector(snapshot, selected, display);' not in workspace:
     raise SystemExit("Trigger Inspector must remain resident even while Scene is visible.")
 if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
     raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
-if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV3' not in workspace:
+if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV4' not in workspace:
     raise SystemExit("Trigger Scene/Inspector must use the movable lower-right window identities.")
 scene_start = workspace.find('private static void DrawCompactScene')
 scene_end = workspace.find('private static void DrawResidentInspector', scene_start)
@@ -308,6 +312,10 @@ if inspector_start < 0 or 'ImGuiCond.Always' in workspace[inspector_start:]:
     raise SystemExit("Trigger Inspector must not be pinned every frame; developers must be able to move it.")
 if 'advancedInspectorOpen' in workspace or 'DrawAdvancedInspector' in workspace or 'TriggerWorkspaceAdvanced' in workspace:
     raise SystemExit("Trigger workspace must remain single-inspector; Advanced mode must not return.")
+if 'ImGuiWindowFlags.AlwaysAutoResize' in workspace[inspector_start:]:
+    raise SystemExit("Trigger Inspector must stay manually resizable; AlwaysAutoResize must not return.")
+if 'TriggerInspectorResidentV4' not in workspace or '"TriggerInspectorResidentV4"' not in workspace:
+    raise SystemExit("Trigger Inspector must use the resizable/persisted V4 geometry identity.")
 if 'TriggerEditorKeys.Name' not in view or 'trigger.Name + "  ["' not in view:
     raise SystemExit("Trigger inspector/scene list must expose custom names.")
 if 'SPOT AREA' in view or 'DevToolUiSettings.T("区域", "SPOT AREA")' in view:
