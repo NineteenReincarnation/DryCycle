@@ -208,7 +208,7 @@ if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
     raise SystemExit("Trigger must not recreate a private top command-bar window.")
 if 'ImGui.BeginPopup("##TriggerAddPopup")' not in workspace or 'ImGui.CloseCurrentPopup()' not in workspace:
     raise SystemExit("Trigger Add must remain a compact popup menu attached to the shared top bar.")
-if 'Name##TriggerCreateName' not in workspace or 'name: addTriggerName' not in workspace:
+if '"TriggerCreateName"' not in workspace or 'name: addTriggerName' not in workspace:
     raise SystemExit("Trigger name must be authored in the compact popup before the trigger is created.")
 if 'DrawAddPalette' in workspace or 'TriggerAddPalette' in workspace or 'TriggerWorkspaceAddSearch' in workspace:
     raise SystemExit("Trigger Add must not regress to an independent/search window.")
