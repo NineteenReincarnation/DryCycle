@@ -234,7 +234,10 @@ public static class EditorInputRouter
         if (EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
             return;
 
-        if (!ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.X))
+        if (!ctrl && !shift &&
+            !global::UnityEngine.Input.GetKey(KeyCode.LeftAlt) &&
+            !global::UnityEngine.Input.GetKey(KeyCode.RightAlt) &&
+            global::UnityEngine.Input.GetKeyDown(KeyCode.X))
         {
             HandleGlobalDeleteShortcut(session);
             return;
@@ -327,7 +330,8 @@ public static class EditorInputRouter
             return;
 
         // X is a DevTool-wide delete command. Reserve the gameplay key immediately, then dispatch
-        // according to the active workspace. Frontend-owned selections use the edge bridge below.
+        // according to the active workspace. Map subviews keep their presentation-only selection
+        // locally, so they consume the same X edge in the active frontend.
         MarkKeyboardCaptured(session.Owner?.game);
 
         switch (session.ToolMode)
