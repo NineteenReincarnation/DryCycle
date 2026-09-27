@@ -153,6 +153,62 @@ dotnet run --project tests/WorldMapBackground.Tests/WorldMapBackground.Tests.csp
   --configuration Release \
   --no-launch-profile
 
+# Trigger is intentionally canvas-first: transient add/scene/advanced panels must not regress
+# back into the old always-open Browser + Inspector + center Scene layout.
+python3 - <<'PY'
+from pathlib import Path
+
+workspace_path = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorWorkspace.cs")
+view_path = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorView.cs")
+pages_path = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/BuiltinDevToolPages.cs")
+font_path = Path("src/DevUI/DevTool/RWImGui/Settings/Fonts/FontSettingsWindow.cs")
+migration_path = Path("src/DevUI/DevTool/RWImGui/Diagnostics/Compatibility/MigrationCoverageWindow.cs")
+
+for path in (workspace_path, view_path, pages_path, font_path, migration_path):
+    if not path.is_file():
+        raise SystemExit(f"Trigger canvas-first contract input is missing: {path}")
+
+workspace = workspace_path.read_text(encoding="utf-8")
+view = view_path.read_text(encoding="utf-8")
+pages = pages_path.read_text(encoding="utf-8")
+font = font_path.read_text(encoding="utf-8")
+migration = migration_path.read_text(encoding="utf-8")
+
+start = pages.find("internal sealed class TriggersDevToolPage")
+end = pages.find("internal sealed class MapDevToolPage", start)
+if start < 0 or end < 0:
+    raise SystemExit("Could not isolate TriggersDevToolPage for canvas-first guard.")
+trigger_page = pages[start:end]
+
+required_workspace = (
+    "DrawCommandBar",
+    "DrawAddPalette",
+    "DrawCompactScene",
+    "DrawQuickInspector",
+    "DrawAdvancedInspector",
+)
+for token in required_workspace:
+    if token not in workspace:
+        raise SystemExit(f"Trigger canvas-first workspace lost required surface: {token}")
+
+if "UsesDedicatedWorkspace => true" not in trigger_page:
+    raise SystemExit("Trigger page must remain a dedicated canvas-first workspace.")
+if "SupportsSceneSurface => false" not in trigger_page:
+    raise SystemExit("Trigger page must not restore the large shared center Scene window.")
+if "DrawSlugcatCompactSelector" not in view or "TriggerEditorCommandKind.SetSlugcats" not in view:
+    raise SystemExit("Trigger slugcat editing must remain compact and preset-capable.")
+if "EditorToolMode.Triggers" not in font:
+    raise SystemExit("Font diagnostics must stay out of the Trigger workspace.")
+if "EditorToolMode.Triggers" not in migration:
+    raise SystemExit("Migration diagnostics must stay out of the Trigger workspace.")
+
+lower_workspace = workspace.lower()
+if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" in workspace:
+    raise SystemExit("Trigger workspace must not add recent-use/recent-selection UI.")
+
+print("Trigger canvas-first workspace guard passed.")
+PY
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
