@@ -52,6 +52,15 @@ internal static partial class TriggerEditorView
             DrawQuickInspector(snapshot, selected, display);
     }
 
+    internal static void EnterCanvasFirst()
+    {
+        workspaceShellInitialized = false;
+        addPaletteOpen = false;
+        scenePanelOpen = false;
+        advancedInspectorOpen = false;
+        focusAddSearch = false;
+    }
+
     private static void ResetWorkspaceRetainedState()
     {
         workspaceShellInitialized = false;
@@ -146,6 +155,9 @@ internal static partial class TriggerEditorView
                     : DevToolButtonTone.Subtle))
         {
             addPaletteOpen = !addPaletteOpen;
+            EditorUiCommandQueue.Enqueue(
+                new EditorUiCommand(
+                    EditorUiCommandKind.ToggleBrowser));
             if (addPaletteOpen)
                 focusAddSearch = true;
         }
@@ -198,6 +210,9 @@ internal static partial class TriggerEditorView
             {
                 advancedInspectorOpen =
                     !advancedInspectorOpen;
+                EditorUiCommandQueue.Enqueue(
+                    new EditorUiCommand(
+                        EditorUiCommandKind.ToggleInspector));
                 if (advancedInspectorOpen)
                     scenePanelOpen = false;
             }
@@ -546,6 +561,12 @@ internal static partial class TriggerEditorView
         {
             advancedInspectorOpen = true;
             scenePanelOpen = false;
+            if (!observedShellInspectorOpen)
+            {
+                EditorUiCommandQueue.Enqueue(
+                    new EditorUiCommand(
+                        EditorUiCommandKind.ToggleInspector));
+            }
         }
 
         ImGui.End();
