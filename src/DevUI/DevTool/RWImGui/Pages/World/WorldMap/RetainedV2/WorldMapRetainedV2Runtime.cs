@@ -40,28 +40,36 @@ internal static class WorldMapRetainedV2Runtime
     {
         internal readonly HashSet<string> Ids;
         internal readonly WorldMapRouteSpatialIndex SpatialIndex;
+        internal readonly Dictionary<string, WorldMapCrossingMark[]> CrossingsByRoute;
 
         internal PresentedRouteSnapshot(
             HashSet<string> ids,
-            WorldMapRouteSpatialIndex spatialIndex)
+            WorldMapRouteSpatialIndex spatialIndex,
+            Dictionary<string, WorldMapCrossingMark[]> crossingsByRoute)
         {
             Ids = ids ?? new HashSet<string>(StringComparer.Ordinal);
             SpatialIndex = spatialIndex ?? new WorldMapRouteSpatialIndex();
+            CrossingsByRoute =
+                crossingsByRoute ??
+                new Dictionary<string, WorldMapCrossingMark[]>(
+                    StringComparer.Ordinal);
         }
 
         internal static PresentedRouteSnapshot Empty() =>
             new(
                 new HashSet<string>(StringComparer.Ordinal),
-                new WorldMapRouteSpatialIndex());
+                new WorldMapRouteSpatialIndex(),
+                new Dictionary<string, WorldMapCrossingMark[]>(
+                    StringComparer.Ordinal));
     }
 
     private static PresentedRouteSnapshot presentedRoutes =
         PresentedRouteSnapshot.Empty();
     private static long presentedRouteRevision = long.MinValue;
-    private static Dictionary<string, WorldMapCrossingMark[]> presentedCrossingsByRoute =
+    private static Dictionary<string, WorldMapCrossingMark[]> liveCrossingsByRoute =
         new(StringComparer.Ordinal);
-    private static long presentedCrossingRevision = long.MinValue;
-    private static bool presentedCrossingsCurrent;
+    private static long liveCrossingRevision = long.MinValue;
+    private static bool liveCrossingsCurrent;
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
     private static volatile bool enabled;
@@ -236,7 +244,7 @@ internal static class WorldMapRetainedV2Runtime
                 geometryChangedRooms);
         }
         ConnectionResources.Update(MainSceneState, RoomResources);
-        PublishCrossingSnapshotIfNeeded();
+        PublishLiveCrossingSnapshotIfNeeded();
         ConnectionResources.DrainRouteChanges(routeChanged);
         if (routeChanged.Count > 0)
         {
@@ -399,15 +407,32 @@ internal static class WorldMapRetainedV2Runtime
     {
         marks = null;
         if (!enabled ||
-            string.IsNullOrEmpty(connectionId) ||
-            !Volatile.Read(ref presentedCrossingsCurrent))
+            string.IsNullOrEmpty(connectionId))
             return false;
 
-        Dictionary<string, WorldMapCrossingMark[]> snapshot =
-            Volatile.Read(ref presentedCrossingsByRoute);
+        // A route that has already been painted to the retained surface must use the crossing
+        // grammar captured in the exact same immutable publication. Live crossing rebuilds can
+        // finish before the next Camera.Render; exposing them early would put hover/selection
+        // bridge arcs on a different route frame from the pixels underneath.
+        PresentedRouteSnapshot presented =
+            Volatile.Read(ref presentedRoutes);
+        if (presented?.Ids?.Contains(connectionId) == true)
+        {
+            return presented.CrossingsByRoute != null &&
+                   presented.CrossingsByRoute.TryGetValue(
+                       connectionId,
+                       out marks) &&
+                   marks != null &&
+                   marks.Length > 0;
+        }
 
-        return snapshot != null &&
-               snapshot.TryGetValue(
+        if (!Volatile.Read(ref liveCrossingsCurrent))
+            return false;
+
+        Dictionary<string, WorldMapCrossingMark[]> live =
+            Volatile.Read(ref liveCrossingsByRoute);
+        return live != null &&
+               live.TryGetValue(
                    connectionId,
                    out marks) &&
                marks != null &&
@@ -466,20 +491,20 @@ internal static class WorldMapRetainedV2Runtime
                    out distanceSquared);
     }
 
-    private static void PublishCrossingSnapshotIfNeeded()
+    private static void PublishLiveCrossingSnapshotIfNeeded()
     {
         if (!ConnectionResources.CrossingsCurrent)
         {
-            if (Volatile.Read(ref presentedCrossingsCurrent))
+            if (Volatile.Read(ref liveCrossingsCurrent))
             {
                 Volatile.Write(
-                    ref presentedCrossingsByRoute,
+                    ref liveCrossingsByRoute,
                     new Dictionary<string, WorldMapCrossingMark[]>(
                         StringComparer.Ordinal));
                 Volatile.Write(
-                    ref presentedCrossingsCurrent,
+                    ref liveCrossingsCurrent,
                     false);
-                presentedCrossingRevision =
+                liveCrossingRevision =
                     long.MinValue;
             }
 
@@ -488,34 +513,63 @@ internal static class WorldMapRetainedV2Runtime
 
         long revision =
             ConnectionResources.CrossingRevision;
-        if (Volatile.Read(ref presentedCrossingsCurrent) &&
-            revision == presentedCrossingRevision)
+        if (Volatile.Read(ref liveCrossingsCurrent) &&
+            revision == liveCrossingRevision)
             return;
 
+        liveCrossingRevision = revision;
+        Volatile.Write(
+            ref liveCrossingsByRoute,
+            BuildCrossingSnapshot(
+                allowedRouteIds: null));
+        Volatile.Write(
+            ref liveCrossingsCurrent,
+            true);
+    }
+
+    private static Dictionary<string, WorldMapCrossingMark[]> BuildCrossingSnapshot(
+        HashSet<string> allowedRouteIds)
+    {
         Dictionary<string, List<WorldMapCrossingMark>> staging =
             new(StringComparer.Ordinal);
 
-        for (int i = 0;
-             i < ConnectionResources.Crossings.Count;
-             i++)
+        if (ConnectionResources.CrossingsCurrent)
         {
-            WorldMapCrossingMark mark =
-                ConnectionResources.Crossings[i];
-
-            AddCrossingToSnapshot(
-                staging,
-                mark.OverRouteId,
-                mark);
-
-            if (!string.Equals(
-                    mark.UnderRouteId,
-                    mark.OverRouteId,
-                    StringComparison.Ordinal))
+            for (int i = 0;
+                 i < ConnectionResources.Crossings.Count;
+                 i++)
             {
-                AddCrossingToSnapshot(
-                    staging,
-                    mark.UnderRouteId,
-                    mark);
+                WorldMapCrossingMark mark =
+                    ConnectionResources.Crossings[i];
+
+                bool overAllowed =
+                    allowedRouteIds == null ||
+                    allowedRouteIds.Contains(
+                        mark.OverRouteId);
+                bool underAllowed =
+                    allowedRouteIds == null ||
+                    allowedRouteIds.Contains(
+                        mark.UnderRouteId);
+
+                if (overAllowed)
+                {
+                    AddCrossingToSnapshot(
+                        staging,
+                        mark.OverRouteId,
+                        mark);
+                }
+
+                if (underAllowed &&
+                    !string.Equals(
+                        mark.UnderRouteId,
+                        mark.OverRouteId,
+                        StringComparison.Ordinal))
+                {
+                    AddCrossingToSnapshot(
+                        staging,
+                        mark.UnderRouteId,
+                        mark);
+                }
             }
         }
 
@@ -529,13 +583,7 @@ internal static class WorldMapRetainedV2Runtime
                 pair.Value.ToArray();
         }
 
-        presentedCrossingRevision = revision;
-        Volatile.Write(
-            ref presentedCrossingsByRoute,
-            next);
-        Volatile.Write(
-            ref presentedCrossingsCurrent,
-            true);
+        return next;
     }
 
     private static void AddCrossingToSnapshot(
@@ -654,9 +702,14 @@ internal static class WorldMapRetainedV2Runtime
         }
 
         presentedRouteRevision = routeRevision;
+        Dictionary<string, WorldMapCrossingMark[]> crossings =
+            BuildCrossingSnapshot(ids);
         Volatile.Write(
             ref presentedRoutes,
-            new PresentedRouteSnapshot(ids, index));
+            new PresentedRouteSnapshot(
+                ids,
+                index,
+                crossings));
     }
 
     private static bool PresentedRouteSetMatches(
@@ -732,13 +785,13 @@ internal static class WorldMapRetainedV2Runtime
             ref presentedRoutes,
             PresentedRouteSnapshot.Empty());
         Volatile.Write(
-            ref presentedCrossingsByRoute,
+            ref liveCrossingsByRoute,
             new Dictionary<string, WorldMapCrossingMark[]>(
                 StringComparer.Ordinal));
         Volatile.Write(
-            ref presentedCrossingsCurrent,
+            ref liveCrossingsCurrent,
             false);
-        presentedCrossingRevision =
+        liveCrossingRevision =
             long.MinValue;
         Volatile.Write(ref retainedConnectionsReady, 0);
         Volatile.Write(ref activeZoom, 1f);
