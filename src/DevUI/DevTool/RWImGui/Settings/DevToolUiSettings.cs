@@ -114,7 +114,7 @@ internal static class DevToolUiSettings
         get => textColor;
         set
         {
-            if (textColor == value) return;
+            if (textColor.Equals(value)) return;
             textColor = value;
             DevToolUserSettingsStore.NotifyPresentationChanged();
         }
@@ -125,7 +125,7 @@ internal static class DevToolUiSettings
         get => disabledTextColor;
         set
         {
-            if (disabledTextColor == value) return;
+            if (disabledTextColor.Equals(value)) return;
             disabledTextColor = value;
             DevToolUserSettingsStore.NotifyPresentationChanged();
         }
