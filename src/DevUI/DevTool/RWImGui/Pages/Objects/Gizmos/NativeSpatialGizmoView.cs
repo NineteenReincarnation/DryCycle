@@ -109,12 +109,7 @@ internal static class NativeSpatialGizmoView
         {
             Num.Vector2 center = WorldToScreen(viewport, display, selected.X, selected.Y);
             float radius = WorldRadiusToScreen(viewport, display, selected.Radius);
-            Num.Vector2 handleDirection = TriggerRadiusDirectionToScreen(
-                viewport,
-                display,
-                selected.RadiusHandleX,
-                selected.RadiusHandleY);
-            Num.Vector2 radiusHandle = center + handleDirection * radius;
+            Num.Vector2 radiusHandle = new(center.X + radius, center.Y);
             DrawSecondaryHandle(draw, radiusHandle);
             if (!drag.Active && CanStartInteraction() && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
                 DistanceSquared(mouse, radiusHandle) <= HitRadius * HitRadius)
@@ -193,7 +188,12 @@ internal static class NativeSpatialGizmoView
         {
             Num.Vector2 center = WorldToScreen(viewport, display, selected.X, selected.Y);
             float radius = WorldRadiusToScreen(viewport, display, selected.Radius);
-            Num.Vector2 radiusHandle = new(center.X + radius, center.Y);
+            Num.Vector2 handleDirection = TriggerRadiusDirectionToScreen(
+                viewport,
+                display,
+                selected.RadiusHandleX,
+                selected.RadiusHandleY);
+            Num.Vector2 radiusHandle = center + handleDirection * radius;
             DrawSecondaryHandle(draw, radiusHandle);
             if (!drag.Active && CanStartInteraction() && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
                 DistanceSquared(mouse, radiusHandle) <= HitRadius * HitRadius)
