@@ -34,6 +34,7 @@ public sealed class EditorTriggerSnapshot
 {
     public int Index { get; init; }
     public string Type { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
     public bool Selected { get; init; }
     public bool IsSpot { get; init; }
     public float X { get; init; }
@@ -288,6 +289,7 @@ public static class TriggerEditorPresentationHub
         {
             Index = index,
             Type = trigger?.type?.value ?? string.Empty,
+            Name = TriggerEditorMetadata.GetName(trigger),
             Selected = index == selectedIndex,
             IsSpot = spot != null,
             X = spot?.pos.x ?? 0f,
@@ -351,6 +353,7 @@ public static class TriggerEditorPresentationHub
     {
         Index = trigger.Index,
         Type = trigger.Type,
+        Name = trigger.Name,
         Selected = selected,
         IsSpot = trigger.IsSpot,
         X = trigger.X,
