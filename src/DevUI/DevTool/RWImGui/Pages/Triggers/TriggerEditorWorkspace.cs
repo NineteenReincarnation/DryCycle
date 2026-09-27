@@ -17,10 +17,7 @@ internal static partial class TriggerEditorView
 {
     private static bool workspaceShellInitialized;
     private static bool observedShellBrowserOpen;
-    private static bool addPaletteOpen;
     private static bool scenePanelOpen = true;
-    private static bool focusAddSearch;
-    private static string workspaceAddSearch = string.Empty;
     private static string workspaceSceneSearch = string.Empty;
 
     internal static void DrawWorkspace(
@@ -36,9 +33,6 @@ internal static partial class TriggerEditorView
         EditorTriggerSnapshot selected =
             FindSelected(snapshot);
 
-        if (addPaletteOpen)
-            DrawAddPalette(snapshot, display);
-
         if (scenePanelOpen)
             DrawCompactScene(snapshot, display);
 
@@ -48,8 +42,6 @@ internal static partial class TriggerEditorView
     internal static void EnterCanvasFirst()
     {
         workspaceShellInitialized = false;
-        addPaletteOpen = false;
-        focusAddSearch = false;
     }
 
     private static void ResetWorkspaceRetainedState()
@@ -59,7 +51,6 @@ internal static partial class TriggerEditorView
         addPaletteOpen = false;
         scenePanelOpen = true;
         focusAddSearch = false;
-        workspaceAddSearch = string.Empty;
         workspaceSceneSearch = string.Empty;
     }
 
@@ -74,16 +65,13 @@ internal static partial class TriggerEditorView
             observedShellBrowserOpen = browserOpen;
             // Trigger always enters in canvas-first mode. Browser state is observed only so Ctrl+B
             // can continue to open/close the compact Add palette; the Inspector itself stays resident.
-            addPaletteOpen = false;
             return;
         }
 
         if (browserOpen != observedShellBrowserOpen)
         {
             observedShellBrowserOpen = browserOpen;
-            addPaletteOpen = !addPaletteOpen;
-            if (addPaletteOpen)
-                focusAddSearch = true;
+            ImGui.OpenPopup("##TriggerAddPopup");
         }
 
     }
@@ -105,15 +93,15 @@ internal static partial class TriggerEditorView
         if (DevToolWidgets.ActionButton(
                 addLabel,
                 "TriggerWorkspaceAdd",
-                addPaletteOpen
-                    ? DevToolButtonTone.Primary
-                    : DevToolButtonTone.Subtle))
+                DevToolButtonTone.Subtle))
         {
-            addPaletteOpen =
-                !addPaletteOpen;
-            if (addPaletteOpen)
-                focusAddSearch = true;
+            ImGui.OpenPopup("##TriggerAddPopup");
         }
+
+        Num.Vector2 addPopupPosition =
+            new(
+                ImGui.GetItemRectMin().X,
+                ImGui.GetItemRectMax().Y + 4f);
 
         int count =
             snapshot.Triggers?.Length ?? 0;
@@ -133,112 +121,51 @@ internal static partial class TriggerEditorView
         {
             scenePanelOpen = !scenePanelOpen;
         }
+
+        DrawAddPopup(
+            snapshot,
+            addPopupPosition);
     }
 
-    private static void DrawAddPalette(
+    private static void DrawAddPopup(
         EditorTriggerPresentationSnapshot snapshot,
-        Num.Vector2 display)
+        Num.Vector2 position)
     {
-        float width =
-            Math.Min(340f, Math.Max(260f, display.X * 0.22f));
-        float height =
-            Math.Min(420f, Math.Max(260f, display.Y * 0.44f));
-
         ImGui.SetNextWindowPos(
-            new Num.Vector2(
-                Math.Max(210f, display.X * 0.25f),
-                58f),
-            ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(
-            new Num.Vector2(width, height),
-            ImGuiCond.FirstUseEver);
+            position,
+            ImGuiCond.Appearing);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(250f, 220f),
-            new Num.Vector2(
-                Math.Max(250f, display.X * 0.45f),
-                Math.Max(220f, display.Y - 80f)));
-        ImGui.SetNextWindowBgAlpha(
-            DevToolUiSettings.PopupAlpha);
+            new Num.Vector2(170f, 0f),
+            new Num.Vector2(320f, 720f));
 
-        if (!ImGui.Begin(
-                DevToolUiSettings.T(
-                    "添加触发器###TriggerAddPalette",
-                    "Add Trigger###TriggerAddPalette"),
-                ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
+        if (!ImGui.BeginPopup("##TriggerAddPopup"))
             return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow(
-            "TriggerAddPalette");
-
-        if (focusAddSearch)
-        {
-            ImGui.SetKeyboardFocusHere();
-            focusAddSearch = false;
-        }
-
-        DevToolWidgets.FullWidthInputText(
-            DevToolUiSettings.T(
-                "搜索",
-                "Search"),
-            "TriggerWorkspaceAddSearch",
-            ref workspaceAddSearch,
-            128);
-
-        ImGui.Separator();
 
         string[] types =
-            snapshot.TriggerTypes ?? Array.Empty<string>();
+            snapshot.TriggerTypes ??
+            Array.Empty<string>();
         EnsureTriggerTypeLabels(types);
-        string query =
-            workspaceAddSearch?.Trim() ?? string.Empty;
-        EnsureTriggerMatches(
-            types,
-            query);
 
-        using DevToolListClipper clipper =
-            new(ProjectedTriggerMatches.Count);
-        while (clipper.Step(
-                   out int firstVisible,
-                   out int lastVisibleExclusive))
+        // The Trigger catalog is intentionally shown in full. This is a short action menu, not a
+        // browser/search surface; developers should see every placeable type immediately.
+        for (int i = 0; i < types.Length; i++)
         {
-            for (int visibleIndex = firstVisible;
-                 visibleIndex < lastVisibleExclusive;
-                 visibleIndex++)
-            {
-                int sourceIndex =
-                    ProjectedTriggerMatches[visibleIndex];
-                string type =
-                    types[sourceIndex];
+            string type =
+                types[i];
+            if (!ImGui.Selectable(
+                    projectedTriggerTypeLabels[i],
+                    false))
+                continue;
 
-                if (!ImGui.Selectable(
-                        projectedTriggerTypeLabels[sourceIndex],
-                        false))
-                    continue;
-
-                TriggerEditorCommandQueue.Enqueue(
-                    new TriggerEditorCommand(
-                        TriggerEditorCommandKind.Create,
-                        text: type));
-
-                addPaletteOpen = false;
-                workspaceAddSearch = string.Empty;
-                break;
-            }
+            TriggerEditorCommandQueue.Enqueue(
+                new TriggerEditorCommand(
+                    TriggerEditorCommandKind.Create,
+                    text: type));
+            ImGui.CloseCurrentPopup();
+            break;
         }
 
-        if (ProjectedTriggerMatches.Count == 0)
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T(
-                    "没有匹配的触发器类型。",
-                    "No matching trigger types."),
-                true);
-        }
-
-        ImGui.End();
+        ImGui.EndPopup();
     }
 
     private static void DrawCompactScene(
