@@ -44,14 +44,6 @@ internal static class LanceScavengerDebugView
 
     internal static void Draw(EditorPresentationSnapshot editor, Num.Vector2 display)
     {
-        string room = string.IsNullOrEmpty(editor.RoomName) ? editor.Document : editor.RoomName;
-        UpdateCaptureRequest(room);
-        LanceScavengerDebugSnapshot snapshot = recordingEnabled
-            ? LanceScavengerDebugPresentationHub.Current
-            : LanceScavengerDebugSnapshot.Empty;
-
-        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
-        float leftRail = Math.Min(400f, Math.Max(190f, 230f * Math.Min(1.35f, scale)));
         float width = Math.Min(Math.Max(760f, display.X - 250f), Math.Max(560f, display.X - 32f));
         float height = Math.Min(Math.Max(500f, display.Y - 190f), Math.Max(360f, display.Y - 32f));
         Num.Vector2 pos = new(
@@ -72,6 +64,21 @@ internal static class LanceScavengerDebugView
         }
 
         FloatingWindowSnap.TrackCurrentWindow("LanceScavengerDebug");
+        DrawEmbedded(editor);
+        ImGui.End();
+    }
+
+    internal static void DrawEmbedded(EditorPresentationSnapshot editor)
+    {
+        string room = string.IsNullOrEmpty(editor.RoomName) ? editor.Document : editor.RoomName;
+        UpdateCaptureRequest(room);
+        LanceScavengerDebugSnapshot snapshot = recordingEnabled
+            ? LanceScavengerDebugPresentationHub.Current
+            : LanceScavengerDebugSnapshot.Empty;
+
+        float scale = Math.Max(0.75f, Math.Min(3f, DevToolUiSettings.UiScale));
+        float leftRail = Math.Min(400f, Math.Max(190f, 230f * Math.Min(1.35f, scale)));
+
         if (DrawHeader(snapshot, room))
         {
             UpdateCaptureRequest(room);
@@ -114,8 +121,8 @@ internal static class LanceScavengerDebugView
             }
         }
         ImGui.EndChild();
-        ImGui.End();
     }
+
 
     internal static void StopCapture()
     {
