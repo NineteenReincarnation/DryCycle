@@ -87,6 +87,41 @@ internal static class DevToolWidgets
     // get: collapse all on the first press, expand all on the next press.
     private static bool roomEffectsExpanded = true;
 
+    internal static void CenteredPrimaryTitle(
+        string text,
+        float fontScale = 1.52f,
+        float restoreScale = 1f)
+    {
+        text ??= string.Empty;
+
+        float rowStartX =
+            ImGui.GetCursorPosX();
+        float rowWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        ImGui.SetWindowFontScale(
+            fontScale);
+        float textWidth =
+            ImGui.CalcTextSize(text).X;
+        ImGui.SetWindowFontScale(
+            restoreScale);
+
+        float centeredX =
+            rowStartX +
+            System.Math.Max(
+                0f,
+                (rowWidth - textWidth) * 0.5f);
+        ImGui.SetCursorPosX(
+            centeredX);
+
+        DrawFlowingTitle(
+            text,
+            FlowTitleLevel.Primary,
+            fontScale,
+            2.0f,
+            restoreScale);
+    }
+
     internal static void PaneTitle(string text, float restoreScale = 1f)
     {
         bool primary = IsPrimaryPaneTitle(text);
