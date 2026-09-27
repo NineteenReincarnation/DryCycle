@@ -576,10 +576,10 @@ internal static partial class TriggerEditorView
             bool selected =
                 Contains(allowed, name);
 
-            if (ImGui.Selectable(
+            bool value = selected;
+            if (ImGui.Checkbox(
                     projectedSlugcatLabels[i],
-                    selected,
-                    ImGuiSelectableFlags.DontClosePopups))
+                    ref value))
             {
                 TriggerEditorCommandQueue.Enqueue(
                     new TriggerEditorCommand(
