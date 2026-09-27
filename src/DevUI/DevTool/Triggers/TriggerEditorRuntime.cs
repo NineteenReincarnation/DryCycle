@@ -513,6 +513,7 @@ public enum TriggerEditorCommandKind
     Delete,
     SetValue,
     ToggleSlugcat,
+    SetSlugcats,
     SetEventType,
     ClearEvent,
     SetEventValue
@@ -525,13 +526,15 @@ public readonly struct TriggerEditorCommand
         int index = -1,
         string key = null,
         string text = null,
-        EditorPropertyValue value = default)
+        EditorPropertyValue value = default,
+        string[] texts = null)
     {
         Kind = kind;
         Index = index;
         Key = key;
         Text = text;
         Value = value;
+        Texts = texts ?? Array.Empty<string>();
     }
 
     public TriggerEditorCommandKind Kind { get; }
@@ -539,6 +542,7 @@ public readonly struct TriggerEditorCommand
     public string Key { get; }
     public string Text { get; }
     public EditorPropertyValue Value { get; }
+    public string[] Texts { get; }
 }
 
 public static class TriggerEditorCommandQueue
@@ -576,6 +580,9 @@ public static class TriggerEditorCommandQueue
                         break;
                     case TriggerEditorCommandKind.ToggleSlugcat:
                         changed = TriggerEditorActions.ToggleSlugcat(session, command.Index, command.Text);
+                        break;
+                    case TriggerEditorCommandKind.SetSlugcats:
+                        changed = TriggerEditorActions.SetSlugcats(session, command.Index, command.Texts);
                         break;
                     case TriggerEditorCommandKind.SetEventType:
                         changed = TriggerEditorActions.SetEventType(session, command.Index, command.Text);
@@ -615,6 +622,7 @@ public static class TriggerEditorCommandQueue
                 break;
             case TriggerEditorCommandKind.SetValue:
             case TriggerEditorCommandKind.ToggleSlugcat:
+            case TriggerEditorCommandKind.SetSlugcats:
             case TriggerEditorCommandKind.SetEventType:
             case TriggerEditorCommandKind.ClearEvent:
             case TriggerEditorCommandKind.SetEventValue:
