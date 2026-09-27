@@ -51,13 +51,20 @@ internal static class DevToolUiSettings
     private static float chineseFontSize = DefaultChineseFontSize;
     private static float englishFontSize = DefaultFontSize;
     private static int englishFontWeight = DefaultFontWeight;
+    private static Num.Vector4 textColor = DefaultTextColor;
+    private static Num.Vector4 disabledTextColor = DefaultDisabledTextColor;
 
     internal static DevToolUiLanguage Language => language;
 
     internal static DevToolScenePlacement ScenePlacement
     {
         get => scenePlacement;
-        set => scenePlacement = value;
+        set
+        {
+            if (scenePlacement == value) return;
+            scenePlacement = value;
+            DevToolUserSettingsStore.NotifyPresentationChanged();
+        }
     }
 
     internal static bool SceneInCenter => scenePlacement == DevToolScenePlacement.Center;
@@ -67,8 +74,19 @@ internal static class DevToolUiSettings
         get => IsChinese ? chineseFontSize : englishFontSize;
         set
         {
-            if (IsChinese) chineseFontSize = value;
-            else englishFontSize = value;
+            float next = System.Math.Max(12f, System.Math.Min(72f, value));
+            if (IsChinese)
+            {
+                if (System.Math.Abs(chineseFontSize - next) <= 0.001f) return;
+                chineseFontSize = next;
+            }
+            else
+            {
+                if (System.Math.Abs(englishFontSize - next) <= 0.001f) return;
+                englishFontSize = next;
+            }
+
+            DevToolUserSettingsStore.NotifyPresentationChanged();
         }
     }
 
@@ -77,7 +95,11 @@ internal static class DevToolUiSettings
         get => IsChinese ? DefaultChineseFontWeight : englishFontWeight;
         set
         {
-            if (!IsChinese) englishFontWeight = value;
+            if (IsChinese) return;
+            int next = System.Math.Max(100, System.Math.Min(900, value));
+            if (englishFontWeight == next) return;
+            englishFontWeight = next;
+            DevToolUserSettingsStore.NotifyPresentationChanged();
         }
     }
 
@@ -87,8 +109,31 @@ internal static class DevToolUiSettings
         set { }
     }
 
-    internal static Num.Vector4 TextColor { get; set; } = DefaultTextColor;
-    internal static Num.Vector4 DisabledTextColor { get; set; } = DefaultDisabledTextColor;
+    internal static Num.Vector4 TextColor
+    {
+        get => textColor;
+        set
+        {
+            if (textColor == value) return;
+            textColor = value;
+            DevToolUserSettingsStore.NotifyPresentationChanged();
+        }
+    }
+
+    internal static Num.Vector4 DisabledTextColor
+    {
+        get => disabledTextColor;
+        set
+        {
+            if (disabledTextColor == value) return;
+            disabledTextColor = value;
+            DevToolUserSettingsStore.NotifyPresentationChanged();
+        }
+    }
+
+    internal static float PersistedChineseFontSize => chineseFontSize;
+    internal static float PersistedEnglishFontSize => englishFontSize;
+    internal static int PersistedEnglishFontWeight => englishFontWeight;
 
     internal static bool IsChinese => language == DevToolUiLanguage.Chinese;
     internal static float UiScale => FontSize / ReferenceFontSize;
@@ -97,6 +142,7 @@ internal static class DevToolUiSettings
     {
         if (language == value) return;
         language = value;
+        DevToolUserSettingsStore.NotifyPresentationChanged();
         DevToolFrontend.RequestContextRebuildForLanguageChange();
     }
 
@@ -105,8 +151,27 @@ internal static class DevToolUiSettings
         chineseFontSize = DefaultChineseFontSize;
         englishFontSize = DefaultFontSize;
         englishFontWeight = DefaultFontWeight;
-        TextColor = DefaultTextColor;
-        DisabledTextColor = DefaultDisabledTextColor;
+        textColor = DefaultTextColor;
+        disabledTextColor = DefaultDisabledTextColor;
+        DevToolUserSettingsStore.NotifyPresentationChanged();
+    }
+
+    internal static void RestorePersistedPreferences(
+        DevToolUiLanguage restoredLanguage,
+        DevToolScenePlacement restoredScenePlacement,
+        float restoredChineseFontSize,
+        float restoredEnglishFontSize,
+        int restoredEnglishFontWeight,
+        Num.Vector4 restoredTextColor,
+        Num.Vector4 restoredDisabledTextColor)
+    {
+        language = restoredLanguage;
+        scenePlacement = restoredScenePlacement;
+        chineseFontSize = System.Math.Max(12f, System.Math.Min(72f, restoredChineseFontSize));
+        englishFontSize = System.Math.Max(12f, System.Math.Min(72f, restoredEnglishFontSize));
+        englishFontWeight = System.Math.Max(100, System.Math.Min(900, restoredEnglishFontWeight));
+        textColor = restoredTextColor;
+        disabledTextColor = restoredDisabledTextColor;
     }
 
     internal static string T(string chinese, string english)
