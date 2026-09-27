@@ -80,6 +80,9 @@ internal static partial class CartographyView
             return;
         }
 
+        FloatingWindowSnap.TrackCurrentWindow(
+            "CartographyImageBrowser");
+
         DrawImageBrowserToolbar();
 
         if (!string.IsNullOrEmpty(imageBrowserError))
