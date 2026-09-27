@@ -76,6 +76,9 @@ internal sealed class CartographyDocument
     public uint Water = 0xB34D9FD1;
     public uint Connections = 0xFFB8C3D0;
     public bool ShowRoomNames = true;
+    // Cartography-only visual rule: keep authored curved terrain solid from its visible surface
+    // down to the room floor. This does not mutate RoomSettings or gameplay collision.
+    public bool SolidTerrain = true;
     public bool ShowConnections = true;
     public bool Transparent = true;
     public bool CropSolid = true;
@@ -92,7 +95,7 @@ internal sealed class CartographyDocument
         {
             Identity = Identity, Region = Region, Title = Title, FontFamily = FontFamily,
             Background = Background, Terrain = Terrain, Water = Water, Connections = Connections,
-            ShowRoomNames = ShowRoomNames, ShowConnections = ShowConnections, Transparent = Transparent,
+            ShowRoomNames = ShowRoomNames, SolidTerrain = SolidTerrain, ShowConnections = ShowConnections, Transparent = Transparent,
             CropSolid = CropSolid, ExportScale = ExportScale, Padding = Padding
         };
         copy.Layers.AddRange(Layers.Select(layer => layer.Clone()));
