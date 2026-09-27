@@ -230,6 +230,50 @@ if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" 
 print("Trigger canvas-first workspace guard passed.")
 PY
 
+# Named Trigger authoring and the lower-right canvas workspace are one UX contract: names must
+# persist through Rain World's unknown-trigger fields, named Spots get clickable world labels, and
+# Scene/Quick Edit remain movable rather than being pinned every frame.
+python3 - <<'PY'
+from pathlib import Path
+
+runtime = Path("src/DevUI/DevTool/Triggers/TriggerEditorRuntime.cs").read_text(encoding="utf-8")
+actions = Path("src/DevUI/DevTool/Triggers/TriggerEditorActions.cs").read_text(encoding="utf-8")
+metadata = Path("src/DevUI/DevTool/Triggers/TriggerEditorMetadata.cs").read_text(encoding="utf-8")
+workspace = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorWorkspace.cs").read_text(encoding="utf-8")
+view = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorView.cs").read_text(encoding="utf-8")
+labels = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerSceneLabelView.cs").read_text(encoding="utf-8")
+pages = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/BuiltinDevToolPages.cs").read_text(encoding="utf-8")
+
+if 'public string Name { get; init; }' not in runtime or 'Name = TriggerEditorMetadata.GetName(trigger)' not in runtime:
+    raise SystemExit("Trigger presentation must expose persisted custom names.")
+if 'public const string Name = "name";' not in actions or 'TriggerEditorMetadata.SetName(trigger, value.Text)' not in actions:
+    raise SystemExit("Trigger names must remain editable through the normal history-backed SetValue path.")
+if 'unrecognizedSaveStrings' not in metadata or 'DryCycleName64' not in metadata or 'Convert.ToBase64String' not in metadata:
+    raise SystemExit("Trigger names must persist safely through Rain World's forward-compatible trigger metadata.")
+if 'private static bool scenePanelOpen = true;' not in workspace:
+    raise SystemExit("Trigger Scene must default visible in the canvas-first workspace.")
+if 'DrawQuickInspector(snapshot, selected, display);' not in workspace:
+    raise SystemExit("Trigger Quick Edit must remain resident even while Scene is visible.")
+if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
+    raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
+if 'TriggerCompactSceneV2' not in workspace or 'TriggerQuickInspectorV2' not in workspace:
+    raise SystemExit("Trigger Scene/Quick Edit must use the movable lower-right window identities.")
+if 'ImGuiCond.Always' in workspace[workspace.find('private static void DrawCompactScene'):workspace.find('private static void DrawQuickInspector')]:
+    raise SystemExit("Trigger Scene must not be pinned every frame; developers must be able to move it.")
+quick_start = workspace.find('private static void DrawQuickInspector')
+quick_end = workspace.find('private static void DrawAdvancedInspector', quick_start)
+if quick_start < 0 or quick_end < 0 or 'ImGuiCond.Always' in workspace[quick_start:quick_end]:
+    raise SystemExit("Trigger Quick Edit must not be pinned every frame; developers must be able to move it.")
+if 'TriggerEditorKeys.Name' not in view or 'trigger.Name + "  ["' not in view:
+    raise SystemExit("Trigger inspector/scene list must expose custom names.")
+if 'string.IsNullOrWhiteSpace(trigger.Name)' not in labels or 'TriggerEditorCommandKind.Select' not in labels:
+    raise SystemExit("Named spatial triggers must render clickable world labels.")
+if 'TriggerSceneLabelView.Draw' not in pages:
+    raise SystemExit("Trigger page must project named trigger labels into the room.")
+
+print("Trigger naming and resident workspace guard passed.")
+PY
+
 # Cartography solid-terrain mode is shared author state: it must default off, persist with a
 # backwards-compatible false fallback, sit beside the room-name toggle, and drive the common room
 # raster consumed by canvas and all exporters.
