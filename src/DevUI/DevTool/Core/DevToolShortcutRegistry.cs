@@ -188,6 +188,11 @@ public static class DevToolShortcutRegistry
         RegisterMode(EditorToolMode.Sound,
             new DevToolShortcutDescriptor("sound-handle", "LMB Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 20));
 
+        RegisterMode(EditorToolMode.Triggers,
+            new DevToolShortcutDescriptor("trigger-delete", "X / Delete", "删除当前选中的触发器", "Delete the selected trigger", 10));
+        RegisterMode(EditorToolMode.Triggers,
+            new DevToolShortcutDescriptor("trigger-spot-handle", "LMB Drag", "拖动 Spot 中心点或半径控制点；半径控制点可 360° 旋转", "Drag the Spot center or radius handle; the radius handle rotates through 360°", 20));
+
         RegisterMode(EditorToolMode.Map,
             new DevToolShortcutDescriptor("map-delete-connection", "Delete / X", "在 World Map 删除当前连接", "Delete the selected World Map connection", 10));
         RegisterMode(EditorToolMode.Map,
