@@ -76,9 +76,9 @@ internal sealed class CartographyDocument
     public uint Water = 0xB34D9FD1;
     public uint Connections = 0xFFB8C3D0;
     public bool ShowRoomNames = true;
-    // Cartography-only visual rule: keep authored curved terrain solid from its visible surface
-    // down to the room floor. This does not mutate RoomSettings or gameplay collision.
-    public bool SolidTerrain = true;
+    // Optional Cartography-only visual rule: when enabled, keep authored curved terrain solid from
+    // its visible surface down to the room floor. This does not mutate RoomSettings or gameplay collision.
+    public bool SolidTerrain = false;
     public bool ShowConnections = true;
     public bool Transparent = true;
     public bool CropSolid = true;
