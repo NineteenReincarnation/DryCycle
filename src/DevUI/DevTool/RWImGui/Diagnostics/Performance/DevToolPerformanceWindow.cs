@@ -170,7 +170,6 @@ internal static class DevToolPerformanceWindow
         DrawFrontendMetric(DevToolFrontendPerformanceMetric.FontSettings, DevToolUiSettings.T("字体设置", "Font settings"));
         DrawFrontendMetric(DevToolFrontendPerformanceMetric.Overlay, DevToolUiSettings.T("主 Overlay", "Main overlay"));
         DrawFrontendMetric(DevToolFrontendPerformanceMetric.SceneWorkspace, DevToolUiSettings.T("场景工作区", "Scene workspace"));
-        DrawFrontendMetric(DevToolFrontendPerformanceMetric.ScenePlacement, DevToolUiSettings.T("场景放置", "Scene placement"));
         DrawFrontendMetric(DevToolFrontendPerformanceMetric.ActionToast, DevToolUiSettings.T("操作提示", "Action toast"));
 
         ImGui.Spacing();
