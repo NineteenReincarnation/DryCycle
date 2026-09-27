@@ -368,7 +368,9 @@ public sealed class BridgePlugin : BaseUnityPlugin
 
         // Core shell/context activation happens before Map caches, image pumps or catalog work.
         // Optional page code can no longer prevent this call from being reached.
-        DevToolFrontend.SetVisibleFromMainThread(frontendVisible);
+        DevToolFrontend.SetVisibleFromMainThread(
+            frontendVisible,
+            releaseContextWhenHidden: definitelyClosed);
 
         if (!sessionVisible)
         {
@@ -714,7 +716,9 @@ internal static class DevToolFrontend
             EditorInputRouter.SetFrontendCapture(false, false, false);
     }
 
-    internal static void SetVisibleFromMainThread(bool value)
+    internal static void SetVisibleFromMainThread(
+        bool value,
+        bool releaseContextWhenHidden = true)
     {
         bool wasVisible = visible;
         visible = value;
@@ -730,7 +734,13 @@ internal static class DevToolFrontend
 
         if (!value)
         {
-            if (contextAttached || wasVisible)
+            // H only closes Rain World's DevUI surface; it does not end the DevTools/game lifetime.
+            // Releasing RWImGUI's native consumer context on that transient edge can race the Present
+            // thread that is still finishing the current frame and hard-crash the process without a
+            // managed exception. Keep the context attached but idle for transient hides (H / Esc),
+            // and release it only when the game/session is definitely ending or during explicit
+            // teardown/rebuild.
+            if (releaseContextWhenHidden && (contextAttached || wasVisible))
                 ReleaseContext();
 
             EditorInputRouter.SetFrontendCapture(false, false, false);
