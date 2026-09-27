@@ -293,6 +293,54 @@ if 'TriggerSceneLabelView.Draw' not in pages:
 print("Trigger naming and resident workspace guard passed.")
 PY
 
+# Rebuilt DevTool layout is a user preference, not session state. Every tracked floating window
+# must restore from BepInEx/config on a fresh consumer context, and common shell code must not
+# overwrite authored geometry after ImGui.Begin.
+python3 - <<'PY'
+from pathlib import Path
+
+store_path = Path("src/DevUI/DevTool/RWImGui/Settings/DevToolUserSettingsStore.cs")
+settings_path = Path("src/DevUI/DevTool/RWImGui/Settings/DevToolUiSettings.cs")
+snap_path = Path("src/DevUI/DevTool/RWImGui/Widgets/Windows/FloatingWindowSnap.cs")
+overlay_path = Path("src/DevUI/DevTool/RWImGui/Shell/DevToolOverlay.cs")
+bridge_path = Path("src/DevUI/DevTool/RWImGui/Shell/BridgePlugin.cs")
+
+for path in (store_path, settings_path, snap_path, overlay_path, bridge_path):
+    if not path.is_file():
+        raise SystemExit(f"Persistent DevTool layout input is missing: {path}")
+
+store = store_path.read_text(encoding="utf-8")
+settings = settings_path.read_text(encoding="utf-8")
+snap = snap_path.read_text(encoding="utf-8")
+overlay = overlay_path.read_text(encoding="utf-8")
+bridge = bridge_path.read_text(encoding="utf-8")
+
+if 'Path.Combine(Paths.ConfigPath, FileName)' not in store or 'DryCycle.DevTool.UI.xml' not in store:
+    raise SystemExit("DevTool user layout must persist under BepInEx/config.")
+if 'TryGetWindow' not in store or 'RememberWindow' not in store or 'FlushIfDue' not in store:
+    raise SystemExit("DevTool user settings store lost window restore/save behavior.")
+if 'RememberWindowGroups' not in store or 'browserInspectorSplit' not in store:
+    raise SystemExit("Window groups and Browser/Inspector splitter must persist with geometry.")
+if 'RestorePersistedPreferences' not in settings or 'NotifyPresentationChanged' not in settings:
+    raise SystemExit("Language/font/scene presentation preferences must share the persistent user store.")
+if 'DevToolUserSettingsStore.TryGetWindow' not in snap or 'ImGui.SetWindowSize' not in snap:
+    raise SystemExit("Floating windows must restore persisted size after ImGui.Begin.")
+if 'DevToolUserSettingsStore.RememberWindow' not in snap or 'FlushIfDue' not in snap:
+    raise SystemExit("Floating windows must publish authored geometry and debounce disk writes.")
+if 'BeginContextSession' not in snap or 'ReloadPersistedLayout' not in snap:
+    raise SystemExit("A rebuilt RWImGui consumer context must restore persistent layout state.")
+if 'browserInspectorDisplayWidth' in overlay:
+    raise SystemExit("Editor Panel must not reset width/position merely because a game session or display frame starts.")
+if 'RememberBrowserInspectorSplit' not in overlay:
+    raise SystemExit("Editor Panel Browser/Inspector splitter preference must persist.")
+if 'BridgePlugin/DevToolUserSettingsStore.Load' not in bridge or 'DevToolUserSettingsStore.FlushNow' not in bridge:
+    raise SystemExit("DevTool user settings must load at frontend startup and flush during shutdown.")
+if 'FloatingWindowSnap.BeginContextSession' not in bridge:
+    raise SystemExit("Fresh RWImGui contexts must reapply persisted window geometry.")
+
+print("Persistent DevTool UI layout guard passed.")
+PY
+
 # Cartography solid-terrain mode is shared author state: it must default off, persist with a
 # backwards-compatible false fallback, sit beside the room-name toggle, and drive the common room
 # raster consumed by canvas and all exporters.
