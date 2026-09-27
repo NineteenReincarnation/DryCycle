@@ -85,6 +85,7 @@ internal static class FloatingWindowSnap
     private static int nextGroupId = 1;
     private static int nextStaleAuditFrame;
     private static bool leftMouseDownThisFrame;
+    private static bool persistenceInitialized;
 
     private static bool marqueeActive;
     private static bool marqueeReleasePending;
@@ -98,6 +99,67 @@ internal static class FloatingWindowSnap
 
     internal static bool OwnsMouse => marqueeActive || marqueeReleasePending || groupDragging;
     internal static int SelectedWindowCount => Selected.Count;
+
+    internal static void ReloadPersistedLayout()
+    {
+        Windows.Clear();
+        Selected.Clear();
+        GroupDragOrigins.Clear();
+        Guides.Clear();
+        Groups.Clear();
+
+        DevToolPersistedWindowGroup[] persisted =
+            DevToolUserSettingsStore.GetWindowGroups();
+
+        int highestGroupId = 0;
+        for (int i = 0; i < persisted.Length; i++)
+        {
+            DevToolPersistedWindowGroup source =
+                persisted[i];
+            if (source.Id <= 0 ||
+                source.Members == null ||
+                source.Members.Length < 2)
+                continue;
+
+            WindowGroup group =
+                new()
+                {
+                    Id = source.Id
+                };
+            group.Members.UnionWith(source.Members);
+            if (group.Members.Count < 2)
+                continue;
+
+            Groups.Add(group);
+            highestGroupId =
+                Math.Max(
+                    highestGroupId,
+                    group.Id);
+        }
+
+        nextGroupId =
+            Math.Max(
+                1,
+                highestGroupId + 1);
+        persistenceInitialized = true;
+    }
+
+    internal static void BeginContextSession()
+    {
+        if (!persistenceInitialized)
+            ReloadPersistedLayout();
+
+        // ImGui window state belongs to the current consumer context. A rebuilt context must start
+        // from the persisted developer-authored geometry rather than stale in-process observations.
+        Windows.Clear();
+        Selected.Clear();
+        GroupDragOrigins.Clear();
+        Guides.Clear();
+        marqueeActive = false;
+        marqueeReleasePending = false;
+        groupDragging = false;
+        groupDragDelta = Num.Vector2.Zero;
+    }
 
     internal static WindowGroupSnapshot[] GetGroupSnapshots()
     {
@@ -136,6 +198,7 @@ internal static class FloatingWindowSnap
         {
             if (Groups[i].Id != groupId) continue;
             Groups.RemoveAt(i);
+            RememberGroups();
             return true;
         }
         return false;
@@ -274,14 +337,37 @@ internal static class FloatingWindowSnap
 
         if (!state.Initialized)
         {
-            // ImGui ini persistence can restore a perfectly valid window coordinate from an old
-            // monitor/resolution that is completely outside the current display. Clamp on the very
-            // first observed frame instead of accepting that invisible coordinate as authoritative.
-            Num.Vector2 clamped = ClampVisible(position, size);
-            if (DistanceSquared(clamped, position) > GeometryEpsilon)
+            if (DevToolUserSettingsStore.TryGetWindow(
+                    id,
+                    out DevToolPersistedWindowLayout persisted))
             {
-                ImGui.SetWindowPos(clamped);
-                position = clamped;
+                // Apply the developer's saved geometry after ImGui.Begin so per-window default
+                // SetNextWindowPos/Size calls cannot overwrite it on a fresh game/context.
+                ImGui.SetWindowSize(
+                    persisted.Size,
+                    ImGuiCond.Always);
+                size =
+                    ImGui.GetWindowSize();
+
+                Num.Vector2 restored =
+                    ClampVisible(
+                        persisted.Position,
+                        size);
+                ImGui.SetWindowPos(restored);
+                position =
+                    restored;
+            }
+            else
+            {
+                Num.Vector2 clamped =
+                    ClampVisible(
+                        position,
+                        size);
+                if (DistanceSquared(clamped, position) > GeometryEpsilon)
+                {
+                    ImGui.SetWindowPos(clamped);
+                    position = clamped;
+                }
             }
 
             state.Position = position;
@@ -289,6 +375,12 @@ internal static class FloatingWindowSnap
             state.MouseWasDown = mouseDown;
             state.LastSeenFrame = frame;
             state.Initialized = true;
+
+            DevToolUserSettingsStore.RememberWindow(
+                id,
+                position,
+                size);
+
             DrawSelectionOutline(id, position, size);
             return;
         }
@@ -364,6 +456,11 @@ internal static class FloatingWindowSnap
         state.MouseWasDown = mouseDown;
         state.LastSeenFrame = frame;
 
+        DevToolUserSettingsStore.RememberWindow(
+            id,
+            position,
+            size);
+
         DrawSelectionOutline(id, position, size);
     }
 
@@ -380,6 +477,11 @@ internal static class FloatingWindowSnap
         }
 
         DrawAlignmentGuides();
+
+        DevToolUserSettingsStore.FlushIfDue(
+            leftMouseDownThisFrame ||
+            groupDragging ||
+            marqueeActive);
 
         if (!marqueeActive) return;
 
@@ -425,7 +527,34 @@ internal static class FloatingWindowSnap
 
         Selected.Clear();
         Selected.UnionWith(members);
+        RememberGroups();
         return true;
+    }
+
+    private static void RememberGroups()
+    {
+        DevToolPersistedWindowGroup[] snapshot =
+            new DevToolPersistedWindowGroup[Groups.Count];
+
+        for (int i = 0; i < Groups.Count; i++)
+        {
+            WindowGroup group =
+                Groups[i];
+            string[] members =
+                new string[group.Members.Count];
+            group.Members.CopyTo(members);
+            Array.Sort(
+                members,
+                StringComparer.OrdinalIgnoreCase);
+
+            snapshot[i] =
+                new DevToolPersistedWindowGroup(
+                    group.Id,
+                    members);
+        }
+
+        DevToolUserSettingsStore.RememberWindowGroups(
+            snapshot);
     }
 
     private static WindowGroup FindGroup(int groupId)
