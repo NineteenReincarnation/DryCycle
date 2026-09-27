@@ -110,10 +110,6 @@ internal static class DevToolTopStatusWindow
 
     private static void DrawGlobalRow(EditorPresentationSnapshot snapshot)
     {
-        float rowStartX = ImGui.GetCursorPosX();
-        float rowStartY = ImGui.GetCursorPosY();
-        float rowWidth = ImGui.GetContentRegionAvail().X;
-
         string room =
             snapshot?.Available == true &&
             !string.IsNullOrWhiteSpace(snapshot.RoomName)
@@ -134,62 +130,58 @@ internal static class DevToolTopStatusWindow
             title = room + " : NewDevtool Active";
         }
 
-        // Draw the title first across the complete row. We then return the cursor to the same row
-        // for the left/right segmented controls, so the title stays centered against the window
-        // rather than being shifted by whichever localized button label happens to be wider.
-        DevToolWidgets.CenteredPrimaryTitle(
-            title,
-            1.56f);
-
-        float titleEndY = ImGui.GetCursorPosY();
-        float frameHeight = ImGui.GetFrameHeight();
-        float controlsY =
-            rowStartY +
-            Math.Max(
-                0f,
-                (titleEndY - rowStartY - frameHeight) * 0.5f);
-
         float modeWidth = ModeButtonWidth * 2f + SegmentGap;
         float languageWidth = LanguageButtonWidth * 2f + SegmentGap;
-        bool enoughWidth =
-            rowWidth >= modeWidth + languageWidth + 300f;
+        float sideWidth = Math.Max(modeWidth, languageWidth) + 8f;
+        float available = ImGui.GetContentRegionAvail().X;
 
-        if (enoughWidth)
+        // Use three real layout columns instead of drawing the centered title and then moving the
+        // cursor backwards over the same row. Rewinding the cursor produced an overlapping-item
+        // layout on the native ImGui backend and could terminate Rain World as soon as H opened
+        // DevUI. Equal side columns keep the title centered against the whole top window.
+        if (available >= sideWidth * 2f + 260f)
         {
-            ImGui.SetCursorPos(
-                new Num.Vector2(
-                    rowStartX,
-                    controlsY));
+            ImGui.Columns(3, "##DevToolTopGlobalColumns", false);
+            ImGui.SetColumnWidth(0, sideWidth);
+            ImGui.SetColumnWidth(1, Math.Max(260f, available - sideWidth * 2f));
+            ImGui.SetColumnWidth(2, sideWidth);
+
             DrawModeSegment();
 
-            ImGui.SetCursorPos(
-                new Num.Vector2(
-                    rowStartX + rowWidth - languageWidth,
-                    controlsY));
+            ImGui.NextColumn();
+            DevToolWidgets.CenteredPrimaryTitle(
+                title,
+                1.56f);
+
+            ImGui.NextColumn();
+            float rightOffset =
+                Math.Max(
+                    0f,
+                    ImGui.GetColumnWidth() - languageWidth - ImGui.GetStyle().ItemSpacing.X);
+            if (rightOffset > 0f)
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + rightOffset);
             DrawLanguageSegment();
 
-            float controlsEndY =
-                ImGui.GetItemRectMax().Y -
-                ImGui.GetWindowPos().Y;
-            ImGui.SetCursorPos(
-                new Num.Vector2(
-                    rowStartX,
-                    Math.Max(titleEndY, controlsEndY)));
+            ImGui.Columns(1);
             return;
         }
 
-        // Very narrow displays keep the same controls but move them to a compact second row rather
-        // than allowing them to collide with the centered room title.
-        ImGui.SetCursorPos(
-            new Num.Vector2(
-                rowStartX,
-                titleEndY));
+        // Narrow displays stack the centered title over one compact controls row. This avoids
+        // overlap while preserving access to both global switches.
+        DevToolWidgets.CenteredPrimaryTitle(
+            title,
+            1.46f);
+        ImGui.Spacing();
 
         DrawModeSegment();
         ImGui.SameLine();
-        float rightX = rowStartX + rowWidth - languageWidth;
-        if (rightX > ImGui.GetCursorPosX())
-            ImGui.SetCursorPosX(rightX);
+
+        float rightEdge =
+            ImGui.GetWindowContentRegionMax().X;
+        float languageX =
+            rightEdge - languageWidth;
+        if (languageX > ImGui.GetCursorPosX())
+            ImGui.SetCursorPosX(languageX);
         DrawLanguageSegment();
     }
 
@@ -237,10 +229,7 @@ internal static class DevToolTopStatusWindow
                 fixedWidth: LanguageButtonWidth);
 
         if (pushedChineseLabelFont)
-        {
-            ImGui.SetWindowFontScale(1f);
             ImGui.PopFont();
-        }
 
         if (chooseChinese)
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
@@ -288,9 +277,6 @@ internal static class DevToolTopStatusWindow
             return false;
         }
 
-        ImGui.SetWindowFontScale(
-            currentFont.FontSize /
-            chineseFont.FontSize);
         return true;
     }
 }
