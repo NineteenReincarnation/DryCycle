@@ -228,14 +228,13 @@ public sealed class BridgePlugin : BaseUnityPlugin
             DevToolSessionHub.Current;
         RainWorldGame labelGame =
             labelSession?.Owner?.game;
-        bool newUiOwnsDevToolsStatus =
+        bool topBarOwnsDevToolsStatus =
             DevToolFrontend.NativeBackendReady &&
-            !EditorUiModeState.UseVanilla &&
             DevToolSessionHub.IsCurrentSessionLive;
 
         VanillaDevToolsLabelVisibility.Apply(
             labelGame,
-            newUiOwnsDevToolsStatus);
+            topBarOwnsDevToolsStatus);
 
         if (!legacyVisualGuardFaulted)
         {
