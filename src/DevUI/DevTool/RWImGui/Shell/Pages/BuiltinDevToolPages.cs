@@ -198,20 +198,8 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
     protected override string FormatSessionStatus(DevToolPageStatusState state) =>
         DevToolUiSettings.T("触发器 ", "Triggers ") + state.CountA;
 
-    protected override void OnActivate()
-    {
-        EditorSession session =
-            DevToolSessionHub.Current;
-        if (session?.ToolMode == EditorToolMode.Triggers)
-        {
-            if (session.BrowserOpen)
-                session.ToggleBrowser();
-            if (session.InspectorOpen)
-                session.ToggleInspector();
-        }
-
+    protected override void OnActivate() =>
         TriggerEditorView.EnterCanvasFirst();
-    }
 
     protected override void OnReset()
     {
