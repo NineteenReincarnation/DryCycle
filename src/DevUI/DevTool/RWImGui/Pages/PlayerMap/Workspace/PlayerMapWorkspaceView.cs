@@ -21,7 +21,6 @@ internal static class PlayerMapWorkspaceView
     private const float MinZoom = 0.12f;
     private const float MaxZoom = 5f;
     private static readonly bool[] LayerVisible = { true, true, true };
-    private static string search = string.Empty;
     private static Num.Vector2 pan;
     private static float zoom = 1f;
     private static bool fitRequested = true;
@@ -51,7 +50,6 @@ internal static class PlayerMapWorkspaceView
 
     internal static void ResetRetainedState()
     {
-        search = string.Empty;
         pan = default;
         zoom = 1f;
         fitRequested = true;
@@ -90,7 +88,13 @@ internal static class PlayerMapWorkspaceView
         float center = Math.Max(260f, available.X - left - right - 16f);
 
         if (ImGui.BeginChild("##PlayerMapExplorer", new Num.Vector2(left, available.Y), ImGuiChildFlags.Borders))
-            DrawExplorer(snapshot);
+        {
+            // Player Map deliberately reuses the World Map browser instead of maintaining a second
+            // room list/search/selection implementation. Both workspaces now share subregion groups,
+            // issues, search state, compact region summary and room selection semantics.
+            WorldWorkspaceView.DrawSharedExplorer(worldSnapshot);
+            ScopedScrollChrome.Draw("PlayerMapExplorer");
+        }
         ImGui.EndChild();
         ImGui.SameLine(0f, 8f);
 
@@ -152,78 +156,6 @@ internal static class PlayerMapWorkspaceView
         PlayerMapLayoutAssist.DrawToolbar(snapshot);
         PlayerMapGroupLayerControls.DrawToolbar(snapshot);
         PlayerMapMigrationStreamView.DrawToolbar(snapshot);
-    }
-
-    private static void DrawExplorer(PlayerMapPresentationSnapshot snapshot)
-    {
-        DevToolWidgets.PaneTitle(DevToolUiSettings.T("房间", "ROOMS"));
-        ImGui.TextDisabled(DevToolUiSettings.T("搜索房间", "Search rooms"));
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText("##PlayerMapSearch", ref search, 160);
-        ImGui.Spacing();
-
-        string normalized = (search ?? string.Empty).Trim();
-        for (int i = 0; i < snapshot.Rooms.Length; i++)
-        {
-            PlayerMapRoomSnapshot room = snapshot.Rooms[i];
-            if (!LayerVisible[Math.Max(0, Math.Min(2, room.Layer))]) continue;
-            if (normalized.Length > 0 && room.Name.IndexOf(normalized, StringComparison.OrdinalIgnoreCase) < 0) continue;
-
-            string status = RoomStatusText(room);
-            string placement = room.Disabled ? string.Empty : RoomPlacementText(room);
-            string tooltip = room.Bake.Status == RoomMapBakeStatus.Failed
-                ? room.Bake.Error
-                : null;
-
-            bool clicked = DevToolRoomExplorerEntry.Draw(
-                room.Name,
-                room.Name,
-                MapRoomLayer.Label(room.Layer),
-                status,
-                placement,
-                RoomStatusColor(room),
-                room.Selected,
-                tooltip);
-
-            if (clicked)
-                MapEditorCommandQueue.Enqueue(new MapEditorCommand(MapEditorCommandKind.SelectRoom, roomIndex: room.RoomIndex));
-        }
-    }
-
-    private static string RoomStatusText(PlayerMapRoomSnapshot room)
-    {
-        if (room.Disabled)
-            return DevToolUiSettings.T("已禁用", "Disabled");
-        return room.Bake.Status switch
-        {
-            RoomMapBakeStatus.Ready => DevToolUiSettings.T("可用", "Ready"),
-            RoomMapBakeStatus.Pending => DevToolUiSettings.T("准备中", "Preparing"),
-            RoomMapBakeStatus.Failed => DevToolUiSettings.T("无法读取", "Unavailable"),
-            _ => DevToolUiSettings.T("等待数据", "Waiting")
-        };
-    }
-
-    private static string RoomPlacementText(PlayerMapRoomSnapshot room)
-    {
-        if (room.Mode == PlayerMapPlacementMode.Absolute)
-            return DevToolUiSettings.T("独立位置", "Independent");
-        return room.Offset.sqrMagnitude <= 0.0001f
-            ? DevToolUiSettings.T("跟随世界布局", "World Layout")
-            : DevToolUiSettings.T("跟随世界布局 + 偏移", "World Layout + Offset");
-    }
-
-    private static uint RoomStatusColor(PlayerMapRoomSnapshot room)
-    {
-        if (room.Disabled)
-            return ImGui.GetColorU32(ImGuiCol.TextDisabled);
-        Num.Vector4 color = room.Bake.Status switch
-        {
-            RoomMapBakeStatus.Ready => new Num.Vector4(0.45f, 0.82f, 0.50f, 1f),
-            RoomMapBakeStatus.Pending => new Num.Vector4(0.92f, 0.72f, 0.34f, 1f),
-            RoomMapBakeStatus.Failed => new Num.Vector4(0.92f, 0.38f, 0.34f, 1f),
-            _ => new Num.Vector4(0.62f, 0.66f, 0.72f, 1f)
-        };
-        return ImGui.ColorConvertFloat4ToU32(color);
     }
 
     private static void DrawCanvas(PlayerMapPresentationSnapshot snapshot, EditorMapPresentationSnapshot worldSnapshot)
