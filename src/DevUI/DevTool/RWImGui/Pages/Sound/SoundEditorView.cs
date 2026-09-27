@@ -128,6 +128,46 @@ internal static class SoundEditorView
         }
     }
 
+    internal static void DrawTopControls(EditorSoundPresentationSnapshot snapshot)
+    {
+        if (snapshot == null || !snapshot.Available)
+        {
+            SoundLibraryGroupsView.DrawCreateTypeTopControls();
+            return;
+        }
+
+        const float knobDiameter = 58f;
+        const float gap = 18f;
+
+        ImGui.BeginGroup();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("背景低鸣", "Bkg Drone"));
+        DrawRoomRotary(
+            SoundEditorKeys.BackgroundDroneVolume,
+            snapshot.BackgroundDroneVolume,
+            knobDiameter);
+        ImGui.EndGroup();
+
+        ImGui.SameLine(0f, gap);
+
+        ImGui.BeginGroup();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("声音类型", "Sound Type"));
+        float rowY = ImGui.GetCursorPosY();
+        ImGui.SetCursorPosY(
+            rowY + Math.Max(0f, (knobDiameter - ImGui.GetFrameHeight()) * 0.5f));
+        SoundLibraryGroupsView.DrawCreateTypeTopControls();
+        ImGui.EndGroup();
+
+        ImGui.SameLine(0f, gap);
+
+        ImGui.BeginGroup();
+        DevToolWidgets.MutedText(DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"));
+        DrawRoomRotary(
+            SoundEditorKeys.NoThreatDroneVolume,
+            snapshot.NoThreatDroneVolume,
+            knobDiameter);
+        ImGui.EndGroup();
+    }
+
     internal static void DrawInspector(EditorSoundPresentationSnapshot snapshot)
     {
         SoundLibraryGroupsView.DrawProblemsOnce();
@@ -143,15 +183,6 @@ internal static class SoundEditorView
             DevToolUiSettings.T("声音", "Sound"),
             DevToolUiSettings.T("折叠所有", "Collapse All"),
             "SoundInspectorCollapseAll");
-
-        if (collapseAll) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
-        if (ImGui.CollapsingHeader(
-                DevToolUiSettings.T("房间音频##SoundRoomAudio", "Room Audio##SoundRoomAudio"),
-                ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            DrawRoomFloat(SoundEditorKeys.BackgroundDroneVolume, DevToolUiSettings.T("背景低鸣", "Bkg Drone"), snapshot.BackgroundDroneVolume, 0f, 1f);
-            DrawRoomFloat(SoundEditorKeys.NoThreatDroneVolume, DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"), snapshot.NoThreatDroneVolume, 0f, 1f);
-        }
 
         int[] selectedIndices = SoundWorkspaceState.SelectedIndices();
         if (selectedIndices.Length > 1)
@@ -554,14 +585,16 @@ internal static class SoundEditorView
                (sound?.ResourceSourceName?.IndexOf(query, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
-    private static void DrawRoomFloat(string key, string label, float current, float min, float max)
+    private static void DrawRoomRotary(string key, float current, float diameter)
     {
-        ImGui.PushID("SoundRoom");
-        ImGui.PushID(key);
-        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.SliderFloat(
-            DevToolNumericScope.SoundRoom, key, label, current, min, max);
-        ImGui.PopID();
-        ImGui.PopID();
+        DevToolNumericEditResult<float> edit = DevToolNumericWidgets.RotaryFloat(
+            DevToolNumericScope.SoundRoom,
+            key,
+            current,
+            0f,
+            1f,
+            diameter,
+            "0.000");
         if (edit.Committed)
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
