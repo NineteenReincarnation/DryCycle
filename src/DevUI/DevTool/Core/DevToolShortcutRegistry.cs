@@ -159,6 +159,7 @@ public static class DevToolShortcutRegistry
         RegisterCommon(new DevToolShortcutDescriptor("undo", "Ctrl+Z", "撤销上一步", "Undo last action", 20));
         RegisterCommon(new DevToolShortcutDescriptor("redo-shift", "Ctrl+Shift+Z", "重做", "Redo", 30));
         RegisterCommon(new DevToolShortcutDescriptor("redo-y", "Ctrl+Y", "重做（备用快捷键）", "Redo (alternate)", 31));
+        RegisterCommon(new DevToolShortcutDescriptor("delete", "X", "删除当前视图所选内容", "Delete the current view selection", 35));
         RegisterCommon(new DevToolShortcutDescriptor("focus", "Tab", "进入 / 退出专注模式", "Enter / exit Focus mode", 40));
         RegisterCommon(new DevToolShortcutDescriptor("browser", "Ctrl+B", "显示 / 隐藏浏览器", "Show / hide Browser", 50));
         RegisterCommon(new DevToolShortcutDescriptor("inspector", "Ctrl+I", "显示 / 隐藏检查器", "Show / hide Inspector", 60));
@@ -170,8 +171,6 @@ public static class DevToolShortcutRegistry
 
         RegisterMode(EditorToolMode.Objects,
             new DevToolShortcutDescriptor("objects-duplicate", "Ctrl+D", "复制当前选中物件", "Duplicate selected objects", 10));
-        RegisterMode(EditorToolMode.Objects,
-            new DevToolShortcutDescriptor("objects-delete", "Delete", "删除当前选中物件", "Delete selected objects", 20));
         RegisterMode(EditorToolMode.Objects,
             new DevToolShortcutDescriptor("objects-toggle-selection", "Ctrl+LMB", "切换场景列表中的单个物件选择", "Toggle one object in the Scene selection", 30));
         RegisterMode(EditorToolMode.Objects,
@@ -189,12 +188,8 @@ public static class DevToolShortcutRegistry
             new DevToolShortcutDescriptor("sound-handle", "LMB Drag", "拖动世界中的声音控制点；控制点优先于覆盖在其上的窗口", "Drag sound world handles; handles take priority over overlapping windows", 20));
 
         RegisterMode(EditorToolMode.Triggers,
-            new DevToolShortcutDescriptor("trigger-delete", "X / Delete", "删除当前选中的触发器", "Delete the selected trigger", 10));
-        RegisterMode(EditorToolMode.Triggers,
             new DevToolShortcutDescriptor("trigger-spot-handle", "LMB Drag", "拖动 Spot 中心点或半径控制点；半径控制点可 360° 旋转", "Drag the Spot center or radius handle; the radius handle rotates through 360°", 20));
 
-        RegisterMode(EditorToolMode.Map,
-            new DevToolShortcutDescriptor("map-delete-connection", "Delete / X", "在 World Map 删除当前连接", "Delete the selected World Map connection", 10));
         RegisterMode(EditorToolMode.Map,
             new DevToolShortcutDescriptor("player-map-layer", "1 / 2 / 3", "在 Player Map 将所选房间切换到对应图层", "Move selected Player Map rooms to the chosen layer", 20));
         RegisterMode(EditorToolMode.Map,
