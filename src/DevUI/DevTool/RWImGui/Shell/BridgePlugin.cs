@@ -1031,16 +1031,14 @@ internal static class DevToolFrontend
                             DevToolOverlay.Draw(snapshot, frameContext);
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
                             FontSettingsWindow.Draw(frameContext.DisplaySize);
-                        bool sceneSurfaceSupported = !snapshot.FocusMode && ScenePlacementWindow.Supports(snapshot.ToolMode);
+                        bool sceneSurfaceSupported =
+                            !snapshot.FocusMode &&
+                            !DevToolOverlay.SuppressesSharedPageSurfaces &&
+                            DevToolPageViewRegistry.SupportsSceneSurface(snapshot.ToolMode);
                         if (sceneSurfaceSupported && DevToolUiSettings.SceneInCenter)
                         {
                             using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.SceneWorkspace))
                                 SceneWorkspaceWindow.Draw(snapshot, frameContext.DisplaySize);
-                        }
-                        if (sceneSurfaceSupported)
-                        {
-                            using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ScenePlacement))
-                                ScenePlacementWindow.Draw(snapshot, frameContext.DisplaySize);
                         }
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
                             ActionToastOverlay.Draw(snapshot, frameContext);
@@ -1417,7 +1415,6 @@ internal sealed class DevToolRetainedViewLifecycle
     {
         DevToolNumericWidgets.Reset();
         DevToolOverlay.ResetRetainedState();
-        ScenePlacementWindow.ResetRetainedState();
 
         // Registered pages are the sole owners of page-specific retained projections. Resetting the
         // registry replaces the old frontend fan-out and guarantees newly registered pages cannot be
