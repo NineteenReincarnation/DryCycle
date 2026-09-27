@@ -137,6 +137,15 @@ internal static class DevToolOverlay
                 "Lance Scavenger: live state, aim quality, 38-frame brace history, path blocks and counter-sweep diagnostics"));
         }
 
+        // Trigger owns its compact Add/Scene/Advanced controls inside the canvas-first workspace.
+        // Do not duplicate large Browser/Inspector toggles in the global activity window.
+        if (!lanceDebugPage && snapshot.ToolMode == EditorToolMode.Triggers)
+        {
+            FitActivityBarHeight(display);
+            ImGui.End();
+            return;
+        }
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
