@@ -112,6 +112,48 @@ internal static partial class Program
         CartographyDocument hidden = document.Clone(); hidden.Items.Find(item => item.Room == "SU_A02").Visible = false;
         Check(CartographySceneBuilder.Build(hidden, source).Errors.Length == 0, "Hidden missing rooms do not block export.");
         source.Rooms["SU_A02"].Ready = true;
+
+        CartographyDocument withoutRoomNames =
+            document.Clone();
+        withoutRoomNames.ShowRoomNames =
+            false;
+        CartographyScene sceneWithoutRoomNames =
+            CartographySceneBuilder.Build(
+                withoutRoomNames,
+                source);
+
+        Check(
+            sceneWithoutRoomNames.Nodes
+                .Where(node => node.Room)
+                .SelectMany(node => node.Primitives)
+                .All(primitive =>
+                    primitive.Kind != CartographyPrimitiveKind.Text ||
+                    (primitive.Text != "SU_A01" &&
+                     primitive.Text != "SU_A02")),
+            "Disabling room names removes generated room-name text from the shared scene.");
+
+        string noNamesSvg =
+            Path.Combine(
+                output,
+                "cartography-no-room-names.svg");
+        CartographyExporter.Export(
+            withoutRoomNames,
+            sceneWithoutRoomNames,
+            noNamesSvg,
+            CartographyExportFormat.Svg,
+            CartographyStorage.HashFile(noNamesSvg));
+        XElement noNamesVector =
+            XElement.Load(noNamesSvg);
+        Check(
+            !noNamesVector
+                .Descendants()
+                .Where(element =>
+                    element.Name.LocalName == "text")
+                .Any(element =>
+                    element.Value == "SU_A01" ||
+                    element.Value == "SU_A02"),
+            "Exports use the same room-name visibility state as the canvas scene.");
+
         CartographyExporter.Dimensions(document, scene, out int width, out int height);
         string preview = Path.Combine(output, "cartography-preview.png");
         CartographyExporter.Export(document, scene, preview, CartographyExportFormat.Png, CartographyStorage.HashFile(preview));
