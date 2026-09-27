@@ -12,7 +12,7 @@ internal static class VanillaDevToolsLabelVisibility
         RainWorldGame game,
         bool newUiOwnsStatus)
     {
-        if (!ReferenceEquals(
+        if (!object.ReferenceEquals(
                 observedGame,
                 game))
         {
