@@ -404,8 +404,7 @@ public static class EditorInputRouter
 
             case EditorToolMode.Map:
                 // Map subviews own presentation-only selections (World Map links, Cartography
-                // elements). Publish one edge and let the visible subview consume it exactly once.
-                EditorGlobalDeleteShortcut.Publish();
+                // elements), so their active frontend consumes the same X edge directly.
                 return;
 
             default:
