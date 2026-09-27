@@ -138,7 +138,7 @@ internal static class CartographyRegionLoader
 
         List<PlacedObject> terrain =
             ParseCurvedTerrainObjects(
-                room.Settings);
+                room.Settings, room.Name);
 
         if (terrain.Count == 0)
         {
@@ -162,7 +162,7 @@ internal static class CartographyRegionLoader
     }
 
     private static List<PlacedObject> ParseCurvedTerrainObjects(
-        string settings)
+        string settings, string roomName)
     {
         List<PlacedObject> result =
             new();
@@ -214,6 +214,11 @@ internal static class CartographyRegionLoader
                                     y)
                         };
 
+                    // Cartography loads detached author data on its source worker. Own terrain
+                    // must not rely on the gameplay PlacedObject hook being installed on that path.
+                    if (string.Equals(type.value, "QuicksandZone", StringComparison.Ordinal))
+                        placed.data = new DryCycle.TerrainExt.QuicksandZone.QuicksandZoneData(placed);
+
                     if (parts.Length > 3 &&
                         placed.data != null)
                     {
@@ -224,9 +229,10 @@ internal static class CartographyRegionLoader
                     result.Add(
                         placed);
                 }
-                catch
+                catch (Exception error)
                 {
-                    // One malformed authored object must not suppress the rest of the room map.
+                    global::DryCycle.Plugin.Logger?.LogWarning(
+                        "Cartography terrain data failed for " + roomName + " / " + type.value + ": " + error);
                 }
             }
         }
@@ -279,6 +285,11 @@ internal static class CartographyRegionLoader
         }
 
         type = null;
+        if (value.Equals("QuicksandZone", StringComparison.OrdinalIgnoreCase))
+        {
+            type = new PlacedObject.Type("QuicksandZone", register: false);
+            return true;
+        }
         return false;
     }
 

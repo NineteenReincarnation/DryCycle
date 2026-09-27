@@ -544,6 +544,9 @@ internal static partial class MapRoomGeometryPresentationHub
         unchecked
         {
             ulong hash = 1469598103934665603UL;
+            // Geometry policy changes invalidate authored curves only, retaining valid tile/node
+            // caches. Old front-to-back backdrop strips must not survive as floor geometry.
+            hash = PersistentMix(hash, AuthoredTerrainGeometryVersion);
             RoomSettings[] templates = region?.roomSettingsTemplates;
             hash = PersistentMix(hash, templates?.Length ?? 0);
             if (templates == null) return (long)hash;

@@ -45,6 +45,8 @@ public static partial class MapRenderIsolationTests
             InitializeTextureDevice();
             if (Argument("-testScope") == "connections") ExerciseCorniferConnections();
             else if (Argument("-testScope") == "worldmap") ExerciseWorldMapOptimization();
+            else if ((Argument("-testScope") ?? "").StartsWith("terrain", StringComparison.Ordinal))
+                ExerciseCartographyTerrain(Argument("-testScope") == "terrain-baseline");
             else
             {
                 ExerciseCartographySprites();

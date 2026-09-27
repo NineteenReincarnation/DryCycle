@@ -117,6 +117,7 @@ internal static partial class MapRoomGeometryPresentationHub
     private const float PixelsPerTile = 20f;
     private const float CurveSimplifyToleranceTiles = 0.075f;
     private const int MaxCurveSamples = 192;
+    private const int AuthoredTerrainGeometryVersion = 2;
 
     // Opening a large region must never synchronously decode every minimap/RoomSettings file.
     // Cheap room bounds appear immediately; detailed raster and authored terrain are filled in
@@ -1309,7 +1310,6 @@ internal static partial class MapRoomGeometryPresentationHub
         float roomWidthPixels = Math.Max(PixelsPerTile, roomWidthTiles * PixelsPerTile);
         int sampleCount = Mathf.Clamp(Mathf.CeilToInt(roomWidthPixels / 10f) + 1, 16, MaxCurveSamples);
         List<EditorMapPointSnapshot> surface = new(sampleCount);
-        List<EditorMapPointSnapshot> back = new(sampleCount);
         int handle = 0;
         for (int i = 0; i < sampleCount; i++)
         {
@@ -1317,22 +1317,18 @@ internal static partial class MapRoomGeometryPresentationHub
             while (handle < handles.Count - 2 && handles[handle + 1].Middle.x < x) handle++;
 
             float y = TerrainCurve.Handle.Sample(handles[handle], handles[handle + 1], x);
-            float backY = TerrainCurve.Handle.SampleBack(handles[handle], handles[handle + 1], x);
-            if (float.IsNaN(y) || float.IsInfinity(y) ||
-                float.IsNaN(backY) || float.IsInfinity(backY))
+            if (float.IsNaN(y) || float.IsInfinity(y))
                 continue;
 
             surface.Add(new EditorMapPointSnapshot(x / PixelsPerTile, y / PixelsPerTile));
-            back.Add(new EditorMapPointSnapshot(x / PixelsPerTile, backY / PixelsPerTile));
         }
 
-        if (surface.Count < 2 || back.Count != surface.Count) return;
+        if (surface.Count < 2) return;
 
-        // World Map only needs the authored curved surface itself. Filling TerrainHandle all the
-        // way to the room floor turns a curve into a room-wide black slab and was the source of
-        // the long protruding silhouettes around curved rooms. Preserve the real front/back strip
-        // used by TerrainCurve instead.
-        AddPairedFillRuns(curves, fills, surface, back, EditorMapGeometryKind.Solid);
+        // TerrainCurve's backHeight is the raised background/depth contour, not the underside of
+        // a floor. The room-wide terrain extends below its front surface to the bottom of the room.
+        // Keep that solid body in the semantic data; Cartography crops its exterior just like walls.
+        AddFlatFillRuns(curves, fills, surface, 0f, EditorMapGeometryKind.Solid);
         AddSurfaceCurve(curves, surface, EditorMapGeometryKind.CurvedSlope);
     }
 
