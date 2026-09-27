@@ -53,7 +53,10 @@ internal static class TriggerEditorActions
         state.SetSelectedIndex(index >= 0 && index < count ? index : -1);
     }
 
-    internal static bool Create(EditorSession session, string typeName)
+    internal static bool Create(
+        EditorSession session,
+        string typeName,
+        string name = null)
     {
         if (session?.RoomSettings?.triggers == null || string.IsNullOrEmpty(typeName)) return false;
         if (session.ToolMode != EditorToolMode.Triggers) session.SetToolMode(EditorToolMode.Triggers);
@@ -62,10 +65,18 @@ internal static class TriggerEditorActions
         if (!NativeTriggerFactory.TryCreate(session, type, out EventTrigger created) || created == null)
             return false;
 
+        // The author name is part of creation, not a follow-up edit. Store it before the "after"
+        // snapshot so one Undo removes the complete authored trigger and one Redo restores its name.
+        TriggerEditorMetadata.SetName(
+            created,
+            name);
+
         IEditorStateSnapshot before = AbsentMemberSnapshots.Trigger(session.RoomSettings, created);
         IEditorStateSnapshot after = SingleTriggerStateSnapshot.Capture(session.RoomSettings, created);
         if (SnapshotHistoryEntry.TryCreate(
-                "Create trigger " + typeName,
+                string.IsNullOrWhiteSpace(name)
+                    ? "Create trigger " + typeName
+                    : "Create trigger " + name.Trim() + " [" + typeName + "]",
                 before,
                 after,
                 out SnapshotHistoryEntry entry))
