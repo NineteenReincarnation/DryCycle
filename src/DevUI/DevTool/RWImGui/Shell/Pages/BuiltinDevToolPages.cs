@@ -140,7 +140,7 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
         NativeSpatialGizmoView.DrawSound(SoundEditorPresentationHub.Current, display);
 
     public override void DrawTopControls(EditorPresentationSnapshot snapshot) =>
-        SoundLibraryGroupsView.DrawCreateTypeTopControls();
+        SoundEditorView.DrawTopControls(SoundEditorPresentationHub.Current);
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
