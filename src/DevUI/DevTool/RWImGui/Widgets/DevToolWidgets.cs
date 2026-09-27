@@ -344,7 +344,12 @@ internal static class DevToolWidgets
         return pressedButton;
     }
 
-    internal static bool ActionButton(string label, string id, DevToolButtonTone tone = DevToolButtonTone.Normal, bool fullWidth = false)
+    internal static bool ActionButton(
+        string label,
+        string id,
+        DevToolButtonTone tone = DevToolButtonTone.Normal,
+        bool fullWidth = false,
+        float fixedWidth = 0f)
     {
         // Objects used to own its Scene list inside the Browser. Sound and Triggers can suppress
         // their tab directly because their views are separate classes; Objects lives in the large
@@ -405,7 +410,13 @@ internal static class DevToolWidgets
         ImGui.PushStyleColor(ImGuiCol.Border, border);
 
         ImGui.PushID(id ?? string.Empty);
-        bool pressed = ImGui.Button(label, fullWidth ? new Num.Vector2(-1f, 0f) : new Num.Vector2(0f, 0f));
+        Num.Vector2 buttonSize =
+            fullWidth
+                ? new Num.Vector2(-1f, 0f)
+                : fixedWidth > 0f
+                    ? new Num.Vector2(fixedWidth, 0f)
+                    : new Num.Vector2(0f, 0f);
+        bool pressed = ImGui.Button(label, buttonSize);
         ImGui.PopID();
 
         ImGui.PopStyleColor(4);
