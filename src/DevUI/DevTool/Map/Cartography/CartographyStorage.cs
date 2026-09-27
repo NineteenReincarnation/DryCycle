@@ -18,7 +18,8 @@ internal static class CartographyStorage
         document.Validate();
         XElement root = new("cartography", A("version", CartographyDocument.FormatVersion), A("identity", document.Identity), A("region", document.Region),
             A("title", document.Title), A("font", document.FontFamily), A("background", document.Background), A("terrain", document.Terrain), A("water", document.Water),
-            A("connections", document.Connections), A("roomNames", document.ShowRoomNames), A("links", document.ShowConnections), A("transparent", document.Transparent),
+            A("connections", document.Connections), A("roomNames", document.ShowRoomNames), A("solidTerrain", document.SolidTerrain),
+            A("links", document.ShowConnections), A("transparent", document.Transparent),
             A("cropSolid", document.CropSolid), A("scale", document.ExportScale), A("padding", document.Padding),
             new XElement("layers", document.Layers.Select(layer => new XElement("layer", A("id", layer.Id), A("name", layer.Name), A("visible", layer.Visible), A("locked", layer.Locked), A("opacity", layer.Opacity)))),
             new XElement("objects", document.Items.Select(item => new XElement("object", A("id", item.Id), A("kind", item.Kind), A("layer", item.LayerId), A("room", item.Room),
@@ -41,7 +42,11 @@ internal static class CartographyStorage
         {
             Identity = identity, Region = Str(root, "region"), Title = Str(root, "title"), FontFamily = Str(root, "font"),
             Background = UInt(root, "background"), Terrain = UInt(root, "terrain"), Water = UInt(root, "water"), Connections = UInt(root, "connections"),
-            ShowRoomNames = Bool(root, "roomNames"), ShowConnections = Bool(root, "links"), Transparent = Bool(root, "transparent"), CropSolid = Bool(root, "cropSolid"),
+            ShowRoomNames = Bool(root, "roomNames"),
+            // This attribute was added after format v2 shipped. Missing means the new safer/default
+            // presentation, not false, so old projects immediately get solid curved terrain.
+            SolidTerrain = root.Attribute("solidTerrain") == null || Bool(root, "solidTerrain"),
+            ShowConnections = Bool(root, "links"), Transparent = Bool(root, "transparent"), CropSolid = Bool(root, "cropSolid"),
             ExportScale = Float(root, "scale"), Padding = Int(root, "padding")
         };
         foreach (XElement layer in root.Element("layers")?.Elements("layer") ?? throw new InvalidDataException("Missing layers."))
