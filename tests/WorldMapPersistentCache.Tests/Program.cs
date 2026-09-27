@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using BepInEx;
 using DryCycle.DevUI.DevTool.Map;
+using DryCycle.DevUI.DevTool.RWImGui;
 using UnityEngine;
 
 internal static class Program
@@ -24,6 +25,7 @@ internal static class Program
         try
         {
             V3RoundTripAndFlush();
+            ExactCurvedTerrainGeometry();
             V2FallbackMigrationRead();
             TruncatedCacheRejected();
             WrongContextRejected();
@@ -116,6 +118,116 @@ internal static class Program
             Math.Abs(route.Points[1].X - 80f) < 0.0001f &&
             Math.Abs(route.Points[2].Y - 45f) < 0.0001f,
             "Route points must round-trip.");
+    }
+
+    private static void ExactCurvedTerrainGeometry()
+    {
+        EditorMapRoomVisualSnapshot exact = new()
+        {
+            Available = true,
+            DetailedRasterAvailable = true,
+            WidthTiles = 20f,
+            HeightTiles = 10f,
+            RasterRuns = new[]
+            {
+                new EditorMapRectSnapshot(
+                    0f, 0f, 20f, 10f,
+                    EditorMapGeometryKind.Air)
+            },
+            // This deliberately represents the old coarse approximation. When exact closed fill
+            // polygons exist, retained geometry must ignore this room-wide rectangle.
+            TerrainRuns = new[]
+            {
+                new EditorMapRectSnapshot(
+                    0f, 0f, 20f, 8f,
+                    EditorMapGeometryKind.Solid)
+            },
+            Curves = new[]
+            {
+                new EditorMapPolylineSnapshot
+                {
+                    Kind = EditorMapGeometryKind.Solid,
+                    Closed = true,
+                    Points = new[]
+                    {
+                        new EditorMapPointSnapshot(2f, 8f),
+                        new EditorMapPointSnapshot(8f, 6f),
+                        new EditorMapPointSnapshot(8f, 5f),
+                        new EditorMapPointSnapshot(2f, 7f)
+                    }
+                },
+                new EditorMapPolylineSnapshot
+                {
+                    Kind = EditorMapGeometryKind.CurvedSlope,
+                    Closed = false,
+                    Points = new[]
+                    {
+                        new EditorMapPointSnapshot(2f, 8f),
+                        new EditorMapPointSnapshot(8f, 6f)
+                    }
+                }
+            }
+        };
+
+        RoomGeometryBlob exactBlob =
+            RoomGeometryBuilder.Build(
+                7,
+                exact,
+                1);
+
+        Check(
+            exactBlob.AuthoredTerrainVertices.Length == 4 &&
+            exactBlob.AuthoredTerrainTriangleIndices.Length == 6,
+            "Exact curved terrain must build one polygon quad instead of rectangle fill runs.");
+
+        float exactMinX =
+            exactBlob.AuthoredTerrainVertices.Min(vertex => vertex.X);
+        float exactMaxX =
+            exactBlob.AuthoredTerrainVertices.Max(vertex => vertex.X);
+        float exactMinY =
+            exactBlob.AuthoredTerrainVertices.Min(vertex => vertex.Y);
+        float exactMaxY =
+            exactBlob.AuthoredTerrainVertices.Max(vertex => vertex.Y);
+
+        Check(
+            Math.Abs(exactMinX - 2f) < 0.0001f &&
+            Math.Abs(exactMaxX - 8f) < 0.0001f &&
+            Math.Abs(exactMinY - 5f) < 0.0001f &&
+            Math.Abs(exactMaxY - 8f) < 0.0001f,
+            "Exact curved terrain bounds must follow the real curve strip, not its legacy room-wide AABB.");
+
+        Check(
+            exactBlob.CurveSegments.Length == 1 &&
+            Math.Abs(exactBlob.CurveSegments[0].AX - 2f) < 0.0001f &&
+            Math.Abs(exactBlob.CurveSegments[0].BX - 8f) < 0.0001f,
+            "Closed fill polygons must not pollute routing curve segments while the visible surface remains available.");
+
+        EditorMapRoomVisualSnapshot legacy = new()
+        {
+            Available = true,
+            DetailedRasterAvailable = true,
+            WidthTiles = 20f,
+            HeightTiles = 10f,
+            TerrainRuns = new[]
+            {
+                new EditorMapRectSnapshot(
+                    3f, 2f, 5f, 4f,
+                    EditorMapGeometryKind.Solid)
+            },
+            Curves = Array.Empty<EditorMapPolylineSnapshot>()
+        };
+
+        RoomGeometryBlob legacyBlob =
+            RoomGeometryBuilder.Build(
+                8,
+                legacy,
+                1);
+
+        Check(
+            legacyBlob.AuthoredTerrainVertices.Length == 4 &&
+            Math.Abs(legacyBlob.AuthoredTerrainVertices.Min(vertex => vertex.X) - 3f) < 0.0001f &&
+            Math.Abs(legacyBlob.AuthoredTerrainVertices.Max(vertex => vertex.X) - 8f) < 0.0001f,
+            "Legacy cached TerrainRuns remain a bounded compatibility fallback when no exact polygons exist.");
     }
 
     private static void V2FallbackMigrationRead()
