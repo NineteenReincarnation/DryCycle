@@ -772,31 +772,76 @@ internal static class WorldMapView
         EditorMapPolylineSnapshot curve,
         bool highLod)
     {
-        EditorMapPointSnapshot[] points = curve?.Points ?? Array.Empty<EditorMapPointSnapshot>();
-        if (points.Length < 2) return;
+        EditorMapPointSnapshot[] points =
+            curve?.Points ?? Array.Empty<EditorMapPointSnapshot>();
+        if (points.Length < 2)
+            return;
 
-        uint color = GeometryColor(curve.Kind);
-        int surfaceCount = curve.Closed && points.Length >= 4 ? points.Length - 2 : points.Length;
-        for (int i = 0; i < surfaceCount - 1; i++)
+        uint color =
+            GeometryColor(curve.Kind);
+
+        if (curve.Closed && points.Length >= 3)
         {
-            Num.Vector2 a = LocalToScreen(roomMin, visual, points[i].X, points[i].Y);
-            Num.Vector2 b = LocalToScreen(roomMin, visual, points[i + 1].X, points[i + 1].Y);
-            draw.AddLine(a, b, color, curve.Kind == EditorMapGeometryKind.QuicksandMaterial ? 2.2f : 1.6f);
+            // Closed authored snapshots are exact curved-terrain fill polygons. The old fallback
+            // treated their tail points as a single flat bottom edge, which recreated the same
+            // rectangular/stepped slab that the retained renderer has now removed.
+            Num.Vector2 origin =
+                LocalToScreen(
+                    roomMin,
+                    visual,
+                    points[0].X,
+                    points[0].Y);
+
+            for (int i = 1; i < points.Length - 1; i++)
+            {
+                Num.Vector2 b =
+                    LocalToScreen(
+                        roomMin,
+                        visual,
+                        points[i].X,
+                        points[i].Y);
+                Num.Vector2 c =
+                    LocalToScreen(
+                        roomMin,
+                        visual,
+                        points[i + 1].X,
+                        points[i + 1].Y);
+                draw.AddTriangleFilled(
+                    origin,
+                    b,
+                    c,
+                    color);
+            }
+
+            return;
         }
 
-        if (!curve.Closed || surfaceCount < 2) return;
-        float bottomY = points[points.Length - 1].Y;
-        Num.Vector2 bottomA = LocalToScreen(roomMin, visual, points[0].X, bottomY);
-        Num.Vector2 bottomB = LocalToScreen(roomMin, visual, points[surfaceCount - 1].X, bottomY);
-        draw.AddLine(bottomA, bottomB, color, 1f);
+        float thickness =
+            curve.Kind == EditorMapGeometryKind.QuicksandMaterial
+                ? 2.2f
+                : highLod
+                    ? 1.6f
+                    : 1.35f;
 
-        if (!highLod && curve.Kind != EditorMapGeometryKind.QuicksandMaterial) return;
-        int stride = curve.Kind == EditorMapGeometryKind.QuicksandMaterial ? 2 : 4;
-        for (int i = 0; i < surfaceCount; i += stride)
+        for (int i = 0; i < points.Length - 1; i++)
         {
-            Num.Vector2 top = LocalToScreen(roomMin, visual, points[i].X, points[i].Y);
-            Num.Vector2 bottom = LocalToScreen(roomMin, visual, points[i].X, bottomY);
-            draw.AddLine(top, bottom, color, curve.Kind == EditorMapGeometryKind.QuicksandMaterial ? 1.2f : 0.7f);
+            Num.Vector2 a =
+                LocalToScreen(
+                    roomMin,
+                    visual,
+                    points[i].X,
+                    points[i].Y);
+            Num.Vector2 b =
+                LocalToScreen(
+                    roomMin,
+                    visual,
+                    points[i + 1].X,
+                    points[i + 1].Y);
+            draw.AddLine(
+                a,
+                b,
+                color,
+                thickness);
         }
     }
 
