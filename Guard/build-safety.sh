@@ -231,6 +231,8 @@ if 'snapshot.TriggerTypes ??' not in workspace or 'for (int i = 0; i < types.Len
     raise SystemExit("Trigger Add popup must expose the full trigger-type catalog directly.")
 if "Select a trigger in the room to edit it" in workspace or "选择场景中的触发器进行编辑" in workspace:
     raise SystemExit("Trigger top controls must not restore the empty-selection instruction text.")
+if '"场景 "' in workspace or '"Scene "' in workspace:
+    raise SystemExit("Trigger Scene top button must stay label-only and must not append a trigger count.")
 if "DrawSlugcatCompactSelector" not in view or "TriggerEditorCommandKind.SetSlugcats" not in view:
     raise SystemExit("Trigger slugcat editing must remain compact and preset-capable.")
 if "ImGuiSelectableFlags.DontClosePopups" in view:
