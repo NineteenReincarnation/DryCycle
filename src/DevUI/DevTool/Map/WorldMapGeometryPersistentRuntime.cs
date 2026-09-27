@@ -184,7 +184,16 @@ internal static partial class MapRoomGeometryPresentationHub
             }
         }
 
-        if (roomValid && settingsValid && templateValid && stored.CurvesInitialized)
+        bool authoredTerrainPayloadCurrent =
+            stored.TerrainFillRuns == null ||
+            stored.TerrainFillRuns.Length == 0 ||
+            HasExactAuthoredFillPolygons(stored.Curves);
+
+        if (roomValid &&
+            settingsValid &&
+            templateValid &&
+            stored.CurvesInitialized &&
+            authoredTerrainPayloadCurrent)
         {
             entry.CurvesInitialized = true;
             entry.SettingsFingerprint = stored.SettingsFingerprint;
@@ -201,6 +210,26 @@ internal static partial class MapRoomGeometryPresentationHub
 
         if (restored)
             entry.Revision++;
+    }
+
+    private static bool HasExactAuthoredFillPolygons(
+        EditorMapPolylineSnapshot[] curves)
+    {
+        if (curves == null ||
+            curves.Length == 0)
+            return false;
+
+        for (int i = 0; i < curves.Length; i++)
+        {
+            EditorMapPolylineSnapshot curve =
+                curves[i];
+            if (curve?.Closed == true &&
+                curve.Points != null &&
+                curve.Points.Length >= 3)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool PersistentTryBindRestoredRaster(
