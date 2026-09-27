@@ -24,20 +24,14 @@ internal static class DevToolTopStatusWindow
             display.Y <= 1f)
             return;
 
-        float width =
-            Math.Min(
-                760f,
-                Math.Max(
-                    260f,
-                    display.X - 420f));
-        float x =
-            Math.Max(
-                8f,
-                (display.X - width) * 0.5f);
-
+        // This window auto-sizes to the active page controls. Position it after Begin using the
+        // real computed width; estimating width up front made the compact Trigger bar visibly drift
+        // left of screen center.
         ImGui.SetNextWindowPos(
-            new Num.Vector2(x, 8f),
-            ImGuiCond.Always);
+            new Num.Vector2(
+                display.X * 0.5f,
+                8f),
+            ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowBgAlpha(
             Math.Min(
                 0.96f,
@@ -58,14 +52,26 @@ internal static class DevToolTopStatusWindow
             return;
         }
 
+        // Center the already auto-sized window using its actual width every frame. This status
+        // surface is shared chrome and intentionally not user-positionable.
+        Num.Vector2 windowSize =
+            ImGui.GetWindowSize();
+        ImGui.SetWindowPos(
+            new Num.Vector2(
+                Math.Max(
+                    8f,
+                    (display.X - windowSize.X) * 0.5f),
+                8f));
+
         string room =
             string.IsNullOrWhiteSpace(snapshot.RoomName)
                 ? "-"
                 : snapshot.RoomName;
 
-        ImGui.TextUnformatted(
+        DevToolWidgets.CenteredPrimaryTitle(
             room +
-            " : NewDevtool Active");
+            " : NewDevtool Active",
+            1.52f);
 
         if (page?.HasTopControls == true)
         {
