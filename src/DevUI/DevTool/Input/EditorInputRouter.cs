@@ -2,6 +2,7 @@ using System;
 using DryCycle.DevUI.Controls;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Sound;
 using DryCycle.DevUI.DevTool.Triggers;
 using DryCycle.Misc;
 using Mono.Cecil.Cil;
@@ -233,6 +234,12 @@ public static class EditorInputRouter
         if (EditorUiModeState.UseVanilla || EditorUiModeState.OverlayHidden)
             return;
 
+        if (!ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.X))
+        {
+            HandleGlobalDeleteShortcut(session);
+            return;
+        }
+
         if (ctrl && global::UnityEngine.Input.GetKeyDown(KeyCode.D) && session.ToolMode == EditorToolMode.Objects)
         {
             bool succeeded = EditorActions.DuplicateSelection(session);
@@ -243,7 +250,8 @@ public static class EditorInputRouter
                 succeeded,
                 succeeded ? EditorShortcutFeedbackVisual.Duplicate : EditorShortcutFeedbackVisual.Warning);
         }
-        else if (global::UnityEngine.Input.GetKeyDown(KeyCode.Delete) && session.ToolMode == EditorToolMode.Objects)
+        else if (global::UnityEngine.Input.GetKeyDown(KeyCode.Delete) &&
+                 session.ToolMode == EditorToolMode.Objects)
         {
             bool succeeded = EditorActions.DeleteSelection(session);
             EditorShortcutFeedback.PublishCustom(
@@ -253,10 +261,8 @@ public static class EditorInputRouter
                 succeeded,
                 succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
         }
-        else if (!ctrl &&
-                 session.ToolMode == EditorToolMode.Triggers &&
-                 (global::UnityEngine.Input.GetKeyDown(KeyCode.X) ||
-                  global::UnityEngine.Input.GetKeyDown(KeyCode.Delete)))
+        else if (global::UnityEngine.Input.GetKeyDown(KeyCode.Delete) &&
+                 session.ToolMode == EditorToolMode.Triggers)
         {
             TriggerEditorState triggerState = TriggerEditorStateHub.Get(session);
             int selectedIndex = triggerState?.SelectedIndex ?? -1;
@@ -273,19 +279,10 @@ public static class EditorInputRouter
                         selectedIndex));
             }
 
-            bool xShortcut =
-                global::UnityEngine.Input.GetKeyDown(KeyCode.X);
-            if (xShortcut)
-                MarkKeyboardCaptured(session.Owner?.game);
-
-            string keys =
-                xShortcut
-                    ? "X"
-                    : "Delete";
             EditorShortcutFeedback.PublishCustom(
                 succeeded ? "已删除触发器" : "没有可删除的触发器",
                 succeeded ? "Trigger deleted" : "No trigger selected",
-                keys,
+                "Delete",
                 succeeded,
                 succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
         }
@@ -321,6 +318,104 @@ public static class EditorInputRouter
                 "Tab",
                 true,
                 EditorShortcutFeedbackVisual.Toggle);
+        }
+    }
+
+    private static void HandleGlobalDeleteShortcut(EditorSession session)
+    {
+        if (session == null)
+            return;
+
+        // X is a DevTool-wide delete command. Reserve the gameplay key immediately, then dispatch
+        // according to the active workspace. Frontend-owned selections use the edge bridge below.
+        MarkKeyboardCaptured(session.Owner?.game);
+
+        switch (session.ToolMode)
+        {
+            case EditorToolMode.Objects:
+            {
+                bool succeeded =
+                    EditorActions.DeleteSelection(session);
+                EditorShortcutFeedback.PublishCustom(
+                    succeeded ? "已删除所选物件" : "没有可删除的物件",
+                    succeeded ? "Selection deleted" : "Nothing to delete",
+                    "X",
+                    succeeded,
+                    succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+                return;
+            }
+
+            case EditorToolMode.Sound:
+            {
+                SoundEditorState state =
+                    SoundEditorStateHub.Get(session);
+                int index =
+                    state?.SelectedIndex ?? -1;
+                bool succeeded =
+                    session.RoomSettings?.ambientSounds != null &&
+                    index >= 0 &&
+                    index < session.RoomSettings.ambientSounds.Count &&
+                    session.RoomSettings.ambientSounds[index]?.inherited != true;
+
+                if (succeeded)
+                {
+                    SoundEditorCommandQueue.Enqueue(
+                        new SoundEditorCommand(
+                            SoundEditorCommandKind.Delete,
+                            index));
+                }
+
+                EditorShortcutFeedback.PublishCustom(
+                    succeeded ? "已删除声音" : "没有可删除的声音",
+                    succeeded ? "Sound deleted" : "No deletable sound selected",
+                    "X",
+                    succeeded,
+                    succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+                return;
+            }
+
+            case EditorToolMode.Triggers:
+            {
+                TriggerEditorState state =
+                    TriggerEditorStateHub.Get(session);
+                int index =
+                    state?.SelectedIndex ?? -1;
+                bool succeeded =
+                    session.RoomSettings?.triggers != null &&
+                    index >= 0 &&
+                    index < session.RoomSettings.triggers.Count;
+
+                if (succeeded)
+                {
+                    TriggerEditorCommandQueue.Enqueue(
+                        new TriggerEditorCommand(
+                            TriggerEditorCommandKind.Delete,
+                            index));
+                }
+
+                EditorShortcutFeedback.PublishCustom(
+                    succeeded ? "已删除触发器" : "没有可删除的触发器",
+                    succeeded ? "Trigger deleted" : "No trigger selected",
+                    "X",
+                    succeeded,
+                    succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+                return;
+            }
+
+            case EditorToolMode.Map:
+                // Map subviews own presentation-only selections (World Map links, Cartography
+                // elements). Publish one edge and let the visible subview consume it exactly once.
+                EditorGlobalDeleteShortcut.Publish();
+                return;
+
+            default:
+                EditorShortcutFeedback.PublishCustom(
+                    "当前视图没有可删除内容",
+                    "Nothing deletable in this view",
+                    "X",
+                    false,
+                    EditorShortcutFeedbackVisual.Warning);
+                return;
         }
     }
 
