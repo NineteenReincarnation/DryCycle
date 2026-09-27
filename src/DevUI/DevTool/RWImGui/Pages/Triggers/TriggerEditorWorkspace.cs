@@ -20,7 +20,7 @@ internal static partial class TriggerEditorView
     private static bool observedShellBrowserOpen;
     private static bool observedShellInspectorOpen;
     private static bool addPaletteOpen;
-    private static bool scenePanelOpen;
+    private static bool scenePanelOpen = true;
     private static bool advancedInspectorOpen;
     private static bool focusAddSearch;
     private static string workspaceAddSearch = string.Empty;
@@ -46,17 +46,17 @@ internal static partial class TriggerEditorView
         if (scenePanelOpen)
             DrawCompactScene(snapshot, display);
 
+        if (selected != null)
+            DrawQuickInspector(snapshot, selected, display);
+
         if (advancedInspectorOpen)
             DrawAdvancedInspector(snapshot, display);
-        else if (selected != null && !scenePanelOpen)
-            DrawQuickInspector(snapshot, selected, display);
     }
 
     internal static void EnterCanvasFirst()
     {
         workspaceShellInitialized = false;
         addPaletteOpen = false;
-        scenePanelOpen = false;
         advancedInspectorOpen = false;
         focusAddSearch = false;
     }
@@ -67,7 +67,7 @@ internal static partial class TriggerEditorView
         observedShellBrowserOpen = false;
         observedShellInspectorOpen = false;
         addPaletteOpen = false;
-        scenePanelOpen = false;
+        scenePanelOpen = true;
         advancedInspectorOpen = false;
         focusAddSearch = false;
         workspaceAddSearch = string.Empty;
@@ -108,8 +108,6 @@ internal static partial class TriggerEditorView
         {
             observedShellInspectorOpen = inspectorOpen;
             advancedInspectorOpen = !advancedInspectorOpen;
-            if (advancedInspectorOpen)
-                scenePanelOpen = false;
         }
     }
 
@@ -177,8 +175,6 @@ internal static partial class TriggerEditorView
                     : DevToolButtonTone.Subtle))
         {
             scenePanelOpen = !scenePanelOpen;
-            if (scenePanelOpen)
-                advancedInspectorOpen = false;
         }
 
         EditorTriggerSnapshot selected =
@@ -190,7 +186,9 @@ internal static partial class TriggerEditorView
             ImGui.TextDisabled("|");
             ImGui.SameLine();
             ImGui.TextUnformatted(
-                selected.Type ?? string.Empty);
+                string.IsNullOrWhiteSpace(selected.Name)
+                    ? selected.Type ?? string.Empty
+                    : selected.Name + "  [" + (selected.Type ?? string.Empty) + "]");
 
             if (selected.Event?.HasEvent == true)
             {
@@ -209,8 +207,6 @@ internal static partial class TriggerEditorView
             {
                 advancedInspectorOpen =
                     !advancedInspectorOpen;
-                if (advancedInspectorOpen)
-                    scenePanelOpen = false;
             }
 
             if (ImGui.IsItemHovered())
@@ -353,7 +349,9 @@ internal static partial class TriggerEditorView
                 display.X - width - 14f);
 
         ImGui.SetNextWindowPos(
-            new Num.Vector2(x, 92f),
+            new Num.Vector2(
+                x,
+                Math.Max(84f, display.Y - height - 14f)),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(
             new Num.Vector2(width, height),
@@ -404,6 +402,9 @@ internal static partial class TriggerEditorView
                 continue;
 
             if (!Matches(
+                    trigger.Name,
+                    query) &&
+                !Matches(
                     trigger.Type,
                     query) &&
                 !Matches(
@@ -436,14 +437,22 @@ internal static partial class TriggerEditorView
             Math.Max(
                 8f,
                 display.X - width - 14f);
+        float sceneHeight =
+            Math.Min(
+                390f,
+                Math.Max(
+                    240f,
+                    display.Y * 0.40f));
         float y =
             scenePanelOpen
-                ? Math.Min(display.Y - 280f, 500f)
-                : 110f;
+                ? display.Y - sceneHeight - 330f
+                : display.Y - 310f;
 
         ImGui.SetNextWindowPos(
-            new Num.Vector2(x, Math.Max(84f, y)),
-            ImGuiCond.Always);
+            new Num.Vector2(
+                x,
+                Math.Max(84f, y)),
+            ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(240f, 0f),
             new Num.Vector2(
@@ -468,6 +477,12 @@ internal static partial class TriggerEditorView
 
         ImGui.TextUnformatted(
             selected.Type ?? string.Empty);
+
+        DrawString(
+            selected,
+            TriggerEditorKeys.Name,
+            DevToolUiSettings.T("名称", "Name"),
+            selected.Name);
 
         if (selected.IsSpot)
         {
@@ -556,7 +571,6 @@ internal static partial class TriggerEditorView
                 true))
         {
             advancedInspectorOpen = true;
-            scenePanelOpen = false;
         }
 
         ImGui.End();
@@ -579,7 +593,7 @@ internal static partial class TriggerEditorView
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(x, 86f),
-            ImGuiCond.Always);
+            ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(
             new Num.Vector2(width, height),
             ImGuiCond.FirstUseEver);
