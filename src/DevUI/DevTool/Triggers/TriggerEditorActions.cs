@@ -194,6 +194,49 @@ internal static class TriggerEditorActions
         });
     }
 
+    internal static bool SetSlugcats(
+        EditorSession session,
+        int index,
+        string[] slugcatNames)
+    {
+        if (!TryGet(session, index, out EventTrigger trigger) ||
+            trigger.slugcats == null)
+            return false;
+
+        slugcatNames ??= Array.Empty<string>();
+
+        return Mutate(session, trigger, "Change trigger slugcats", () =>
+        {
+            trigger.slugcats.Clear();
+
+            for (int i = 0; i < slugcatNames.Length; i++)
+            {
+                string value = slugcatNames[i];
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
+
+                SlugcatStats.Name name =
+                    new(value.Trim(), false);
+
+                bool duplicate = false;
+                for (int existing = 0; existing < trigger.slugcats.Count; existing++)
+                {
+                    if (trigger.slugcats[existing] == name)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate)
+                    trigger.slugcats.Add(name);
+            }
+
+            trigger.RefreshTimelineList();
+            return true;
+        });
+    }
+
     internal static bool SetEventType(EditorSession session, int index, string eventTypeName)
     {
         if (!TryGet(session, index, out EventTrigger trigger) || string.IsNullOrEmpty(eventTypeName)) return false;
