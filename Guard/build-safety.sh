@@ -208,8 +208,23 @@ if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
     raise SystemExit("Trigger must not recreate a private top command-bar window.")
 if 'ImGui.BeginPopup("##TriggerAddPopup")' not in workspace or 'ImGui.CloseCurrentPopup()' not in workspace:
     raise SystemExit("Trigger Add must remain a compact popup menu attached to the shared top bar.")
-if '"TriggerCreateName"' not in workspace or 'name: addTriggerName' not in workspace:
-    raise SystemExit("Trigger name must be authored in the compact popup before the trigger is created.")
+add_start = workspace.find('private static void DrawAddPopup')
+confirm_start = workspace.find('private static void DrawCreateConfirmPopup', add_start)
+scene_start = workspace.find('private static void DrawCompactScene', confirm_start)
+if add_start < 0 or confirm_start < 0 or scene_start < 0:
+    raise SystemExit("Could not isolate Trigger Add/type-confirm popup flow.")
+add_popup = workspace[add_start:confirm_start]
+confirm_popup = workspace[confirm_start:scene_start]
+if '"TriggerCreateName"' in add_popup or 'name: addTriggerName' in add_popup:
+    raise SystemExit("Trigger type list must not contain the name field or create the trigger immediately.")
+if 'pendingTriggerType = type;' not in add_popup or 'createConfirmPopupRequested = true;' not in add_popup:
+    raise SystemExit("Selecting a Trigger type must stage it and open the naming confirmation popup.")
+if 'ImGui.BeginPopup("##TriggerCreateConfirmPopup")' not in confirm_popup:
+    raise SystemExit("Trigger creation must use a second compact naming confirmation popup.")
+if '"TriggerCreateName"' not in confirm_popup or 'name: addTriggerName' not in confirm_popup:
+    raise SystemExit("Trigger name must be entered only after selecting a type and passed into atomic creation.")
+if 'TriggerCreateConfirm' not in confirm_popup or 'TriggerCreateCancel' not in confirm_popup:
+    raise SystemExit("Trigger naming confirmation popup must provide explicit Confirm and Cancel actions.")
 if 'DrawAddPalette' in workspace or 'TriggerAddPalette' in workspace or 'TriggerWorkspaceAddSearch' in workspace:
     raise SystemExit("Trigger Add must not regress to an independent/search window.")
 if 'snapshot.TriggerTypes ??' not in workspace or 'for (int i = 0; i < types.Length; i++)' not in workspace:
