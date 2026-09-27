@@ -358,12 +358,14 @@ internal static partial class TriggerEditorView
         EditorTriggerSnapshot selected,
         Num.Vector2 display)
     {
+        // Keep the default compact, but wide enough that the value control and its trailing
+        // Chinese/English label can both render without clipping.
         float width =
             Math.Min(
-                285f,
+                380f,
                 Math.Max(
-                    255f,
-                    display.X * 0.16f));
+                    350f,
+                    display.X * 0.20f));
         float x =
             Math.Max(
                 8f,
@@ -396,17 +398,17 @@ internal static partial class TriggerEditorView
                 defaultHeight),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(235f, 260f),
+            new Num.Vector2(335f, 260f),
             new Num.Vector2(
-                Math.Max(420f, display.X * 0.46f),
+                Math.Max(520f, display.X * 0.50f),
                 Math.Max(320f, display.Y - 80f)));
         ImGui.SetNextWindowBgAlpha(
             DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T(
-                    "检查器###TriggerInspectorResidentV4",
-                    "Inspector###TriggerInspectorResidentV4"),
+                    "检查器###TriggerInspectorResidentV5",
+                    "Inspector###TriggerInspectorResidentV5"),
                 ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
@@ -414,7 +416,7 @@ internal static partial class TriggerEditorView
         }
 
         FloatingWindowSnap.TrackCurrentWindow(
-            "TriggerInspectorResidentV4");
+            "TriggerInspectorResidentV5");
 
         if (selected == null)
         {
