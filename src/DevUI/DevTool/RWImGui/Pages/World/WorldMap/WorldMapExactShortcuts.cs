@@ -276,9 +276,13 @@ internal static class WorldMapExactShortcuts
         global::Room realized = entry.Room.realizedRoom;
         if (realized?.shortcuts != null && realized.shortcuts.Length > 0)
         {
-            if (!entry.Ready || !entry.FromRealizedRoom || force)
+            bool rebuilt =
+                !entry.Ready ||
+                !entry.FromRealizedRoom ||
+                force;
+            if (rebuilt)
                 BuildFromRealized(entry, realized);
-            return !entry.Ready || !entry.FromRealizedRoom;
+            return rebuilt;
         }
 
         if (entry.FromRealizedRoom)
