@@ -191,8 +191,7 @@ required_workspace = (
     "DrawCommandBar",
     "DrawAddPalette",
     "DrawCompactScene",
-    "DrawQuickInspector",
-    "DrawAdvancedInspector",
+    "DrawResidentInspector",
 )
 for token in required_workspace:
     if token not in workspace:
@@ -252,20 +251,38 @@ if 'unrecognizedSaveStrings' not in metadata or 'DryCycleName64' not in metadata
     raise SystemExit("Trigger names must persist safely through Rain World's forward-compatible trigger metadata.")
 if 'private static bool scenePanelOpen = true;' not in workspace:
     raise SystemExit("Trigger Scene must default visible in the canvas-first workspace.")
-if 'DrawQuickInspector(snapshot, selected, display);' not in workspace:
-    raise SystemExit("Trigger Quick Edit must remain resident even while Scene is visible.")
+if 'DrawResidentInspector(snapshot, selected, display);' not in workspace:
+    raise SystemExit("Trigger Inspector must remain resident even while Scene is visible.")
 if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
     raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
-if 'TriggerCompactSceneV2' not in workspace or 'TriggerQuickInspectorV2' not in workspace:
-    raise SystemExit("Trigger Scene/Quick Edit must use the movable lower-right window identities.")
+if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV3' not in workspace:
+    raise SystemExit("Trigger Scene/Inspector must use the movable lower-right window identities.")
 if 'ImGuiCond.Always' in workspace[workspace.find('private static void DrawCompactScene'):workspace.find('private static void DrawQuickInspector')]:
     raise SystemExit("Trigger Scene must not be pinned every frame; developers must be able to move it.")
-quick_start = workspace.find('private static void DrawQuickInspector')
-quick_end = workspace.find('private static void DrawAdvancedInspector', quick_start)
-if quick_start < 0 or quick_end < 0 or 'ImGuiCond.Always' in workspace[quick_start:quick_end]:
-    raise SystemExit("Trigger Quick Edit must not be pinned every frame; developers must be able to move it.")
+inspector_start = workspace.find('private static void DrawResidentInspector')
+if inspector_start < 0 or 'ImGuiCond.Always' in workspace[inspector_start:]:
+    raise SystemExit("Trigger Inspector must not be pinned every frame; developers must be able to move it.")
+if 'advancedInspectorOpen' in workspace or 'DrawAdvancedInspector' in workspace or 'TriggerWorkspaceAdvanced' in workspace:
+    raise SystemExit("Trigger workspace must remain single-inspector; Advanced mode must not return.")
 if 'TriggerEditorKeys.Name' not in view or 'trigger.Name + "  ["' not in view:
     raise SystemExit("Trigger inspector/scene list must expose custom names.")
+if 'SPOT AREA' in view or 'DevToolUiSettings.T("区域", "SPOT AREA")' in view:
+    raise SystemExit("Trigger Inspector must not restore the redundant Spot area section.")
+inspector_start = view.find('internal static void DrawInspector')
+library_start = view.find('private static void DrawLibrary', inspector_start)
+if inspector_start < 0 or library_start < 0:
+    raise SystemExit("Could not isolate Trigger Inspector for simplified-layout guard.")
+inspector = view[inspector_start:library_start]
+if 'TriggerEditorKeys.Position' in inspector or 'TriggerEditorKeys.Radius' in inspector:
+    raise SystemExit("Spot position/radius belong to the world gizmo, not the Trigger Inspector.")
+if 'DrawSlugcatCompactSelector(snapshot, selected);' not in inspector:
+    raise SystemExit("Trigger Inspector must expose the compact Allowed Slugcats control inline.")
+if '蛞蝓猫##TriggerSlugcats' in view or 'Slugcats##TriggerSlugcats' in view:
+    raise SystemExit("Allowed Slugcats must not regain a separate collapsible section.")
+if 'DeleteTriggerTopRight' not in inspector or 'DevToolButtonTone.Danger' not in inspector:
+    raise SystemExit("Delete Trigger must stay as the danger action in the Inspector top-right title row.")
+if 'DeleteTriggerTopRight' in inspector[inspector.find('DrawEventEditor'):]:
+    raise SystemExit("Delete Trigger must not return to the bottom of the Inspector.")
 if 'string.IsNullOrWhiteSpace(trigger.Name)' not in labels or 'TriggerEditorCommandKind.Select' not in labels:
     raise SystemExit("Named spatial triggers must render clickable world labels.")
 if 'TriggerSceneLabelView.Draw' not in pages:
