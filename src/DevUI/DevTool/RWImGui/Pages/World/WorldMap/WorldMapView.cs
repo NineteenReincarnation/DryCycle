@@ -2907,7 +2907,18 @@ internal static class WorldMapView
     {
         if (!showConnections || string.IsNullOrEmpty(selectedConnectionId)) return;
         ImGuiIOPtr io = ImGui.GetIO();
-        if (io.WantTextInput || !ImGui.IsKeyPressed(ImGuiKey.Delete)) return;
+        if (io.WantTextInput) return;
+
+        bool globalDelete =
+            !io.KeyCtrl &&
+            !io.KeyShift &&
+            !io.KeyAlt &&
+            !io.KeySuper &&
+            ImGui.IsKeyPressed(ImGuiKey.X);
+        bool legacyDelete =
+            ImGui.IsKeyPressed(ImGuiKey.Delete);
+        if (!globalDelete && !legacyDelete) return;
+
         EditorMapConnectionSnapshot connection = FindConnection(snapshot, selectedConnectionId);
         if (connection == null || connection.Ambiguous || connection.ToNodeIndex < 0) return;
         EditorMapRoomSnapshot a = FindRoom(snapshot, connection.FromRoomIndex);
@@ -2926,7 +2937,7 @@ internal static class WorldMapView
         EditorShortcutFeedback.PublishCustom(
             "已删除地图连接",
             "World Map connection deleted",
-            "Delete",
+            globalDelete ? "X" : "Delete",
             true,
             EditorShortcutFeedbackVisual.Delete);
     }
