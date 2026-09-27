@@ -14,6 +14,7 @@ public static partial class MapRenderIsolationTests
     {
         ExerciseOpenCorridor();
         ExerciseThumbnailReuse();
+        ExercisePresentedRouteFrameCohesion();
         ImGuiNative.LoadFunctionPointers(&GetProcAddress, native);
         IntPtr context = ImGui.CreateContext();
         var io = ImGui.GetIO(); io.NativePtr->IniFilename = null;
@@ -198,6 +199,102 @@ public static partial class MapRenderIsolationTests
         runtime.GetField("canvasSeenAt", Flags).SetValue(null, Stopwatch.GetTimestamp() - Stopwatch.Frequency);
         Check(!(bool)runtime.GetProperty("CanvasVisible", Flags).GetValue(null), "A dormant map canvas does not request off-screen GPU rendering.");
         runtime.GetField("enabled", Flags).SetValue(null, false);
+    }
+
+    private static void ExercisePresentedRouteFrameCohesion()
+    {
+        Type runtime = Front("WorldMapRetainedV2Runtime");
+        runtime.GetField("enabled", Flags).SetValue(null, true);
+        runtime.GetMethod("ResetRetainedState", Flags).Invoke(null, null);
+
+        try
+        {
+            object resources = runtime.GetField("ConnectionResources", Flags).GetValue(null);
+            IDictionary routeTable = (IDictionary)Get(resources, "routes");
+
+            foreach (string id in new[] { "frame-over", "frame-under" })
+            {
+                object route = New("ConnectionRouteResource");
+                Set(route, "ConnectionId", id);
+                Set(route, "Revision", 1L);
+                Set(route, "Points", id == "frame-over"
+                    ? new[] { new Num.Vector2(0, 20), new Num.Vector2(80, 20) }
+                    : new[] { new Num.Vector2(40, 0), new Num.Vector2(40, 60) });
+                routeTable[id] = route;
+            }
+
+            Type markType = Front("WorldMapCrossingMark");
+            Array Marks(Num.Vector2 point)
+            {
+                Array values = Array.CreateInstance(markType, 1);
+                values.SetValue(
+                    Activator.CreateInstance(
+                        markType,
+                        Flags,
+                        null,
+                        new object[]
+                        {
+                            "frame-over",
+                            "frame-under",
+                            point,
+                            Num.Vector2.UnitX,
+                            false
+                        },
+                        null),
+                    0);
+                return values;
+            }
+
+            Num.Vector2 PublishedPoint()
+            {
+                object[] args = { "frame-over", null };
+                Check(
+                    (bool)runtime.GetMethod("TryGetConnectionCrossings", Flags)
+                        .Invoke(null, args),
+                    "Presented route exposes its crossing grammar.");
+                Array values = (Array)args[1];
+                object mark = values.GetValue(0);
+                return (Num.Vector2)mark.GetType()
+                    .GetProperty("Point", Flags)
+                    .GetValue(mark);
+            }
+
+            Set(resources, "crossings", Marks(new Num.Vector2(40, 20)));
+            Set(resources, "crossingLayoutDirty", false);
+            Set(resources, "crossingRevision", 1L);
+            runtime.GetMethod("PublishPresentedRoutes", Flags).Invoke(
+                null,
+                new object[] { new[] { "frame-over", "frame-under" }, 1L });
+
+            Check(
+                PublishedPoint() == new Num.Vector2(40, 20),
+                "Presented crossing snapshot starts on the route frame that was published.");
+
+            // Simulate a background route/crossing rebuild completing before the next retained
+            // Camera.Render. Live data may advance, but hover/selection overlays must stay on the
+            // crossing grammar that belongs to the pixels still being displayed.
+            Set(resources, "crossings", Marks(new Num.Vector2(54, 34)));
+            Set(resources, "crossingRevision", 2L);
+            runtime.GetMethod("PublishLiveCrossingSnapshotIfNeeded", Flags)
+                .Invoke(null, null);
+
+            Check(
+                PublishedPoint() == new Num.Vector2(40, 20),
+                "A newer live crossing cannot jump ahead of the retained surface frame.");
+
+            runtime.GetMethod("PublishPresentedRoutes", Flags).Invoke(
+                null,
+                new object[] { new[] { "frame-over", "frame-under" }, 2L });
+
+            Check(
+                PublishedPoint() == new Num.Vector2(54, 34),
+                "Crossing grammar advances only when the matching retained route frame is published.");
+        }
+        finally
+        {
+            runtime.GetMethod("ResetRetainedState", Flags).Invoke(null, null);
+            runtime.GetField("enabled", Flags).SetValue(null, false);
+        }
     }
 
     private static void ExerciseMapDirections()
