@@ -32,6 +32,15 @@ internal static class DevToolTopStatusWindow
                 0.96f,
                 DevToolUiSettings.WindowAlpha + 0.08f));
 
+        // Shared chrome is intentionally a little larger than normal editor panels. It needs to be
+        // readable against a busy room background without turning into another large workspace.
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.WindowPadding,
+            new Num.Vector2(13f, 9f));
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.ItemSpacing,
+            new Num.Vector2(9f, 7f));
+
         ImGuiWindowFlags flags =
             ImGuiWindowFlags.NoDecoration |
             ImGuiWindowFlags.AlwaysAutoResize |
@@ -44,6 +53,7 @@ internal static class DevToolTopStatusWindow
                 flags))
         {
             ImGui.End();
+            ImGui.PopStyleVar(2);
             return;
         }
 
@@ -71,9 +81,15 @@ internal static class DevToolTopStatusWindow
         if (page?.HasTopControls == true)
         {
             ImGui.Separator();
+
+            // Make page-specific top actions easier to read/hit without changing their normal
+            // appearance elsewhere in the editor.
+            ImGui.SetWindowFontScale(1.14f);
             page.DrawTopControls(snapshot);
+            ImGui.SetWindowFontScale(1f);
         }
 
         ImGui.End();
+        ImGui.PopStyleVar(2);
     }
 }
