@@ -46,8 +46,7 @@ internal static partial class TriggerEditorView
         if (scenePanelOpen)
             DrawCompactScene(snapshot, display);
 
-        if (selected != null)
-            DrawQuickInspector(snapshot, selected, display);
+        DrawQuickInspector(snapshot, selected, display);
 
         if (advancedInspectorOpen)
             DrawAdvancedInspector(snapshot, display);
@@ -366,8 +365,8 @@ internal static partial class TriggerEditorView
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T(
-                    "场景###TriggerCompactScene",
-                    "Scene###TriggerCompactScene"),
+                    "场景###TriggerCompactSceneV2",
+                    "Scene###TriggerCompactSceneV2"),
                 ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
@@ -463,8 +462,8 @@ internal static partial class TriggerEditorView
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T(
-                    "快速编辑###TriggerQuickInspector",
-                    "Quick Edit###TriggerQuickInspector"),
+                    "快速编辑###TriggerQuickInspectorV2",
+                    "Quick Edit###TriggerQuickInspectorV2"),
                 ImGuiWindowFlags.AlwaysAutoResize |
                 ImGuiWindowFlags.NoCollapse))
         {
@@ -474,6 +473,17 @@ internal static partial class TriggerEditorView
 
         FloatingWindowSnap.TrackCurrentWindow(
             "TriggerQuickInspector");
+
+        if (selected == null)
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "选择一个触发器后在这里快速编辑。",
+                    "Select a trigger to edit its common properties here."),
+                true);
+            ImGui.End();
+            return;
+        }
 
         ImGui.TextUnformatted(
             selected.Type ?? string.Empty);
