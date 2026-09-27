@@ -127,6 +127,11 @@ dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-laun
 # broken regression-test edits on main instead of silently ignoring the worldmap suite.
 dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile --   "$(pwd)/tests/WorldMapRenderIsolation.Tests"
 
+# Cartography's hosted suite targets the game-era framework, but all of its regression sources can
+# still be parsed on hosted CI. Keep new author-state/rendering tests inside the syntax contract.
+dotnet run --project "$tmp/SyntaxGuard.csproj" --configuration Release --no-launch-profile -- \
+  "$(pwd)/tests/Cartography.Tests"
+
 # World Map persistent cache is a binary compatibility boundary. Run its production-code-linked
 # regression suite in CI so V2 fallback, V3 round-trip/corruption handling and shutdown flush cannot
 # silently regress behind syntax-only validation.
@@ -223,6 +228,40 @@ if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" 
     raise SystemExit("Trigger workspace must not add recent-use/recent-selection UI.")
 
 print("Trigger canvas-first workspace guard passed.")
+PY
+
+# Cartography solid-terrain mode is shared author state: it must default on, persist with a
+# backwards-compatible true fallback, sit beside the room-name toggle, and drive the common room
+# raster consumed by canvas and all exporters.
+python3 - <<'PY'
+from pathlib import Path
+
+document = Path("src/DevUI/DevTool/Map/Cartography/CartographyDocument.cs").read_text(encoding="utf-8")
+storage = Path("src/DevUI/DevTool/Map/Cartography/CartographyStorage.cs").read_text(encoding="utf-8")
+raster = Path("src/DevUI/DevTool/Map/Cartography/CartographyRoomRasterizer.cs").read_text(encoding="utf-8")
+inspector = Path("src/DevUI/DevTool/RWImGui/Pages/Map/CartographyView.Inspector.cs").read_text(encoding="utf-8")
+scene = Path("src/DevUI/DevTool/Map/Cartography/CartographyScene.cs").read_text(encoding="utf-8")
+
+if "public bool SolidTerrain = true;" not in document:
+    raise SystemExit("Cartography SolidTerrain must default to enabled.")
+if 'A("solidTerrain", document.SolidTerrain)' not in storage:
+    raise SystemExit("Cartography SolidTerrain must be persisted.")
+if 'root.Attribute("solidTerrain") == null || Bool(root, "solidTerrain")' not in storage:
+    raise SystemExit("Old cartography documents must migrate missing solidTerrain to true.")
+if "document.SolidTerrain && hasCurves" not in raster or "RasterizeSolidBelowSurfaces" not in raster:
+    raise SystemExit("Cartography SolidTerrain must drive the curved-surface-to-floor raster fill.")
+if "forcedSolid" not in raster or "(forcedSolid == null || !forcedSolid[i])" not in raster:
+    raise SystemExit("Solid curved terrain must survive CropSolid trimming.")
+room_names = inspector.find("##AtlasRoomNames")
+solid = inspector.find("##AtlasSolidTerrain")
+if room_names < 0 or solid < 0 or solid <= room_names:
+    raise SystemExit("Solid terrain toggle must remain immediately after room-name visibility controls.")
+if "SetSolidTerrain" not in inspector:
+    raise SystemExit("Cartography SolidTerrain must commit through document style state.")
+if "entry.SolidTerrain != document.SolidTerrain" not in scene:
+    raise SystemExit("Cartography room cache must invalidate when SolidTerrain changes.")
+
+print("Cartography solid-terrain contract guard passed.")
 PY
 
 # ---------------------------------------------------------------------------
