@@ -10,18 +10,15 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Canvas-first Trigger workspace.
 ///
-/// The room remains the primary surface. Library, Scene and full Inspector are transient tools;
-/// the selected trigger exposes only its highest-frequency fields in a compact card while spatial
-/// properties stay on the world gizmo.
+/// The room remains the primary surface. Scene and Inspector stay compact and movable in the
+/// lower-right workspace, while spatial Spot properties stay on the world gizmo.
 /// </summary>
 internal static partial class TriggerEditorView
 {
     private static bool workspaceShellInitialized;
     private static bool observedShellBrowserOpen;
-    private static bool observedShellInspectorOpen;
     private static bool addPaletteOpen;
     private static bool scenePanelOpen = true;
-    private static bool advancedInspectorOpen;
     private static bool focusAddSearch;
     private static string workspaceAddSearch = string.Empty;
     private static string workspaceSceneSearch = string.Empty;
@@ -46,17 +43,13 @@ internal static partial class TriggerEditorView
         if (scenePanelOpen)
             DrawCompactScene(snapshot, display);
 
-        DrawQuickInspector(snapshot, selected, display);
-
-        if (advancedInspectorOpen)
-            DrawAdvancedInspector(snapshot, display);
+        DrawResidentInspector(snapshot, selected, display);
     }
 
     internal static void EnterCanvasFirst()
     {
         workspaceShellInitialized = false;
         addPaletteOpen = false;
-        advancedInspectorOpen = false;
         focusAddSearch = false;
     }
 
@@ -78,15 +71,10 @@ internal static partial class TriggerEditorView
     {
         bool browserOpen =
             shell?.BrowserOpen == true;
-        bool inspectorOpen =
-            shell?.InspectorOpen == true;
-
         if (!workspaceShellInitialized)
         {
             workspaceShellInitialized = true;
             observedShellBrowserOpen = browserOpen;
-            observedShellInspectorOpen = inspectorOpen;
-
             // Trigger always enters in canvas-first mode. Existing Browser/Inspector state may have
             // been left open by another page; do not let those persisted shell flags cover the room
             // on the first Trigger frame. Subsequent Ctrl+B / Ctrl+I changes are still observed.
@@ -103,11 +91,6 @@ internal static partial class TriggerEditorView
                 focusAddSearch = true;
         }
 
-        if (inspectorOpen != observedShellInspectorOpen)
-        {
-            observedShellInspectorOpen = inspectorOpen;
-            advancedInspectorOpen = !advancedInspectorOpen;
-        }
     }
 
     private static void DrawCommandBar(
@@ -196,25 +179,6 @@ internal static partial class TriggerEditorView
                     selected.Event.Type ?? string.Empty);
             }
 
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("高级", "Advanced"),
-                    "TriggerWorkspaceAdvanced",
-                    advancedInspectorOpen
-                        ? DevToolButtonTone.Primary
-                        : DevToolButtonTone.Subtle))
-            {
-                advancedInspectorOpen =
-                    !advancedInspectorOpen;
-            }
-
-            if (ImGui.IsItemHovered())
-            {
-                DevToolTooltip.Show(
-                    DevToolUiSettings.T(
-                        "完整触发器参数。Ctrl+I 也可切换。",
-                        "Full trigger properties. Ctrl+I also toggles this."));
-            }
         }
         else
         {
@@ -425,7 +389,7 @@ internal static partial class TriggerEditorView
         ImGui.End();
     }
 
-    private static void DrawQuickInspector(
+    private static void DrawResidentInspector(
         EditorTriggerPresentationSnapshot snapshot,
         EditorTriggerSnapshot selected,
         Num.Vector2 display)
@@ -462,8 +426,8 @@ internal static partial class TriggerEditorView
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T(
-                    "快速编辑###TriggerQuickInspectorV2",
-                    "Quick Edit###TriggerQuickInspectorV2"),
+                    "检查器###TriggerInspectorResidentV3",
+                    "Inspector###TriggerInspectorResidentV3"),
                 ImGuiWindowFlags.AlwaysAutoResize |
                 ImGuiWindowFlags.NoCollapse))
         {
@@ -472,161 +436,18 @@ internal static partial class TriggerEditorView
         }
 
         FloatingWindowSnap.TrackCurrentWindow(
-            "TriggerQuickInspector");
+            "TriggerInspectorResident");
 
         if (selected == null)
         {
             DevToolWidgets.MutedText(
                 DevToolUiSettings.T(
-                    "选择一个触发器后在这里快速编辑。",
-                    "Select a trigger to edit its common properties here."),
+                    "选择一个触发器后在这里编辑。",
+                    "Select a trigger to edit it here."),
                 true);
             ImGui.End();
             return;
         }
-
-        ImGui.TextUnformatted(
-            selected.Type ?? string.Empty);
-
-        DrawString(
-            selected,
-            TriggerEditorKeys.Name,
-            DevToolUiSettings.T("名称", "Name"),
-            selected.Name);
-
-        if (selected.IsSpot)
-        {
-            ImGui.TextDisabled(
-                DevToolUiSettings.T(
-                    $"位置 {selected.X:0.#}, {selected.Y:0.#}  |  半径 {selected.Radius:0.#}",
-                    $"Position {selected.X:0.#}, {selected.Y:0.#}  |  Radius {selected.Radius:0.#}"));
-            if (ImGui.IsItemHovered())
-            {
-                DevToolTooltip.Show(
-                    DevToolUiSettings.T(
-                        "位置和半径优先直接使用房间中的 Gizmo 编辑。",
-                        "Prefer editing position and radius directly with the room gizmo."));
-            }
-        }
-
-        if (!string.IsNullOrEmpty(
-                selected.CreatureType))
-        {
-            DrawString(
-                selected,
-                TriggerEditorKeys.CreatureType,
-                DevToolUiSettings.T(
-                    "生物类型",
-                    "Creature type"),
-                selected.CreatureType);
-        }
-
-        DrawFloat(
-            selected,
-            TriggerEditorKeys.FireChance,
-            DevToolUiSettings.T(
-                "触发概率",
-                "Fire chance"),
-            selected.FireChance,
-            0f,
-            1f);
-
-        DrawFloat(
-            selected,
-            TriggerEditorKeys.DelaySeconds,
-            DevToolUiSettings.T(
-                "延迟（秒）",
-                "Delay (seconds)"),
-            selected.DelaySeconds,
-            0f,
-            120f);
-
-        bool multiUse =
-            selected.MultiUse;
-        if (ImGui.Checkbox(
-                DevToolUiSettings.T(
-                    "允许多次触发##TriggerQuickMultiUse",
-                    "Can fire multiple times##TriggerQuickMultiUse"),
-                ref multiUse))
-        {
-            SendValue(
-                selected.Index,
-                TriggerEditorKeys.MultiUse,
-                new EditorPropertyValue(
-                    EditorPropertyKind.Boolean,
-                    boolean: multiUse));
-        }
-
-        DrawSlugcatCompactSelector(
-            snapshot,
-            selected);
-
-        if (selected.Event?.HasEvent == true)
-        {
-            ImGui.TextDisabled(
-                DevToolUiSettings.T(
-                    "事件: ",
-                    "Event: ") +
-                selected.Event.Type);
-        }
-
-        ImGui.Separator();
-
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T(
-                    "高级设置",
-                    "Advanced"),
-                "TriggerQuickAdvanced",
-                DevToolButtonTone.Subtle,
-                true))
-        {
-            advancedInspectorOpen = true;
-        }
-
-        ImGui.End();
-    }
-
-    private static void DrawAdvancedInspector(
-        EditorTriggerPresentationSnapshot snapshot,
-        Num.Vector2 display)
-    {
-        float width =
-            Math.Min(430f, Math.Max(340f, display.X * 0.28f));
-        float height =
-            Math.Min(
-                Math.Max(420f, display.Y * 0.68f),
-                Math.Max(420f, display.Y - 110f));
-        float x =
-            Math.Max(
-                8f,
-                display.X - width - 14f);
-
-        ImGui.SetNextWindowPos(
-            new Num.Vector2(x, 86f),
-            ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(
-            new Num.Vector2(width, height),
-            ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(320f, 320f),
-            new Num.Vector2(
-                Math.Max(320f, display.X * 0.46f),
-                Math.Max(320f, display.Y - 80f)));
-        ImGui.SetNextWindowBgAlpha(
-            DevToolUiSettings.WindowAlpha);
-
-        if (!ImGui.Begin(
-                DevToolUiSettings.T(
-                    "高级检查器###TriggerAdvancedInspector",
-                    "Advanced Inspector###TriggerAdvancedInspector"),
-                ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        FloatingWindowSnap.TrackCurrentWindow(
-            "TriggerAdvancedInspector");
 
         DrawInspector(snapshot);
 
