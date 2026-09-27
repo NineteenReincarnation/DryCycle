@@ -168,7 +168,8 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
     public override int NavigationOrder => 400;
     public override string NavigationLabel => DevToolUiSettings.T("触发器", "Triggers");
     public override string NavigationTooltip => DevToolUiSettings.T("触发器", "Triggers");
-    public override bool SupportsSceneSurface => true;
+    public override bool UsesDedicatedWorkspace => true;
+    public override bool SupportsSceneSurface => false;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于新检查器无法表达的自定义触发器/事件控件。",
         "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
@@ -184,6 +185,12 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
 
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         TriggerEditorView.DrawSceneWorkspace(TriggerEditorPresentationHub.Current);
+
+    public override void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        TriggerEditorView.DrawWorkspace(
+            snapshot,
+            TriggerEditorPresentationHub.Current,
+            display);
 
     protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
         new(countA: TriggerEditorPresentationHub.Current.Triggers?.Length ?? 0);
