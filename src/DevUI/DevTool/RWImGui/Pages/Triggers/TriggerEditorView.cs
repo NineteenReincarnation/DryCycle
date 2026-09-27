@@ -7,7 +7,7 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
-internal static class TriggerEditorView
+internal static partial class TriggerEditorView
 {
     private readonly struct EditBindingKey : IEquatable<EditBindingKey>
     {
@@ -112,6 +112,8 @@ internal static class TriggerEditorView
         projectedEntranceCount = -1;
         projectedEntranceChinese = false;
         projectedEntranceLabels = Array.Empty<string>();
+
+        ResetWorkspaceRetainedState();
     }
 
     internal static void DrawBrowser(EditorTriggerPresentationSnapshot snapshot)
@@ -512,21 +514,124 @@ internal static class TriggerEditorView
 
     private static void DrawSlugcats(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
     {
-        if (!ImGui.CollapsingHeader(DevToolUiSettings.T("蛞蝓猫##TriggerSlugcats", "Slugcats##TriggerSlugcats"), ImGuiTreeNodeFlags.DefaultOpen)) return;
-        string[] all = snapshot.SlugcatNames ?? Array.Empty<string>();
-        string[] allowed = trigger.AllowedSlugcats ?? Array.Empty<string>();
+        if (!ImGui.CollapsingHeader(
+                DevToolUiSettings.T("蛞蝓猫##TriggerSlugcats", "Slugcats##TriggerSlugcats"),
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        DrawSlugcatCompactSelector(snapshot, trigger);
+    }
+
+    private static void DrawSlugcatCompactSelector(
+        EditorTriggerPresentationSnapshot snapshot,
+        EditorTriggerSnapshot trigger)
+    {
+        string[] all =
+            snapshot.SlugcatNames ?? Array.Empty<string>();
+        string[] allowed =
+            trigger.AllowedSlugcats ?? Array.Empty<string>();
         EnsureSlugcatLabels(all);
+
+        string preview =
+            SlugcatSelectionSummary(all, allowed);
+
+        if (!ImGui.BeginCombo(
+                DevToolUiSettings.T(
+                    "适用角色##TriggerSlugcatCombo",
+                    "Allowed slugcats##TriggerSlugcatCombo"),
+                preview))
+            return;
+
+        if (ImGui.SmallButton(
+                DevToolUiSettings.T(
+                    "全选##TriggerSlugcatsAll",
+                    "All##TriggerSlugcatsAll")))
+        {
+            TriggerEditorCommandQueue.Enqueue(
+                new TriggerEditorCommand(
+                    TriggerEditorCommandKind.SetSlugcats,
+                    index: trigger.Index,
+                    texts: (string[])all.Clone()));
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton(
+                DevToolUiSettings.T(
+                    "清空##TriggerSlugcatsNone",
+                    "Clear##TriggerSlugcatsNone")))
+        {
+            TriggerEditorCommandQueue.Enqueue(
+                new TriggerEditorCommand(
+                    TriggerEditorCommandKind.SetSlugcats,
+                    index: trigger.Index,
+                    texts: Array.Empty<string>()));
+        }
+
+        ImGui.Separator();
 
         for (int i = 0; i < all.Length; i++)
         {
-            string name = all[i];
-            bool value = Contains(allowed, name);
-            if (ImGui.Checkbox(projectedSlugcatLabels[i], ref value))
-                TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(
-                    TriggerEditorCommandKind.ToggleSlugcat,
-                    index: trigger.Index,
-                    text: name));
+            string name =
+                all[i];
+            bool selected =
+                Contains(allowed, name);
+
+            if (ImGui.Selectable(
+                    projectedSlugcatLabels[i],
+                    selected,
+                    ImGuiSelectableFlags.DontClosePopups))
+            {
+                TriggerEditorCommandQueue.Enqueue(
+                    new TriggerEditorCommand(
+                        TriggerEditorCommandKind.ToggleSlugcat,
+                        index: trigger.Index,
+                        text: name));
+            }
         }
+
+        ImGui.EndCombo();
+    }
+
+    private static string SlugcatSelectionSummary(
+        string[] all,
+        string[] allowed)
+    {
+        all ??= Array.Empty<string>();
+        allowed ??= Array.Empty<string>();
+
+        int selectedCount = 0;
+        string first = string.Empty;
+        string second = string.Empty;
+
+        for (int i = 0; i < all.Length; i++)
+        {
+            string name =
+                all[i];
+            if (!Contains(allowed, name))
+                continue;
+
+            if (selectedCount == 0)
+                first = name;
+            else if (selectedCount == 1)
+                second = name;
+
+            selectedCount++;
+        }
+
+        if (selectedCount == 0)
+            return DevToolUiSettings.T("无", "None");
+        if (all.Length > 0 && selectedCount == all.Length)
+            return DevToolUiSettings.T("全部", "All");
+        if (selectedCount == 1)
+            return first;
+        if (selectedCount == 2)
+            return first + " + " + second;
+
+        return first +
+               " + " +
+               second +
+               " +" +
+               (selectedCount - 2);
     }
 
     private static void DrawInt(EditorTriggerSnapshot trigger, string key, string label, int current, int min, int max)
