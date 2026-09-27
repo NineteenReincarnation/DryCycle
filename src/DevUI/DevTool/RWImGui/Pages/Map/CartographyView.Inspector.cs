@@ -94,7 +94,7 @@ internal static partial class CartographyView
                 !roomNamesVisible);
 
         bool solidTerrain =
-            presentation?.Document?.SolidTerrain ?? true;
+            presentation?.Document?.SolidTerrain ?? false;
         string solidTerrainLabel =
             T("实心地形", "Solid terrain");
         DevToolWidgets.SameLineIfFits(
