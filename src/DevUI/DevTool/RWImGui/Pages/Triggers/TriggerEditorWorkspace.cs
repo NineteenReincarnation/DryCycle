@@ -32,7 +32,6 @@ internal static partial class TriggerEditorView
             return;
 
         SynchronizeWorkspaceShell(shell);
-        DrawCommandBar(snapshot, display);
 
         EditorTriggerSnapshot selected =
             FindSelected(snapshot);
@@ -89,42 +88,20 @@ internal static partial class TriggerEditorView
 
     }
 
-    private static void DrawCommandBar(
-        EditorTriggerPresentationSnapshot snapshot,
-        Num.Vector2 display)
+    internal static void DrawTopControls(
+        EditorPresentationSnapshot shell,
+        EditorTriggerPresentationSnapshot snapshot)
     {
-        float width =
-            Math.Min(
-                760f,
-                Math.Max(
-                    420f,
-                    display.X - 520f));
-        float x =
-            Math.Max(
-                210f,
-                (display.X - width) * 0.5f);
-
-        ImGui.SetNextWindowPos(
-            new Num.Vector2(x, 8f),
-            ImGuiCond.Always);
-        ImGui.SetNextWindowBgAlpha(
-            Math.Min(0.96f, DevToolUiSettings.WindowAlpha + 0.08f));
-
-        ImGuiWindowFlags flags =
-            ImGuiWindowFlags.NoDecoration |
-            ImGuiWindowFlags.AlwaysAutoResize |
-            ImGuiWindowFlags.NoSavedSettings |
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse;
-
-        if (!ImGui.Begin("##TriggerCanvasCommandBar", flags))
-        {
-            ImGui.End();
+        if (snapshot == null ||
+            !snapshot.Available)
             return;
-        }
+
+        SynchronizeWorkspaceShell(shell);
 
         string addLabel =
-            DevToolUiSettings.T("+ 添加", "+ Add");
+            DevToolUiSettings.T(
+                "+ 添加",
+                "+ Add");
         if (DevToolWidgets.ActionButton(
                 addLabel,
                 "TriggerWorkspaceAdd",
@@ -132,7 +109,8 @@ internal static partial class TriggerEditorView
                     ? DevToolButtonTone.Primary
                     : DevToolButtonTone.Subtle))
         {
-            addPaletteOpen = !addPaletteOpen;
+            addPaletteOpen =
+                !addPaletteOpen;
             if (addPaletteOpen)
                 focusAddSearch = true;
         }
@@ -144,6 +122,7 @@ internal static partial class TriggerEditorView
                 "场景 ",
                 "Scene ") +
             count;
+
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 sceneLabel,
@@ -152,40 +131,9 @@ internal static partial class TriggerEditorView
                     ? DevToolButtonTone.Primary
                     : DevToolButtonTone.Subtle))
         {
-            scenePanelOpen = !scenePanelOpen;
+            scenePanelOpen =
+                !scenePanelOpen;
         }
-
-        EditorTriggerSnapshot selected =
-            FindSelected(snapshot);
-
-        if (selected != null)
-        {
-            ImGui.SameLine();
-            ImGui.TextDisabled("|");
-            ImGui.SameLine();
-            ImGui.TextUnformatted(
-                string.IsNullOrWhiteSpace(selected.Name)
-                    ? selected.Type ?? string.Empty
-                    : selected.Name + "  [" + (selected.Type ?? string.Empty) + "]");
-
-            if (selected.Event?.HasEvent == true)
-            {
-                ImGui.SameLine();
-                ImGui.TextDisabled(
-                    selected.Event.Type ?? string.Empty);
-            }
-
-        }
-        else
-        {
-            ImGui.SameLine();
-            ImGui.TextDisabled(
-                DevToolUiSettings.T(
-                    "选择场景中的触发器进行编辑",
-                    "Select a trigger in the room to edit it"));
-        }
-
-        ImGui.End();
     }
 
     private static void DrawAddPalette(
