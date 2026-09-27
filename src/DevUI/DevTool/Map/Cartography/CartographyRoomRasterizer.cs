@@ -28,7 +28,27 @@ internal static class CartographyRoomRasterizer
         int scale = hasCurves ? 3 : 1;
         int width = w * scale, height = h * scale;
         byte[] curveKinds = new byte[width * height];
-        if (hasCurves) RasterizePolygons(polygons, curveKinds, width, height, scale);
+        if (hasCurves)
+            RasterizePolygons(polygons, curveKinds, width, height, scale);
+
+        // Optional Cartography presentation mode: preserve the authored upper curve, then treat
+        // everything below that surface as solid down to the room floor. Keep a separate mask so
+        // CropSolid can continue trimming ordinary deep wall mass without punching this deliberate
+        // solid presentation back out.
+        bool[] forcedSolid =
+            document.SolidTerrain && hasCurves
+                ? new bool[width * height]
+                : null;
+        if (forcedSolid != null)
+        {
+            RasterizeSolidBelowSurfaces(
+                polygons,
+                curveKinds,
+                forcedSolid,
+                width,
+                height,
+                scale);
+        }
 
         bool[] solid = new bool[width * height];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
@@ -52,7 +72,11 @@ internal static class CartographyRoomRasterizer
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
         {
             int i = y * width + x, tileX = x / scale, tileY = y / scale, tile = tileY * w + tileX;
-            if (solid[i] && keep != null && !keep[i]) continue;
+            if (solid[i] &&
+                keep != null &&
+                !keep[i] &&
+                (forcedSolid == null || !forcedSolid[i]))
+                continue;
             int kind = kinds[tile];
             bool curved = curveKinds[i] != 0;
             bool solidMaterial = kind == 2 || curved &&
@@ -70,6 +94,152 @@ internal static class CartographyRoomRasterizer
                 pixels[(y * repeat + dy) * outputWidth + x * repeat + dx] = color;
         }
         return new CartographyRaster(outputWidth, outputHeight, pixels);
+    }
+
+    private static void RasterizeSolidBelowSurfaces(
+        EditorMapPolylineSnapshot[] curves,
+        byte[] materials,
+        bool[] forcedSolid,
+        int width,
+        int height,
+        int scale)
+    {
+        if (curves == null ||
+            materials == null ||
+            forcedSolid == null ||
+            width <= 0 ||
+            height <= 0)
+            return;
+
+        byte solidMaterial =
+            (byte)((int)EditorMapGeometryKind.Solid + 1);
+
+        foreach (EditorMapPolylineSnapshot curve in curves)
+        {
+            if (curve?.Closed == true ||
+                curve?.Points == null ||
+                curve.Points.Length < 2)
+                continue;
+
+            // These are the authored ground-surface families. Quicksand has its own body/material
+            // semantics and must not become an arbitrary room-floor fill merely because it is curved.
+            if (curve.Kind != EditorMapGeometryKind.CurvedSlope &&
+                curve.Kind != EditorMapGeometryKind.LocalTerrain &&
+                curve.Kind != EditorMapGeometryKind.Solid)
+                continue;
+
+            EditorMapPointSnapshot[] points =
+                curve.Points;
+
+            for (int i = 0; i < points.Length - 1; i++)
+            {
+                float ax =
+                    points[i].X * scale;
+                float ay =
+                    height - points[i].Y * scale;
+                float bx =
+                    points[i + 1].X * scale;
+                float by =
+                    height - points[i + 1].Y * scale;
+
+                float dx =
+                    bx - ax;
+
+                if (Math.Abs(dx) < 0.0001f)
+                {
+                    int x =
+                        Math.Max(
+                            0,
+                            Math.Min(
+                                width - 1,
+                                (int)Math.Floor(ax)));
+
+                    FillSolidColumn(
+                        x,
+                        Math.Min(ay, by),
+                        materials,
+                        forcedSolid,
+                        width,
+                        height,
+                        solidMaterial);
+                    continue;
+                }
+
+                float minX =
+                    Math.Min(ax, bx);
+                float maxX =
+                    Math.Max(ax, bx);
+                int first =
+                    Math.Max(
+                        0,
+                        (int)Math.Ceiling(minX - .5f));
+                int last =
+                    Math.Min(
+                        width - 1,
+                        (int)Math.Floor(maxX - .5f));
+
+                for (int x = first; x <= last; x++)
+                {
+                    float sampleX =
+                        x + .5f;
+                    float t =
+                        (sampleX - ax) /
+                        dx;
+                    if (t < -0.0001f ||
+                        t > 1.0001f)
+                        continue;
+
+                    float surfaceY =
+                        ay +
+                        (by - ay) *
+                        t;
+
+                    FillSolidColumn(
+                        x,
+                        surfaceY,
+                        materials,
+                        forcedSolid,
+                        width,
+                        height,
+                        solidMaterial);
+                }
+            }
+        }
+    }
+
+    private static void FillSolidColumn(
+        int x,
+        float surfaceY,
+        byte[] materials,
+        bool[] forcedSolid,
+        int width,
+        int height,
+        byte material)
+    {
+        if (x < 0 ||
+            x >= width)
+            return;
+
+        int firstY =
+            Math.Max(
+                0,
+                Math.Min(
+                    height,
+                    (int)Math.Ceiling(
+                        surfaceY -
+                        .5f)));
+
+        for (int y = firstY;
+             y < height;
+             y++)
+        {
+            int index =
+                y * width + x;
+            materials[index] =
+                material;
+            forcedSolid[index] =
+                true;
+        }
     }
 
     private static void RasterizePolygons(EditorMapPolylineSnapshot[] polygons, byte[] materials, int width, int height, int scale)
