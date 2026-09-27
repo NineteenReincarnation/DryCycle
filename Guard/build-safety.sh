@@ -160,16 +160,18 @@ from pathlib import Path
 
 workspace_path = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorWorkspace.cs")
 view_path = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorView.cs")
+gizmo_path = Path("src/DevUI/DevTool/RWImGui/Pages/Objects/Gizmos/NativeSpatialGizmoView.cs")
 pages_path = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/BuiltinDevToolPages.cs")
 font_path = Path("src/DevUI/DevTool/RWImGui/Settings/Fonts/FontSettingsWindow.cs")
 migration_path = Path("src/DevUI/DevTool/RWImGui/Diagnostics/Compatibility/MigrationCoverageWindow.cs")
 
-for path in (workspace_path, view_path, pages_path, font_path, migration_path):
+for path in (workspace_path, view_path, gizmo_path, pages_path, font_path, migration_path):
     if not path.is_file():
         raise SystemExit(f"Trigger canvas-first contract input is missing: {path}")
 
 workspace = workspace_path.read_text(encoding="utf-8")
 view = view_path.read_text(encoding="utf-8")
+gizmo = gizmo_path.read_text(encoding="utf-8")
 pages = pages_path.read_text(encoding="utf-8")
 font = font_path.read_text(encoding="utf-8")
 migration = migration_path.read_text(encoding="utf-8")
@@ -197,6 +199,20 @@ if "SupportsSceneSurface => false" not in trigger_page:
     raise SystemExit("Trigger page must not restore the large shared center Scene window.")
 if "DrawSlugcatCompactSelector" not in view or "TriggerEditorCommandKind.SetSlugcats" not in view:
     raise SystemExit("Trigger slugcat editing must remain compact and preset-capable.")
+if "ImGuiSelectableFlags.DontClosePopups" in view:
+    raise SystemExit("Current ImGui.NET does not expose DontClosePopups; keep the slugcat combo on compatible widgets.")
+
+trigger_gizmo_marker = "internal static void DrawTriggers"
+trigger_gizmo_pos = gizmo.find(trigger_gizmo_marker)
+if trigger_gizmo_pos < 0:
+    raise SystemExit("Could not isolate Trigger gizmo section.")
+sound_gizmo = gizmo[:trigger_gizmo_pos]
+trigger_gizmo = gizmo[trigger_gizmo_pos:]
+if "RadiusHandleX" in sound_gizmo or "RadiusHandleY" in sound_gizmo:
+    raise SystemExit("Trigger radius-handle fields must not be referenced from EditorSoundSnapshot code.")
+if "RadiusHandleX" not in trigger_gizmo or "RadiusHandleY" not in trigger_gizmo:
+    raise SystemExit("Spot trigger gizmo must retain its authored 360-degree radius-handle direction.")
+
 if "EditorToolMode.Triggers" not in font:
     raise SystemExit("Font diagnostics must stay out of the Trigger workspace.")
 if "EditorToolMode.Triggers" not in migration:
