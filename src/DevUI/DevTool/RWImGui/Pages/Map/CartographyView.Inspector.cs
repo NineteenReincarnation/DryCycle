@@ -67,6 +67,27 @@ internal static partial class CartographyView
         if (toggleCanvasArea)
             SetCanvasSelectionEnabled(presentation, !canvasAreaActive);
 
+        bool roomNamesVisible =
+            presentation?.Document?.ShowRoomNames ?? true;
+        string roomNamesLabel =
+            T("显示房间名", "Show room names");
+        DevToolWidgets.SameLineIfFits(
+            DevToolWidgets.ButtonWidth(roomNamesLabel));
+        if (roomNamesVisible)
+            ImGui.PushStyleColor(
+                ImGuiCol.Button,
+                new Num.Vector4(.20f, .43f, .69f, 1f));
+        bool toggleRoomNames =
+            ImGui.Button(
+                roomNamesLabel +
+                "##AtlasRoomNames");
+        if (roomNamesVisible)
+            ImGui.PopStyleColor();
+        if (toggleRoomNames)
+            SetRoomNamesVisible(
+                presentation,
+                !roomNamesVisible);
+
         if (state.Loading)
             ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域...", "Preparing map in background; you can select another region..."));
         if (state.Failed)
@@ -127,6 +148,50 @@ internal static partial class CartographyView
         styleDraft = style;
         styleDirty = false;
         exportAreaDrag = ExportAreaDrag.None;
+    }
+
+    private static void SetRoomNamesVisible(
+        CartographyPresentation presentation,
+        bool visible)
+    {
+        if (presentation?.Document == null ||
+            string.IsNullOrEmpty(presentation.Identity) ||
+            presentation.Document.ShowRoomNames == visible)
+            return;
+
+        // Room-name visibility is author state, not a frontend-only filter. Commit it through the
+        // same Style command as the workspace inspector so canvas preview, saved project, undo/redo
+        // and every export format consume the exact same scene.
+        LeaveDrafts();
+
+        CartographyDocument style =
+            presentation.Document.Clone();
+        style.ShowRoomNames =
+            visible;
+
+        string key =
+            presentation.Identity +
+            "/style";
+        CartographyRuntime.StageDraft(
+            key,
+            new CartographyCommand
+            {
+                DocumentId =
+                    presentation.Identity,
+                Revision =
+                    presentation.Revision,
+                Kind =
+                    CartographyCommandKind.Style,
+                Style =
+                    style
+            });
+        CartographyRuntime.CommitDraft(
+            key);
+
+        styleDraft =
+            style;
+        styleDirty =
+            false;
     }
 
     private static string CampaignLabel(string campaign) => campaign switch
