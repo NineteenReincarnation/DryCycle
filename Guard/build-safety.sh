@@ -231,7 +231,7 @@ PY
 
 # Named Trigger authoring and the lower-right canvas workspace are one UX contract: names must
 # persist through Rain World's unknown-trigger fields, named Spots get clickable world labels, and
-# Scene/Quick Edit remain movable rather than being pinned every frame.
+# Scene/Inspector remain movable rather than being pinned every frame.
 python3 - <<'PY'
 from pathlib import Path
 
@@ -257,7 +257,9 @@ if 'scenePanelOpen = !scenePanelOpen;' not in workspace:
     raise SystemExit("The top Scene button must continue to show/hide the Trigger scene panel.")
 if 'TriggerCompactSceneV2' not in workspace or 'TriggerInspectorResidentV3' not in workspace:
     raise SystemExit("Trigger Scene/Inspector must use the movable lower-right window identities.")
-if 'ImGuiCond.Always' in workspace[workspace.find('private static void DrawCompactScene'):workspace.find('private static void DrawQuickInspector')]:
+scene_start = workspace.find('private static void DrawCompactScene')
+scene_end = workspace.find('private static void DrawResidentInspector', scene_start)
+if scene_start < 0 or scene_end < 0 or 'ImGuiCond.Always' in workspace[scene_start:scene_end]:
     raise SystemExit("Trigger Scene must not be pinned every frame; developers must be able to move it.")
 inspector_start = workspace.find('private static void DrawResidentInspector')
 if inspector_start < 0 or 'ImGuiCond.Always' in workspace[inspector_start:]:
