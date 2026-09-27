@@ -16,6 +16,9 @@ internal static class MigrationCoverageWindow
 
     internal static void Draw(Num.Vector2 display)
     {
+        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Triggers)
+            return;
+
         DevUiMigrationCoverageSnapshot observed = DevUiMigrationCoverage.Observed;
         DevUiMigrationCoverageSnapshot current = DevUiMigrationCoverage.CurrentPage;
 
