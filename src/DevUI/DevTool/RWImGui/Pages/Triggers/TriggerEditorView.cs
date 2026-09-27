@@ -164,6 +164,11 @@ internal static partial class TriggerEditorView
         }
 
         ImGui.Text(selected.Type);
+        DrawString(
+            selected,
+            TriggerEditorKeys.Name,
+            DevToolUiSettings.T("名称", "Name"),
+            selected.Name);
         ImGui.TextDisabled(selected.Event?.HasEvent == true
             ? DevToolUiSettings.T("事件 | ", "Event | ") + selected.Event.Type
             : DevToolUiSettings.T("未分配事件", "No event assigned"));
@@ -823,7 +828,10 @@ internal static partial class TriggerEditorView
                 labels[i] = "##TriggerSceneMissing" + i;
                 continue;
             }
-            string label = trigger.Type ?? string.Empty;
+            string label =
+                string.IsNullOrWhiteSpace(trigger.Name)
+                    ? trigger.Type ?? string.Empty
+                    : trigger.Name + "  [" + (trigger.Type ?? string.Empty) + "]";
             if (trigger.Event?.HasEvent == true) label += "  ->  " + trigger.Event.Type;
             labels[i] = label + "##TriggerScene" + trigger.Index;
         }
