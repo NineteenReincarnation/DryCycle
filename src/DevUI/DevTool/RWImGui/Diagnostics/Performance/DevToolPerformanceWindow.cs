@@ -119,6 +119,37 @@ internal static class DevToolPerformanceWindow
         }
 
         FloatingWindowSnap.TrackCurrentWindow("Performance");
+        DrawEmbeddedContents();
+        ImGui.End();
+    }
+
+    internal static void DrawEmbedded()
+    {
+        if (!DevToolPerformanceMonitor.Enabled)
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "性能采样默认关闭，避免正常编辑产生额外诊断开销。",
+                    "Performance sampling is disabled by default so normal editing pays no diagnostic overhead."),
+                true);
+
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("开始性能监控", "Start Monitoring"),
+                    "DebugPerformanceStart",
+                    DevToolButtonTone.Primary))
+            {
+                DevToolPerformanceMonitor.SetEnabled(true);
+                DevToolFrontendPerformanceMonitor.SetEnabled(true);
+                InvalidateReadback();
+            }
+            return;
+        }
+
+        DrawEmbeddedContents();
+    }
+
+    private static void DrawEmbeddedContents()
+    {
         EnsureReadback();
 
         DevToolWidgets.MutedText(GetRollingDescription());
@@ -142,7 +173,6 @@ internal static class DevToolPerformanceWindow
         {
             DevToolPerformanceMonitor.SetEnabled(false);
             DevToolFrontendPerformanceMonitor.SetEnabled(false);
-            ImGui.End();
             return;
         }
 
@@ -209,8 +239,8 @@ internal static class DevToolPerformanceWindow
                 "监控关闭后，计时埋点回到无分配快速路径；缓存计数器也只剩一次 Enabled 检查。",
                 "When monitoring is disabled, timing returns to its allocation-free fast path and cache counters reduce to one Enabled check."));
 
-        ImGui.End();
     }
+
 
     private static void DrawSoundColdStart()
     {
