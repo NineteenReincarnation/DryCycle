@@ -18,6 +18,8 @@ internal static partial class TriggerEditorView
     private static bool workspaceShellInitialized;
     private static bool observedShellBrowserOpen;
     private static bool addPopupRequested;
+    private static bool createConfirmPopupRequested;
+    private static string pendingTriggerType = string.Empty;
     private static string addTriggerName = string.Empty;
     private static bool scenePanelOpen = true;
     private static string workspaceSceneSearch = string.Empty;
@@ -45,6 +47,8 @@ internal static partial class TriggerEditorView
     {
         workspaceShellInitialized = false;
         addPopupRequested = false;
+        createConfirmPopupRequested = false;
+        pendingTriggerType = string.Empty;
         addTriggerName = string.Empty;
     }
 
@@ -53,6 +57,8 @@ internal static partial class TriggerEditorView
         workspaceShellInitialized = false;
         observedShellBrowserOpen = false;
         addPopupRequested = false;
+        createConfirmPopupRequested = false;
+        pendingTriggerType = string.Empty;
         addTriggerName = string.Empty;
         scenePanelOpen = true;
         workspaceSceneSearch = string.Empty;
@@ -135,6 +141,15 @@ internal static partial class TriggerEditorView
         DrawAddPopup(
             snapshot,
             addPopupPosition);
+
+        if (createConfirmPopupRequested)
+        {
+            ImGui.OpenPopup("##TriggerCreateConfirmPopup");
+            createConfirmPopupRequested = false;
+        }
+
+        DrawCreateConfirmPopup(
+            addPopupPosition);
     }
 
     private static void DrawAddPopup(
@@ -150,16 +165,6 @@ internal static partial class TriggerEditorView
 
         if (!ImGui.BeginPopup("##TriggerAddPopup"))
             return;
-
-        DevToolWidgets.FullWidthInputText(
-            DevToolUiSettings.T(
-                "名称",
-                "Name"),
-            "TriggerCreateName",
-            ref addTriggerName,
-            128);
-
-        ImGui.Separator();
 
         string[] types =
             snapshot.TriggerTypes ??
@@ -177,14 +182,81 @@ internal static partial class TriggerEditorView
                     false))
                 continue;
 
-            TriggerEditorCommandQueue.Enqueue(
-                new TriggerEditorCommand(
-                    TriggerEditorCommandKind.Create,
-                    text: type,
-                    name: addTriggerName));
+            pendingTriggerType = type;
             addTriggerName = string.Empty;
+            createConfirmPopupRequested = true;
             ImGui.CloseCurrentPopup();
             break;
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private static void DrawCreateConfirmPopup(
+        Num.Vector2 position)
+    {
+        ImGui.SetNextWindowPos(
+            position,
+            ImGuiCond.Appearing);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(220f, 0f),
+            new Num.Vector2(360f, 240f));
+
+        if (!ImGui.BeginPopup("##TriggerCreateConfirmPopup"))
+            return;
+
+        ImGui.TextDisabled(
+            DevToolUiSettings.T(
+                "触发器类型",
+                "Trigger type"));
+        ImGui.SameLine();
+        ImGui.TextUnformatted(
+            pendingTriggerType ?? string.Empty);
+
+        ImGui.Separator();
+
+        DevToolWidgets.FullWidthInputText(
+            DevToolUiSettings.T(
+                "名称",
+                "Name"),
+            "TriggerCreateName",
+            ref addTriggerName,
+            128);
+
+        ImGui.Spacing();
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T(
+                    "确认",
+                    "Create"),
+                "TriggerCreateConfirm",
+                DevToolButtonTone.Primary))
+        {
+            if (!string.IsNullOrEmpty(pendingTriggerType))
+            {
+                TriggerEditorCommandQueue.Enqueue(
+                    new TriggerEditorCommand(
+                        TriggerEditorCommandKind.Create,
+                        text: pendingTriggerType,
+                        name: addTriggerName));
+            }
+
+            pendingTriggerType = string.Empty;
+            addTriggerName = string.Empty;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T(
+                    "取消",
+                    "Cancel"),
+                "TriggerCreateCancel",
+                DevToolButtonTone.Subtle))
+        {
+            pendingTriggerType = string.Empty;
+            addTriggerName = string.Empty;
+            ImGui.CloseCurrentPopup();
         }
 
         ImGui.EndPopup();
