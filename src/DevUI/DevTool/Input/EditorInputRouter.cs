@@ -273,8 +273,13 @@ public static class EditorInputRouter
                         selectedIndex));
             }
 
+            bool xShortcut =
+                global::UnityEngine.Input.GetKeyDown(KeyCode.X);
+            if (xShortcut)
+                MarkKeyboardCaptured(session.Owner?.game);
+
             string keys =
-                global::UnityEngine.Input.GetKeyDown(KeyCode.X)
+                xShortcut
                     ? "X"
                     : "Delete";
             EditorShortcutFeedback.PublishCustom(
