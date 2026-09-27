@@ -18,6 +18,7 @@ internal static partial class TriggerEditorView
     private static bool workspaceShellInitialized;
     private static bool observedShellBrowserOpen;
     private static bool addPopupRequested;
+    private static string addTriggerName = string.Empty;
     private static bool scenePanelOpen = true;
     private static string workspaceSceneSearch = string.Empty;
 
@@ -44,6 +45,7 @@ internal static partial class TriggerEditorView
     {
         workspaceShellInitialized = false;
         addPopupRequested = false;
+        addTriggerName = string.Empty;
     }
 
     private static void ResetWorkspaceRetainedState()
@@ -51,6 +53,7 @@ internal static partial class TriggerEditorView
         workspaceShellInitialized = false;
         observedShellBrowserOpen = false;
         addPopupRequested = false;
+        addTriggerName = string.Empty;
         scenePanelOpen = true;
         workspaceSceneSearch = string.Empty;
     }
@@ -148,6 +151,22 @@ internal static partial class TriggerEditorView
         if (!ImGui.BeginPopup("##TriggerAddPopup"))
             return;
 
+        if (ImGui.IsWindowAppearing())
+            ImGui.SetKeyboardFocusHere();
+
+        ImGui.SetNextItemWidth(
+            Math.Max(
+                170f,
+                ImGui.GetContentRegionAvail().X));
+        ImGui.InputText(
+            DevToolUiSettings.T(
+                "名称##TriggerCreateName",
+                "Name##TriggerCreateName"),
+            ref addTriggerName,
+            128);
+
+        ImGui.Separator();
+
         string[] types =
             snapshot.TriggerTypes ??
             Array.Empty<string>();
@@ -167,7 +186,9 @@ internal static partial class TriggerEditorView
             TriggerEditorCommandQueue.Enqueue(
                 new TriggerEditorCommand(
                     TriggerEditorCommandKind.Create,
-                    text: type));
+                    text: type,
+                    name: addTriggerName));
+            addTriggerName = string.Empty;
             ImGui.CloseCurrentPopup();
             break;
         }
@@ -272,7 +293,11 @@ internal static partial class TriggerEditorView
         Num.Vector2 display)
     {
         float width =
-            Math.Min(310f, Math.Max(250f, display.X * 0.20f));
+            Math.Min(
+                285f,
+                Math.Max(
+                    255f,
+                    display.X * 0.16f));
         float x =
             Math.Max(
                 8f,
@@ -293,19 +318,27 @@ internal static partial class TriggerEditorView
                 x,
                 Math.Max(84f, y)),
             ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(240f, 0f),
+        ImGui.SetNextWindowSize(
             new Num.Vector2(
-                Math.Max(240f, display.X * 0.36f),
-                Math.Max(180f, display.Y - 100f)));
+                width,
+                Math.Min(
+                    520f,
+                    Math.Max(
+                        360f,
+                        display.Y * 0.56f))),
+            ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(235f, 260f),
+            new Num.Vector2(
+                Math.Max(420f, display.X * 0.46f),
+                Math.Max(320f, display.Y - 80f)));
         ImGui.SetNextWindowBgAlpha(
             DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T(
-                    "检查器###TriggerInspectorResidentV3",
-                    "Inspector###TriggerInspectorResidentV3"),
-                ImGuiWindowFlags.AlwaysAutoResize |
+                    "检查器###TriggerInspectorResidentV4",
+                    "Inspector###TriggerInspectorResidentV4"),
                 ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
@@ -313,7 +346,7 @@ internal static partial class TriggerEditorView
         }
 
         FloatingWindowSnap.TrackCurrentWindow(
-            "TriggerInspectorResident");
+            "TriggerInspectorResidentV4");
 
         if (selected == null)
         {
