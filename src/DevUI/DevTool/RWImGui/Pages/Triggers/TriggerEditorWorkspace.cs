@@ -50,9 +50,8 @@ internal static partial class TriggerEditorView
     {
         workspaceShellInitialized = false;
         observedShellBrowserOpen = false;
-        addPaletteOpen = false;
+        addPopupRequested = false;
         scenePanelOpen = true;
-        focusAddSearch = false;
         workspaceSceneSearch = string.Empty;
     }
 
@@ -66,7 +65,7 @@ internal static partial class TriggerEditorView
             workspaceShellInitialized = true;
             observedShellBrowserOpen = browserOpen;
             // Trigger always enters in canvas-first mode. Browser state is observed only so Ctrl+B
-            // can continue to open/close the compact Add palette; the Inspector itself stays resident.
+            // can request the same compact Add popup used by the shared top button.
             return;
         }
 
