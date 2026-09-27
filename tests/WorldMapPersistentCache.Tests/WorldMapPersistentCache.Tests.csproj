@@ -10,5 +10,9 @@
   <ItemGroup>
     <Compile Include="../../src/DevUI/DevTool/Map/MapViewPersistentCache.cs"
              Link="Production/MapViewPersistentCache.cs" />
+    <Compile Include="../../src/DevUI/DevTool/RWImGui/Pages/World/WorldMap/RetainedV2/Rooms/RoomGeometryBlob.cs"
+             Link="Production/RoomGeometryBlob.cs" />
+    <Compile Include="../../src/DevUI/DevTool/RWImGui/Pages/World/WorldMap/RetainedV2/Rooms/RoomGeometryBuilder.cs"
+             Link="Production/RoomGeometryBuilder.cs" />
   </ItemGroup>
 </Project>
