@@ -158,8 +158,9 @@ dotnet run --project tests/WorldMapBackground.Tests/WorldMapBackground.Tests.csp
   --configuration Release \
   --no-launch-profile
 
-# Trigger is intentionally canvas-first: transient add/scene/advanced panels must not regress
-# back into the old always-open Browser + Inspector + center Scene layout.
+# Trigger is intentionally canvas-first: transient add/scene panels must not regress back into the
+# old always-open Browser + Inspector + center Scene layout. Its special controls live in the
+# shared NewDevtool top-status window rather than a second page-owned top bar.
 python3 - <<'PY'
 from pathlib import Path
 
@@ -188,7 +189,7 @@ if start < 0 or end < 0:
 trigger_page = pages[start:end]
 
 required_workspace = (
-    "DrawCommandBar",
+    "DrawTopControls",
     "DrawAddPalette",
     "DrawCompactScene",
     "DrawResidentInspector",
@@ -201,6 +202,12 @@ if "UsesDedicatedWorkspace => true" not in trigger_page:
     raise SystemExit("Trigger page must remain a dedicated canvas-first workspace.")
 if "SupportsSceneSurface => false" not in trigger_page:
     raise SystemExit("Trigger page must not restore the large shared center Scene window.")
+if "HasTopControls => true" not in trigger_page or "TriggerEditorView.DrawTopControls" not in trigger_page:
+    raise SystemExit("Trigger special controls must remain registered with the shared top-status window.")
+if "TriggerCanvasCommandBar" in workspace or "DrawCommandBar" in workspace:
+    raise SystemExit("Trigger must not recreate a private top command-bar window.")
+if "Select a trigger in the room to edit it" in workspace or "选择场景中的触发器进行编辑" in workspace:
+    raise SystemExit("Trigger top controls must not restore the empty-selection instruction text.")
 if "DrawSlugcatCompactSelector" not in view or "TriggerEditorCommandKind.SetSlugcats" not in view:
     raise SystemExit("Trigger slugcat editing must remain compact and preset-capable.")
 if "ImGuiSelectableFlags.DontClosePopups" in view:
@@ -227,6 +234,35 @@ if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" 
     raise SystemExit("Trigger workspace must not add recent-use/recent-selection UI.")
 
 print("Trigger canvas-first workspace guard passed.")
+PY
+
+# New UI owns one shared top status surface. Rain World's yellow developer label is hidden only
+# while the rebuilt frontend is healthy/active and is restored when Vanilla takes ownership.
+python3 - <<'PY'
+from pathlib import Path
+
+contract = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/IDevToolPageView.cs").read_text(encoding="utf-8")
+overlay = Path("src/DevUI/DevTool/RWImGui/Shell/DevToolOverlay.cs").read_text(encoding="utf-8")
+top = Path("src/DevUI/DevTool/RWImGui/Shell/Windows/DevToolTopStatusWindow.cs").read_text(encoding="utf-8")
+label = Path("src/DevUI/DevTool/RWImGui/Shell/VanillaDevToolsLabelVisibility.cs").read_text(encoding="utf-8")
+bridge = Path("src/DevUI/DevTool/RWImGui/Shell/BridgePlugin.cs").read_text(encoding="utf-8")
+
+if 'bool HasTopControls { get; }' not in contract or 'void DrawTopControls(EditorPresentationSnapshot snapshot);' not in contract:
+    raise SystemExit("DevTool page contract must expose optional shared top controls.")
+if 'DevToolTopStatusWindow.Draw' not in overlay:
+    raise SystemExit("Every rebuilt page must pass through the shared top-status window.")
+if 'snapshot.RoomName' not in top or '" : NewDevtool Active"' not in top:
+    raise SystemExit("Shared top status must display the current room and NewDevtool Active.")
+if 'page?.HasTopControls == true' not in top or 'page.DrawTopControls(snapshot)' not in top:
+    raise SystemExit("Shared top status must host the active page's optional special controls.")
+if 'devToolsLabel.isVisible' not in label or 'newUiOwnsStatus' not in label:
+    raise SystemExit("Vanilla developer-label ownership bridge is missing.")
+if 'DevToolFrontend.NativeBackendReady' not in bridge or 'VanillaDevToolsLabelVisibility.Apply' not in bridge:
+    raise SystemExit("Vanilla yellow label must be hidden only while the healthy New UI owns developer status.")
+if 'VanillaDevToolsLabelVisibility.Restore' not in bridge:
+    raise SystemExit("Vanilla yellow label must be restored when the frontend shuts down.")
+
+print("Shared NewDevtool top-status guard passed.")
 PY
 
 # Named Trigger authoring and the lower-right canvas workspace are one UX contract: names must
