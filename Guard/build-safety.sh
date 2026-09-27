@@ -230,8 +230,8 @@ if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" 
 print("Trigger canvas-first workspace guard passed.")
 PY
 
-# Cartography solid-terrain mode is shared author state: it must default on, persist with a
-# backwards-compatible true fallback, sit beside the room-name toggle, and drive the common room
+# Cartography solid-terrain mode is shared author state: it must default off, persist with a
+# backwards-compatible false fallback, sit beside the room-name toggle, and drive the common room
 # raster consumed by canvas and all exporters.
 python3 - <<'PY'
 from pathlib import Path
@@ -243,12 +243,12 @@ inspector = Path("src/DevUI/DevTool/RWImGui/Pages/Map/CartographyView.Inspector.
 scene = Path("src/DevUI/DevTool/Map/Cartography/CartographyScene.cs").read_text(encoding="utf-8")
 editing = Path("src/DevUI/DevTool/Map/Cartography/CartographyEditing.cs").read_text(encoding="utf-8")
 
-if "public bool SolidTerrain = true;" not in document:
-    raise SystemExit("Cartography SolidTerrain must default to enabled.")
+if "public bool SolidTerrain = false;" not in document:
+    raise SystemExit("Cartography SolidTerrain must default to disabled.")
 if 'A("solidTerrain", document.SolidTerrain)' not in storage:
     raise SystemExit("Cartography SolidTerrain must be persisted.")
-if 'root.Attribute("solidTerrain") == null || Bool(root, "solidTerrain")' not in storage:
-    raise SystemExit("Old cartography documents must migrate missing solidTerrain to true.")
+if 'root.Attribute("solidTerrain") != null && Bool(root, "solidTerrain")' not in storage:
+    raise SystemExit("Old cartography documents missing solidTerrain must keep the default false state.")
 if "document.SolidTerrain && hasCurves" not in raster or "RasterizeSolidBelowSurfaces" not in raster:
     raise SystemExit("Cartography SolidTerrain must drive the curved-surface-to-floor raster fill.")
 if "forcedSolid" not in raster or "(forcedSolid == null || !forcedSolid[i])" not in raster:
@@ -257,6 +257,8 @@ room_names = inspector.find("##AtlasRoomNames")
 solid = inspector.find("##AtlasSolidTerrain")
 if room_names < 0 or solid < 0 or solid <= room_names:
     raise SystemExit("Solid terrain toggle must remain immediately after room-name visibility controls.")
+if "presentation?.Document?.SolidTerrain ?? false" not in inspector:
+    raise SystemExit("Cartography SolidTerrain toolbar must present disabled before a document is available.")
 if "SetSolidTerrain" not in inspector:
     raise SystemExit("Cartography SolidTerrain must commit through document style state.")
 if "next.SolidTerrain = style.SolidTerrain" not in editing:
