@@ -76,7 +76,6 @@ internal static partial class TriggerEditorView
             // Trigger always enters in canvas-first mode. Browser state is observed only so Ctrl+B
             // can continue to open/close the compact Add palette; the Inspector itself stays resident.
             addPaletteOpen = false;
-            advancedInspectorOpen = false;
             return;
         }
 
