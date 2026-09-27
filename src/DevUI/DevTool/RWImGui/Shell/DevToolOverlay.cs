@@ -16,7 +16,6 @@ internal static class DevToolOverlay
 {
     private static bool lanceDebugPage;
     private static float browserInspectorSplit = 0.23f;
-    private static float browserInspectorDisplayWidth;
     private static bool browserInspectorSplitterDragging;
     private const float BrowserPaneFontScale = 1.22f;
 
@@ -27,6 +26,12 @@ internal static class DevToolOverlay
 
     internal static bool SuppressesSharedPageSurfaces => lanceDebugPage;
     internal static bool IsDebugWorkspace => lanceDebugPage;
+
+    internal static void ReloadPersistedPresentationState()
+    {
+        browserInspectorSplit =
+            DevToolUserSettingsStore.BrowserInspectorSplit;
+    }
 
     internal static void Draw(EditorPresentationSnapshot snapshot, DevToolUiFrameContext frameContext)
     {
@@ -282,14 +287,9 @@ internal static class DevToolOverlay
             return;
         }
 
-        // Apply the balanced default once per display width even when an older oversized ImGui
-        // window size was saved. Manual resizing is retained afterwards until resolution changes.
-        if (Math.Abs(browserInspectorDisplayWidth - display.X) > 0.5f)
-        {
-            ImGui.SetWindowSize(new Num.Vector2(defaultWidth, ImGui.GetWindowSize().Y));
-            ImGui.SetWindowPos(new Num.Vector2(defaultPos.X, ImGui.GetWindowPos().Y));
-            browserInspectorDisplayWidth = display.X;
-        }
+        // Persisted geometry is restored by FloatingWindowSnap after Begin. Defaults above now
+        // apply only to windows the developer has never authored; resolution changes clamp rather
+        // than resetting a saved layout.
         FloatingWindowSnap.TrackCurrentWindow("BrowserInspector");
 
         bool suppressInspector = page?.SuppressInspector(snapshot) == true;
@@ -349,6 +349,8 @@ internal static class DevToolOverlay
                 float nextLeft = leftWidth + ImGui.GetIO().MouseDelta.X;
                 nextLeft = Math.Max(minLeft, Math.Min(nextLeft, maxLeft));
                 browserInspectorSplit = nextLeft / usable;
+                DevToolUserSettingsStore.RememberBrowserInspectorSplit(
+                    browserInspectorSplit);
             }
 
             ImGui.SameLine(0f, 0f);
