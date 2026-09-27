@@ -304,8 +304,10 @@ settings_path = Path("src/DevUI/DevTool/RWImGui/Settings/DevToolUiSettings.cs")
 snap_path = Path("src/DevUI/DevTool/RWImGui/Widgets/Windows/FloatingWindowSnap.cs")
 overlay_path = Path("src/DevUI/DevTool/RWImGui/Shell/DevToolOverlay.cs")
 bridge_path = Path("src/DevUI/DevTool/RWImGui/Shell/BridgePlugin.cs")
+image_browser_path = Path("src/DevUI/DevTool/RWImGui/Pages/Map/CartographyImageBrowser.cs")
+creature_picker_path = Path("src/DevUI/DevTool/RWImGui/Pages/World/Creatures/WorldCreatureCatalogPicker.cs")
 
-for path in (store_path, settings_path, snap_path, overlay_path, bridge_path):
+for path in (store_path, settings_path, snap_path, overlay_path, bridge_path, image_browser_path, creature_picker_path):
     if not path.is_file():
         raise SystemExit(f"Persistent DevTool layout input is missing: {path}")
 
@@ -314,6 +316,8 @@ settings = settings_path.read_text(encoding="utf-8")
 snap = snap_path.read_text(encoding="utf-8")
 overlay = overlay_path.read_text(encoding="utf-8")
 bridge = bridge_path.read_text(encoding="utf-8")
+image_browser = image_browser_path.read_text(encoding="utf-8")
+creature_picker = creature_picker_path.read_text(encoding="utf-8")
 
 if 'Path.Combine(Paths.ConfigPath, FileName)' not in store or 'DryCycle.DevTool.UI.xml' not in store:
     raise SystemExit("DevTool user layout must persist under BepInEx/config.")
@@ -337,6 +341,10 @@ if 'BridgePlugin/DevToolUserSettingsStore.Load' not in bridge or 'DevToolUserSet
     raise SystemExit("DevTool user settings must load at frontend startup and flush during shutdown.")
 if 'FloatingWindowSnap.BeginContextSession' not in bridge:
     raise SystemExit("Fresh RWImGui contexts must reapply persisted window geometry.")
+if 'FloatingWindowSnap.TrackCurrentWindow(' not in image_browser or '"CartographyImageBrowser"' not in image_browser:
+    raise SystemExit("Cartography image browser must participate in persistent window geometry.")
+if 'FloatingWindowSnap.TrackCurrentWindow(' not in creature_picker or '"CreatureCatalog:" + popupId' not in creature_picker:
+    raise SystemExit("Movable creature catalog popups must participate in persistent window geometry.")
 
 print("Persistent DevTool UI layout guard passed.")
 PY
