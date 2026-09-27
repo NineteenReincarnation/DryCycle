@@ -15,7 +15,6 @@ internal enum DevToolFrontendPerformanceMetric
     FontSettings,
     Overlay,
     SceneWorkspace,
-    ScenePlacement,
     ActionToast,
     Count
 }
