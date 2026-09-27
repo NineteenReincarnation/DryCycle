@@ -78,8 +78,12 @@ internal static partial class TriggerEditorView
             workspaceShellInitialized = true;
             observedShellBrowserOpen = browserOpen;
             observedShellInspectorOpen = inspectorOpen;
-            addPaletteOpen = browserOpen;
-            advancedInspectorOpen = inspectorOpen;
+
+            // Trigger always enters in canvas-first mode. Existing Browser/Inspector state may have
+            // been left open by another page; do not let those persisted shell flags cover the room
+            // on the first Trigger frame. Subsequent Ctrl+B / Ctrl+I changes are still observed.
+            addPaletteOpen = false;
+            advancedInspectorOpen = false;
             return;
         }
 
