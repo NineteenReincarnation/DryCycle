@@ -131,12 +131,16 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
     public override string NavigationLabel => DevToolUiSettings.T("声音", "Sound");
     public override string NavigationTooltip => DevToolUiSettings.T("声音", "Sound");
     public override bool SupportsSceneSurface => true;
+    public override bool HasTopControls => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于未迁移的自定义声音页面控件。",
         "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
         NativeSpatialGizmoView.DrawSound(SoundEditorPresentationHub.Current, display);
+
+    public override void DrawTopControls(EditorPresentationSnapshot snapshot) =>
+        SoundLibraryGroupsView.DrawCreateTypeTopControls();
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawBrowser(SoundEditorPresentationHub.Current);
