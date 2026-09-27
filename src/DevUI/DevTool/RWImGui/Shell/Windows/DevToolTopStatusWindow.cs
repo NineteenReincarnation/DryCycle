@@ -27,10 +27,8 @@ internal static class DevToolTopStatusWindow
         // Do not give this auto-sized shared chrome an estimated X before Begin. Its exact window
         // width is known only after ImGui has resolved the current contents; we center that real
         // window below against the full display width.
-        ImGui.SetNextWindowBgAlpha(
-            Math.Min(
-                0.96f,
-                DevToolUiSettings.WindowAlpha + 0.08f));
+        // Match the normal editor windows instead of forcing the top status surface more opaque.
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         // Shared chrome is intentionally a little larger than normal editor panels. It needs to be
         // readable against a busy room background without turning into another large workspace.
