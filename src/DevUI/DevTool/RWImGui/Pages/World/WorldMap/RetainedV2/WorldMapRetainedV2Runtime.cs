@@ -977,6 +977,7 @@ internal static class WorldMapRetainedV2Runtime
             return;
 
         ImGui.TextUnformatted("World Map Retained V2 | hardened + cache V3");
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("总览", "OVERVIEW"));
         ImGui.TextUnformatted("rooms: " + RenderSceneState.Rooms.Count);
         ImGui.TextUnformatted("connections: " + RenderSceneState.Connections.Count);
         ImGui.TextUnformatted(
@@ -990,6 +991,8 @@ internal static class WorldMapRetainedV2Runtime
             " ms | expected " +
             readinessExpectedRooms + " rooms / " +
             readinessExpectedConnections + " routes");
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("缩略图与几何", "THUMBNAILS / GEOMETRY"));
         ImGui.TextUnformatted(
             "room resources: " + RoomResources.Count +
             " | thumbnails " + RoomResources.CommittedThumbnailCount +
@@ -1045,6 +1048,8 @@ internal static class WorldMapRetainedV2Runtime
                 ? " | visible budget 1.35 ms"
                 : " | dormant budget 2.00 ms"));
 
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("后台调度与读取", "BACKGROUND / READBACK"));
         bool backgroundIncomplete =
             !MapRoomGeometryPresentationHub.SourceRecoverySessionComplete ||
             !RoomResources.ThumbnailLoadComplete;
@@ -1099,6 +1104,8 @@ internal static class WorldMapRetainedV2Runtime
             " ms | peak " +
             MapRoomGeometryPresentationHub.CurveLoadPeakMilliseconds.ToString("F2") +
             " ms");
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("连接与寻路", "ROUTING"));
         ImGui.TextUnformatted(
             "world-space routes: " + ConnectionResources.Count +
             " | pending " + ConnectionResources.PendingCount);
@@ -1130,6 +1137,8 @@ internal static class WorldMapRetainedV2Runtime
             " ms | peak " +
             ConnectionResources.CrossingBuildPeakMilliseconds.ToString("F2") +
             " ms");
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("Retained Surface", "RETAINED SURFACE"));
         ImGui.TextUnformatted(
             "surface: " + (Surface.Ready ? "ready" : "waiting") +
             (string.IsNullOrEmpty(Surface.Error) ? string.Empty : " | " + Surface.Error));
@@ -1144,6 +1153,8 @@ internal static class WorldMapRetainedV2Runtime
             "retained connection objects: " + ConnectionRenderer.RetainedRouteCount +
             " | surface " + PresentedRouteCount +
             " | route-set complete " + RetainedConnectionsReady);
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("持久缓存", "PERSISTENT CACHE"));
         ImGui.TextUnformatted(
             "persistent cache v3: validated rooms " +
             WorldMapPersistentRetainedCache.ValidatedRoomCount +
@@ -1166,6 +1177,8 @@ internal static class WorldMapRetainedV2Runtime
             WorldMapPersistentRetainedCache.RestoredThumbnailCount +
             " | route hits " +
             WorldMapPersistentRetainedCache.RestoredRouteCount);
+        ImGui.Spacing();
+        DevToolWidgets.SectionHeader(DevToolUiSettings.T("空间索引与 Revision", "SPATIAL / REVISIONS"));
         ImGui.TextUnformatted(
             "spatial rooms: " + SpatialIndex.Count +
             " | visible " + visibleRooms.Count);
