@@ -198,7 +198,6 @@ internal static class WorldMapView
         }
 
         WorldMapPlayerLocator.DrawToolbar(snapshot);
-        WorldMapRetainedV2Runtime.DrawToolbarDiagnostics();
     }
 
     private static void DrawCompactCheckbox(string label, string id, ref bool value) =>
