@@ -946,7 +946,9 @@ internal static class DevToolFrontend
 
         EditorPresentationSnapshot snapshot = EditorPresentationHub.Current;
 
-        if (Interlocked.Exchange(ref firstRenderLogged, 1) == 0)
+        bool traceFirstRender =
+            Interlocked.Exchange(ref firstRenderLogged, 1) == 0;
+        if (traceFirstRender)
         {
             log?.LogInfo(
                 "DryCycle DevTool RWImGui context Render reached Present. visible=" +
@@ -1026,8 +1028,12 @@ internal static class DevToolFrontend
                 {
                     // The two-way mode switch is always visible while DevUI itself is alive. Vanilla
                     // presentation hides rebuilt editor panels, not the control used to return.
+                    if (traceFirstRender)
+                        log?.LogInfo("DevTool first-frame stage: before UiModeSwitch.");
                     using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.UiModeSwitch))
                         UiModeSwitch.Draw();
+                    if (traceFirstRender)
+                        log?.LogInfo("DevTool first-frame stage: after UiModeSwitch.");
 
                     // Switching from Vanilla to New UI can happen inside UiModeSwitch.Draw(). If the
                     // recreated session has not published its first snapshot yet, wait one frame rather
@@ -1037,10 +1043,19 @@ internal static class DevToolFrontend
                         // Draw the core editor chrome before secondary typography/settings windows.
                         // A Font window bug must not prevent the main Control Center/activity shell
                         // from being submitted in the same frame.
+                        if (traceFirstRender)
+                            log?.LogInfo("DevTool first-frame stage: before Overlay.");
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.Overlay))
                             DevToolOverlay.Draw(snapshot, frameContext);
+                        if (traceFirstRender)
+                            log?.LogInfo("DevTool first-frame stage: after Overlay.");
+
+                        if (traceFirstRender)
+                            log?.LogInfo("DevTool first-frame stage: before FontSettings.");
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.FontSettings))
                             FontSettingsWindow.Draw(frameContext.DisplaySize);
+                        if (traceFirstRender)
+                            log?.LogInfo("DevTool first-frame stage: after FontSettings.");
                         bool sceneSurfaceSupported =
                             !snapshot.FocusMode &&
                             !DevToolOverlay.SuppressesSharedPageSurfaces &&
