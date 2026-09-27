@@ -43,9 +43,9 @@ internal static class CartographyStorage
             Identity = identity, Region = Str(root, "region"), Title = Str(root, "title"), FontFamily = Str(root, "font"),
             Background = UInt(root, "background"), Terrain = UInt(root, "terrain"), Water = UInt(root, "water"), Connections = UInt(root, "connections"),
             ShowRoomNames = Bool(root, "roomNames"),
-            // This attribute was added after format v2 shipped. Missing means the new safer/default
-            // presentation, not false, so old projects immediately get solid curved terrain.
-            SolidTerrain = root.Attribute("solidTerrain") == null || Bool(root, "solidTerrain"),
+            // This attribute was added after format v2 shipped. Missing keeps the historical
+            // non-forced presentation, matching the current default-off behavior.
+            SolidTerrain = root.Attribute("solidTerrain") != null && Bool(root, "solidTerrain"),
             ShowConnections = Bool(root, "links"), Transparent = Bool(root, "transparent"), CropSolid = Bool(root, "cropSolid"),
             ExportScale = Float(root, "scale"), Padding = Int(root, "padding")
         };
