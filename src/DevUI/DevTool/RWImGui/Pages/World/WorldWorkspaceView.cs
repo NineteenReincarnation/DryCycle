@@ -471,7 +471,7 @@ internal static class WorldWorkspaceView
         {
             if (ImGui.BeginChild("##WorldExplorer", new Num.Vector2(left, available.Y), ImGuiChildFlags.Borders))
             {
-                DrawExplorer(snapshot);
+                DrawSharedExplorer(snapshot);
                 ScopedScrollChrome.Draw("WorldExplorer");
             }
             ImGui.EndChild();
@@ -748,7 +748,7 @@ internal static class WorldWorkspaceView
             coreThickness);
     }
 
-    private static void DrawExplorer(EditorMapPresentationSnapshot snapshot)
+    internal static void DrawSharedExplorer(EditorMapPresentationSnapshot snapshot)
     {
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("世界浏览器", "WORLD EXPLORER"));
         DrawExplorerModeButton(ExplorerMode.Subregions, DevToolUiSettings.T("子区域", "SubRegions"), "WorldExplorerModeSubregions");
