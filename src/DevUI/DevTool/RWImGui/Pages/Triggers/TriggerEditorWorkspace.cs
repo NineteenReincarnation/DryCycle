@@ -47,7 +47,7 @@ internal static partial class TriggerEditorView
 
         if (advancedInspectorOpen)
             DrawAdvancedInspector(snapshot, display);
-        else if (selected != null)
+        else if (selected != null && !scenePanelOpen)
             DrawQuickInspector(snapshot, selected, display);
     }
 
@@ -161,6 +161,8 @@ internal static partial class TriggerEditorView
                     : DevToolButtonTone.Subtle))
         {
             scenePanelOpen = !scenePanelOpen;
+            if (scenePanelOpen)
+                advancedInspectorOpen = false;
         }
 
         EditorTriggerSnapshot selected =
@@ -169,7 +171,7 @@ internal static partial class TriggerEditorView
         if (selected != null)
         {
             ImGui.SameLine();
-            ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+            ImGui.TextDisabled("|");
             ImGui.SameLine();
             ImGui.TextUnformatted(
                 selected.Type ?? string.Empty);
@@ -191,6 +193,8 @@ internal static partial class TriggerEditorView
             {
                 advancedInspectorOpen =
                     !advancedInspectorOpen;
+                if (advancedInspectorOpen)
+                    scenePanelOpen = false;
             }
 
             if (ImGui.IsItemHovered())
@@ -423,7 +427,7 @@ internal static partial class TriggerEditorView
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(x, Math.Max(84f, y)),
-            ImGuiCond.FirstUseEver);
+            ImGuiCond.Always);
         ImGui.SetNextWindowSizeConstraints(
             new Num.Vector2(240f, 0f),
             new Num.Vector2(
@@ -536,6 +540,7 @@ internal static partial class TriggerEditorView
                 true))
         {
             advancedInspectorOpen = true;
+            scenePanelOpen = false;
         }
 
         ImGui.End();
@@ -558,7 +563,7 @@ internal static partial class TriggerEditorView
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(x, 86f),
-            ImGuiCond.FirstUseEver);
+            ImGuiCond.Always);
         ImGui.SetNextWindowSize(
             new Num.Vector2(width, height),
             ImGuiCond.FirstUseEver);
