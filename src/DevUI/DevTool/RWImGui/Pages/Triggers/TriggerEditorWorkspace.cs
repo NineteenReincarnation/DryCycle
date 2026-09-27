@@ -17,6 +17,7 @@ internal static partial class TriggerEditorView
 {
     private static bool workspaceShellInitialized;
     private static bool observedShellBrowserOpen;
+    private static bool addPopupRequested;
     private static bool scenePanelOpen = true;
     private static string workspaceSceneSearch = string.Empty;
 
@@ -42,6 +43,7 @@ internal static partial class TriggerEditorView
     internal static void EnterCanvasFirst()
     {
         workspaceShellInitialized = false;
+        addPopupRequested = false;
     }
 
     private static void ResetWorkspaceRetainedState()
@@ -71,7 +73,7 @@ internal static partial class TriggerEditorView
         if (browserOpen != observedShellBrowserOpen)
         {
             observedShellBrowserOpen = browserOpen;
-            ImGui.OpenPopup("##TriggerAddPopup");
+            addPopupRequested = true;
         }
 
     }
@@ -95,7 +97,13 @@ internal static partial class TriggerEditorView
                 "TriggerWorkspaceAdd",
                 DevToolButtonTone.Subtle))
         {
+            addPopupRequested = true;
+        }
+
+        if (addPopupRequested)
+        {
             ImGui.OpenPopup("##TriggerAddPopup");
+            addPopupRequested = false;
         }
 
         Num.Vector2 addPopupPosition =
