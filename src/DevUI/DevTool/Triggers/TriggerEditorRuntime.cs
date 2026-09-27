@@ -530,7 +530,8 @@ public readonly struct TriggerEditorCommand
         string key = null,
         string text = null,
         EditorPropertyValue value = default,
-        string[] texts = null)
+        string[] texts = null,
+        string name = null)
     {
         Kind = kind;
         Index = index;
@@ -538,6 +539,7 @@ public readonly struct TriggerEditorCommand
         Text = text;
         Value = value;
         Texts = texts ?? Array.Empty<string>();
+        Name = name ?? string.Empty;
     }
 
     public TriggerEditorCommandKind Kind { get; }
@@ -546,6 +548,7 @@ public readonly struct TriggerEditorCommand
     public string Text { get; }
     public EditorPropertyValue Value { get; }
     public string[] Texts { get; }
+    public string Name { get; }
 }
 
 public static class TriggerEditorCommandQueue
@@ -573,7 +576,10 @@ public static class TriggerEditorCommandQueue
                         TriggerEditorActions.Select(session, command.Index);
                         break;
                     case TriggerEditorCommandKind.Create:
-                        changed = TriggerEditorActions.Create(session, command.Text);
+                        changed = TriggerEditorActions.Create(
+                            session,
+                            command.Text,
+                            command.Name);
                         break;
                     case TriggerEditorCommandKind.Delete:
                         changed = TriggerEditorActions.Delete(session, command.Index);
