@@ -196,11 +196,7 @@ internal static class SoundEditorView
 
         EditorSoundSnapshot selected = FindSelected(snapshot);
         if (selected == null)
-        {
-            ImGui.Separator();
-            ImGui.TextWrapped(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个声音进行编辑。", "Select a sound from Scene or its world gizmo to edit it."));
             return;
-        }
 
         ImGui.Separator();
         ImGui.TextWrapped(selected.Sample);
