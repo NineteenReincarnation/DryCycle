@@ -39,6 +39,8 @@ public sealed class EditorTriggerSnapshot
     public float X { get; init; }
     public float Y { get; init; }
     public float Radius { get; init; }
+    public float RadiusHandleX { get; init; }
+    public float RadiusHandleY { get; init; }
     public int ActiveFromCycle { get; init; }
     public int ActiveToCycle { get; init; }
     public float DelaySeconds { get; init; }
@@ -291,6 +293,8 @@ public static class TriggerEditorPresentationHub
             X = spot?.pos.x ?? 0f,
             Y = spot?.pos.y ?? 0f,
             Radius = spot?.rad ?? 0f,
+            RadiusHandleX = spot?.radHandlePosition.x ?? 0f,
+            RadiusHandleY = spot?.radHandlePosition.y ?? 0f,
             ActiveFromCycle = trigger?.activeFromCycle ?? 0,
             ActiveToCycle = trigger?.activeToCycle ?? -1,
             DelaySeconds = (trigger?.delay ?? 0) / 40f,
@@ -352,6 +356,8 @@ public static class TriggerEditorPresentationHub
         X = trigger.X,
         Y = trigger.Y,
         Radius = trigger.Radius,
+        RadiusHandleX = trigger.RadiusHandleX,
+        RadiusHandleY = trigger.RadiusHandleY,
         ActiveFromCycle = trigger.ActiveFromCycle,
         ActiveToCycle = trigger.ActiveToCycle,
         DelaySeconds = trigger.DelaySeconds,
