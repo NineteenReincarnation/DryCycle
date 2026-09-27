@@ -138,7 +138,7 @@ internal static class CartographyEditing
                 CartographyDocument style = command.Style ?? throw new InvalidOperationException("Missing map style.");
                 next.Title = style.Title; next.FontFamily = style.FontFamily;
                 next.Background = style.Background; next.Terrain = style.Terrain; next.Water = style.Water; next.Connections = style.Connections;
-                next.ShowRoomNames = style.ShowRoomNames; next.ShowConnections = style.ShowConnections;
+                next.ShowRoomNames = style.ShowRoomNames; next.SolidTerrain = style.SolidTerrain; next.ShowConnections = style.ShowConnections;
                 next.Transparent = style.Transparent; next.CropSolid = style.CropSolid; next.ExportScale = style.ExportScale; next.Padding = style.Padding;
                 next.Options = style.Options.Clone(); next.Palettes.Clear(); next.Palettes.AddRange(style.Palettes.Select(p => p.Clone()));
                 break;
