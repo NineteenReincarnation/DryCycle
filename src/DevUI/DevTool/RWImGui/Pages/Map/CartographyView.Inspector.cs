@@ -93,6 +93,32 @@ internal static partial class CartographyView
                 presentation,
                 !roomNamesVisible);
 
+        bool solidTerrain =
+            presentation?.Document?.SolidTerrain ?? true;
+        string solidTerrainLabel =
+            T("实心地形", "Solid terrain");
+        DevToolWidgets.SameLineIfFits(
+            DevToolWidgets.ButtonWidth(solidTerrainLabel));
+        if (solidTerrain)
+            ImGui.PushStyleColor(
+                ImGuiCol.Button,
+                new Num.Vector4(.20f, .43f, .69f, 1f));
+        bool toggleSolidTerrain =
+            ImGui.Button(
+                solidTerrainLabel +
+                "##AtlasSolidTerrain");
+        if (solidTerrain)
+            ImGui.PopStyleColor();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(
+                T(
+                    "开启后，曲面地形从可见曲线一直实心填充到房间底部；画布与导出保持一致",
+                    "When on, curved ground is filled solid from its visible surface to the room floor on both canvas and exports."));
+        if (toggleSolidTerrain)
+            SetSolidTerrain(
+                presentation,
+                !solidTerrain);
+
         if (state.Loading)
             ImGui.TextDisabled(T("正在后台准备地图，可继续选择区域...", "Preparing map in background; you can select another region..."));
         if (state.Failed)
@@ -173,6 +199,49 @@ internal static partial class CartographyView
             presentation.Document.Clone();
         style.ShowRoomNames =
             visible;
+
+        string key =
+            presentation.Identity +
+            "/style";
+        CartographyRuntime.StageDraft(
+            key,
+            new CartographyCommand
+            {
+                DocumentId =
+                    presentation.Identity,
+                Revision =
+                    presentation.Revision,
+                Kind =
+                    CartographyCommandKind.Style,
+                Style =
+                    style
+            });
+        CartographyRuntime.CommitDraft(
+            key);
+
+        styleDraft =
+            style;
+        styleDirty =
+            false;
+    }
+
+    private static void SetSolidTerrain(
+        CartographyPresentation presentation,
+        bool enabled)
+    {
+        if (presentation?.Document == null ||
+            string.IsNullOrEmpty(presentation.Identity) ||
+            presentation.Document.SolidTerrain == enabled)
+            return;
+
+        // This is Cartography author state, just like room-name visibility. The scene is shared by
+        // the editor canvas and every exporter, so one committed value controls both surfaces.
+        LeaveDrafts();
+
+        CartographyDocument style =
+            presentation.Document.Clone();
+        style.SolidTerrain =
+            enabled;
 
         string key =
             presentation.Identity +
