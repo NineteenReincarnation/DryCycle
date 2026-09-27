@@ -14,7 +14,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// </summary>
 internal static class DevToolOverlay
 {
-    private static bool lanceDebugPage;
+    private static bool debugWorkspacePage;
     private static float browserInspectorSplit = 0.23f;
     private static bool browserInspectorSplitterDragging;
     private const float BrowserPaneFontScale = 1.22f;
@@ -24,8 +24,8 @@ internal static class DevToolOverlay
     private static string placementLabelText = string.Empty;
     private static bool pageBackgroundFaulted;
 
-    internal static bool SuppressesSharedPageSurfaces => lanceDebugPage;
-    internal static bool IsDebugWorkspace => lanceDebugPage;
+    internal static bool SuppressesSharedPageSurfaces => debugWorkspacePage;
+    internal static bool IsDebugWorkspace => debugWorkspacePage;
 
     internal static void ReloadPersistedPresentationState()
     {
@@ -37,9 +37,9 @@ internal static class DevToolOverlay
     {
         ImGuiIOPtr io = frameContext.Io;
         Num.Vector2 display = frameContext.DisplaySize;
-        IDevToolPageView page = lanceDebugPage ? null : DevToolPageViewRegistry.Get(snapshot.ToolMode);
+        IDevToolPageView page = debugWorkspacePage ? null : DevToolPageViewRegistry.Get(snapshot.ToolMode);
 
-        if (!lanceDebugPage && !pageBackgroundFaulted && page != null)
+        if (!debugWorkspacePage && !pageBackgroundFaulted && page != null)
         {
             try
             {
@@ -65,7 +65,7 @@ internal static class DevToolOverlay
         if (!snapshot.FocusMode)
             DrawActivityBar(snapshot, display);
 
-        if (lanceDebugPage)
+        if (debugWorkspacePage)
         {
             if (snapshot.PlacementActive)
                 Send(EditorUiCommandKind.CancelPlacement);
@@ -91,7 +91,7 @@ internal static class DevToolOverlay
         placementLabelType = string.Empty;
         placementLabelChinese = false;
         placementLabelText = string.Empty;
-        lanceDebugPage = false;
+        debugWorkspacePage = false;
         pageBackgroundFaulted = false;
         ShortcutWindow.ResetRetainedState();
         DevToolDebugWorkspaceView.ResetRetainedState();
@@ -132,9 +132,9 @@ internal static class DevToolOverlay
         for (int i = 0; i < pages.Count; i++)
             DrawModeButton(pages[i], snapshot.ToolMode);
 
-        if (DevToolWidgets.NavItem(debugLabel, "DevToolLanceScavengerDebug", lanceDebugPage))
+        if (DevToolWidgets.NavItem(debugLabel, "DevToolDebugWorkspace", debugWorkspacePage))
         {
-            lanceDebugPage = true;
+            debugWorkspacePage = true;
             DevToolPageViewRegistry.DeactivateActive();
             if (snapshot.PlacementActive)
                 Send(EditorUiCommandKind.CancelPlacement);
@@ -148,7 +148,7 @@ internal static class DevToolOverlay
 
         // Trigger owns its compact Add/Scene/Advanced controls inside the canvas-first workspace.
         // Do not duplicate large Browser/Inspector toggles in the global activity window.
-        if (!lanceDebugPage && snapshot.ToolMode == EditorToolMode.Triggers)
+        if (!debugWorkspacePage && snapshot.ToolMode == EditorToolMode.Triggers)
         {
             FitActivityBarHeight(display);
             ImGui.End();
@@ -159,7 +159,7 @@ internal static class DevToolOverlay
         ImGui.Separator();
         ImGui.Spacing();
 
-        if (lanceDebugPage)
+        if (debugWorkspacePage)
         {
             DevToolWidgets.MutedText(DevToolUiSettings.T(
                 "调试信息统一收纳在独立工作区；选择上方任一常规工具即可返回。",
@@ -224,9 +224,9 @@ internal static class DevToolOverlay
     private static void DrawModeButton(IDevToolFrontendPage page, EditorToolMode current)
     {
         string id = "DevToolMode:" + page.Id;
-        if (DevToolWidgets.NavItem(page.NavigationLabel, id, !lanceDebugPage && current == page.Mode))
+        if (DevToolWidgets.NavItem(page.NavigationLabel, id, !debugWorkspacePage && current == page.Mode))
         {
-            lanceDebugPage = false;
+            debugWorkspacePage = false;
             DevToolDebugWorkspaceView.Deactivate();
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: page.Mode));
         }
