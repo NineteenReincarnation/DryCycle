@@ -316,31 +316,154 @@ internal static partial class TriggerEditorView
 
         EditorTriggerSnapshot[] triggers =
             snapshot.Triggers ?? Array.Empty<EditorTriggerSnapshot>();
-        EnsureSceneLabels(triggers);
+        string[] categories =
+            snapshot.TriggerTypes ?? Array.Empty<string>();
 
         string query =
             workspaceSceneSearch?.Trim() ?? string.Empty;
+
+        bool anyVisible =
+            false;
+
+        // Use the registry/catalog order so Scene remains predictable as more Trigger types are
+        // added. Each type is a real category; its instances live underneath and no longer repeat
+        // "[Type]" on every row.
+        for (int categoryIndex = 0;
+             categoryIndex < categories.Length;
+             categoryIndex++)
+        {
+            string type =
+                categories[categoryIndex];
+            if (string.IsNullOrEmpty(type))
+                continue;
+
+            anyVisible |=
+                DrawSceneCategory(
+                    type,
+                    categoryIndex,
+                    triggers,
+                    query);
+        }
+
+        // Third-party Trigger types can exist before the catalog learns about them. Keep those
+        // visible by emitting one fallback category per unknown type.
+        for (int i = 0; i < triggers.Length; i++)
+        {
+            EditorTriggerSnapshot trigger =
+                triggers[i];
+            if (trigger == null ||
+                string.IsNullOrEmpty(trigger.Type) ||
+                ContainsTriggerType(
+                    categories,
+                    trigger.Type) ||
+                HasEarlierUnknownType(
+                    triggers,
+                    i,
+                    categories,
+                    trigger.Type))
+                continue;
+
+            anyVisible |=
+                DrawSceneCategory(
+                    trigger.Type,
+                    categories.Length + i,
+                    triggers,
+                    query);
+        }
+
+        if (!anyVisible)
+        {
+            DevToolWidgets.MutedText(
+                DevToolUiSettings.T(
+                    "没有匹配的触发器。",
+                    "No matching triggers."),
+                true);
+        }
+
+        ImGui.End();
+    }
+
+    private static bool DrawSceneCategory(
+        string type,
+        int categoryIndex,
+        EditorTriggerSnapshot[] triggers,
+        string query)
+    {
+        int matchingCount =
+            0;
 
         for (int i = 0; i < triggers.Length; i++)
         {
             EditorTriggerSnapshot trigger =
                 triggers[i];
-            if (trigger == null)
-                continue;
-
-            if (!Matches(
-                    trigger.Name,
-                    query) &&
-                !Matches(
-                    trigger.Type,
-                    query) &&
-                !Matches(
-                    trigger.Event?.Type,
+            if (!IsSceneTriggerMatch(
+                    trigger,
+                    type,
                     query))
                 continue;
 
+            matchingCount++;
+        }
+
+        if (matchingCount == 0)
+            return false;
+
+        string header =
+            type +
+            "  " +
+            matchingCount +
+            "##TriggerSceneCategory" +
+            categoryIndex;
+
+        if (!ImGui.CollapsingHeader(
+                header,
+                ImGuiTreeNodeFlags.DefaultOpen))
+            return true;
+
+        int ordinal =
+            0;
+
+        for (int i = 0; i < triggers.Length; i++)
+        {
+            EditorTriggerSnapshot trigger =
+                triggers[i];
+            if (trigger == null ||
+                !string.Equals(
+                    trigger.Type,
+                    type,
+                    StringComparison.Ordinal))
+                continue;
+
+            ordinal++;
+
+            if (!IsSceneTriggerMatch(
+                    trigger,
+                    type,
+                    query))
+                continue;
+
+            string visibleLabel =
+                string.IsNullOrWhiteSpace(trigger.Name)
+                    ? type + " #" + ordinal
+                    : trigger.Name;
+
+            if (trigger.Event?.HasEvent == true &&
+                !string.IsNullOrWhiteSpace(
+                    trigger.Event.Type))
+            {
+                visibleLabel +=
+                    "  ->  " +
+                    trigger.Event.Type;
+            }
+
+            string itemLabel =
+                "  " +
+                visibleLabel +
+                "##TriggerSceneItem" +
+                trigger.Index;
+
             if (ImGui.Selectable(
-                    projectedSceneLabels[i],
+                    itemLabel,
                     trigger.Selected))
             {
                 TriggerEditorCommandQueue.Enqueue(
@@ -350,7 +473,75 @@ internal static partial class TriggerEditorView
             }
         }
 
-        ImGui.End();
+        return true;
+    }
+
+    private static bool IsSceneTriggerMatch(
+        EditorTriggerSnapshot trigger,
+        string type,
+        string query)
+    {
+        if (trigger == null ||
+            !string.Equals(
+                trigger.Type,
+                type,
+                StringComparison.Ordinal))
+            return false;
+
+        return Matches(
+                   trigger.Name,
+                   query) ||
+               Matches(
+                   trigger.Type,
+                   query) ||
+               Matches(
+                   trigger.Event?.Type,
+                   query);
+    }
+
+    private static bool ContainsTriggerType(
+        string[] categories,
+        string type)
+    {
+        if (categories == null)
+            return false;
+
+        for (int i = 0; i < categories.Length; i++)
+        {
+            if (string.Equals(
+                    categories[i],
+                    type,
+                    StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasEarlierUnknownType(
+        EditorTriggerSnapshot[] triggers,
+        int beforeIndex,
+        string[] categories,
+        string type)
+    {
+        for (int i = 0; i < beforeIndex; i++)
+        {
+            EditorTriggerSnapshot earlier =
+                triggers[i];
+            if (earlier == null ||
+                ContainsTriggerType(
+                    categories,
+                    earlier.Type))
+                continue;
+
+            if (string.Equals(
+                    earlier.Type,
+                    type,
+                    StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private static void DrawResidentInspector(
