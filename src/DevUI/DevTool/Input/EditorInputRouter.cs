@@ -2,6 +2,7 @@ using System;
 using DryCycle.DevUI.Controls;
 using DryCycle.DevUI.DevTool.Commands;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Triggers;
 using DryCycle.Misc;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
@@ -249,6 +250,37 @@ public static class EditorInputRouter
                 succeeded ? "已删除所选物件" : "没有可删除的物件",
                 succeeded ? "Selection deleted" : "Nothing to delete",
                 "Delete",
+                succeeded,
+                succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+        }
+        else if (!ctrl &&
+                 session.ToolMode == EditorToolMode.Triggers &&
+                 (global::UnityEngine.Input.GetKeyDown(KeyCode.X) ||
+                  global::UnityEngine.Input.GetKeyDown(KeyCode.Delete)))
+        {
+            TriggerEditorState triggerState = TriggerEditorStateHub.Get(session);
+            int selectedIndex = triggerState?.SelectedIndex ?? -1;
+            bool succeeded =
+                session.RoomSettings?.triggers != null &&
+                selectedIndex >= 0 &&
+                selectedIndex < session.RoomSettings.triggers.Count;
+
+            if (succeeded)
+            {
+                TriggerEditorCommandQueue.Enqueue(
+                    new TriggerEditorCommand(
+                        TriggerEditorCommandKind.Delete,
+                        selectedIndex));
+            }
+
+            string keys =
+                global::UnityEngine.Input.GetKeyDown(KeyCode.X)
+                    ? "X"
+                    : "Delete";
+            EditorShortcutFeedback.PublishCustom(
+                succeeded ? "已删除触发器" : "没有可删除的触发器",
+                succeeded ? "Trigger deleted" : "No trigger selected",
+                keys,
                 succeeded,
                 succeeded ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
         }
