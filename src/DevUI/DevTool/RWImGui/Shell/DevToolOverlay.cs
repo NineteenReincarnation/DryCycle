@@ -10,7 +10,7 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 ///
 /// Page-specific browser, inspector, workspace, scene and placement capabilities belong to registered
 /// page objects. This class owns only the common activity bar, Browser/Inspector shell, generic
-/// placement input chrome and the standalone Lance Scavenger debug surface.
+/// placement input chrome and the unified diagnostics workspace.
 /// </summary>
 internal static class DevToolOverlay
 {
@@ -69,11 +69,11 @@ internal static class DevToolOverlay
         {
             if (snapshot.PlacementActive)
                 Send(EditorUiCommandKind.CancelPlacement);
-            LanceScavengerDebugView.Draw(snapshot, display);
+            DevToolDebugWorkspaceView.Draw(snapshot, display);
             return;
         }
 
-        LanceScavengerDebugView.StopCapture();
+        DevToolDebugWorkspaceView.Deactivate();
         if (!snapshot.FocusMode)
         {
             if (page?.UsesDedicatedWorkspace == true)
@@ -94,7 +94,7 @@ internal static class DevToolOverlay
         lanceDebugPage = false;
         pageBackgroundFaulted = false;
         ShortcutWindow.ResetRetainedState();
-        LanceScavengerDebugView.StopCapture();
+        DevToolDebugWorkspaceView.ResetRetainedState();
     }
 
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
@@ -142,8 +142,8 @@ internal static class DevToolOverlay
         if (ImGui.IsItemHovered())
         {
             DevToolTooltip.Show(DevToolUiSettings.T(
-                "长枪拾荒者：实时状态、瞄准质量、38帧架枪历史、路径阻断与反扫诊断",
-                "Lance Scavenger: live state, aim quality, 38-frame brace history, path blocks and counter-sweep diagnostics"));
+                "统一调试中心：性能、世界地图 Retained/缓存、兼容迁移、前端字体与生物专项诊断",
+                "Unified diagnostics: performance, World Map retained/cache, compatibility, frontend/font and creature diagnostics"));
         }
 
         // Trigger owns its compact Add/Scene/Advanced controls inside the canvas-first workspace.
@@ -162,8 +162,8 @@ internal static class DevToolOverlay
         if (lanceDebugPage)
         {
             DevToolWidgets.MutedText(DevToolUiSettings.T(
-                "调试页使用独立工作区。选择上方任一常规工具即可返回。",
-                "Debug uses its own workspace. Select any normal tool above to return."));
+                "调试信息统一收纳在独立工作区；选择上方任一常规工具即可返回。",
+                "Diagnostics are collected in one dedicated workspace. Select any normal tool above to return."));
             FitActivityBarHeight(display);
             ImGui.End();
             return;
@@ -227,7 +227,7 @@ internal static class DevToolOverlay
         if (DevToolWidgets.NavItem(page.NavigationLabel, id, !lanceDebugPage && current == page.Mode))
         {
             lanceDebugPage = false;
-            LanceScavengerDebugView.StopCapture();
+            DevToolDebugWorkspaceView.Deactivate();
             EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.SetToolMode, mode: page.Mode));
         }
 
