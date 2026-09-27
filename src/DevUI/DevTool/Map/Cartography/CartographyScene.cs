@@ -55,7 +55,7 @@ internal sealed class CartographySceneCache
         internal CartographyItem Item;
         internal CartographyLayer Layer;
         internal CartographyRoomSource Room;
-        internal bool Names, Crop;
+        internal bool Names, Crop, SolidTerrain;
         internal uint Terrain, Water;
         internal CartographySceneNode Node;
         internal string Error;
@@ -68,13 +68,30 @@ internal sealed class CartographySceneCache
         node = null; error = null;
         if (!entries.TryGetValue(item.Id, out Entry entry) || !CartographyEditing.SameItem(entry.Item, item) ||
             !CartographyEditing.SameLayer(entry.Layer, layer) || !ReferenceEquals(entry.Room, room) || entry.Style != StyleKey(document) ||
-            (item.Kind == CartographyItemKind.Room && (entry.Names != document.ShowRoomNames || entry.Crop != document.CropSolid || entry.Terrain != document.Terrain || entry.Water != document.Water))) return false;
+            (item.Kind == CartographyItemKind.Room &&
+             (entry.Names != document.ShowRoomNames ||
+              entry.Crop != document.CropSolid ||
+              entry.SolidTerrain != document.SolidTerrain ||
+              entry.Terrain != document.Terrain ||
+              entry.Water != document.Water))) return false;
         node = entry.Node; error = entry.Error; return true;
     }
 
     internal void Store(CartographyDocument document, CartographyItem item, CartographyLayer layer, CartographyRoomSource room, CartographySceneNode node, string error) =>
-        entries[item.Id] = new Entry { Item = item.Clone(), Layer = layer.Clone(), Room = room, Names = document.ShowRoomNames, Crop = document.CropSolid,
-            Terrain = document.Terrain, Water = document.Water, Node = node, Error = error, Style = StyleKey(document) };
+        entries[item.Id] = new Entry
+        {
+            Item = item.Clone(),
+            Layer = layer.Clone(),
+            Room = room,
+            Names = document.ShowRoomNames,
+            Crop = document.CropSolid,
+            SolidTerrain = document.SolidTerrain,
+            Terrain = document.Terrain,
+            Water = document.Water,
+            Node = node,
+            Error = error,
+            Style = StyleKey(document)
+        };
 
     private static string StyleKey(CartographyDocument d) => d.FontFamily + CartographyRecord.Key(d.Options) + string.Join(";", d.Palettes.Select(CartographyRecord.Key));
 
