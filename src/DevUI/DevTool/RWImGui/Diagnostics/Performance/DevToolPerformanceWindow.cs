@@ -73,7 +73,6 @@ internal static class DevToolPerformanceWindow
         DevToolFrontendPerformanceMetric.FontSettings,
         DevToolFrontendPerformanceMetric.Overlay,
         DevToolFrontendPerformanceMetric.SceneWorkspace,
-        DevToolFrontendPerformanceMetric.ScenePlacement,
         DevToolFrontendPerformanceMetric.ActionToast
     };
 
