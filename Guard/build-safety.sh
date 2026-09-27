@@ -261,6 +261,10 @@ if 'DevToolTopStatusWindow.Draw' not in overlay:
     raise SystemExit("Every rebuilt page must pass through the shared top-status window.")
 if 'snapshot.RoomName' not in top or '" : NewDevtool Active"' not in top:
     raise SystemExit("Shared top status must display the current room and NewDevtool Active.")
+if '(display.X - windowSize.X) * 0.5f' not in top or '6f));' not in top:
+    raise SystemExit("Shared top status must remain locked to the physical screen top-center.")
+if 'DevToolWidgets.CenteredPrimaryTitle' not in top or '1.68f' not in top:
+    raise SystemExit("Shared top status must retain the enlarged primary gold title treatment.")
 if 'page?.HasTopControls == true' not in top or 'page.DrawTopControls(snapshot)' not in top:
     raise SystemExit("Shared top status must host the active page's optional special controls.")
 if 'devToolsLabel.isVisible' not in label or 'newUiOwnsStatus' not in label:
