@@ -67,9 +67,21 @@ internal static partial class Program
     private static void Persistence()
     {
         CartographyDocument document = Annotated();
+        Check(document.SolidTerrain, "New cartography documents default to solid curved terrain.");
+
+        document.SolidTerrain = false;
         string xml = CartographyStorage.Serialize(document);
         CartographyDocument loaded = CartographyStorage.Deserialize(xml, document.Identity);
+        Check(!loaded.SolidTerrain, "Solid-terrain author state round trips through project persistence.");
         Check(CartographyStorage.Serialize(loaded) == xml, "All editable properties and CJK text round trip.");
+
+        XElement legacyRoot = XElement.Parse(xml);
+        legacyRoot.Attribute("solidTerrain")?.Remove();
+        CartographyDocument legacySolid =
+            CartographyStorage.Deserialize(
+                legacyRoot.ToString(SaveOptions.DisableFormatting),
+                document.Identity);
+        Check(legacySolid.SolidTerrain, "Older cartography files without solidTerrain migrate to the default enabled state.");
         Check(!xml.Contains("<Runs") && !xml.Contains("terrain is not ready"), "Derived source/cache data must stay out of the author file.");
         Throws(() => CartographyStorage.Deserialize(xml, "other-source|Survivor"), "Wrong-source import must be rejected.");
         Throws(() => CartographyStorage.Deserialize(xml.Replace("version=\"" + CartographyDocument.FormatVersion + "\"", "version=\"999\""), document.Identity), "Future documents cannot be silently downgraded.");
