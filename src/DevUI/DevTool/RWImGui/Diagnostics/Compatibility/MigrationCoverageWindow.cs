@@ -1,5 +1,6 @@
 using System;
 using DryCycle.DevUI.DevTool.Compatibility;
+using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
 using Num = System.Numerics;
 
