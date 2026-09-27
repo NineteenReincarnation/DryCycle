@@ -151,14 +151,11 @@ internal static partial class TriggerEditorView
         if (!ImGui.BeginPopup("##TriggerAddPopup"))
             return;
 
-        ImGui.SetNextItemWidth(
-            Math.Max(
-                170f,
-                ImGui.GetContentRegionAvail().X));
-        ImGui.InputText(
+        DevToolWidgets.FullWidthInputText(
             DevToolUiSettings.T(
-                "名称##TriggerCreateName",
-                "Name##TriggerCreateName"),
+                "名称",
+                "Name"),
+            "TriggerCreateName",
             ref addTriggerName,
             128);
 
