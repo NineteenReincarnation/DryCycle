@@ -560,11 +560,38 @@ internal static partial class CartographyView
             }
             dragging = marquee = false; delta = default;
         }
-        // Save and Undo remain owned by EditorInputRouter; these local keys only affect this canvas.
+        // X is the DevTool-wide delete command and does not depend on canvas hover. Text entry,
+        // active widgets and pointer gestures still own their input until the interaction finishes.
+        bool globalDelete =
+            !io.WantTextInput &&
+            !ImGui.IsAnyItemActive() &&
+            !dragging &&
+            !marquee &&
+            !io.KeyCtrl &&
+            !io.KeyShift &&
+            !io.KeyAlt &&
+            !io.KeySuper &&
+            ImGui.IsKeyPressed(ImGuiKey.X);
+
+        if (globalDelete)
+        {
+            bool available = Selection.Count > 0;
+            if (available)
+                Send(CartographyCommandKind.Delete, command => command.Ids = Selection.ToArray());
+            EditorShortcutFeedback.PublishCustom(
+                available ? "已删除制图元素" : "没有可删除的制图元素",
+                available ? "Cartography items deleted" : "Nothing to delete",
+                "X",
+                available,
+                available ? EditorShortcutFeedbackVisual.Delete : EditorShortcutFeedbackVisual.Warning);
+        }
+
+        // Save and Undo remain owned by EditorInputRouter; the remaining configurable keys are
+        // canvas-local and therefore keep their hover requirement.
         if (!hovered || io.WantTextInput || ImGui.IsAnyItemActive() || dragging || marquee) return;
         ClipboardKeys(snapshot, mouse, io);
 
-        if (KeyChord(snapshot.Document.Options.DeleteKey, false))
+        if (!globalDelete && KeyChord(snapshot.Document.Options.DeleteKey, false))
         {
             bool available = Selection.Count > 0;
             if (available)
