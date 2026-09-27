@@ -120,11 +120,19 @@ internal static class DevToolTopStatusWindow
                 ? snapshot.RoomName
                 : "-";
 
-        string title =
-            room +
-            (EditorUiModeState.UseVanilla
-                ? " : Vanilla DevUI Active"
-                : " : NewDevtool Active");
+        string title;
+        if (EditorUiModeState.UseVanilla)
+        {
+            title = room + " : Vanilla DevUI Active";
+        }
+        else if (snapshot?.Available != true)
+        {
+            title = DevToolUiSettings.T("DevTool 正在启动...", "DevTool starting...");
+        }
+        else
+        {
+            title = room + " : NewDevtool Active";
+        }
 
         // Draw the title first across the complete row. We then return the cursor to the same row
         // for the left/right segmented controls, so the title stays centered against the window
@@ -229,7 +237,10 @@ internal static class DevToolTopStatusWindow
                 fixedWidth: LanguageButtonWidth);
 
         if (pushedChineseLabelFont)
+        {
+            ImGui.SetWindowFontScale(1f);
             ImGui.PopFont();
+        }
 
         if (chooseChinese)
             DevToolUiSettings.SetLanguage(DevToolUiLanguage.Chinese);
@@ -277,6 +288,9 @@ internal static class DevToolTopStatusWindow
             return false;
         }
 
+        ImGui.SetWindowFontScale(
+            currentFont.FontSize /
+            chineseFont.FontSize);
         return true;
     }
 }
