@@ -432,7 +432,12 @@ internal static class WorldWorkspaceView
 
         Num.Vector2 available = ImGui.GetContentRegionAvail();
         bool showExplorer = editor.BrowserOpen;
-        bool showInspector = editor.InspectorOpen;
+        // The region summary now lives under the explorer search field. Reserve the right inspector
+        // only for an actual room, connection or subregion selection so the default map gets the
+        // full center width instead of carrying an empty statistics column.
+        bool showInspector =
+            editor.InspectorOpen &&
+            HasDetailInspector(snapshot);
         float splitter = GetSplitterInteractionWidth();
         float reserved = (showExplorer ? splitter : 0f) + (showInspector ? splitter : 0f);
         float minCenter = 400f;
@@ -762,6 +767,7 @@ internal static class WorldWorkspaceView
                 "WorldExplorerSearch",
                 minimumControlWidth: 180f);
         ImGui.InputText(explorerSearchLabel, ref search, 192);
+        DrawCompactRegionSummary(snapshot, issueCount);
         ImGui.Separator();
 
         switch (explorerMode)
@@ -773,6 +779,38 @@ internal static class WorldWorkspaceView
                 DrawIssueExplorer(snapshot);
                 break;
         }
+    }
+
+    private static void DrawCompactRegionSummary(
+        EditorMapPresentationSnapshot snapshot,
+        int issueCount)
+    {
+        int rooms = snapshot.Rooms?.Length ?? 0;
+        int links = snapshot.Connections?.Length ?? 0;
+        int subregions = GetSubregions(snapshot).Count;
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted(snapshot.RegionName ?? string.Empty);
+        ImGui.SameLine();
+        ImGui.TextDisabled(
+            DevToolUiSettings.T("房间 ", "Rooms ") + rooms +
+            "  " +
+            DevToolUiSettings.T("连接 ", "Links ") + links);
+
+        string secondary =
+            DevToolUiSettings.T("子区域 ", "Subregions ") + subregions +
+            "  " +
+            DevToolUiSettings.T("问题 ", "Issues ") + issueCount;
+
+        bool dirty =
+            WorldTextRegistry.Dirty ||
+            WorldTopologyRegistry.Dirty ||
+            WorldWorkspaceDataView.HasDirtyData ||
+            WorldRoomAttractionRegistry.Dirty;
+        if (dirty)
+            secondary += DevToolUiSettings.T("  · 未保存", "  · Unsaved");
+
+        ImGui.TextDisabled(secondary);
     }
 
     private static void DrawExplorerModeButton(ExplorerMode mode, string label, string id)
@@ -1261,6 +1299,20 @@ internal static class WorldWorkspaceView
         }
     }
 
+    private static bool HasDetailInspector(EditorMapPresentationSnapshot snapshot)
+    {
+        if (selectionKind == SelectionKind.Connection &&
+            !string.IsNullOrEmpty(selectedConnectionId) &&
+            FindConnection(snapshot, selectedConnectionId) != null)
+            return true;
+
+        if (selectionKind == SelectionKind.Subregion)
+            return true;
+
+        return selectionKind == SelectionKind.Room &&
+               FindRoom(snapshot, snapshot.SelectedRoomIndex) != null;
+    }
+
     private static void DrawInspector(EditorMapPresentationSnapshot snapshot)
     {
         using (WorldInspectorReadability.Enter())
@@ -1291,20 +1343,8 @@ internal static class WorldWorkspaceView
         else
         {
             selectionKind = SelectionKind.Region;
-            DrawRegionInspector(snapshot);
         }
         }
-    }
-
-    private static void DrawRegionInspector(EditorMapPresentationSnapshot snapshot)
-    {
-        ImGui.TextUnformatted(snapshot.RegionName);
-        ImGui.Separator();
-        DrawMetric(DevToolUiSettings.T("房间", "Rooms"), (snapshot.Rooms?.Length ?? 0).ToString());
-        DrawMetric(DevToolUiSettings.T("连接", "Links"), (snapshot.Connections?.Length ?? 0).ToString());
-        DrawMetric(DevToolUiSettings.T("子区域", "Subregions"), GetSubregions(snapshot).Count.ToString());
-        DrawMetric(DevToolUiSettings.T("问题", "Issues"), GetIssues(snapshot).Count.ToString());
-        DrawDirtyHints();
     }
 
     private static void DrawRoomInspector(EditorMapPresentationSnapshot snapshot, EditorMapRoomSnapshot room)
