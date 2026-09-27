@@ -31,7 +31,8 @@ internal static class FontSettingsWindow
 
         // The Map workspace needs uninterrupted horizontal/vertical space. Typography settings are
         // presentation-only and do not need to cover the graph while Map is the active tool.
-        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map)
+        if (EditorPresentationHub.Current.ToolMode == EditorToolMode.Map ||
+            EditorPresentationHub.Current.ToolMode == EditorToolMode.Triggers)
             return;
 
         // Keep the typography window compact but large enough to show the whole default panel.
