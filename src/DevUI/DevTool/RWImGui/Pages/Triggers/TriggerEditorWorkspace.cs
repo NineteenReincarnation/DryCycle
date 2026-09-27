@@ -99,7 +99,7 @@ internal static partial class TriggerEditorView
         if (browserOpen != observedShellBrowserOpen)
         {
             observedShellBrowserOpen = browserOpen;
-            addPaletteOpen = browserOpen;
+            addPaletteOpen = !addPaletteOpen;
             if (addPaletteOpen)
                 focusAddSearch = true;
         }
@@ -107,7 +107,9 @@ internal static partial class TriggerEditorView
         if (inspectorOpen != observedShellInspectorOpen)
         {
             observedShellInspectorOpen = inspectorOpen;
-            advancedInspectorOpen = inspectorOpen;
+            advancedInspectorOpen = !advancedInspectorOpen;
+            if (advancedInspectorOpen)
+                scenePanelOpen = false;
         }
     }
 
@@ -155,9 +157,6 @@ internal static partial class TriggerEditorView
                     : DevToolButtonTone.Subtle))
         {
             addPaletteOpen = !addPaletteOpen;
-            EditorUiCommandQueue.Enqueue(
-                new EditorUiCommand(
-                    EditorUiCommandKind.ToggleBrowser));
             if (addPaletteOpen)
                 focusAddSearch = true;
         }
@@ -210,9 +209,6 @@ internal static partial class TriggerEditorView
             {
                 advancedInspectorOpen =
                     !advancedInspectorOpen;
-                EditorUiCommandQueue.Enqueue(
-                    new EditorUiCommand(
-                        EditorUiCommandKind.ToggleInspector));
                 if (advancedInspectorOpen)
                     scenePanelOpen = false;
             }
@@ -561,9 +557,6 @@ internal static partial class TriggerEditorView
         {
             advancedInspectorOpen = true;
             scenePanelOpen = false;
-            EditorUiCommandQueue.Enqueue(
-                new EditorUiCommand(
-                    EditorUiCommandKind.ToggleInspector));
         }
 
         ImGui.End();
