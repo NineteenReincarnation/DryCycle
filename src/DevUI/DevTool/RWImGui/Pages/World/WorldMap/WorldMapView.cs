@@ -56,7 +56,6 @@ internal static class WorldMapView
     private static int focusRoomRequested = -1;
     private static bool showConnections = true;
     private static bool showPortLabels = true;
-    private static bool showSubregionLabels = true;
 
     private static int draggingRoom = -1;
     private static Num.Vector2 dragStartMouse;
@@ -113,7 +112,6 @@ internal static class WorldMapView
         focusRoomRequested = -1;
         showConnections = true;
         showPortLabels = true;
-        showSubregionLabels = true;
         for (int i = 0; i < layerVisible.Length; i++) layerVisible[i] = true;
 
         draggingRoom = -1;
@@ -168,8 +166,6 @@ internal static class WorldMapView
         DrawCompactCheckbox(DevToolUiSettings.T("连接", "Links"), "WorldMapLinks", ref showConnections);
         ImGui.SameLine();
         WorldMapPipeLayers.DrawToolbarControls(ref showPortLabels, ref linkingRoom, ref linkingNode);
-        ImGui.SameLine();
-        DrawCompactCheckbox(DevToolUiSettings.T("子区域", "Subregions"), "WorldMapSubregions", ref showSubregionLabels);
 
         if (!compact) ImGui.SameLine(0f, 16f);
         else ImGui.Spacing();
@@ -914,14 +910,6 @@ internal static class WorldMapView
         Num.Vector2 label = new Num.Vector2((min.X + max.X - nameSize.X) * 0.5f, min.Y - nameSize.Y - 3f);
         draw.AddText(label, text, name);
 
-        if (!showSubregionLabels || zoom < 0.75f || string.IsNullOrEmpty(room.Subregion)) return;
-        string meta = MapRoomLayer.Label(room.Layer) + " | " + room.Subregion;
-        if (room.OffScreenDen) meta += " | DEN";
-        Num.Vector2 metaSize = ImGui.CalcTextSize(meta);
-        draw.AddText(
-            new Num.Vector2((min.X + max.X - metaSize.X) * 0.5f, max.Y + 2f),
-            ImGui.GetColorU32(ImGuiCol.TextDisabled),
-            meta);
     }
 
     private static void DrawConnections(
@@ -1777,37 +1765,6 @@ internal static class WorldMapView
                         1f));
             }
 
-            if (!showSubregionLabels ||
-                zoom < 0.75f ||
-                string.IsNullOrEmpty(
-                    room.Subregion))
-                continue;
-
-            string meta =
-                MapRoomLayer.Label(
-                    room.Layer) +
-                " | " +
-                room.Subregion;
-            if (room.OffScreenDen)
-                meta += " | DEN";
-
-            Num.Vector2 metaSize =
-                ImGui.CalcTextSize(
-                    meta);
-            Num.Vector2 metaPos =
-                new(
-                    (min.X +
-                     max.X -
-                     metaSize.X) *
-                    0.5f,
-                    max.Y + 2f);
-
-            ReserveOverlayLabelRect(
-                metaPos,
-                metaSize,
-                new Num.Vector2(
-                    2f,
-                    1f));
         }
     }
 
