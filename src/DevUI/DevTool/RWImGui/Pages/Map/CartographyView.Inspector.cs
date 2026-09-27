@@ -83,6 +83,11 @@ internal static partial class CartographyView
                 "##AtlasRoomNames");
         if (roomNamesVisible)
             ImGui.PopStyleColor();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(
+                T(
+                    "关闭后画布与导出均不显示房间名",
+                    "When off, room names are hidden from both the canvas and exports."));
         if (toggleRoomNames)
             SetRoomNamesVisible(
                 presentation,
