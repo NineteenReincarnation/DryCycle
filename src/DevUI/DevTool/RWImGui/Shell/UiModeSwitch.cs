@@ -7,7 +7,6 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 
 internal static class UiModeSwitch
 {
-    private static bool migrationDiagnosticsFaulted;
     private static bool groupStatusFaulted;
 
     internal static void Draw()
@@ -35,24 +34,7 @@ internal static class UiModeSwitch
             return;
         }
 
-        // Map needs the largest uninterrupted workspace. Compatibility diagnostics stay hidden
-        // there. The radial shortcut palette is owned once by DevToolOverlay for every tool mode.
-        if (snapshot.ToolMode != EditorToolMode.Map && !migrationDiagnosticsFaulted)
-        {
-            try
-            {
-                MigrationCoverageWindow.Draw(display);
-            }
-            catch (Exception error)
-            {
-                migrationDiagnosticsFaulted = true;
-                global::DryCycle.Plugin.Logger?.LogError(
-                    "DevTool migration diagnostics failed and were isolated from the core UI shell. " +
-                    error);
-            }
-        }
-
-        // These windows are diagnostics only. They must never stand between a healthy ImGui context
+        // Group status is auxiliary UI. It must never stand between a healthy ImGui context
         // and the main Control Center/DevToolOverlay.
         if (!groupStatusFaulted &&
             (FloatingWindowSnap.SelectedWindowCount > 0 ||
