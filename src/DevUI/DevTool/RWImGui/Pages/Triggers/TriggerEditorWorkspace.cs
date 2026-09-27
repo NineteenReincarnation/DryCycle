@@ -119,13 +119,10 @@ internal static partial class TriggerEditorView
                 ImGui.GetItemRectMin().X,
                 ImGui.GetItemRectMax().Y + 4f);
 
-        int count =
-            snapshot.Triggers?.Length ?? 0;
         string sceneLabel =
             DevToolUiSettings.T(
-                "场景 ",
-                "Scene ") +
-            count;
+                "场景",
+                "Scene");
 
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
