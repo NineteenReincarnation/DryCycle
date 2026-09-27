@@ -174,8 +174,15 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
         "用于新检查器无法表达的自定义触发器/事件控件。",
         "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
 
-    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
-        NativeSpatialGizmoView.DrawTriggers(TriggerEditorPresentationHub.Current, display);
+    public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        NativeSpatialGizmoView.DrawTriggers(
+            TriggerEditorPresentationHub.Current,
+            display);
+        TriggerSceneLabelView.Draw(
+            TriggerEditorPresentationHub.Current,
+            display);
+    }
 
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         TriggerEditorView.DrawBrowser(TriggerEditorPresentationHub.Current);
@@ -201,9 +208,16 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
     protected override void OnActivate() =>
         TriggerEditorView.EnterCanvasFirst();
 
+    protected override void OnDeactivate()
+    {
+        NativeSpatialGizmoView.ResetRetainedState();
+        TriggerSceneLabelView.ResetRetainedState();
+    }
+
     protected override void OnReset()
     {
         NativeSpatialGizmoView.ResetRetainedState();
+        TriggerSceneLabelView.ResetRetainedState();
         TriggerEditorView.ResetRetainedState();
     }
 }
