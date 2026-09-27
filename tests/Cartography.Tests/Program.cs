@@ -60,6 +60,9 @@ internal static partial class Program
         Check(duplicated.Items.Count(item => item.Kind == CartographyItemKind.Room) == 2, "Duplication cannot create duplicate source-room identities.");
         Check(duplicated.Items.Count > annotated.Items.Count, "Annotations can be duplicated.");
         source.Rooms.Add("SU_A03", new CartographyRoomSource { Name = "SU_A03", Layer = 1, Ready = true, Width = 20, Height = 10 });
+        CartographyDocument synchronized = CartographyEditing.Apply(aligned, source, new CartographyCommand { Kind = CartographyCommandKind.AddMissingRooms });
+        Check(synchronized.Items.Count == aligned.Items.Count + 1 && synchronized.Items[0].X == aligned.Items[0].X, "Source synchronization preserves authored layout.");
+
         CartographyDocument styleToggle = synchronized.Clone();
         styleToggle.SolidTerrain = false;
         CartographyDocument afterStyleToggle =
@@ -85,9 +88,6 @@ internal static partial class Program
                     Style = styleToggle
                 });
         Check(afterStyleToggle.SolidTerrain, "Style commands must re-enable SolidTerrain after it has been disabled.");
-
-        CartographyDocument synchronized = CartographyEditing.Apply(aligned, source, new CartographyCommand { Kind = CartographyCommandKind.AddMissingRooms });
-        Check(synchronized.Items.Count == aligned.Items.Count + 1 && synchronized.Items[0].X == aligned.Items[0].X, "Source synchronization preserves authored layout.");
     }
 
     private static void Persistence()
