@@ -561,12 +561,9 @@ internal static partial class TriggerEditorView
         {
             advancedInspectorOpen = true;
             scenePanelOpen = false;
-            if (!observedShellInspectorOpen)
-            {
-                EditorUiCommandQueue.Enqueue(
-                    new EditorUiCommand(
-                        EditorUiCommandKind.ToggleInspector));
-            }
+            EditorUiCommandQueue.Enqueue(
+                new EditorUiCommand(
+                    EditorUiCommandKind.ToggleInspector));
         }
 
         ImGui.End();
