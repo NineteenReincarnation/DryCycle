@@ -151,15 +151,26 @@ internal static partial class TriggerEditorView
             return;
         }
 
-        bool collapseAll = DevToolWidgets.PaneTitleWithAction(
-            DevToolUiSettings.T("触发器", "Trigger"),
-            DevToolUiSettings.T("折叠所有", "Collapse All"),
-            "TriggerInspectorCollapseAll");
-
         EditorTriggerSnapshot selected = FindSelected(snapshot);
         if (selected == null)
         {
+            DevToolWidgets.PaneTitle(
+                DevToolUiSettings.T("触发器", "Trigger"));
             ImGui.TextWrapped(DevToolUiSettings.T("从场景列表或世界 Gizmo 中选择一个触发器。", "Select a trigger from Scene or its world gizmo."));
+            return;
+        }
+
+        bool deleteTrigger = DevToolWidgets.PaneTitleWithAction(
+            DevToolUiSettings.T("触发器", "Trigger"),
+            DevToolUiSettings.T("删除", "Delete"),
+            "DeleteTriggerTopRight",
+            tone: DevToolButtonTone.Danger);
+        if (deleteTrigger)
+        {
+            TriggerEditorCommandQueue.Enqueue(
+                new TriggerEditorCommand(
+                    TriggerEditorCommandKind.Delete,
+                    selected.Index));
             return;
         }
 
@@ -173,13 +184,6 @@ internal static partial class TriggerEditorView
             ? DevToolUiSettings.T("事件 | ", "Event | ") + selected.Event.Type
             : DevToolUiSettings.T("未分配事件", "No event assigned"));
         ImGui.Separator();
-
-        if (collapseAll)
-            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
-        if (!ImGui.CollapsingHeader(
-                DevToolUiSettings.T("触发器内容##TriggerInspectorDetails", "Trigger Details##TriggerInspectorDetails"),
-                ImGuiTreeNodeFlags.DefaultOpen))
-            return;
 
         ImGui.TextDisabled(DevToolUiSettings.T("触发条件", "ACTIVATION"));
         DrawInt(selected, TriggerEditorKeys.ActiveFromCycle, DevToolUiSettings.T("起始周期", "From cycle"), selected.ActiveFromCycle, 0, 80);
@@ -195,14 +199,6 @@ internal static partial class TriggerEditorView
         DrawKarma(selected);
         DrawEntrance(snapshot, selected);
 
-        if (selected.IsSpot)
-        {
-            ImGui.Separator();
-            ImGui.TextDisabled(DevToolUiSettings.T("区域", "SPOT AREA"));
-            DrawVector(selected, TriggerEditorKeys.Position, DevToolUiSettings.T("位置", "Position"), selected.X, selected.Y);
-            DrawFloat(selected, TriggerEditorKeys.Radius, DevToolUiSettings.T("半径", "Radius"), selected.Radius, 0f, 4000f);
-        }
-
         if (!string.IsNullOrEmpty(selected.CreatureType))
         {
             ImGui.Separator();
@@ -211,14 +207,11 @@ internal static partial class TriggerEditorView
         }
 
         ImGui.Separator();
-        DrawSlugcats(snapshot, selected);
+        DrawSlugcatCompactSelector(snapshot, selected);
 
         ImGui.Separator();
         DrawEventEditor(snapshot, selected);
 
-        ImGui.Separator();
-        if (DevToolWidgets.ActionButton(DevToolUiSettings.T("删除触发器", "Delete Trigger"), "DeleteTrigger", DevToolButtonTone.Danger))
-            TriggerEditorCommandQueue.Enqueue(new TriggerEditorCommand(TriggerEditorCommandKind.Delete, selected.Index));
     }
 
     private static void DrawLibrary(EditorTriggerPresentationSnapshot snapshot)
@@ -515,16 +508,6 @@ internal static partial class TriggerEditorView
             if (selected) ImGui.SetItemDefaultFocus();
         }
         ImGui.EndCombo();
-    }
-
-    private static void DrawSlugcats(EditorTriggerPresentationSnapshot snapshot, EditorTriggerSnapshot trigger)
-    {
-        if (!ImGui.CollapsingHeader(
-                DevToolUiSettings.T("蛞蝓猫##TriggerSlugcats", "Slugcats##TriggerSlugcats"),
-                ImGuiTreeNodeFlags.DefaultOpen))
-            return;
-
-        DrawSlugcatCompactSelector(snapshot, trigger);
     }
 
     private static void DrawSlugcatCompactSelector(
