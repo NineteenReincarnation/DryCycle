@@ -196,6 +196,24 @@ internal static class SoundLibraryGroupsView
         ImGui.Separator();
     }
 
+    internal static void DrawCreateTypeTopControls()
+    {
+        string omni = DevToolUiSettings.T("全向", "Omni");
+        string directional = DevToolUiSettings.T("定向", "Directional");
+        string spot = DevToolUiSettings.T("点声源", "Spot");
+
+        if (ImGui.RadioButton(omni + "##SoundCreateTypeTopOmni", createType == 0))
+            createType = 0;
+
+        ImGui.SameLine();
+        if (ImGui.RadioButton(directional + "##SoundCreateTypeTopDirectional", createType == 1))
+            createType = 1;
+
+        ImGui.SameLine();
+        if (ImGui.RadioButton(spot + "##SoundCreateTypeTopSpot", createType == 2))
+            createType = 2;
+    }
+
     internal static void DrawLibrary(EditorSoundPresentationSnapshot snapshot)
     {
         SoundActivationStatusSnapshot activation = SoundActivationPipeline.Current;
@@ -205,18 +223,6 @@ internal static class SoundLibraryGroupsView
             return;
         }
 
-        DevToolWidgets.SectionHeader(DevToolUiSettings.T("创建声音", "CREATE SOUND"), BrowserBodyFontScale);
-        string omni = DevToolUiSettings.T("全向", "Omni");
-        string directional = DevToolUiSettings.T("定向", "Directional");
-        string spot = DevToolUiSettings.T("点声源", "Spot");
-
-        if (ImGui.RadioButton(omni, createType == 0)) createType = 0;
-        DevToolWidgets.SameLineIfFits(DevToolWidgets.RadioWidth(directional));
-        if (ImGui.RadioButton(directional, createType == 1)) createType = 1;
-        DevToolWidgets.SameLineIfFits(DevToolWidgets.RadioWidth(spot));
-        if (ImGui.RadioButton(spot, createType == 2)) createType = 2;
-
-        ImGui.Spacing();
         DrawLibraryDestination();
         ImGui.Spacing();
         DevToolWidgets.FullWidthInputText(DevToolUiSettings.T("搜索", "Search"), "SoundLibrarySearch", ref search, 128);
