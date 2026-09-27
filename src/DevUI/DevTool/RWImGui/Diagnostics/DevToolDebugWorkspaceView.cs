@@ -29,6 +29,14 @@ internal static class DevToolDebugWorkspaceView
         bool compatibilityActive = section == DebugSection.Compatibility;
         DevUiDiagnosticsPolicy.Enabled = compatibilityActive;
 
+        // Expensive diagnostics are scoped to the category that exposes them. Leaving a category
+        // immediately returns its instrumentation to the normal zero/low-overhead path.
+        if (section != DebugSection.Performance && DevToolPerformanceMonitor.Enabled)
+        {
+            DevToolPerformanceMonitor.SetEnabled(false);
+            DevToolFrontendPerformanceMonitor.SetEnabled(false);
+        }
+
         if (section != DebugSection.LanceScavenger)
             LanceScavengerDebugView.StopCapture();
 
@@ -98,6 +106,11 @@ internal static class DevToolDebugWorkspaceView
     internal static void Deactivate()
     {
         DevUiDiagnosticsPolicy.Enabled = false;
+        if (DevToolPerformanceMonitor.Enabled)
+        {
+            DevToolPerformanceMonitor.SetEnabled(false);
+            DevToolFrontendPerformanceMonitor.SetEnabled(false);
+        }
         LanceScavengerDebugView.StopCapture();
     }
 
