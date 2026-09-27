@@ -165,10 +165,6 @@ internal static class DialogEditorView
             ImGui.TextWrapped(snapshot.SelectedPath);
         }
 
-        ImGui.Separator();
-        ImGui.TextWrapped(DevToolUiSettings.T(
-            "原版 DialogPage 本质上是预览工具，而不是文本文件编辑器。新版工作区保留这个边界，不会从 DevTool 直接写入对话资源。",
-            "Vanilla DialogPage is a preview tool, not a text-file editor. The rebuilt workspace intentionally preserves that boundary rather than writing conversation resources from DevTool."));
     }
 
     private static void EnsureBrowserProjection(string[] paths)
