@@ -71,11 +71,13 @@ internal interface IDevToolPageView
     bool UsesDedicatedWorkspace { get; }
     bool SupportsSceneSurface { get; }
     bool SupportsPlacementInput { get; }
+    bool HasTopControls { get; }
     string LegacyFallbackTooltip { get; }
 
     string GetSessionStatus(EditorPresentationSnapshot snapshot);
     bool SuppressInspector(EditorPresentationSnapshot snapshot);
     void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display);
+    void DrawTopControls(EditorPresentationSnapshot snapshot);
     void DrawBrowser(EditorPresentationSnapshot snapshot);
     void DrawInspector(EditorPresentationSnapshot snapshot);
     void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display);
@@ -113,6 +115,7 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public virtual bool UsesDedicatedWorkspace => false;
     public virtual bool SupportsSceneSurface => false;
     public virtual bool SupportsPlacementInput => false;
+    public virtual bool HasTopControls => false;
     public virtual string LegacyFallbackTooltip => string.Empty;
 
     public string GetSessionStatus(EditorPresentationSnapshot snapshot)
@@ -131,6 +134,7 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
 
     public virtual bool SuppressInspector(EditorPresentationSnapshot snapshot) => false;
     public virtual void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) { }
+    public virtual void DrawTopControls(EditorPresentationSnapshot snapshot) { }
     public abstract void DrawBrowser(EditorPresentationSnapshot snapshot);
     public abstract void DrawInspector(EditorPresentationSnapshot snapshot);
     public virtual void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) { }
