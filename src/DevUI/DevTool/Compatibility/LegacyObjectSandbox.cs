@@ -462,6 +462,13 @@ internal static class LegacyObjectSandbox
         try
         {
             visual.isVisible = false;
+
+            // FGameObjectNode destroys its wrapped Unity GameObject when removed from an on-stage
+            // container by default. A headless host still needs that GameObject as a semantic source
+            // (for example a LineRenderer), so defer destruction until the sandbox itself is disposed.
+            if (visual is FGameObjectNode gameObjectNode)
+                gameObjectNode.shouldDestroyOnRemoveFromStage = false;
+
             if (!ReferenceEquals(visual.container, quarantine))
             {
                 visual.container?.RemoveChild(visual);
@@ -540,7 +547,16 @@ internal static class LegacyObjectSandbox
             catch { }
         }
 
-        try { state.QuarantineContainer.RemoveAllChildren(); }
+        try
+        {
+            for (int i = 0; i < state.QuarantineContainer.GetChildCount(); i++)
+            {
+                if (state.QuarantineContainer.GetChildAt(i) is FGameObjectNode gameObjectNode &&
+                    gameObjectNode.gameObject != null)
+                    UnityEngine.Object.Destroy(gameObjectNode.gameObject);
+            }
+            state.QuarantineContainer.RemoveAllChildren();
+        }
         catch { }
 
         state.Page = null;
