@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.History;
+using DryCycle.DevUI.DevTool.World;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Map;
@@ -35,7 +36,9 @@ internal static class NativeMapAuthoringStateHub
     {
         internal string Name = string.Empty;
         internal Vector2 MapPosition;
+        internal Vector2 InheritedDevPosition;
         internal Vector2 DevPosition;
+        internal bool HasDevPositionOverride;
         internal int Layer = MapRoomLayer.Default;
 
         // Last values observed/written through the optional vanilla adapter. They let the bounded
@@ -52,6 +55,7 @@ internal static class NativeMapAuthoringStateHub
     {
         internal readonly Dictionary<int, RoomState> Rooms = new();
         internal bool Initialized;
+        internal bool PositionOverridesDirty;
         internal long Revision;
     }
 
@@ -84,11 +88,18 @@ internal static class NativeMapAuthoringStateHub
         WorldState state = Ensure(session);
         if (state == null || !state.Rooms.TryGetValue(roomIndex, out RoomState room))
             return false;
-        if ((room.DevPosition - position).sqrMagnitude <= 0.000001f)
+        bool nextOverride =
+            (room.InheritedDevPosition - position).sqrMagnitude > 0.000001f;
+        if ((room.DevPosition - position).sqrMagnitude <= 0.000001f &&
+            room.HasDevPositionOverride == nextOverride)
             return false;
 
-        room.DevPosition = position;
+        room.DevPosition = nextOverride
+            ? position
+            : room.InheritedDevPosition;
+        room.HasDevPositionOverride = nextOverride;
         room.PendingLegacyPush = true;
+        state.PositionOverridesDirty = true;
         unchecked { state.Revision++; }
         return true;
     }
@@ -233,12 +244,19 @@ internal static class NativeMapAuthoringStateHub
         AbstractRoom room = session?.World?.GetAbstractRoom(roomIndex);
         if (room == null) return null;
 
+        WorldState state = Ensure(session);
+        bool hasOverride =
+            state != null &&
+            state.Rooms.TryGetValue(roomIndex, out RoomState roomState) &&
+            roomState.HasDevPositionOverride;
+
         return new NativeMapRoomAuthoringSnapshot(
             session.World,
             roomIndex,
             room.name ?? string.Empty,
             value.MapPosition,
             value.DevPosition,
+            hasOverride,
             value.Layer,
             room.subregionName);
     }
@@ -249,6 +267,7 @@ internal static class NativeMapAuthoringStateHub
         int roomIndex,
         Vector2 mapPosition,
         Vector2 devPosition,
+        bool hasDevPositionOverride,
         int layer,
         string subregion)
     {
@@ -264,9 +283,13 @@ internal static class NativeMapAuthoringStateHub
         if (abstractRoom == null) return false;
 
         room.MapPosition = mapPosition;
-        room.DevPosition = devPosition;
+        room.HasDevPositionOverride = hasDevPositionOverride;
+        room.DevPosition = hasDevPositionOverride
+            ? devPosition
+            : room.InheritedDevPosition;
         room.Layer = layer;
         room.PendingLegacyPush = true;
+        state.PositionOverridesDirty = true;
         abstractRoom.subregionName = subregion;
         unchecked { state.Revision++; }
 
@@ -289,8 +312,17 @@ internal static class NativeMapAuthoringStateHub
         InitializeDefaults(world, state);
         LoadMapConfig(world, state);
 
-        if (session?.Owner?.activePage is MapPage page && ReferenceEquals(page.world, world))
+        MapPage page =
+            session?.Owner?.activePage is MapPage livePage &&
+            ReferenceEquals(livePage.world, world)
+                ? livePage
+                : null;
+        if (page != null)
             ImportLegacyPage(page, state);
+
+        LoadDevPositionOverrides(world, state);
+        if (page != null)
+            ApplyEffectiveOverridesToLegacyPage(page, state);
 
         state.Initialized = true;
         return state;
@@ -312,6 +344,7 @@ internal static class NativeMapAuthoringStateHub
             {
                 Name = room.name ?? string.Empty,
                 MapPosition = next,
+                InheritedDevPosition = next,
                 DevPosition = next,
                 Layer = MapRoomLayer.Default
             };
@@ -361,9 +394,12 @@ internal static class NativeMapAuthoringStateHub
                 if (fields.Length >= 4 &&
                     TryFloat(fields[2], out float devX) &&
                     TryFloat(fields[3], out float devY))
-                    room.DevPosition = new Vector2(devX, devY);
+                    room.InheritedDevPosition = new Vector2(devX, devY);
                 else
-                    room.DevPosition = room.MapPosition;
+                    room.InheritedDevPosition = room.MapPosition;
+
+                room.DevPosition = room.InheritedDevPosition;
+                room.HasDevPositionOverride = false;
 
                 if (fields.Length >= 5 &&
                     int.TryParse(fields[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int layer))
@@ -410,11 +446,263 @@ internal static class NativeMapAuthoringStateHub
 
     private static void ImportPanel(RoomState room, RoomPanel panel)
     {
-        room.MapPosition = panel.pos;
-        room.DevPosition = panel.devPos;
+        // The live vanilla panel is the strongest source for the untouched developer layout:
+        // panel.pos is exactly where the original Map page is currently drawing the room.
+        room.InheritedDevPosition = panel.pos;
+        room.DevPosition = room.InheritedDevPosition;
+        room.HasDevPositionOverride = false;
         room.Layer = Mathf.Clamp(panel.layer, 0, 2);
         room.PendingLegacyPush = false;
         RememberLegacyMirror(room, panel);
+    }
+
+    private const string PositionOverrideHeader = "# DryCycle DevTool map position overrides v1";
+
+    internal static bool SaveDevPositionOverrides(EditorSession session)
+    {
+        WorldState state = Ensure(session);
+        global::World world = session?.World;
+        if (state == null || world == null || !state.PositionOverridesDirty)
+            return true;
+
+        if (!TryResolvePositionOverridePath(world, out string path, out string error))
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool Map position overrides were not saved: " +
+                (error ?? "authoring path is unavailable."));
+            return false;
+        }
+
+        try
+        {
+            List<string> lines = new() { PositionOverrideHeader };
+            List<RoomState> ordered = new();
+            foreach (RoomState room in state.Rooms.Values)
+            {
+                if (room.HasDevPositionOverride)
+                    ordered.Add(room);
+            }
+
+            ordered.Sort((a, b) =>
+                string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                RoomState room = ordered[i];
+                lines.Add(
+                    room.Name + ": " +
+                    room.DevPosition.x.ToString("R", CultureInfo.InvariantCulture) +
+                    "><" +
+                    room.DevPosition.y.ToString("R", CultureInfo.InvariantCulture));
+            }
+
+            WorldAuthoringPathResolver.AtomicWriteAllLines(path, lines);
+            state.PositionOverridesDirty = false;
+            return true;
+        }
+        catch (Exception saveError)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool Map position override save failed: " + saveError);
+            return false;
+        }
+    }
+
+    internal static IDisposable BeginVanillaMapSaveProjection(
+        EditorSession session,
+        MapPage page)
+    {
+        WorldState state = Ensure(session);
+        if (state == null || page?.subNodes == null)
+            return EmptyDisposable.Instance;
+
+        List<LegacySaveRestore> restore = new();
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is not RoomPanel panel ||
+                panel.roomRep?.room == null ||
+                !state.Rooms.TryGetValue(panel.roomRep.room.index, out RoomState room))
+                continue;
+
+            restore.Add(new LegacySaveRestore(
+                panel,
+                room,
+                panel.pos,
+                panel.devPos,
+                panel.layer));
+
+            // Vanilla map config remains the inherited source. DryCycle-only room placement is
+            // serialized separately and must never overwrite the original developer layout.
+            panel.devPos = room.InheritedDevPosition;
+            panel.layer = room.Layer;
+        }
+
+        return new LegacySaveProjection(restore);
+    }
+
+    private static void LoadDevPositionOverrides(global::World world, WorldState state)
+    {
+        if (!TryResolvePositionOverridePath(world, out string path, out _) ||
+            string.IsNullOrWhiteSpace(path) ||
+            !File.Exists(path))
+            return;
+
+        Dictionary<string, RoomState> byName =
+            new(StringComparer.OrdinalIgnoreCase);
+        foreach (RoomState room in state.Rooms.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(room.Name))
+                byName[room.Name] = room;
+        }
+
+        try
+        {
+            string[] lines = File.ReadAllLines(path);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i]?.Trim();
+                if (string.IsNullOrEmpty(line) || line.StartsWith("#", StringComparison.Ordinal))
+                    continue;
+
+                int separator = line.IndexOf(": ", StringComparison.Ordinal);
+                if (separator <= 0)
+                    continue;
+
+                string roomName = line.Substring(0, separator);
+                if (!byName.TryGetValue(roomName, out RoomState room))
+                    continue;
+
+                string[] fields = line.Substring(separator + 2)
+                    .Split(new[] { "><" }, StringSplitOptions.None);
+                if (fields.Length < 2 ||
+                    !TryFloat(fields[0], out float x) ||
+                    !TryFloat(fields[1], out float y))
+                    continue;
+
+                room.DevPosition = new Vector2(x, y);
+                room.HasDevPositionOverride = true;
+            }
+
+            state.PositionOverridesDirty = false;
+        }
+        catch (Exception loadError)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool Map position override load failed: " + loadError.Message);
+        }
+    }
+
+    private static void ApplyEffectiveOverridesToLegacyPage(
+        MapPage page,
+        WorldState state)
+    {
+        if (page?.subNodes == null)
+            return;
+
+        for (int i = 0; i < page.subNodes.Count; i++)
+        {
+            if (page.subNodes[i] is not RoomPanel panel ||
+                panel.roomRep?.room == null ||
+                !state.Rooms.TryGetValue(panel.roomRep.room.index, out RoomState room) ||
+                !room.HasDevPositionOverride)
+                continue;
+
+            panel.devPos = room.DevPosition;
+            RememberLegacyMirror(room, panel);
+        }
+    }
+
+    private static bool TryResolvePositionOverridePath(
+        global::World world,
+        out string path,
+        out string error)
+    {
+        path = string.Empty;
+        error = null;
+
+        string resolvedMapPath = ResolveMapConfigPath(world);
+        if (string.IsNullOrWhiteSpace(resolvedMapPath))
+        {
+            error = "vanilla map config path is unavailable.";
+            return false;
+        }
+
+        if (!WorldAuthoringPathResolver.TryResolveMapConfigSource(
+                world.name,
+                resolvedMapPath,
+                out string sourcePath,
+                out error))
+            return false;
+
+        string directory = Path.GetDirectoryName(sourcePath);
+        string stem = Path.GetFileNameWithoutExtension(sourcePath);
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(stem))
+        {
+            error = "map config source path is invalid.";
+            return false;
+        }
+
+        path = Path.Combine(directory, stem + ".drycycle-layout.txt");
+        return true;
+    }
+
+    private readonly struct LegacySaveRestore
+    {
+        internal LegacySaveRestore(
+            RoomPanel panel,
+            RoomState room,
+            Vector2 position,
+            Vector2 devPosition,
+            int layer)
+        {
+            Panel = panel;
+            Room = room;
+            Position = position;
+            DevPosition = devPosition;
+            Layer = layer;
+        }
+
+        internal RoomPanel Panel { get; }
+        internal RoomState Room { get; }
+        internal Vector2 Position { get; }
+        internal Vector2 DevPosition { get; }
+        internal int Layer { get; }
+    }
+
+    private sealed class LegacySaveProjection : IDisposable
+    {
+        private List<LegacySaveRestore> restore;
+
+        internal LegacySaveProjection(List<LegacySaveRestore> restore)
+        {
+            this.restore = restore;
+        }
+
+        public void Dispose()
+        {
+            List<LegacySaveRestore> current = restore;
+            restore = null;
+            if (current == null)
+                return;
+
+            for (int i = 0; i < current.Count; i++)
+            {
+                LegacySaveRestore item = current[i];
+                if (item.Panel == null)
+                    continue;
+
+                item.Panel.pos = item.Position;
+                item.Panel.devPos = item.DevPosition;
+                item.Panel.layer = item.Layer;
+                RememberLegacyMirror(item.Room, item.Panel);
+            }
+        }
+    }
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        internal static readonly EmptyDisposable Instance = new();
+        public void Dispose() { }
     }
 
     private static void RememberLegacyMirror(RoomState room, RoomPanel panel)
@@ -449,6 +737,7 @@ internal sealed class NativeMapRoomAuthoringSnapshot : IEditorStateSnapshot
     private readonly string roomName;
     private readonly Vector2 mapPosition;
     private readonly Vector2 devPosition;
+    private readonly bool hasDevPositionOverride;
     private readonly int layer;
     private readonly string subregion;
 
@@ -458,6 +747,7 @@ internal sealed class NativeMapRoomAuthoringSnapshot : IEditorStateSnapshot
         string roomName,
         Vector2 mapPosition,
         Vector2 devPosition,
+        bool hasDevPositionOverride,
         int layer,
         string subregion)
     {
@@ -466,6 +756,7 @@ internal sealed class NativeMapRoomAuthoringSnapshot : IEditorStateSnapshot
         this.roomName = roomName ?? string.Empty;
         this.mapPosition = mapPosition;
         this.devPosition = devPosition;
+        this.hasDevPositionOverride = hasDevPositionOverride;
         this.layer = layer;
         this.subregion = subregion;
         Fingerprint =
@@ -473,6 +764,7 @@ internal sealed class NativeMapRoomAuthoringSnapshot : IEditorStateSnapshot
             mapPosition.y.ToString("R", CultureInfo.InvariantCulture) + "|" +
             devPosition.x.ToString("R", CultureInfo.InvariantCulture) + "," +
             devPosition.y.ToString("R", CultureInfo.InvariantCulture) + "|" +
+            (hasDevPositionOverride ? "1" : "0") + "|" +
             layer.ToString(CultureInfo.InvariantCulture) + "|" + (subregion ?? string.Empty);
     }
 
@@ -491,6 +783,7 @@ internal sealed class NativeMapRoomAuthoringSnapshot : IEditorStateSnapshot
             roomIndex,
             mapPosition,
             devPosition,
+            hasDevPositionOverride,
             layer,
             subregion);
 }
