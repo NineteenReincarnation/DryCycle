@@ -61,6 +61,7 @@ function New-TestRepo {
 - `Feature/` — feature
 '@
     Write-Utf8 (Join-Path $path "src/Area/Feature/File.cs") "class File { }"
+    Write-Utf8 (Join-Path $path "src/Area/Feature/Keep.cs") "class Keep { }"
 
     Invoke-Git $path @("add", ".") | Out-Null
     Invoke-Git $path @("commit", "-q", "-m", "baseline") | Out-Null
@@ -154,7 +155,7 @@ $tests.Add({
 $tests.Add({
     $repo = New-TestRepo
     try {
-        Invoke-Git $repo @("rm", "-q", "src/Area/Feature/File.cs") | Out-Null
+        Invoke-Git $repo @("rm", "-r", "-q", "src/Area/Feature") | Out-Null
         $result = Invoke-Checker $repo @("-Source", "Staged")
         Assert-Equal 20 $result.ExitCode "deleted direct module"
         Assert-Contains $result.Output "idx src/Area/CODEMAP.md -Feature/" "deleted direct module"
@@ -220,11 +221,292 @@ $tests.Add({
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
 
-$passed = 0
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("rm", "-q", "src/Area/Feature/File.cs") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "delete ordinary file"
+        Assert-Empty $result.Output "delete ordinary file must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("mv", "src/Area/Feature/File.cs", "src/Area/Feature/Renamed.cs") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "rename ordinary file"
+        Assert-Empty $result.Output "rename ordinary file must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        New-Item -ItemType Directory -Path (Join-Path $repo "src/Area/Feature/Internal") -Force | Out-Null
+        Invoke-Git $repo @("mv", "src/Area/Feature/File.cs", "src/Area/Feature/Internal/File.cs") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "move inside module"
+        Assert-Empty $result.Output "move inside module must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("mv", "src/Area/Feature", "src/Area/Renamed") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 20 $result.ExitCode "rename direct module"
+        Assert-Contains $result.Output "idx src/Area/CODEMAP.md -Feature/" "rename direct module stale"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +Renamed/" "rename direct module missing"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/Child/File.cs") "class Child { }"
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Feature
+
+- `Child/` — child
+'@
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "nested codemap with child"
+        Assert-Empty $result.Output "valid nested codemap must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/Child/File.cs") "class Child { }"
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Feature
+'@
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 10 $result.ExitCode "nested codemap missing child"
+        Assert-Contains $result.Output "sem src/Area/Feature/CODEMAP.md +Child/" "nested codemap missing child"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/Child/File.cs") "class Child { }"
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Feature
+
+- `Child/` — child
+'@
+        Invoke-Git $repo @("add", ".") | Out-Null
+        Invoke-Git $repo @("commit", "-q", "-m", "nested scope") | Out-Null
+        Invoke-Git $repo @("rm", "-q", "src/Area/Feature/CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "delete nested codemap"
+        Assert-Empty $result.Output "deleted nested codemap must fall back silently"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/中文功能/File.cs") "class UnicodeFeature { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 10 $result.ExitCode "unicode module"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +中文功能/" "unicode module"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/Feature Space/File.cs") "class SpacedFeature { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 10 $result.ExitCode "space module"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +Feature Space/" "space module"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/Generated/File.cs") "class Generated { }"
+        Write-Utf8 (Join-Path $repo "src/Area/CODEMAP.md") @'
+<!-- codemap:v1 -->
+<!-- codemap-ignore: Generated -->
+
+# Area
+
+- `Feature/` — feature
+'@
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "ignored module"
+        Assert-Empty $result.Output "ignored module must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Area
+
+- `./` — direct implementation
+- `Feature/` — feature
+'@
+        Invoke-Git $repo @("add", "src/Area/CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "dot entry"
+        Assert-Empty $result.Output "dot entry must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Root
+
+- `src/` — source
+- DevTool route -> `src/Area/`
+'@
+        Invoke-Git $repo @("add", "CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "non-index bullet"
+        Assert-Empty $result.Output "non-index bullet must be ignored"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Area
+'@
+        Invoke-Git $repo @("add", "src/Area/CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 10 $result.ExitCode "missing existing entry"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +Feature/" "missing existing entry"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Area
+
+- `Feature/` — feature
+- `Ghost/` — stale
+'@
+        Invoke-Git $repo @("add", "src/Area/CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 20 $result.ExitCode "stale map entry"
+        Assert-Contains $result.Output "idx src/Area/CODEMAP.md -Ghost/" "stale map entry"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("rm", "-q", "CODEMAP.md") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 20 $result.ExitCode "delete root map"
+        Assert-Contains $result.Output "idx CODEMAP.md -root" "delete root map"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        $base = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        Invoke-Git $repo @("commit", "-q", "-m", "new module default head") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Range", "-Base", $base)
+        Assert-Equal 10 $result.ExitCode "range default head"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +NewFeature/" "range default head"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Other/CODEMAP.md") "# intentionally invalid"
+        Write-Utf8 (Join-Path $repo "src/Other/File.cs") "class Other { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        Invoke-Git $repo @("commit", "-q", "-m", "unrelated invalid scope") | Out-Null
+        Write-Utf8 (Join-Path $repo "src/Area/Feature/File.cs") "class File { int X; }"
+        Invoke-Git $repo @("add", "src/Area/Feature/File.cs") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "unrelated invalid scope"
+        Assert-Empty $result.Output "unrelated scope must not be scanned"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = Join-Path ([IO.Path]::GetTempPath()) ("drycycle-codemap-initial-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $repo | Out-Null
+    try {
+        Invoke-Git $repo @("init", "-q") | Out-Null
+        Invoke-Git $repo @("config", "user.email", "codemap-tests@example.invalid") | Out-Null
+        Invoke-Git $repo @("config", "user.name", "CodeMap Tests") | Out-Null
+        Write-Utf8 (Join-Path $repo "CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Root
+
+- `src/` — source
+'@
+        Write-Utf8 (Join-Path $repo "src/Area/File.cs") "class Initial { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        $result = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $result.ExitCode "initial commit"
+        Assert-Empty $result.Output "initial commit must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
 foreach ($test in $tests) {
     & $test
-    $passed++
 }
 
-[Console]::Out.WriteLine("CodeMap tests: $passed passed")
+exit 0
 exit 0
