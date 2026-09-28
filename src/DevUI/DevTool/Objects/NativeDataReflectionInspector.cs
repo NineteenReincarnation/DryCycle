@@ -48,6 +48,8 @@ internal sealed class NativeDataReflectionInspector :
         internal bool Writable;
         internal EditorPropertyKind Kind;
         internal EditorPropertyGizmoHint GizmoHint;
+        internal EditorPropertyGizmoShape GizmoShape;
+        internal float GizmoScale = 1f;
         internal bool HasRange;
         internal float Min;
         internal float Max;
@@ -334,6 +336,8 @@ internal sealed class NativeDataReflectionInspector :
             Writable = !field.IsInitOnly && !field.IsLiteral,
             Kind = EditorPropertyKind.Vector2,
             GizmoHint = EditorPropertyGizmoHint.RelativePoint,
+            GizmoShape = EditorPropertyGizmoShape.Line,
+            GizmoScale = 1f,
             Options = Array.Empty<string>()
         };
     }
@@ -360,6 +364,8 @@ internal sealed class NativeDataReflectionInspector :
             Writable = writable,
             Kind = kind,
             GizmoHint = ResolveGizmoHint(declaringType, name, valueType),
+            GizmoShape = ResolveGizmoShape(declaringType, name, valueType),
+            GizmoScale = 1f,
             HasRange = hasRange,
             Min = min,
             Max = max,
@@ -1108,6 +1114,27 @@ internal sealed class NativeDataReflectionInspector :
         return EditorPropertyGizmoHint.None;
     }
 
+    private static EditorPropertyGizmoShape ResolveGizmoShape(
+        Type declaringType,
+        string name,
+        Type valueType)
+    {
+        if (valueType != typeof(Vector2) ||
+            !string.Equals(name, "handlePos", StringComparison.Ordinal))
+            return EditorPropertyGizmoShape.None;
+
+        // Stable Rain World DevInterface contracts. Third-party Data subclasses inherit these
+        // semantics automatically; no mod/type allowlist is involved.
+        if (declaringType == typeof(PlacedObject.GridRectObjectData))
+            return EditorPropertyGizmoShape.Rectangle;
+        if (declaringType == typeof(PlacedObject.LightSourceData))
+            return EditorPropertyGizmoShape.Circle;
+        if (declaringType == typeof(PlacedObject.ResizableObjectData))
+            return EditorPropertyGizmoShape.Line;
+
+        return EditorPropertyGizmoShape.None;
+    }
+
     private static EditorPropertyKind ResolveKind(Type type, out string[] options)
     {
         options = Array.Empty<string>();
@@ -1145,6 +1172,8 @@ internal sealed class NativeDataReflectionInspector :
             Source = "Rain World model",
             Kind = binding.Kind,
             GizmoHint = binding.GizmoHint,
+            GizmoShape = binding.GizmoShape,
+            GizmoScale = binding.GizmoScale,
             HasRange = binding.HasRange,
             Min = binding.Min,
             Max = binding.Max,
@@ -1312,6 +1341,8 @@ internal sealed class NativeDataReflectionInspector :
             Source = source.Source,
             Kind = source.Kind,
             GizmoHint = source.GizmoHint,
+            GizmoShape = source.GizmoShape,
+            GizmoScale = source.GizmoScale,
             HasRange = source.HasRange,
             Min = source.Min,
             Max = source.Max,
