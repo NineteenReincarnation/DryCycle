@@ -492,6 +492,7 @@ presentation_path = Path("src/DevUI/DevTool/Core/EditorObjectPresentationPartial
 host_path = Path("src/DevUI/DevTool/Compatibility/LegacyObjectSandbox.cs")
 gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBridge.cs")
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
+bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
 project_path = Path("src/DryCycle.csproj")
 
 for path in (
@@ -501,6 +502,7 @@ for path in (
     host_path,
     gizmo_path,
     coverage_path,
+    bridge_path,
     project_path,
 ):
     if not path.is_file():
@@ -512,6 +514,7 @@ presentation = presentation_path.read_text(encoding="utf-8")
 host = host_path.read_text(encoding="utf-8")
 gizmo = gizmo_path.read_text(encoding="utf-8")
 coverage = coverage_path.read_text(encoding="utf-8")
+bridge = bridge_path.read_text(encoding="utf-8")
 project = project_path.read_text(encoding="utf-8")
 
 def require(condition, message):
@@ -535,12 +538,15 @@ reflection_pos = bootstrap.find("NativeDataReflectionInspector.Instance")
 require(managed_pos >= 0 and reflection_pos > managed_pos,
         "Managed Object protocol must run before generic Data reflection.")
 
-require("externalObject && !coverage.IsComplete" in presentation,
-        "Incomplete third-party Objects must still route through the isolated headless fallback.")
-require("!coverage.GizmoComplete" in presentation and "HeadlessRepresentationGizmoBridge.Capture" in presentation,
-        "Incomplete scene geometry must still merge from the headless Representation.")
-require("(!coverage.IsComplete || session.LegacyUiVisible)" in presentation,
-        "Full original DevUI must remain an explicit escape hatch only for compatibility gaps.")
+require("externalObject && (!coverage.IsComplete || representationGap)" in presentation,
+        "Incomplete third-party Objects or unsupported Representation nodes must route through the isolated headless fallback.")
+require("(!coverage.GizmoComplete || representationGap)" in presentation and
+        "HeadlessRepresentationGizmoBridge.Capture" in presentation,
+        "Incomplete scene geometry or Representation coverage must merge from the headless Representation.")
+require("(!coverage.IsComplete || representationGap || session.LegacyUiVisible)" in presentation,
+        "Full original DevUI must remain an explicit escape hatch only for proven compatibility gaps.")
+require("LegacyObjectSandbox.HasCompatibilityGap" in presentation,
+        "Object presentation must include the Representation tree in compatibility coverage.")
 
 capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
 capture_end = host.find("internal static bool Run(", capture_start)
@@ -554,6 +560,16 @@ require("page.Refresh()" not in host and "Page.Refresh()" not in host,
         "Headless Object host must not revive full ObjectsPage refresh work.")
 require("FGameObjectNode" in host and "shouldDestroyOnRemoveFromStage = false" in host,
         "Custom Futile GameObject nodes must remain invisible without destroying their semantic source.")
+require("HasCompatibilityGap" in host and "EnsureCompatibilityAudit" in host,
+        "Headless Object host must cache a conservative Representation compatibility verdict.")
+require("TreeSignature" in host and "ComputeTreeSignature" in host and
+        "AuditModel" in host and "AuditTree" in host and
+        "ModelAuditIntervalFrames" in host and "TreeAuditIntervalFrames" in host,
+        "Dynamic third-party control trees must use sparse model/tree audits instead of per-frame rescans.")
+require("MarkDirtyAfterMutation" in host,
+        "Headless control actions must invalidate dynamic control-tree caches immediately.")
+require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge,
+        "Unknown interactive DevUI nodes must remain explicit compatibility gaps instead of being silently accepted.")
 
 required_gizmo = (
     "HandlePrefix",
