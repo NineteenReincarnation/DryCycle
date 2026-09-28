@@ -75,15 +75,40 @@ internal static class DB_WarpCompatibility
         // Resolve both forms so the integration stays soft across Warp revisions.
         Type warpContainerType = DB_RuntimePatch.FindType("WarpContainer")
             ?? warpMenuType.GetNestedType("WarpContainer", BindingFlags.Public | BindingFlags.NonPublic);
-        MethodInfo generate = warpContainerType?.GetMethod(
-            "GenerateRoomButtons", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        // Warp 1.9.1 currently exposes:
+        // GenerateRoomButtons(List<RoomInfo> roomList, SortType sort, ViewType view).
+        // Resolve by shape instead of a single GetMethod(name) call so a future overload does not
+        // turn this soft integration into an AmbiguousMatchException.
+        MethodInfo generate = warpContainerType?
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .FirstOrDefault(method =>
+            {
+                if (!string.Equals(method.Name, "GenerateRoomButtons", StringComparison.Ordinal))
+                    return false;
+
+                ParameterInfo[] parameters = method.GetParameters();
+                return parameters.Length >= 1 &&
+                       typeof(IEnumerable).IsAssignableFrom(parameters[0].ParameterType);
+            });
         MethodInfo generatePrefix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(GenerateRoomButtonsPrefix), BindingFlags.NonPublic | BindingFlags.Static);
         MethodInfo generatePostfix = typeof(DB_WarpCompatibility).GetMethod(
             nameof(GenerateRoomButtonsPostfix), BindingFlags.NonPublic | BindingFlags.Static);
 
         DB_RuntimePatch.Patch(harmony, colorLoad, colorPrefix);
-        DB_RuntimePatch.Patch(harmony, generate, generatePrefix, generatePostfix);
+
+        // HarmonyX in the current Rain World stack does not accept the __args pseudo-parameter on
+        // this patch path (it is parsed as an invalid indexed argument). The postfix below binds
+        // only the first original argument through __0, which is stable across parameter renames.
+        if (generate != null &&
+            !DB_RuntimePatch.Patch(harmony, generate, generatePrefix, generatePostfix))
+        {
+            Plugin.Logger?.LogWarning(
+                "Desert Batfly Warp compatibility could not patch GenerateRoomButtons; " +
+                "room classification remains active, but the English Desert group offset is disabled.");
+        }
+
         enabled = true;
     }
 
@@ -137,15 +162,18 @@ internal static class DB_WarpCompatibility
         EnsureWarpTypeColors();
     }
 
-    private static void GenerateRoomButtonsPostfix(object __instance, object[] __args)
+    private static void GenerateRoomButtonsPostfix(object __instance, object __0)
     {
         // "DESERT SWARMROOM" is considerably wider than Warp's stock type headers.
         // In English only, move the whole Desert group left so the header no longer
         // collides with the adjacent OUTPOST/TRADER groups while keeping its buttons
         // centered beneath the header. Chinese uses the shorter localized label and
         // therefore keeps Warp's original spacing.
-        if (__instance == null || !IsEnglishLanguage() || __args == null || __args.Length == 0 ||
-            __args[0] is not IEnumerable rooms || roomInfoType == null)
+        //
+        // __0 is Harmony's positional alias for the original roomList argument. Do not use
+        // __args here: HarmonyX 2.x in this Rain World stack rejects it during patch generation.
+        if (__instance == null || !IsEnglishLanguage() ||
+            __0 is not IEnumerable rooms || roomInfoType == null)
             return;
 
         FieldInfo nameField = FindField(roomInfoType, "name");
