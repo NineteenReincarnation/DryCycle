@@ -150,7 +150,7 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
 }
 
 function Assert-Empty([object[]]$Value, [string]$Message) {
-    if ($Value.Count -ne 0) {
+    if (@($Value).Count -ne 0) {
         throw "$Message output=[$($Value -join ' | ')]"
     }
 }
