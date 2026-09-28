@@ -47,6 +47,16 @@ if errorlevel 1 (
 
 for /f "delims=" %%R in ('git rev-parse --show-toplevel') do set "REPO=%%R"
 cd /d "%REPO%" || goto :fail
+rem Enable repository-owned hooks when no custom hook path is configured.
+set "HOOKS_PATH="
+for /f "delims=" %%H in ('git config --local --get core.hooksPath 2^>nul') do set "HOOKS_PATH=%%H"
+if not defined HOOKS_PATH (
+    git config --local core.hooksPath .githooks >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Could not enable repository Git hooks.
+        goto :fail
+    )
+)
 
 for /f "delims=" %%B in ('git symbolic-ref --quiet --short HEAD 2^>nul') do set "BRANCH=%%B"
 if not defined BRANCH (
