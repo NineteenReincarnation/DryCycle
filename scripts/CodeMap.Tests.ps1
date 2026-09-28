@@ -455,7 +455,7 @@ $tests.Add({
 $tests.Add({
     $repo = New-TestRepo
     try {
-        $base = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        $base = @(Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
         Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
         Invoke-Git $repo @("add", ".") | Out-Null
         Invoke-Git $repo @("commit", "-q", "-m", "new module default head") | Out-Null
@@ -508,5 +508,4 @@ foreach ($test in $tests) {
     & $test
 }
 
-exit 0
 exit 0
