@@ -266,14 +266,13 @@ python3 - <<'PY'
 from pathlib import Path
 
 contract = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/IDevToolPageView.cs").read_text(encoding="utf-8")
-overlay = Path("src/DevUI/DevTool/RWImGui/Shell/DevToolOverlay.cs").read_text(encoding="utf-8")
 top = Path("src/DevUI/DevTool/RWImGui/Shell/Windows/DevToolTopStatusWindow.cs").read_text(encoding="utf-8")
 label = Path("src/DevUI/DevTool/RWImGui/Shell/VanillaDevToolsLabelVisibility.cs").read_text(encoding="utf-8")
 bridge = Path("src/DevUI/DevTool/RWImGui/Shell/BridgePlugin.cs").read_text(encoding="utf-8")
 
 if 'bool HasTopControls { get; }' not in contract or 'void DrawTopControls(EditorPresentationSnapshot snapshot);' not in contract:
     raise SystemExit("DevTool page contract must expose optional shared top controls.")
-if 'DevToolTopStatusWindow.Draw' not in overlay:
+if 'DevToolTopStatusWindow.Draw' not in bridge:
     raise SystemExit("Every rebuilt page must pass through the shared top-status window.")
 if 'snapshot.RoomName' not in top or '" : NewDevtool Active"' not in top:
     raise SystemExit("Shared top status must display the current room and NewDevtool Active.")
