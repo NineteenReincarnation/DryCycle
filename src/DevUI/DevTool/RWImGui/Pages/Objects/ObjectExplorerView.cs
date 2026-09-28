@@ -35,17 +35,28 @@ internal static class ObjectExplorerView
         public string Tooltip => TooltipText ?? string.Empty;
     }
 
+    private sealed class ObjectLibraryPage
+    {
+        internal readonly List<ObjectLibraryRow> Rows = new();
+        internal readonly List<CategoryRun> CategoryRuns = new();
+    }
+
     private sealed class ObjectLibraryGroup
     {
         internal string Source;
         internal DevToolSourceMark SourceMark;
         internal readonly List<ObjectLibraryRow> Rows = new();
         internal readonly List<CategoryRun> CategoryRuns = new();
+        internal readonly List<ObjectLibraryPage> Pages = new();
     }
 
     private const float BrowserPaneFontScale = 1.22f;
+    private const int ObjectsPerPage = 22;
 
     private static string objectSearch = string.Empty;
+    private static string activeObjectSource = string.Empty;
+    private static readonly Dictionary<string, int> ObjectPageBySource =
+        new(StringComparer.OrdinalIgnoreCase);
     private static string sceneSearch = string.Empty;
     private static bool sceneTab;
     private static long sceneSelectionAnchorStableId;
@@ -78,9 +89,12 @@ internal static class ObjectExplorerView
         {
             group.Rows.Clear();
             group.CategoryRuns.Clear();
+            group.Pages.Clear();
         }
         ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
+        ObjectPageBySource.Clear();
+        activeObjectSource = string.Empty;
         projectedObjectLibrary = null;
         projectedObjectSearch = string.Empty;
         projectedObjectChinese = false;
@@ -163,37 +177,53 @@ internal static class ObjectExplorerView
 
         ImGui.Spacing();
         EnsureObjectLibraryProjection(snapshot);
-        for (int sourceIndex = 0; sourceIndex < ObjectLibraryGroups.Count; sourceIndex++)
+
+        DrawObjectSourceTabs();
+        ObjectLibraryGroup activeGroup = ResolveActiveObjectGroup();
+        if (activeGroup == null)
         {
-            ObjectLibraryGroup group = ObjectLibraryGroups[sourceIndex];
-            DevToolWidgets.SourceHeader(group.SourceMark, 1.42f * BrowserPaneFontScale, BrowserPaneFontScale);
+            DevToolWidgets.MutedText(DevToolUiSettings.T("没有可用的物件来源。", "No object sources available."));
+            return;
+        }
 
-            List<ObjectLibraryRow> rows = group.Rows;
-            List<CategoryRun> categoryRuns = group.CategoryRuns;
-            for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
+        if (activeGroup.Rows.Count == 0 || activeGroup.Pages.Count == 0)
+        {
+            DevToolWidgets.MutedText(DevToolUiSettings.T("当前 Mod 没有匹配的物件。", "No matching objects in this mod."));
+            return;
+        }
+
+        int pageIndex = DrawObjectPageControls(activeGroup);
+        ObjectLibraryPage page = activeGroup.Pages[pageIndex];
+
+        List<ObjectLibraryRow> rows = page.Rows;
+        List<CategoryRun> categoryRuns = page.CategoryRuns;
+        for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
+        {
+            CategoryRun run = categoryRuns[categoryIndex];
+            if (categoryIndex > 0)
+                ImGui.Spacing();
+
+            DrawObjectCategoryLabel(run.Category);
+
+            using DevToolListClipper clipper = new(run.Count);
+            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
             {
-                CategoryRun run = categoryRuns[categoryIndex];
-                if (categoryIndex > 0) ImGui.Spacing();
-                DevToolWidgets.MutedText(run.Category);
-
-                using DevToolListClipper clipper = new(run.Count);
-                while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
+                for (int localIndex = firstVisible; localIndex < lastVisibleExclusive; localIndex++)
                 {
-                    for (int localIndex = firstVisible; localIndex < lastVisibleExclusive; localIndex++)
+                    ObjectLibraryRow row = rows[run.Start + localIndex];
+                    EditorObjectTypeSnapshot item = row.Item;
+                    bool selected = snapshot.PlacementActive &&
+                                    string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
+                    if (DevToolExplorerRowRenderer.DrawSelectable(row, selected))
                     {
-                        ObjectLibraryRow row = rows[run.Start + localIndex];
-                        EditorObjectTypeSnapshot item = row.Item;
-                        bool selected = snapshot.PlacementActive &&
-                                        string.Equals(snapshot.PlacementType, item.Type, StringComparison.Ordinal);
-                        if (DevToolExplorerRowRenderer.DrawSelectable(row, selected))
-                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.BeginPlacement, text: item.Type));
+                        EditorUiCommandQueue.Enqueue(
+                            new EditorUiCommand(
+                                EditorUiCommandKind.BeginPlacement,
+                                text: item.Type));
                     }
                 }
             }
         }
-
-        if (objectLibraryMatchCount == 0)
-            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的物件。", "No matching objects."));
     }
 
     private static void EnsureObjectLibraryProjection(EditorPresentationSnapshot snapshot)
@@ -210,6 +240,7 @@ internal static class ObjectExplorerView
         {
             cached.Rows.Clear();
             cached.CategoryRuns.Clear();
+            cached.Pages.Clear();
         }
         ObjectLibraryGroups.Clear();
         objectLibraryMatchCount = 0;
@@ -226,7 +257,8 @@ internal static class ObjectExplorerView
         for (int i = 0; i < library.Length; i++)
         {
             EditorObjectTypeSnapshot item = library[i];
-            if (item == null || !MatchesLibrary(item, normalizedSearch, searchMode, needle)) continue;
+            if (item == null)
+                continue;
 
             string source = string.IsNullOrWhiteSpace(item.Source)
                 ? DevToolUiSettings.T("未知来源", "Unknown Source")
@@ -244,9 +276,11 @@ internal static class ObjectExplorerView
                     SourceMark = DevToolSourcePresentation.FromLabel(source)
                 };
                 ObjectLibraryGroupsBySource[source] = group;
-            }
-            if (group.Rows.Count == 0)
                 ObjectLibraryGroups.Add(group);
+            }
+
+            if (!MatchesLibrary(item, normalizedSearch, searchMode, needle))
+                continue;
 
             int rowIndex = group.Rows.Count;
             if (group.CategoryRuns.Count == 0 ||
@@ -274,9 +308,257 @@ internal static class ObjectExplorerView
             objectLibraryMatchCount++;
         }
 
+        ObjectLibraryGroups.Sort(CompareObjectSources);
+        for (int groupIndex = 0; groupIndex < ObjectLibraryGroups.Count; groupIndex++)
+            BuildObjectPages(ObjectLibraryGroups[groupIndex]);
+
+        EnsureActiveObjectSource();
+
         projectedObjectLibrary = library;
         projectedObjectSearch = normalizedSearch;
         projectedObjectChinese = chinese;
+    }
+
+    private static void DrawObjectSourceTabs()
+    {
+        if (ObjectLibraryGroups.Count == 0)
+            return;
+
+        DevToolWidgets.MutedText(DevToolUiSettings.T("Mod", "MOD"));
+
+        for (int i = 0; i < ObjectLibraryGroups.Count; i++)
+        {
+            ObjectLibraryGroup group = ObjectLibraryGroups[i];
+            bool active = string.Equals(
+                activeObjectSource,
+                group.Source,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (DevToolWidgets.ActionButton(
+                    group.Source,
+                    "ObjectSourceTab:" + group.Source,
+                    active ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+            {
+                activeObjectSource = group.Source;
+                ObjectPageBySource[group.Source] = 0;
+            }
+
+            if (i + 1 < ObjectLibraryGroups.Count)
+            {
+                float nextWidth =
+                    DevToolWidgets.ButtonWidth(
+                        ObjectLibraryGroups[i + 1].Source);
+                DevToolWidgets.SameLineIfFits(nextWidth);
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+    }
+
+    private static ObjectLibraryGroup ResolveActiveObjectGroup()
+    {
+        EnsureActiveObjectSource();
+
+        if (!string.IsNullOrEmpty(activeObjectSource) &&
+            ObjectLibraryGroupsBySource.TryGetValue(
+                activeObjectSource,
+                out ObjectLibraryGroup group))
+        {
+            return group;
+        }
+
+        return ObjectLibraryGroups.Count > 0
+            ? ObjectLibraryGroups[0]
+            : null;
+    }
+
+    private static void EnsureActiveObjectSource()
+    {
+        if (!string.IsNullOrEmpty(activeObjectSource) &&
+            ObjectLibraryGroupsBySource.ContainsKey(activeObjectSource))
+            return;
+
+        activeObjectSource =
+            ObjectLibraryGroups.Count > 0
+                ? ObjectLibraryGroups[0].Source
+                : string.Empty;
+    }
+
+    private static int DrawObjectPageControls(ObjectLibraryGroup group)
+    {
+        int pageCount = group?.Pages?.Count ?? 0;
+        if (pageCount <= 0)
+            return 0;
+
+        if (!ObjectPageBySource.TryGetValue(group.Source, out int pageIndex))
+            pageIndex = 0;
+
+        pageIndex = Math.Max(0, Math.Min(pageCount - 1, pageIndex));
+
+        if (pageCount > 1)
+        {
+            string pageText = DevToolUiSettings.T(
+                $"页面 {pageIndex + 1} / {pageCount}",
+                $"Page {pageIndex + 1} / {pageCount}");
+            ImGui.TextDisabled(pageText);
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("上一页", "Previous"),
+                    "ObjectPagePrevious",
+                    DevToolButtonTone.Subtle))
+            {
+                pageIndex =
+                    pageIndex <= 0
+                        ? pageCount - 1
+                        : pageIndex - 1;
+            }
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T("下一页", "Next"),
+                    "ObjectPageNext",
+                    DevToolButtonTone.Subtle))
+            {
+                pageIndex =
+                    pageIndex + 1 >= pageCount
+                        ? 0
+                        : pageIndex + 1;
+            }
+
+            ImGui.Spacing();
+        }
+
+        ObjectPageBySource[group.Source] = pageIndex;
+        return pageIndex;
+    }
+
+    private static void BuildObjectPages(ObjectLibraryGroup group)
+    {
+        group.Pages.Clear();
+        if (group.Rows.Count == 0)
+            return;
+
+        ObjectLibraryPage page = null;
+
+        for (int categoryIndex = 0; categoryIndex < group.CategoryRuns.Count; categoryIndex++)
+        {
+            CategoryRun sourceRun = group.CategoryRuns[categoryIndex];
+            int consumed = 0;
+
+            while (consumed < sourceRun.Count)
+            {
+                int remaining = sourceRun.Count - consumed;
+
+                if (page == null)
+                {
+                    page = new ObjectLibraryPage();
+                    group.Pages.Add(page);
+                }
+
+                int free = ObjectsPerPage - page.Rows.Count;
+                if (free <= 0)
+                {
+                    page = new ObjectLibraryPage();
+                    group.Pages.Add(page);
+                    free = ObjectsPerPage;
+                }
+
+                // Keep a normal-sized category together when it can fit on a fresh page. This
+                // mirrors the old ObjectsPage pagination without throwing away the current
+                // category-first list presentation.
+                if (page.Rows.Count > 0 &&
+                    remaining <= ObjectsPerPage &&
+                    remaining > free)
+                {
+                    page = new ObjectLibraryPage();
+                    group.Pages.Add(page);
+                    free = ObjectsPerPage;
+                }
+
+                int take = Math.Min(remaining, free);
+                int localStart = page.Rows.Count;
+                page.CategoryRuns.Add(new CategoryRun
+                {
+                    Category = sourceRun.Category,
+                    Start = localStart,
+                    Count = take
+                });
+
+                for (int row = 0; row < take; row++)
+                {
+                    page.Rows.Add(
+                        group.Rows[
+                            sourceRun.Start +
+                            consumed +
+                            row]);
+                }
+
+                consumed += take;
+                if (page.Rows.Count >= ObjectsPerPage)
+                    page = null;
+            }
+        }
+    }
+
+    private static int CompareObjectSources(
+        ObjectLibraryGroup left,
+        ObjectLibraryGroup right)
+    {
+        int leftPriority = ObjectSourcePriority(left?.Source);
+        int rightPriority = ObjectSourcePriority(right?.Source);
+        int priority = leftPriority.CompareTo(rightPriority);
+        if (priority != 0)
+            return priority;
+
+        return string.Compare(
+            left?.Source,
+            right?.Source,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int ObjectSourcePriority(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+            return 3;
+
+        if (source.IndexOf("PlacedObject Registry", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.IndexOf("Vanilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            source.IndexOf("Rain World", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 0;
+
+        if (source.IndexOf("DryCycle", StringComparison.OrdinalIgnoreCase) >= 0)
+            return 1;
+
+        return 2;
+    }
+
+    private static void DrawObjectCategoryLabel(string category)
+    {
+        // Keep the current plain category/list language, but give category boundaries enough visual
+        // weight to scan quickly. A small double-draw adds weight without requiring a second font.
+        category ??= string.Empty;
+
+        const float categoryScale = 1.34f;
+        ImGui.SetWindowFontScale(categoryScale);
+        Num.Vector2 position = ImGui.GetCursorScreenPos();
+        Num.Vector2 size = ImGui.CalcTextSize(category);
+        uint color = ImGui.GetColorU32(ImGuiCol.Text);
+        ImDrawListPtr draw = ImGui.GetWindowDrawList();
+
+        draw.AddText(position, color, category);
+        draw.AddText(
+            position + new Num.Vector2(0.75f, 0f),
+            color,
+            category);
+
+        ImGui.Dummy(
+            new Num.Vector2(
+                size.X + 1f,
+                size.Y + 2f));
+        ImGui.SetWindowFontScale(BrowserPaneFontScale);
     }
 
     private static bool MatchesLibrary(
