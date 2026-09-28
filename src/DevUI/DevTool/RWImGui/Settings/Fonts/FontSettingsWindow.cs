@@ -42,7 +42,10 @@ internal static class FontSettingsWindow
             new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(190f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
-        if (!ImGui.Begin(DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"), ImGuiWindowFlags.NoCollapse))
+        if (!ImGui.Begin(
+                DevToolUiSettings.T("字体###DevToolFontSettings", "Font###DevToolFontSettings"),
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
