@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $checker = Join-Path $PSScriptRoot "CodeMap.ps1"
 $autofixer = Join-Path $PSScriptRoot "CodeMap.AutoFix.ps1"
+$installer = Join-Path $PSScriptRoot "Install-CodeMapHooks.ps1"
 $powerShell = if (Get-Command pwsh -ErrorAction SilentlyContinue) {
     (Get-Command pwsh).Source
 }
@@ -121,6 +122,27 @@ function Invoke-AutoFix(
     }
 }
 
+function Invoke-Installer(
+    [string]$WorkingDirectory,
+    [string[]]$Arguments = @()
+) {
+    $scripts = Join-Path $WorkingDirectory "scripts"
+    $hooks = Join-Path $WorkingDirectory ".githooks"
+    New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+    New-Item -ItemType Directory -Path $hooks -Force | Out-Null
+    Copy-Item -LiteralPath $installer -Destination (Join-Path $scripts "Install-CodeMapHooks.ps1") -Force
+    $hookText = "#!/bin/sh" + [Environment]::NewLine + "exit 0" + [Environment]::NewLine
+    Write-Utf8 (Join-Path $hooks "pre-commit") $hookText
+    Write-Utf8 (Join-Path $hooks "pre-push") $hookText
+
+    $copy = Join-Path $scripts "Install-CodeMapHooks.ps1"
+    $output = @(& $powerShell -NoProfile -File $copy @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "installer failed exit=$exitCode output=[$($output -join ' | ')]"
+    }
+    return @($output | ForEach-Object { [string]$_ })
+}
 function Assert-Equal($Expected, $Actual, [string]$Message) {
     if ($Expected -ne $Actual) {
         throw "$Message expected=[$Expected] actual=[$Actual]"
@@ -662,6 +684,41 @@ $tests.Add({
         if ($mapText -match [regex]::Escape([string][char]96 + "Feature/" + [string][char]96)) {
             throw "autofix delete plus unrelated add left stale entry"
         }
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        $output = Invoke-Installer $repo
+        Assert-Empty $output "installer normal install must be silent"
+        $configured = @(Invoke-Git $repo @("config", "--local", "--get", "core.hooksPath"))
+        Assert-Equal ".githooks" $configured[0].Trim() "installer hooks path"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("config", "--local", "core.hooksPath", ".custom-hooks") | Out-Null
+        $output = Invoke-Installer $repo @("-IfUnset")
+        Assert-Empty $output "installer IfUnset must be silent"
+        $configured = @(Invoke-Git $repo @("config", "--local", "--get", "core.hooksPath"))
+        Assert-Equal ".custom-hooks" $configured[0].Trim() "installer must preserve custom hooks path"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        [void](Invoke-Installer $repo)
+        [void](Invoke-Installer $repo @("-Disable"))
+        $raw = @(& git -C $repo config --local --get core.hooksPath 2>&1)
+        Assert-Equal 1 $LASTEXITCODE "installer disable must unset hooks path"
+        Assert-Empty $raw "installer disable must leave no hooks path"
     }
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
