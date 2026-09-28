@@ -222,7 +222,9 @@ public static partial class EditorPresentationHub
             X = selected?.pos.x ?? 0f,
             Y = selected?.pos.y ?? 0f,
             DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
-            LegacyUiAvailable = singleSelection,
+            LegacyUiAvailable =
+                singleSelection &&
+                (!coverage.IsComplete || session.LegacyUiVisible),
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
             ObjectGizmo = objectGizmo,
