@@ -320,7 +320,8 @@ internal static partial class TriggerEditorView
                 DevToolUiSettings.T(
                     "场景###TriggerCompactSceneV2",
                     "Scene###TriggerCompactSceneV2"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
