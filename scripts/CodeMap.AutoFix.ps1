@@ -487,17 +487,11 @@ try {
                 continue
             }
 
-            $unhandledMissing = @(
-                $issues.Missing |
-                    Where-Object {
-                        -not $handledMissing.Contains($_.Map + "|" + $_.Entry)
-                    }
-            )
-
-            if (@($unhandledMissing).Count -eq 0) {
-                $edit = Get-EditState $edits $stale.Map
-                [void]$edit.Remove.Add($stale.Entry)
-            }
+            # A stale entry points at a directory that objectively no longer exists.
+            # Removing that entry is safe even when unrelated new directories still need semantic
+            # descriptions. Only migration of the old description requires an R100 proof above.
+            $edit = Get-EditState $edits $stale.Map
+            [void]$edit.Remove.Add($stale.Entry)
         }
 
         $applied = 0

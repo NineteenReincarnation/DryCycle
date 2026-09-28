@@ -33,7 +33,14 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           $base = $env:BASE_SHA
-          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$') {
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+
+) {
               $base = 'EMPTY'
+          }
+          elseif (-not (git cat-file -e "$base^{commit}" 2>$null)) {
+              git fetch --no-tags --depth=1 origin $base 2>$null
+              if ($LASTEXITCODE -ne 0 -or -not (git cat-file -e "$base^{commit}" 2>$null)) {
+                  $base = 'EMPTY'
+              }
           }
           ./scripts/CodeMap.ps1 -Source Range -Base $base -Head $env:HEAD_SHA

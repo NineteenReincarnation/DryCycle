@@ -647,6 +647,25 @@ $tests.Add({
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
 
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("rm", "-r", "-q", "src/Area/Feature") | Out-Null
+        Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 10 $result.ExitCode "autofix delete plus unrelated semantic add"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +NewFeature/" "autofix keeps semantic add"
+
+        $mapText = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        if ($mapText -match [regex]::Escape([string][char]96 + "Feature/" + [string][char]96)) {
+            throw "autofix delete plus unrelated add left stale entry"
+        }
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
 foreach ($test in $tests) {
     & $test
 }

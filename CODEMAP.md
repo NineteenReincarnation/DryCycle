@@ -16,7 +16,7 @@
 - `docs/` — 深度架构、设计与说明文档；普通局部任务不要默认读取。
 - `lib/` — 编译依赖说明。
 - `.github/` — CI / workflow。
-- `.githooks/` — 本地 Git 提交与推送前的机械校验 Hook。
+- `.githooks/` — 可选本地 Git 提交与推送前机械校验 Hook。
 
 ## 高价值消歧
 

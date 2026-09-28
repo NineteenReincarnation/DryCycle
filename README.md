@@ -17,8 +17,18 @@ with bundles in `shader-bundles` and logs in `logs`. Only redistributable bundle
 their version files are copied into `mod/assets/drycycle`. DLL deployment remains
 `Ancient Site/newest/plugins` in the selected Rain World installation.
 
-`上传.bat` respects `.gitignore`. Visual Studio may create its own ignored `.vs`
-directory when opening the solution; it is excluded from that upload script.
+Visual Studio may create its own ignored `.vs` directory when opening the solution.
+
+### Optional local CODEMAP hooks
+
+GitHub Actions is the authoritative CODEMAP check. A fresh clone can additionally enable the
+repository-owned pre-commit/pre-push hooks once with:
+
+```powershell
+pwsh -NoProfile -File ./scripts/Install-CodeMapHooks.ps1
+```
+
+The installer does not replace an existing custom `core.hooksPath` unless `-Force` is used.
 
 ## Versioning
 
