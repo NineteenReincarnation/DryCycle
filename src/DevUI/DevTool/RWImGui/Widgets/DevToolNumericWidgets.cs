@@ -15,6 +15,8 @@ internal static class DevToolNumericScope
     internal const string Relationship = "Relationship";
     internal const string Trigger = "Trigger";
     internal const string SoundRoom = "SoundRoom";
+    internal const string SoundRoomBackgroundDrone = "SoundRoom.BackgroundDrone";
+    internal const string SoundRoomNoThreatDrone = "SoundRoom.NoThreatDrone";
     internal const string SoundItem = "SoundItem";
     internal const string Universal = "Universal";
     internal const string ObjectTransform = "ObjectTransform";
