@@ -165,7 +165,7 @@ internal static class SoundEditorView
         ImGui.SetColumnWidth(2, sideWidth);
 
         DrawRoomRotaryColumn(
-            DevToolUiSettings.T("背景低鸣", "Bkg Drone"),
+            DevToolUiSettings.T("威胁音乐音量", "Bkg Drone"),
             DevToolNumericScope.SoundRoomBackgroundDrone,
             SoundEditorKeys.BackgroundDroneVolume,
             snapshot.BackgroundDroneVolume,
@@ -196,7 +196,7 @@ internal static class SoundEditorView
         ImGui.NextColumn();
 
         DrawRoomRotaryColumn(
-            DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"),
+            DevToolUiSettings.T("无威胁时音量", "No Threat Drone"),
             DevToolNumericScope.SoundRoomNoThreatDrone,
             SoundEditorKeys.NoThreatDroneVolume,
             snapshot.NoThreatDroneVolume,
@@ -272,7 +272,7 @@ internal static class SoundEditorView
 
             if (selected.Inherited) ImGui.EndDisabled();
             if (selected.Inherited)
-                ImGui.TextWrapped(DevToolUiSettings.T("继承声音 | 请修改来源模板，或添加本地覆盖。", "Inherited sound | edit its source template or add a local override."));
+                ImGui.TextWrapped(DevToolUiSettings.T("默认声音 | 请修改来源模板，或添加本地覆盖。", "Inherited sound | edit its source template or add a local override."));
         }
 
         if (selectedIndices.Length <= 1)
@@ -847,7 +847,7 @@ internal static class SoundEditorView
                 _ => "?"
             };
             string suffix = sound.Inherited
-                ? DevToolUiSettings.T("  [继承]", "  [Inherited]")
+                ? DevToolUiSettings.T("  [默认]", "  [Inherited]")
                 : sound.OverWrite
                     ? DevToolUiSettings.T("  [覆盖]", "  [Override]")
                     : string.Empty;
@@ -914,7 +914,7 @@ internal static class SoundEditorView
             return stateText;
 
         stateText = sound.Type;
-        if (sound.Inherited) stateText += chinese ? " | 继承" : " | Inherited";
+        if (sound.Inherited) stateText += chinese ? " | 默认" : " | Inherited";
         else if (sound.OverWrite) stateText += chinese ? " | 覆盖模板" : " | Overrides template";
         stateSound = sound;
         stateChinese = chinese;
