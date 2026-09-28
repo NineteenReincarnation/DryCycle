@@ -278,6 +278,14 @@ public static class ObjectCatalog
 
         Dictionary<string, string> next =
             new(StringComparer.Ordinal);
+        HashSet<string> registeredTypes =
+            new(StringComparer.Ordinal);
+        for (int i = 0; i < ExtEnum<PlacedObject.Type>.values.Count; i++)
+        {
+            string entry = ExtEnum<PlacedObject.Type>.values.GetEntry(i);
+            if (!string.IsNullOrEmpty(entry))
+                registeredTypes.Add(entry);
+        }
 
         // Rain World's own ExtEnum fields live in Assembly-CSharp, including DLC / Watcher helper
         // containers. Resolve those first so a third-party alias cannot steal ownership of a base
@@ -286,6 +294,7 @@ public static class ObjectCatalog
         CollectPlacedObjectTypes(
             gameAssembly,
             "Rain World",
+            registeredTypes,
             next,
             overwrite: false);
 
@@ -310,6 +319,7 @@ public static class ObjectCatalog
                 CollectPlacedObjectTypes(
                     assembly,
                     source.Trim(),
+                    registeredTypes,
                     next,
                     overwrite: false);
             }
@@ -322,10 +332,12 @@ public static class ObjectCatalog
     private static void CollectPlacedObjectTypes(
         Assembly assembly,
         string source,
+        HashSet<string> registeredTypes,
         Dictionary<string, string> destination,
         bool overwrite)
     {
         if (assembly == null ||
+            registeredTypes == null ||
             destination == null ||
             string.IsNullOrWhiteSpace(source))
             return;
@@ -372,18 +384,13 @@ public static class ObjectCatalog
                 if (!typeof(PlacedObject.Type).IsAssignableFrom(field.FieldType))
                     continue;
 
-                PlacedObject.Type value;
-                try
-                {
-                    value = field.GetValue(null) as PlacedObject.Type;
-                }
-                catch
-                {
-                    continue;
-                }
-
-                string typeName = value?.value;
-                if (string.IsNullOrEmpty(typeName))
+                // Use metadata only. Reading a static ExtEnum field can trigger an arbitrary mod
+                // type initializer, which is not acceptable just to build a Browser index. Rain
+                // World and conventional mod enum holders use the field name as the ExtEnum value;
+                // unknown/dynamic registrations safely fall back to "PlacedObject Registry".
+                string typeName = field.Name;
+                if (string.IsNullOrEmpty(typeName) ||
+                    !registeredTypes.Contains(typeName))
                     continue;
 
                 if (overwrite || !destination.ContainsKey(typeName))
