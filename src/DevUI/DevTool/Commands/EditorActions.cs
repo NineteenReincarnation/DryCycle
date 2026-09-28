@@ -72,7 +72,13 @@ public static class EditorActions
         if (session == null || map == null) return false;
 
         bool ok = true;
-        map.SaveMapConfig();
+
+        if (!NativeMapAuthoringStateHub.SaveDevPositionOverrides(session))
+            ok = false;
+
+        using (NativeMapAuthoringStateHub.BeginVanillaMapSaveProjection(session, map))
+            map.SaveMapConfig();
+
         if (PlayerMapWorkspaceRuntime.IsDirty(session))
         {
             ok = false;
