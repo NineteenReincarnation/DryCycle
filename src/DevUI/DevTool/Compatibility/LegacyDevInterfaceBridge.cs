@@ -200,19 +200,38 @@ public static class LegacyDevInterfaceBridge
         if (node is Button infrastructureButton && IsInfrastructureButton(infrastructureButton))
             return true;
 
-        // Containers are covered by recursively mirroring their descendants. Handles are covered
-        // by HeadlessRepresentationGizmoBridge, and labels carry presentation text only.
-        if (node is Page ||
-            node is Panel ||
-            node is Handle ||
-            node is DevUILabel ||
-            node is PlacedObjectRepresentation)
+        // Containers are covered by recursively mirroring their descendants, but a subclass may
+        // also hide authoring input directly in Update(). Only framework Update implementations are
+        // assumed safe. Unknown custom Update() logic keeps the explicit legacy escape hatch.
+        if (node is Page)
+            return true;
+        if (node is PlacedObjectRepresentation representation)
+            return UsesOnlyFrameworkUpdate(
+                representation,
+                typeof(PlacedObjectRepresentation),
+                typeof(Handle),
+                typeof(PositionedDevUINode),
+                typeof(DevUINode));
+        if (node is Panel panel)
+            return UsesOnlyFrameworkUpdate(
+                panel,
+                typeof(Panel),
+                typeof(RectangularDevUINode),
+                typeof(PositionedDevUINode),
+                typeof(DevUINode));
+        if (node is Handle handle)
+            return UsesOnlyFrameworkUpdate(
+                handle,
+                typeof(Handle),
+                typeof(PositionedDevUINode),
+                typeof(DevUINode));
+        if (node is DevUILabel)
             return true;
 
         // Composite control frameworks commonly wrap real Buttons/Sliders/Handles in a plain
         // PositionedDevUINode. That wrapper is safe to recurse through only when it has no custom
-        // per-frame Update() semantics of its own. This covers structural containers such as POM's
-        // managed button/select and multi-point holders without naming POM or any concrete type.
+        // per-frame Update() semantics of its own. This covers structural managed button/select and
+        // multi-point holders without naming any ecosystem or concrete third-party type.
         if (node is PositionedDevUINode positioned && IsPassiveCompositeNode(positioned))
             return true;
 
@@ -223,7 +242,16 @@ public static class LegacyDevInterfaceBridge
         return false;
     }
 
-    private static bool IsPassiveCompositeNode(PositionedDevUINode node)
+    private static bool IsPassiveCompositeNode(PositionedDevUINode node) =>
+        UsesOnlyFrameworkUpdate(
+            node,
+            typeof(RectangularDevUINode),
+            typeof(PositionedDevUINode),
+            typeof(DevUINode));
+
+    private static bool UsesOnlyFrameworkUpdate(
+        DevUINode node,
+        params Type[] allowedDeclaringTypes)
     {
         if (node == null)
             return false;
@@ -237,10 +265,35 @@ public static class LegacyDevInterfaceBridge
         if (update == null)
             return true;
 
+        // A non-virtual method with the same name cannot participate in DevUINode's virtual update
+        // dispatch. Walk back to the inherited virtual implementation instead of treating a harmless
+        // method hide as an authoring surface.
         Type declaring = update.DeclaringType;
-        return declaring == typeof(DevUINode) ||
-               declaring == typeof(PositionedDevUINode) ||
-               declaring == typeof(RectangularDevUINode);
+        if (!update.IsVirtual)
+        {
+            Type current = node.GetType().BaseType;
+            while (current != null && typeof(DevUINode).IsAssignableFrom(current))
+            {
+                MethodInfo inherited = current.GetMethod(
+                    nameof(DevUINode.Update),
+                    BindingFlags.Instance |
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.DeclaredOnly);
+                if (inherited != null && inherited.IsVirtual)
+                {
+                    declaring = inherited.DeclaringType;
+                    break;
+                }
+                current = current.BaseType;
+            }
+        }
+
+        for (int i = 0; i < allowedDeclaringTypes.Length; i++)
+            if (declaring == allowedDeclaringTypes[i])
+                return true;
+
+        return false;
     }
 
     internal static bool CanAdaptBoolean(DevUINode node) =>
@@ -362,6 +415,7 @@ public static class LegacyDevInterfaceBridge
             if (!TryWriteMember(node, "actualValue", desired)) return false;
             PropagateSignal(button, DevUISignalType.ButtonClick, string.Empty);
             button.Refresh();
+            SynchronizePollingParent(owner, button);
             return TryReadBoolMember(node, "actualValue", out after) && after == desired;
         }
         catch (Exception error)
@@ -1184,13 +1238,26 @@ public static class LegacyDevInterfaceBridge
     private static void SynchronizePollingParent(global::DevInterface.DevUI owner, DevUINode node)
     {
         if (owner == null || node?.parentNode == null) return;
+
         bool oldMouseClick = owner.mouseClick;
+        bool oldMouseDown = owner.mouseDown;
+        DevUINode oldDraggedNode = owner.draggedNode;
         try
         {
+            // This is a semantic synchronization pass, not a synthetic legacy-input frame. Disable
+            // mouse transitions and drag ownership so hidden Panels can process deferred tree/value
+            // state without accidentally reacting to the real cursor behind the ImGui frontend.
             owner.mouseClick = false;
+            owner.mouseDown = false;
+            owner.draggedNode = null;
             node.parentNode.Update();
         }
-        finally { owner.mouseClick = oldMouseClick; }
+        finally
+        {
+            owner.mouseClick = oldMouseClick;
+            owner.mouseDown = oldMouseDown;
+            owner.draggedNode = oldDraggedNode;
+        }
     }
 
     private static float ColorDistanceSquared(Color a, Color b)
