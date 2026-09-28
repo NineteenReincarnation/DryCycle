@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using DevInterface;
@@ -17,6 +18,7 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 internal static class HeadlessRepresentationGizmoBridge
 {
     internal const string HandlePrefix = "headless-handle:";
+    private static readonly ConcurrentDictionary<Type, FieldInfo[]> LineRendererFields = new();
 
     internal static EditorObjectGizmoSnapshot Capture(
         EditorSession session,
@@ -118,6 +120,12 @@ internal static class HeadlessRepresentationGizmoBridge
             representation,
             camera,
             panelPositions,
+            lines,
+            insidePanel: false);
+
+        CaptureLineRendererGeometry(
+            representation,
+            camera,
             lines,
             insidePanel: false);
 
@@ -283,6 +291,147 @@ internal static class HeadlessRepresentationGizmoBridge
                 panelPositions,
                 lines,
                 nextInsidePanel);
+    }
+
+    private static void CaptureLineRendererGeometry(
+        DevUINode node,
+        Vector2 camera,
+        List<EditorObjectLineSegmentSnapshot> lines,
+        bool insidePanel)
+    {
+        if (node == null || lines == null)
+            return;
+
+        bool nextInsidePanel = insidePanel || node is Panel;
+        if (!nextInsidePanel)
+        {
+            FieldInfo[] fields = LineRendererFields.GetOrAdd(
+                node.GetType(),
+                BuildLineRendererFields);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                object raw;
+                try { raw = fields[i].GetValue(node); }
+                catch { continue; }
+
+                if (raw is LineRenderer renderer)
+                {
+                    CaptureLineRenderer(renderer, camera, lines);
+                    continue;
+                }
+
+                if (raw is Array array)
+                {
+                    for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                        if (array.GetValue(itemIndex) is LineRenderer item)
+                            CaptureLineRenderer(item, camera, lines);
+                }
+            }
+        }
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            CaptureLineRendererGeometry(
+                node.subNodes[i],
+                camera,
+                lines,
+                nextInsidePanel);
+    }
+
+    private static FieldInfo[] BuildLineRendererFields(Type nodeType)
+    {
+        List<FieldInfo> result = new();
+        Type current = nodeType;
+
+        while (current != null &&
+               current != typeof(DevUINode) &&
+               typeof(DevUINode).IsAssignableFrom(current))
+        {
+            FieldInfo[] fields = current.GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                Type fieldType = fields[i].FieldType;
+                if (typeof(LineRenderer).IsAssignableFrom(fieldType))
+                {
+                    result.Add(fields[i]);
+                    continue;
+                }
+
+                if (fieldType.IsArray &&
+                    fieldType.GetElementType() != null &&
+                    typeof(LineRenderer).IsAssignableFrom(fieldType.GetElementType()))
+                    result.Add(fields[i]);
+            }
+
+            current = current.BaseType;
+        }
+
+        return result.ToArray();
+    }
+
+    private static void CaptureLineRenderer(
+        LineRenderer renderer,
+        Vector2 camera,
+        List<EditorObjectLineSegmentSnapshot> lines)
+    {
+        if (renderer == null || !renderer.enabled)
+            return;
+
+        int count;
+        try { count = renderer.positionCount; }
+        catch { return; }
+
+        if (count < 2)
+            return;
+
+        // Defensive cap for malformed/custom renderers. DevTool geometry is an authoring aid, not a
+        // general-purpose Unity scene mirror.
+        count = Math.Min(count, 4096);
+
+        Vector3 previous3;
+        try { previous3 = renderer.GetPosition(0); }
+        catch { return; }
+
+        Vector2 previous = RendererPoint(renderer, previous3) + camera;
+        for (int i = 1; i < count; i++)
+        {
+            Vector3 current3;
+            try { current3 = renderer.GetPosition(i); }
+            catch { break; }
+
+            Vector2 current = RendererPoint(renderer, current3) + camera;
+            if ((current - previous).sqrMagnitude > 0.0001f)
+                AddLineUnique(lines, previous, current);
+            previous = current;
+        }
+    }
+
+    private static Vector2 RendererPoint(
+        LineRenderer renderer,
+        Vector3 point)
+    {
+        if (renderer == null)
+            return new Vector2(point.x, point.y);
+
+        try
+        {
+            if (!renderer.useWorldSpace && renderer.transform != null)
+            {
+                Vector3 world = renderer.transform.TransformPoint(point);
+                return new Vector2(world.x, world.y);
+            }
+        }
+        catch { }
+
+        return new Vector2(point.x, point.y);
     }
 
     private static bool IsPixelSprite(FSprite sprite)
