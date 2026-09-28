@@ -276,9 +276,9 @@ if 'DevToolTopStatusWindow.Draw' not in bridge:
     raise SystemExit("Every rebuilt page must pass through the shared top-status window.")
 if 'snapshot.RoomName' not in top or '" : NewDevtool Active"' not in top:
     raise SystemExit("Shared top status must display the current room and NewDevtool Active.")
-if '(display.X - windowSize.X) * 0.5f' not in top or '6f));' not in top:
+if '(display.X - width) * 0.5f' not in top or '6f),' not in top:
     raise SystemExit("Shared top status must remain locked to the physical screen top-center.")
-if 'DevToolWidgets.CenteredPrimaryTitle' not in top or '1.68f' not in top:
+if 'DevToolWidgets.CenteredPrimaryTitle' not in top or '1.56f' not in top:
     raise SystemExit("Shared top status must retain the enlarged primary gold title treatment.")
 if 'new Num.Vector2(13f, 9f)' not in top or 'ImGui.SetWindowFontScale(1.14f)' not in top:
     raise SystemExit("Shared top status must keep its enlarged padding and readable action row.")
