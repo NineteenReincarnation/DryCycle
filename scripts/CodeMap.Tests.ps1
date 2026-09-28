@@ -142,8 +142,10 @@ $tests.Add({
     try {
         Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
         Invoke-Git $repo @("add", "src/Area/NewFeature/New.cs") | Out-Null
-        $result = Invoke-Checker $repo @("-Source", "Staged")
-        Assert-Equal 10 $result.ExitCode "new direct module"
+        $result = Invoke-Checker $repo @("-Source", "Staged", "-Detailed")
+        if ($result.ExitCode -ne 10) {
+            throw "new direct module expected=[10] actual=[$($result.ExitCode)] output=[$($result.Output -join ' | ')]"
+        }
         Assert-Contains $result.Output "sem src/Area/CODEMAP.md +NewFeature/" "new direct module"
     }
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
