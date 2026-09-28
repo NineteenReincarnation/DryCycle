@@ -557,6 +557,12 @@ function Test-Scope(
     }
 }
 
+function Write-Trace([string]$Message) {
+    if ($Detailed) {
+        [Console]::Out.WriteLine("trace $Message")
+    }
+}
+
 function Write-MinimalOutput([string[]]$Lines) {
     if ($Detailed) {
         foreach ($line in $Lines) {
@@ -641,6 +647,7 @@ try {
         }
 
         $changes = @(Get-Changes $baseTree $targetTree)
+        Write-Trace ("changes=" + $changes.Count)
         if ($changes.Count -eq 0) {
             exit 0
         }
@@ -657,6 +664,7 @@ try {
             Get-AffectedScopes $changes $baseTree $targetTree
         )
 
+        Write-Trace ("scopes=" + ($affectedScopes -join ","))
         if ($affectedScopes.Count -eq 0) {
             exit 0
         }
@@ -665,14 +673,23 @@ try {
         $invalidLines = New-Object System.Collections.Generic.List[string]
 
         foreach ($scope in $affectedScopes) {
-            if (-not (Should-ValidateScope $baseTree $targetTree $scope)) {
+            $shouldValidate = Should-ValidateScope $baseTree $targetTree $scope
+            Write-Trace ("scope=" + $scope + " validate=" + $shouldValidate)
+            if (-not $shouldValidate) {
                 continue
             }
 
             $result = Test-Scope $targetTree $scope
             if ($null -eq $result) {
+                Write-Trace ("scope=" + $scope + " result=null")
                 continue
             }
+
+            Write-Trace (
+                "scope=" + $scope +
+                " missing=" + ($result.Missing -join ",") +
+                " stale=" + ($result.Stale -join ",")
+            )
 
             if ($result.FormatErrors.Count -gt 0) {
                 $invalidLines.Add("fmt $($result.CodeMap)")
