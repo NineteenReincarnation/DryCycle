@@ -189,7 +189,22 @@ function Parse-CodeMap([string]$Content) {
     }
 
     foreach ($line in $lines) {
-        $ignoreMatch = [regex]::Match($line, '^\s*<!--\s*codemap-ignore:\s*(?<items>.*?)\s*-->\s*
+        $ignoreMatch = [regex]::Match($line, '^\s*<!--\s*codemap-ignore:\s*(?<items>.*?)\s*-->\s*$')
+        if ($ignoreMatch.Success) {
+            foreach ($item in ($ignoreMatch.Groups["items"].Value -split ',')) {
+                $name = $item.Trim().TrimEnd('/')
+                if (-not [string]::IsNullOrWhiteSpace($name)) {
+                    [void]$ignored.Add($name)
+                }
+            }
+            continue
+        }
+
+        if ($line -notmatch '^\s*-\s+\x60') {
+            continue
+        }
+
+        $match = [regex]::Match($line, '^\s*-\s+\x60(?<path>[^\x60]+)\x60\s+(?:—|-)\s+.+$')
         if (-not $match.Success) {
             $errors.Add("entry")
             continue
