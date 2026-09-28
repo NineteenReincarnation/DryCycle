@@ -54,12 +54,9 @@ internal static class DevToolOverlay
             }
         }
 
-        // The compact top status surface and collapsed shortcut orb are shared editor chrome
-        // rather than page content. Global mode/language controls now live in the top surface.
-        DevToolTopStatusWindow.Draw(
-            snapshot,
-            page,
-            display);
+        // The compact top status surface is submitted by BridgePlugin after every normal
+        // workspace/window so it owns the highest regular UI layer. ShortcutWindow remains part of
+        // the shared editor chrome here.
         ShortcutWindow.Draw(snapshot, display);
 
         if (!snapshot.FocusMode)
@@ -121,7 +118,8 @@ internal static class DevToolOverlay
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("工具###DevToolActivity", "Tools###DevToolActivity"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
@@ -287,7 +285,8 @@ internal static class DevToolOverlay
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("编辑面板###DevToolBrowserInspector", "Editor Panel###DevToolBrowserInspector"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
