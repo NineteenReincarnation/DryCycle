@@ -111,6 +111,13 @@ internal static class DevToolNumericWidgets
     private static readonly Dictionary<EditKey, IntState> IntStates = new();
     private static readonly HashSet<EditKey> FloatTextEditors = new();
     private static readonly HashSet<EditKey> FloatTextEditorFocusPending = new();
+
+    // Rotary dragging has explicit pointer ownership instead of relying only on ImGui's global
+    // ActiveId. This guarantees that two rotary widgets drawn in the same top bar can never consume
+    // the same MouseDelta, even if a backend/column transition briefly reports overlapping active
+    // state while the pointer crosses between them.
+    private static EditKey? activeRotaryDragKey;
+
     private static readonly List<EditKey> StaleKeys = new();
     private static int nextPruneFrame;
 
@@ -226,21 +233,41 @@ internal static class DevToolNumericWidgets
 
         bool hovered = ImGui.IsItemHovered();
         bool active = ImGui.IsItemActive();
-        if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        bool doubleClicked =
+            hovered &&
+            ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
+
+        if (doubleClicked)
         {
+            if (activeRotaryDragKey.HasValue &&
+                activeRotaryDragKey.Value.Equals(key))
+            {
+                activeRotaryDragKey = null;
+            }
+
             FloatTextEditors.Add(key);
             FloatTextEditorFocusPending.Add(key);
         }
-        else if (active && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
+        else
         {
-            Num.Vector2 delta = ImGui.GetIO().MouseDelta;
-            float span = Math.Max(0.0001f, max - min);
-            float next = value + (delta.X - delta.Y) * span / 180f;
-            next = Math.Max(min, Math.Min(max, next));
-            if (!NearlyEqual(next, value))
+            if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                activeRotaryDragKey = key;
+
+            bool ownsDrag =
+                activeRotaryDragKey.HasValue &&
+                activeRotaryDragKey.Value.Equals(key);
+
+            if (ownsDrag && ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
-                value = next;
-                changed = true;
+                Num.Vector2 delta = ImGui.GetIO().MouseDelta;
+                float span = Math.Max(0.0001f, max - min);
+                float next = value + (delta.X - delta.Y) * span / 180f;
+                next = Math.Max(min, Math.Min(max, next));
+                if (!NearlyEqual(next, value))
+                {
+                    value = next;
+                    changed = true;
+                }
             }
         }
 
@@ -284,8 +311,23 @@ internal static class DevToolNumericWidgets
             text,
             valueText);
 
+        bool ownsReleasedDrag =
+            activeRotaryDragKey.HasValue &&
+            activeRotaryDragKey.Value.Equals(key) &&
+            ImGui.IsMouseReleased(ImGuiMouseButton.Left);
+
         DevToolNumericEditResult<float> rotaryResult =
-            EndFloat(key, authoritativeValue, value, changed, state, frame);
+            EndFloat(
+                key,
+                authoritativeValue,
+                value,
+                changed,
+                state,
+                frame,
+                forceCommit: ownsReleasedDrag);
+
+        if (ownsReleasedDrag)
+            activeRotaryDragKey = null;
 
         if (hovered)
         {
@@ -353,6 +395,11 @@ internal static class DevToolNumericWidgets
         IntStates.Remove(key);
         FloatTextEditors.Remove(key);
         FloatTextEditorFocusPending.Remove(key);
+        if (activeRotaryDragKey.HasValue &&
+            activeRotaryDragKey.Value.Equals(key))
+        {
+            activeRotaryDragKey = null;
+        }
     }
 
     internal static void Reset()
@@ -361,6 +408,7 @@ internal static class DevToolNumericWidgets
         IntStates.Clear();
         FloatTextEditors.Clear();
         FloatTextEditorFocusPending.Clear();
+        activeRotaryDragKey = null;
         StaleKeys.Clear();
         nextPruneFrame = 0;
     }
