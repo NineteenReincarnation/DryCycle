@@ -1,0 +1,15 @@
+#!/bin/sh
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -File "$root/scripts/CodeMap.AutoFix.ps1" -Repository "$root"
+    exit $?
+fi
+
+if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/CodeMap.AutoFix.ps1" -Repository "$root"
+    exit $?
+fi
+
+printf '%s\n' 'codemap: PowerShell unavailable' >&2
+exit 30

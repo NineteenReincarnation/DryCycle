@@ -1,0 +1,55 @@
+#!/bin/sh
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+remote_name="$1"
+
+run_check() {
+    base="$1"
+    head="$2"
+
+    if command -v pwsh >/dev/null 2>&1; then
+        pwsh -NoProfile -File "$root/scripts/CodeMap.ps1" -Source Range -Base "$base" -Head "$head" -Repository "$root"
+        return $?
+    fi
+
+    if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/CodeMap.ps1" -Source Range -Base "$base" -Head "$head" -Repository "$root"
+        return $?
+    fi
+
+    printf '%s\n' 'codemap: PowerShell unavailable' >&2
+    return 30
+}
+
+while read local_ref local_oid remote_ref remote_oid
+do
+    case "$local_oid" in
+        0000000000000000000000000000000000000000) continue ;;
+    esac
+
+    base="$remote_oid"
+    case "$remote_oid" in
+        0000000000000000000000000000000000000000)
+            base=""
+            remote_main="refs/remotes/$remote_name/main"
+            if git show-ref --verify --quiet "$remote_main"; then
+                base=$(git merge-base "$local_oid" "$remote_main" 2>/dev/null || true)
+            fi
+
+            if [ "$base" = "$local_oid" ]; then
+                continue
+            fi
+
+            if [ -z "$base" ]; then
+                base="EMPTY"
+            fi
+            ;;
+    esac
+
+    run_check "$base" "$local_oid"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        exit "$rc"
+    fi
+done
+
+exit 0
