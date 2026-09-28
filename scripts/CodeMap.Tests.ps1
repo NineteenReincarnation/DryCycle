@@ -739,6 +739,7 @@ $tests.Add({
         $mapLines.Add("# Area")
         $mapLines.Add("")
         $tick = [string][char]96
+        $mapLines.Add("- " + $tick + "Feature/" + $tick + " — feature")
         for ($i = 0; $i -lt 9; $i++) {
             $name = "Feature$i"
             Write-Utf8 (Join-Path $repo "src/Area/$name/File.cs") "class $name { }"
