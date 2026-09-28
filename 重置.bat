@@ -164,10 +164,9 @@ if errorlevel 1 (
 )
 echo [OK] Fresh clone completed.
 
-rem Enable repository-owned hooks in the fresh checkout.
-git -C "%TARGET%" config --local core.hooksPath .githooks >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%\scripts\Install-CodeMapHooks.ps1" -IfUnset >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Could not enable repository Git hooks.
+    echo [ERROR] Could not configure repository Git hooks.
     goto :worker_fail
 )
 echo.

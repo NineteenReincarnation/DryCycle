@@ -1,6 +1,7 @@
 param(
     [switch]$Disable,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$IfUnset
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,9 @@ if ($Disable) {
 if (-not [string]::IsNullOrWhiteSpace($current) -and
     $current -ne ".githooks" -and
     -not $Force) {
+    if ($IfUnset) {
+        exit 0
+    }
     throw "custom core.hooksPath already configured: $current"
 }
 
