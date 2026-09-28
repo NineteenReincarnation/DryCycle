@@ -30,7 +30,6 @@ IteratorRegistry.Unregister(definition);
 - [Brain、动作与玩家观察](BEHAVIOR.md)：优先级、条件、不可打断动作、行为模块、感知与默认行为。
 - [Conversation 与对话脚本](CONVERSATION.md)：命令、条件、分支、HUD 输出、打断、恢复与清理。
 - [Body、Arm 与 Pose](BODY.md)：移动、配置、自定义身体、机械臂约束及姿势输入。
-- [开发进度与验证](PROGRESS.md)：本次交付、测试结果、后续阶段和未验证内容。
 
 ## 当前结构
 
