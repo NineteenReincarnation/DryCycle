@@ -529,7 +529,7 @@ public static class SoundEditorCommandQueue
                         SoundGroupLibrary.CreateLocalGroup(command.Key, command.Text);
                         break;
                     case SoundEditorCommandKind.DeleteGroup:
-                        SoundGroupLibrary.DeleteLocalGroup(command.Key);
+                        SoundGroupLibrary.DeleteGroup(command.Key, command.Text);
                         break;
                     case SoundEditorCommandKind.AddSoundToGroup:
                         SoundEditorActions.AddSoundToGroup(session, command.Index, command.Key);
