@@ -209,10 +209,38 @@ public static class LegacyDevInterfaceBridge
             node is PlacedObjectRepresentation)
             return true;
 
+        // Composite control frameworks commonly wrap real Buttons/Sliders/Handles in a plain
+        // PositionedDevUINode. That wrapper is safe to recurse through only when it has no custom
+        // per-frame Update() semantics of its own. This covers structural containers such as POM's
+        // managed button/select and multi-point holders without naming POM or any concrete type.
+        if (node is PositionedDevUINode positioned && IsPassiveCompositeNode(positioned))
+            return true;
+
         // Anything else is deliberately conservative. In particular, a custom PositionedDevUINode
-        // may implement mouse interaction in Update() without inheriting Button/Handle. Treating it
-        // as passive would silently discard third-party authoring semantics.
+        // that overrides Update() may implement mouse/keyboard interaction without inheriting
+        // Button/Handle. Treating it as passive would silently discard third-party authoring
+        // semantics, so it must keep the explicit legacy fallback available.
         return false;
+    }
+
+    private static bool IsPassiveCompositeNode(PositionedDevUINode node)
+    {
+        if (node == null)
+            return false;
+
+        MethodInfo update = node.GetType().GetMethod(
+            nameof(DevUINode.Update),
+            BindingFlags.Instance |
+            BindingFlags.Public |
+            BindingFlags.NonPublic);
+
+        if (update == null)
+            return true;
+
+        Type declaring = update.DeclaringType;
+        return declaring == typeof(DevUINode) ||
+               declaring == typeof(PositionedDevUINode) ||
+               declaring == typeof(RectangularDevUINode);
     }
 
     internal static bool CanAdaptBoolean(DevUINode node) =>
