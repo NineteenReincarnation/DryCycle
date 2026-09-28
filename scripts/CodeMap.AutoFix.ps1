@@ -179,7 +179,7 @@ function Test-PureDirectoryMove(
             }
     )
 
-    if ($relevant.Count -eq 0) {
+    if (@($relevant).Count -eq 0) {
         return $false
     }
 
@@ -409,7 +409,7 @@ try {
     }
 
     $repoResult = Invoke-Git $repoArgs
-    if ($repoResult.Lines.Count -ne 1) {
+    if (@($repoResult.Lines).Count -ne 1) {
         throw "repository root unavailable"
     }
 
@@ -427,7 +427,7 @@ try {
                 Where-Object { $_.StartsWith("fmt ", [StringComparison]::Ordinal) }
         )
 
-        if ($check.ExitCode -eq 30 -or $formatErrors.Count -gt 0) {
+        if ($check.ExitCode -eq 30 -or @($formatErrors).Count -gt 0) {
             foreach ($line in $check.Lines) {
                 [Console]::Out.WriteLine($line)
             }
@@ -435,7 +435,7 @@ try {
         }
 
         $issues = Parse-CheckerOutput $check.Lines
-        if ($issues.Stale.Count -eq 0) {
+        if (@($issues.Stale).Count -eq 0) {
             foreach ($line in $check.Lines) {
                 [Console]::Out.WriteLine($line)
             }
@@ -460,7 +460,7 @@ try {
                     }
             )
 
-            if ($candidates.Count -eq 1) {
+            if (@($candidates).Count -eq 1) {
                 $target = $candidates[0]
                 $sourceSnapshot = Read-EntryLines $repoRoot $stale.Map
                 if (-not $sourceSnapshot.Entries.ContainsKey($stale.Entry)) {
@@ -494,7 +494,7 @@ try {
                     }
             )
 
-            if ($unhandledMissing.Count -eq 0) {
+            if (@($unhandledMissing).Count -eq 0) {
                 $edit = Get-EditState $edits $stale.Map
                 [void]$edit.Remove.Add($stale.Entry)
             }
