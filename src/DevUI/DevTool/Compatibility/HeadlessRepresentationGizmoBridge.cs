@@ -103,6 +103,8 @@ internal static class HeadlessRepresentationGizmoBridge
         Vector2 camera = CameraPosition(session);
         List<EditorObjectGizmoHandleSnapshot> handles = new();
         List<EditorObjectLineSegmentSnapshot> lines = new();
+        List<Vector2> panelPositions = new();
+        CollectPanelPositions(representation, camera, panelPositions);
         CaptureChildren(
             representation,
             representation,
@@ -111,6 +113,13 @@ internal static class HeadlessRepresentationGizmoBridge
             camera,
             handles,
             lines);
+
+        CapturePixelGeometry(
+            representation,
+            camera,
+            panelPositions,
+            lines,
+            insidePanel: false);
 
         if (handles.Count == 0 && lines.Count == 0)
             return EditorObjectGizmoSnapshot.Empty;
@@ -176,6 +185,156 @@ internal static class HeadlessRepresentationGizmoBridge
                 handles,
                 lines);
         }
+    }
+
+    private static void CollectPanelPositions(
+        DevUINode node,
+        Vector2 camera,
+        List<Vector2> positions)
+    {
+        if (node == null || positions == null)
+            return;
+
+        if (node is Panel panel)
+            positions.Add(panel.absPos + camera);
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            CollectPanelPositions(node.subNodes[i], camera, positions);
+    }
+
+    private static void CapturePixelGeometry(
+        DevUINode node,
+        Vector2 camera,
+        List<Vector2> panelPositions,
+        List<EditorObjectLineSegmentSnapshot> lines,
+        bool insidePanel)
+    {
+        if (node == null || lines == null)
+            return;
+
+        bool nextInsidePanel = insidePanel || node is Panel;
+        if (!nextInsidePanel && node.fSprites != null)
+        {
+            for (int i = 0; i < node.fSprites.Count; i++)
+            {
+                FSprite sprite = node.fSprites[i];
+                if (!IsPixelSprite(sprite))
+                    continue;
+
+                float width = Mathf.Abs(sprite.scaleX);
+                float height = Mathf.Abs(sprite.scaleY);
+                if (width < 1.5f && height < 1.5f)
+                    continue;
+
+                Vector2 position = new(sprite.x, sprite.y);
+                float radians = sprite.rotation * Mathf.Deg2Rad;
+                Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
+                Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
+
+                if (width <= 2.5f || height <= 2.5f)
+                {
+                    bool alongY = height >= width;
+                    float length = alongY ? height : width;
+                    float anchor = alongY ? sprite.anchorY : sprite.anchorX;
+                    Vector2 axis = alongY ? yAxis : xAxis;
+                    Vector2 a = position + axis * (-anchor * length) + camera;
+                    Vector2 b = position + axis * ((1f - anchor) * length) + camera;
+
+                    // Representation-level connector lines to control Panels are UI chrome, not
+                    // scene geometry. Panel descendants are already skipped; this catches connectors
+                    // stored directly on the Representation itself.
+                    if (NearAny(a, panelPositions, 5f) ||
+                        NearAny(b, panelPositions, 5f))
+                        continue;
+
+                    AddLineUnique(lines, a, b);
+                    continue;
+                }
+
+                // A scaled pixel with meaningful extent in both axes is a common generic DevUI
+                // rectangle/fill primitive. Emit only its outline; alpha/color remain presentation
+                // details and are intentionally not interpreted as semantics.
+                Vector2 bottomLeft =
+                    position +
+                    xAxis * (-sprite.anchorX * width) +
+                    yAxis * (-sprite.anchorY * height) +
+                    camera;
+                Vector2 bottomRight = bottomLeft + xAxis * width;
+                Vector2 topLeft = bottomLeft + yAxis * height;
+                Vector2 topRight = bottomRight + yAxis * height;
+
+                AddLineUnique(lines, bottomLeft, bottomRight);
+                AddLineUnique(lines, bottomRight, topRight);
+                AddLineUnique(lines, topRight, topLeft);
+                AddLineUnique(lines, topLeft, bottomLeft);
+            }
+        }
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            CapturePixelGeometry(
+                node.subNodes[i],
+                camera,
+                panelPositions,
+                lines,
+                nextInsidePanel);
+    }
+
+    private static bool IsPixelSprite(FSprite sprite)
+    {
+        if (sprite?.element == null)
+            return false;
+
+        string name = sprite.element.name ?? string.Empty;
+        return string.Equals(name, "pixel", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool NearAny(
+        Vector2 point,
+        List<Vector2> candidates,
+        float radius)
+    {
+        if (candidates == null || candidates.Count == 0)
+            return false;
+
+        float limit = radius * radius;
+        for (int i = 0; i < candidates.Count; i++)
+            if ((candidates[i] - point).sqrMagnitude <= limit)
+                return true;
+        return false;
+    }
+
+    private static void AddLineUnique(
+        List<EditorObjectLineSegmentSnapshot> lines,
+        Vector2 a,
+        Vector2 b)
+    {
+        const float epsilon = 0.5f;
+        float epsilonSquared = epsilon * epsilon;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            EditorObjectLineSegmentSnapshot existing = lines[i];
+            if (existing == null)
+                continue;
+
+            Vector2 x = new(existing.X0, existing.Y0);
+            Vector2 y = new(existing.X1, existing.Y1);
+            bool same =
+                (x - a).sqrMagnitude <= epsilonSquared &&
+                (y - b).sqrMagnitude <= epsilonSquared;
+            bool reversed =
+                (x - b).sqrMagnitude <= epsilonSquared &&
+                (y - a).sqrMagnitude <= epsilonSquared;
+            if (same || reversed)
+                return;
+        }
+
+        AddLine(lines, a, b);
     }
 
     private static void CaptureMultiPointGeometry(
