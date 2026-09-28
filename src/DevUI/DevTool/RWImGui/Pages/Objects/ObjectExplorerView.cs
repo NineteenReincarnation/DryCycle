@@ -242,7 +242,6 @@ internal static class ObjectExplorerView
         }
         ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
-        objectLibraryMatchCount = 0;
 
         char searchMode = '\0';
         string needle = normalizedSearch;
