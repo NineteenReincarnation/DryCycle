@@ -133,9 +133,6 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
     public override bool UsesDedicatedWorkspace => true;
     public override bool SupportsSceneSurface => false;
     public override bool HasTopControls => true;
-    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
-        "用于未迁移的自定义声音页面控件。",
-        "Fallback for custom SoundPage controls or mod-added sound tooling not migrated yet.");
 
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
         NativeSpatialGizmoView.DrawSound(SoundEditorPresentationHub.Current, display);
