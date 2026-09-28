@@ -57,6 +57,9 @@ internal static class SoundEditorView
     private static string selectionGroupName = string.Empty;
     private static string selectionGroupId = string.Empty;
     private static bool selectionGroupIdManual;
+    private static bool scenePaneVisible = true;
+    private static bool firstWorkspaceSplitterDragging;
+    private static bool secondWorkspaceSplitterDragging;
     private const float BrowserBodyFontScale = 1.22f;
 
     private static EditorSoundSnapshot[] projectedSceneSounds;
@@ -97,8 +100,8 @@ internal static class SoundEditorView
 
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
-        bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
-        if (!sceneInBrowser && browserTab == BrowserTab.Scene)
+        const bool sceneInBrowser = false;
+        if (browserTab == BrowserTab.Scene)
             browserTab = BrowserTab.Library;
 
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("声音", "SOUNDS"), BrowserBodyFontScale);
@@ -214,7 +217,7 @@ internal static class SoundEditorView
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
         bool collapseAll = DevToolWidgets.PaneTitleWithAction(
-            DevToolUiSettings.T("声音", "Sound"),
+            DevToolUiSettings.T("检查器", "INSPECTOR"),
             DevToolUiSettings.T("折叠所有", "Collapse All"),
             "SoundInspectorCollapseAll");
 
@@ -284,6 +287,392 @@ internal static class SoundEditorView
         }
     }
 
+    internal static void DrawWorkspace(
+        EditorPresentationSnapshot editor,
+        EditorSoundPresentationSnapshot snapshot,
+        Num.Vector2 display)
+    {
+        if (snapshot == null || !snapshot.Available)
+            return;
+
+        float defaultWidth = Math.Min(
+            Math.Max(900f, display.X * 0.78f),
+            Math.Max(680f, display.X - 210f));
+        float defaultHeight = Math.Min(
+            Math.Max(320f, display.Y * 0.38f),
+            Math.Max(300f, display.Y - 180f));
+        Num.Vector2 defaultPos = new(
+            Math.Max(180f, (display.X - defaultWidth) * 0.5f),
+            Math.Max(92f, display.Y - defaultHeight - 14f));
+
+        ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(
+            new Num.Vector2(defaultWidth, defaultHeight),
+            ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(680f, 300f),
+            new Num.Vector2(
+                Math.Max(680f, display.X - 16f),
+                Math.Max(300f, display.Y - 16f)));
+        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
+
+        if (!ImGui.Begin(
+                DevToolUiSettings.T(
+                    "声音工作区###DevToolSoundWorkspace",
+                    "Sound Workspace###DevToolSoundWorkspace"),
+                ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            return;
+        }
+
+        FloatingWindowSnap.TrackCurrentWindow("SoundWorkspace");
+        DrawWorkspacePaneToggles(editor);
+        ImGui.Separator();
+
+        bool browserVisible = editor?.BrowserOpen == true;
+        bool inspectorVisible = editor?.InspectorOpen == true;
+        if (!browserVisible && !scenePaneVisible && !inspectorVisible)
+            scenePaneVisible = true;
+
+        Num.Vector2 available = ImGui.GetContentRegionAvail();
+        if (available.X > 1f && available.Y > 1f)
+        {
+            int paneCount =
+                (browserVisible ? 1 : 0) +
+                (scenePaneVisible ? 1 : 0) +
+                (inspectorVisible ? 1 : 0);
+
+            if (paneCount >= 3)
+            {
+                DrawThreePaneWorkspace(
+                    editor,
+                    snapshot,
+                    available);
+            }
+            else
+            {
+                DrawReducedWorkspace(
+                    editor,
+                    snapshot,
+                    available,
+                    browserVisible,
+                    scenePaneVisible,
+                    inspectorVisible);
+            }
+        }
+
+        ImGui.End();
+    }
+
+    private static void DrawWorkspacePaneToggles(EditorPresentationSnapshot editor)
+    {
+        bool browserVisible = editor?.BrowserOpen == true;
+        bool inspectorVisible = editor?.InspectorOpen == true;
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("资源", "Resources"),
+                "SoundWorkspaceToggleBrowser",
+                browserVisible ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            EditorUiCommandQueue.Enqueue(
+                new EditorUiCommand(EditorUiCommandKind.ToggleBrowser));
+        }
+
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("场景", "Scene"),
+                "SoundWorkspaceToggleScene",
+                scenePaneVisible ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            bool next = !scenePaneVisible;
+            if (!next && !browserVisible && !inspectorVisible)
+                next = true;
+            scenePaneVisible = next;
+        }
+
+        ImGui.SameLine();
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T("检查器", "Inspector"),
+                "SoundWorkspaceToggleInspector",
+                inspectorVisible ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
+        {
+            EditorUiCommandQueue.Enqueue(
+                new EditorUiCommand(EditorUiCommandKind.ToggleInspector));
+        }
+    }
+
+    private static void DrawThreePaneWorkspace(
+        EditorPresentationSnapshot editor,
+        EditorSoundPresentationSnapshot snapshot,
+        Num.Vector2 available)
+    {
+        const float splitterWidth = 10f;
+        float usable = Math.Max(1f, available.X - splitterWidth * 2f);
+
+        float minBrowser = 230f;
+        float minScene = 270f;
+        float minInspector = 300f;
+        float required = minBrowser + minScene + minInspector;
+        if (required > usable)
+        {
+            float factor = usable / required;
+            minBrowser = Math.Max(120f, minBrowser * factor);
+            minScene = Math.Max(140f, minScene * factor);
+            minInspector = Math.Max(160f, minInspector * factor);
+        }
+
+        float browserWidth = usable * DevToolUserSettingsStore.SoundBrowserSplit;
+        browserWidth = Math.Max(
+            minBrowser,
+            Math.Min(browserWidth, usable - minScene - minInspector));
+
+        float sceneWidth = usable * DevToolUserSettingsStore.SoundSceneSplit;
+        sceneWidth = Math.Max(
+            minScene,
+            Math.Min(sceneWidth, usable - browserWidth - minInspector));
+
+        float inspectorWidth = Math.Max(
+            minInspector,
+            usable - browserWidth - sceneWidth);
+
+        DrawBrowserPane(snapshot, browserWidth, available.Y);
+
+        ImGui.SameLine(0f, 0f);
+        DrawWorkspaceSplitter(
+            "##SoundWorkspaceSplitBrowserScene",
+            splitterWidth,
+            available.Y,
+            ref firstWorkspaceSplitterDragging,
+            delta =>
+            {
+                float nextBrowser = Math.Max(
+                    minBrowser,
+                    Math.Min(
+                        browserWidth + delta,
+                        browserWidth + sceneWidth - minScene));
+                float nextScene = browserWidth + sceneWidth - nextBrowser;
+                DevToolUserSettingsStore.RememberSoundWorkspaceSplits(
+                    nextBrowser / usable,
+                    nextScene / usable);
+            });
+
+        ImGui.SameLine(0f, 0f);
+        DrawScenePane(snapshot, sceneWidth, available.Y);
+
+        ImGui.SameLine(0f, 0f);
+        DrawWorkspaceSplitter(
+            "##SoundWorkspaceSplitSceneInspector",
+            splitterWidth,
+            available.Y,
+            ref secondWorkspaceSplitterDragging,
+            delta =>
+            {
+                float nextScene = Math.Max(
+                    minScene,
+                    Math.Min(
+                        sceneWidth + delta,
+                        sceneWidth + inspectorWidth - minInspector));
+                DevToolUserSettingsStore.RememberSoundWorkspaceSplits(
+                    browserWidth / usable,
+                    nextScene / usable);
+            });
+
+        ImGui.SameLine(0f, 0f);
+        DrawInspectorPane(editor, snapshot, 0f, available.Y);
+    }
+
+    private static void DrawReducedWorkspace(
+        EditorPresentationSnapshot editor,
+        EditorSoundPresentationSnapshot snapshot,
+        Num.Vector2 available,
+        bool browserVisible,
+        bool sceneVisible,
+        bool inspectorVisible)
+    {
+        firstWorkspaceSplitterDragging = false;
+        secondWorkspaceSplitterDragging = false;
+
+        int count =
+            (browserVisible ? 1 : 0) +
+            (sceneVisible ? 1 : 0) +
+            (inspectorVisible ? 1 : 0);
+
+        if (count <= 1)
+        {
+            if (browserVisible)
+                DrawBrowserPane(snapshot, 0f, available.Y);
+            else if (inspectorVisible)
+                DrawInspectorPane(editor, snapshot, 0f, available.Y);
+            else
+                DrawScenePane(snapshot, 0f, available.Y);
+            return;
+        }
+
+        const float splitterWidth = 10f;
+        float leftWidth = Math.Max(
+            220f,
+            (available.X - splitterWidth) * 0.42f);
+
+        if (browserVisible)
+            DrawBrowserPane(snapshot, leftWidth, available.Y);
+        else
+            DrawScenePane(snapshot, leftWidth, available.Y);
+
+        ImGui.SameLine(0f, 0f);
+        bool ignoredDragging = false;
+        DrawWorkspaceSplitter(
+            "##SoundWorkspaceReducedSplit",
+            splitterWidth,
+            available.Y,
+            ref ignoredDragging,
+            _ => { });
+
+        ImGui.SameLine(0f, 0f);
+        if (inspectorVisible)
+            DrawInspectorPane(editor, snapshot, 0f, available.Y);
+        else
+            DrawScenePane(snapshot, 0f, available.Y);
+    }
+
+    private static void DrawBrowserPane(
+        EditorSoundPresentationSnapshot snapshot,
+        float width,
+        float height)
+    {
+        if (ImGui.BeginChild(
+                "##SoundWorkspaceBrowser",
+                new Num.Vector2(width, height),
+                ImGuiChildFlags.Borders))
+        {
+            DrawBrowser(snapshot);
+            ScopedScrollChrome.Draw("SoundWorkspaceBrowser");
+        }
+        ImGui.EndChild();
+    }
+
+    private static void DrawScenePane(
+        EditorSoundPresentationSnapshot snapshot,
+        float width,
+        float height)
+    {
+        if (ImGui.BeginChild(
+                "##SoundWorkspaceScene",
+                new Num.Vector2(width, height),
+                ImGuiChildFlags.Borders))
+        {
+            DevToolWidgets.PaneTitle(
+                DevToolUiSettings.T("场景", "SCENE"));
+            DrawSceneWorkspace(snapshot);
+            ScopedScrollChrome.Draw("SoundWorkspaceScene");
+        }
+        ImGui.EndChild();
+    }
+
+    private static void DrawInspectorPane(
+        EditorPresentationSnapshot editor,
+        EditorSoundPresentationSnapshot snapshot,
+        float width,
+        float height)
+    {
+        if (ImGui.BeginChild(
+                "##SoundWorkspaceInspector",
+                new Num.Vector2(width, height),
+                ImGuiChildFlags.Borders))
+        {
+            DrawInspector(snapshot);
+            DrawInspectorAdvanced(editor);
+            ScopedScrollChrome.Draw("SoundWorkspaceInspector");
+        }
+        ImGui.EndChild();
+    }
+
+    private static void DrawInspectorAdvanced(EditorPresentationSnapshot editor)
+    {
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        if (DevToolWidgets.ActionButton(
+                "...",
+                "SoundInspectorAdvanced",
+                DevToolButtonTone.Subtle))
+        {
+            ImGui.OpenPopup("##SoundInspectorAdvancedPopup");
+        }
+
+        if (!ImGui.BeginPopup("##SoundInspectorAdvancedPopup"))
+            return;
+
+        bool legacyVisible =
+            editor?.Inspector?.LegacyUiVisible == true;
+        string label = legacyVisible
+            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
+            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
+
+        if (ImGui.Selectable(label))
+        {
+            EditorUiCommandQueue.Enqueue(
+                new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
+        }
+
+        ImGui.EndPopup();
+    }
+
+    private static void DrawWorkspaceSplitter(
+        string id,
+        float width,
+        float height,
+        ref bool dragging,
+        Action<float> onDrag)
+    {
+        ImGui.InvisibleButton(
+            id,
+            new Num.Vector2(width, height));
+
+        bool hovered = ImGui.IsItemHovered();
+        if (!dragging &&
+            hovered &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            dragging = true;
+        }
+
+        if (dragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            dragging = false;
+
+        if (hovered || dragging)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+
+        Num.Vector2 min = ImGui.GetItemRectMin();
+        Num.Vector2 max = ImGui.GetItemRectMax();
+        float x = (min.X + max.X) * 0.5f;
+        ImGui.GetWindowDrawList().AddLine(
+            new Num.Vector2(x, min.Y),
+            new Num.Vector2(x, max.Y),
+            ImGui.GetColorU32(
+                hovered || dragging
+                    ? ImGuiCol.HeaderActive
+                    : ImGuiCol.Separator),
+            dragging ? 3f : 1.5f);
+
+        if (hovered &&
+            ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        {
+            dragging = false;
+            DevToolUserSettingsStore.RememberSoundWorkspaceSplits(
+                0.26f,
+                0.30f);
+            return;
+        }
+
+        if (dragging)
+        {
+            float delta = ImGui.GetIO().MouseDelta.X;
+            if (Math.Abs(delta) > 0.001f)
+                onDrag(delta);
+        }
+    }
+
     internal static void ResetRetainedState()
     {
         SoundVectorEdits.Clear();
@@ -308,6 +697,9 @@ internal static class SoundEditorView
         selectionGroupName = string.Empty;
         selectionGroupId = string.Empty;
         selectionGroupIdManual = false;
+        scenePaneVisible = true;
+        firstWorkspaceSplitterDragging = false;
+        secondWorkspaceSplitterDragging = false;
     }
 
     private static void DrawTabButton(BrowserTab tab, string label, string id)
@@ -365,9 +757,6 @@ internal static class SoundEditorView
             SoundWorkspaceState.ClearSelection();
         }
 
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T("单击单选 | Ctrl 追加/取消 | Shift 范围选择 | Ctrl+A 全选", "Click selects | Ctrl toggles | Shift selects a range | Ctrl+A selects all"),
-            true);
         ImGui.Separator();
 
         EnsureSceneProjection(sounds);
@@ -421,11 +810,6 @@ internal static class SoundEditorView
                     $"Added {selectedIndices.Length} sounds to {group.Name}");
             }
         }
-        else
-        {
-            DevToolWidgets.MutedText(DevToolUiSettings.T("先创建工作音效组即可批量加入。", "Create a working group to add the selection in one click."), true);
-        }
-
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("从选择新建音效组", "New Group From Selection"),
                 "SoundSceneCreateGroupFromSelection",
