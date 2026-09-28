@@ -638,19 +638,23 @@ try {
                 throw "Range requires Base and Head"
             }
 
-            $baseResult = Invoke-Git @(
-                "rev-parse",
-                "--verify",
-                "$Base^{tree}"
-            )
+            if ($Base -eq "EMPTY") {
+                $baseTree = $EmptyTree
+            }
+            else {
+                $baseResult = Invoke-Git @(
+                    "rev-parse",
+                    "--verify",
+                    "$Base^{tree}"
+                )
+                $baseTree = $baseResult.Lines[0].Trim()
+            }
 
             $targetResult = Invoke-Git @(
                 "rev-parse",
                 "--verify",
                 "$Head^{tree}"
             )
-
-            $baseTree = $baseResult.Lines[0].Trim()
             $targetTree = $targetResult.Lines[0].Trim()
         }
 
