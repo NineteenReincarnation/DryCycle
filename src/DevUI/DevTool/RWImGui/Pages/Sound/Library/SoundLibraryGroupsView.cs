@@ -437,8 +437,6 @@ internal static class SoundLibraryGroupsView
             ImGui.EndCombo();
         }
 
-        if (!hasGroup)
-            DevToolWidgets.MutedText(DevToolUiSettings.T("创建工作音效组后，可一键直接写入 Group 或同时写入 Scene + Group。", "Create a working group to write directly to it, or to Scene + Group in one click."), true);
     }
 
     private static void DrawDestinationOption(
