@@ -36,27 +36,17 @@ internal static class ObjectExplorerView
         public string Tooltip => TooltipText ?? string.Empty;
     }
 
-    private sealed class ObjectLibraryPage
-    {
-        internal readonly List<ObjectLibraryRow> Rows = new();
-        internal readonly List<CategoryRun> CategoryRuns = new();
-    }
-
     private sealed class ObjectLibraryGroup
     {
         internal string Source;
         internal readonly List<ObjectLibraryRow> Rows = new();
         internal readonly List<CategoryRun> CategoryRuns = new();
-        internal readonly List<ObjectLibraryPage> Pages = new();
     }
 
     private const float BrowserPaneFontScale = 1.22f;
-    private const int ObjectsPerPage = 22;
 
     private static string objectSearch = string.Empty;
     private static string activeObjectSource = string.Empty;
-    private static readonly Dictionary<string, int> ObjectPageBySource =
-        new(StringComparer.OrdinalIgnoreCase);
     private static string sceneSearch = string.Empty;
     private static bool sceneTab;
     private static long sceneSelectionAnchorStableId;
@@ -88,11 +78,9 @@ internal static class ObjectExplorerView
         {
             group.Rows.Clear();
             group.CategoryRuns.Clear();
-            group.Pages.Clear();
         }
         ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
-        ObjectPageBySource.Clear();
         activeObjectSource = string.Empty;
         projectedObjectLibrary = null;
         projectedObjectSearch = string.Empty;
@@ -184,17 +172,14 @@ internal static class ObjectExplorerView
             return;
         }
 
-        if (activeGroup.Rows.Count == 0 || activeGroup.Pages.Count == 0)
+        if (activeGroup.Rows.Count == 0)
         {
             DevToolWidgets.MutedText(DevToolUiSettings.T("当前 Mod 没有匹配的物件。", "No matching objects in this mod."));
             return;
         }
 
-        int pageIndex = DrawObjectPageControls(activeGroup);
-        ObjectLibraryPage page = activeGroup.Pages[pageIndex];
-
-        List<ObjectLibraryRow> rows = page.Rows;
-        List<CategoryRun> categoryRuns = page.CategoryRuns;
+        List<ObjectLibraryRow> rows = activeGroup.Rows;
+        List<CategoryRun> categoryRuns = activeGroup.CategoryRuns;
         for (int categoryIndex = 0; categoryIndex < categoryRuns.Count; categoryIndex++)
         {
             CategoryRun run = categoryRuns[categoryIndex];
@@ -238,7 +223,6 @@ internal static class ObjectExplorerView
         {
             cached.Rows.Clear();
             cached.CategoryRuns.Clear();
-            cached.Pages.Clear();
         }
         ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
@@ -305,9 +289,6 @@ internal static class ObjectExplorerView
         }
 
         ObjectLibraryGroups.Sort(CompareObjectSources);
-        for (int groupIndex = 0; groupIndex < ObjectLibraryGroups.Count; groupIndex++)
-            BuildObjectPages(ObjectLibraryGroups[groupIndex]);
-
         EnsureActiveObjectSource();
 
         projectedObjectLibrary = library;
@@ -336,7 +317,6 @@ internal static class ObjectExplorerView
                     active ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
             {
                 activeObjectSource = group.Source;
-                ObjectPageBySource[group.Source] = 0;
             }
 
             if (i + 1 < ObjectLibraryGroups.Count)
@@ -380,123 +360,6 @@ internal static class ObjectExplorerView
             ObjectLibraryGroups.Count > 0
                 ? ObjectLibraryGroups[0].Source
                 : string.Empty;
-    }
-
-    private static int DrawObjectPageControls(ObjectLibraryGroup group)
-    {
-        int pageCount = group?.Pages?.Count ?? 0;
-        if (pageCount <= 0)
-            return 0;
-
-        if (!ObjectPageBySource.TryGetValue(group.Source, out int pageIndex))
-            pageIndex = 0;
-
-        pageIndex = Math.Max(0, Math.Min(pageCount - 1, pageIndex));
-
-        if (pageCount > 1)
-        {
-            string pageText = DevToolUiSettings.T(
-                $"页面 {pageIndex + 1} / {pageCount}",
-                $"Page {pageIndex + 1} / {pageCount}");
-            ImGui.TextDisabled(pageText);
-
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("上一页", "Previous"),
-                    "ObjectPagePrevious",
-                    DevToolButtonTone.Subtle))
-            {
-                pageIndex =
-                    pageIndex <= 0
-                        ? pageCount - 1
-                        : pageIndex - 1;
-            }
-
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("下一页", "Next"),
-                    "ObjectPageNext",
-                    DevToolButtonTone.Subtle))
-            {
-                pageIndex =
-                    pageIndex + 1 >= pageCount
-                        ? 0
-                        : pageIndex + 1;
-            }
-
-            ImGui.Spacing();
-        }
-
-        ObjectPageBySource[group.Source] = pageIndex;
-        return pageIndex;
-    }
-
-    private static void BuildObjectPages(ObjectLibraryGroup group)
-    {
-        group.Pages.Clear();
-        if (group.Rows.Count == 0)
-            return;
-
-        ObjectLibraryPage page = null;
-
-        for (int categoryIndex = 0; categoryIndex < group.CategoryRuns.Count; categoryIndex++)
-        {
-            CategoryRun sourceRun = group.CategoryRuns[categoryIndex];
-            int consumed = 0;
-
-            while (consumed < sourceRun.Count)
-            {
-                int remaining = sourceRun.Count - consumed;
-
-                if (page == null)
-                {
-                    page = new ObjectLibraryPage();
-                    group.Pages.Add(page);
-                }
-
-                int free = ObjectsPerPage - page.Rows.Count;
-                if (free <= 0)
-                {
-                    page = new ObjectLibraryPage();
-                    group.Pages.Add(page);
-                    free = ObjectsPerPage;
-                }
-
-                // Keep a normal-sized category together when it can fit on a fresh page. This
-                // mirrors the old ObjectsPage pagination without throwing away the current
-                // category-first list presentation.
-                if (page.Rows.Count > 0 &&
-                    remaining <= ObjectsPerPage &&
-                    remaining > free)
-                {
-                    page = new ObjectLibraryPage();
-                    group.Pages.Add(page);
-                    free = ObjectsPerPage;
-                }
-
-                int take = Math.Min(remaining, free);
-                int localStart = page.Rows.Count;
-                page.CategoryRuns.Add(new CategoryRun
-                {
-                    Category = sourceRun.Category,
-                    Start = localStart,
-                    Count = take
-                });
-
-                for (int row = 0; row < take; row++)
-                {
-                    page.Rows.Add(
-                        group.Rows[
-                            sourceRun.Start +
-                            consumed +
-                            row]);
-                }
-
-                consumed += take;
-                if (page.Rows.Count >= ObjectsPerPage)
-                    page = null;
-            }
-        }
     }
 
     private static int CompareObjectSources(
