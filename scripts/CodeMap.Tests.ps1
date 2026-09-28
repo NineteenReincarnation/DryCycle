@@ -207,11 +207,11 @@ $tests.Add({
 $tests.Add({
     $repo = New-TestRepo
     try {
-        $base = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        $base = @(Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
         Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
         Invoke-Git $repo @("add", ".") | Out-Null
         Invoke-Git $repo @("commit", "-q", "-m", "new module without map") | Out-Null
-        $head = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        $head = @(Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
 
         $result = Invoke-Checker $repo @("-Source", "Range", "-Base", $base, "-Head", $head)
         Assert-Equal 10 $result.ExitCode "range mode"
