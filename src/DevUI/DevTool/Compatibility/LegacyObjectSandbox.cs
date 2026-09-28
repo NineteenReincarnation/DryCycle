@@ -6,31 +6,74 @@ using DryCycle.DevUI.DevTool.Core;
 namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
-/// Selected-object compatibility sandbox for PlacedObject types that do not yet have complete native
-/// authoring coverage. It materializes one reusable ObjectsPage per session, creates a representation
-/// only for the selected target, and temporarily exposes that page to the existing semantic bridge
-/// while a capture or action runs.
+/// Headless selected-object Representation host for PlacedObject types that do not yet have complete
+/// native authoring coverage. The historical class name is retained to avoid spreading a migration
+/// through callers, but this is no longer a visible "legacy page" fallback.
 ///
-/// The sandbox never calls ObjectsPage.Refresh(), so it never creates representations for every object
-/// in the room. Explicit Vanilla/Legacy mode still materializes the real full ObjectsPage normally.
+/// Exactly one target Representation is materialized per session. Its Futile visuals are quarantined
+/// from every container, semantic controls are compiled only when the target/tree changes, and normal
+/// capture never swaps DevUI.activePage. The hidden ObjectsPage exists only because third-party
+/// CreateObjRep hooks conventionally require that constructor boundary.
 /// </summary>
 internal static class LegacyObjectSandbox
 {
     private sealed class State
     {
         internal ObjectsPage Page;
+        internal PlacedObjectRepresentation Representation;
         internal PlacedObject Target;
+        internal LegacyControlSnapshot[] CachedControls = Array.Empty<LegacyControlSnapshot>();
+        internal string ModelFingerprint = string.Empty;
+        internal bool ControlsDirty = true;
     }
 
     private static ConditionalWeakTable<EditorSession, State> states = new();
 
     internal static LegacyControlSnapshot[] Capture(EditorSession session, PlacedObject target)
     {
-        return Run(
-            session,
-            target,
-            () => LegacyDevInterfaceBridge.Capture(session.Owner, target),
-            Array.Empty<LegacyControlSnapshot>());
+        if (session?.Owner == null || target?.type == null)
+            return Array.Empty<LegacyControlSnapshot>();
+
+        // Explicit Vanilla/Legacy mode already owns the real ObjectsPage and remains authoritative.
+        if (session.Owner.activePage is ObjectsPage)
+            return LegacyDevInterfaceBridge.Capture(session.Owner, target);
+
+        State state = Acquire(session, target);
+        if (state?.Representation == null)
+            return Array.Empty<LegacyControlSnapshot>();
+
+        string fingerprint = Fingerprint(target);
+        if (!string.Equals(state.ModelFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            state.ModelFingerprint = fingerprint;
+            state.ControlsDirty = true;
+            RefreshHeadlessRepresentation(state);
+        }
+
+        if (!state.ControlsDirty)
+            return state.CachedControls ?? Array.Empty<LegacyControlSnapshot>();
+
+        try
+        {
+            QuarantineVisualTree(state.Page);
+            state.CachedControls =
+                LegacyDevInterfaceBridge.CaptureRoot(state.Representation) ??
+                Array.Empty<LegacyControlSnapshot>();
+            state.ControlsDirty = false;
+            return state.CachedControls;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless object control compilation failed: " + error.Message);
+            state.CachedControls = Array.Empty<LegacyControlSnapshot>();
+            state.ControlsDirty = false;
+            return state.CachedControls;
+        }
+        finally
+        {
+            QuarantineVisualTree(state.Page);
+        }
     }
 
     internal static bool Run(
@@ -92,9 +135,12 @@ internal static class LegacyObjectSandbox
             // synchronous on the DevUI/main thread and no EditorSession synchronization occurs until
             // after this call returns. The sandbox is a semantic backend only: none of its Futile
             // visuals may ever leak into the rebuilt editor.
-            HideVisualTree(state.Page);
+            QuarantineVisualTree(state.Page);
             session.Owner.activePage = state.Page;
-            return action();
+            T result = action();
+            state.ControlsDirty = true;
+            state.ModelFingerprint = Fingerprint(target);
+            return result;
         }
         catch (Exception error)
         {
@@ -103,7 +149,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            HideVisualTree(state.Page);
+            QuarantineVisualTree(state.Page);
             session.Owner.activePage = previous;
         }
     }
@@ -136,15 +182,27 @@ internal static class LegacyObjectSandbox
                 // ObjectsPage construction creates ordinary DevInterface menu/representation sprites
                 // even though this page exists only as a compatibility backend. Suppress them in the
                 // same frame so selecting an external object can never reveal vanilla DevUI.
-                HideVisualTree(page);
+                QuarantineVisualTree(page);
             }
             finally
             {
                 session.Owner.activePage = previous;
             }
 
+            PlacedObjectRepresentation representation = FindRepresentation(page, target);
+            if (representation == null)
+            {
+                try { page.ClearSprites(); }
+                catch { }
+                return null;
+            }
+
             state.Page = page;
+            state.Representation = representation;
             state.Target = target;
+            state.CachedControls = Array.Empty<LegacyControlSnapshot>();
+            state.ModelFingerprint = Fingerprint(target);
+            state.ControlsDirty = true;
             return state;
         }
         catch (Exception error)
@@ -157,7 +215,7 @@ internal static class LegacyObjectSandbox
         }
     }
 
-    private static void HideVisualTree(DevUINode node)
+    private static void QuarantineVisualTree(DevUINode node)
     {
         if (node == null)
             return;
@@ -166,8 +224,11 @@ internal static class LegacyObjectSandbox
         {
             for (int i = 0; i < node.fSprites.Count; i++)
             {
-                if (node.fSprites[i] != null)
-                    node.fSprites[i].isVisible = false;
+                FSprite sprite = node.fSprites[i];
+                if (sprite == null) continue;
+                sprite.isVisible = false;
+                try { sprite.RemoveFromContainer(); }
+                catch { }
             }
         }
 
@@ -175,8 +236,11 @@ internal static class LegacyObjectSandbox
         {
             for (int i = 0; i < node.fLabels.Count; i++)
             {
-                if (node.fLabels[i] != null)
-                    node.fLabels[i].isVisible = false;
+                FLabel label = node.fLabels[i];
+                if (label == null) continue;
+                label.isVisible = false;
+                try { label.RemoveFromContainer(); }
+                catch { }
             }
         }
 
@@ -184,7 +248,67 @@ internal static class LegacyObjectSandbox
             return;
 
         for (int i = 0; i < node.subNodes.Count; i++)
-            HideVisualTree(node.subNodes[i]);
+            QuarantineVisualTree(node.subNodes[i]);
+    }
+
+    private static void RefreshHeadlessRepresentation(State state)
+    {
+        if (state?.Representation == null)
+            return;
+
+        try
+        {
+            state.Representation.Refresh();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless object representation refresh failed: " + error.Message);
+        }
+        finally
+        {
+            QuarantineVisualTree(state.Page);
+        }
+    }
+
+    private static PlacedObjectRepresentation FindRepresentation(
+        DevUINode node,
+        PlacedObject target)
+    {
+        if (node == null || target == null)
+            return null;
+
+        if (node is PlacedObjectRepresentation representation &&
+            ReferenceEquals(representation.pObj, target))
+            return representation;
+
+        if (node.subNodes == null)
+            return null;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+        {
+            PlacedObjectRepresentation found =
+                FindRepresentation(node.subNodes[i], target);
+            if (found != null)
+                return found;
+        }
+
+        return null;
+    }
+
+    private static string Fingerprint(PlacedObject target)
+    {
+        if (target == null)
+            return string.Empty;
+
+        string data;
+        try { data = target.data?.ToString() ?? string.Empty; }
+        catch { data = "<serialization-failed>"; }
+
+        return (target.type?.value ?? string.Empty) + "|" +
+               target.pos.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+               target.pos.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" +
+               (target.active ? "1" : "0") + "|" + data;
     }
 
     private static void DisposeState(State state)
@@ -197,6 +321,10 @@ internal static class LegacyObjectSandbox
         }
 
         state.Page = null;
+        state.Representation = null;
         state.Target = null;
+        state.CachedControls = Array.Empty<LegacyControlSnapshot>();
+        state.ModelFingerprint = string.Empty;
+        state.ControlsDirty = true;
     }
 }
