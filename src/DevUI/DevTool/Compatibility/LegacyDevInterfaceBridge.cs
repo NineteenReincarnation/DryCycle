@@ -133,6 +133,88 @@ public static class LegacyDevInterfaceBridge
                CanAdaptColorSelect(node) || CanAdaptText(node) || CanAdaptDirection(node);
     }
 
+    /// <summary>
+    /// Conservative structural proof used by the headless host. A Representation is considered
+    /// fully mirrored only when every descendant is either a known semantic control, a passive
+    /// container/label, or a world-space Handle. Unknown custom DevUINodes remain a compatibility
+    /// gap even when their PlacedObject.Data happens to be fully reflected.
+    /// </summary>
+    internal static bool HasUnsupportedNodes(DevUINode root, out string example)
+    {
+        example = string.Empty;
+        if (root == null)
+        {
+            example = "missing representation";
+            return true;
+        }
+
+        return HasUnsupportedChildren(root, string.Empty, out example);
+    }
+
+    private static bool HasUnsupportedChildren(
+        DevUINode parent,
+        string parentPath,
+        out string example)
+    {
+        example = string.Empty;
+        if (parent?.subNodes == null)
+            return false;
+
+        for (int i = 0; i < parent.subNodes.Count; i++)
+        {
+            DevUINode node = parent.subNodes[i];
+            if (node == null)
+                continue;
+
+            string path = string.IsNullOrEmpty(parentPath)
+                ? i.ToString()
+                : parentPath + "." + i;
+
+            if (!IsStructurallyCoveredNode(node))
+            {
+                example = path + " " + (node.GetType().FullName ?? node.GetType().Name);
+                return true;
+            }
+
+            // Atomic controls own their internal visual/nub nodes. Those descendants are
+            // implementation detail, not separate authoring obligations.
+            if (IsAtomicAdaptedControl(node))
+                continue;
+
+            if (HasUnsupportedChildren(node, path, out example))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsStructurallyCoveredNode(DevUINode node)
+    {
+        if (node == null)
+            return true;
+
+        if (CanAdaptNode(node))
+            return true;
+
+        // Non-authoring infrastructure is intentionally not mirrored as a user control.
+        if (node is Button infrastructureButton && IsInfrastructureButton(infrastructureButton))
+            return true;
+
+        // Containers are covered by recursively mirroring their descendants. Handles are covered
+        // by HeadlessRepresentationGizmoBridge, and labels carry presentation text only.
+        if (node is Page ||
+            node is Panel ||
+            node is Handle ||
+            node is DevUILabel ||
+            node is PlacedObjectRepresentation)
+            return true;
+
+        // Anything else is deliberately conservative. In particular, a custom PositionedDevUINode
+        // may implement mouse interaction in Update() without inheriting Button/Handle. Treating it
+        // as passive would silently discard third-party authoring semantics.
+        return false;
+    }
+
     internal static bool CanAdaptBoolean(DevUINode node) =>
         node is Button && TryReadBoolMember(node, "actualValue", out _);
 
