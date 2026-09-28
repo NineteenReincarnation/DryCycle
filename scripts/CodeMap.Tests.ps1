@@ -227,3 +227,4 @@ foreach ($test in $tests) {
 }
 
 [Console]::Out.WriteLine("CodeMap tests: $passed passed")
+exit 0
