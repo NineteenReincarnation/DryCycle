@@ -541,22 +541,36 @@ internal static class LegacyObjectSandbox
     private static void DisposeState(State state)
     {
         if (state == null) return;
-        if (state.Page != null)
-        {
-            try { state.Page.ClearSprites(); }
-            catch { }
-        }
 
+        List<UnityEngine.GameObject> quarantinedGameObjects = new();
         try
         {
             for (int i = 0; i < state.QuarantineContainer.GetChildCount(); i++)
             {
                 if (state.QuarantineContainer.GetChildAt(i) is FGameObjectNode gameObjectNode &&
                     gameObjectNode.gameObject != null)
-                    UnityEngine.Object.Destroy(gameObjectNode.gameObject);
+                    quarantinedGameObjects.Add(gameObjectNode.gameObject);
             }
-            state.QuarantineContainer.RemoveAllChildren();
         }
+        catch { }
+
+        if (state.Page != null)
+        {
+            try { state.Page.ClearSprites(); }
+            catch { }
+        }
+
+        for (int i = 0; i < quarantinedGameObjects.Count; i++)
+        {
+            try
+            {
+                if (quarantinedGameObjects[i] != null)
+                    UnityEngine.Object.Destroy(quarantinedGameObjects[i]);
+            }
+            catch { }
+        }
+
+        try { state.QuarantineContainer.RemoveAllChildren(); }
         catch { }
 
         state.Page = null;
