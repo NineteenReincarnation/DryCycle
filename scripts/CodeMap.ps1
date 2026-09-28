@@ -347,6 +347,71 @@ function Get-AffectedScopes(
     return @($scopes | Sort-Object)
 }
 
+function Test-StringSetEqual([string[]]$Left, [string[]]$Right) {
+    if ($Left.Count -ne $Right.Count) {
+        return $false
+    }
+
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($item in $Left) {
+        [void]$set.Add([string]$item)
+    }
+
+    foreach ($item in $Right) {
+        if (-not $set.Contains([string]$item)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-CodeMapChanged(
+    [string]$BaseTree,
+    [string]$TargetTree,
+    [string]$Scope
+) {
+    $codeMapPath = Get-CodeMapPath $Scope
+    $baseExists = Test-BlobExists $BaseTree $codeMapPath
+    $targetExists = Test-BlobExists $TargetTree $codeMapPath
+
+    if ($baseExists -ne $targetExists) {
+        return $true
+    }
+    if (-not $targetExists) {
+        return $false
+    }
+
+    $result = Invoke-Git @("diff", "--quiet", $BaseTree, $TargetTree, "--", $codeMapPath) -AllowFailure
+    if ($result.ExitCode -eq 0) {
+        return $false
+    }
+    if ($result.ExitCode -eq 1) {
+        return $true
+    }
+
+    throw "git diff quiet failed"
+}
+
+function Should-ValidateScope(
+    [string]$BaseTree,
+    [string]$TargetTree,
+    [string]$Scope
+) {
+    $codeMapPath = Get-CodeMapPath $Scope
+    if (-not (Test-BlobExists $TargetTree $codeMapPath)) {
+        return $false
+    }
+
+    if (Test-CodeMapChanged $BaseTree $TargetTree $Scope) {
+        return $true
+    }
+
+    $baseDirectories = @(Get-DirectChildDirectories $BaseTree $Scope)
+    $targetDirectories = @(Get-DirectChildDirectories $TargetTree $Scope)
+    return -not (Test-StringSetEqual $baseDirectories $targetDirectories)
+}
+
 function Test-Scope([string]$TargetTree, [string]$Scope) {
     $codeMapPath = Get-CodeMapPath $Scope
     if (-not (Test-BlobExists $TargetTree $codeMapPath)) {
@@ -466,6 +531,10 @@ try {
         $invalidLines = New-Object System.Collections.Generic.List[string]
 
         foreach ($scope in $affectedScopes) {
+            if (-not (Should-ValidateScope $baseTree $targetTree $scope)) {
+                continue
+            }
+
             $result = Test-Scope $targetTree $scope
             if ($null -eq $result) {
                 continue
