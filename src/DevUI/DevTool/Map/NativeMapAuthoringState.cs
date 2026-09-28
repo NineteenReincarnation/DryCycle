@@ -227,7 +227,9 @@ internal static class NativeMapAuthoringStateHub
             if (!externalChange) continue;
 
             room.MapPosition = panel.pos;
-            room.DevPosition = panel.devPos;
+            room.InheritedDevPosition = panel.pos;
+            if (!room.HasDevPositionOverride)
+                room.DevPosition = room.InheritedDevPosition;
             room.Layer = Mathf.Clamp(panel.layer, 0, 2);
             RememberLegacyMirror(room, panel);
             changed = true;
