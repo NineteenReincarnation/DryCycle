@@ -148,12 +148,22 @@ public static class LegacyDevInterfaceBridge
             return true;
         }
 
-        return HasUnsupportedChildren(root, string.Empty, out example);
+        HashSet<DevUINode> visited = new();
+        visited.Add(root);
+        int remaining = 4096;
+        return HasUnsupportedChildren(
+            root,
+            string.Empty,
+            visited,
+            ref remaining,
+            out example);
     }
 
     private static bool HasUnsupportedChildren(
         DevUINode parent,
         string parentPath,
+        HashSet<DevUINode> visited,
+        ref int remaining,
         out string example)
     {
         example = string.Empty;
@@ -162,6 +172,12 @@ public static class LegacyDevInterfaceBridge
 
         for (int i = 0; i < parent.subNodes.Count; i++)
         {
+            if (--remaining < 0)
+            {
+                example = "representation node budget exceeded";
+                return true;
+            }
+
             DevUINode node = parent.subNodes[i];
             if (node == null)
                 continue;
@@ -169,6 +185,12 @@ public static class LegacyDevInterfaceBridge
             string path = string.IsNullOrEmpty(parentPath)
                 ? i.ToString()
                 : parentPath + "." + i;
+
+            if (!visited.Add(node))
+            {
+                example = path + " cyclic DevUI node";
+                return true;
+            }
 
             if (!IsStructurallyCoveredNode(node))
             {
@@ -181,7 +203,12 @@ public static class LegacyDevInterfaceBridge
             if (IsAtomicAdaptedControl(node))
                 continue;
 
-            if (HasUnsupportedChildren(node, path, out example))
+            if (HasUnsupportedChildren(
+                    node,
+                    path,
+                    visited,
+                    ref remaining,
+                    out example))
                 return true;
         }
 
@@ -256,11 +283,23 @@ public static class LegacyDevInterfaceBridge
         if (node == null)
             return false;
 
-        MethodInfo update = node.GetType().GetMethod(
-            nameof(DevUINode.Update),
-            BindingFlags.Instance |
-            BindingFlags.Public |
-            BindingFlags.NonPublic);
+        MethodInfo update;
+        try
+        {
+            update = node.GetType().GetMethod(
+                nameof(DevUINode.Update),
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+        }
+        catch
+        {
+            // Reflection ambiguity/failure is itself a reason not to claim full compatibility.
+            return false;
+        }
 
         if (update == null)
             return true;
@@ -274,12 +313,23 @@ public static class LegacyDevInterfaceBridge
             Type current = node.GetType().BaseType;
             while (current != null && typeof(DevUINode).IsAssignableFrom(current))
             {
-                MethodInfo inherited = current.GetMethod(
-                    nameof(DevUINode.Update),
-                    BindingFlags.Instance |
-                    BindingFlags.Public |
-                    BindingFlags.NonPublic |
-                    BindingFlags.DeclaredOnly);
+                MethodInfo inherited;
+                try
+                {
+                    inherited = current.GetMethod(
+                        nameof(DevUINode.Update),
+                        BindingFlags.Instance |
+                        BindingFlags.Public |
+                        BindingFlags.NonPublic |
+                        BindingFlags.DeclaredOnly,
+                        binder: null,
+                        types: Type.EmptyTypes,
+                        modifiers: null);
+                }
+                catch
+                {
+                    return false;
+                }
                 if (inherited != null && inherited.IsVirtual)
                 {
                     declaring = inherited.DeclaringType;
