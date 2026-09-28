@@ -233,7 +233,7 @@ internal static class DevToolNumericWidgets
             new Num.Vector2(diameter, diameter));
 
         bool hovered = ImGui.IsItemHovered();
-        bool active = ImGui.IsItemActive();
+        bool itemActive = ImGui.IsItemActive();
         bool resetRequested =
             resetValue.HasValue &&
             hovered &&
@@ -242,12 +242,36 @@ internal static class DevToolNumericWidgets
             hovered &&
             ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 
+        bool ownsDrag =
+            activeRotaryDragKey.HasValue &&
+            activeRotaryDragKey.Value.Equals(key);
+
+        // Any fresh left click outside this rotary invalidates stale ownership immediately. The
+        // visual state below is derived from ownership, never from ImGui.IsItemActive() alone:
+        // window dragging/focus changes must not make a rotary look pressed.
+        if (ownsDrag &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
+            !(hovered && itemActive))
+        {
+            activeRotaryDragKey = null;
+            ownsDrag = false;
+        }
+
+        // Also retire ownership that survived while this widget was temporarily not rendered.
+        if (ownsDrag &&
+            !ImGui.IsMouseDown(ImGuiMouseButton.Left) &&
+            !ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            activeRotaryDragKey = null;
+            ownsDrag = false;
+        }
+
         if (resetRequested)
         {
-            if (activeRotaryDragKey.HasValue &&
-                activeRotaryDragKey.Value.Equals(key))
+            if (ownsDrag)
             {
                 activeRotaryDragKey = null;
+                ownsDrag = false;
             }
 
             float next = Math.Max(
@@ -263,10 +287,10 @@ internal static class DevToolNumericWidgets
         }
         else if (doubleClicked)
         {
-            if (activeRotaryDragKey.HasValue &&
-                activeRotaryDragKey.Value.Equals(key))
+            if (ownsDrag)
             {
                 activeRotaryDragKey = null;
+                ownsDrag = false;
             }
 
             FloatTextEditors.Add(key);
@@ -274,19 +298,20 @@ internal static class DevToolNumericWidgets
         }
         else
         {
-            if (hovered && active && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            if (hovered &&
+                itemActive &&
+                ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
                 activeRotaryDragKey = key;
-
-            bool ownsDrag =
-                activeRotaryDragKey.HasValue &&
-                activeRotaryDragKey.Value.Equals(key);
+                ownsDrag = true;
+            }
 
             // A rotary may consume mouse delta only while THIS InvisibleButton is the active ImGui
             // item and the drag started on this exact rotary. Window moves, splitter drags, canvas
             // pans, clicks in other windows, etc. must never adjust a rotary merely because a stale
             // drag key exists.
             if (ownsDrag &&
-                active &&
+                itemActive &&
                 ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
             {
                 Num.Vector2 delta = ImGui.GetIO().MouseDelta;
@@ -301,6 +326,11 @@ internal static class DevToolNumericWidgets
             }
         }
 
+        bool rotaryPressed =
+            ownsDrag &&
+            itemActive &&
+            ImGui.IsMouseDown(ImGuiMouseButton.Left);
+
         Num.Vector2 rectMin = ImGui.GetItemRectMin();
         Num.Vector2 rectMax = ImGui.GetItemRectMax();
         Num.Vector2 center = new(
@@ -310,12 +340,12 @@ internal static class DevToolNumericWidgets
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         uint background = ImGui.GetColorU32(
-            active ? ImGuiCol.FrameBgActive :
+            rotaryPressed ? ImGuiCol.FrameBgActive :
             hovered ? ImGuiCol.FrameBgHovered :
             ImGuiCol.FrameBg);
         uint border = ImGui.GetColorU32(ImGuiCol.Border);
         uint indicator = ImGui.GetColorU32(
-            active ? ImGuiCol.SliderGrabActive : ImGuiCol.SliderGrab);
+            rotaryPressed ? ImGuiCol.SliderGrabActive : ImGuiCol.SliderGrab);
         uint text = ImGui.GetColorU32(ImGuiCol.Text);
 
         draw.AddCircleFilled(center, radius, background, 32);
@@ -329,7 +359,7 @@ internal static class DevToolNumericWidgets
         Num.Vector2 pointer = new(
             center.X + (float)Math.Cos(angle) * radius * 0.72f,
             center.Y + (float)Math.Sin(angle) * radius * 0.72f);
-        draw.AddLine(center, pointer, indicator, active ? 3.4f : 2.8f);
+        draw.AddLine(center, pointer, indicator, rotaryPressed ? 3.4f : 2.8f);
         draw.AddCircleFilled(center, Math.Max(2.5f, radius * 0.10f), indicator, 16);
 
         string valueText = value.ToString(displayFormat);
