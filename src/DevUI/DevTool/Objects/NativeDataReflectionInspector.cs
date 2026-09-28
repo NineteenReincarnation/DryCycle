@@ -281,6 +281,7 @@ internal sealed class NativeDataReflectionInspector :
                 }
 
                 MemberBinding binding = BuildBinding(
+                    dataType,
                     current,
                     field.Name,
                     field.FieldType,
@@ -299,6 +300,7 @@ internal sealed class NativeDataReflectionInspector :
                     continue;
 
                 MemberBinding binding = BuildBinding(
+                    dataType,
                     current,
                     property.Name,
                     property.PropertyType,
@@ -343,6 +345,7 @@ internal sealed class NativeDataReflectionInspector :
     }
 
     private static MemberBinding BuildBinding(
+        Type dataType,
         Type declaringType,
         string name,
         Type valueType,
@@ -364,7 +367,7 @@ internal sealed class NativeDataReflectionInspector :
             Writable = writable,
             Kind = kind,
             GizmoHint = ResolveGizmoHint(declaringType, name, valueType),
-            GizmoShape = ResolveGizmoShape(declaringType, name, valueType),
+            GizmoShape = ResolveGizmoShape(dataType, name, valueType),
             GizmoScale = 1f,
             HasRange = hasRange,
             Min = min,
@@ -1115,21 +1118,23 @@ internal sealed class NativeDataReflectionInspector :
     }
 
     private static EditorPropertyGizmoShape ResolveGizmoShape(
-        Type declaringType,
+        Type dataType,
         string name,
         Type valueType)
     {
-        if (valueType != typeof(Vector2) ||
+        if (dataType == null ||
+            valueType != typeof(Vector2) ||
             !string.Equals(name, "handlePos", StringComparison.Ordinal))
             return EditorPropertyGizmoShape.None;
 
-        // Stable Rain World DevInterface contracts. Third-party Data subclasses inherit these
-        // semantics automatically; no mod/type allowlist is involved.
-        if (declaringType == typeof(PlacedObject.GridRectObjectData))
-            return EditorPropertyGizmoShape.Rectangle;
-        if (declaringType == typeof(PlacedObject.LightSourceData))
+        // Stable Rain World DevInterface base contracts. Use the concrete Data type so a handlePos
+        // declared by ResizableObjectData still keeps GridRect/LightSource semantics in subclasses.
+        // Third-party subclasses therefore inherit this automatically without per-mod knowledge.
+        if (typeof(PlacedObject.LightSourceData).IsAssignableFrom(dataType))
             return EditorPropertyGizmoShape.Circle;
-        if (declaringType == typeof(PlacedObject.ResizableObjectData))
+        if (typeof(PlacedObject.GridRectObjectData).IsAssignableFrom(dataType))
+            return EditorPropertyGizmoShape.Rectangle;
+        if (typeof(PlacedObject.ResizableObjectData).IsAssignableFrom(dataType))
             return EditorPropertyGizmoShape.Line;
 
         return EditorPropertyGizmoShape.None;
