@@ -339,7 +339,7 @@ function Get-Changes(
         })
     }
 
-    return @($changes)
+    return $changes.ToArray()
 }
 
 function Add-Scope(
