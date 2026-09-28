@@ -5,6 +5,8 @@ param(
     [string]$Base = "",
     [string]$Head = "HEAD",
 
+    [string]$Repository = "",
+
     [switch]$Detailed
 )
 
@@ -597,13 +599,19 @@ try {
         throw "git not found"
     }
 
-    $repoHint = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-    $repoResult = Invoke-Git @("-C", $repoHint, "rev-parse", "--show-toplevel")
+    $repoArgs = if ([string]::IsNullOrWhiteSpace($Repository)) {
+        @("rev-parse", "--show-toplevel")
+    }
+    else {
+        @("-C", ([IO.Path]::GetFullPath($Repository)), "rev-parse", "--show-toplevel")
+    }
+
+    $repoResult = Invoke-Git $repoArgs
     if ($repoResult.Lines.Count -ne 1) {
         throw "repository root unavailable"
     }
 
-    $repoRoot = $repoResult.Lines[0]
+    $repoRoot = $repoResult.Lines[0].Trim()
     Push-Location $repoRoot
 
     try {
