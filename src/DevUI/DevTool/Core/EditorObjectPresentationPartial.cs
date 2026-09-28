@@ -170,6 +170,23 @@ public static partial class EditorPresentationHub
             ? ObjectInspectorRegistry.GetCoverage(selected)
             : ObjectInspectorCoverage.Complete();
 
+        bool representationGap = false;
+        if (singleSelection && externalObject)
+        {
+            representationGap = LegacyObjectSandbox.HasCompatibilityGap(
+                session,
+                selected,
+                out string unsupportedNode);
+            if (representationGap &&
+                DevUiDiagnosticsPolicy.Enabled &&
+                !string.IsNullOrWhiteSpace(unsupportedNode))
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool third-party Object requires explicit legacy fallback: " +
+                    unsupportedNode);
+            }
+        }
+
         LegacyControlSnapshot[] legacyControls = Array.Empty<LegacyControlSnapshot>();
         if (singleSelection)
         {
@@ -178,14 +195,15 @@ public static partial class EditorPresentationHub
                 legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
                 LegacyObjectSandbox.Release(session);
             }
-            else if (externalObject && !coverage.IsComplete)
+            else if (externalObject && (!coverage.IsComplete || representationGap))
             {
-                // Protocol-aware adapters can prove that their inspector/gizmo model is complete.
-                // Generic reflection cannot, so unknown/custom representations still receive the
-                // isolated headless fallback instead of being silently treated as fully compatible.
+                // A protocol adapter may cover every Data field while the original Representation
+                // still contains an unknown interactive node. Keep the selected-object host alive
+                // and mirror every supported control, but expose full legacy UI only as an explicit
+                // escape hatch for the remaining gap.
                 legacyControls = LegacyObjectSandbox.Capture(session, selected);
             }
-            else
+            else if (!externalObject)
             {
                 LegacyObjectSandbox.Release(session);
             }
@@ -199,7 +217,9 @@ public static partial class EditorPresentationHub
             ? NativeObjectGizmoPresentation.Capture(selected, selectedIndex, properties)
             : EditorObjectGizmoSnapshot.Empty;
 
-        if (singleSelection && externalObject && !coverage.GizmoComplete)
+        if (singleSelection &&
+            externalObject &&
+            (!coverage.GizmoComplete || representationGap))
         {
             objectGizmo = NativeObjectGizmoPresentation.Merge(
                 objectGizmo,
@@ -224,7 +244,7 @@ public static partial class EditorPresentationHub
             DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
             LegacyUiAvailable =
                 singleSelection &&
-                (!coverage.IsComplete || session.LegacyUiVisible),
+                (!coverage.IsComplete || representationGap || session.LegacyUiVisible),
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
             ObjectGizmo = objectGizmo,
