@@ -483,8 +483,17 @@ try {
                 continue
             }
 
-            $edit = Get-EditState $edits $stale.Map
-            [void]$edit.Remove.Add($stale.Entry)
+            $unhandledMissing = @(
+                $issues.Missing |
+                    Where-Object {
+                        -not $handledMissing.Contains($_.Map + "|" + $_.Entry)
+                    }
+            )
+
+            if ($unhandledMissing.Count -eq 0) {
+                $edit = Get-EditState $edits $stale.Map
+                [void]$edit.Remove.Add($stale.Entry)
+            }
         }
 
         $applied = 0
