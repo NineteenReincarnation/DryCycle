@@ -28,8 +28,17 @@ internal static class LegacyObjectSandbox
         internal readonly FContainer QuarantineContainer = new();
         internal LegacyControlSnapshot[] CachedControls = Array.Empty<LegacyControlSnapshot>();
         internal string ModelFingerprint = string.Empty;
+        internal ulong TreeSignature;
+        internal int LastModelAuditFrame = int.MinValue;
+        internal int LastTreeAuditFrame = int.MinValue;
         internal bool ControlsDirty = true;
     }
+
+    // Normal publication must stay O(1). Expensive serialization/tree walks are only used as
+    // low-frequency safety audits for third-party code that mutates behind DryCycle's revision
+    // system. All mutations routed through this host invalidate immediately.
+    private const int ModelAuditIntervalFrames = 30;
+    private const int TreeAuditIntervalFrames = 12;
 
     private static ConditionalWeakTable<EditorSession, State> states = new();
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedVisualFields = new();
@@ -47,13 +56,13 @@ internal static class LegacyObjectSandbox
         if (state?.Representation == null)
             return Array.Empty<LegacyControlSnapshot>();
 
-        string fingerprint = Fingerprint(target);
-        if (!string.Equals(state.ModelFingerprint, fingerprint, StringComparison.Ordinal))
-        {
-            state.ModelFingerprint = fingerprint;
+        AuditModel(state, target);
+
+        // Custom Buttons may create/remove Panels without touching PlacedObject.Data. Operations
+        // routed through Run/MutateRepresentation invalidate immediately; this low-frequency audit
+        // catches asynchronous/third-party tree changes without scanning the tree every frame.
+        if (!state.ControlsDirty && AuditTree(state))
             state.ControlsDirty = true;
-            RefreshHeadlessRepresentation(state);
-        }
 
         if (!state.ControlsDirty)
             return state.CachedControls ?? Array.Empty<LegacyControlSnapshot>();
@@ -70,6 +79,7 @@ internal static class LegacyObjectSandbox
             if (DevUiDiagnosticsPolicy.Enabled)
                 DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation);
 
+            RememberTree(state);
             state.ControlsDirty = false;
             return state.CachedControls;
         }
@@ -115,13 +125,7 @@ internal static class LegacyObjectSandbox
         if (state?.Representation == null)
             return fallback;
 
-        string fingerprint = Fingerprint(target);
-        if (!string.Equals(state.ModelFingerprint, fingerprint, StringComparison.Ordinal))
-        {
-            state.ModelFingerprint = fingerprint;
-            state.ControlsDirty = true;
-            RefreshHeadlessRepresentation(state);
-        }
+        AuditModel(state, target);
 
         try
         {
@@ -176,8 +180,7 @@ internal static class LegacyObjectSandbox
             bool changed = mutation(state.Representation);
             if (changed)
             {
-                state.ControlsDirty = true;
-                state.ModelFingerprint = Fingerprint(target);
+                MarkDirtyAfterMutation(state, target);
             }
             return changed;
         }
@@ -248,8 +251,7 @@ internal static class LegacyObjectSandbox
             QuarantineVisualTree(state.Page, state.QuarantineContainer);
             session.Owner.activePage = state.Page;
             T result = action();
-            state.ControlsDirty = true;
-            state.ModelFingerprint = Fingerprint(target);
+            MarkDirtyAfterMutation(state, target);
             return result;
         }
         catch (Exception error)
@@ -312,6 +314,9 @@ internal static class LegacyObjectSandbox
             state.Target = target;
             state.CachedControls = Array.Empty<LegacyControlSnapshot>();
             state.ModelFingerprint = Fingerprint(target);
+            state.LastModelAuditFrame = CurrentFrame();
+            state.TreeSignature = ComputeTreeSignature(representation);
+            state.LastTreeAuditFrame = state.LastModelAuditFrame;
             state.ControlsDirty = true;
             return state;
         }
@@ -523,6 +528,132 @@ internal static class LegacyObjectSandbox
         return null;
     }
 
+    private static void AuditModel(State state, PlacedObject target)
+    {
+        if (state == null || target == null)
+            return;
+
+        int frame = CurrentFrame();
+        if (!AuditDue(state.LastModelAuditFrame, frame, ModelAuditIntervalFrames))
+            return;
+
+        state.LastModelAuditFrame = frame;
+        string fingerprint = Fingerprint(target);
+        if (string.Equals(state.ModelFingerprint, fingerprint, StringComparison.Ordinal))
+            return;
+
+        state.ModelFingerprint = fingerprint;
+        state.ControlsDirty = true;
+        RefreshHeadlessRepresentation(state);
+        // Refresh() is allowed to rebuild transient Panels/Handles, so force the next structural
+        // comparison to use the post-refresh tree.
+        RememberTree(state);
+    }
+
+    private static bool AuditTree(State state)
+    {
+        if (state?.Representation == null)
+            return false;
+
+        int frame = CurrentFrame();
+        if (!AuditDue(state.LastTreeAuditFrame, frame, TreeAuditIntervalFrames))
+            return false;
+
+        state.LastTreeAuditFrame = frame;
+        ulong current = ComputeTreeSignature(state.Representation);
+        if (state.TreeSignature == 0UL)
+        {
+            state.TreeSignature = current;
+            return false;
+        }
+
+        bool changed = state.TreeSignature != current;
+        state.TreeSignature = current;
+        return changed;
+    }
+
+    private static void RememberTree(State state)
+    {
+        if (state?.Representation == null)
+            return;
+
+        state.TreeSignature = ComputeTreeSignature(state.Representation);
+        state.LastTreeAuditFrame = CurrentFrame();
+    }
+
+    private static void MarkDirtyAfterMutation(State state, PlacedObject target)
+    {
+        if (state == null)
+            return;
+
+        state.ControlsDirty = true;
+        state.ModelFingerprint = Fingerprint(target);
+        state.LastModelAuditFrame = CurrentFrame();
+
+        // Do not remember the tree here. A Button.Clicked() implementation may create a child Panel
+        // immediately or during the following Refresh/Update. Leaving the previous signature intact
+        // lets the next compilation/audit observe that structural transition.
+        state.LastTreeAuditFrame = int.MinValue;
+    }
+
+    private static bool AuditDue(int lastFrame, int currentFrame, int interval)
+    {
+        if (lastFrame == int.MinValue)
+            return true;
+        if (currentFrame < lastFrame)
+            return true; // Time.frameCount wrapped/reset.
+        return currentFrame - lastFrame >= interval;
+    }
+
+    private static int CurrentFrame()
+    {
+        try { return UnityEngine.Time.frameCount; }
+        catch { return 0; }
+    }
+
+    private static ulong ComputeTreeSignature(DevUINode root)
+    {
+        if (root == null)
+            return 0UL;
+
+        const ulong offset = 1469598103934665603UL;
+        const ulong prime = 1099511628211UL;
+        ulong hash = offset;
+        int remaining = 4096;
+        HashSet<DevUINode> visited = new();
+        Stack<DevUINode> stack = new();
+        stack.Push(root);
+
+        while (stack.Count > 0 && remaining-- > 0)
+        {
+            DevUINode node = stack.Pop();
+            if (node == null || !visited.Add(node))
+                continue;
+
+            hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(node));
+            hash *= prime;
+            hash ^= unchecked((uint)node.GetType().GetHashCode());
+            hash *= prime;
+
+            string id = node.IDstring ?? string.Empty;
+            hash ^= unchecked((uint)StringComparer.Ordinal.GetHashCode(id));
+            hash *= prime;
+
+            int count = node.subNodes?.Count ?? 0;
+            hash ^= unchecked((uint)count);
+            hash *= prime;
+
+            // Reverse push preserves the same logical child order in the signature.
+            for (int i = count - 1; i >= 0; i--)
+                stack.Push(node.subNodes[i]);
+        }
+
+        // A malformed/cyclic custom tree is still distinguishable from a normal complete walk.
+        hash ^= unchecked((uint)remaining);
+        hash *= prime;
+        return hash;
+    }
+
     private static string Fingerprint(PlacedObject target)
     {
         if (target == null)
@@ -578,6 +709,9 @@ internal static class LegacyObjectSandbox
         state.Target = null;
         state.CachedControls = Array.Empty<LegacyControlSnapshot>();
         state.ModelFingerprint = string.Empty;
+        state.TreeSignature = 0UL;
+        state.LastModelAuditFrame = int.MinValue;
+        state.LastTreeAuditFrame = int.MinValue;
         state.ControlsDirty = true;
     }
 }
