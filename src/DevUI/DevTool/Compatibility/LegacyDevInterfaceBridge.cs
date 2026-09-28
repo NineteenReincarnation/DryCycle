@@ -91,8 +91,17 @@ public static class LegacyDevInterfaceBridge
     internal static LegacyControlSnapshot[] CaptureRoot(DevUINode root)
     {
         if (root == null) return Array.Empty<LegacyControlSnapshot>();
+
         List<LegacyControlSnapshot> result = new();
-        CaptureChildren(root, string.Empty, result);
+        HashSet<DevUINode> visited = new();
+        visited.Add(root);
+        int remaining = 4096;
+        CaptureChildren(
+            root,
+            string.Empty,
+            result,
+            visited,
+            ref remaining);
         return result.ToArray();
     }
 
@@ -696,14 +705,22 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    private static void CaptureChildren(DevUINode parent, string parentPath, List<LegacyControlSnapshot> output)
+    private static void CaptureChildren(
+        DevUINode parent,
+        string parentPath,
+        List<LegacyControlSnapshot> output,
+        HashSet<DevUINode> visited,
+        ref int remaining)
     {
-        if (parent?.subNodes == null) return;
+        if (parent?.subNodes == null || remaining <= 0) return;
 
         for (int i = 0; i < parent.subNodes.Count; i++)
         {
+            if (--remaining < 0)
+                return;
+
             DevUINode node = parent.subNodes[i];
-            if (node == null) continue;
+            if (node == null || !visited.Add(node)) continue;
             string path = string.IsNullOrEmpty(parentPath) ? i.ToString() : parentPath + "." + i;
             bool atomic = false;
 
@@ -782,7 +799,12 @@ public static class LegacyDevInterfaceBridge
             }
 
             if (!atomic)
-                CaptureChildren(node, path, output);
+                CaptureChildren(
+                    node,
+                    path,
+                    output,
+                    visited,
+                    ref remaining);
         }
     }
 
