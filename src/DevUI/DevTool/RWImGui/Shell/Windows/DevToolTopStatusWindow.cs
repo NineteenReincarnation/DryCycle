@@ -80,7 +80,8 @@ internal static class DevToolTopStatusWindow
             ImGuiWindowFlags.AlwaysAutoResize |
             ImGuiWindowFlags.NoSavedSettings |
             ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse;
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoFocusOnAppearing;
 
         if (!ImGui.Begin(
                 "##DevToolTopStatus",
