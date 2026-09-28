@@ -325,7 +325,8 @@ internal static class SoundEditorView
                 DevToolUiSettings.T(
                     "声音工作区###DevToolSoundWorkspace",
                     "Sound Workspace###DevToolSoundWorkspace"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
