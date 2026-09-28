@@ -73,14 +73,14 @@ function Invoke-Checker(
 ) {
     Push-Location $WorkingDirectory
     try {
-        $output = @(& $powerShell -NoProfile -File $checker @Arguments 2>&1)
+        $output = @(& $powerShell -NoProfile -File $checker @Arguments -Repository $WorkingDirectory 2>&1)
         $exitCode = $LASTEXITCODE
         $lines = @($output | ForEach-Object { [string]$_ })
         if ($exitCode -notin @(0, 10, 20, 30)) {
             throw "checker host failure exit=$exitCode output=[$($lines -join ' | ')]"
         }
         if ($exitCode -eq 30) {
-            $detail = @(& $powerShell -NoProfile -File $checker @Arguments -Detailed 2>&1)
+            $detail = @(& $powerShell -NoProfile -File $checker @Arguments -Repository $WorkingDirectory -Detailed 2>&1)
             throw "checker internal output=[$($detail -join ' | ')]"
         }
         return [pscustomobject]@{
