@@ -413,7 +413,12 @@ internal sealed class ManagedObjectProtocolInspector :
         else if (valueType?.IsEnum == true)
         {
             binding.Kind = EditorPropertyKind.Enum;
-            binding.Options = Enum.GetNames(valueType);
+            // Managed enum fields may intentionally expose only a subset of the CLR enum. Prefer
+            // the descriptor's own list contract so DryCycle cannot create a value the original
+            // control would reject.
+            binding.Options = TryReadListOptions(descriptor, out string[] enumOptions)
+                ? enumOptions
+                : Enum.GetNames(valueType);
             binding.InspectorSupported = binding.Options.Length > 0;
         }
         else if (valueType != null &&
