@@ -479,6 +479,102 @@ if "entry.SolidTerrain != document.SolidTerrain" not in scene:
 print("Cartography solid-terrain contract guard passed.")
 PY
 
+# Third-party Object compatibility is protocol-based, not a growing allowlist of mod/type names.
+# Keep the durable architecture contract executable on hosted CI: ManagedData-like schemas are
+# structurally adapted, incomplete objects fall through to one headless Representation host, and
+# world-space semantics are compiled without materializing visible vanilla DevUI.
+python3 - <<'PY'
+from pathlib import Path
+
+managed_path = Path("src/DevUI/DevTool/Objects/ManagedObjectProtocolInspector.cs")
+bootstrap_path = Path("src/DevUI/DevTool/Objects/NativeObjectInspectorBootstrap.cs")
+presentation_path = Path("src/DevUI/DevTool/Core/EditorObjectPresentationPartial.cs")
+host_path = Path("src/DevUI/DevTool/Compatibility/LegacyObjectSandbox.cs")
+gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBridge.cs")
+coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
+project_path = Path("src/DryCycle.csproj")
+
+for path in (
+    managed_path,
+    bootstrap_path,
+    presentation_path,
+    host_path,
+    gizmo_path,
+    coverage_path,
+    project_path,
+):
+    if not path.is_file():
+        raise SystemExit(f"Object compatibility contract input is missing: {path}")
+
+managed = managed_path.read_text(encoding="utf-8")
+bootstrap = bootstrap_path.read_text(encoding="utf-8")
+presentation = presentation_path.read_text(encoding="utf-8")
+host = host_path.read_text(encoding="utf-8")
+gizmo = gizmo_path.read_text(encoding="utf-8")
+coverage = coverage_path.read_text(encoding="utf-8")
+project = project_path.read_text(encoding="utf-8")
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+# Optional ecosystem support must stay structural: no compile-time POM/RegionKit dependency and no
+# concrete ecosystem type in the protocol adapter.
+for forbidden in ("<Reference Include=\"Pom", "<Reference Include=\"RegionKit"):
+    require(forbidden not in project, "Optional Object compatibility must not add a hard POM/RegionKit reference.")
+for forbidden in ("using Pom", "using RegionKit", "typeof(Pom.", "typeof(RegionKit."):
+    require(forbidden not in managed, "Managed Object adapter regressed to a concrete ecosystem type dependency.")
+
+require('"GetValue"' in managed and '"SetValue"' in managed and '"fields"' in managed,
+        "Managed Object adapter must continue to recognize the fields + GetValue/SetValue protocol.")
+require("IObjectInspectorCoverageProvider" in managed and "IObjectInspectorGizmoAdapter" in managed,
+        "Managed Object protocol must publish both coverage and scene-gizmo capabilities.")
+
+managed_pos = bootstrap.find("ManagedObjectProtocolInspector.Instance")
+reflection_pos = bootstrap.find("NativeDataReflectionInspector.Instance")
+require(managed_pos >= 0 and reflection_pos > managed_pos,
+        "Managed Object protocol must run before generic Data reflection.")
+
+require("externalObject && !coverage.IsComplete" in presentation,
+        "Incomplete third-party Objects must still route through the isolated headless fallback.")
+require("!coverage.GizmoComplete" in presentation and "HeadlessRepresentationGizmoBridge.Capture" in presentation,
+        "Incomplete scene geometry must still merge from the headless Representation.")
+require("(!coverage.IsComplete || session.LegacyUiVisible)" in presentation,
+        "Full original DevUI must remain an explicit escape hatch only for compatibility gaps.")
+
+capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
+capture_end = host.find("internal static bool Run(", capture_start)
+require(capture_start >= 0 and capture_end > capture_start, "Could not isolate headless Object capture.")
+capture = host[capture_start:capture_end]
+require("activePage = state.Page" not in capture,
+        "Normal headless capture must never swap the visible DevUI page.")
+require("QuarantineContainer" in host and "CachedControls" in host and "ControlsDirty" in host,
+        "Headless Object host must retain detached visuals and cached semantic controls.")
+require("page.Refresh()" not in host and "Page.Refresh()" not in host,
+        "Headless Object host must not revive full ObjectsPage refresh work.")
+require("FGameObjectNode" in host and "shouldDestroyOnRemoveFromStage = false" in host,
+        "Custom Futile GameObject nodes must remain invisible without destroying their semantic source.")
+
+required_gizmo = (
+    "HandlePrefix",
+    "TryWriteManagedVectorArrayElement",
+    "CaptureMultiPointGeometry",
+    "CapturePixelGeometry",
+    "CaptureLineRendererGeometry",
+)
+for token in required_gizmo:
+    require(token in gizmo, f"Headless Object gizmo compiler lost required generic capability: {token}")
+require("ResolveNode(representation, path)" in gizmo,
+        "Headless Handle edits must resolve the current tree by path instead of caching stale node references.")
+
+require("ObserveHeadlessRepresentation" in coverage,
+        "Headless third-party Representation protocols must remain observable by compatibility diagnostics.")
+require("DevUiDiagnosticsPolicy.Enabled" in host and "ObserveHeadlessRepresentation" in host,
+        "Expensive compatibility auditing must stay diagnostics-only on normal editor frames.")
+
+print("Protocol-based third-party Object compatibility guard passed.")
+PY
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
