@@ -1,233 +1,224 @@
 # DryCycle
 
-Rain World v1.11.8 code mod. Mod ID: `Anno`.
+**DryCycle** 是一个面向 **Rain World 1.11.8** 的综合玩法扩展项目，核心围绕干旱、水资源、极端天气、荒漠生态与业力操纵展开。
 
-Current version: **0.0.34**.
+在这里，雨不再只是循环末尾的死亡倒计时，水本身也成为一种需要主动争取和管理的生存资源。玩家需要同时面对饥饿、脱水、温度、天气和环境变化，并在新的生物、武器、区域机制与业力能力之间寻找自己的生存方式。
 
-## Local build files
+---
 
-Build intermediates and test executables default to `../Build/DryCycle/obj` and
-`../Build/DryCycle/bin`, outside this source checkout. On this workstation that is
-`C:/Users/Orrhisk/Desktop/Build/DryCycle`. Override `DryCycleBuildRoot` with an MSBuild
-property for another machine. Keep source tests, build scripts and runtime mod assets
-in this repository; generated test projects, screenshots and logs belong in Build.
+## 水分与生存
 
-`scripts/Build-Shaders.ps1` stages the Unity project under `../Build/DryCycle/shader-project`,
-with bundles in `shader-bundles` and logs in `logs`. Only redistributable bundles and
-their version files are copied into `mod/assets/drycycle`. DLL deployment remains
-`Ancient Site/newest/plugins` in the selected Rain World installation.
+DryCycle 为玩家增加了一套独立的**水分系统**。
 
-Visual Studio may create its own ignored `.vs` directory when opening the solution.
+水分会随着时间持续消耗，角色需要通过饮水、含水食物或其他补水来源恢复状态。不同角色拥有不同的休眠用水需求，而最大水分容量会跟随角色本身的食物容量变化，因此不同蛞蝓猫在资源管理上也会产生不同压力。
 
-### Optional local CODEMAP hooks
+水分并没有被做成一条完全独立的 HUD，而是直接融合进 Rain World 原本的食物圆点。青色液面会连续显示每个圆点中的实际水量，并随着饮水、脱水和休眠消耗平滑变化。
 
-GitHub Actions is the authoritative CODEMAP check. A fresh clone can additionally enable the
-repository-owned pre-commit/pre-push hooks once with:
+当水分降低到危险水平时，玩家会逐渐进入类似饥饿状态的虚弱阶段。休眠也不再只看食物：正常休眠需要满足对应角色的水分要求，并在睡眠后消耗相应水量。
 
-```powershell
-pwsh -NoProfile -File ./scripts/Install-CodeMapHooks.ps1
-```
+其他与水分相关的行为包括：
 
-The installer does not replace an existing custom `core.hooksPath` unless `-Force` is used.
+- 不同蛞蝓猫拥有不同的休眠水分需求。
+- 满腹时仍可以摄取具有补水效果的食物，而不会额外增加普通食物值。
+- 被动脱水会直接反映在 HUD 液面上，而不是以离散档位跳变。
+- Jolly 合作模式下，每名玩家独立计算自己的水分、消耗与休眠需求。
+- NPC slugpup 不参与 DryCycle 的玩家水分规则。
+- 可选 SlugBase 角色能够使用自己的水分消耗和休眠需求配置。
 
-## Versioning
+水资源因此不再只是场景的一部分，而会真正影响探索距离、食物选择、休眠时机和路线规划。
 
-DryCycle increments only the final development number:
+---
 
-```text
-0.0.31 -> 0.0.32
-0.0.32 -> 0.0.33
-0.0.33 -> 0.0.34
-```
+## 温度、湿度与暴露
 
-The patch number does not roll over at 9.
+干旱环境不仅影响喝水，也影响玩家如何在房间中移动。
 
-## Hydration model
+DryCycle 包含玩家体温、湿润程度、环境湿度、日照暴露和房间热环境等系统。高温、潮湿、淋湿、遮阴以及不同天气条件会共同改变玩家所处的环境压力，并与水分消耗产生联系。
 
-- **1 hydration pip = 400 WV**.
-- **Half a pip = 200 WV**.
-- Hydration capacity is **not fixed at five pips**.
-- A slugcat's maximum hydration is its **maximum food-pip count × 400 WV**.
-- Example: a 5-food-pip slugcat has 2000 WV capacity; a 6-food-pip slugcat has 2400 WV capacity; Survivor's 7 food pips give 2800 WV capacity.
-- At **200 WV or lower**, the player receives Rain World's malnourished/starving weakness through the temporary `malnourishedByCreature` path.
-- Hydration is stored in pip units in `SaveState.unrecognizedSaveStrings`; the WV layer is an internal conversion, so the existing save format remains readable.
-- Water fills the same vanilla food circles from left to right. Sleep depletion runs from the currently rightmost occupied water pip toward the left.
+露天区域与阴影区域不再完全等价。在强烈日照或高温环境下，寻找遮蔽、减少暴露和控制行动时间会成为生存的一部分；进入水体、遭遇降雨或环境湿度变化，也会改变玩家的湿润状态和热环境。
 
-## Character hydration configuration
+---
 
-DryCycle has built-in character defaults for two values:
+## 天气与环境变化
 
-- `WaterLossRate`: passive hydration loss in **WV per second**. Default: **5 WV/s**.
-- `WaterPips`: hydration pips required for normal hibernation. The same value is used as the normal hibernation water cost and as the cyan divider position.
+DryCycle 扩展了 Rain World 的天气表现，使不同天气真正参与到探索和资源判断中。
 
-Built-in `WaterPips` values:
+### 降雨
 
-| Slugcat | WaterPips |
-| --- | ---: |
-| Monk (`Yellow`) | 1 |
-| Survivor (`White`) | 2 |
-| Hunter (`Red`) | 3 |
-| Gourmand | 4 |
-| Artificer | 3 |
-| Rivulet | 3 |
-| Spearmaster (`Spear`) | 3 |
-| Saint | 2 |
-| Inv | 6 |
-| Watcher | 2 |
+不同强度的降雨能够改变房间中的环境状态，也为缺水的玩家提供新的补水机会。
 
-Characters not listed above fall back to `WaterPips = 2` and `WaterLossRate = 5`. `Night` is Rain World's hidden legacy Nightcat identifier rather than a normal story campaign, so DryCycle currently leaves it on that fallback instead of treating it as a separate campaign default.
+当玩家处于能够直接接触雨水的位置时，可以从降雨中饮水；屋顶、建筑结构和其他遮挡则会阻止这一过程。于是同一场雨既可能是一种危险，也可能是一次难得的水资源补给。
 
-`WaterPips` is **not** a capacity setting. Capacity always follows the character's food meter. A character may therefore have, for example, 12 maximum food/water pips while only requiring 6 pips to hibernate.
+### 雾
 
-## Optional SlugBase compatibility
+雾会明显改变房间的空间感和可视距离。DryCycle 的雾并不是单纯覆盖一层半透明颜色，而是具有自己的体积、噪声和障碍处理，使雾气能够随着房间结构形成更自然的浓淡变化。
 
-SlugBase is **not required** to run DryCycle. `modinfo.json` has no SlugBase requirement, the plugin declares no SlugBase dependency metadata, and the project has no compile-time `SlugBase.dll` reference.
+### 沙尘暴
 
-When SlugBase is present, DryCycle discovers it during Rain World's mod initialization and registers two optional custom player features through reflection before SlugBase performs its JSON scan:
+沙尘暴为开放区域带来更强烈的荒漠环境压力，通过视野、空间氛围和环境反馈改变玩家对房间的判断。
 
-```json
-{
-  "id": "MySlugcat",
-  "name": "My Slugcat",
-  "description": "Example",
-  "features": {
-    "WaterLossRate": 5.0,
-    "WaterPips": 2
-  }
-}
-```
+### 热浪
 
-The feature names are case-sensitive:
+热浪强调持续的地表高温和空气扰动。房间中的热环境会形成明显的视觉与听觉反馈，并进一步影响玩家面对高温区域时的移动和停留方式。
 
-- `WaterLossRate`
-- `WaterPips`
+### 强烈高温
 
-If a SlugBase character omits either feature, DryCycle uses the built-in fallback values above. Because values are resolved on demand, SlugBase JSON reloads can update the active settings without DryCycle maintaining a second character-config cache.
+更极端的高温天气会将日照与环境暴露推向危险状态。玩家和其他生物都可能受到高温环境影响，使遮蔽、路线选择和停留时间变得更加重要。
 
-SlugBase's own `food_max`/food-meter behavior remains the source of truth for a custom character's maximum hydration capacity because DryCycle reads the actual food meter / `MaxFoodInStomach` rather than using `WaterPips` as a cap.
+---
 
-## Current HUD behavior
+## 昼夜与世界时间
 
-- Hydration is rendered as cyan liquid inside vanilla food pips; there is no second hydration row.
-- The water display is now **fully continuous** rather than quantized to empty / half / full. A total of `2.37` hydration therefore renders as two full water pips and a third pip filled to **37%**.
-- Whenever the currently active water pip is partially filled, its liquid surface keeps a subtle idle wave even when the player is not drinking.
-- Drinking and food hydration gains continue to use a stronger wave and smooth rising-water animation before settling back to the idle wave.
-- Passive dehydration tracks the real WV value continuously, so while the HUD is visible the current rightmost water surface can be watched slowly sinking instead of snapping between half-pip states.
-- Passive dehydration automatically reveals the vanilla lower-left HUD every time another **half hydration pip (200 WV)** has been lost. With the default `WaterLossRate = 5 WV/s`, this occurs once every **40 seconds** while water is being consumed normally.
-- Water stays visible during vanilla food restore/pop animations and scales with the food-circle outer-radius animation.
-- The cyan hibernation divider uses the current character's `WaterPips` and copies the vanilla survival-divider spacing.
-- Normal sleep drains water visually from right to left using the same continuous liquid-level representation.
-- Full-stomach hydrating food can still be eaten without increasing normal food; a temporary 50%-scale overflow food pip appears to the right.
-- Non-hydrating food at full stomach keeps the vanilla refusal feedback without repeatedly resetting the shake forever.
-- Shortcut transitions preserve hydration HUD state; drinking itself remains disabled while travelling through a shortcut.
-- Jolly co-op keeps hydration, passive loss, and `WaterPips` independent per human player.
-- NPC slugpups remain excluded from DryCycle hydration.
+DryCycle 包含持续运行的世界时间与昼夜变化。
 
-## KingVultureSpear prototype
+光照、调色和环境表现能够随着时间发生变化，并在区域切换时保持时间连续性，而不是把每个房间当成彼此独立的静态场景。
 
-Version 0.0.30 adds the first prototype of the **KingVultureSpear** extraction system.
+庇护所和循环重置也会与世界时间衔接，使昼夜变化成为整个世界状态的一部分。
 
-- Only a **dead King Vulture** can be harvested.
-- The player must have a free hand and stand close to the King Vulture's head/tusk area.
-- Holding the pickup/eat input for about **55 frames** starts and completes the pull.
-- The two King Vulture tusks are tracked independently. Each side can be extracted once. After a successful extraction, the pickup button must be released before a second tusk can be pulled.
-- The closest eligible tusk is selected automatically. A tusk that is already detached/fired far away from the head is not treated as something that can be harvested from the corpse.
-- When extraction finishes, the original corpse-side tusk body, detail layer, wire, and laser are hidden. A separate `KingVultureSpear` object is created at the same position and orientation and is immediately grabbed by the player's free hand.
-- The detached item copies the source tusk's side, current profile (`zRot`), King Vulture color pair, armor color, and `patternDisplace` value.
-- Its renderer recreates the original King Tusk's **15-segment `TriangleMesh` geometry**, including the original tusk bend/profile/radius formulas, and uses Rain World's original **`KingTusk` shader**. The item does not keep the original sprite instances, wire, or laser, so it remains independent from the corpse's `VultureGraphics` lifecycle.
-- The usable item currently inherits normal `Spear` gameplay behavior. Special damage, durability, charging, tethering, or other weapon abilities have not been assigned yet.
-- `KingVultureSpear` has its own registered `AbstractObjectType`, an `AbstractSpear` subclass, and a custom save parser so the object can be abstractized/realized instead of existing only as a temporary room effect.
-- Which tusks have been removed from a particular corpse is currently stored on that King Vulture's `AbstractCreature` for its current abstract/realized lifetime. It is not yet designed as a permanent cross-cycle world-resource state.
+---
 
-Version 0.0.31 adds the missing `Unity.Mathematics.dll` compile reference required by Rain World APIs exposing `Unity.Mathematics.float2` in their public signatures.
+## 新生物与荒漠生态
 
-Version 0.0.32 addresses the first in-game extraction test feedback:
+DryCycle 为新的环境加入了多种生物与变种。它们并不只是原版生物的换色版本，而会在体型、武器、移动方式、攻击习惯或生态位置上形成自己的区别。
 
-- An eligible corpse-side tusk now gets vanilla-style pickup feedback when the player enters range: a pickup-range sound plus a visible white pulse/highlight.
-- While the pickup button is held, the selected tusk pulses more strongly, receives a more visible tug, and the slugcat's free hand reaches toward the tusk so the pull action is readable before extraction completes.
-- Detached `KingVultureSpear` meshes no longer assign a flat white sprite color after setting custom per-vertex colors.
-- The two corpse tusks now survive front/behind sprite-slot swaps independently. Both dynamic body/detail slots are restored before each corpse draw, after which only the actually extracted side is hidden.
-- A detached KingVultureSpear also uses a per-vertex white blink when it later becomes a normal pickup candidate.
+### Desert Batfly
 
-Version 0.0.33 changes the detached tusk renderer to follow the original Rain World v1.11.8 King Tusk rendering path as closely as possible rather than merely approximating its colors:
+比普通 Batfly 更大的荒漠变种。
 
-- Body/detail meshes still use the exact vanilla 15-segment `MakeLongMesh` topology and the exact `TuskBend`, `TuskProfBend`, and `TuskRad` formulas.
-- Both detached meshes are now placed in the same **Midground** container used by `KingTusks.Tusk`.
-- `ApplyPalette` now restores the vanilla common sprite tint before writing the custom vertex colors. This sprite-level state is part of the original `KingTusk` shader input and was the main remaining reason the detached pattern could differ from the corpse-side tusk.
-- Body and detail vertex colors now mirror the original `KingTusks.Tusk.ApplyPalette` / `UpdateTuskColors` formulas directly.
-- The detail mesh alpha is still the original `patternDisplace`, exactly as in `KingTusks.Tusk.ApplyPalette`.
-- Under MMF, detached-tusk darkness now also applies Rain World's `LightSourceExposure` factor, matching the lighting calculation used by `VultureGraphics` while allowing the light response to follow the detached item.
+它们保留群居与飞行特征，但拥有更明显的个体行为差异。部分个体会表现出更强的攻击性，在受到威胁后进行反击，也可能主动骚扰体型较小的生物。
 
-Version 0.0.34 adds the requested extraction pose and carrying weight penalties:
+### Lance Scavenger
 
-- While a tusk is being pulled from a dead King Vulture, the slugcat's available hands use the same absolute-target arm presentation as Rain World's vanilla heavy-corpse dragging, with a small increasing body strain toward the tusk. The corpse remains effectively immovable during the extraction.
-- A human-controlled slugcat carrying a `KingVultureSpear` in either hand or on `spearOnBack` runs at **75%** normal speed, climbs poles at **74%** normal speed, and corridor-climbs at **78%** normal speed.
-- The movement multipliers are applied only around the relevant vanilla movement update and the original `SlugcatStats` values are restored immediately afterward, avoiding persistent stat mutation.
-- NPC slugpups do not receive these carrying penalties.
+以长枪和高速突刺为核心战斗方式的特殊拾荒者。
 
-This is still a source-level prototype and should be re-tested in the local Rain World installation.
+Lance Scavenger 会使用独立的 **Scavenger Lance** 进行架枪、短刺和冲锋。它不会把长枪当成普通 Spear 那样频繁投掷，而是依靠武器长度、身体速度和枪尖碰撞建立威胁。
 
-## Standard Rain World build setup
+在明确敌对之前，它仍保留拾荒者的社会行为和警告阶段；真正进入战斗后，则会寻找适合冲锋的距离与通道，避免友军和不适合长枪展开的狭窄地形。失去长枪后，它也会真实寻找并重新拾取武器，而不是直接生成一把新的长枪。
 
-The project targets **.NET Framework 4.8** and compiles against the installed Rain World assemblies. SlugBase is not needed to compile.
+### Mantle Crab
 
-```powershell
-dotnet build .\DryCycle.sln -c Release -p:RainWorldDir="D:/Steam/steamapps/common/Rain World"
-```
+大型蟹类生物，强调重量感、节肢移动和身体姿态。
 
-DryCycle references only:
+Mantle Crab 拥有独立的腿部、钳部、姿态控制和地形探测。它的移动不会简单套用普通地面生物的滑行方式，而是通过肢体支撑、身体翻转、地形接触和钳部动作来表现大型甲壳生物的运动感。
 
-```text
-BepInEx/core/BepInEx.dll
-BepInEx/utils/PUBLIC-Assembly-CSharp.dll
-BepInEx/plugins/HOOKS-Assembly-CSharp.dll
-RainWorld_Data/Managed/Assembly-CSharp-firstpass.dll
-RainWorld_Data/Managed/UnityEngine.dll
-RainWorld_Data/Managed/UnityEngine.CoreModule.dll
-RainWorld_Data/Managed/Unity.Mathematics.dll
-```
+### Mossy Spider
 
-Output path on the current development machine:
+独立的蜘蛛型生物扩展，拥有自己的 AI、寻路、腿部运动和轮廓表现。
 
-```text
-D:/Steam/steamapps/common/Rain World/RainWorld_Data/StreamingAssets/mods/Ancient Site/newest/plugins/DryCycle.dll
-```
+它被设计为区域生态的一部分，而不是简单复用原版蜘蛛的视觉外壳。
 
-## Iterator Framework
+### Spineback Lizard
 
-The first six development phases provide immutable definitions, fluent registration,
-per-room runtimes, replaceable bodies and arm constraints, movement, collision, poses,
-named sprites, modular mesh graphics, action arbitration, cached player sensing,
-and dialogue sequences with conditions, commands, interruption and HUD output.
-PWN_AI includes a white and lavender sample iterator with a golden headdress that
-observes visible players while hovering. Managed validation and CPU mesh previews pass;
-Unity in-game validation is pending.
-See the [Iterator Framework documentation](src/Iterators/Documentation/README.md) and
-[runtime lifecycle API](src/Iterators/Documentation/RUNTIME.md),
-[body, arm and pose API](src/Iterators/Documentation/BODY.md),
-[graphics and PWN_AI sample](src/Iterators/Documentation/GRAPHICS.md),
-[Brain, actions and behavior modules](src/Iterators/Documentation/BEHAVIOR.md),
-[conversation and dialogue API](src/Iterators/Documentation/CONVERSATION.md), and
-[phase progress and validation](src/Iterators/Documentation/PROGRESS.md).
+带有明显背棘特征的蜥蜴变种。
 
-## Source layout
+它通过独立的背部尖刺与外观表现，在原版蜥蜴体系中形成更强的轮廓识别。
 
-```text
-src/Plugin.cs
-src/Thirst/ThirstHooks.cs
-src/Thirst/ThirstStore.cs
-src/Thirst/ThirstState.cs
-src/Thirst/ThirstConstants.cs
-src/Thirst/HydrationWeakness.cs
-src/Thirst/SlugBaseHydrationFeatures.cs
-src/Thirst/FoodWaterTable.cs
-src/HUD/ThirstMeter.cs
-src/HUD/HydrationDivider.cs
-src/Items/KingVultureSpear/AbstractKingVultureSpear.cs
-src/Items/KingVultureSpear/KingVultureSpear.cs
-src/Items/KingVultureSpear/KingVultureSpearHooks.cs
-src/Items/KingVultureSpear/KingVultureSpearFeedback.cs
-src/Items/KingVultureSpear/KingVultureSpearPlayerEffects.cs
-```
+---
 
-Temperature mechanics are not implemented yet.
+## 武器与物品
+
+DryCycle 加入了多件真正参与移动、战斗和资源管理的物品。
+
+### Dew Pod
+
+一种能够储存水分的携带物。
+
+Dew Pod 可以在水中重新补充内部液体，玩家能够直接利用其中的水分进行补水。它本身也具有完整的物理行为：被武器击中或受到严重冲击后可能破裂，破损后储存的水会逐渐泄漏。
+
+因此它既是补给品，也是一种可以提前准备和携带的移动水源。
+
+### Rope Spear
+
+带有绳索系统的特殊长矛。
+
+投掷后，Rope Spear 会在长矛与握持端之间展开一根真实绳索。绳索能够绕过地形、承受拉力，并作为可攀爬结构使用。
+
+当长矛固定在墙面或其他位置时，玩家可以沿绳索上下移动，并继续爬到长矛本体附近。它因此不只是武器，也是一件能够改变房间移动路线的探索工具。
+
+### Scavenger Lance
+
+Lance Scavenger 使用的长兵器，同时也是能够独立存在于世界中的真实物品。
+
+它明显长于普通 Spear，拥有枪尖、枪杆和握持区域的区别。武器的主要价值来自持有者自身的速度与前向贯刺，而不是单纯的投掷伤害。
+
+玩家也能够拾取和使用这件武器，但它的长度和惯性会使它与普通 Spear 有明显不同的手感。
+
+### King Vulture Spear
+
+可从死亡 King Vulture 身上提取的特殊长矛。
+
+玩家需要靠近尸体头部并持续拔取獠牙，两侧 tusk 可以分别被取下。完成后，原本属于尸体的獠牙会成为一件独立、可携带、可保存的武器，并保留 King Tusk 原有的主要外观特征。
+
+这件武器明显比普通 Spear 更沉重。携带时会降低奔跑、爬杆和管道移动能力，因此获得强大而特殊的武器，同时也意味着需要承担真实的移动代价。
+
+### Karma Spear
+
+由业力力量驱动的特殊 Spear。
+
+Karma Spear 储存一定等级的业力力量，并在命中生物或插入墙面后释放。命中目标时会根据目标类型触发不同的业力反应；固定在墙面时则能够形成持续的业力场域。
+
+它的强度与持续时间取决于储存的业力等级，因此这件武器并不是无限使用的特殊矛，而是把业力资源转换成主动战斗能力。
+
+---
+
+## 业力操纵
+
+DryCycle 将业力从单纯的死亡惩罚、通行要求和显示等级，进一步扩展为可以被玩家主动消耗的资源。
+
+不同业力能力共用同一套保护资源，因此同一份业力保护不能被多个能力重复消费。
+
+### Karmic Armor
+
+当玩家拥有可用的强化业力保护时，可以获得类似 Watcher 拾荒者业力护盾的防御效果。
+
+护盾能够在危险抓取、直接攻击、投掷武器或致命伤害到来时触发，阻挡攻击并产生明显的业力视觉反馈。它并不是永久无敌状态，而是以实际业力保护作为代价。
+
+### Karma Spear
+
+Karma Spear 则把同一套业力资源转化为主动攻击与控制能力。
+
+这使玩家需要在“保留业力作为防御”与“把业力投入武器”之间进行选择。
+
+---
+
+## 世界连接与探索结构
+
+DryCycle 也扩展了区域内部的世界连接方式。
+
+### WorldLink
+
+WorldLink 用于建立比原版固定房间连接更复杂的区域内部通路，包括具有方向、图形和运行时状态的连接结构。
+
+它允许一个区域内部形成更清晰的分区、特殊入口和非标准通行关系，使世界结构不必完全受原版区域出口形式限制。
+
+### Internal Gate
+
+区域内部可以存在类似业力门的门体，而不需要把两侧都视为不同 Region。
+
+这使同一个区域内部也能够通过大型门结构形成明显的空间分隔和路线层次。
+
+### 多端口与定向连接
+
+世界连接系统还支持更复杂的门体、端口和方向关系，使某些房间能够承担真正的交通节点作用，而不是简单的一进一出。
+
+---
+
+## 庇护所与休眠
+
+除普通 Rain World 庇护所外，DryCycle 也对休眠流程进行了扩展。
+
+开放式庇护所、世界时间、水分需求和循环重置可以共同参与睡眠逻辑，使休眠更自然地接入新的生存系统，而不是成为与天气、水分和时间完全分离的独立流程。
+
+---
+
+## 开发者工具
+
+除了玩家能够直接体验的玩法内容，DryCycle 还包含一套基于 ImGui 的 Rain World 开发者工具重构。
+
+它覆盖 Room、Object、Sound、Trigger、Relationships、World Map、Player Map、Cartography 等内容编辑，并提供统一的 Gizmo、撤销/重做、保存和可视化操作。
+
+这部分主要用于项目自身和地图内容的持续制作，不属于普通玩家必须理解的玩法系统。
+
+---
+
+DryCycle 仍在持续扩展。README 只描述当前项目中已经存在的主要玩法与内容，不记录逐版本开发历史、源码结构或内部实现过程。
