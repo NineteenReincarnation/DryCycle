@@ -5,6 +5,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $checker = Join-Path $PSScriptRoot "CodeMap.ps1"
+$autofixer = Join-Path $PSScriptRoot "CodeMap.AutoFix.ps1"
 $powerShell = if (Get-Command pwsh -ErrorAction SilentlyContinue) {
     (Get-Command pwsh).Source
 }
@@ -83,6 +84,28 @@ function Invoke-Checker(
         if ($exitCode -eq 30) {
             $detail = @(& $powerShell -NoProfile -File $checker @Arguments -Repository $WorkingDirectory -Detailed 2>&1)
             throw "checker internal output=[$($detail -join ' | ')]"
+        }
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = $lines
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Invoke-AutoFix(
+    [string]$WorkingDirectory,
+    [string[]]$Arguments = @()
+) {
+    Push-Location $WorkingDirectory
+    try {
+        $output = @(& $powerShell -NoProfile -File $autofixer @Arguments -Repository $WorkingDirectory 2>&1)
+        $exitCode = $LASTEXITCODE
+        $lines = @($output | ForEach-Object { [string]$_ })
+        if ($exitCode -notin @(0, 10, 20, 30)) {
+            throw "autofix host failure exit=$exitCode output=[$($lines -join ' | ')]"
         }
         return [pscustomobject]@{
             ExitCode = $exitCode
@@ -504,6 +527,111 @@ $tests.Add({
     }
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("mv", "src/Area/Feature", "src/Area/Renamed") | Out-Null
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 0 $result.ExitCode "autofix pure rename"
+        Assert-Empty $result.Output "autofix pure rename must be silent"
+
+        $map = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        if ($map -notmatch [regex]::Escape([string][char]96 + "Renamed/" + [string][char]96)) {
+            throw "autofix pure rename did not update target entry"
+        }
+        if ($map -match [regex]::Escape([string][char]96 + "Feature/" + [string][char]96)) {
+            throw "autofix pure rename left stale entry"
+        }
+
+        $check = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $check.ExitCode "autofix pure rename final check"
+        Assert-Empty $check.Output "autofix pure rename final check must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("rm", "-r", "-q", "src/Area/Feature") | Out-Null
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 0 $result.ExitCode "autofix delete module"
+        Assert-Empty $result.Output "autofix delete module must be silent"
+
+        $map = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        if ($map -match [regex]::Escape([string][char]96 + "Feature/" + [string][char]96)) {
+            throw "autofix delete module left stale entry"
+        }
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Area/NewFeature/New.cs") "class NewFeature { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+
+        $before = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 10 $result.ExitCode "autofix new semantic module"
+        Assert-Contains $result.Output "sem src/Area/CODEMAP.md +NewFeature/" "autofix new semantic module"
+
+        $after = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        Assert-Equal $before $after "autofix must not invent semantic description"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Invoke-Git $repo @("rm", "-r", "-q", "src/Area/Feature") | Out-Null
+        Add-Content -LiteralPath (Join-Path $repo "src/Area/CODEMAP.md") -Value ([Environment]::NewLine + "<!-- user edit -->")
+
+        $before = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 20 $result.ExitCode "autofix protects unstaged map edit"
+
+        $after = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        Assert-Equal $before $after "autofix overwrote unstaged map edit"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        Write-Utf8 (Join-Path $repo "src/Other/CODEMAP.md") @'
+<!-- codemap:v1 -->
+
+# Other
+
+- `Base/` — base
+'@
+        Write-Utf8 (Join-Path $repo "src/Other/Base/File.cs") "class Base { }"
+        Invoke-Git $repo @("add", ".") | Out-Null
+        Invoke-Git $repo @("commit", "-q", "-m", "other scope") | Out-Null
+
+        New-Item -ItemType Directory -Path (Join-Path $repo "src/Other") -Force | Out-Null
+        Invoke-Git $repo @("mv", "src/Area/Feature", "src/Other/Moved") | Out-Null
+
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 0 $result.ExitCode "autofix cross-scope move"
+        Assert-Empty $result.Output "autofix cross-scope move must be silent"
+
+        $oldMap = [IO.File]::ReadAllText((Join-Path $repo "src/Area/CODEMAP.md"))
+        $newMap = [IO.File]::ReadAllText((Join-Path $repo "src/Other/CODEMAP.md"))
+        if ($oldMap -match [regex]::Escape([string][char]96 + "Feature/" + [string][char]96)) {
+            throw "autofix cross-scope move left old entry"
+        }
+        if ($newMap -notmatch [regex]::Escape([string][char]96 + "Moved/" + [string][char]96)) {
+            throw "autofix cross-scope move did not migrate entry"
+        }
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
 foreach ($test in $tests) {
     & $test
 }
