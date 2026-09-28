@@ -1,63 +1,41 @@
-using System;
 using ImGuiNET;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Shared chrome for the Objects scene visibility model.
-///
-/// Scene can be hosted either in the center workspace or in the Browser. Both surfaces must expose
-/// the same category visibility/focus controls because they mutate one shared scene policy.
+/// Shared category chrome for the Objects scene list.
+/// Center Scene and Browser Scene use the same collapse behavior.
 /// </summary>
 internal static class ObjectSceneFilterControls
 {
-    internal static void DrawFocusSummary(string scope)
+    internal static bool DrawCollapseAllAction(string scope)
     {
-        if (string.IsNullOrEmpty(ObjectSceneVisibilityState.FocusedCategory))
-            return;
+        string label = DevToolUiSettings.T("折叠所有", "Collapse All");
+        float buttonWidth = DevToolWidgets.ButtonWidth(label);
 
-        ImGui.Spacing();
-        DevToolWidgets.MutedText(
-            DevToolUiSettings.T("聚焦: ", "Focus: ") + ObjectSceneVisibilityState.FocusedCategory);
         ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("清除", "Clear"),
-                "ObjectSceneClearFocus##" + scope,
-                DevToolButtonTone.Subtle))
-            ObjectSceneVisibilityState.ClearFocus();
+        float actionX = ImGui.GetWindowContentRegionMax().X - buttonWidth;
+        if (actionX > ImGui.GetCursorPosX())
+            ImGui.SetCursorPosX(actionX);
+
+        return DevToolWidgets.ActionButton(
+            label,
+            "ObjectSceneCollapseAll##" + scope,
+            DevToolButtonTone.Subtle);
     }
 
-    internal static void DrawCategoryHeader(string category, string scope)
+    internal static bool DrawCategoryHeader(
+        string category,
+        string scope,
+        bool collapseAll)
     {
-        ObjectCategoryVisibility mode = ObjectSceneVisibilityState.GetCategoryMode(category);
-        string state = mode switch
-        {
-            ObjectCategoryVisibility.Ghost => DevToolUiSettings.T("弱显", "Ghost"),
-            ObjectCategoryVisibility.Hidden => DevToolUiSettings.T("隐藏", "Hidden"),
-            _ => DevToolUiSettings.T("正常", "Normal")
-        };
+        category ??= string.Empty;
 
-        DevToolWidgets.MutedText(category);
-        ImGui.SameLine();
-        if (DevToolWidgets.ActionButton(
-                state,
-                "ObjectCategoryVisibility##" + scope + "##" + category,
-                mode == ObjectCategoryVisibility.Normal
-                    ? DevToolButtonTone.Subtle
-                    : DevToolButtonTone.Normal))
-            ObjectSceneVisibilityState.CycleCategoryMode(category);
+        if (collapseAll)
+            ImGui.SetNextItemOpen(false, ImGuiCond.Always);
 
-        ImGui.SameLine();
-        bool focused = string.Equals(
-            ObjectSceneVisibilityState.FocusedCategory,
-            category,
-            StringComparison.OrdinalIgnoreCase);
-        if (DevToolWidgets.ActionButton(
-                focused
-                    ? DevToolUiSettings.T("取消聚焦", "Unfocus")
-                    : DevToolUiSettings.T("聚焦", "Focus"),
-                "ObjectCategoryFocus##" + scope + "##" + category,
-                focused ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-            ObjectSceneVisibilityState.SetFocusedCategory(category);
+        return ImGui.CollapsingHeader(
+            category + "##ObjectSceneCategory##" + scope + "##" + category,
+            ImGuiTreeNodeFlags.DefaultOpen);
     }
 }

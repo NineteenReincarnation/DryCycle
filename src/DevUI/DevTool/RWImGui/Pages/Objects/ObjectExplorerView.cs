@@ -601,12 +601,13 @@ internal static class ObjectExplorerView
                 Send(EditorUiCommandKind.DeleteSelection);
         }
 
+        bool collapseAll = ObjectSceneFilterControls.DrawCollapseAllAction("Browser");
+
         ImGui.Spacing();
         DevToolWidgets.MutedText(DevToolUiSettings.T("搜索场景物件", "Search scene objects"));
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputText("##DevToolSceneSearch", ref sceneSearch, 128);
         ObjectSceneVisibilityState.SetSearchQuery(sceneSearch);
-        ObjectSceneFilterControls.DrawFocusSummary("Browser");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -622,9 +623,11 @@ internal static class ObjectExplorerView
             ObjectSceneProjectedCategory category = categories[categoryIndex];
             if (categoryIndex > 0) ImGui.Spacing();
 
-            ObjectSceneFilterControls.DrawCategoryHeader(
-                category.Category,
-                "BrowserScene");
+            if (!ObjectSceneFilterControls.DrawCategoryHeader(
+                    category.Category,
+                    "BrowserScene",
+                    collapseAll))
+                continue;
 
             List<ObjectSceneProjectedRow> rows = category.Rows;
             using DevToolListClipper clipper = new(rows.Count);

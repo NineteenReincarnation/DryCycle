@@ -71,6 +71,8 @@ internal static class ObjectSceneWorkspaceView
             }
         }
 
+        bool collapseAll = ObjectSceneFilterControls.DrawCollapseAllAction("Center");
+
         if (selectedCount > 0)
         {
             ImGui.Spacing();
@@ -182,8 +184,6 @@ internal static class ObjectSceneWorkspaceView
         ImGui.InputText("##CenterSceneObjectSearch", ref search, 128);
         ObjectSceneVisibilityState.SetSearchQuery(search);
 
-        ObjectSceneFilterControls.DrawFocusSummary("Center");
-
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -198,9 +198,11 @@ internal static class ObjectSceneWorkspaceView
             ObjectSceneProjectedCategory category = categories[categoryIndex];
             if (categoryIndex > 0) ImGui.Spacing();
 
-            ObjectSceneFilterControls.DrawCategoryHeader(
-                category.Category,
-                "CenterScene");
+            if (!ObjectSceneFilterControls.DrawCategoryHeader(
+                    category.Category,
+                    "CenterScene",
+                    collapseAll))
+                continue;
 
             List<ObjectSceneProjectedRow> rows = category.Rows;
             using DevToolListClipper clipper = new(rows.Count);
