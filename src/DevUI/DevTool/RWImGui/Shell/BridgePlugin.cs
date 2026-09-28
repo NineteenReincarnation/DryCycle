@@ -126,6 +126,11 @@ public sealed class BridgePlugin : BaseUnityPlugin
         }
 
         TryEnableOptionalFrontendFeature(
+            "RwImGuiLocalizationReloadGuard",
+            () => RwImGuiLocalizationReloadGuard.Enable(Logger),
+            RwImGuiLocalizationReloadGuard.Disable);
+
+        TryEnableOptionalFrontendFeature(
             "WorldCreatureSpawnInspector",
             () => WorldCreatureSpawnInspector.Enable(Logger),
             WorldCreatureSpawnInspector.Disable);
@@ -502,6 +507,7 @@ public sealed class BridgePlugin : BaseUnityPlugin
         SafeFrontendCleanup("RWImGui callback", TryUnregisterCallback);
         SafeFrontendCleanup("font atlas integration", DevToolFontAtlasIntegration.Disable);
 
+        SafeFrontendCleanup("RWImGUI localization reload guard", RwImGuiLocalizationReloadGuard.Disable);
         if (ownsCreatureCatalogRuntime)
             SafeFrontendCleanup("creature catalog fallback", WorldCreatureCatalogPicker.Shutdown);
         ownsCreatureCatalogRuntime = false;
