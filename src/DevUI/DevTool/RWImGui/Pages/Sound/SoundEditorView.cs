@@ -145,10 +145,13 @@ internal static class SoundEditorView
         const float minimumSideWidth = 118f;
 
         float availableWidth = ImGui.GetContentRegionAvail().X;
-        float sideWidth = Math.Max(
+        float desiredSideWidth = Math.Max(
             minimumSideWidth,
             Math.Min(150f, availableWidth * 0.22f));
-        float centerWidth = Math.Max(220f, availableWidth - sideWidth * 2f);
+        float sideWidth = Math.Min(
+            desiredSideWidth,
+            Math.Max(80f, (availableWidth - 220f) * 0.5f));
+        float centerWidth = Math.Max(1f, availableWidth - sideWidth * 2f);
 
         // Three real columns keep the sound-type selector on the exact center axis of the top
         // window. The two room-volume controls live in equal side columns and therefore never push
