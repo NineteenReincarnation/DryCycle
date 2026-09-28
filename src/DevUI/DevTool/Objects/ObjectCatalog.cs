@@ -116,6 +116,7 @@ public static class ObjectCatalog
 
     private static Dictionary<string, string> inferredSourceByType;
     private static int inferredSourcePluginCount = -1;
+    private static int inferredSourceTypeCount = -1;
 
     /// <summary>
     /// Changes whenever descriptor metadata can produce a different catalog projection.
@@ -238,6 +239,7 @@ public static class ObjectCatalog
         cachedByType = null;
         cachedTypeCount = -1;
         inferredSourcePluginCount = -1;
+        inferredSourceTypeCount = -1;
         unchecked { revision++; }
     }
 
@@ -272,8 +274,10 @@ public static class ObjectCatalog
     private static void EnsureInferredSources()
     {
         int pluginCount = Chainloader.PluginInfos?.Count ?? 0;
+        int typeCount = ExtEnum<PlacedObject.Type>.values.Count;
         if (inferredSourceByType != null &&
-            inferredSourcePluginCount == pluginCount)
+            inferredSourcePluginCount == pluginCount &&
+            inferredSourceTypeCount == typeCount)
             return;
 
         Dictionary<string, string> next =
@@ -327,6 +331,7 @@ public static class ObjectCatalog
 
         inferredSourceByType = next;
         inferredSourcePluginCount = pluginCount;
+        inferredSourceTypeCount = typeCount;
     }
 
     private static void CollectPlacedObjectTypes(
