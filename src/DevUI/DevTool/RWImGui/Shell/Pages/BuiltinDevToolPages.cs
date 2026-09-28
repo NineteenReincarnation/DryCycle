@@ -130,7 +130,8 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
     public override int NavigationOrder => 300;
     public override string NavigationLabel => DevToolUiSettings.T("声音", "Sound");
     public override string NavigationTooltip => DevToolUiSettings.T("声音", "Sound");
-    public override bool SupportsSceneSurface => true;
+    public override bool UsesDedicatedWorkspace => true;
+    public override bool SupportsSceneSurface => false;
     public override bool HasTopControls => true;
     public override string LegacyFallbackTooltip => DevToolUiSettings.T(
         "用于未迁移的自定义声音页面控件。",
@@ -150,6 +151,12 @@ internal sealed class SoundDevToolPage : DevToolFrontendPageBase
 
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         SoundEditorView.DrawSceneWorkspace(SoundEditorPresentationHub.Current);
+
+    public override void DrawWorkspace(EditorPresentationSnapshot snapshot, Num.Vector2 display) =>
+        SoundEditorView.DrawWorkspace(
+            snapshot,
+            SoundEditorPresentationHub.Current,
+            display);
 
     protected override DevToolPageStatusState BuildSessionStatusState(EditorPresentationSnapshot snapshot) =>
         new(countA: SoundEditorPresentationHub.Current.Sounds?.Length ?? 0);
