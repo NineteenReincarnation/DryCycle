@@ -297,25 +297,28 @@ internal static class SoundEditorView
         if (snapshot == null || !snapshot.Available)
             return;
 
+        // Compact three-pane workspace. On a 1690x950-class display this resolves to
+        // roughly 760x530, matching the intended resource / scene / inspector footprint while
+        // remaining fully resizable by the developer.
         float defaultWidth = Math.Min(
-            Math.Max(900f, display.X * 0.78f),
-            Math.Max(680f, display.X - 210f));
+            760f,
+            Math.Max(640f, display.X - 80f));
         float defaultHeight = Math.Min(
-            Math.Max(320f, display.Y * 0.38f),
-            Math.Max(300f, display.Y - 180f));
+            530f,
+            Math.Max(340f, display.Y - 160f));
         Num.Vector2 defaultPos = new(
-            Math.Max(180f, (display.X - defaultWidth) * 0.5f),
-            Math.Max(92f, display.Y - defaultHeight - 14f));
+            Math.Max(120f, (display.X - defaultWidth) * 0.5f),
+            Math.Max(110f, (display.Y - defaultHeight) * 0.5f));
 
         ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(
             new Num.Vector2(defaultWidth, defaultHeight),
             ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(680f, 300f),
+            new Num.Vector2(640f, 320f),
             new Num.Vector2(
-                Math.Max(680f, display.X - 16f),
-                Math.Max(300f, display.Y - 16f)));
+                Math.Max(640f, display.X - 16f),
+                Math.Max(320f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
@@ -412,9 +415,9 @@ internal static class SoundEditorView
         const float splitterWidth = 10f;
         float usable = Math.Max(1f, available.X - splitterWidth * 2f);
 
-        float minBrowser = 230f;
-        float minScene = 270f;
-        float minInspector = 300f;
+        float minBrowser = 180f;
+        float minScene = 210f;
+        float minInspector = 250f;
         float required = minBrowser + minScene + minInspector;
         if (required > usable)
         {
