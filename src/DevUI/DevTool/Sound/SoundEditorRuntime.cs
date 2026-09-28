@@ -7,6 +7,16 @@ using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.Sound;
 
+/// <summary>
+/// Canonical Rain World room-sound defaults. These mirror DefaultRoomSettings:
+/// BkgDroneVolume = 0.3 and BkgDroneNoThreatVolume = 1.0.
+/// </summary>
+internal static class SoundEditorDefaults
+{
+    internal const float BackgroundDroneVolume = 0.3f;
+    internal const float NoThreatDroneVolume = 1f;
+}
+
 public sealed class EditorSoundSnapshot
 {
     public int Index { get; init; }
