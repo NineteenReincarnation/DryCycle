@@ -234,6 +234,57 @@ public static class DevUiMigrationCoverage
         }
     }
 
+    internal static void ObserveHeadlessRepresentation(PlacedObjectRepresentation representation)
+    {
+        if (representation == null)
+            return;
+
+        try
+        {
+            Dictionary<string, MutableEntry> entries = new(StringComparer.Ordinal);
+            const string scope = "HeadlessObject";
+            DevUiMigrationSource source = ResolveContextSource(
+                representation,
+                ResolveSource(representation.GetType()));
+
+            Walk(
+                representation,
+                "root",
+                true,
+                scope,
+                source,
+                entries);
+
+            lock (Gate)
+            {
+                foreach (KeyValuePair<string, MutableEntry> pair in entries)
+                {
+                    MutableEntry incoming = pair.Value;
+                    if (ObservedEntries.TryGetValue(pair.Key, out MutableEntry existing))
+                    {
+                        if (incoming.InstanceCount > existing.InstanceCount)
+                            existing.InstanceCount = incoming.InstanceCount;
+                        existing.State = incoming.State;
+                        existing.AdapterNote = incoming.AdapterNote;
+                        existing.Source = incoming.Source;
+                    }
+                    else
+                    {
+                        ObservedEntries[pair.Key] = Clone(incoming);
+                    }
+                }
+
+                observed = BuildSnapshot("Observed", ObservedEntries.Values);
+                LogCoverageGrowthIfNeeded(observed);
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless object compatibility audit failed: " + error.Message);
+        }
+    }
+
     internal static void Reset()
     {
         lock (Gate)

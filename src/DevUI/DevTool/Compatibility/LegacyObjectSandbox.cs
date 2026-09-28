@@ -60,6 +60,12 @@ internal static class LegacyObjectSandbox
             state.CachedControls =
                 LegacyDevInterfaceBridge.CaptureRoot(state.Representation) ??
                 Array.Empty<LegacyControlSnapshot>();
+
+            // Full protocol scanning is diagnostics-only. Production object editing pays no
+            // migration-audit reflection cost.
+            if (DevUiDiagnosticsPolicy.Enabled)
+                DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation);
+
             state.ControlsDirty = false;
             return state.CachedControls;
         }
