@@ -90,7 +90,9 @@ internal static class LegacyObjectSandbox
         {
             // Existing LegacyDevInterfaceBridge semantics are intentionally reused. The swap is
             // synchronous on the DevUI/main thread and no EditorSession synchronization occurs until
-            // after this call returns.
+            // after this call returns. The sandbox is a semantic backend only: none of its Futile
+            // visuals may ever leak into the rebuilt editor.
+            HideVisualTree(state.Page);
             session.Owner.activePage = state.Page;
             return action();
         }
@@ -101,6 +103,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
+            HideVisualTree(state.Page);
             session.Owner.activePage = previous;
         }
     }
@@ -129,6 +132,11 @@ internal static class LegacyObjectSandbox
                 // Passing the existing model object is critical: CreateObjRep then constructs only
                 // its representation/control tree and does not append another PlacedObject.
                 page.CreateObjRep(target.type, target);
+
+                // ObjectsPage construction creates ordinary DevInterface menu/representation sprites
+                // even though this page exists only as a compatibility backend. Suppress them in the
+                // same frame so selecting an external object can never reveal vanilla DevUI.
+                HideVisualTree(page);
             }
             finally
             {
@@ -147,6 +155,36 @@ internal static class LegacyObjectSandbox
             DisposeState(state);
             return null;
         }
+    }
+
+    private static void HideVisualTree(DevUINode node)
+    {
+        if (node == null)
+            return;
+
+        if (node.fSprites != null)
+        {
+            for (int i = 0; i < node.fSprites.Count; i++)
+            {
+                if (node.fSprites[i] != null)
+                    node.fSprites[i].isVisible = false;
+            }
+        }
+
+        if (node.fLabels != null)
+        {
+            for (int i = 0; i < node.fLabels.Count; i++)
+            {
+                if (node.fLabels[i] != null)
+                    node.fLabels[i].isVisible = false;
+            }
+        }
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            HideVisualTree(node.subNodes[i]);
     }
 
     private static void DisposeState(State state)

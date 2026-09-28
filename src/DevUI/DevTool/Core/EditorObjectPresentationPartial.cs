@@ -175,11 +175,12 @@ public static partial class EditorPresentationHub
                 legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
                 LegacyObjectSandbox.Release(session);
             }
-            else if (externalObject)
+            else if (externalObject && !HasUsefulNativeInspectorProperties(properties))
             {
-                // Unknown third-party objects receive only one selected-object legacy representation.
-                // Builtin/game-defined objects stay purely native unless the user explicitly opens
-                // full Legacy UI.
+                // The selected-object legacy sandbox is a last-resort compatibility path, not the
+                // default inspector for every third-party object. If native/reflection capture has
+                // any real authored member, keep the object page-less and avoid materializing a
+                // DevInterface control tree just because the type came from another mod.
                 legacyControls = LegacyObjectSandbox.Capture(session, selected);
             }
             else
@@ -214,6 +215,30 @@ public static partial class EditorPresentationHub
             MixedPropertyKeys = mixedPropertyKeys,
             LegacyControls = legacyControls
         };
+    }
+
+    private static bool HasUsefulNativeInspectorProperties(EditorPropertySnapshot[] properties)
+    {
+        if (properties == null)
+            return false;
+
+        for (int i = 0; i < properties.Length; i++)
+        {
+            EditorPropertySnapshot property = properties[i];
+            if (property == null)
+                continue;
+
+            // NativeDataReflectionInspector always emits these two metadata rows. They do not count
+            // as authored coverage; any other property means the rebuilt inspector has real model
+            // information and the legacy page should stay dormant.
+            if (string.Equals(property.Key, "__nativeDataType", StringComparison.Ordinal) ||
+                string.Equals(property.Key, "__nativeSerialized", StringComparison.Ordinal))
+                continue;
+
+            return true;
+        }
+
+        return false;
     }
 
     private static int IndexOfReference(List<PlacedObject> values, PlacedObject target)
