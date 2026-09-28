@@ -173,13 +173,6 @@ internal static class SoundLibraryGroupsView
             }
             ImGui.TextDisabled(activePresentation?.WorkingSummary ?? BuildWorkingSummary(active));
         }
-        else
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T("还没有可写入的本地音效组。", "No writable local sound group yet."),
-                true);
-        }
-
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("+ 新建工作组", "+ New Working Group"),
                 "SoundQuickCreateGroup",
@@ -341,16 +334,11 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawAddToGroup(EditorSoundSnapshot selected)
     {
+        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
+            return;
+
         ImGui.Separator();
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("工作音效组", "WORKING GROUP"));
-
-        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T("没有工作音效组；请在左侧创建或选择一个。", "No working group; create or select one in the Browser."),
-                true);
-            return;
-        }
 
         ImGui.TextWrapped(FindGroupPresentation(group)?.Line ?? BuildGroupLine(group));
         if (DevToolWidgets.ActionButton(
@@ -371,16 +359,11 @@ internal static class SoundLibraryGroupsView
 
     internal static void DrawAddSelectionToGroup(int[] indices)
     {
+        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
+            return;
+
         ImGui.Separator();
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("工作音效组", "WORKING GROUP"));
-
-        if (!SoundWorkspaceState.TryGetActiveLocalGroup(out SoundGroupSnapshot group))
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T("没有工作音效组；请在左侧创建或选择一个。", "No working group; create or select one in the Browser."),
-                true);
-            return;
-        }
 
         int count = indices?.Length ?? 0;
         ImGui.TextWrapped(FindGroupPresentation(group)?.Line ?? BuildGroupLine(group));
