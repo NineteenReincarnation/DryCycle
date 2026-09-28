@@ -41,7 +41,10 @@ internal static class SceneWorkspaceWindow
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         string title = DevToolUiSettings.T("场景###DevToolSceneWorkspace", "Scene###DevToolSceneWorkspace");
-        if (!ImGui.Begin(title, ImGuiWindowFlags.NoCollapse))
+        if (!ImGui.Begin(
+                title,
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
