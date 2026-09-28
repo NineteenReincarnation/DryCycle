@@ -396,28 +396,14 @@ internal static class ObjectExplorerView
 
     private static void DrawObjectCategoryLabel(string category)
     {
-        // Keep the current plain category/list language, but give category boundaries enough visual
-        // weight to scan quickly. A small double-draw adds weight without requiring a second font.
-        category ??= string.Empty;
-
-        const float categoryScale = 1.34f;
-        ImGui.SetWindowFontScale(categoryScale);
-        Num.Vector2 position = ImGui.GetCursorScreenPos();
-        Num.Vector2 size = ImGui.CalcTextSize(category);
-        uint color = ImGui.GetColorU32(ImGuiCol.Text);
-        ImDrawListPtr draw = ImGui.GetWindowDrawList();
-
-        draw.AddText(position, color, category);
-        draw.AddText(
-            position + new Num.Vector2(0.75f, 0f),
-            color,
-            category);
-
-        ImGui.Dummy(
-            new Num.Vector2(
-                size.X + 1f,
-                size.Y + 2f));
-        ImGui.SetWindowFontScale(BrowserPaneFontScale);
+        // Category tags use the same primary-gold language as the Browser title, but at a smaller
+        // hierarchy level so they stay clearly subordinate to the pane title.
+        const float categoryScale = 1.52f;
+        DevToolWidgets.PrimaryLabel(
+            category ?? string.Empty,
+            categoryScale,
+            BrowserPaneFontScale,
+            1.35f);
     }
 
     private static bool MatchesLibrary(

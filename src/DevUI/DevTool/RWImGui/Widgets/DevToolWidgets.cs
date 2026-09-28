@@ -213,6 +213,20 @@ internal static class DevToolWidgets
         return pressed;
     }
 
+    internal static void PrimaryLabel(
+        string text,
+        float fontScale,
+        float restoreScale = 1f,
+        float stroke = 1.35f)
+    {
+        DrawFlowingTitle(
+            text ?? string.Empty,
+            FlowTitleLevel.Primary,
+            fontScale,
+            stroke,
+            restoreScale);
+    }
+
     internal static void SectionHeader(string text, float restoreScale = 1f)
     {
         float bodyScale = ResolvePaneBodyScale(restoreScale);
