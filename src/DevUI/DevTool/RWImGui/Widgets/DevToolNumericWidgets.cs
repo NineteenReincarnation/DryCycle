@@ -250,14 +250,20 @@ internal static class DevToolNumericWidgets
         }
         else
         {
-            if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            if (hovered && active && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                 activeRotaryDragKey = key;
 
             bool ownsDrag =
                 activeRotaryDragKey.HasValue &&
                 activeRotaryDragKey.Value.Equals(key);
 
-            if (ownsDrag && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            // A rotary may consume mouse delta only while THIS InvisibleButton is the active ImGui
+            // item and the drag started on this exact rotary. Window moves, splitter drags, canvas
+            // pans, clicks in other windows, etc. must never adjust a rotary merely because a stale
+            // drag key exists.
+            if (ownsDrag &&
+                active &&
+                ImGui.IsMouseDragging(ImGuiMouseButton.Left, 0f))
             {
                 Num.Vector2 delta = ImGui.GetIO().MouseDelta;
                 float span = Math.Max(0.0001f, max - min);
