@@ -36,10 +36,19 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($base) -or $base.Trim('0').Length -eq 0) {
               $base = 'EMPTY'
           }
-          elseif (-not (git cat-file -e "$base^{commit}" 2>$null)) {
-              git fetch --no-tags --depth=1 origin $base 2>$null
-              if ($LASTEXITCODE -ne 0 -or -not (git cat-file -e "$base^{commit}" 2>$null)) {
-                  $base = 'EMPTY'
+          else {
+              git cat-file -e "$base^{commit}" 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                  git fetch --no-tags --depth=1 origin $base 2>$null
+                  if ($LASTEXITCODE -ne 0) {
+                      $base = 'EMPTY'
+                  }
+                  else {
+                      git cat-file -e "$base^{commit}" 2>$null
+                      if ($LASTEXITCODE -ne 0) {
+                          $base = 'EMPTY'
+                      }
+                  }
               }
           }
           ./scripts/CodeMap.ps1 -Source Range -Base $base -Head $env:HEAD_SHA
