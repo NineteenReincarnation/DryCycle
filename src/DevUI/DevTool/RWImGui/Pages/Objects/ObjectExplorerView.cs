@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using DryCycle.DevUI.DevTool.Core;
 using ImGuiNET;
+using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
@@ -242,6 +243,7 @@ internal static class ObjectExplorerView
             cached.CategoryRuns.Clear();
             cached.Pages.Clear();
         }
+        ObjectLibraryGroupsBySource.Clear();
         ObjectLibraryGroups.Clear();
         objectLibraryMatchCount = 0;
 
