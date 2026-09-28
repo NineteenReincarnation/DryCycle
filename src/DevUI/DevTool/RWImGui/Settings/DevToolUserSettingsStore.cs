@@ -55,7 +55,7 @@ internal readonly struct DevToolPersistedWindowGroup
 /// </summary>
 internal static class DevToolUserSettingsStore
 {
-    private const int CurrentVersion = 1;
+    private const int CurrentVersion = 2;
     private const string FileName = "DryCycle.DevTool.UI.xml";
     private static readonly object Sync = new();
     private static readonly Dictionary<string, DevToolPersistedWindowLayout> Windows =
@@ -123,9 +123,28 @@ internal static class DevToolUserSettingsStore
                     XElement root = document.Root;
                     if (root != null)
                     {
+                        int storedVersion =
+                            int.TryParse(
+                                Attribute(root, "version"),
+                                NumberStyles.Integer,
+                                CultureInfo.InvariantCulture,
+                                out int parsedVersion)
+                                ? parsedVersion
+                                : 1;
+
                         LoadPresentation(root.Element("Presentation"));
                         LoadWindows(root.Element("Windows"));
                         LoadGroups(root.Element("Groups"));
+
+                        if (storedVersion < 2)
+                        {
+                            // Sound's original unified workspace default was intentionally very
+                            // wide. Drop only that saved geometry once so existing installs receive
+                            // the new compact default; subsequent developer resizing remains sticky.
+                            Windows.Remove("SoundWorkspace");
+                            dirty = true;
+                            saveAfterUtc = DateTime.UtcNow;
+                        }
                     }
                 }
             }
