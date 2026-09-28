@@ -54,7 +54,8 @@ internal static class DevToolDebugWorkspaceView
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("调试中心###DevToolDebugWorkspace", "Debug Center###DevToolDebugWorkspace"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
