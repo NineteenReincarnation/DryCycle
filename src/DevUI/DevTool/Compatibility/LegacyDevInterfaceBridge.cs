@@ -270,6 +270,12 @@ public static class LegacyDevInterfaceBridge
             // will mirror that panel recursively on the following frame.
             button.Clicked();
             button.Refresh();
+
+            // Several third-party Panels defer structural work until their next Update after a
+            // child Button signal (pagination, file pickers, searchable lists). The headless host
+            // intentionally has no vanilla per-frame page loop, so advance only the direct polling
+            // parent once after an explicit semantic action.
+            SynchronizePollingParent(owner, button);
             return true;
         }
         catch (Exception error)
@@ -320,6 +326,7 @@ public static class LegacyDevInterfaceBridge
             if (TryReadBoolMember(node, "actualValue", out bool current) && current == desired) return true;
             button.Clicked();
             button.Refresh();
+            SynchronizePollingParent(owner, button);
             if (TryReadBoolMember(node, "actualValue", out bool after) && after == desired) return true;
 
             // Fallback for value-backed buttons whose Clicked implementation only opens a helper
@@ -438,6 +445,7 @@ public static class LegacyDevInterfaceBridge
             button.OnValueChange(options[selectedIndex]);
             SelectOptions.Remove(button);
             button.Refresh();
+            SynchronizePollingParent(owner, button);
             return true;
         }
         catch (Exception error)
@@ -464,6 +472,7 @@ public static class LegacyDevInterfaceBridge
             button.Text = selected;
             PropagateSignal(button, DevUISignalType.ButtonClick, selected);
             button.Refresh();
+            SynchronizePollingParent(owner, button);
             return TryReadStringMember(node, "actualValue", out string actual) &&
                    string.Equals(actual, selected, StringComparison.Ordinal);
         }
@@ -486,6 +495,11 @@ public static class LegacyDevInterfaceBridge
         {
             commit.Invoke(node, new object[] { value ?? string.Empty, true });
             node.Refresh();
+
+            // RegionKit FilePicker/SearchableSelectPanel are representative of a broader pattern:
+            // the text control commits immediately, while the parent Panel notices the new value in
+            // Update() and rebuilds its temporary children. Advance that parent only on mutation.
+            SynchronizePollingParent(owner, node);
             return TryReadTextValue(node, out string actual) &&
                    string.Equals(actual, value ?? string.Empty, StringComparison.Ordinal);
         }
@@ -540,6 +554,7 @@ public static class LegacyDevInterfaceBridge
             button.Text = ColorUtility.ToHtmlStringRGB(color);
             PropagateSignal(button, DevUISignalType.ButtonClick, string.Empty);
             button.Refresh();
+            SynchronizePollingParent(owner, button);
             return TryReadColor(node, out Color actual) && ColorDistanceSquared(actual, color) < 0.000001f;
         }
         catch (Exception error)
