@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
@@ -29,6 +32,7 @@ internal static class LegacyObjectSandbox
     }
 
     private static ConditionalWeakTable<EditorSession, State> states = new();
+    private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedVisualFields = new();
 
     internal static LegacyControlSnapshot[] Capture(EditorSession session, PlacedObject target)
     {
@@ -360,11 +364,111 @@ internal static class LegacyObjectSandbox
             }
         }
 
+        QuarantineReferencedVisuals(node, quarantine);
+
         if (node.subNodes == null)
             return;
 
         for (int i = 0; i < node.subNodes.Count; i++)
             QuarantineVisualTree(node.subNodes[i], quarantine);
+    }
+
+    private static void QuarantineReferencedVisuals(
+        DevUINode node,
+        FContainer quarantine)
+    {
+        if (node == null || quarantine == null)
+            return;
+
+        FieldInfo[] fields = ReferencedVisualFields.GetOrAdd(
+            node.GetType(),
+            BuildReferencedVisualFields);
+
+        for (int i = 0; i < fields.Length; i++)
+        {
+            object raw;
+            try { raw = fields[i].GetValue(node); }
+            catch { continue; }
+
+            if (raw is FNode visual)
+            {
+                MoveVisualToQuarantine(visual, quarantine);
+                continue;
+            }
+
+            if (raw is Array array)
+            {
+                for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                    if (array.GetValue(itemIndex) is FNode item)
+                        MoveVisualToQuarantine(item, quarantine);
+            }
+        }
+    }
+
+    private static FieldInfo[] BuildReferencedVisualFields(Type nodeType)
+    {
+        List<FieldInfo> result = new();
+        Type current = nodeType;
+
+        // DevUINode base storage (owner, parent, fSprites/fLabels/subNodes) is handled explicitly.
+        // Only inspect fields introduced by concrete/custom node classes.
+        while (current != null &&
+               current != typeof(DevUINode) &&
+               typeof(DevUINode).IsAssignableFrom(current))
+        {
+            FieldInfo[] fields = current.GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                Type fieldType = fields[i].FieldType;
+                if (typeof(FContainer).IsAssignableFrom(fieldType))
+                    continue;
+
+                if (typeof(FNode).IsAssignableFrom(fieldType))
+                {
+                    result.Add(fields[i]);
+                    continue;
+                }
+
+                if (fieldType.IsArray)
+                {
+                    Type elementType = fieldType.GetElementType();
+                    if (elementType != null &&
+                        typeof(FNode).IsAssignableFrom(elementType) &&
+                        !typeof(FContainer).IsAssignableFrom(elementType))
+                        result.Add(fields[i]);
+                }
+            }
+
+            current = current.BaseType;
+        }
+
+        return result.ToArray();
+    }
+
+    private static void MoveVisualToQuarantine(
+        FNode visual,
+        FContainer quarantine)
+    {
+        if (visual == null ||
+            quarantine == null ||
+            visual is FContainer)
+            return;
+
+        try
+        {
+            visual.isVisible = false;
+            if (!ReferenceEquals(visual.container, quarantine))
+            {
+                visual.container?.RemoveChild(visual);
+                quarantine.AddChild(visual);
+            }
+        }
+        catch { }
     }
 
     private static void RefreshHeadlessRepresentation(State state)
@@ -435,6 +539,9 @@ internal static class LegacyObjectSandbox
             try { state.Page.ClearSprites(); }
             catch { }
         }
+
+        try { state.QuarantineContainer.RemoveAllChildren(); }
+        catch { }
 
         state.Page = null;
         state.Representation = null;
