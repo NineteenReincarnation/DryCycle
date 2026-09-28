@@ -45,7 +45,6 @@ internal static class ObjectExplorerView
     private sealed class ObjectLibraryGroup
     {
         internal string Source;
-        internal DevToolSourceMark SourceMark;
         internal readonly List<ObjectLibraryRow> Rows = new();
         internal readonly List<CategoryRun> CategoryRuns = new();
         internal readonly List<ObjectLibraryPage> Pages = new();
@@ -68,7 +67,6 @@ internal static class ObjectExplorerView
     private static readonly Dictionary<string, ObjectLibraryGroup> ObjectLibraryGroupsBySource =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<ObjectLibraryGroup> ObjectLibraryGroups = new();
-    private static int objectLibraryMatchCount;
     private static string observedObjectSearch;
     private static string normalizedObjectSearch = string.Empty;
 
@@ -99,7 +97,6 @@ internal static class ObjectExplorerView
         projectedObjectLibrary = null;
         projectedObjectSearch = string.Empty;
         projectedObjectChinese = false;
-        objectLibraryMatchCount = 0;
         observedObjectSearch = null;
         normalizedObjectSearch = string.Empty;
 
@@ -274,8 +271,7 @@ internal static class ObjectExplorerView
             {
                 group = new ObjectLibraryGroup
                 {
-                    Source = source,
-                    SourceMark = DevToolSourcePresentation.FromLabel(source)
+                    Source = source
                 };
                 ObjectLibraryGroupsBySource[source] = group;
                 ObjectLibraryGroups.Add(group);
@@ -307,7 +303,6 @@ internal static class ObjectExplorerView
                 DisplayName = displayName,
                 TooltipText = (item.Source ?? string.Empty) + " | " + item.Type
             });
-            objectLibraryMatchCount++;
         }
 
         ObjectLibraryGroups.Sort(CompareObjectSources);
