@@ -568,8 +568,14 @@ require("TreeSignature" in host and "ComputeTreeSignature" in host and
         "Dynamic third-party control trees must use sparse model/tree audits instead of per-frame rescans.")
 require("MarkDirtyAfterMutation" in host,
         "Headless control actions must invalidate dynamic control-tree caches immediately.")
-require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge,
-        "Unknown interactive DevUI nodes must remain explicit compatibility gaps instead of being silently accepted.")
+require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge and
+        "UsesOnlyFrameworkUpdate" in bridge,
+        "Unknown interactive DevUI nodes and custom Update() surfaces must remain explicit compatibility gaps instead of being silently accepted.")
+require("SynchronizePollingParent" in bridge and
+        "owner.mouseClick = false" in bridge and
+        "owner.mouseDown = false" in bridge and
+        "owner.draggedNode = null" in bridge,
+        "Dynamic legacy Panels must advance deferred state only through an input-quarantined semantic synchronization pass.")
 
 required_gizmo = (
     "HandlePrefix",
