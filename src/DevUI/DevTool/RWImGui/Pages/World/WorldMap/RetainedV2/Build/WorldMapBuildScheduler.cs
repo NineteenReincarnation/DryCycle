@@ -33,6 +33,7 @@ internal sealed class WorldMapBuildScheduler
         internal int SourceStamp;
         internal int Generation;
         internal EditorMapRoomVisualSnapshot Visual;
+        internal bool HasThumbnail;
     }
 
     private const int MaxWorkers = 2;
@@ -66,7 +67,8 @@ internal sealed class WorldMapBuildScheduler
     internal bool ScheduleRoom(
         int roomIndex,
         EditorMapRoomVisualSnapshot visual,
-        int sourceStamp)
+        int sourceStamp,
+        bool hasThumbnail = false)
     {
         if (roomIndex < 0 || visual?.Available != true)
             return false;
@@ -83,7 +85,8 @@ internal sealed class WorldMapBuildScheduler
                 RoomIndex = roomIndex,
                 SourceStamp = sourceStamp,
                 Generation = generation,
-                Visual = visual
+                Visual = visual,
+                HasThumbnail = hasThumbnail
             });
             StartWorkersLocked();
             return true;
@@ -175,10 +178,9 @@ internal sealed class WorldMapBuildScheduler
         long started = Stopwatch.GetTimestamp();
         try
         {
-            result.Geometry = RoomGeometryBuilder.Build(
-                request.RoomIndex,
-                request.Visual,
-                request.SourceStamp);
+            result.Geometry = request.HasThumbnail
+                ? RoomGeometryBuilder.BuildForThumbnail(request.RoomIndex, request.Visual, request.SourceStamp)
+                : RoomGeometryBuilder.Build(request.RoomIndex, request.Visual, request.SourceStamp);
         }
         catch (Exception error)
         {

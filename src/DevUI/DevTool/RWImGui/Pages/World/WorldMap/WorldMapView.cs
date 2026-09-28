@@ -594,15 +594,13 @@ internal static class WorldMapView
         bool hovered = ReferenceEquals(room, hoveredRoom);
         if (!retainedRoomsPresented)
         {
-            // Never replace a room thumbnail with the old flat navigation placeholder just because
-            // the retained surface misses a frame during middle/right-button panning. That fallback
-            // made every room flash into a pale rectangle as soon as viewport interaction began.
-            //
-            // Keep the same detailed raster fallback for both idle and navigation frames. The
-            // expensive interaction affordances (ports, creature holes, labels) are still suppressed
-            // by fastNavigation, so a transient retained-surface miss stays visually stable without
-            // bringing back the old full-map interaction cost.
-            DrawRoomGeometry(draw, room, visual, min, selected, hovered);
+            // Cold opening must not expand a whole uncached region into immediate-mode vertices
+            // while its retained surface is being uploaded. The worker/main-thread queue owns room
+            // detail. A real surface error still uses the detailed fallback and remains observable.
+            if (WorldMapRetainedV2Runtime.PreparingSurface)
+                DrawRoomNavigationLod(draw, room, min, max, selected);
+            else
+                DrawRoomGeometry(draw, room, visual, min, selected, hovered);
         }
         else if (selected || hovered || room.CurrentRoom)
         {

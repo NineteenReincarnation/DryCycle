@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using DryCycle.DevUI.DevTool.World;
 using UnityEngine;
 using Num = System.Numerics;
@@ -20,6 +21,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         internal MeshFilter Filter;
         internal MeshRenderer Renderer;
         internal long Revision = long.MinValue;
+        internal ConnectionRouteResource PresentedRoute;
     }
 
     private const float CoreHalfWidth = 0.95f;
@@ -52,6 +54,13 @@ internal sealed class WorldMapRetainedConnectionRenderer
     private bool crossingHasGeometry;
 
     internal int RetainedRouteCount => routeObjects.Count;
+    internal long Revision { get; private set; }
+    internal bool HasPendingUploads { get; private set; }
+    internal bool TryGetPresentedRoute(string id, out ConnectionRouteResource route)
+    {
+        route = routeObjects.TryGetValue(id, out RouteObject obj) ? obj.PresentedRoute : null;
+        return route != null;
+    }
 
     internal void ApplyDirty(WorldMapDirtySet dirty)
     {
@@ -74,6 +83,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         if (resources == null || visibleRouteIds == null)
             return false;
         if (!EnsureResources(renderScene)) return false;
+        HasPendingUploads = false;
 
         if (!showConnections)
         {
@@ -83,6 +93,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
         }
 
         visibleNow.Clear();
+        long deadline = Stopwatch.GetTimestamp() + (long)(Stopwatch.Frequency * .0015d);
+        int uploads = 0;
 
         for (int i = 0; i < visibleRouteIds.Count; i++)
         {
@@ -94,11 +106,23 @@ internal sealed class WorldMapRetainedConnectionRenderer
                 continue;
 
             visibleNow.Add(id);
-            RouteObject obj = GetOrCreate(id);
-            if (obj.Revision != route.Revision)
+            routeObjects.TryGetValue(id, out RouteObject obj);
+            if (obj == null || obj.Revision != route.Revision)
             {
-                ReplaceMesh(obj.Filter, BuildRouteMesh(route));
-                obj.Revision = route.Revision;
+                if (uploads >= 6 || (uploads > 0 && Stopwatch.GetTimestamp() >= deadline))
+                {
+                    HasPendingUploads = true;
+                    if (obj == null) continue;
+                }
+                else
+                {
+                    obj ??= GetOrCreate(id);
+                    ReplaceMesh(obj.Filter, BuildRouteMesh(route));
+                    obj.Revision = route.Revision;
+                    obj.PresentedRoute = route;
+                    Revision++;
+                    uploads++;
+                }
             }
 
             if (!obj.Root.activeSelf)
@@ -122,7 +146,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
         for (int i = 0; i < stale.Count; i++)
             RemoveRoute(stale[i]);
 
-        if (!resources.CrossingsCurrent)
+        if (!resources.CrossingsCurrent || HasPendingUploads)
         {
             if (crossingObject != null)
                 crossingObject.SetActive(false);
@@ -136,6 +160,12 @@ internal sealed class WorldMapRetainedConnectionRenderer
             if (crossingRevision != resources.CrossingRevision ||
                 visibilityChanged)
             {
+                if (uploads > 0 && Stopwatch.GetTimestamp() >= deadline)
+                {
+                    HasPendingUploads = true;
+                    crossingObject.SetActive(false);
+                    return true;
+                }
                 Mesh crossingMesh =
                     BuildCrossingMesh(
                         resources,
@@ -152,6 +182,7 @@ internal sealed class WorldMapRetainedConnectionRenderer
                     visibleNow);
                 crossingHasGeometry =
                     crossingMesh != null;
+                Revision++;
             }
 
             if (crossingObject != null)
@@ -164,6 +195,8 @@ internal sealed class WorldMapRetainedConnectionRenderer
 
     internal void Reset()
     {
+        HasPendingUploads = false;
+        Revision++;
         foreach (RouteObject route in routeObjects.Values)
             DestroyRouteObject(route);
         routeObjects.Clear();

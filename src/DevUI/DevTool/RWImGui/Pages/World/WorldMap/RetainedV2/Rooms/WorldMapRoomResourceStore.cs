@@ -371,16 +371,6 @@ internal sealed class WorldMapRoomResourceStore
         EditorMapRoomVisualSnapshot visual = MapRoomGeometryPresentationHub.Get(roomIndex);
         resource.OffScreenDen = sceneRoom.OffScreenDen;
         if (resource.OffScreenDen) return;
-        int visualStamp = ComputeVisualStamp(visual);
-        if (visual?.Available == true &&
-            visualStamp != resource.VisualStamp &&
-            visualStamp != resource.RequestedVisualStamp)
-        {
-            resource.RequestedVisualStamp = visualStamp;
-            if (!buildScheduler.ScheduleRoom(roomIndex, visual, visualStamp))
-                resource.RequestedVisualStamp = int.MinValue;
-        }
-
         WorldMapLegacyRoomSourceService.RoomTextureSource source = default;
         bool hasCommittedThumbnail = resource.Thumbnail.HasCommitted;
         bool resolvedPersistent =
@@ -438,6 +428,18 @@ internal sealed class WorldMapRoomResourceStore
         {
             // Missing source is not a command to clear the thumbnail. Keep last-known-good.
             resource.Thumbnail.RejectPending();
+        }
+
+        // Resolve the thumbnail before choosing the build: cold decoding publishes both in the
+        // same frame. Scheduling first needlessly expands that raster into thousands of quads.
+        int visualStamp = ComputeVisualStamp(visual);
+        if (visual?.Available == true &&
+            visualStamp != resource.VisualStamp &&
+            visualStamp != resource.RequestedVisualStamp)
+        {
+            resource.RequestedVisualStamp = visualStamp;
+            if (!buildScheduler.ScheduleRoom(roomIndex, visual, visualStamp, resource.Thumbnail.HasCommitted))
+                resource.RequestedVisualStamp = int.MinValue;
         }
     }
 

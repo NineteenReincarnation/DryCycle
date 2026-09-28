@@ -44,9 +44,10 @@ internal sealed class WorldMapTextureBridge
         try
         {
             entry ??= new Entry { Image = new ImGUITexture(source.width, source.height), FlipY = SystemInfo.graphicsUVStartsAtTop };
-            lock (gate) entry.Handle = 0;
             // Never hold a Present lock across Graphics.Blit / GetNativeTexturePtr: Unity can wait
             // for the render thread while that thread is inside our ImGui callback.
+            // The published SRV has its own reference. Keep it usable while Unity uploads the next
+            // image; clearing it here made every upload race fall back to drawing all room tiles.
             entry.Image.UpdateFrom(source);
             lock (gate) { textures[source] = entry; return Publish(entry); }
         }
@@ -96,7 +97,14 @@ internal sealed class WorldMapTextureBridge
 
     private bool Publish(Entry entry)
     {
-        entry.Handle = entry.Image.ImGuiHandle;
+        ulong next = entry.Image.ImGuiHandle;
+        if (next != entry.Handle)
+        {
+            if (next != 0) Marshal.AddRef(new IntPtr(unchecked((long)next)));
+            ulong previous = entry.Handle;
+            entry.Handle = next;
+            if (previous != 0) Marshal.Release(new IntPtr(unchecked((long)previous)));
+        }
         error = entry.Handle == 0 ? "RWImGUI texture upload is waiting for its D3D11 device / shader-resource view." : string.Empty;
         return entry.Handle != 0;
     }
@@ -154,7 +162,15 @@ internal sealed class WorldMapTextureBridge
     }
     private void Dispose(Entry entry)
     {
-        try { entry?.Image.Dispose(); }
+        if (entry == null) return;
+        try
+        {
+            // Callers remove the entry from publication under gate before releasing ownership.
+            ulong handle = entry.Handle;
+            entry.Handle = 0;
+            if (handle != 0) Marshal.Release(new IntPtr(unchecked((long)handle)));
+            entry.Image.Dispose();
+        }
         catch (Exception failure) { log?.LogError("Map texture disposal failed: " + failure); }
     }
 }

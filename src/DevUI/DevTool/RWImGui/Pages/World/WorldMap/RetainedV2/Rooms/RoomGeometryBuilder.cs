@@ -13,7 +13,14 @@ internal static class RoomGeometryBuilder
     internal static RoomGeometryBlob Build(
         int roomIndex,
         EditorMapRoomVisualSnapshot visual,
-        int sourceStamp)
+        int sourceStamp) => BuildCore(roomIndex, visual, sourceStamp, true);
+
+    internal static RoomGeometryBlob BuildForThumbnail(
+        int roomIndex, EditorMapRoomVisualSnapshot visual, int sourceStamp) =>
+        BuildCore(roomIndex, visual, sourceStamp, false);
+
+    private static RoomGeometryBlob BuildCore(
+        int roomIndex, EditorMapRoomVisualSnapshot visual, int sourceStamp, bool includeRaster)
     {
         visual ??= EditorMapRoomVisualSnapshot.Empty;
         float width = Math.Max(1f, visual.WidthTiles);
@@ -35,7 +42,11 @@ internal static class RoomGeometryBuilder
             height,
             EditorMapGeometryKind.Air);
 
-        EditorMapRectSnapshot[] runs = visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>();
+        // A committed texture already contains the tile raster. Building thousands of fallback
+        // quads as well doubles cold-load CPU/memory work without ever submitting those vertices.
+        EditorMapRectSnapshot[] runs = includeRaster
+            ? visual.RasterRuns ?? Array.Empty<EditorMapRectSnapshot>()
+            : Array.Empty<EditorMapRectSnapshot>();
         for (int i = 0; i < runs.Length; i++)
         {
             EditorMapRectSnapshot run = runs[i];

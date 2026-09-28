@@ -133,6 +133,8 @@ public static partial class MapRenderIsolationTests
         object roomRenderer = New("WorldMapRetainedRoomRenderer"), routeRenderer = New("WorldMapRetainedConnectionRenderer"), surface = New("WorldMapRenderTextureSurface");
         object queue = Activator.CreateInstance(Core("Map.WorldMapRoomSourceQueue"), true);
         var textures = new List<Texture2D>();
+        var visuals = new Dictionary<int, object>();
+        long rasterVertices = 0, thumbnailVertices = 0;
         var ids = Enumerable.Range(0, names.Length).ToArray();
         for (int i = 0; i < names.Length; i++)
         {
@@ -191,7 +193,10 @@ public static partial class MapRenderIsolationTests
                     for (int n = 0; n < anchors.Length; n++) nodes.SetValue(Activator.CreateInstance(Core("Map.EditorMapNodeVisualSnapshot"),
                         new object[] { Property(anchors[n], "NodeIndex"), Property(anchors[n], "EntranceX"), Property(anchors[n], "EntranceY") }), n);
                     PropertySet(visual, "Nodes", nodes);
-                    object geometry = Front("RoomGeometryBuilder").GetMethod("Build", Flags).Invoke(null, new object[] { i, visual, 1 });
+                    visuals.Add(i, visual);
+                    object geometry = Front("RoomGeometryBuilder").GetMethod("BuildForThumbnail", Flags).Invoke(null, new object[] { i, visual, 1 });
+                    thumbnailVertices += ((Array)Property(geometry, "Vertices")).Length;
+                    rasterVertices += 4 + 4 * ((Array)Get(source, "Raster")).Length;
                     object resource = New("WorldMapRoomResourceStore+RoomResource"); Set(resource, "Geometry", geometry); Set(resource, "GeometryGeneration", 1L);
                     object descriptor = Activator.CreateInstance(Front("WorldMapLegacyRoomSourceService+RoomTextureSource"), Flags, null,
                         new object[] { texture, new Rect(0, 0, 1, 1), (float)width, (float)height, 1, "" }, null);
@@ -211,7 +216,8 @@ public static partial class MapRenderIsolationTests
                 long elapsed = Stopwatch.GetTimestamp() - started;
                 peakMain = Math.Max(peakMain, elapsed); totalMain += elapsed; frames++;
                 if (ready == names.Length && (int)Property(routes, "PendingCount") == 0 &&
-                    (bool)Property(routes, "CrossingsCurrent") && !(bool)Property(roomRenderer, "HasPendingUploads")) break;
+                    (bool)Property(routes, "CrossingsCurrent") && !(bool)Property(roomRenderer, "HasPendingUploads") &&
+                    !(bool)Property(routeRenderer, "HasPendingUploads")) break;
                 Thread.Sleep(16);
             }
             Check(ready == names.Length, "All HI thumbnails load automatically from real installed room files.");
@@ -225,9 +231,13 @@ public static partial class MapRenderIsolationTests
                 "Every HI routing job and corridor/crossing pass settles within 30 seconds, including blocked routes.");
             Check((int)Property(roomRenderer, "RetainedRoomCount") == names.Length && !(bool)Property(roomRenderer, "HasPendingUploads"), "Every HI room reaches its retained GPU mesh.");
             Check(!((GameObject)Get(surface, "sceneObject")).activeSelf, "HI meshes remain isolated from gameplay after rendering.");
+            Check(!(bool)Property(routeRenderer, "HasPendingUploads"), "Budgeted HI route meshes finish uploading across frames.");
             Check(OpaquePixels((RenderTexture)Get(surface, "presented"), "HI-complete-map.png") > 1000, "The complete HI GPU surface contains the loaded map.");
             results.Add("HI integrated: rooms=" + ready + ", links=" + edgeIds.Length + ", elapsed=" + timer.ElapsedMilliseconds + " ms, frames=" + frames +
                 ", main avg=" + (totalMain * 1000d / Stopwatch.Frequency / frames).ToString("F2") + " ms, main peak=" + (peakMain * 1000d / Stopwatch.Frequency).ToString("F2") + " ms; includes source decode, routes, mesh upload and Camera.Render, excludes gameplay/ImGui.");
+            results.Add("HI textured room geometry: " + thumbnailVertices + " base vertices; raster expansion would allocate up to " + rasterVertices + ".");
+            Check(thumbnailVertices < rasterVertices / 10, "Committed thumbnails eliminate redundant tile meshes.");
+            ExerciseIndustrialColdUi(scene, visuals);
         }
         finally
         {

@@ -73,6 +73,7 @@ internal static class WorldMapRetainedV2Runtime
     private static WorldMapDirtySet lastDirty = new();
     private static ManualLogSource log;
     private static volatile bool enabled;
+    private static string resourceRegion = string.Empty;
     private static int activeLayerMask = 7;
     private static int activeShowConnections = 1;
     private static float activeZoom = 1f;
@@ -177,8 +178,20 @@ internal static class WorldMapRetainedV2Runtime
                 out long _))
             MainSceneState.SetViewTransform(latestView);
 
-        mainThreadDirty.Clear();
         SceneTransfer.Drain(MainSceneState, mainThreadDirty);
+
+        // Warp publishes the game snapshot and UI scene on different threads. Keep deltas pending
+        // until they refer to the same world; never decode HI sources into the old B5 room indices.
+        if (snapshot?.Available != true ||
+            !string.Equals(MainSceneState.Region, snapshot.RegionName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!string.Equals(resourceRegion, MainSceneState.Region, StringComparison.OrdinalIgnoreCase))
+        {
+            ResetMainThreadResources();
+            Volatile.Write(ref resourceRegion, MainSceneState.Region);
+            mainThreadDirty.FullRebuild = true;
+        }
 
         if (!mainThreadDirty.IsEmpty)
         {
@@ -197,6 +210,7 @@ internal static class WorldMapRetainedV2Runtime
             if (mainThreadDirty.TopologyChanged || mainThreadDirty.FullRebuild)
                 Volatile.Write(ref retainedConnectionsReady, 0);
         }
+        mainThreadDirty.Clear();
 
         if (WorldMapBackgroundSchedulingPolicy.CanRenderRetainedSurface(
                 CanvasVisible,
@@ -287,6 +301,7 @@ internal static class WorldMapRetainedV2Runtime
                 viewRevision != lastRenderedViewRevision;
             bool nonViewDirty =
                 RoomRenderer.HasPendingUploads ||
+                ConnectionRenderer.HasPendingUploads ||
                 Surface.NeedsRender ||
                 sceneRevision != lastRenderedSceneRevision ||
                 roomResourceRevision != lastRenderedRoomResourceRevision ||
@@ -357,7 +372,7 @@ internal static class WorldMapRetainedV2Runtime
                         showConnections
                             ? visibleRoutes
                             : null,
-                        routeRevision);
+                        ConnectionRenderer.Revision);
                 }
             }
         }
@@ -365,11 +380,14 @@ internal static class WorldMapRetainedV2Runtime
         UpdateViewReadiness();
     }
 
+    internal static bool PreparingSurface => enabled && string.IsNullOrEmpty(Surface.Error);
+
     internal static bool TryPresentSurface(
         ImDrawListPtr draw,
         Num.Vector2 min,
         Num.Vector2 max) =>
         enabled &&
+        string.Equals(RenderSceneState.Region, Volatile.Read(ref resourceRegion), StringComparison.OrdinalIgnoreCase) &&
         Surface.TryPresent(
             draw,
             min,
@@ -665,7 +683,8 @@ internal static class WorldMapRetainedV2Runtime
     {
         PresentedRouteSnapshot current =
             Volatile.Read(ref presentedRoutes);
-        if (routeRevision == presentedRouteRevision &&
+        if (!ConnectionRenderer.HasPendingUploads &&
+            routeRevision == presentedRouteRevision &&
             PresentedRouteSetMatches(
                 current?.Ids,
                 routeIds))
@@ -682,7 +701,7 @@ internal static class WorldMapRetainedV2Runtime
             {
                 string id = routeIds[i];
                 if (string.IsNullOrEmpty(id) ||
-                    !ConnectionResources.TryGet(
+                    !ConnectionRenderer.TryGetPresentedRoute(
                         id,
                         out ConnectionRouteResource route) ||
                     route?.Points == null ||
@@ -704,7 +723,9 @@ internal static class WorldMapRetainedV2Runtime
 
         presentedRouteRevision = routeRevision;
         Dictionary<string, WorldMapCrossingMark[]> crossings =
-            BuildCrossingSnapshot(ids);
+            ConnectionRenderer.HasPendingUploads
+                ? new Dictionary<string, WorldMapCrossingMark[]>(StringComparer.Ordinal)
+                : BuildCrossingSnapshot(ids);
         Volatile.Write(
             ref presentedRoutes,
             new PresentedRouteSnapshot(
@@ -765,6 +786,23 @@ internal static class WorldMapRetainedV2Runtime
         RenderSceneState.Reset();
         MainSceneState.Reset();
         SceneTransfer.Clear();
+        ResetMainThreadResources();
+        mainThreadDirty.Clear();
+        Interlocked.Exchange(ref canvasSeenAt, 0L);
+        Volatile.Write(ref activeZoom, 1f);
+        readinessRegion = string.Empty;
+        readinessStartedTicks = 0L;
+        firstSurfaceReadyTicks = 0L;
+        readinessCompletedTicks = 0L;
+        readinessExpectedRooms = 0;
+        readinessExpectedConnections = 0;
+        readinessComplete = false;
+        lastDirty = new WorldMapDirtySet();
+    }
+
+    private static void ResetMainThreadResources()
+    {
+        Volatile.Write(ref resourceRegion, string.Empty);
         RoomResources.Reset();
         WorldMapLegacyRoomSourceService.Reset();
         ConnectionResources.Reset();
@@ -773,12 +811,10 @@ internal static class WorldMapRetainedV2Runtime
         RoomRenderer.Reset();
         ConnectionRenderer.Reset();
         Surface.Reset();
-        mainThreadDirty.Clear();
         geometryChangedRooms.Clear();
         routeChanged.Clear();
         sourcePriorityRooms.Clear();
         MapRoomGeometryPresentationHub.PrioritizeRooms(null);
-        Interlocked.Exchange(ref canvasSeenAt, 0L);
         visibleRooms.Clear();
         visibleRoutes.Clear();
         presentedRouteRevision = long.MinValue;
@@ -795,21 +831,12 @@ internal static class WorldMapRetainedV2Runtime
         liveCrossingRevision =
             long.MinValue;
         Volatile.Write(ref retainedConnectionsReady, 0);
-        Volatile.Write(ref activeZoom, 1f);
         lastRenderedViewRevision = long.MinValue;
         lastRenderedSceneRevision = long.MinValue;
         lastRenderedRoomResourceRevision = long.MinValue;
         lastRenderedRouteRevision = long.MinValue;
         lastRenderedLayerMask = int.MinValue;
         lastRenderedShowConnections = int.MinValue;
-        readinessRegion = string.Empty;
-        readinessStartedTicks = 0L;
-        firstSurfaceReadyTicks = 0L;
-        readinessCompletedTicks = 0L;
-        readinessExpectedRooms = 0;
-        readinessExpectedConnections = 0;
-        readinessComplete = false;
-        lastDirty = new WorldMapDirtySet();
     }
 
     private static void TrackViewReadinessStart(
