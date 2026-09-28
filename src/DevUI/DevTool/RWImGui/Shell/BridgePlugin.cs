@@ -1073,6 +1073,19 @@ internal static class DevToolFrontend
                         }
                         using (DevToolFrontendPerformanceMonitor.Measure(DevToolFrontendPerformanceMetric.ActionToast))
                             ActionToastOverlay.Draw(snapshot, frameContext);
+
+                        // Persistent top chrome is submitted after every regular editor window.
+                        // This gives it the highest normal DevTool layer without forcing keyboard
+                        // focus every frame. Shortcut feedback below remains the only transient
+                        // surface intentionally allowed above it.
+                        IDevToolPageView topPage =
+                            DevToolOverlay.IsDebugWorkspace
+                                ? null
+                                : DevToolPageViewRegistry.Get(snapshot.ToolMode);
+                        DevToolTopStatusWindow.Draw(
+                            snapshot,
+                            topPage,
+                            frameContext.DisplaySize);
                     }
                 }
 
