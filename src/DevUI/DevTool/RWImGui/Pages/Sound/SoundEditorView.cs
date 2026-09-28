@@ -132,9 +132,9 @@ internal static class SoundEditorView
     {
         if (snapshot == null || !snapshot.Available)
         {
-            float selectorWidth = SoundLibraryGroupsView.CreateTypeTopControlsWidth();
+            float fallbackSelectorWidth = SoundLibraryGroupsView.CreateTypeTopControlsWidth();
             float available = ImGui.GetContentRegionAvail().X;
-            float offset = Math.Max(0f, (available - selectorWidth) * 0.5f);
+            float offset = Math.Max(0f, (available - fallbackSelectorWidth) * 0.5f);
             if (offset > 0f)
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
             SoundLibraryGroupsView.DrawCreateTypeTopControls();
