@@ -146,9 +146,11 @@ internal static class DevToolOverlay
                 "Unified diagnostics: performance, World Map retained/cache, compatibility, frontend/font and creature diagnostics"));
         }
 
-        // Trigger owns its compact Add/Scene/Advanced controls inside the canvas-first workspace.
-        // Do not duplicate large Browser/Inspector toggles in the global activity window.
-        if (!debugWorkspacePage && snapshot.ToolMode == EditorToolMode.Triggers)
+        // Trigger and Sound own their compact workspace controls inside their dedicated
+        // workspaces. Do not duplicate Browser/Inspector toggles in the global activity window.
+        if (!debugWorkspacePage &&
+            (snapshot.ToolMode == EditorToolMode.Triggers ||
+             snapshot.ToolMode == EditorToolMode.Sound))
         {
             FitActivityBarHeight(display);
             ImGui.End();
