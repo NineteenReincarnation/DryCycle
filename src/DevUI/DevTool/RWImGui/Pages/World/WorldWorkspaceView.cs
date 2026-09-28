@@ -221,7 +221,8 @@ internal static class WorldWorkspaceView
 
         if (!ImGui.Begin(
                 DevToolUiSettings.T("世界工作区###DevToolWorldWorkspace", "World Workspace###DevToolWorldWorkspace"),
-                ImGuiWindowFlags.NoCollapse))
+                ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
             return;
