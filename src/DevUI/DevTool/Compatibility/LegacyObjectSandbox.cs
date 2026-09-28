@@ -22,6 +22,7 @@ internal static class LegacyObjectSandbox
         internal ObjectsPage Page;
         internal PlacedObjectRepresentation Representation;
         internal PlacedObject Target;
+        internal readonly FContainer QuarantineContainer = new();
         internal LegacyControlSnapshot[] CachedControls = Array.Empty<LegacyControlSnapshot>();
         internal string ModelFingerprint = string.Empty;
         internal bool ControlsDirty = true;
@@ -55,7 +56,7 @@ internal static class LegacyObjectSandbox
 
         try
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             state.CachedControls =
                 LegacyDevInterfaceBridge.CaptureRoot(state.Representation) ??
                 Array.Empty<LegacyControlSnapshot>();
@@ -72,7 +73,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
         }
     }
 
@@ -114,7 +115,7 @@ internal static class LegacyObjectSandbox
 
         try
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             return projection(state.Representation);
         }
         catch (Exception error)
@@ -125,7 +126,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
         }
     }
 
@@ -160,7 +161,7 @@ internal static class LegacyObjectSandbox
         Page previous = session.Owner.activePage;
         try
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             session.Owner.activePage = state.Page;
             bool changed = mutation(state.Representation);
             if (changed)
@@ -178,7 +179,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             session.Owner.activePage = previous;
         }
     }
@@ -234,7 +235,7 @@ internal static class LegacyObjectSandbox
             // synchronous on the DevUI/main thread and no EditorSession synchronization occurs until
             // after this call returns. The sandbox is a semantic backend only: none of its Futile
             // visuals may ever leak into the rebuilt editor.
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             session.Owner.activePage = state.Page;
             T result = action();
             state.ControlsDirty = true;
@@ -248,7 +249,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
             session.Owner.activePage = previous;
         }
     }
@@ -281,7 +282,7 @@ internal static class LegacyObjectSandbox
                 // ObjectsPage construction creates ordinary DevInterface menu/representation sprites
                 // even though this page exists only as a compatibility backend. Suppress them in the
                 // same frame so selecting an external object can never reveal vanilla DevUI.
-                QuarantineVisualTree(page);
+                QuarantineVisualTree(page, state.QuarantineContainer);
             }
             finally
             {
@@ -314,9 +315,11 @@ internal static class LegacyObjectSandbox
         }
     }
 
-    private static void QuarantineVisualTree(DevUINode node)
+    private static void QuarantineVisualTree(
+        DevUINode node,
+        FContainer quarantine)
     {
-        if (node == null)
+        if (node == null || quarantine == null)
             return;
 
         if (node.fSprites != null)
@@ -326,7 +329,11 @@ internal static class LegacyObjectSandbox
                 FSprite sprite = node.fSprites[i];
                 if (sprite == null) continue;
                 sprite.isVisible = false;
-                try { sprite.RemoveFromContainer(); }
+                try
+                {
+                    sprite.RemoveFromContainer();
+                    quarantine.AddChild(sprite);
+                }
                 catch { }
             }
         }
@@ -338,7 +345,11 @@ internal static class LegacyObjectSandbox
                 FLabel label = node.fLabels[i];
                 if (label == null) continue;
                 label.isVisible = false;
-                try { label.RemoveFromContainer(); }
+                try
+                {
+                    label.RemoveFromContainer();
+                    quarantine.AddChild(label);
+                }
                 catch { }
             }
         }
@@ -347,7 +358,7 @@ internal static class LegacyObjectSandbox
             return;
 
         for (int i = 0; i < node.subNodes.Count; i++)
-            QuarantineVisualTree(node.subNodes[i]);
+            QuarantineVisualTree(node.subNodes[i], quarantine);
     }
 
     private static void RefreshHeadlessRepresentation(State state)
@@ -366,7 +377,7 @@ internal static class LegacyObjectSandbox
         }
         finally
         {
-            QuarantineVisualTree(state.Page);
+            QuarantineVisualTree(state.Page, state.QuarantineContainer);
         }
     }
 
