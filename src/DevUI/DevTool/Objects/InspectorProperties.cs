@@ -24,6 +24,44 @@ public enum EditorPropertyGizmoHint
     VerticalDistance
 }
 
+public enum EditorPropertyGizmoShape
+{
+    None,
+    Line,
+    Circle,
+    Rectangle,
+    Tile,
+    Direction4,
+    Direction8
+}
+
+public readonly struct ObjectInspectorCoverage
+{
+    public ObjectInspectorCoverage(
+        bool inspectorComplete,
+        bool gizmoComplete,
+        int supportedFields = 0,
+        int unsupportedFields = 0)
+    {
+        InspectorComplete = inspectorComplete;
+        GizmoComplete = gizmoComplete;
+        SupportedFields = Math.Max(0, supportedFields);
+        UnsupportedFields = Math.Max(0, unsupportedFields);
+    }
+
+    public bool InspectorComplete { get; }
+    public bool GizmoComplete { get; }
+    public int SupportedFields { get; }
+    public int UnsupportedFields { get; }
+    public bool IsComplete => InspectorComplete && GizmoComplete;
+
+    public static ObjectInspectorCoverage Complete(int fields = 0) =>
+        new(true, true, fields, 0);
+
+    public static ObjectInspectorCoverage Conservative(int supportedFields = 0, int unsupportedFields = 1) =>
+        new(false, false, supportedFields, Math.Max(1, unsupportedFields));
+}
+
 /// <summary>
 /// Detached property description consumed by the optional ImGui frontend. It contains
 /// only scalar/string data so the render callback never dereferences Rain World objects.
@@ -36,6 +74,8 @@ public sealed class EditorPropertySnapshot
     public string Source { get; init; } = string.Empty;
     public EditorPropertyKind Kind { get; init; }
     public EditorPropertyGizmoHint GizmoHint { get; init; }
+    public EditorPropertyGizmoShape GizmoShape { get; init; }
+    public float GizmoScale { get; init; } = 1f;
     public string SerializedValue { get; init; } = string.Empty;
     public string StringValue { get; init; } = string.Empty;
     public float X { get; init; }
@@ -93,6 +133,22 @@ public interface IObjectInspectorAdapter
     bool CanInspect(PlacedObject target);
     IReadOnlyList<EditorPropertySnapshot> Capture(PlacedObject target);
     bool TrySetValue(PlacedObject target, string key, EditorPropertyValue value);
+}
+
+public interface IObjectInspectorCoverageProvider
+{
+    ObjectInspectorCoverage GetCoverage(PlacedObject target);
+}
+
+public interface IObjectInspectorGizmoAdapter
+{
+    bool TryBuildGizmoValue(
+        PlacedObject target,
+        string key,
+        float relativeX,
+        float relativeY,
+        bool snap,
+        out EditorPropertyValue value);
 }
 
 public static class ObjectInspectorRegistry
@@ -166,6 +222,74 @@ public static class ObjectInspectorRegistry
         }
 
         return Array.Empty<EditorPropertySnapshot>();
+    }
+
+    internal static ObjectInspectorCoverage GetCoverage(PlacedObject target)
+    {
+        if (target == null)
+            return ObjectInspectorCoverage.Conservative();
+
+        for (int i = 0; i < adapters.Count; i++)
+        {
+            IObjectInspectorAdapter adapter = adapters[i].Adapter;
+            try
+            {
+                if (!adapter.CanInspect(target))
+                    continue;
+
+                // Explicit adapters are treated as first-class/complete unless they opt into a
+                // conservative capability report. Generic fallback adapters implement the provider.
+                return adapter is IObjectInspectorCoverageProvider provider
+                    ? provider.GetCoverage(target)
+                    : ObjectInspectorCoverage.Complete();
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool inspector coverage failed: " + error.Message);
+                return ObjectInspectorCoverage.Conservative();
+            }
+        }
+
+        return ObjectInspectorCoverage.Conservative();
+    }
+
+    internal static bool TryBuildGizmoValue(
+        PlacedObject target,
+        string key,
+        float relativeX,
+        float relativeY,
+        bool snap,
+        out EditorPropertyValue value)
+    {
+        value = default;
+        if (target == null || string.IsNullOrEmpty(key))
+            return false;
+
+        for (int i = 0; i < adapters.Count; i++)
+        {
+            IObjectInspectorAdapter adapter = adapters[i].Adapter;
+            try
+            {
+                if (!adapter.CanInspect(target))
+                    continue;
+
+                return adapter is IObjectInspectorGizmoAdapter gizmo &&
+                       gizmo.TryBuildGizmoValue(
+                           target,
+                           key,
+                           relativeX,
+                           relativeY,
+                           snap,
+                           out value);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning("DevTool inspector gizmo conversion failed: " + error.Message);
+                return false;
+            }
+        }
+
+        return false;
     }
 
     internal static bool TrySetValue(PlacedObject target, string key, EditorPropertyValue value)

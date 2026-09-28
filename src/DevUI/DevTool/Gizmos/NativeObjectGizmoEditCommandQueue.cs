@@ -179,11 +179,12 @@ public static class NativeObjectGizmoEditCommandQueue
         {
             string propertyKey = command.HandleId.Substring("property:".Length);
             Vector2 relative = new Vector2(command.X, command.Y) - target.pos;
-            if (!NativeDataReflectionInspector.TryBuildNativeGizmoValue(
+            if (!ObjectInspectorRegistry.TryBuildGizmoValue(
                     target,
                     propertyKey,
                     relative.x,
                     relative.y,
+                    command.Snap,
                     out EditorPropertyValue value))
                 return false;
 

@@ -28,6 +28,13 @@ public sealed class EditorObjectLineSegmentSnapshot
     public float Y1 { get; init; }
 }
 
+public sealed class EditorObjectCircleSnapshot
+{
+    public float CenterX { get; init; }
+    public float CenterY { get; init; }
+    public float Radius { get; init; }
+}
+
 public sealed class EditorObjectBezierSegmentSnapshot
 {
     public int SegmentIndex { get; init; }
@@ -49,6 +56,7 @@ public sealed class EditorObjectGizmoSnapshot
     public long ObjectStableId { get; init; }
     public EditorObjectGizmoHandleSnapshot[] Handles { get; init; } = Array.Empty<EditorObjectGizmoHandleSnapshot>();
     public EditorObjectLineSegmentSnapshot[] Lines { get; init; } = Array.Empty<EditorObjectLineSegmentSnapshot>();
+    public EditorObjectCircleSnapshot[] Circles { get; init; } = Array.Empty<EditorObjectCircleSnapshot>();
     public EditorObjectBezierSegmentSnapshot[] BezierSegments { get; init; } = Array.Empty<EditorObjectBezierSegmentSnapshot>();
 }
 
@@ -64,6 +72,7 @@ internal static class NativeObjectGizmoPresentation
 
         List<EditorObjectGizmoHandleSnapshot> handles = new();
         List<EditorObjectLineSegmentSnapshot> lines = new();
+        List<EditorObjectCircleSnapshot> circles = new();
         List<EditorObjectBezierSegmentSnapshot> beziers = new();
 
         bool specialized = false;
@@ -193,7 +202,7 @@ internal static class NativeObjectGizmoPresentation
         // Simple verified Data members still use the reflected inspector schema as their semantic
         // source. Complex WaterCurrent/Spline models publish their own complete primitive set above.
         if (!specialized)
-            CapturePropertyHandles(target, properties, handles);
+            CapturePropertyHandles(target, properties, handles, lines, circles);
 
         if (ModManager.Watcher &&
             target.data is Watcher.KarmaFlowerPatch.KarmaFlowerPatchData karmaPatch)
@@ -305,6 +314,7 @@ internal static class NativeObjectGizmoPresentation
             ObjectStableId = ObjectPresentationIdentity.Get(target),
             Handles = handles.ToArray(),
             Lines = lines.ToArray(),
+            Circles = circles.ToArray(),
             BezierSegments = beziers.ToArray()
         };
     }
@@ -312,7 +322,9 @@ internal static class NativeObjectGizmoPresentation
     private static void CapturePropertyHandles(
         PlacedObject target,
         EditorPropertySnapshot[] properties,
-        List<EditorObjectGizmoHandleSnapshot> handles)
+        List<EditorObjectGizmoHandleSnapshot> handles,
+        List<EditorObjectLineSegmentSnapshot> lines,
+        List<EditorObjectCircleSnapshot> circles)
     {
         if (properties == null) return;
 
@@ -322,21 +334,31 @@ internal static class NativeObjectGizmoPresentation
             if (property == null || property.GizmoHint == EditorPropertyGizmoHint.None)
                 continue;
 
+            float scale = property.GizmoScale > 0f ? property.GizmoScale : 1f;
             float x;
             float y;
             switch (property.GizmoHint)
             {
                 case EditorPropertyGizmoHint.RelativePoint:
-                    x = target.pos.x + property.X;
-                    y = target.pos.y + property.Y;
+                    x = target.pos.x + property.X * scale;
+                    y = target.pos.y + property.Y * scale;
                     break;
                 case EditorPropertyGizmoHint.VerticalDistance:
                     x = target.pos.x;
-                    y = target.pos.y + property.X;
+                    y = target.pos.y + property.X * scale;
                     break;
                 default:
                     continue;
             }
+
+            Vector2 point = new(x, y);
+            bool tileScaled = scale >= 19.999f;
+            bool drawAnchor =
+                property.GizmoShape == EditorPropertyGizmoShape.Line ||
+                property.GizmoShape == EditorPropertyGizmoShape.Circle ||
+                property.GizmoShape == EditorPropertyGizmoShape.Direction4 ||
+                property.GizmoShape == EditorPropertyGizmoShape.Direction8 ||
+                property.GizmoShape == EditorPropertyGizmoShape.None;
 
             handles.Add(new EditorObjectGizmoHandleSnapshot
             {
@@ -345,9 +367,65 @@ internal static class NativeObjectGizmoPresentation
                 Y = y,
                 AnchorX = target.pos.x,
                 AnchorY = target.pos.y,
-                DrawAnchorLine = true
+                DrawAnchorLine = drawAnchor
             });
+
+            switch (property.GizmoShape)
+            {
+                case EditorPropertyGizmoShape.Circle:
+                    circles.Add(new EditorObjectCircleSnapshot
+                    {
+                        CenterX = target.pos.x,
+                        CenterY = target.pos.y,
+                        Radius = Vector2.Distance(target.pos, point)
+                    });
+                    break;
+
+                case EditorPropertyGizmoShape.Rectangle:
+                    if (tileScaled)
+                        AddTileRectangle(lines, target.pos, point);
+                    else
+                        AddRectangle(lines, target.pos, point);
+                    break;
+
+                case EditorPropertyGizmoShape.Tile:
+                    AddTileCell(lines, point);
+                    break;
+            }
         }
+    }
+
+    private static void AddTileCell(
+        List<EditorObjectLineSegmentSnapshot> lines,
+        Vector2 point)
+    {
+        float left = Mathf.Floor(point.x / 20f) * 20f;
+        float bottom = Mathf.Floor(point.y / 20f) * 20f;
+        AddRectangle(
+            lines,
+            new Vector2(left, bottom),
+            new Vector2(left + 20f, bottom + 20f));
+    }
+
+    private static void AddTileRectangle(
+        List<EditorObjectLineSegmentSnapshot> lines,
+        Vector2 origin,
+        Vector2 point)
+    {
+        IntVector2 a = new(
+            Mathf.FloorToInt(origin.x / 20f),
+            Mathf.FloorToInt(origin.y / 20f));
+        IntVector2 b = new(
+            Mathf.FloorToInt(point.x / 20f),
+            Mathf.FloorToInt(point.y / 20f));
+
+        Vector2 min = new(
+            Mathf.Min(a.x, b.x) * 20f,
+            Mathf.Min(a.y, b.y) * 20f);
+        Vector2 max = new(
+            (Mathf.Max(a.x, b.x) + 1) * 20f,
+            (Mathf.Max(a.y, b.y) + 1) * 20f);
+        AddRectangle(lines, min, max);
     }
 
     private static void CaptureTerrainGrassPatch(

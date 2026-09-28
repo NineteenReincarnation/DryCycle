@@ -75,6 +75,7 @@ internal static class NativeObjectGizmoView
         ImDrawListPtr draw = ImGui.GetBackgroundDrawList();
 
         DrawLines(draw, viewport, display, gizmo.Lines);
+        DrawCircles(draw, viewport, display, gizmo.Circles);
         CurveCandidate nearestCurve = DrawCurves(draw, viewport, display, gizmo.BezierSegments, mouse);
         HandleCandidate nearestHandle = DrawHandles(draw, viewport, display, gizmo.Handles, mouse);
 
@@ -197,6 +198,37 @@ internal static class NativeObjectGizmoView
             Num.Vector2 a = WorldToScreen(viewport, display, line.X0, line.Y0);
             Num.Vector2 b = WorldToScreen(viewport, display, line.X1, line.Y1);
             draw.AddLine(a, b, RegionColor(), 1.2f);
+        }
+    }
+
+    private static void DrawCircles(
+        ImDrawListPtr draw,
+        EditorViewportSnapshot viewport,
+        Num.Vector2 display,
+        EditorObjectCircleSnapshot[] circles)
+    {
+        if (circles == null) return;
+
+        float scaleX = display.X / Math.Max(0.0001f, viewport.Width);
+        float scaleY = display.Y / Math.Max(0.0001f, viewport.Height);
+        float scale = (Math.Abs(scaleX) + Math.Abs(scaleY)) * 0.5f;
+
+        for (int i = 0; i < circles.Length; i++)
+        {
+            EditorObjectCircleSnapshot circle = circles[i];
+            if (circle == null || circle.Radius <= 0f) continue;
+
+            Num.Vector2 center = WorldToScreen(
+                viewport,
+                display,
+                circle.CenterX,
+                circle.CenterY);
+            draw.AddCircle(
+                center,
+                Math.Max(1f, circle.Radius * scale),
+                RegionColor(),
+                48,
+                1.2f);
         }
     }
 

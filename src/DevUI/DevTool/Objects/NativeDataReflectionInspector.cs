@@ -14,7 +14,10 @@ namespace DryCycle.DevUI.DevTool.Objects;
 /// adapter is registered at a low priority. Unsupported member types remain visible through the
 /// serialized-data row, while known scalar/vector/color/enum members are editable natively.
 /// </summary>
-internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
+internal sealed class NativeDataReflectionInspector :
+    IObjectInspectorAdapter,
+    IObjectInspectorCoverageProvider,
+    IObjectInspectorGizmoAdapter
 {
     internal static readonly NativeDataReflectionInspector Instance = new();
 
@@ -171,6 +174,30 @@ internal sealed class NativeDataReflectionInspector : IObjectInspectorAdapter
             return false;
         }
     }
+
+    public ObjectInspectorCoverage GetCoverage(PlacedObject target)
+    {
+        PlacedObject.Data data = target?.data;
+        if (data == null)
+            return ObjectInspectorCoverage.Conservative();
+
+        Schema schema = Schemas.GetOrAdd(data.GetType(), BuildSchema);
+        return ObjectInspectorCoverage.Conservative(schema.Members.Length, 1);
+    }
+
+    public bool TryBuildGizmoValue(
+        PlacedObject target,
+        string key,
+        float relativeX,
+        float relativeY,
+        bool snap,
+        out EditorPropertyValue value) =>
+        TryBuildNativeGizmoValue(
+            target,
+            key,
+            relativeX,
+            relativeY,
+            out value);
 
     internal static bool HasWritableMembers(PlacedObject target)
     {
