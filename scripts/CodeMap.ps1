@@ -221,7 +221,7 @@ function Parse-CodeMap([string]$Content) {
 
     $errors = New-Object System.Collections.Generic.List[string]
     $entries = @{}
-    $ignored = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $ignored = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 
     if ($firstContentLine -ne $CodeMapMarker) {
         $errors.Add("marker")
@@ -376,7 +376,7 @@ function Get-AffectedScopes(
     [string]$BaseTree,
     [string]$TargetTree
 ) {
-    $scopes = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $scopes = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 
     foreach ($change in $Changes) {
         $oldIsCodeMap = (-not [string]::IsNullOrEmpty($change.OldPath)) -and
@@ -428,7 +428,7 @@ function Test-StringSetEqual(
         return $false
     }
 
-    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($item in $Left) {
         [void]$set.Add([string]$item)
     }
@@ -521,12 +521,12 @@ function Test-Scope(
 
     $directories = @(Get-DirectChildDirectories $TargetTree $Scope)
 
-    $directorySet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $directorySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($directory in $directories) {
         [void]$directorySet.Add("$directory/")
     }
 
-    $entrySet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $entrySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($path in $parsed.Entries.Keys) {
         if ($path -ne "./") {
             [void]$entrySet.Add([string]$path)
