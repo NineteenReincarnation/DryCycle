@@ -18,9 +18,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Regression tests
+      - name: Checker regression tests
         shell: pwsh
         run: ./scripts/CodeMap.Tests.ps1
+
+      - name: Auto-fix regression tests
+        shell: pwsh
+        run: ./scripts/CodeMap.AutoFix.Tests.ps1
 
       - name: Validate changed CODEMAP scopes
         shell: pwsh
