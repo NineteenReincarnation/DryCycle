@@ -75,9 +75,13 @@ function Invoke-Checker(
     try {
         $output = @(& $powerShell -NoProfile -File $checker @Arguments 2>&1)
         $exitCode = $LASTEXITCODE
+        $lines = @($output | ForEach-Object { [string]$_ })
+        if ($exitCode -notin @(0, 10, 20, 30)) {
+            throw "checker host failure exit=$exitCode output=[$($lines -join ' | ')]"
+        }
         return [pscustomobject]@{
             ExitCode = $exitCode
-            Output = @($output | ForEach-Object { [string]$_ })
+            Output = $lines
         }
     }
     finally {
