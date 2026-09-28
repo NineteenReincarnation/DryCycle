@@ -422,8 +422,12 @@ try {
             exit 0
         }
 
-        if ($check.ExitCode -eq 30 -or
-            ($check.Lines | Where-Object { $_.StartsWith("fmt ", [StringComparison]::Ordinal) }).Count -gt 0) {
+        $formatErrors = @(
+            $check.Lines |
+                Where-Object { $_.StartsWith("fmt ", [StringComparison]::Ordinal) }
+        )
+
+        if ($check.ExitCode -eq 30 -or $formatErrors.Count -gt 0) {
             foreach ($line in $check.Lines) {
                 [Console]::Out.WriteLine($line)
             }
