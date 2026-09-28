@@ -196,6 +196,25 @@ internal static class SoundLibraryGroupsView
         ImGui.Separator();
     }
 
+    internal static float CreateTypeTopControlsWidth()
+    {
+        string omni = DevToolUiSettings.T("全向", "Omni");
+        string directional = DevToolUiSettings.T("定向", "Directional");
+        string spot = DevToolUiSettings.T("点声源", "Spot");
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        float radio = ImGui.GetFrameHeight();
+        float inner = style.ItemInnerSpacing.X;
+        float spacing = style.ItemSpacing.X;
+
+        return
+            radio + inner + ImGui.CalcTextSize(omni).X +
+            spacing +
+            radio + inner + ImGui.CalcTextSize(directional).X +
+            spacing +
+            radio + inner + ImGui.CalcTextSize(spot).X;
+    }
+
     internal static void DrawCreateTypeTopControls()
     {
         string omni = DevToolUiSettings.T("全向", "Omni");
