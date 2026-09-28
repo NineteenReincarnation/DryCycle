@@ -107,6 +107,10 @@ function Invoke-AutoFix(
         if ($exitCode -notin @(0, 10, 20, 30)) {
             throw "autofix host failure exit=$exitCode output=[$($lines -join ' | ')]"
         }
+        if ($exitCode -eq 30) {
+            $detail = @(& $powerShell -NoProfile -File $autofixer @Arguments -Repository $WorkingDirectory -Detailed 2>&1)
+            throw "autofix internal output=[$($detail -join ' | ')]"
+        }
         return [pscustomobject]@{
             ExitCode = $exitCode
             Output = $lines
@@ -635,7 +639,7 @@ $tests.Add({
 $tests.Add({
     $repo = New-TestRepo
     try {
-        $head = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        $head = @(Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
         $result = Invoke-Checker $repo @("-Source", "Range", "-Base", "EMPTY", "-Head", $head)
         Assert-Equal 0 $result.ExitCode "empty range baseline"
         Assert-Empty $result.Output "empty range baseline must be silent"
