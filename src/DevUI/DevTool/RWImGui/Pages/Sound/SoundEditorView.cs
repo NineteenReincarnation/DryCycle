@@ -132,40 +132,71 @@ internal static class SoundEditorView
     {
         if (snapshot == null || !snapshot.Available)
         {
+            float selectorWidth = SoundLibraryGroupsView.CreateTypeTopControlsWidth();
+            float available = ImGui.GetContentRegionAvail().X;
+            float offset = Math.Max(0f, (available - selectorWidth) * 0.5f);
+            if (offset > 0f)
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
             SoundLibraryGroupsView.DrawCreateTypeTopControls();
             return;
         }
 
         const float knobDiameter = 58f;
-        const float gap = 18f;
+        const float minimumSideWidth = 118f;
 
-        ImGui.BeginGroup();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("背景低鸣", "Bkg Drone"));
-        DrawRoomRotary(
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        float sideWidth = Math.Max(
+            minimumSideWidth,
+            Math.Min(150f, availableWidth * 0.22f));
+        float centerWidth = Math.Max(220f, availableWidth - sideWidth * 2f);
+
+        // Three real columns keep the sound-type selector on the exact center axis of the top
+        // window. The two room-volume controls live in equal side columns and therefore never push
+        // the selector left or right.
+        ImGui.Columns(3, "##SoundTopControlColumns", false);
+        ImGui.SetColumnWidth(0, sideWidth);
+        ImGui.SetColumnWidth(1, centerWidth);
+        ImGui.SetColumnWidth(2, sideWidth);
+
+        DrawRoomRotaryColumn(
+            DevToolUiSettings.T("背景低鸣", "Bkg Drone"),
+            DevToolNumericScope.SoundRoomBackgroundDrone,
             SoundEditorKeys.BackgroundDroneVolume,
             snapshot.BackgroundDroneVolume,
-            knobDiameter);
-        ImGui.EndGroup();
+            knobDiameter,
+            instance: 0);
 
-        ImGui.SameLine(0f, gap);
+        ImGui.NextColumn();
 
-        ImGui.BeginGroup();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("声音类型", "Sound Type"));
+        string typeLabel = DevToolUiSettings.T("声音类型", "Sound Type");
+        float centerStartX = ImGui.GetCursorPosX();
+        float actualCenterWidth = ImGui.GetColumnWidth();
+        float labelWidth = ImGui.CalcTextSize(typeLabel).X;
+        ImGui.SetCursorPosX(
+            centerStartX +
+            Math.Max(0f, (actualCenterWidth - labelWidth) * 0.5f));
+        DevToolWidgets.MutedText(typeLabel);
+
+        float selectorWidth = SoundLibraryGroupsView.CreateTypeTopControlsWidth();
+        ImGui.SetCursorPosX(
+            centerStartX +
+            Math.Max(0f, (actualCenterWidth - selectorWidth) * 0.5f));
         float rowY = ImGui.GetCursorPosY();
         ImGui.SetCursorPosY(
             rowY + Math.Max(0f, (knobDiameter - ImGui.GetFrameHeight()) * 0.5f));
         SoundLibraryGroupsView.DrawCreateTypeTopControls();
-        ImGui.EndGroup();
 
-        ImGui.SameLine(0f, gap);
+        ImGui.NextColumn();
 
-        ImGui.BeginGroup();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"));
-        DrawRoomRotary(
+        DrawRoomRotaryColumn(
+            DevToolUiSettings.T("无威胁低鸣", "No Threat Drone"),
+            DevToolNumericScope.SoundRoomNoThreatDrone,
             SoundEditorKeys.NoThreatDroneVolume,
             snapshot.NoThreatDroneVolume,
-            knobDiameter);
-        ImGui.EndGroup();
+            knobDiameter,
+            instance: 1);
+
+        ImGui.Columns(1);
     }
 
     internal static void DrawInspector(EditorSoundPresentationSnapshot snapshot)
@@ -581,16 +612,37 @@ internal static class SoundEditorView
                (sound?.ResourceSourceName?.IndexOf(query, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
     }
 
-    private static void DrawRoomRotary(string key, float current, float diameter)
+    private static void DrawRoomRotaryColumn(
+        string label,
+        string scope,
+        string key,
+        float current,
+        float diameter,
+        int instance)
     {
+        float columnStartX = ImGui.GetCursorPosX();
+        float columnWidth = ImGui.GetColumnWidth();
+
+        float labelWidth = ImGui.CalcTextSize(label).X;
+        ImGui.SetCursorPosX(
+            columnStartX +
+            Math.Max(0f, (columnWidth - labelWidth) * 0.5f));
+        DevToolWidgets.MutedText(label);
+
+        ImGui.SetCursorPosX(
+            columnStartX +
+            Math.Max(0f, (columnWidth - diameter) * 0.5f));
+
         DevToolNumericEditResult<float> edit = DevToolNumericWidgets.RotaryFloat(
-            DevToolNumericScope.SoundRoom,
+            scope,
             key,
             current,
             0f,
             1f,
             diameter,
-            "0.000");
+            "0.000",
+            instance);
+
         if (edit.Committed)
         {
             SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
