@@ -33,8 +33,7 @@ jobs:
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           $base = $env:BASE_SHA
-          if ([string]::IsNullOrWhiteSpace($base) -or $base -match '^0+
-) {
+          if ([string]::IsNullOrWhiteSpace($base) -or $base.Trim('0').Length -eq 0) {
               $base = 'EMPTY'
           }
           elseif (-not (git cat-file -e "$base^{commit}" 2>$null)) {
