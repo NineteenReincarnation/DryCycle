@@ -640,9 +640,6 @@ internal static class SoundEditorView
         if (dragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
             dragging = false;
 
-        if (hovered || dragging)
-            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
-
         Num.Vector2 min = ImGui.GetItemRectMin();
         Num.Vector2 max = ImGui.GetItemRectMax();
         float x = (min.X + max.X) * 0.5f;
