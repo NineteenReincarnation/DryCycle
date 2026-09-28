@@ -14,7 +14,7 @@
 - `Gizmos/` — 场景 Gizmo 编辑命令。
 - `History/` — Undo/Redo、快照与编辑事务。
 - `Input/` — 输入所有权、快捷键与场景交互仲裁。
-- `Map/` — World Map、Player Map 与 Cartography；更细导航见其 `CODEMAP.md`。
+- `Map/` — World Map、Player Map 与 Cartography。
 - `Objects/` — Object Catalog、Inspector、多选与运行时协调。
 - `Preview/` — 临时运行时预览、所有权与安全回滚。
 - `Relationships/` — 生物关系编辑。
