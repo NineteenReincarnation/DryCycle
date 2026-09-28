@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using BepInEx.Bootstrap;
 
 namespace DryCycle.DevUI.DevTool.Objects;
 
@@ -111,6 +113,9 @@ public static class ObjectCatalog
     private static int cachedTypeCount = -1;
     private static long registrationOrder;
     private static long revision = 1;
+
+    private static Dictionary<string, string> inferredSourceByType;
+    private static int inferredSourcePluginCount = -1;
 
     /// <summary>
     /// Changes whenever descriptor metadata can produce a different catalog projection.
@@ -232,6 +237,7 @@ public static class ObjectCatalog
         cached = null;
         cachedByType = null;
         cachedTypeCount = -1;
+        inferredSourcePluginCount = -1;
         unchecked { revision++; }
     }
 
@@ -243,10 +249,147 @@ public static class ObjectCatalog
             type,
             name,
             category,
-            "PlacedObject Registry",
+            InferObjectSource(type),
             GuessTags(type.value),
             GuessPresentationKind(type.value),
             GuessImportance(type.value));
+    }
+
+    private static string InferObjectSource(PlacedObject.Type type)
+    {
+        string typeName = type?.value;
+        if (string.IsNullOrEmpty(typeName))
+            return "PlacedObject Registry";
+
+        EnsureInferredSources();
+        return inferredSourceByType != null &&
+               inferredSourceByType.TryGetValue(typeName, out string source) &&
+               !string.IsNullOrWhiteSpace(source)
+            ? source
+            : "PlacedObject Registry";
+    }
+
+    private static void EnsureInferredSources()
+    {
+        int pluginCount = Chainloader.PluginInfos?.Count ?? 0;
+        if (inferredSourceByType != null &&
+            inferredSourcePluginCount == pluginCount)
+            return;
+
+        Dictionary<string, string> next =
+            new(StringComparer.Ordinal);
+
+        // Rain World's own ExtEnum fields live in Assembly-CSharp, including DLC / Watcher helper
+        // containers. Resolve those first so a third-party alias cannot steal ownership of a base
+        // game type.
+        Assembly gameAssembly = typeof(PlacedObject).Assembly;
+        CollectPlacedObjectTypes(
+            gameAssembly,
+            "Rain World",
+            next,
+            overwrite: false);
+
+        if (Chainloader.PluginInfos != null)
+        {
+            foreach (var pair in Chainloader.PluginInfos)
+            {
+                var info = pair.Value;
+                Assembly assembly = info?.Instance?.GetType().Assembly;
+                if (assembly == null || ReferenceEquals(assembly, gameAssembly))
+                    continue;
+
+                string source =
+                    info.Metadata?.Name;
+                if (string.IsNullOrWhiteSpace(source))
+                    source = info.Metadata?.GUID;
+                if (string.IsNullOrWhiteSpace(source))
+                    source = assembly.GetName().Name;
+                if (string.IsNullOrWhiteSpace(source))
+                    continue;
+
+                CollectPlacedObjectTypes(
+                    assembly,
+                    source.Trim(),
+                    next,
+                    overwrite: false);
+            }
+        }
+
+        inferredSourceByType = next;
+        inferredSourcePluginCount = pluginCount;
+    }
+
+    private static void CollectPlacedObjectTypes(
+        Assembly assembly,
+        string source,
+        Dictionary<string, string> destination,
+        bool overwrite)
+    {
+        if (assembly == null ||
+            destination == null ||
+            string.IsNullOrWhiteSpace(source))
+            return;
+
+        Type[] types;
+        try
+        {
+            types = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException error)
+        {
+            types = error.Types ?? Array.Empty<Type>();
+        }
+        catch
+        {
+            return;
+        }
+
+        const BindingFlags flags =
+            BindingFlags.Static |
+            BindingFlags.Public |
+            BindingFlags.NonPublic |
+            BindingFlags.DeclaredOnly;
+
+        for (int typeIndex = 0; typeIndex < types.Length; typeIndex++)
+        {
+            Type owner = types[typeIndex];
+            if (owner == null)
+                continue;
+
+            FieldInfo[] fields;
+            try
+            {
+                fields = owner.GetFields(flags);
+            }
+            catch
+            {
+                continue;
+            }
+
+            for (int fieldIndex = 0; fieldIndex < fields.Length; fieldIndex++)
+            {
+                FieldInfo field = fields[fieldIndex];
+                if (!typeof(PlacedObject.Type).IsAssignableFrom(field.FieldType))
+                    continue;
+
+                PlacedObject.Type value;
+                try
+                {
+                    value = field.GetValue(null) as PlacedObject.Type;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                string typeName = value?.value;
+                if (string.IsNullOrEmpty(typeName))
+                    continue;
+
+                if (overwrite || !destination.ContainsKey(typeName))
+                    destination[typeName] = source;
+            }
+        }
     }
 
     private static string GuessCategory(string name)
