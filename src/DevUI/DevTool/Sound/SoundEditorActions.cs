@@ -129,21 +129,35 @@ internal static class SoundEditorActions
 
         return MutateRoomVolumes(session, "Change sound room setting", settings =>
         {
+            // Treat the two room-drone values as independent authoring properties. Preserve the
+            // untouched sibling explicitly so neither a vanilla setter side effect nor a future
+            // compatibility hook can make one rotary drag rewrite the other value.
+            float backgroundBefore = settings.BkgDroneVolume;
+            float noThreatBefore = settings.BkgDroneNoThreatVolume;
+
             switch (key)
             {
                 case SoundEditorKeys.BackgroundDroneVolume:
                 {
                     float next = Mathf.Clamp01(value.X);
-                    if (Mathf.Approximately(settings.BkgDroneVolume, next)) return false;
+                    if (Mathf.Approximately(backgroundBefore, next)) return false;
+
                     settings.BkgDroneVolume = next;
-                    return true;
+                    if (!Mathf.Approximately(settings.BkgDroneNoThreatVolume, noThreatBefore))
+                        settings.BkgDroneNoThreatVolume = noThreatBefore;
+
+                    return !Mathf.Approximately(settings.BkgDroneVolume, backgroundBefore);
                 }
                 case SoundEditorKeys.NoThreatDroneVolume:
                 {
                     float next = Mathf.Clamp01(value.X);
-                    if (Mathf.Approximately(settings.BkgDroneNoThreatVolume, next)) return false;
+                    if (Mathf.Approximately(noThreatBefore, next)) return false;
+
                     settings.BkgDroneNoThreatVolume = next;
-                    return true;
+                    if (!Mathf.Approximately(settings.BkgDroneVolume, backgroundBefore))
+                        settings.BkgDroneVolume = backgroundBefore;
+
+                    return !Mathf.Approximately(settings.BkgDroneNoThreatVolume, noThreatBefore);
                 }
                 default:
                     return false;
