@@ -163,6 +163,13 @@ if errorlevel 1 (
     goto :worker_fail
 )
 echo [OK] Fresh clone completed.
+
+rem Enable repository-owned hooks in the fresh checkout.
+git -C "%TARGET%" config --local core.hooksPath .githooks >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Could not enable repository Git hooks.
+    goto :worker_fail
+)
 echo.
 
 rem ------------------------------------------------------------
