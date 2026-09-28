@@ -170,6 +170,7 @@ internal static class SoundEditorView
             SoundEditorKeys.BackgroundDroneVolume,
             snapshot.BackgroundDroneVolume,
             knobDiameter,
+            SoundEditorDefaults.BackgroundDroneVolume,
             instance: 0);
 
         ImGui.NextColumn();
@@ -200,6 +201,7 @@ internal static class SoundEditorView
             SoundEditorKeys.NoThreatDroneVolume,
             snapshot.NoThreatDroneVolume,
             knobDiameter,
+            SoundEditorDefaults.NoThreatDroneVolume,
             instance: 1);
 
         ImGui.Columns(1);
@@ -1002,6 +1004,7 @@ internal static class SoundEditorView
         string key,
         float current,
         float diameter,
+        float defaultValue,
         int instance)
     {
         float columnStartX = ImGui.GetCursorPosX();
@@ -1025,7 +1028,8 @@ internal static class SoundEditorView
             1f,
             diameter,
             "0.000",
-            instance);
+            instance,
+            resetValue: defaultValue);
 
         if (edit.Committed)
         {
