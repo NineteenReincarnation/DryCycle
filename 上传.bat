@@ -51,6 +51,16 @@ if errorlevel 1 (
     echo [ERROR] Could not enable Git long-path support.
     goto :fail
 )
+rem Enable repository-owned hooks when no custom hook path is configured.
+set "HOOKS_PATH="
+for /f "delims=" %%H in ('git config --local --get core.hooksPath 2^>nul') do set "HOOKS_PATH=%%H"
+if not defined HOOKS_PATH (
+    git config --local core.hooksPath .githooks >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Could not enable repository Git hooks.
+        goto :fail
+    )
+)
 
 set "NESTED_BACKUP=%TEMP%\git_all_upload_nested_%RANDOM%_%RANDOM%"
 set "NESTED_MAP=%TEMP%\git_all_upload_nested_map_%RANDOM%_%RANDOM%.txt"
