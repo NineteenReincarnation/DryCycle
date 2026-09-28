@@ -68,6 +68,8 @@ internal static class DevToolUserSettingsStore
     private static DateTime saveAfterUtc;
 
     private static float browserInspectorSplit = 0.23f;
+    private static float soundBrowserSplit = 0.26f;
+    private static float soundSceneSplit = 0.30f;
 
     internal static string SettingsPath =>
         Path.Combine(Paths.ConfigPath, FileName);
@@ -81,6 +83,24 @@ internal static class DevToolUserSettingsStore
         }
     }
 
+    internal static float SoundBrowserSplit
+    {
+        get
+        {
+            lock (Sync)
+                return soundBrowserSplit;
+        }
+    }
+
+    internal static float SoundSceneSplit
+    {
+        get
+        {
+            lock (Sync)
+                return soundSceneSplit;
+        }
+    }
+
     internal static void Load(ManualLogSource logger)
     {
         lock (Sync)
@@ -91,6 +111,8 @@ internal static class DevToolUserSettingsStore
             Windows.Clear();
             Groups.Clear();
             browserInspectorSplit = 0.23f;
+            soundBrowserSplit = 0.26f;
+            soundSceneSplit = 0.30f;
 
             try
             {
@@ -115,6 +137,8 @@ internal static class DevToolUserSettingsStore
                 Windows.Clear();
                 Groups.Clear();
                 browserInspectorSplit = 0.23f;
+                soundBrowserSplit = 0.26f;
+                soundSceneSplit = 0.30f;
             }
 
             loaded = true;
@@ -238,6 +262,26 @@ internal static class DevToolUserSettingsStore
         }
     }
 
+    internal static void RememberSoundWorkspaceSplits(
+        float browser,
+        float scene)
+    {
+        browser = Math.Max(0.12f, Math.Min(0.60f, browser));
+        scene = Math.Max(0.12f, Math.Min(0.60f, scene));
+
+        lock (Sync)
+        {
+            if (!loaded ||
+                (Math.Abs(soundBrowserSplit - browser) <= 0.0005f &&
+                 Math.Abs(soundSceneSplit - scene) <= 0.0005f))
+                return;
+
+            soundBrowserSplit = browser;
+            soundSceneSplit = scene;
+            MarkDirtyLocked();
+        }
+    }
+
     internal static void CapturePresentationPreferences()
     {
         lock (Sync)
@@ -297,6 +341,20 @@ internal static class DevToolUserSettingsStore
                 browserInspectorSplit,
                 0.08f,
                 0.82f);
+        soundBrowserSplit =
+            ReadFloat(
+                element,
+                "soundBrowserSplit",
+                soundBrowserSplit,
+                0.12f,
+                0.60f);
+        soundSceneSplit =
+            ReadFloat(
+                element,
+                "soundSceneSplit",
+                soundSceneSplit,
+                0.12f,
+                0.60f);
 
         DevToolUiLanguage language =
             ParseEnum(
@@ -475,6 +533,8 @@ internal static class DevToolUserSettingsStore
             new XAttribute("language", DevToolUiSettings.Language),
             new XAttribute("scenePlacement", DevToolUiSettings.ScenePlacement),
             new XAttribute("browserInspectorSplit", F(browserInspectorSplit)),
+            new XAttribute("soundBrowserSplit", F(soundBrowserSplit)),
+            new XAttribute("soundSceneSplit", F(soundSceneSplit)),
             new XAttribute("chineseFontSize", F(DevToolUiSettings.PersistedChineseFontSize)),
             new XAttribute("englishFontSize", F(DevToolUiSettings.PersistedEnglishFontSize)),
             new XAttribute("englishFontWeight", DevToolUiSettings.PersistedEnglishFontWeight),
