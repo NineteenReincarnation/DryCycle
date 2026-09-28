@@ -84,6 +84,105 @@ internal static class LegacyObjectSandbox
         return Run(session, target, action, false);
     }
 
+    internal static T InspectRepresentation<T>(
+        EditorSession session,
+        PlacedObject target,
+        Func<PlacedObjectRepresentation, T> projection,
+        T fallback)
+    {
+        if (session?.Owner == null || target?.type == null || projection == null)
+            return fallback;
+
+        if (session.Owner.activePage is ObjectsPage livePage)
+        {
+            PlacedObjectRepresentation liveRepresentation =
+                FindRepresentation(livePage, target);
+            return liveRepresentation == null ? fallback : projection(liveRepresentation);
+        }
+
+        State state = Acquire(session, target);
+        if (state?.Representation == null)
+            return fallback;
+
+        string fingerprint = Fingerprint(target);
+        if (!string.Equals(state.ModelFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            state.ModelFingerprint = fingerprint;
+            state.ControlsDirty = true;
+            RefreshHeadlessRepresentation(state);
+        }
+
+        try
+        {
+            QuarantineVisualTree(state.Page);
+            return projection(state.Representation);
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless representation projection failed: " + error.Message);
+            return fallback;
+        }
+        finally
+        {
+            QuarantineVisualTree(state.Page);
+        }
+    }
+
+    internal static bool MutateRepresentation(
+        EditorSession session,
+        PlacedObject target,
+        Func<PlacedObjectRepresentation, bool> mutation)
+    {
+        if (session?.Owner == null || target?.type == null || mutation == null)
+            return false;
+
+        if (session.Owner.activePage is ObjectsPage livePage)
+        {
+            PlacedObjectRepresentation liveRepresentation =
+                FindRepresentation(livePage, target);
+            if (liveRepresentation == null)
+                return false;
+
+            try { return mutation(liveRepresentation); }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool live representation mutation failed: " + error.Message);
+                return false;
+            }
+        }
+
+        State state = Acquire(session, target);
+        if (state?.Representation == null)
+            return false;
+
+        Page previous = session.Owner.activePage;
+        try
+        {
+            QuarantineVisualTree(state.Page);
+            session.Owner.activePage = state.Page;
+            bool changed = mutation(state.Representation);
+            if (changed)
+            {
+                state.ControlsDirty = true;
+                state.ModelFingerprint = Fingerprint(target);
+            }
+            return changed;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless representation mutation failed: " + error.Message);
+            return false;
+        }
+        finally
+        {
+            QuarantineVisualTree(state.Page);
+            session.Owner.activePage = previous;
+        }
+    }
+
     internal static void Invalidate(EditorSession session, PlacedObject target)
     {
         if (session == null || target == null || !states.TryGetValue(session, out State state))

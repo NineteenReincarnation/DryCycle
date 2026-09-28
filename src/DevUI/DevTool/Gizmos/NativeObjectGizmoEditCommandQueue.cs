@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Objects;
 using RWCustom;
@@ -159,7 +160,7 @@ public static class NativeObjectGizmoEditCommandQueue
 
             case NativeObjectGizmoEditKind.Update:
                 if (EditorContinuousTransactionHub.IsActive(session, transactionKey) &&
-                    ApplyDrag(target, command))
+                    ApplyDrag(session, target, command))
                 {
                     MarkChanged(session, target);
                 }
@@ -173,8 +174,19 @@ public static class NativeObjectGizmoEditCommandQueue
         }
     }
 
-    private static bool ApplyDrag(PlacedObject target, NativeObjectGizmoEditCommand command)
+    private static bool ApplyDrag(
+        EditorSession session,
+        PlacedObject target,
+        NativeObjectGizmoEditCommand command)
     {
+        if (command.HandleId.StartsWith(HeadlessRepresentationGizmoBridge.HandlePrefix, StringComparison.Ordinal))
+            return HeadlessRepresentationGizmoBridge.Move(
+                session,
+                target,
+                command.HandleId,
+                command.X,
+                command.Y);
+
         if (command.HandleId.StartsWith("property:", StringComparison.Ordinal))
         {
             string propertyKey = command.HandleId.Substring("property:".Length);

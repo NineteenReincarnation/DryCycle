@@ -319,6 +319,41 @@ internal static class NativeObjectGizmoPresentation
         };
     }
 
+    internal static EditorObjectGizmoSnapshot Merge(
+        EditorObjectGizmoSnapshot primary,
+        EditorObjectGizmoSnapshot secondary)
+    {
+        if (primary == null || primary.ObjectIndex < 0)
+            return secondary ?? EditorObjectGizmoSnapshot.Empty;
+        if (secondary == null || secondary.ObjectIndex < 0)
+            return primary;
+
+        return new EditorObjectGizmoSnapshot
+        {
+            ObjectIndex = primary.ObjectIndex,
+            ObjectStableId = primary.ObjectStableId != 0L
+                ? primary.ObjectStableId
+                : secondary.ObjectStableId,
+            Handles = Concat(primary.Handles, secondary.Handles),
+            Lines = Concat(primary.Lines, secondary.Lines),
+            Circles = Concat(primary.Circles, secondary.Circles),
+            BezierSegments = Concat(primary.BezierSegments, secondary.BezierSegments)
+        };
+    }
+
+    private static T[] Concat<T>(T[] left, T[] right)
+    {
+        left ??= Array.Empty<T>();
+        right ??= Array.Empty<T>();
+        if (left.Length == 0) return right;
+        if (right.Length == 0) return left;
+
+        T[] result = new T[left.Length + right.Length];
+        Array.Copy(left, 0, result, 0, left.Length);
+        Array.Copy(right, 0, result, left.Length, right.Length);
+        return result;
+    }
+
     private static void CapturePropertyHandles(
         PlacedObject target,
         EditorPropertySnapshot[] properties,

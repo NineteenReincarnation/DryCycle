@@ -166,6 +166,9 @@ public static partial class EditorPresentationHub
         bool externalObject = singleSelection &&
                               selected.type != null &&
                               !GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), selected.type.value);
+        ObjectInspectorCoverage coverage = singleSelection
+            ? ObjectInspectorRegistry.GetCoverage(selected)
+            : ObjectInspectorCoverage.Complete();
 
         LegacyControlSnapshot[] legacyControls = Array.Empty<LegacyControlSnapshot>();
         if (singleSelection)
@@ -175,7 +178,7 @@ public static partial class EditorPresentationHub
                 legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
                 LegacyObjectSandbox.Release(session);
             }
-            else if (externalObject && !ObjectInspectorRegistry.GetCoverage(selected).IsComplete)
+            else if (externalObject && !coverage.IsComplete)
             {
                 // Protocol-aware adapters can prove that their inspector/gizmo model is complete.
                 // Generic reflection cannot, so unknown/custom representations still receive the
@@ -190,6 +193,20 @@ public static partial class EditorPresentationHub
         else
         {
             LegacyObjectSandbox.Release(session);
+        }
+
+        EditorObjectGizmoSnapshot objectGizmo = singleSelection
+            ? NativeObjectGizmoPresentation.Capture(selected, selectedIndex, properties)
+            : EditorObjectGizmoSnapshot.Empty;
+
+        if (singleSelection && externalObject && !coverage.GizmoComplete)
+        {
+            objectGizmo = NativeObjectGizmoPresentation.Merge(
+                objectGizmo,
+                HeadlessRepresentationGizmoBridge.Capture(
+                    session,
+                    selected,
+                    selectedIndex));
         }
 
         return new EditorInspectorSnapshot
@@ -208,9 +225,7 @@ public static partial class EditorPresentationHub
             LegacyUiAvailable = singleSelection,
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
-            ObjectGizmo = singleSelection
-                ? NativeObjectGizmoPresentation.Capture(selected, selectedIndex, properties)
-                : EditorObjectGizmoSnapshot.Empty,
+            ObjectGizmo = objectGizmo,
             MixedPropertyKeys = mixedPropertyKeys,
             LegacyControls = legacyControls
         };
