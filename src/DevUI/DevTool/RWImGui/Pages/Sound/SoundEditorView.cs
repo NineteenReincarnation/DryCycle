@@ -587,42 +587,11 @@ internal static class SoundEditorView
                 ImGuiChildFlags.Borders))
         {
             DrawInspector(snapshot);
-            DrawInspectorAdvanced(editor);
             ScopedScrollChrome.Draw("SoundWorkspaceInspector");
         }
         ImGui.EndChild();
     }
 
-    private static void DrawInspectorAdvanced(EditorPresentationSnapshot editor)
-    {
-        ImGui.Spacing();
-        ImGui.Separator();
-
-        if (DevToolWidgets.ActionButton(
-                "...",
-                "SoundInspectorAdvanced",
-                DevToolButtonTone.Subtle))
-        {
-            ImGui.OpenPopup("##SoundInspectorAdvancedPopup");
-        }
-
-        if (!ImGui.BeginPopup("##SoundInspectorAdvancedPopup"))
-            return;
-
-        bool legacyVisible =
-            editor?.Inspector?.LegacyUiVisible == true;
-        string label = legacyVisible
-            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
-            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
-
-        if (ImGui.Selectable(label))
-        {
-            EditorUiCommandQueue.Enqueue(
-                new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
-        }
-
-        ImGui.EndPopup();
-    }
 
     private static void DrawWorkspaceSplitter(
         string id,
