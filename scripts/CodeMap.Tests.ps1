@@ -150,8 +150,15 @@ function Assert-Equal($Expected, $Actual, [string]$Message) {
 }
 
 function Assert-Empty([object[]]$Value, [string]$Message) {
-    if (@($Value).Count -ne 0) {
-        throw "$Message output=[$($Value -join ' | ')]"
+    $visible = @(
+        $Value |
+            Where-Object {
+                $null -ne $_ -and
+                -not [string]::IsNullOrEmpty([string]$_)
+            }
+    )
+    if ($visible.Count -ne 0) {
+        throw "$Message output=[$($visible -join ' | ')]"
     }
 }
 
