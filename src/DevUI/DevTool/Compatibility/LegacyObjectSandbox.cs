@@ -385,12 +385,37 @@ internal static class LegacyObjectSandbox
     }
 
     private static void QuarantineVisualTree(
+        DevUINode root,
+        FContainer quarantine)
+    {
+        if (root == null || quarantine == null)
+            return;
+
+        HashSet<DevUINode> visited = new();
+        Stack<DevUINode> stack = new();
+        stack.Push(root);
+        int remaining = 8192;
+
+        while (stack.Count > 0 && remaining-- > 0)
+        {
+            DevUINode node = stack.Pop();
+            if (node == null || !visited.Add(node))
+                continue;
+
+            QuarantineNodeVisuals(node, quarantine);
+
+            if (node.subNodes == null)
+                continue;
+
+            for (int i = node.subNodes.Count - 1; i >= 0; i--)
+                stack.Push(node.subNodes[i]);
+        }
+    }
+
+    private static void QuarantineNodeVisuals(
         DevUINode node,
         FContainer quarantine)
     {
-        if (node == null || quarantine == null)
-            return;
-
         if (node.fSprites != null)
         {
             for (int i = 0; i < node.fSprites.Count; i++)
@@ -424,12 +449,6 @@ internal static class LegacyObjectSandbox
         }
 
         QuarantineReferencedVisuals(node, quarantine);
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            QuarantineVisualTree(node.subNodes[i], quarantine);
     }
 
     private static void QuarantineReferencedVisuals(
@@ -558,25 +577,32 @@ internal static class LegacyObjectSandbox
     }
 
     private static PlacedObjectRepresentation FindRepresentation(
-        DevUINode node,
+        DevUINode root,
         PlacedObject target)
     {
-        if (node == null || target == null)
+        if (root == null || target == null)
             return null;
 
-        if (node is PlacedObjectRepresentation representation &&
-            ReferenceEquals(representation.pObj, target))
-            return representation;
+        HashSet<DevUINode> visited = new();
+        Stack<DevUINode> stack = new();
+        stack.Push(root);
+        int remaining = 8192;
 
-        if (node.subNodes == null)
-            return null;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
+        while (stack.Count > 0 && remaining-- > 0)
         {
-            PlacedObjectRepresentation found =
-                FindRepresentation(node.subNodes[i], target);
-            if (found != null)
-                return found;
+            DevUINode node = stack.Pop();
+            if (node == null || !visited.Add(node))
+                continue;
+
+            if (node is PlacedObjectRepresentation representation &&
+                ReferenceEquals(representation.pObj, target))
+                return representation;
+
+            if (node.subNodes == null)
+                continue;
+
+            for (int i = node.subNodes.Count - 1; i >= 0; i--)
+                stack.Push(node.subNodes[i]);
         }
 
         return null;
