@@ -1,9 +1,10 @@
-[CmdletBinding()]
 param(
     [ValidateSet("Staged", "Range")]
     [string]$Source = "Staged",
+
     [string]$Base = "",
-    [string]$Head = "HEAD",
+    [string]$Head = "",
+
     [switch]$Detailed
 )
 
@@ -13,28 +14,28 @@ Set-StrictMode -Version Latest
 $ExitSemanticReview = 10
 $ExitInvalidIndex = 20
 $ExitInternalError = 30
+
 $CodeMapName = "CODEMAP.md"
 $CodeMapMarker = "<!-- codemap:v1 -->"
 $EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 $MaxDefaultLines = 6
 $MaxDefaultChars = 800
 
-$blobExistsCache = @{}
+$pathExistsCache = @{}
 $scopeCache = @{}
 $childDirectoryCache = @{}
 
-function Invoke-Git {
-    param(
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [switch]$AllowFailure
-    )
-
+function Invoke-Git(
+    [string[]]$Arguments,
+    [switch]$AllowFailure
+) {
     $raw = @(& git @Arguments 2>&1)
     $exitCode = $LASTEXITCODE
     $lines = @($raw | ForEach-Object { [string]$_ })
 
     if ($exitCode -ne 0 -and -not $AllowFailure) {
-        throw "git failed: $($Arguments -join ' ')"
+        throw "git failed: $($Arguments[0])"
     }
 
     return [pscustomobject]@{
@@ -43,9 +44,7 @@ function Invoke-Git {
     }
 }
 
-function Normalize-RepoPath {
-    param([AllowEmptyString()][string]$Path)
-
+function Normalize-RepoPath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         return ""
     }
@@ -58,9 +57,7 @@ function Normalize-RepoPath {
     return $normalized.Trim('/')
 }
 
-function Get-ParentRepoPath {
-    param([AllowEmptyString()][string]$Path)
-
+function Get-ParentRepoPath([string]$Path) {
     $normalized = Normalize-RepoPath $Path
     if ([string]::IsNullOrEmpty($normalized)) {
         return ""
@@ -74,9 +71,7 @@ function Get-ParentRepoPath {
     return $normalized.Substring(0, $separator)
 }
 
-function Get-FileNameRepoPath {
-    param([string]$Path)
-
+function Get-FileNameRepoPath([string]$Path) {
     $normalized = Normalize-RepoPath $Path
     if ([string]::IsNullOrEmpty($normalized)) {
         return ""
@@ -90,19 +85,16 @@ function Get-FileNameRepoPath {
     return $normalized.Substring($separator + 1)
 }
 
-function Join-RepoPath {
-    param(
-        [AllowEmptyString()][string]$Left,
-        [string]$Right
-    )
-
+function Join-RepoPath(
+    [string]$Left,
+    [string]$Right
+) {
     $leftNormalized = Normalize-RepoPath $Left
     $rightNormalized = Normalize-RepoPath $Right
 
     if ([string]::IsNullOrEmpty($leftNormalized)) {
         return $rightNormalized
     }
-
     if ([string]::IsNullOrEmpty($rightNormalized)) {
         return $leftNormalized
     }
@@ -110,47 +102,32 @@ function Join-RepoPath {
     return "$leftNormalized/$rightNormalized"
 }
 
-function Get-CodeMapPath {
-    param([AllowEmptyString()][string]$Scope)
+function Get-CodeMapPath([string]$Scope) {
     return Join-RepoPath $Scope $CodeMapName
 }
 
-function Test-TreePath {
-    param(
-        [string]$Tree,
-        [string]$Path
-    )
-
+function Test-GitPathExists(
+    [string]$Tree,
+    [string]$Path
+) {
     $normalized = Normalize-RepoPath $Path
     $key = "$Tree|$normalized"
-    if ($blobExistsCache.ContainsKey($key)) {
-        return [bool]$blobExistsCache[$key]
+
+    if ($pathExistsCache.ContainsKey($key)) {
+        return [bool]$pathExistsCache[$key]
     }
 
     $objectSpec = $Tree + ":" + $normalized
     $result = Invoke-Git @("cat-file", "-e", $objectSpec) -AllowFailure
     $exists = $result.ExitCode -eq 0
-    $blobExistsCache[$key] = $exists
+    $pathExistsCache[$key] = $exists
     return $exists
 }
 
-function Get-BlobText {
-    param(
-        [string]$Tree,
-        [string]$Path
-    )
-
-    $objectSpec = $Tree + ":" + (Normalize-RepoPath $Path)
-    $result = Invoke-Git @("show", $objectSpec)
-    return ($result.Lines -join [Environment]::NewLine)
-}
-
-function Find-NearestScope {
-    param(
-        [string]$Tree,
-        [AllowEmptyString()][string]$StartDirectory
-    )
-
+function Find-NearestScope(
+    [string]$Tree,
+    [string]$StartDirectory
+) {
     $directory = Normalize-RepoPath $StartDirectory
     $cacheKey = "$Tree|$directory"
 
@@ -162,8 +139,7 @@ function Find-NearestScope {
 
     while ($true) {
         $visited.Add($directory)
-        $mapPath = Get-CodeMapPath $directory
-        if (Test-TreePath $Tree $mapPath) {
+        if (Test-GitPathExists $Tree (Get-CodeMapPath $directory)) {
             foreach ($item in $visited) {
                 $scopeCache["$Tree|$item"] = $directory
             }
@@ -184,23 +160,15 @@ function Find-NearestScope {
     return ""
 }
 
-function Get-DirectChildDirectories {
-    param(
-        [string]$Tree,
-        [AllowEmptyString()][string]$Scope
-    )
-
+function Get-DirectChildDirectories(
+    [string]$Tree,
+    [string]$Scope
+) {
     $scopeNormalized = Normalize-RepoPath $Scope
     $cacheKey = "$Tree|$scopeNormalized"
 
     if ($childDirectoryCache.ContainsKey($cacheKey)) {
         return @($childDirectoryCache[$cacheKey])
-    }
-
-    if (-not [string]::IsNullOrEmpty($scopeNormalized) -and
-        -not (Test-TreePath $Tree $scopeNormalized)) {
-        $childDirectoryCache[$cacheKey] = @()
-        return @()
     }
 
     $treeSpec = if ([string]::IsNullOrEmpty($scopeNormalized)) {
@@ -230,9 +198,16 @@ function Get-DirectChildDirectories {
     return $directories
 }
 
-function Parse-CodeMap {
-    param([string]$Content)
+function Get-BlobText(
+    [string]$Tree,
+    [string]$Path
+) {
+    $objectSpec = $Tree + ":" + (Normalize-RepoPath $Path)
+    $result = Invoke-Git @("show", $objectSpec)
+    return ($result.Lines -join [Environment]::NewLine)
+}
 
+function Parse-CodeMap([string]$Content) {
     $lines = @($Content -split '\r?\n')
     $firstContentLine = $lines |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
@@ -278,6 +253,7 @@ function Parse-CodeMap {
 
         $path = $match.Groups["path"].Value.Trim()
         $validPath = $path -eq "./" -or $path -match '^[^/\\]+/$'
+
         if (-not $validPath) {
             $errors.Add("path")
             continue
@@ -298,12 +274,10 @@ function Parse-CodeMap {
     }
 }
 
-function Get-Changes {
-    param(
-        [string]$BaseTree,
-        [string]$TargetTree
-    )
-
+function Get-Changes(
+    [string]$BaseTree,
+    [string]$TargetTree
+) {
     $result = Invoke-Git @(
         "-c",
         "core.quotepath=false",
@@ -362,22 +336,22 @@ function Get-Changes {
     return @($changes)
 }
 
-function Add-Scope {
-    param(
-        [System.Collections.Generic.HashSet[string]]$Set,
-        [AllowEmptyString()][string]$Scope
-    )
+function Add-Scope(
+    [System.Collections.Generic.HashSet[string]]$Set,
+    [string]$Scope
+) {
+    if ($null -eq $Scope) {
+        return
+    }
 
     [void]$Set.Add((Normalize-RepoPath $Scope))
 }
 
-function Add-ParentScopeForCodeMap {
-    param(
-        [System.Collections.Generic.HashSet[string]]$Set,
-        [string]$Tree,
-        [string]$CodeMapPath
-    )
-
+function Add-ParentScopeForCodeMap(
+    [System.Collections.Generic.HashSet[string]]$Set,
+    [string]$Tree,
+    [string]$CodeMapPath
+) {
     if ((Get-FileNameRepoPath $CodeMapPath) -ne $CodeMapName) {
         return
     }
@@ -391,23 +365,20 @@ function Add-ParentScopeForCodeMap {
     Add-Scope $Set (Find-NearestScope $Tree $parent)
 }
 
-function Get-AffectedScopes {
-    param(
-        [object[]]$Changes,
-        [string]$BaseTree,
-        [string]$TargetTree
-    )
-
+function Get-AffectedScopes(
+    [object[]]$Changes,
+    [string]$BaseTree,
+    [string]$TargetTree
+) {
     $scopes = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 
     foreach ($change in $Changes) {
-        $oldIsCodeMap =
-            (-not [string]::IsNullOrEmpty($change.OldPath)) -and
+        $oldIsCodeMap = (-not [string]::IsNullOrEmpty($change.OldPath)) -and
             (Get-FileNameRepoPath $change.OldPath) -eq $CodeMapName
-        $newIsCodeMap =
-            (-not [string]::IsNullOrEmpty($change.NewPath)) -and
+        $newIsCodeMap = (-not [string]::IsNullOrEmpty($change.NewPath)) -and
             (Get-FileNameRepoPath $change.NewPath) -eq $CodeMapName
 
+        $isCodeMapChange = $oldIsCodeMap -or $newIsCodeMap
         $isStructuralChange =
             $change.Status.StartsWith("A", [StringComparison]::Ordinal) -or
             $change.Status.StartsWith("D", [StringComparison]::Ordinal) -or
@@ -415,7 +386,7 @@ function Get-AffectedScopes {
             $change.Status.StartsWith("C", [StringComparison]::Ordinal) -or
             $change.Status.StartsWith("T", [StringComparison]::Ordinal)
 
-        if (-not $isStructuralChange -and -not $oldIsCodeMap -and -not $newIsCodeMap) {
+        if (-not $isStructuralChange -and -not $isCodeMapChange) {
             continue
         }
 
@@ -443,12 +414,10 @@ function Get-AffectedScopes {
     return @($scopes | Sort-Object)
 }
 
-function Test-StringSetEqual {
-    param(
-        [string[]]$Left,
-        [string[]]$Right
-    )
-
+function Test-StringSetEqual(
+    [string[]]$Left,
+    [string[]]$Right
+) {
     if ($Left.Count -ne $Right.Count) {
         return $false
     }
@@ -467,16 +436,14 @@ function Test-StringSetEqual {
     return $true
 }
 
-function Test-CodeMapChanged {
-    param(
-        [string]$BaseTree,
-        [string]$TargetTree,
-        [AllowEmptyString()][string]$Scope
-    )
-
-    $mapPath = Get-CodeMapPath $Scope
-    $baseExists = Test-TreePath $BaseTree $mapPath
-    $targetExists = Test-TreePath $TargetTree $mapPath
+function Test-CodeMapChanged(
+    [string]$BaseTree,
+    [string]$TargetTree,
+    [string]$Scope
+) {
+    $codeMapPath = Get-CodeMapPath $Scope
+    $baseExists = Test-GitPathExists $BaseTree $codeMapPath
+    $targetExists = Test-GitPathExists $TargetTree $codeMapPath
 
     if ($baseExists -ne $targetExists) {
         return $true
@@ -492,7 +459,7 @@ function Test-CodeMapChanged {
         $BaseTree,
         $TargetTree,
         "--",
-        $mapPath
+        $codeMapPath
     ) -AllowFailure
 
     if ($result.ExitCode -eq 0) {
@@ -506,15 +473,13 @@ function Test-CodeMapChanged {
     throw "git diff quiet failed"
 }
 
-function Should-ValidateScope {
-    param(
-        [string]$BaseTree,
-        [string]$TargetTree,
-        [AllowEmptyString()][string]$Scope
-    )
-
-    $mapPath = Get-CodeMapPath $Scope
-    if (-not (Test-TreePath $TargetTree $mapPath)) {
+function Should-ValidateScope(
+    [string]$BaseTree,
+    [string]$TargetTree,
+    [string]$Scope
+) {
+    $codeMapPath = Get-CodeMapPath $Scope
+    if (-not (Test-GitPathExists $TargetTree $codeMapPath)) {
         return $false
     }
 
@@ -522,26 +487,26 @@ function Should-ValidateScope {
         return $true
     }
 
-    $before = @(Get-DirectChildDirectories $BaseTree $Scope)
-    $after = @(Get-DirectChildDirectories $TargetTree $Scope)
-    return -not (Test-StringSetEqual $before $after)
+    $baseDirectories = @(Get-DirectChildDirectories $BaseTree $Scope)
+    $targetDirectories = @(Get-DirectChildDirectories $TargetTree $Scope)
+
+    return -not (Test-StringSetEqual $baseDirectories $targetDirectories)
 }
 
-function Test-Scope {
-    param(
-        [string]$TargetTree,
-        [AllowEmptyString()][string]$Scope
-    )
-
-    $mapPath = Get-CodeMapPath $Scope
-    if (-not (Test-TreePath $TargetTree $mapPath)) {
+function Test-Scope(
+    [string]$TargetTree,
+    [string]$Scope
+) {
+    $codeMapPath = Get-CodeMapPath $Scope
+    if (-not (Test-GitPathExists $TargetTree $codeMapPath)) {
         return $null
     }
 
-    $parsed = Parse-CodeMap (Get-BlobText $TargetTree $mapPath)
+    $parsed = Parse-CodeMap (Get-BlobText $TargetTree $codeMapPath)
+
     if ($parsed.Errors.Count -gt 0) {
         return [pscustomobject]@{
-            CodeMap = $mapPath
+            CodeMap = $codeMapPath
             FormatErrors = $parsed.Errors
             Missing = @()
             Stale = @()
@@ -549,6 +514,7 @@ function Test-Scope {
     }
 
     $directories = @(Get-DirectChildDirectories $TargetTree $Scope)
+
     $directorySet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach ($directory in $directories) {
         [void]$directorySet.Add("$directory/")
@@ -566,7 +532,7 @@ function Test-Scope {
             Where-Object {
                 $name = ([string]$_).TrimEnd('/')
                 -not $entrySet.Contains($_) -and
-                -not $parsed.Ignored.Contains($name)
+                    -not $parsed.Ignored.Contains($name)
             } |
             Sort-Object
     )
@@ -578,16 +544,14 @@ function Test-Scope {
     )
 
     return [pscustomobject]@{
-        CodeMap = $mapPath
+        CodeMap = $codeMapPath
         FormatErrors = @()
         Missing = $missing
         Stale = $stale
     }
 }
 
-function Write-MinimalOutput {
-    param([string[]]$Lines)
-
+function Write-MinimalOutput([string[]]$Lines) {
     if ($Detailed) {
         foreach ($line in $Lines) {
             [Console]::Out.WriteLine($line)
@@ -621,19 +585,12 @@ try {
         throw "git not found"
     }
 
-    $repoHint = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-    $repoResult = Invoke-Git @(
-        "-C",
-        $repoHint,
-        "rev-parse",
-        "--show-toplevel"
-    )
-
+    $repoResult = Invoke-Git @("rev-parse", "--show-toplevel")
     if ($repoResult.Lines.Count -ne 1) {
         throw "repository root unavailable"
     }
 
-    $repoRoot = $repoResult.Lines[0].Trim()
+    $repoRoot = $repoResult.Lines[0]
     Push-Location $repoRoot
 
     try {
@@ -644,19 +601,20 @@ try {
                 "HEAD^{tree}"
             ) -AllowFailure
 
-            if ($baseResult.ExitCode -eq 0) {
-                $baseTree = $baseResult.Lines[0].Trim()
+            $baseTree = if ($baseResult.ExitCode -eq 0) {
+                $baseResult.Lines[0].Trim()
             }
             else {
-                $baseTree = $EmptyTree
+                $EmptyTree
             }
 
             $targetResult = Invoke-Git @("write-tree")
             $targetTree = $targetResult.Lines[0].Trim()
         }
         else {
-            if ([string]::IsNullOrWhiteSpace($Base)) {
-                throw "Range requires Base"
+            if ([string]::IsNullOrWhiteSpace($Base) -or
+                [string]::IsNullOrWhiteSpace($Head)) {
+                throw "Range requires Base and Head"
             }
 
             $baseResult = Invoke-Git @(
@@ -664,6 +622,7 @@ try {
                 "--verify",
                 "$Base^{tree}"
             )
+
             $targetResult = Invoke-Git @(
                 "rev-parse",
                 "--verify",
@@ -679,9 +638,10 @@ try {
             exit 0
         }
 
-        $rootMapBefore = Test-TreePath $baseTree $CodeMapName
-        $rootMapAfter = Test-TreePath $targetTree $CodeMapName
-        if ($rootMapBefore -and -not $rootMapAfter) {
+        $rootMapExisted = Test-GitPathExists $baseTree $CodeMapName
+        $rootMapExists = Test-GitPathExists $targetTree $CodeMapName
+
+        if ($rootMapExisted -and -not $rootMapExists) {
             Write-MinimalOutput @("idx $CodeMapName -root")
             exit $ExitInvalidIndex
         }
@@ -708,14 +668,7 @@ try {
             }
 
             if ($result.FormatErrors.Count -gt 0) {
-                if ($Detailed) {
-                    $invalidLines.Add(
-                        "fmt $($result.CodeMap) $($result.FormatErrors -join ',')"
-                    )
-                }
-                else {
-                    $invalidLines.Add("fmt $($result.CodeMap)")
-                }
+                $invalidLines.Add("fmt $($result.CodeMap)")
                 continue
             }
 
@@ -750,7 +703,9 @@ try {
 }
 catch {
     if ($Detailed) {
-        [Console]::Out.WriteLine("internal $($_.Exception.Message)")
+        [Console]::Out.WriteLine(
+            "internal $($_.Exception.Message)"
+        )
     }
     else {
         [Console]::Out.WriteLine("internal")
