@@ -458,7 +458,67 @@ internal sealed class ManagedObjectProtocolInspector :
             ? "Geometry"
             : "Fields";
 
-        EditorPropertySnapshot result = new()
+        float x = 0f;
+        float y = 0f;
+        float z = 0f;
+        float w = 0f;
+        int integer = 0;
+        bool boolean = false;
+        string text = string.Empty;
+
+        object current = binding.CurrentValue;
+        switch (binding.Kind)
+        {
+            case EditorPropertyKind.Float:
+                x = Convert.ToSingle(current, CultureInfo.InvariantCulture);
+                break;
+
+            case EditorPropertyKind.Integer:
+                integer = Convert.ToInt32(current, CultureInfo.InvariantCulture);
+                break;
+
+            case EditorPropertyKind.Boolean:
+                boolean = Convert.ToBoolean(current, CultureInfo.InvariantCulture);
+                break;
+
+            case EditorPropertyKind.String:
+                text = current?.ToString() ?? string.Empty;
+                break;
+
+            case EditorPropertyKind.Vector2:
+                if (current is Vector2 vector)
+                {
+                    x = vector.x;
+                    y = vector.y;
+                }
+                else if (current is IntVector2 intVector)
+                {
+                    x = intVector.x;
+                    y = intVector.y;
+                }
+                break;
+
+            case EditorPropertyKind.Color:
+                if (current is Color color)
+                {
+                    x = color.r;
+                    y = color.g;
+                    z = color.b;
+                    w = color.a;
+                }
+                break;
+
+            case EditorPropertyKind.Enum:
+                text = current?.ToString() ?? string.Empty;
+                integer = IndexOf(binding.Options, text);
+                break;
+
+            default:
+                text = SerializeDescriptorValue(binding);
+                break;
+        }
+
+        return new EditorPropertySnapshot
         {
             Key = binding.Key,
             DisplayName = binding.DisplayName,
@@ -474,65 +534,15 @@ internal sealed class ManagedObjectProtocolInspector :
             Min = binding.Min,
             Max = binding.Max,
             Step = binding.Step,
-            Options = binding.Options ?? Array.Empty<string>()
+            Options = binding.Options ?? Array.Empty<string>(),
+            X = x,
+            Y = y,
+            Z = z,
+            W = w,
+            IntegerValue = integer,
+            BooleanValue = boolean,
+            StringValue = text
         };
-
-        object current = binding.CurrentValue;
-        switch (binding.Kind)
-        {
-            case EditorPropertyKind.Float:
-                result.X = Convert.ToSingle(current, CultureInfo.InvariantCulture);
-                break;
-
-            case EditorPropertyKind.Integer:
-                result.IntegerValue = Convert.ToInt32(current, CultureInfo.InvariantCulture);
-                break;
-
-            case EditorPropertyKind.Boolean:
-                result.BooleanValue = Convert.ToBoolean(current, CultureInfo.InvariantCulture);
-                break;
-
-            case EditorPropertyKind.String:
-                result.StringValue = current?.ToString() ?? string.Empty;
-                break;
-
-            case EditorPropertyKind.Vector2:
-                if (current is Vector2 vector)
-                {
-                    result.X = vector.x;
-                    result.Y = vector.y;
-                }
-                else if (current is IntVector2 intVector)
-                {
-                    result.X = intVector.x;
-                    result.Y = intVector.y;
-                }
-                break;
-
-            case EditorPropertyKind.Color:
-                if (current is Color color)
-                {
-                    result.X = color.r;
-                    result.Y = color.g;
-                    result.Z = color.b;
-                    result.W = color.a;
-                }
-                break;
-
-            case EditorPropertyKind.Enum:
-            {
-                string text = current?.ToString() ?? string.Empty;
-                result.StringValue = text;
-                result.IntegerValue = IndexOf(binding.Options, text);
-                break;
-            }
-
-            default:
-                result.StringValue = SerializeDescriptorValue(binding);
-                break;
-        }
-
-        return result;
     }
 
     private static object ConvertEditorValue(
