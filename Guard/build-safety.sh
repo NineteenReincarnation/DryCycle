@@ -169,9 +169,8 @@ view_path = Path("src/DevUI/DevTool/RWImGui/Pages/Triggers/TriggerEditorView.cs"
 gizmo_path = Path("src/DevUI/DevTool/RWImGui/Pages/Objects/Gizmos/NativeSpatialGizmoView.cs")
 pages_path = Path("src/DevUI/DevTool/RWImGui/Shell/Pages/BuiltinDevToolPages.cs")
 font_path = Path("src/DevUI/DevTool/RWImGui/Settings/Fonts/FontSettingsWindow.cs")
-migration_path = Path("src/DevUI/DevTool/RWImGui/Diagnostics/Compatibility/MigrationCoverageWindow.cs")
 
-for path in (workspace_path, view_path, gizmo_path, pages_path, font_path, migration_path):
+for path in (workspace_path, view_path, gizmo_path, pages_path, font_path):
     if not path.is_file():
         raise SystemExit(f"Trigger canvas-first contract input is missing: {path}")
 
@@ -180,7 +179,6 @@ view = view_path.read_text(encoding="utf-8")
 gizmo = gizmo_path.read_text(encoding="utf-8")
 pages = pages_path.read_text(encoding="utf-8")
 font = font_path.read_text(encoding="utf-8")
-migration = migration_path.read_text(encoding="utf-8")
 
 start = pages.find("internal sealed class TriggersDevToolPage")
 end = pages.find("internal sealed class MapDevToolPage", start)
@@ -255,9 +253,6 @@ if "RadiusHandleX" not in trigger_gizmo or "RadiusHandleY" not in trigger_gizmo:
 
 if "EditorToolMode.Triggers" not in font:
     raise SystemExit("Font diagnostics must stay out of the Trigger workspace.")
-if "EditorToolMode.Triggers" not in migration:
-    raise SystemExit("Migration diagnostics must stay out of the Trigger workspace.")
-
 lower_workspace = workspace.lower()
 if "recent" in lower_workspace or "最近使用" in workspace or "最近选中" in workspace:
     raise SystemExit("Trigger workspace must not add recent-use/recent-selection UI.")

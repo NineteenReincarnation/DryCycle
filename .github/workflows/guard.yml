@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - '!src/**/*.md'
       - 'Guard/**'
       - 'scripts/Test-MapRendering.ps1'
       - 'tests/WorldMapRenderIsolation.Tests/**'
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - '!src/**/*.md'
       - 'Guard/**'
       - 'scripts/Test-MapRendering.ps1'
       - 'tests/WorldMapRenderIsolation.Tests/**'
@@ -38,7 +40,7 @@ jobs:
     name: Build Safety
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build safety contracts
         shell: bash
         run: bash Guard/build-safety.sh
