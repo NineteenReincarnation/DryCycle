@@ -3,7 +3,7 @@ param(
     [string]$Source = "Staged",
 
     [string]$Base = "",
-    [string]$Head = "",
+    [string]$Head = "HEAD",
 
     [switch]$Detailed
 )
@@ -169,6 +169,12 @@ function Get-DirectChildDirectories(
 
     if ($childDirectoryCache.ContainsKey($cacheKey)) {
         return @($childDirectoryCache[$cacheKey])
+    }
+
+    if (-not [string]::IsNullOrEmpty($scopeNormalized) -and
+        -not (Test-GitPathExists $Tree $scopeNormalized)) {
+        $childDirectoryCache[$cacheKey] = @()
+        return @()
     }
 
     $treeSpec = if ([string]::IsNullOrEmpty($scopeNormalized)) {
@@ -585,7 +591,8 @@ try {
         throw "git not found"
     }
 
-    $repoResult = Invoke-Git @("rev-parse", "--show-toplevel")
+    $repoHint = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+    $repoResult = Invoke-Git @("-C", $repoHint, "rev-parse", "--show-toplevel")
     if ($repoResult.Lines.Count -ne 1) {
         throw "repository root unavailable"
     }
