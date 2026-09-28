@@ -202,7 +202,11 @@ internal static class NativeObjectGizmoPresentation
         // Simple verified Data members still use the reflected inspector schema as their semantic
         // source. Complex WaterCurrent/Spline models publish their own complete primitive set above.
         if (!specialized)
+        {
             CapturePropertyHandles(target, properties, handles, lines, circles);
+            if (target.data is PlacedObject.QuadObjectData quad)
+                CaptureQuadOutline(target, quad, lines);
+        }
 
         if (ModManager.Watcher &&
             target.data is Watcher.KarmaFlowerPatch.KarmaFlowerPatchData karmaPatch)
@@ -395,6 +399,10 @@ internal static class NativeObjectGizmoPresentation
                 property.GizmoShape == EditorPropertyGizmoShape.Direction8 ||
                 property.GizmoShape == EditorPropertyGizmoShape.None;
 
+            bool quadHandle =
+                target.data is PlacedObject.QuadObjectData &&
+                property.Key.IndexOf(".handles[", StringComparison.Ordinal) >= 0;
+
             handles.Add(new EditorObjectGizmoHandleSnapshot
             {
                 Id = "property:" + property.Key,
@@ -402,7 +410,7 @@ internal static class NativeObjectGizmoPresentation
                 Y = y,
                 AnchorX = target.pos.x,
                 AnchorY = target.pos.y,
-                DrawAnchorLine = drawAnchor
+                DrawAnchorLine = quadHandle ? false : drawAnchor
             });
 
             switch (property.GizmoShape)
@@ -428,6 +436,28 @@ internal static class NativeObjectGizmoPresentation
                     break;
             }
         }
+    }
+
+    private static void CaptureQuadOutline(
+        PlacedObject target,
+        PlacedObject.QuadObjectData quad,
+        List<EditorObjectLineSegmentSnapshot> lines)
+    {
+        if (target == null ||
+            quad?.handles == null ||
+            quad.handles.Length < 3 ||
+            lines == null)
+            return;
+
+        Vector2 origin = target.pos;
+        Vector2 h0 = origin + quad.handles[0];
+        Vector2 h1 = origin + quad.handles[1];
+        Vector2 h2 = origin + quad.handles[2];
+
+        AddLine(lines, origin, h0);
+        AddLine(lines, h0, h1);
+        AddLine(lines, h1, h2);
+        AddLine(lines, h2, origin);
     }
 
     private static void AddTileCell(
