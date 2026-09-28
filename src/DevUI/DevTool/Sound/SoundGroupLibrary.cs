@@ -275,6 +275,103 @@ public static class SoundGroupLibrary
         return SaveLocalAndReload();
     }
 
+    internal static bool DeleteGroup(string id, string sourcePath)
+    {
+        EnsureLoaded();
+        if (!loaded || loading)
+            return false;
+
+        id = (id ?? string.Empty).Trim();
+        sourcePath = (sourcePath ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(id))
+            return false;
+
+        // Local groups still use the in-memory authoring model so all local entries remain
+        // canonical. SaveLocalAndReload below removes the XML file entirely when the last local
+        // group is deleted.
+        if (localGroups.ContainsKey(id))
+            return DeleteLocalGroup(id);
+
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return false;
+
+        try
+        {
+            string file = Path.GetFullPath(sourcePath);
+            if (!File.Exists(file))
+            {
+                BeginReload(force: true);
+                return false;
+            }
+
+            XDocument document =
+                XDocument.Load(
+                    file,
+                    LoadOptions.PreserveWhitespace);
+
+            XElement root = document.Root;
+            if (root == null ||
+                !string.Equals(
+                    root.Name.LocalName,
+                    "SoundGroups",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            XElement target = root
+                .Elements()
+                .FirstOrDefault(element =>
+                    string.Equals(
+                        element.Name.LocalName,
+                        "SoundGroup",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        Attr(element, "id"),
+                        id,
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (target == null)
+                return false;
+
+            target.Remove();
+
+            bool anyGroupsRemain = root
+                .Elements()
+                .Any(element =>
+                    string.Equals(
+                        element.Name.LocalName,
+                        "SoundGroup",
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (anyGroupsRemain)
+            {
+                document.Save(file);
+            }
+            else
+            {
+                // Do not leave a dead empty settings file behind. A one-group sound-groups.xml is
+                // removed together with that group, which is the expected delete semantics in the
+                // DevTool.
+                File.Delete(file);
+            }
+
+            BeginReload(force: true);
+            return true;
+        }
+        catch (Exception error)
+        {
+            AddProblem(
+                DevToolProblemSeverity.Error,
+                "sound-group-delete",
+                "Unable to delete sound group from its settings file: " + error.Message,
+                id,
+                sourcePath);
+            RebuildSnapshot();
+            return false;
+        }
+    }
+
     internal static bool AddSoundToLocalGroup(string id, SoundGroupSoundDefinition sound)
     {
         EnsureLoaded();
@@ -495,8 +592,17 @@ public static class SoundGroupLibrary
                 root.Add(groupElement);
             }
 
-            XDocument document = new(new XDeclaration("1.0", "utf-8", null), root);
-            document.Save(file);
+            if (localGroups.Count == 0)
+            {
+                if (File.Exists(file))
+                    File.Delete(file);
+            }
+            else
+            {
+                XDocument document = new(new XDeclaration("1.0", "utf-8", null), root);
+                document.Save(file);
+            }
+
             BeginReload(force: true);
             return true;
         }
