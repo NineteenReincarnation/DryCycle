@@ -170,7 +170,8 @@ internal static class DevToolNumericWidgets
         float max,
         float diameter = 54f,
         string displayFormat = "0.000",
-        int instance = -1)
+        int instance = -1,
+        float? resetValue = null)
     {
         int frame = PrepareFrame();
         EditKey key = new(scope, instance, stateKey);
@@ -233,11 +234,34 @@ internal static class DevToolNumericWidgets
 
         bool hovered = ImGui.IsItemHovered();
         bool active = ImGui.IsItemActive();
+        bool resetRequested =
+            resetValue.HasValue &&
+            hovered &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Middle);
         bool doubleClicked =
             hovered &&
             ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left);
 
-        if (doubleClicked)
+        if (resetRequested)
+        {
+            if (activeRotaryDragKey.HasValue &&
+                activeRotaryDragKey.Value.Equals(key))
+            {
+                activeRotaryDragKey = null;
+            }
+
+            float next = Math.Max(
+                min,
+                Math.Min(
+                    max,
+                    resetValue.Value));
+            if (!NearlyEqual(next, value))
+            {
+                value = next;
+                changed = true;
+            }
+        }
+        else if (doubleClicked)
         {
             if (activeRotaryDragKey.HasValue &&
                 activeRotaryDragKey.Value.Equals(key))
@@ -330,7 +354,7 @@ internal static class DevToolNumericWidgets
                 changed,
                 state,
                 frame,
-                forceCommit: ownsReleasedDrag);
+                forceCommit: ownsReleasedDrag || resetRequested);
 
         if (ownsReleasedDrag)
             activeRotaryDragKey = null;
@@ -339,8 +363,12 @@ internal static class DevToolNumericWidgets
         {
             DevToolTooltip.Show(
                 DevToolUiSettings.T(
-                    "拖动旋钮调节；双击输入数字",
-                    "Drag to adjust; double-click to type a value"));
+                    resetValue.HasValue
+                        ? "拖动旋钮调节；双击输入数字；中键恢复默认"
+                        : "拖动旋钮调节；双击输入数字",
+                    resetValue.HasValue
+                        ? "Drag to adjust; double-click to type; middle-click to reset"
+                        : "Drag to adjust; double-click to type a value"));
         }
 
         ImGui.PopID();
