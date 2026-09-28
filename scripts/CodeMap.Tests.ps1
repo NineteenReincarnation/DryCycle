@@ -632,6 +632,17 @@ $tests.Add({
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
 
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        $head = (Invoke-Git $repo @("rev-parse", "HEAD"))[0].Trim()
+        $result = Invoke-Checker $repo @("-Source", "Range", "-Base", "EMPTY", "-Head", $head)
+        Assert-Equal 0 $result.ExitCode "empty range baseline"
+        Assert-Empty $result.Output "empty range baseline must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
 foreach ($test in $tests) {
     & $test
 }
