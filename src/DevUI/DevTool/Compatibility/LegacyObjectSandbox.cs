@@ -32,6 +32,9 @@ internal static class LegacyObjectSandbox
         internal int LastModelAuditFrame = int.MinValue;
         internal int LastTreeAuditFrame = int.MinValue;
         internal bool ControlsDirty = true;
+        internal bool CompatibilityDirty = true;
+        internal bool HasUnsupportedNodes;
+        internal string UnsupportedNodeExample = string.Empty;
     }
 
     // Normal publication must stay O(1). Expensive serialization/tree walks are only used as
@@ -80,6 +83,8 @@ internal static class LegacyObjectSandbox
                 DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation);
 
             RememberTree(state);
+            state.CompatibilityDirty = true;
+            EnsureCompatibilityAudit(state);
             state.ControlsDirty = false;
             return state.CachedControls;
         }
@@ -103,6 +108,52 @@ internal static class LegacyObjectSandbox
         Func<bool> action)
     {
         return Run(session, target, action, false);
+    }
+
+    internal static bool HasCompatibilityGap(
+        EditorSession session,
+        PlacedObject target,
+        out string example)
+    {
+        example = string.Empty;
+        if (session?.Owner == null || target?.type == null)
+        {
+            example = "headless representation host unavailable";
+            return true;
+        }
+
+        if (session.Owner.activePage is ObjectsPage livePage)
+        {
+            PlacedObjectRepresentation liveRepresentation =
+                FindRepresentation(livePage, target);
+            if (liveRepresentation == null)
+            {
+                example = "live representation unavailable";
+                return true;
+            }
+
+            return LegacyDevInterfaceBridge.HasUnsupportedNodes(
+                liveRepresentation,
+                out example);
+        }
+
+        State state = Acquire(session, target);
+        if (state?.Representation == null)
+        {
+            example = "headless representation unavailable";
+            return true;
+        }
+
+        AuditModel(state, target);
+        if (AuditTree(state))
+        {
+            state.ControlsDirty = true;
+            state.CompatibilityDirty = true;
+        }
+
+        EnsureCompatibilityAudit(state);
+        example = state.UnsupportedNodeExample ?? string.Empty;
+        return state.HasUnsupportedNodes;
     }
 
     internal static T InspectRepresentation<T>(
@@ -318,6 +369,9 @@ internal static class LegacyObjectSandbox
             state.TreeSignature = ComputeTreeSignature(representation);
             state.LastTreeAuditFrame = state.LastModelAuditFrame;
             state.ControlsDirty = true;
+            state.CompatibilityDirty = true;
+            state.HasUnsupportedNodes = false;
+            state.UnsupportedNodeExample = string.Empty;
             return state;
         }
         catch (Exception error)
@@ -544,6 +598,7 @@ internal static class LegacyObjectSandbox
 
         state.ModelFingerprint = fingerprint;
         state.ControlsDirty = true;
+        state.CompatibilityDirty = true;
         RefreshHeadlessRepresentation(state);
         // Refresh() is allowed to rebuild transient Panels/Handles, so force the next structural
         // comparison to use the post-refresh tree.
@@ -569,6 +624,8 @@ internal static class LegacyObjectSandbox
 
         bool changed = state.TreeSignature != current;
         state.TreeSignature = current;
+        if (changed)
+            state.CompatibilityDirty = true;
         return changed;
     }
 
@@ -587,6 +644,7 @@ internal static class LegacyObjectSandbox
             return;
 
         state.ControlsDirty = true;
+        state.CompatibilityDirty = true;
         state.ModelFingerprint = Fingerprint(target);
         state.LastModelAuditFrame = CurrentFrame();
 
@@ -594,6 +652,26 @@ internal static class LegacyObjectSandbox
         // immediately or during the following Refresh/Update. Leaving the previous signature intact
         // lets the next compilation/audit observe that structural transition.
         state.LastTreeAuditFrame = int.MinValue;
+    }
+
+    private static void EnsureCompatibilityAudit(State state)
+    {
+        if (state?.Representation == null || !state.CompatibilityDirty)
+            return;
+
+        state.HasUnsupportedNodes =
+            LegacyDevInterfaceBridge.HasUnsupportedNodes(
+                state.Representation,
+                out string example);
+        state.UnsupportedNodeExample = example ?? string.Empty;
+        state.CompatibilityDirty = false;
+
+        if (state.HasUnsupportedNodes && DevUiDiagnosticsPolicy.Enabled)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless object compatibility gap: " +
+                state.UnsupportedNodeExample);
+        }
     }
 
     private static bool AuditDue(int lastFrame, int currentFrame, int interval)
@@ -713,5 +791,8 @@ internal static class LegacyObjectSandbox
         state.LastModelAuditFrame = int.MinValue;
         state.LastTreeAuditFrame = int.MinValue;
         state.ControlsDirty = true;
+        state.CompatibilityDirty = true;
+        state.HasUnsupportedNodes = false;
+        state.UnsupportedNodeExample = string.Empty;
     }
 }
