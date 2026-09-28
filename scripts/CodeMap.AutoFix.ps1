@@ -85,7 +85,10 @@ function Test-UnderDirectory(
     )
 }
 
-function Invoke-Checker([string]$RepoRoot) {
+function Invoke-Checker(
+    [string]$RepoRoot,
+    [switch]$FullOutput
+) {
     if ($null -eq $powerShell) {
         throw "PowerShell host not found"
     }
@@ -102,6 +105,9 @@ function Invoke-Checker([string]$RepoRoot) {
 
     if ($Detailed) {
         $arguments += "-Detailed"
+    }
+    elseif ($FullOutput) {
+        $arguments += "-FullOutput"
     }
 
     $output = @(& $powerShell @arguments 2>&1)
@@ -417,7 +423,7 @@ try {
     Push-Location $repoRoot
 
     try {
-        $check = Invoke-Checker $repoRoot
+        $check = Invoke-Checker $repoRoot -FullOutput
         if ($check.ExitCode -eq 0) {
             exit 0
         }

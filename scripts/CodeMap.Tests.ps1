@@ -723,6 +723,39 @@ $tests.Add({
     finally { Remove-Item -LiteralPath $repo -Recurse -Force }
 })
 
+$tests.Add({
+    $repo = New-TestRepo
+    try {
+        $mapLines = New-Object System.Collections.Generic.List[string]
+        $mapLines.Add("<!-- codemap:v1 -->")
+        $mapLines.Add("")
+        $mapLines.Add("# Area")
+        $mapLines.Add("")
+        $tick = [string][char]96
+        for ($i = 0; $i -lt 9; $i++) {
+            $name = "Feature$i"
+            Write-Utf8 (Join-Path $repo "src/Area/$name/File.cs") "class $name { }"
+            $mapLines.Add("- " + $tick + $name + "/" + $tick + " — feature")
+        }
+        Write-Utf8 (Join-Path $repo "src/Area/CODEMAP.md") (($mapLines.ToArray() -join [Environment]::NewLine) + [Environment]::NewLine)
+        Invoke-Git $repo @("add", ".") | Out-Null
+        Invoke-Git $repo @("commit", "-q", "-m", "many modules") | Out-Null
+
+        for ($i = 0; $i -lt 9; $i++) {
+            Invoke-Git $repo @("rm", "-r", "-q", "src/Area/Feature$i") | Out-Null
+        }
+
+        $result = Invoke-AutoFix $repo
+        Assert-Equal 0 $result.ExitCode "autofix many stale entries"
+        Assert-Empty $result.Output "autofix many stale entries must be silent"
+
+        $final = Invoke-Checker $repo @("-Source", "Staged")
+        Assert-Equal 0 $final.ExitCode "autofix many stale entries final check"
+        Assert-Empty $final.Output "autofix many stale entries final check must be silent"
+    }
+    finally { Remove-Item -LiteralPath $repo -Recurse -Force }
+})
+
 foreach ($test in $tests) {
     & $test
 }

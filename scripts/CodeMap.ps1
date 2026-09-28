@@ -7,7 +7,8 @@ param(
 
     [string]$Repository = "",
 
-    [switch]$Detailed
+    [switch]$Detailed,
+    [switch]$FullOutput
 )
 
 $ErrorActionPreference = "Stop"
@@ -566,7 +567,7 @@ function Write-Trace([string]$Message) {
 }
 
 function Write-MinimalOutput([string[]]$Lines) {
-    if ($Detailed) {
+    if ($Detailed -or $FullOutput) {
         foreach ($line in $Lines) {
             [Console]::Out.WriteLine($line)
         }
