@@ -539,30 +539,55 @@ internal static class SoundLibraryGroupsView
     private static void DrawGroupCard(GroupPresentation presentation)
     {
         SoundGroupSnapshot group = presentation.Group;
-        bool active = group.IsLocal && string.Equals(group.Id, SoundWorkspaceState.ActiveGroupId, StringComparison.OrdinalIgnoreCase);
-        if (!ImGui.CollapsingHeader(active ? presentation.ActiveHeader : presentation.InactiveHeader)) return;
+        bool active =
+            group.IsLocal &&
+            string.Equals(
+                group.Id,
+                SoundWorkspaceState.ActiveGroupId,
+                StringComparison.OrdinalIgnoreCase);
 
-        DevToolWidgets.MutedText(DevToolUiSettings.T("来源：", "Source: ") + group.SourceName, true);
-        DevToolWidgets.MutedText(group.SourcePath, true);
+        if (!ImGui.CollapsingHeader(
+                active
+                    ? presentation.ActiveHeader
+                    : presentation.InactiveHeader))
+            return;
 
-        ImGui.TextColored(
-            group.HasMissingResources ? new Num.Vector4(1f, 0.56f, 0.32f, 1f) : new Num.Vector4(0.52f, 0.86f, 0.60f, 1f),
-            presentation.ResourceSummary);
+        DevToolWidgets.SectionHeader(
+            DevToolUiSettings.T("音效组内容", "GROUP CONTENTS"));
 
         SoundEntryRow[] rows = presentation.SoundRows;
-        for (int i = 0; i < rows.Length; i++)
+        if (rows.Length == 0)
         {
-            SoundEntryRow row = rows[i];
-            SoundGroupEntrySnapshot sound = row.Entry;
-            Num.Vector4 color = sound.Available
-                ? new Num.Vector4(0.82f, 0.90f, 0.84f, 1f)
-                : new Num.Vector4(1f, 0.42f, 0.40f, 1f);
-            ImGui.TextColored(color, row.StatusLabel);
-            ImGui.SameLine();
-            ImGui.TextDisabled(row.TypeLabel);
-            ImGui.SameLine();
-            DevToolSourcePresentation.DrawInline(row.Source);
+            ImGui.TextDisabled(
+                DevToolUiSettings.T("（空）", "(empty)"));
         }
+        else
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                SoundEntryRow row = rows[i];
+                SoundGroupEntrySnapshot sound = row.Entry;
+                Num.Vector4 color = sound.Available
+                    ? new Num.Vector4(0.82f, 0.90f, 0.84f, 1f)
+                    : new Num.Vector4(1f, 0.42f, 0.40f, 1f);
+
+                string type = SoundTypeName(sound.Type);
+                string line =
+                    (sound.Sample ?? string.Empty) +
+                    "  |  " +
+                    type +
+                    "  |  " +
+                    DevToolUiSettings.T("音量 ", "Vol ") +
+                    sound.Volume.ToString("0.###") +
+                    "  |  " +
+                    DevToolUiSettings.T("音高 ", "Pitch ") +
+                    sound.Pitch.ToString("0.###");
+
+                ImGui.TextColored(color, line);
+            }
+        }
+
+        ImGui.Spacing();
 
         if (group.IsLocal && !active)
         {
@@ -573,40 +598,100 @@ internal static class SoundLibraryGroupsView
             {
                 SoundWorkspaceState.SetActiveGroup(group.Id);
             }
-            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("应用到房间", "Apply to Room")));
+
+            DevToolWidgets.SameLineIfFits(
+                DevToolWidgets.ButtonWidth(
+                    DevToolUiSettings.T(
+                        "应用到房间",
+                        "Apply to Room")));
         }
         else if (active)
         {
-            ImGui.TextDisabled(DevToolUiSettings.T("当前工作组", "Current Working Group"));
+            ImGui.TextDisabled(
+                DevToolUiSettings.T(
+                    "当前工作组",
+                    "Current Working Group"));
         }
 
         string applyLabel = group.HasMissingResources
             ? DevToolUiSettings.T("应用可用项", "Apply Available")
             : DevToolUiSettings.T("应用到当前房间", "Apply to Room");
-        if (DevToolWidgets.ActionButton(applyLabel, presentation.ApplyId, DevToolButtonTone.Primary))
+
+        if (DevToolWidgets.ActionButton(
+                applyLabel,
+                presentation.ApplyId,
+                DevToolButtonTone.Primary))
         {
             SoundWorkspaceState.ClearSelection();
-            SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                SoundEditorCommandKind.ApplyGroup,
-                key: group.Id));
-            ActionToastOverlay.Notify("已应用音效组：" + group.Name, "Applied sound group: " + group.Name);
-        }
-        if (group.HasMissingResources && ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T("缺失资源会被跳过，详细信息见预警窗口。", "Missing resources are skipped; see the Problems window."));
+            SoundEditorCommandQueue.Enqueue(
+                new SoundEditorCommand(
+                    SoundEditorCommandKind.ApplyGroup,
+                    key: group.Id));
 
-        if (group.IsLocal)
+            ActionToastOverlay.Notify(
+                "已应用音效组：" + group.Name,
+                "Applied sound group: " + group.Name);
+        }
+
+        DevToolWidgets.SameLineIfFits(
+            DevToolWidgets.ButtonWidth(
+                DevToolUiSettings.T(
+                    "删除音效组",
+                    "Delete Group")));
+
+        if (DevToolWidgets.ActionButton(
+                DevToolUiSettings.T(
+                    "删除音效组",
+                    "Delete Group"),
+                presentation.DeleteId,
+                DevToolButtonTone.Danger))
         {
-            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("删除", "Delete")));
+            ImGui.OpenPopup(
+                "##DeleteSoundGroupConfirm" + presentation.DeleteId);
+        }
+
+        string popupId =
+            "##DeleteSoundGroupConfirm" +
+            presentation.DeleteId;
+
+        if (ImGui.BeginPopup(popupId))
+        {
+            ImGui.TextWrapped(
+                DevToolUiSettings.T(
+                    "删除该音效组？设置文件会同步更新；如果这是文件中的最后一个音效组，sound-groups.xml 也会被删除。",
+                    "Delete this sound group? Its settings file will be updated too; if this is the last group in the file, sound-groups.xml will also be deleted."));
+
             if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("删除", "Delete"),
-                    presentation.DeleteId,
+                    DevToolUiSettings.T(
+                        "确认删除",
+                        "Delete"),
+                    "Confirm" + presentation.DeleteId,
                     DevToolButtonTone.Danger))
             {
-                SoundEditorCommandQueue.Enqueue(new SoundEditorCommand(
-                    SoundEditorCommandKind.DeleteGroup,
-                    key: group.Id));
-                if (active) SoundWorkspaceState.SetActiveGroup(string.Empty);
+                SoundEditorCommandQueue.Enqueue(
+                    new SoundEditorCommand(
+                        SoundEditorCommandKind.DeleteGroup,
+                        key: group.Id,
+                        text: group.SourcePath));
+
+                if (active)
+                    SoundWorkspaceState.SetActiveGroup(string.Empty);
+
+                ImGui.CloseCurrentPopup();
             }
+
+            ImGui.SameLine();
+            if (DevToolWidgets.ActionButton(
+                    DevToolUiSettings.T(
+                        "取消",
+                        "Cancel"),
+                    "Cancel" + presentation.DeleteId,
+                    DevToolButtonTone.Subtle))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
         }
 
         ImGui.Spacing();
@@ -913,6 +998,20 @@ internal static class SoundLibraryGroupsView
         return (value?.Sample?.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
                (value?.SourceName?.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0 ||
                (value?.SourceId?.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0;
+    }
+
+    private static string SoundTypeName(string type)
+    {
+        if (string.Equals(type, "Omnidirectional", StringComparison.OrdinalIgnoreCase))
+            return DevToolUiSettings.T("全向", "Omnidirectional");
+        if (string.Equals(type, "Directional", StringComparison.OrdinalIgnoreCase))
+            return DevToolUiSettings.T("定向", "Directional");
+        if (string.Equals(type, "Spot", StringComparison.OrdinalIgnoreCase))
+            return DevToolUiSettings.T("点声源", "Spot");
+
+        return string.IsNullOrWhiteSpace(type)
+            ? DevToolUiSettings.T("声音", "Sound")
+            : type;
     }
 
     private static string TypeName(int type) => type switch
