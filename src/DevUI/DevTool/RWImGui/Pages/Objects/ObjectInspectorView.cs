@@ -68,8 +68,6 @@ internal static class ObjectInspectorView
 
     private static int objectIndex = -1;
     private static int selectionCount;
-    private static float positionX;
-    private static float positionY;
 
     internal static void ResetRetainedState()
     {
@@ -105,7 +103,7 @@ internal static class ObjectInspectorView
         }
 
         if (objectIndex != inspector.ObjectIndex || selectionCount != inspector.SelectionCount)
-            Reset(inspector.ObjectIndex, inspector.X, inspector.Y, inspector.SelectionCount);
+            Reset(inspector.ObjectIndex, inspector.SelectionCount);
 
         bool collapseAll = DevToolWidgets.PaneTitleWithAction(
             DevToolUiSettings.T("物件", "Object"),
@@ -121,7 +119,6 @@ internal static class ObjectInspectorView
                 ImGuiTreeNodeFlags.DefaultOpen))
             return;
 
-        DrawTransform(inspector);
         DrawProperties(inspector);
         DrawCompatibility(inspector);
         DrawActions(inspector);
@@ -168,38 +165,6 @@ internal static class ObjectInspectorView
             if (ImGui.IsItemHovered())
                 DevToolTooltip.Show(inspector.DataType);
         }
-    }
-
-    private static void DrawTransform(EditorInspectorSnapshot inspector)
-    {
-        DevToolWidgets.SectionHeader(inspector.SelectionCount > 1
-            ? DevToolUiSettings.T("变换 | 组锚点", "TRANSFORM | GROUP ANCHOR")
-            : DevToolUiSettings.T("变换", "TRANSFORM"));
-
-        ImGui.SetNextItemWidth(-1f);
-        DevToolNumericEditResult<float> xEdit = DevToolNumericWidgets.InputFloat(
-            DevToolNumericScope.ObjectTransform,
-            "x",
-            "X##DevToolPosX",
-            inspector.X,
-            1f,
-            "%.1f",
-            inspector.ObjectIndex);
-        positionX = xEdit.Value;
-
-        ImGui.SetNextItemWidth(-1f);
-        DevToolNumericEditResult<float> yEdit = DevToolNumericWidgets.InputFloat(
-            DevToolNumericScope.ObjectTransform,
-            "y",
-            "Y##DevToolPosY",
-            inspector.Y,
-            1f,
-            "%.1f",
-            inspector.ObjectIndex);
-        positionY = yEdit.Value;
-
-        if (xEdit.Committed || yEdit.Committed)
-            SendPosition(inspector);
     }
 
     private static void DrawProperties(EditorInspectorSnapshot inspector)
@@ -869,20 +834,6 @@ internal static class ObjectInspectorView
         return new Num.Vector4(0.78f, 0.72f, 1f, 1f);
     }
 
-    private static void SendPosition(EditorInspectorSnapshot inspector)
-    {
-        EditorUiCommandKind kind = inspector.SelectionCount > 1
-            ? EditorUiCommandKind.SetSelectionPosition
-            : EditorUiCommandKind.SetObjectPosition;
-
-        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-            kind,
-            inspector.ObjectIndex,
-            x: positionX,
-            y: positionY,
-            stableId: inspector.SelectionCount == 1 ? inspector.ObjectStableId : 0L));
-    }
-
     private static void SendProperty(EditorInspectorSnapshot inspector, string key, EditorPropertyValue value)
     {
         EditorUiCommandKind kind = inspector.SelectionCount > 1
@@ -897,18 +848,10 @@ internal static class ObjectInspectorView
             stableId: inspector.SelectionCount == 1 ? inspector.ObjectStableId : 0L));
     }
 
-    private static void SynchronizePosition(EditorInspectorSnapshot inspector)
-    {
-        if (Math.Abs(positionX - inspector.X) > 0.0001f) positionX = inspector.X;
-        if (Math.Abs(positionY - inspector.Y) > 0.0001f) positionY = inspector.Y;
-    }
-
-    private static void Reset(int nextObjectIndex, float x = 0f, float y = 0f, int nextSelectionCount = 0)
+    private static void Reset(int nextObjectIndex, int nextSelectionCount = 0)
     {
         objectIndex = nextObjectIndex;
         selectionCount = nextSelectionCount;
-        positionX = x;
-        positionY = y;
         StringEdits.Clear();
         Vector2Edits.Clear();
         ColorEdits.Clear();
