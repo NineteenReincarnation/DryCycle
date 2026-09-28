@@ -181,20 +181,32 @@ internal static class DevToolNumericWidgets
             if (FloatTextEditorFocusPending.Remove(key))
                 ImGui.SetKeyboardFocusHere();
 
+            // RWImGUI currently ships Dear ImGui 1.91. Its InputScalar/InputFloat path
+            // asserts when EnterReturnsTrue is supplied, so never pass that flag here. Enter is
+            // handled explicitly below and force-commits the numeric transaction instead.
             changed = ImGui.InputFloat(
                 "##RotaryInput",
                 ref value,
                 0f,
                 0f,
-                "%.3f",
-                ImGuiInputTextFlags.EnterReturnsTrue);
+                "%.3f");
             value = Math.Max(min, Math.Min(max, value));
 
+            bool enterPressed =
+                ImGui.IsItemActive() &&
+                ImGui.IsKeyPressed(ImGuiKey.Enter);
             bool leaveEditor =
                 ImGui.IsItemDeactivated() ||
-                (ImGui.IsItemActive() && ImGui.IsKeyPressed(ImGuiKey.Enter));
+                enterPressed;
             DevToolNumericEditResult<float> result =
-                EndFloat(key, authoritativeValue, value, changed, state, frame);
+                EndFloat(
+                    key,
+                    authoritativeValue,
+                    value,
+                    changed,
+                    state,
+                    frame,
+                    forceCommit: enterPressed);
 
             if (leaveEditor)
             {
@@ -429,7 +441,8 @@ internal static class DevToolNumericWidgets
         float value,
         bool changed,
         FloatState state,
-        int frame)
+        int frame,
+        bool forceCommit = false)
     {
         state.LastTouchedFrame = frame;
         if (changed)
@@ -440,7 +453,7 @@ internal static class DevToolNumericWidgets
         }
 
         bool committed = false;
-        if (!ImGui.IsItemActive() && state.Dirty)
+        if ((!ImGui.IsItemActive() || forceCommit) && state.Dirty)
         {
             state.Dirty = false;
             if (!NearlyEqual(value, authoritativeValue))
