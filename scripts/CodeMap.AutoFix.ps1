@@ -523,8 +523,9 @@ try {
 }
 catch {
     if ($Detailed) {
+        $line = $_.InvocationInfo.ScriptLineNumber
         [Console]::Out.WriteLine(
-            "internal $($_.Exception.Message)"
+            "internal line=$line $($_.Exception.Message)"
         )
     }
     else {
