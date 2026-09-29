@@ -368,7 +368,8 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
                     "DevTool placed-object detached rollback failed: " + error);
             }
         }
-    }}
+    }
+}
 
 internal sealed class RoomSettingsStateSnapshot : IEditorStateSnapshot
 {
