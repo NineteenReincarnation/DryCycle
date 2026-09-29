@@ -215,6 +215,22 @@ internal static class DevToolOverlay
             snapshot,
             pages);
 
+        IDevToolPageView page =
+            debugWorkspacePage
+                ? null
+                : DevToolPageViewRegistry.Get(snapshot.ToolMode);
+        if (!EditorUiModeState.UseVanilla &&
+            page?.HasTopControls == true)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.SetWindowFontScale(1.14f);
+            page.DrawTopControls(snapshot);
+            ImGui.SetWindowFontScale(1f);
+        }
+
         FitActivityBarHeight(display);
         ImGui.End();
         ImGui.PopStyleVar(2);
@@ -235,8 +251,6 @@ internal static class DevToolOverlay
             Math.Max(
                 1f,
                 ImGui.GetContentRegionAvail().X);
-        float x =
-            left;
         float y =
             ImGui.GetCursorPosY();
         float gap =
@@ -245,6 +259,19 @@ internal static class DevToolOverlay
             Math.Max(
                 29f,
                 ImGui.GetTextLineHeight() + 12f);
+
+        float requiredWidth =
+            MeasureTopActivityFlowWidth(
+                pages,
+                gap);
+        float availableWidth =
+            Math.Max(
+                1f,
+                right - left);
+        float x =
+            requiredWidth <= availableWidth
+                ? left + (availableWidth - requiredWidth) * 0.5f
+                : left;
 
         ImGui.SetCursorPos(
             new Num.Vector2(
@@ -332,81 +359,38 @@ internal static class DevToolOverlay
                     "Unified diagnostics: performance, World Map retained/cache, compatibility, frontend/font and creature diagnostics"));
         }
 
-        bool showPaneToggles =
-            !debugWorkspacePage &&
-            snapshot.ToolMode != EditorToolMode.Triggers &&
-            snapshot.ToolMode != EditorToolMode.Sound;
-
-        if (showPaneToggles)
-        {
-            x +=
-                6f;
-
-            string browserLabel =
-                DevToolUiSettings.T(
-                    "浏览器",
-                    "Browser");
-            PlaceTopActivityItem(
-                browserLabel,
-                "DevToolTopBrowser",
-                snapshot.BrowserOpen,
-                TopActivityUtilityWidth(browserLabel),
-                rowHeight,
-                ref x,
-                ref y,
-                left,
-                right,
-                gap,
-                () =>
-                    Send(EditorUiCommandKind.ToggleBrowser));
-            if (ImGui.IsItemHovered())
-            {
-                DevToolTooltip.Show(
-                    snapshot.BrowserOpen
-                        ? DevToolUiSettings.T(
-                            "隐藏浏览器",
-                            "Hide Browser")
-                        : DevToolUiSettings.T(
-                            "显示浏览器",
-                            "Show Browser"));
-            }
-
-            string inspectorLabel =
-                DevToolUiSettings.T(
-                    "检查器",
-                    "Inspector");
-            PlaceTopActivityItem(
-                inspectorLabel,
-                "DevToolTopInspector",
-                snapshot.InspectorOpen,
-                TopActivityUtilityWidth(inspectorLabel),
-                rowHeight,
-                ref x,
-                ref y,
-                left,
-                right,
-                gap,
-                () =>
-                    Send(EditorUiCommandKind.ToggleInspector));
-            if (ImGui.IsItemHovered())
-            {
-                DevToolTooltip.Show(
-                    snapshot.InspectorOpen
-                        ? DevToolUiSettings.T(
-                            "隐藏检查器",
-                            "Hide Inspector")
-                        : DevToolUiSettings.T(
-                            "显示检查器",
-                            "Show Inspector"));
-            }
-        }
-
         // Advance the normal ImGui cursor past the absolute-positioned flow. This keeps the
         // content-owned window height correct for one-row and wrapped layouts alike.
         ImGui.SetCursorPos(
             new Num.Vector2(
                 left,
                 y + rowHeight));
+    }
+
+    private static float MeasureTopActivityFlowWidth(
+        System.Collections.Generic.IReadOnlyList<IDevToolFrontendPage> pages,
+        float gap)
+    {
+        float width =
+            32f + gap + 2f;
+
+        for (int i = 0; i < pages.Count; i++)
+        {
+            width +=
+                TopActivityItemWidth(
+                    pages[i].NavigationLabel);
+            width +=
+                gap;
+        }
+
+        string debugLabel =
+            DevToolUiSettings.T(
+                "调试",
+                "Debug");
+        width +=
+            TopActivityItemWidth(debugLabel);
+
+        return width;
     }
 
     private static void PlaceTopActivityItem(
@@ -458,14 +442,6 @@ internal static class DevToolOverlay
                 124f,
                 ImGui.CalcTextSize(
                     label ?? string.Empty).X + 22f));
-
-    private static float TopActivityUtilityWidth(string label) =>
-        Math.Max(
-            60f,
-            Math.Min(
-                112f,
-                ImGui.CalcTextSize(
-                    label ?? string.Empty).X + 20f));
 
     private static bool DrawTopActivityButton(
         string label,
@@ -684,85 +660,95 @@ internal static class DevToolOverlay
                     "Unified diagnostics: performance, World Map retained/cache, compatibility, frontend/font and creature diagnostics"));
         }
 
-        if (!debugWorkspacePage &&
-            (snapshot.ToolMode == EditorToolMode.Triggers ||
-             snapshot.ToolMode == EditorToolMode.Sound))
-        {
-            FitActivityBarHeight(display);
-            ImGui.End();
-            ImGui.PopStyleVar(2);
-            return;
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        if (debugWorkspacePage)
-        {
-            DevToolWidgets.MutedText(
-                DevToolUiSettings.T(
-                    "调试信息统一收纳在独立工作区；选择上方任一常规工具即可返回。",
-                    "Diagnostics are collected in one dedicated workspace. Select any normal tool above to return."));
-            FitActivityBarHeight(display);
-            ImGui.End();
-            ImGui.PopStyleVar(2);
-            return;
-        }
-
-        string browserLabel =
-            snapshot.BrowserOpen
-                ? DevToolUiSettings.T(
-                    "隐藏浏览器",
-                    "Hide Browser")
-                : DevToolUiSettings.T(
-                    "显示浏览器",
-                    "Show Browser");
-        if (DevToolWidgets.ActionButton(
-                browserLabel,
-                "DevToolToggleBrowser",
-                DevToolButtonTone.Subtle,
-                true))
-        {
-            Send(
-                EditorUiCommandKind.ToggleBrowser);
-        }
-        if (ImGui.IsItemHovered())
-        {
-            DevToolTooltip.Show(
-                DevToolUiSettings.T(
-                    "显示/隐藏左栏浏览器",
-                    "Toggle left Browser pane"));
-        }
-
-        string inspectorLabel =
-            snapshot.InspectorOpen
-                ? DevToolUiSettings.T(
-                    "隐藏检查器",
-                    "Hide Inspector")
-                : DevToolUiSettings.T(
-                    "显示检查器",
-                    "Show Inspector");
-        if (DevToolWidgets.ActionButton(
-                inspectorLabel,
-                "DevToolToggleInspector",
-                DevToolButtonTone.Subtle,
-                true))
-        {
-            Send(
-                EditorUiCommandKind.ToggleInspector);
-        }
-        if (ImGui.IsItemHovered())
-        {
-            DevToolTooltip.Show(
-                DevToolUiSettings.T(
-                    "显示/隐藏右栏检查器",
-                    "Toggle right Inspector pane"));
-        }
-
         FitActivityBarHeight(display);
         ImGui.End();
         ImGui.PopStyleVar(2);
+
+        DrawDetachedPageControls(
+            snapshot,
+            display);
+    }
+
+    private static void DrawDetachedPageControls(
+        EditorPresentationSnapshot snapshot,
+        Num.Vector2 display)
+    {
+        if (debugWorkspacePage ||
+            EditorUiModeState.UseVanilla)
+            return;
+
+        IDevToolPageView page =
+            DevToolPageViewRegistry.Get(snapshot.ToolMode);
+        if (page?.HasTopControls != true)
+            return;
+
+        float width =
+            Math.Max(
+                320f,
+                Math.Min(
+                    780f,
+                    Math.Max(
+                        320f,
+                        display.X - 16f)));
+        Num.Vector2 position =
+            new(
+                Math.Max(
+                    8f,
+                    (display.X - width) * 0.5f),
+                62f);
+
+        if (DevToolTopStatusWindow.TryGetCurrentRect(
+                out Num.Vector2 topPosition,
+                out Num.Vector2 topSize))
+        {
+            width =
+                topSize.X;
+            position =
+                new Num.Vector2(
+                    topPosition.X,
+                    topPosition.Y + topSize.Y - 1f);
+        }
+
+        ImGui.SetNextWindowPos(
+            position,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(
+            new Num.Vector2(
+                width,
+                0f),
+            ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(
+            Math.Min(
+                1f,
+                DevToolUiSettings.WindowAlpha + 0.04f));
+
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.WindowPadding,
+            new Num.Vector2(
+                8f,
+                6f));
+
+        ImGuiWindowFlags flags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoBringToFrontOnFocus;
+
+        if (ImGui.Begin(
+                "##DevToolDetachedPageControls",
+                flags))
+        {
+            ImGui.SetWindowFontScale(1.14f);
+            page.DrawTopControls(snapshot);
+            ImGui.SetWindowFontScale(1f);
+        }
+
+        ImGui.End();
+        ImGui.PopStyleVar();
     }
 
     private static void DrawLeftActivityHeader()

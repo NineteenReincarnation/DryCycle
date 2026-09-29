@@ -8,8 +8,9 @@ namespace DryCycle.DevUI.DevTool.RWImGui;
 /// <summary>
 /// Shared top status surface for every rebuilt DevTool page.
 ///
-/// Global UI mode and language live on the first row around the room/status title. Optional
-/// page-owned controls occupy the second row so global controls never need a separate window.
+/// Global UI mode, room/status title and language live on this single persistent row.
+/// Page-owned controls are rendered by the tool strip surface below navigation, keeping the
+/// hierarchy stable as Global status -> Tool navigation -> Page controls.
 /// </summary>
 internal static class DevToolTopStatusWindow
 {
@@ -44,21 +45,19 @@ internal static class DevToolTopStatusWindow
         IDevToolPageView page,
         Num.Vector2 display)
     {
-        DrawCore(snapshot, page, display, allowPageControls: true);
+        DrawCore(snapshot, display);
     }
 
     internal static void DrawGlobalOnly(
         EditorPresentationSnapshot snapshot,
         Num.Vector2 display)
     {
-        DrawCore(snapshot, null, display, allowPageControls: false);
+        DrawCore(snapshot, display);
     }
 
     private static void DrawCore(
         EditorPresentationSnapshot snapshot,
-        IDevToolPageView page,
-        Num.Vector2 display,
-        bool allowPageControls)
+        Num.Vector2 display)
     {
         if (display.X <= 1f || display.Y <= 1f)
             return;
@@ -112,17 +111,6 @@ internal static class DevToolTopStatusWindow
         }
 
         DrawGlobalRow(snapshot);
-
-        if (allowPageControls &&
-            !EditorUiModeState.UseVanilla &&
-            page?.HasTopControls == true)
-        {
-            ImGui.Separator();
-
-            ImGui.SetWindowFontScale(1.14f);
-            page.DrawTopControls(snapshot);
-            ImGui.SetWindowFontScale(1f);
-        }
 
         // Publish the real auto-resized geometry before End. DevToolOverlay draws the tool palette
         // immediately afterwards in the same frame and can therefore dock it without a guessed
