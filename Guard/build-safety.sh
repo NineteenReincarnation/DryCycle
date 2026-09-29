@@ -643,9 +643,20 @@ gap_end = host.find("internal static T InspectRepresentation", gap_start)
 require(gap_start >= 0 and gap_end > gap_start,
         "Could not isolate the selected-object compatibility proof.")
 gap = host[gap_start:gap_end]
-require(gap.count("HasUnsupportedVisualGeometry") >= 2 and
-        gap.count("HasUnsupportedNodes") >= 2,
-        "Both live and headless Object compatibility proofs must evaluate control semantics and visual geometry.")
+require("HasUnsupportedVisualGeometry" in gap and
+        "HasUnsupportedNodes" in gap and
+        "unsupportedNodes || unsupportedGeometry" in gap,
+        "Live Object compatibility proof must evaluate control semantics and visual geometry before authorizing fallback.")
+
+audit_start = host.find("private static void EnsureCompatibilityAudit")
+audit_end = host.find("private static bool AuditDue", audit_start)
+require(audit_start >= 0 and audit_end > audit_start,
+        "Could not isolate the cached headless compatibility audit.")
+audit = host[audit_start:audit_end]
+require("HasUnsupportedVisualGeometry" in audit and
+        "HasUnsupportedNodes" in audit and
+        "unsupportedNodes || unsupportedGeometry" in audit,
+        "Headless Object compatibility proof must evaluate control semantics and visual geometry.")
 
 
 require("ObserveHeadlessRepresentation" in coverage,
