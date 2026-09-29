@@ -650,6 +650,15 @@ require("private static bool MaterializeLegacyToolCore" in scheduler and
         "internal static bool ShowExplicitLegacyTool" in scheduler,
         "Legacy page materialization must expose only an explicit public-in-assembly entry point.")
 
+require("internal static bool SwitchTool" in scheduler and
+        "return MaterializeLegacyToolCore(" in scheduler and
+        "NativeToolScheduler.SwitchTool(this, mode)" in runtime and
+        "if (NativeToolScheduler.Supports(mode))" in runtime and
+        "refusing unmanaged legacy page materialization" in runtime,
+        "Objects/Sound/Trigger page ownership must remain centralized in NativeToolScheduler with no raw fallback bypass.")
+require("NativeToolScheduler.TryActivate(this, mode)" not in runtime,
+        "EditorSession must not bypass centralized native workspace page ownership through the retired TryActivate path.")
+
 materialize_core_callers = []
 explicit_entry_callers = []
 for source_path in Path("src/DevUI/DevTool").rglob("*.cs"):
