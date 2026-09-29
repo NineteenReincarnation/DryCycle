@@ -13,8 +13,7 @@ internal static class SoundEditorView
     private enum BrowserTab
     {
         Library,
-        Groups,
-        Scene
+        Groups
     }
 
     private readonly struct SoundEditKey : IEquatable<SoundEditKey>
@@ -100,19 +99,10 @@ internal static class SoundEditorView
 
         SoundWorkspaceState.SynchronizeScene(snapshot);
 
-        const bool sceneInBrowser = false;
-        if (browserTab == BrowserTab.Scene)
-            browserTab = BrowserTab.Library;
-
         DevToolWidgets.PaneTitle(DevToolUiSettings.T("浏览器", "BROWSER"), BrowserBodyFontScale);
         DrawTabButton(BrowserTab.Library, DevToolUiSettings.T("资源库", "Library"), "SoundLibraryTab");
         DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("音效组", "Groups")));
         DrawTabButton(BrowserTab.Groups, DevToolUiSettings.T("音效组", "Groups"), "SoundGroupsTab");
-        if (sceneInBrowser)
-        {
-            DevToolWidgets.SameLineIfFits(DevToolWidgets.ButtonWidth(DevToolUiSettings.T("场景", "Scene")));
-            DrawTabButton(BrowserTab.Scene, DevToolUiSettings.T("场景", "Scene"), "SoundSceneTab");
-        }
         ImGui.Separator();
 
         SoundLibraryGroupsView.DrawWorkingGroupBar();
@@ -121,9 +111,6 @@ internal static class SoundEditorView
         {
             case BrowserTab.Groups:
                 SoundLibraryGroupsView.DrawGroups();
-                break;
-            case BrowserTab.Scene when sceneInBrowser:
-                DrawSceneWorkspace(snapshot);
                 break;
             default:
                 SoundLibraryGroupsView.DrawLibrary(snapshot);
