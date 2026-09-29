@@ -7,22 +7,19 @@ using Num = System.Numerics;
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
 /// <summary>
-/// Icon-first ecology relationship workspace.
+/// Icon-first ecology relationship atlas.
 ///
-/// The old implementation rendered every relationship as two wide text buttons. That made the
-/// developer read type names and decimals line by line before the actual ecology pattern became
-/// visible. This view instead treats a pair as one visual object:
-/// - left semicircle  = Primary -> Other
-/// - right semicircle = Other -> Primary
-/// - hue/glyph        = relationship family
-/// - arc fill/thickness = intensity
-/// Exact enum names and values remain available on hover and in the inspector.
+/// The default view is a semantic map rather than a table or card grid. The selected primary
+/// creature lives at the center; target creatures use Rain World's prepared sandbox/creature icons
+/// and are spatially grouped by the primary creature's relationship toward them. Two parallel
+/// directional rails visualize both directions, while color and line weight encode type and
+/// intensity. Exact enum names/values remain in hover details and the inspector.
 /// </summary>
 internal static class RelationshipEditorView
 {
     private enum RelationshipViewMode
     {
-        Gallery,
+        Atlas,
         Heatmap
     }
 
@@ -58,6 +55,14 @@ internal static class RelationshipEditorView
         internal float PeakIntensity;
     }
 
+    private sealed class AtlasNodeLayout
+    {
+        internal PairPresentation Pair;
+        internal Num.Vector2 Center;
+        internal float Size;
+        internal bool Hovered;
+    }
+
     private static readonly EditorRelationshipValueSnapshot EmptyRelationship = new();
     private static readonly RelationFamily[] FamilyOrder =
     {
@@ -77,16 +82,15 @@ internal static class RelationshipEditorView
     private static string observedMatrixSearch;
     private static string normalizedMatrixSearch = string.Empty;
 
-    private static RelationshipViewMode viewMode = RelationshipViewMode.Gallery;
+    private static RelationshipViewMode viewMode = RelationshipViewMode.Atlas;
     private static RelationshipFilterMode filterMode = RelationshipFilterMode.All;
 
-    private static string[] projectedCreatureTypes;
-    private static DevToolExplorerListItem[] projectedCreatureRows = Array.Empty<DevToolExplorerListItem>();
     private static EditorRelationshipRowSnapshot[] projectedRowsSource;
     private static PairPresentation[] projectedRows = Array.Empty<PairPresentation>();
     private static string projectedFilter = string.Empty;
     private static RelationshipFilterMode projectedFilterMode;
     private static PairPresentation[] projectedVisibleRows = Array.Empty<PairPresentation>();
+    private static readonly List<AtlasNodeLayout> atlasNodes = new();
 
     private static string inspectorEditKey = string.Empty;
     private static string inspectorEditPrimary = string.Empty;
@@ -95,13 +99,12 @@ internal static class RelationshipEditorView
 
     internal static void ResetRetainedState()
     {
-        projectedCreatureTypes = null;
-        projectedCreatureRows = Array.Empty<DevToolExplorerListItem>();
         projectedRowsSource = null;
         projectedRows = Array.Empty<PairPresentation>();
         projectedFilter = string.Empty;
         projectedFilterMode = RelationshipFilterMode.All;
         projectedVisibleRows = Array.Empty<PairPresentation>();
+        atlasNodes.Clear();
 
         inspectorEditKey = string.Empty;
         inspectorEditPrimary = string.Empty;
@@ -115,7 +118,7 @@ internal static class RelationshipEditorView
         observedMatrixSearch = null;
         normalizedMatrixSearch = string.Empty;
 
-        viewMode = RelationshipViewMode.Gallery;
+        viewMode = RelationshipViewMode.Atlas;
         filterMode = RelationshipFilterMode.All;
     }
 
@@ -129,7 +132,7 @@ internal static class RelationshipEditorView
             return;
         }
 
-        ImGui.TextDisabled(DevToolUiSettings.T("主生物", "PRIMARY CREATURE"));
+        ImGui.TextDisabled(DevToolUiSettings.T("主体", "PRIMARY"));
         DevToolWidgets.FullWidthInputText(
             DevToolUiSettings.T("搜索", "Search"),
             "RelationshipPrimarySearch",
@@ -137,15 +140,17 @@ internal static class RelationshipEditorView
             128);
         ImGui.Separator();
 
-        string[] creatures = snapshot.CreatureTypes ?? Array.Empty<string>();
-        EnsureCreatureRows(creatures);
-        string primaryQuery = PrimarySearchQuery();
+        string[] creatures =
+            snapshot.CreatureTypes ?? Array.Empty<string>();
+        string query =
+            PrimarySearchQuery();
 
         int matches = 0;
         for (int i = 0; i < creatures.Length; i++)
         {
-            string type = creatures[i];
-            if (!Matches(type, primaryQuery))
+            string type =
+                creatures[i] ?? string.Empty;
+            if (!Matches(type, query))
                 continue;
 
             matches++;
@@ -155,10 +160,9 @@ internal static class RelationshipEditorView
                     snapshot.PrimaryCreature,
                     StringComparison.Ordinal);
 
-            if (DevToolExplorerRowRenderer.DrawSelectable(
-                    projectedCreatureRows[i],
-                    selected,
-                    defaultFocus: true))
+            if (DrawPrimaryCreatureRow(
+                    type,
+                    selected))
             {
                 RelationshipEditorCommandQueue.Enqueue(
                     new RelationshipEditorCommand(
@@ -175,6 +179,81 @@ internal static class RelationshipEditorView
         }
     }
 
+    private static bool DrawPrimaryCreatureRow(
+        string creatureId,
+        bool selected)
+    {
+        float width =
+            Math.Max(
+                120f,
+                ImGui.GetContentRegionAvail().X);
+        const float height = 36f;
+
+        ImGui.PushID(
+            "RelationshipPrimary:" + creatureId);
+        bool clicked =
+            ImGui.InvisibleButton(
+                "##row",
+                new Num.Vector2(
+                    width,
+                    height));
+        bool hovered =
+            ImGui.IsItemHovered();
+        ImGui.PopID();
+
+        Num.Vector2 min =
+            ImGui.GetItemRectMin();
+        Num.Vector2 max =
+            ImGui.GetItemRectMax();
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+
+        Num.Vector4 bg =
+            selected
+                ? new Num.Vector4(0.15f, 0.34f, 0.57f, 0.94f)
+                : hovered
+                    ? new Num.Vector4(0.12f, 0.16f, 0.22f, 0.94f)
+                    : new Num.Vector4(0.055f, 0.07f, 0.095f, 0.56f);
+
+        draw.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(bg),
+            4f);
+
+        if (selected)
+        {
+            draw.AddRectFilled(
+                min,
+                new Num.Vector2(
+                    min.X + 3f,
+                    max.Y),
+                ImGui.GetColorU32(
+                    new Num.Vector4(0.42f, 0.78f, 1f, 1f)),
+                1f);
+        }
+
+        Num.Vector2 iconPos =
+            min + new Num.Vector2(6f, 4f);
+        WorldCreatureCatalogPicker.DrawInlineIcon(
+            draw,
+            creatureId,
+            iconPos,
+            new Num.Vector2(28f, 28f));
+
+        draw.AddText(
+            min + new Num.Vector2(40f, 9f),
+            ImGui.GetColorU32(
+                selected
+                    ? new Num.Vector4(0.98f, 0.99f, 1f, 1f)
+                    : new Num.Vector4(0.84f, 0.87f, 0.91f, 0.98f)),
+            FitText(
+                creatureId,
+                Math.Max(40f, width - 48f)));
+
+        return clicked;
+    }
+
     internal static void DrawMatrix(
         EditorRelationshipPresentationSnapshot snapshot,
         Num.Vector2 position,
@@ -185,24 +264,32 @@ internal static class RelationshipEditorView
             size.Y < 120f)
             return;
 
-        ImGui.SetNextWindowPos(position, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(size, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(560f, 340f),
-            new Num.Vector2(4000f, 4000f));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
+        ImGui.SetNextWindowPos(
+            position,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(
+            size,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(
+            Math.Min(
+                1f,
+                DevToolUiSettings.WindowAlpha + 0.04f));
+
+        ImGuiWindowFlags flags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoBringToFrontOnFocus;
 
         if (!ImGui.Begin(
-                DevToolUiSettings.T(
-                    "生态关系###DevToolRelationshipMatrix",
-                    "Ecology Relationships###DevToolRelationshipMatrix"),
-                ImGuiWindowFlags.NoCollapse))
+                "##DevToolRelationshipAtlas",
+                flags))
         {
             ImGui.End();
             return;
         }
-
-        FloatingWindowSnap.TrackCurrentWindow("Relationships");
 
         EditorRelationshipRowSnapshot[] rows =
             snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
@@ -226,8 +313,8 @@ internal static class RelationshipEditorView
             return;
         }
 
-        if (viewMode == RelationshipViewMode.Gallery)
-            DrawGallery(snapshot);
+        if (viewMode == RelationshipViewMode.Atlas)
+            DrawAtlas(snapshot);
         else
             DrawHeatmap(snapshot);
 
@@ -258,15 +345,13 @@ internal static class RelationshipEditorView
             return;
         }
 
-        ImGui.TextUnformatted(
+        DrawInspectorPairHeader(
+            snapshot.PrimaryCreature,
+            row.CreatureType,
             string.IsNullOrEmpty(row.DisplayName)
                 ? row.CreatureType
                 : row.DisplayName);
 
-        ImGui.SameLine();
-        ImGui.TextDisabled(" / ");
-        ImGui.SameLine();
-        ImGui.TextDisabled(snapshot.PrimaryCreature);
         ImGui.Separator();
 
         DrawDirectionEditor(
@@ -299,21 +384,21 @@ internal static class RelationshipEditorView
         ImGui.Dummy(new Num.Vector2(10f, 0f));
         ImGui.SameLine();
 
-        bool gallery = viewMode == RelationshipViewMode.Gallery;
+        bool atlas = viewMode == RelationshipViewMode.Atlas;
         if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("画廊", "Gallery"),
-                "RelationshipGalleryMode",
-                gallery ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle,
+                DevToolUiSettings.T("图谱", "Atlas"),
+                "RelationshipAtlasMode",
+                atlas ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle,
                 fixedWidth: 72f))
         {
-            viewMode = RelationshipViewMode.Gallery;
+            viewMode = RelationshipViewMode.Atlas;
         }
 
         ImGui.SameLine();
         if (DevToolWidgets.ActionButton(
                 DevToolUiSettings.T("热图", "Heatmap"),
                 "RelationshipHeatmapMode",
-                !gallery ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle,
+                !atlas ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle,
                 fixedWidth: 72f))
         {
             viewMode = RelationshipViewMode.Heatmap;
@@ -461,44 +546,179 @@ internal static class RelationshipEditorView
         ImGui.PopStyleColor(3);
     }
 
-    private static void DrawGallery(EditorRelationshipPresentationSnapshot snapshot)
+    private static void DrawAtlas(EditorRelationshipPresentationSnapshot snapshot)
     {
-        float available =
-            Math.Max(
-                150f,
-                ImGui.GetContentRegionAvail().X);
-        const float targetCardWidth = 176f;
-        const float cardGap = 8f;
-        const float cardHeight = 122f;
+        Num.Vector2 available =
+            ImGui.GetContentRegionAvail();
+        Num.Vector2 canvasSize =
+            new(
+                Math.Max(520f, available.X),
+                Math.Max(420f, available.Y));
 
-        int columns =
-            Math.Max(
-                1,
-                (int)Math.Floor(
-                    (available + cardGap) /
-                    (targetCardWidth + cardGap)));
+        Num.Vector2 cursorLocal =
+            ImGui.GetCursorPos();
+        Num.Vector2 origin =
+            ImGui.GetCursorScreenPos();
 
-        float cardWidth =
-            Math.Max(
-                148f,
-                (available - cardGap * (columns - 1)) /
-                columns);
+        // Reserve the complete workspace first. Interactive node buttons are submitted afterwards
+        // at absolute positions, so they remain the topmost hit targets instead of being occluded by
+        // one giant canvas item.
+        ImGui.Dummy(canvasSize);
+        Num.Vector2 afterCanvas =
+            ImGui.GetCursorPos();
+
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+        draw.AddRectFilled(
+            origin,
+            origin + canvasSize,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.025f, 0.032f, 0.045f, 0.46f)),
+            8f);
+
+        BuildAtlasLayout(
+            origin,
+            canvasSize);
+
+        Num.Vector2 primaryCenter =
+            origin +
+            canvasSize * 0.5f;
+
+        Num.Vector2 mouse =
+            ImGui.GetIO().MousePos;
+        AtlasNodeLayout hot =
+            null;
+        for (int i = 0; i < atlasNodes.Count; i++)
+        {
+            AtlasNodeLayout node =
+                atlasNodes[i];
+            float half =
+                node.Size * 0.5f;
+            node.Hovered =
+                PointInRect(
+                    mouse,
+                    node.Center - new Num.Vector2(half, half),
+                    node.Center + new Num.Vector2(half, half));
+            if (node.Hovered)
+                hot = node;
+        }
+
+        DrawAtlasZones(
+            draw,
+            origin,
+            canvasSize);
+
+        // Connections deliberately sit behind the icons. Dense maps therefore still read as
+        // creature clusters first; the selected/hovered pair comes forward with much stronger rails.
+        for (int i = 0; i < atlasNodes.Count; i++)
+        {
+            AtlasNodeLayout node =
+                atlasNodes[i];
+            bool emphasized =
+                node.Hovered ||
+                node.Pair.Row?.Selected == true;
+            bool deEmphasized =
+                hot != null &&
+                !ReferenceEquals(
+                    hot,
+                    node) &&
+                node.Pair.Row?.Selected != true;
+
+            DrawBidirectionalConnection(
+                draw,
+                primaryCenter,
+                node.Center,
+                node.Pair,
+                emphasized,
+                deEmphasized);
+        }
+
+        DrawPrimaryAtlasNode(
+            draw,
+            snapshot.PrimaryCreature,
+            primaryCenter,
+            108f);
+
+        // Restore the local cursor and submit node hit targets over the already-painted graph.
+        ImGui.SetCursorPos(cursorLocal);
+        for (int i = 0; i < atlasNodes.Count; i++)
+        {
+            AtlasNodeLayout node =
+                atlasNodes[i];
+            DrawAtlasNode(
+                snapshot,
+                node,
+                origin,
+                cursorLocal);
+        }
+
+        ImGui.SetCursorPos(afterCanvas);
+    }
+
+    private static void BuildAtlasLayout(
+        Num.Vector2 origin,
+        Num.Vector2 size)
+    {
+        atlasNodes.Clear();
 
         for (int familyIndex = 0; familyIndex < FamilyOrder.Length; familyIndex++)
         {
             RelationFamily family =
                 FamilyOrder[familyIndex];
 
+            GetFamilyRegion(
+                origin,
+                size,
+                family,
+                out Num.Vector2 regionMin,
+                out Num.Vector2 regionMax);
+
             int count =
                 CountFamily(family);
-            if (count == 0)
+            if (count <= 0)
                 continue;
 
-            DrawFamilyHeader(
-                family,
-                count);
+            float width =
+                Math.Max(
+                    80f,
+                    regionMax.X - regionMin.X - 18f);
+            float height =
+                Math.Max(
+                    70f,
+                    regionMax.Y - regionMin.Y - 34f);
 
-            int column = 0;
+            float aspect =
+                width /
+                Math.Max(1f, height);
+            int columns =
+                Math.Max(
+                    1,
+                    (int)Math.Ceiling(
+                        Math.Sqrt(
+                            count * aspect)));
+            int rows =
+                Math.Max(
+                    1,
+                    (count + columns - 1) /
+                    columns);
+
+            const float gap = 5f;
+            float cellWidth =
+                width /
+                columns;
+            float cellHeight =
+                height /
+                rows;
+            float nodeSize =
+                Math.Max(
+                    30f,
+                    Math.Min(
+                        58f,
+                        Math.Min(
+                            cellWidth - gap,
+                            cellHeight - gap)));
+
+            int localIndex = 0;
             for (int i = 0; i < projectedVisibleRows.Length; i++)
             {
                 PairPresentation pair =
@@ -506,293 +726,653 @@ internal static class RelationshipEditorView
                 if (pair.ForwardFamily != family)
                     continue;
 
-                if (column > 0)
-                    ImGui.SameLine(0f, cardGap);
+                int col =
+                    localIndex % columns;
+                int row =
+                    localIndex / columns;
 
-                DrawGalleryCard(
-                    snapshot,
-                    pair,
-                    cardWidth,
-                    cardHeight);
+                float x =
+                    regionMin.X +
+                    9f +
+                    cellWidth * (col + 0.5f);
+                float y =
+                    regionMin.Y +
+                    28f +
+                    cellHeight * (row + 0.5f);
 
-                column++;
-                if (column >= columns)
-                    column = 0;
+                atlasNodes.Add(
+                    new AtlasNodeLayout
+                    {
+                        Pair = pair,
+                        Center = new Num.Vector2(x, y),
+                        Size = nodeSize
+                    });
+
+                localIndex++;
             }
-
-            ImGui.Spacing();
         }
     }
 
-    private static void DrawFamilyHeader(
+    private static void GetFamilyRegion(
+        Num.Vector2 origin,
+        Num.Vector2 size,
         RelationFamily family,
-        int count)
+        out Num.Vector2 min,
+        out Num.Vector2 max)
     {
-        Num.Vector4 color =
-            GetFamilyColor(family);
+        float x =
+            origin.X;
+        float y =
+            origin.Y;
+        float w =
+            size.X;
+        float h =
+            size.Y;
 
-        Num.Vector2 cursor =
-            ImGui.GetCursorScreenPos();
+        switch (family)
+        {
+            case RelationFamily.Fear:
+                min = new Num.Vector2(x + w * 0.015f, y + h * 0.055f);
+                max = new Num.Vector2(x + w * 0.285f, y + h * 0.485f);
+                return;
 
-        ImGui.GetWindowDrawList().AddRectFilled(
-            cursor,
-            cursor + new Num.Vector2(4f, ImGui.GetTextLineHeight() + 5f),
-            ImGui.GetColorU32(color),
+            case RelationFamily.Unease:
+                min = new Num.Vector2(x + w * 0.015f, y + h * 0.515f);
+                max = new Num.Vector2(x + w * 0.285f, y + h * 0.945f);
+                return;
+
+            case RelationFamily.Predation:
+                min = new Num.Vector2(x + w * 0.305f, y + h * 0.025f);
+                max = new Num.Vector2(x + w * 0.695f, y + h * 0.285f);
+                return;
+
+            case RelationFamily.Neutral:
+                min = new Num.Vector2(x + w * 0.305f, y + h * 0.715f);
+                max = new Num.Vector2(x + w * 0.695f, y + h * 0.975f);
+                return;
+
+            case RelationFamily.Hostility:
+                min = new Num.Vector2(x + w * 0.715f, y + h * 0.055f);
+                max = new Num.Vector2(x + w * 0.985f, y + h * 0.485f);
+                return;
+
+            case RelationFamily.Untracked:
+                min = new Num.Vector2(x + w * 0.715f, y + h * 0.515f);
+                max = new Num.Vector2(x + w * 0.985f, y + h * 0.945f);
+                return;
+
+            default:
+                min = new Num.Vector2(x + w * 0.355f, y + h * 0.305f);
+                max = new Num.Vector2(x + w * 0.645f, y + h * 0.445f);
+                return;
+        }
+    }
+
+    private static void DrawAtlasZones(
+        ImDrawListPtr draw,
+        Num.Vector2 origin,
+        Num.Vector2 size)
+    {
+        for (int i = 0; i < FamilyOrder.Length; i++)
+        {
+            RelationFamily family =
+                FamilyOrder[i];
+            int count =
+                CountFamily(family);
+            if (count <= 0)
+                continue;
+
+            GetFamilyRegion(
+                origin,
+                size,
+                family,
+                out Num.Vector2 min,
+                out Num.Vector2 max);
+
+            Num.Vector4 color =
+                GetFamilyColor(family);
+
+            draw.AddRectFilled(
+                min,
+                max,
+                ImGui.GetColorU32(
+                    new Num.Vector4(
+                        color.X * 0.07f,
+                        color.Y * 0.07f,
+                        color.Z * 0.07f,
+                        0.58f)),
+                9f);
+
+            draw.AddRect(
+                min,
+                max,
+                ImGui.GetColorU32(
+                    new Num.Vector4(
+                        color.X,
+                        color.Y,
+                        color.Z,
+                        0.22f)),
+                9f,
+                ImDrawFlags.None,
+                1f);
+
+            Num.Vector2 labelCenter =
+                new(
+                    min.X + 15f,
+                    min.Y + 14f);
+            DrawRelationGlyph(
+                draw,
+                labelCenter,
+                family,
+                color,
+                11f);
+
+            string text =
+                GetFamilyLabel(family) +
+                "  " +
+                count;
+            draw.AddText(
+                min + new Num.Vector2(27f, 6f),
+                ImGui.GetColorU32(
+                    new Num.Vector4(
+                        color.X,
+                        color.Y,
+                        color.Z,
+                        0.92f)),
+                text);
+        }
+
+        Num.Vector2 center =
+            origin +
+            size * 0.5f;
+        float ring =
+            Math.Min(
+                size.X,
+                size.Y) *
+            0.13f;
+        draw.AddCircle(
+            center,
+            ring,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.30f, 0.38f, 0.50f, 0.20f)),
+            48,
+            1f);
+        draw.AddCircle(
+            center,
+            ring + 12f,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.30f, 0.38f, 0.50f, 0.10f)),
+            48,
+            1f);
+    }
+
+    private static void DrawPrimaryAtlasNode(
+        ImDrawListPtr draw,
+        string creatureId,
+        Num.Vector2 center,
+        float size)
+    {
+        float half =
+            size * 0.5f;
+        Num.Vector2 min =
+            center -
+            new Num.Vector2(
+                half,
+                half);
+        Num.Vector2 max =
+            center +
+            new Num.Vector2(
+                half,
+                half);
+
+        draw.AddCircleFilled(
+            center,
+            half + 10f,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.12f, 0.30f, 0.48f, 0.20f)),
+            48);
+
+        draw.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.055f, 0.075f, 0.105f, 0.98f)),
+            12f);
+        draw.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.38f, 0.72f, 1f, 0.94f)),
+            12f,
+            ImDrawFlags.None,
             2f);
 
-        ImGui.SetCursorPosX(
-            ImGui.GetCursorPosX() + 10f);
-        ImGui.TextUnformatted(
-            GetFamilyLabel(family));
-        ImGui.SameLine();
-        ImGui.TextDisabled(count.ToString());
-        ImGui.Spacing();
+        WorldCreatureCatalogPicker.DrawInlineIcon(
+            draw,
+            creatureId,
+            min + new Num.Vector2(14f, 10f),
+            new Num.Vector2(
+                size - 28f,
+                size - 42f));
+
+        string label =
+            FitText(
+                creatureId,
+                size - 14f);
+        Num.Vector2 textSize =
+            ImGui.CalcTextSize(label);
+        draw.AddText(
+            new Num.Vector2(
+                center.X - textSize.X * 0.5f,
+                max.Y - 23f),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.94f, 0.97f, 1f, 1f)),
+            label);
     }
 
-    private static int CountFamily(RelationFamily family)
-    {
-        int count = 0;
-        for (int i = 0; i < projectedVisibleRows.Length; i++)
-        {
-            if (projectedVisibleRows[i].ForwardFamily == family)
-                count++;
-        }
-        return count;
-    }
-
-    private static void DrawGalleryCard(
+    private static void DrawAtlasNode(
         EditorRelationshipPresentationSnapshot snapshot,
-        PairPresentation pair,
-        float width,
-        float height)
+        AtlasNodeLayout node,
+        Num.Vector2 canvasOrigin,
+        Num.Vector2 canvasCursorLocal)
     {
-        string id =
-            "##RelationshipCard:" +
-            (pair.Row?.CreatureType ?? string.Empty);
+        if (node?.Pair?.Row == null)
+            return;
 
-        ImGui.PushID(id);
+        float size =
+            node.Size;
+        float half =
+            size * 0.5f;
+        Num.Vector2 min =
+            node.Center -
+            new Num.Vector2(
+                half,
+                half);
+        Num.Vector2 max =
+            node.Center +
+            new Num.Vector2(
+                half,
+                half);
+
+        Num.Vector2 local =
+            canvasCursorLocal +
+            (min - canvasOrigin);
+        ImGui.SetCursorPos(local);
+
+        ImGui.PushID(
+            "RelationshipAtlasNode:" +
+            node.Pair.Row.CreatureType);
         bool clicked =
             ImGui.InvisibleButton(
-                "##card",
-                new Num.Vector2(width, height));
+                "##node",
+                new Num.Vector2(
+                    size,
+                    size));
         bool hovered =
             ImGui.IsItemHovered();
         ImGui.PopID();
 
-        Num.Vector2 min =
-            ImGui.GetItemRectMin();
-        Num.Vector2 max =
-            ImGui.GetItemRectMax();
         ImDrawListPtr draw =
             ImGui.GetWindowDrawList();
+        Num.Vector4 forwardColor =
+            GetFamilyColor(
+                node.Pair.ForwardFamily);
+        Num.Vector4 reverseColor =
+            GetFamilyColor(
+                node.Pair.ReverseFamily);
 
         bool selected =
-            pair.Row?.Selected == true;
+            node.Pair.Row.Selected;
 
-        Num.Vector4 baseColor =
-            hovered
-                ? new Num.Vector4(0.085f, 0.115f, 0.16f, 0.94f)
-                : new Num.Vector4(0.055f, 0.07f, 0.095f, 0.90f);
-
-        draw.AddRectFilled(
-            min,
-            max,
-            ImGui.GetColorU32(baseColor),
-            7f);
-
-        Num.Vector4 borderColor =
+        Num.Vector4 bg =
             selected
-                ? new Num.Vector4(0.36f, 0.72f, 1f, 0.98f)
+                ? new Num.Vector4(0.11f, 0.19f, 0.29f, 0.98f)
                 : hovered
-                    ? new Num.Vector4(0.36f, 0.46f, 0.60f, 0.84f)
-                    : new Num.Vector4(0.22f, 0.27f, 0.34f, 0.68f);
+                    ? new Num.Vector4(0.10f, 0.13f, 0.18f, 0.98f)
+                    : new Num.Vector4(0.045f, 0.055f, 0.075f, 0.94f);
 
-        draw.AddRect(
-            min,
-            max,
-            ImGui.GetColorU32(borderColor),
-            7f,
-            ImDrawFlags.None,
-            selected ? 1.8f : 1f);
+        draw.AddCircleFilled(
+            node.Center,
+            half,
+            ImGui.GetColorU32(bg),
+            32);
 
-        Num.Vector4 forwardColor =
-            GetFamilyColor(pair.ForwardFamily);
-        Num.Vector4 reverseColor =
-            GetFamilyColor(pair.ReverseFamily);
-
-        draw.AddRectFilled(
-            min + new Num.Vector2(4f, 4f),
-            new Num.Vector2(
-                (min.X + max.X) * 0.5f - 1f,
-                min.Y + 7f),
-            ImGui.GetColorU32(forwardColor),
-            2f);
-
-        draw.AddRectFilled(
-            new Num.Vector2(
-                (min.X + max.X) * 0.5f + 1f,
-                min.Y + 4f),
-            new Num.Vector2(
-                max.X - 4f,
-                min.Y + 7f),
-            ImGui.GetColorU32(reverseColor),
-            2f);
-
-        string fittedName =
-            FitText(
-                pair.Name,
-                Math.Max(40f, width - 18f));
-        draw.AddText(
-            min + new Num.Vector2(9f, 13f),
+        draw.AddCircle(
+            node.Center,
+            half - 1f,
             ImGui.GetColorU32(
-                new Num.Vector4(0.93f, 0.95f, 0.98f, 1f)),
-            fittedName);
+                new Num.Vector4(
+                    reverseColor.X,
+                    reverseColor.Y,
+                    reverseColor.Z,
+                    selected || hovered ? 1f : 0.78f)),
+            32,
+            1.2f +
+            Clamp01(node.Pair.Reverse.Intensity) *
+            2.2f);
 
-        Num.Vector2 center =
-            new(
-                (min.X + max.X) * 0.5f,
-                min.Y + 67f);
-        float radius =
-            Math.Max(
-                25f,
-                Math.Min(
-                    34f,
-                    width * 0.20f));
-
+        // Forward relationship is the semantic zone and also the lower arc, so the node remains
+        // legible if it is ever dragged away from its group in a future layout editor.
         DrawArc(
             draw,
-            center,
-            radius,
-            (float)(Math.PI * 0.5),
-            (float)(Math.PI * 1.5),
-            1f,
-            new Num.Vector4(0.18f, 0.22f, 0.28f, 0.70f),
-            3f);
-        DrawArc(
-            draw,
-            center,
-            radius,
-            (float)(-Math.PI * 0.5),
-            (float)(Math.PI * 0.5),
-            1f,
-            new Num.Vector4(0.18f, 0.22f, 0.28f, 0.70f),
-            3f);
-
-        DrawArc(
-            draw,
-            center,
-            radius,
-            (float)(Math.PI * 0.5),
-            (float)(Math.PI * 1.5),
-            Clamp01(pair.Forward.Intensity),
+            node.Center,
+            half - 4f,
+            0f,
+            (float)Math.PI,
+            Clamp01(node.Pair.Forward.Intensity),
             forwardColor,
-            3.4f + Clamp01(pair.Forward.Intensity) * 2f);
+            2.2f +
+            Clamp01(node.Pair.Forward.Intensity) *
+            1.8f);
 
-        DrawArc(
+        WorldCreatureCatalogPicker.DrawInlineIcon(
             draw,
-            center,
-            radius,
-            (float)(-Math.PI * 0.5),
-            (float)(Math.PI * 0.5),
-            Clamp01(pair.Reverse.Intensity),
-            reverseColor,
-            3.4f + Clamp01(pair.Reverse.Intensity) * 2f);
+            node.Pair.Row.CreatureType,
+            min + new Num.Vector2(
+                size * 0.16f,
+                size * 0.13f),
+            new Num.Vector2(
+                size * 0.68f,
+                size * 0.68f));
 
-        DrawCreatureSigil(
-            draw,
-            center,
-            pair.Row?.CreatureType ?? string.Empty,
-            selected);
-
-        DrawRelationGlyph(
-            draw,
-            center + new Num.Vector2(-radius - 17f, 13f),
-            pair.ForwardFamily,
-            forwardColor,
-            11f);
-        DrawRelationGlyph(
-            draw,
-            center + new Num.Vector2(radius + 17f, 13f),
-            pair.ReverseFamily,
-            reverseColor,
-            11f);
-
-        DrawIntensityTick(
-            draw,
-            new Num.Vector2(min.X + 12f, max.Y - 13f),
-            Math.Max(24f, width * 0.28f),
-            pair.Forward.Intensity,
-            forwardColor);
-        DrawIntensityTick(
-            draw,
-            new Num.Vector2(max.X - 12f, max.Y - 13f),
-            -Math.Max(24f, width * 0.28f),
-            pair.Reverse.Intensity,
-            reverseColor);
-
-        if (pair.Asymmetric)
+        if (node.Pair.Asymmetric)
         {
             DrawSplitMarker(
                 draw,
                 new Num.Vector2(
-                    center.X,
-                    max.Y - 12f),
+                    max.X - 6f,
+                    min.Y + 6f),
                 forwardColor,
                 reverseColor);
         }
 
-        if (pair.Changed)
+        if (node.Pair.Changed)
         {
-            draw.AddRectFilled(
-                max - new Num.Vector2(11f, 11f),
-                max - new Num.Vector2(5f, 5f),
+            draw.AddCircleFilled(
+                new Num.Vector2(
+                    min.X + 6f,
+                    min.Y + 6f),
+                2.8f,
                 ImGui.GetColorU32(
-                    new Num.Vector4(0.35f, 0.82f, 1f, 0.96f)),
-                1f);
+                    new Num.Vector4(0.38f, 0.82f, 1f, 1f)),
+                12);
         }
 
         if (selected)
         {
-            bool forwardSelected =
-                snapshot.SelectedDirection ==
-                EditorRelationshipDirection.PrimaryToOther;
-            if (forwardSelected)
-            {
-                draw.AddRectFilled(
-                    min + new Num.Vector2(1f, 10f),
-                    new Num.Vector2(min.X + 4f, max.Y - 10f),
-                    ImGui.GetColorU32(forwardColor),
-                    1f);
-            }
-            else
-            {
-                draw.AddRectFilled(
-                    new Num.Vector2(max.X - 4f, min.Y + 10f),
-                    max - new Num.Vector2(1f, 10f),
-                    ImGui.GetColorU32(reverseColor),
-                    1f);
-            }
+            draw.AddCircle(
+                node.Center,
+                half + 3f,
+                ImGui.GetColorU32(
+                    new Num.Vector4(0.50f, 0.84f, 1f, 1f)),
+                32,
+                2f);
         }
 
-        if (clicked &&
-            pair.Row != null)
+        if (clicked)
         {
-            Num.Vector2 mouse =
-                ImGui.GetIO().MousePos;
-            EditorRelationshipDirection direction =
-                mouse.X < center.X
-                    ? EditorRelationshipDirection.PrimaryToOther
-                    : EditorRelationshipDirection.OtherToPrimary;
-
             RelationshipEditorCommandQueue.Enqueue(
                 new RelationshipEditorCommand(
                     RelationshipEditorCommandKind.SelectPair,
-                    other: pair.Row.CreatureType,
-                    direction: direction));
+                    other: node.Pair.Row.CreatureType,
+                    direction: EditorRelationshipDirection.PrimaryToOther));
         }
 
         if (hovered)
-            DevToolTooltip.Show(BuildPairTooltip(snapshot, pair));
+        {
+            DevToolTooltip.Show(
+                BuildPairTooltip(
+                    snapshot,
+                    node.Pair));
+        }
+    }
+
+    private static void DrawBidirectionalConnection(
+        ImDrawListPtr draw,
+        Num.Vector2 primary,
+        Num.Vector2 target,
+        PairPresentation pair,
+        bool emphasized,
+        bool deEmphasized)
+    {
+        Num.Vector2 delta =
+            target -
+            primary;
+        float length =
+            (float)Math.Sqrt(
+                delta.X * delta.X +
+                delta.Y * delta.Y);
+        if (length < 4f)
+            return;
+
+        Num.Vector2 direction =
+            delta /
+            length;
+        Num.Vector2 normal =
+            new(
+                -direction.Y,
+                direction.X);
+
+        float inset =
+            58f;
+        Num.Vector2 start =
+            primary +
+            direction * inset;
+        Num.Vector2 end =
+            target -
+            direction *
+            Math.Max(
+                18f,
+                Math.Min(
+                    pair == null
+                        ? 18f
+                        : 32f,
+                    length * 0.12f));
+
+        DrawDirectionalRail(
+            draw,
+            start + normal * 3.2f,
+            end + normal * 3.2f,
+            pair.ForwardFamily,
+            pair.Forward.Intensity,
+            true,
+            emphasized,
+            deEmphasized);
+
+        DrawDirectionalRail(
+            draw,
+            end - normal * 3.2f,
+            start - normal * 3.2f,
+            pair.ReverseFamily,
+            pair.Reverse.Intensity,
+            false,
+            emphasized,
+            deEmphasized);
+    }
+
+    private static void DrawDirectionalRail(
+        ImDrawListPtr draw,
+        Num.Vector2 from,
+        Num.Vector2 to,
+        RelationFamily family,
+        float intensity,
+        bool forward,
+        bool emphasized,
+        bool deEmphasized)
+    {
+        float strength =
+            Clamp01(intensity);
+        Num.Vector4 color =
+            GetFamilyColor(family);
+
+        float alpha =
+            deEmphasized
+                ? 0.045f
+                : emphasized
+                    ? 0.95f
+                    : 0.10f + strength * 0.16f;
+
+        uint packed =
+            ImGui.GetColorU32(
+                new Num.Vector4(
+                    color.X,
+                    color.Y,
+                    color.Z,
+                    alpha));
+
+        float thickness =
+            emphasized
+                ? 2.0f + strength * 3.4f
+                : 0.8f + strength * 1.5f;
+
+        draw.AddLine(
+            from,
+            to,
+            packed,
+            thickness);
+
+        Num.Vector2 delta =
+            to - from;
+        float length =
+            (float)Math.Sqrt(
+                delta.X * delta.X +
+                delta.Y * delta.Y);
+        if (length < 8f)
+            return;
+
+        Num.Vector2 dir =
+            delta /
+            length;
+        Num.Vector2 normal =
+            new(
+                -dir.Y,
+                dir.X);
+
+        float t =
+            forward
+                ? 0.67f
+                : 0.60f;
+        Num.Vector2 tip =
+            from +
+            delta * t;
+        float arrow =
+            emphasized
+                ? 7f
+                : 4.5f;
+
+        draw.AddLine(
+            tip,
+            tip -
+            dir * arrow +
+            normal * arrow * 0.55f,
+            packed,
+            thickness);
+        draw.AddLine(
+            tip,
+            tip -
+            dir * arrow -
+            normal * arrow * 0.55f,
+            packed,
+            thickness);
+    }
+
+    private static bool PointInRect(
+        Num.Vector2 point,
+        Num.Vector2 min,
+        Num.Vector2 max) =>
+        point.X >= min.X &&
+        point.X <= max.X &&
+        point.Y >= min.Y &&
+        point.Y <= max.Y;
+
+    private static void DrawInspectorPairHeader(
+        string primary,
+        string other,
+        string otherDisplay)
+    {
+        float width =
+            Math.Max(
+                180f,
+                ImGui.GetContentRegionAvail().X);
+        const float height = 62f;
+
+        Num.Vector2 min =
+            ImGui.GetCursorScreenPos();
+        ImGui.Dummy(
+            new Num.Vector2(
+                width,
+                height));
+        Num.Vector2 max =
+            min +
+            new Num.Vector2(
+                width,
+                height);
+
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+        draw.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.045f, 0.06f, 0.085f, 0.82f)),
+            6f);
+
+        WorldCreatureCatalogPicker.DrawInlineIcon(
+            draw,
+            primary,
+            min + new Num.Vector2(8f, 8f),
+            new Num.Vector2(44f, 44f));
+
+        WorldCreatureCatalogPicker.DrawInlineIcon(
+            draw,
+            other,
+            new Num.Vector2(max.X - 52f, min.Y + 8f),
+            new Num.Vector2(44f, 44f));
+
+        Num.Vector2 lineStart =
+            new(min.X + 62f, min.Y + 31f);
+        Num.Vector2 lineEnd =
+            new(max.X - 62f, min.Y + 31f);
+
+        draw.AddLine(
+            lineStart,
+            lineEnd,
+            ImGui.GetColorU32(
+                new Num.Vector4(0.48f, 0.58f, 0.72f, 0.58f)),
+            1.4f);
+
+        float mid =
+            (lineStart.X + lineEnd.X) * 0.5f;
+        draw.AddLine(
+            new Num.Vector2(mid + 8f, min.Y + 31f),
+            new Num.Vector2(mid + 2f, min.Y + 27f),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.64f, 0.74f, 0.88f, 0.92f)),
+            1.5f);
+        draw.AddLine(
+            new Num.Vector2(mid + 8f, min.Y + 31f),
+            new Num.Vector2(mid + 2f, min.Y + 35f),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.64f, 0.74f, 0.88f, 0.92f)),
+            1.5f);
+
+        string centerLabel =
+            FitText(
+                otherDisplay,
+                Math.Max(
+                    60f,
+                    width - 150f));
+        Num.Vector2 textSize =
+            ImGui.CalcTextSize(centerLabel);
+        draw.AddText(
+            new Num.Vector2(
+                min.X +
+                width * 0.5f -
+                textSize.X * 0.5f,
+                min.Y + 8f),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.92f, 0.95f, 1f, 1f)),
+            centerLabel);
     }
 
     private static void DrawHeatmap(EditorRelationshipPresentationSnapshot snapshot)
@@ -1095,7 +1675,7 @@ internal static class RelationshipEditorView
                 new Num.Vector2(
                     0f,
                     172f),
-                ImGuiChildFlags.Borders))
+                true))
         {
             float headerY =
                 ImGui.GetCursorScreenPos().Y +
@@ -1282,32 +1862,6 @@ internal static class RelationshipEditorView
         }
 
         return null;
-    }
-
-    private static void EnsureCreatureRows(string[] creatures)
-    {
-        if (ReferenceEquals(
-                projectedCreatureTypes,
-                creatures))
-            return;
-
-        DevToolExplorerListItem[] rows =
-            new DevToolExplorerListItem[creatures.Length];
-
-        for (int i = 0; i < creatures.Length; i++)
-        {
-            string type =
-                creatures[i] ?? string.Empty;
-            rows[i] =
-                new DevToolExplorerListItem(
-                    "RelationshipPrimary:" + type,
-                    type);
-        }
-
-        projectedCreatureTypes =
-            creatures;
-        projectedCreatureRows =
-            rows;
     }
 
     private static void EnsureRows(
