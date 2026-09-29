@@ -569,6 +569,16 @@ require("internal static bool TryCreateExternalObject" in host and
         "RestorePlacedObjectList" in host and
         "DryCycle_Headless_Object_Creation" in host,
         "Headless external object creation must keep a rollback-capable isolated creation boundary.")
+
+create_start = host.find("internal static bool TryCreateExternalObject")
+create_end = host.find("internal static LegacyControlSnapshot[] Capture", create_start)
+require(create_start >= 0 and create_end > create_start,
+        "Could not isolate headless external object creation.")
+create_external = host[create_start:create_end]
+restore_owner_pos = create_external.rfind("session.Owner.activePage = previous;")
+cleanup_pos = create_external.rfind("QuarantineVisualTree(page, quarantine);")
+require(restore_owner_pos >= 0 and cleanup_pos > restore_owner_pos,
+        "Temporary ObjectsPage ownership must be restored before best-effort visual cleanup can throw.")
 require("else if (!externalObject)" in presentation and
         "External selections retain one quarantined proof host" in presentation and
         "HeadlessObjectCompatibilityHost.Release(session);" in presentation,
