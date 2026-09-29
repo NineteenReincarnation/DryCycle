@@ -61,7 +61,7 @@ internal readonly struct DevToolPersistedWindowGroup
 /// </summary>
 internal static class DevToolUserSettingsStore
 {
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
     private const string FileName = "DryCycle.DevTool.UI.xml";
     private static readonly object Sync = new();
     private static readonly Dictionary<string, DevToolPersistedWindowLayout> Windows =
@@ -159,6 +159,17 @@ internal static class DevToolUserSettingsStore
                             // wide. Drop only that saved geometry once so existing installs receive
                             // the new compact default; subsequent developer resizing remains sticky.
                             Windows.Remove("SoundWorkspace");
+                            dirty = true;
+                            saveAfterUtc = DateTime.UtcNow;
+                        }
+
+                        if (storedVersion < 3)
+                        {
+                            // World Workspace moved from a right-offset editor window to the
+                            // full-width canvas-first composition below the persistent top chrome.
+                            // Clear only its previous geometry once; future developer resizing stays
+                            // sticky through the same custom window-layout store.
+                            Windows.Remove("WorldWorkspace");
                             dirty = true;
                             saveAfterUtc = DateTime.UtcNow;
                         }

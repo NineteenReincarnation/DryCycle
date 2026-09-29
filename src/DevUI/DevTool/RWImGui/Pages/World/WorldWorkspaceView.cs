@@ -119,8 +119,8 @@ internal static class WorldWorkspaceView
     private static string selectedConnectionId = string.Empty;
     private static int lastObservedRoomIndex = -1;
 
-    private static float explorerWidth = 310f;
-    private static float inspectorWidth = 344f;
+    private static float explorerWidth = 244f;
+    private static float inspectorWidth = 320f;
     private static bool draggingExplorerSplitter;
     private static bool draggingInspectorSplitter;
     private static float explorerSplitterReveal;
@@ -205,15 +205,56 @@ internal static class WorldWorkspaceView
     {
         EditorMapPresentationSnapshot snapshot = MapEditorPresentationHub.Current;
 
-        float defaultX = 188f;
-        float defaultY = 8f;
-        float defaultWidth = Math.Max(720f, display.X - defaultX - 10f);
-        float defaultHeight = Math.Max(430f, display.Y - defaultY - 10f);
-        ImGui.SetNextWindowPos(new Num.Vector2(defaultX, defaultY), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
+        // Expanded World Workspace is a canvas-first surface: leave only a narrow outer gutter and
+        // start below the persistent top status/navigation chrome. The window remains movable and
+        // resizable; these values are only the migrated/default geometry.
+        const float outerGutter = 6f;
+        float topInset =
+            Math.Max(
+                68f,
+                64f * Math.Max(
+                    0.92f,
+                    Math.Min(
+                        1.28f,
+                        DevToolUiSettings.UiScale)));
+        float defaultX =
+            outerGutter;
+        float defaultY =
+            Math.Min(
+                Math.Max(
+                    outerGutter,
+                    display.Y - 430f),
+                topInset);
+        float defaultWidth =
+            Math.Max(
+                720f,
+                display.X - outerGutter * 2f);
+        float defaultHeight =
+            Math.Max(
+                430f,
+                display.Y - defaultY - outerGutter);
+
+        ImGui.SetNextWindowPos(
+            new Num.Vector2(
+                defaultX,
+                defaultY),
+            ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(
+            new Num.Vector2(
+                defaultWidth,
+                defaultHeight),
+            ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(700f, 420f),
-            new Num.Vector2(Math.Max(700f, display.X - 8f), Math.Max(420f, display.Y - 8f)));
+            new Num.Vector2(
+                700f,
+                420f),
+            new Num.Vector2(
+                Math.Max(
+                    700f,
+                    display.X - outerGutter * 2f),
+                Math.Max(
+                    420f,
+                    display.Y - outerGutter * 2f)));
         // Cartography uses the same translucent workspace surface as World Map. Its canvas
         // child is already transparent, so forcing the parent window to alpha 1 made the editor
         // look like an opaque black sheet even though exported room/map backgrounds stay unchanged.
@@ -222,6 +263,7 @@ internal static class WorldWorkspaceView
         if (!ImGui.Begin(
                 DevToolUiSettings.T("世界工作区###DevToolWorldWorkspace", "World Workspace###DevToolWorldWorkspace"),
                 ImGuiWindowFlags.NoCollapse |
+                ImGuiWindowFlags.NoSavedSettings |
                 ImGuiWindowFlags.NoBringToFrontOnFocus))
         {
             ImGui.End();
@@ -443,7 +485,7 @@ internal static class WorldWorkspaceView
         float reserved = (showExplorer ? splitter : 0f) + (showInspector ? splitter : 0f);
         float minCenter = 400f;
         float maxSideSpace = Math.Max(0f, available.X - minCenter - reserved);
-        float left = showExplorer ? Math.Max(260f, Math.Min(explorerWidth, maxSideSpace * 0.46f)) : 0f;
+        float left = showExplorer ? Math.Max(220f, Math.Min(explorerWidth, maxSideSpace * 0.42f)) : 0f;
         WorldInspectorReadability.NormalizeInspectorWidth(ref inspectorWidth);
         float right = showInspector ? Math.Max(238f, Math.Min(inspectorWidth, Math.Max(0f, maxSideSpace - left))) : 0f;
 
@@ -461,7 +503,7 @@ internal static class WorldWorkspaceView
         if (showExplorer && showInspector && left + right > maxSideSpace)
         {
             float overflow = left + right - maxSideSpace;
-            float leftGive = Math.Min(Math.Max(0f, left - 260f), overflow * 0.5f);
+            float leftGive = Math.Min(Math.Max(0f, left - 220f), overflow * 0.5f);
             left -= leftGive;
             overflow -= leftGive;
             right -= Math.Min(Math.Max(0f, right - 238f), overflow);
@@ -484,8 +526,8 @@ internal static class WorldWorkspaceView
                 ref explorerSplitterReveal,
                 +1f,
                 available.Y,
-                260f,
-                450f);
+                220f,
+                420f);
             ImGui.SameLine(0f, 0f);
         }
 
