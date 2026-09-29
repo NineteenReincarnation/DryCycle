@@ -5,6 +5,7 @@ using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
+using DryCycle.DevUI.DevTool.Map;
 using DryCycle.DevUI.DevTool.Map.PlayerMap;
 using DryCycle.DevUI.DevTool.Map.Cartography;
 using DryCycle.DevUI.DevTool.Objects;
