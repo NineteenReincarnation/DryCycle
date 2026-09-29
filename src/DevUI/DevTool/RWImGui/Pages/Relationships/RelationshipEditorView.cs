@@ -753,6 +753,22 @@ internal static class RelationshipEditorView
         }
     }
 
+    private static int CountFamily(RelationFamily family)
+    {
+        int count = 0;
+        for (int i = 0; i < projectedVisibleRows.Length; i++)
+        {
+            PairPresentation pair = projectedVisibleRows[i];
+            if (pair != null &&
+                pair.ForwardFamily == family)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     private static void GetFamilyRegion(
         Num.Vector2 origin,
         Num.Vector2 size,
@@ -1675,7 +1691,7 @@ internal static class RelationshipEditorView
                 new Num.Vector2(
                     0f,
                     172f),
-                true))
+                ImGuiChildFlags.Borders))
         {
             float headerY =
                 ImGui.GetCursorScreenPos().Y +
