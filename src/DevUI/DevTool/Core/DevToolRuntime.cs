@@ -890,7 +890,7 @@ public sealed class EditorSession
         // protocol can still coexist with a custom interactive control surface.
         if (GameDefinedExtEnumCatalog.Contains(
                 typeof(PlacedObject.Type),
-                selected.type.value))
+                selected.type.value) || ManagedObjectRegistration.HasStandardRepresentation(selected))
             return false;
 
         return HeadlessObjectCompatibilityHost.HasCompatibilityGap(

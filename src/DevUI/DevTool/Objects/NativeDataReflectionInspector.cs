@@ -177,6 +177,34 @@ internal sealed class NativeDataReflectionInspector :
         }
     }
 
+    internal static IEnumerable<EditorPropertySnapshot> CaptureAdditionalFields(
+        PlacedObject target, Type protocolBase, ISet<string> managedKeys)
+    {
+        if (target?.data == null) yield break;
+        Schema schema = Schemas.GetOrAdd(target.data.GetType(), BuildSchema);
+        foreach (MemberBinding binding in schema.Members)
+        {
+            // Only supplement fields introduced above the managed protocol. Framework bookkeeping,
+            // computed properties and managed-backed members keep their original owning adapter.
+            Type declaring = binding.Field?.DeclaringType;
+            if (declaring == null || declaring == protocolBase ||
+                !protocolBase.IsAssignableFrom(declaring) || managedKeys.Contains(binding.MemberName))
+                continue;
+
+            EditorPropertySnapshot property;
+            try { property = CaptureMember(binding, target.data); }
+            catch (Exception error)
+            {
+                property = new EditorPropertySnapshot
+                {
+                    Key = binding.Key, DisplayName = binding.DisplayName, Group = "Compatibility",
+                    Kind = EditorPropertyKind.ReadOnly, StringValue = "<read failed: " + error.Message + ">"
+                };
+            }
+            yield return property;
+        }
+    }
+
     public ObjectInspectorCoverage GetCoverage(PlacedObject target)
     {
         PlacedObject.Data data = target?.data;

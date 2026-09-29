@@ -171,7 +171,9 @@ public static partial class EditorPresentationHub
             : ObjectInspectorCoverage.Complete();
 
         bool representationGap = false;
-        if (singleSelection && externalObject)
+        bool inspectOriginalRepresentation = singleSelection && externalObject &&
+            (!coverage.IsComplete || !ManagedObjectRegistration.HasStandardRepresentation(selected));
+        if (inspectOriginalRepresentation)
         {
             representationGap = HeadlessObjectCompatibilityHost.HasCompatibilityGap(
                 session,
@@ -210,7 +212,7 @@ public static partial class EditorPresentationHub
                 // only while a concrete inspector/gizmo compatibility gap still needs it.
                 legacyControls = HeadlessObjectCompatibilityHost.Capture(session, selected);
             }
-            else if (!externalObject)
+            else if (!inspectOriginalRepresentation)
             {
                 // External selections retain one quarantined proof host for the selection lifetime,
                 // even when every current control/gizmo is natively covered. It has no visible page
@@ -237,6 +239,18 @@ public static partial class EditorPresentationHub
                     session,
                     selected,
                     selectedIndex));
+        }
+
+        string compatibilityFailure = HeadlessObjectCompatibilityHost.FailureMessage(session, selected);
+        if (!string.IsNullOrEmpty(compatibilityFailure))
+        {
+            Array.Resize(ref properties, properties.Length + 1);
+            properties[properties.Length - 1] = new EditorPropertySnapshot
+            {
+                Key = "__compatibilityFailure", DisplayName = "Compatibility", Group = "Compatibility",
+                Kind = EditorPropertyKind.ReadOnly,
+                StringValue = "Original object controls unavailable: " + compatibilityFailure
+            };
         }
 
         return new EditorInspectorSnapshot

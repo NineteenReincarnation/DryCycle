@@ -4,6 +4,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using DryCycle.DevUI.DevTool.Compatibility;
 using RWCustom;
 using UnityEngine;
 
@@ -28,6 +30,7 @@ internal sealed class ManagedObjectProtocolInspector :
         internal readonly MethodInfo GetValue;
         internal readonly MethodInfo SetValue;
         internal readonly bool Valid;
+        internal readonly ConcurrentDictionary<Type, MethodInfo> Setters = new();
 
         internal DataSchema(
             MemberInfo fieldsMember,
@@ -35,7 +38,7 @@ internal sealed class ManagedObjectProtocolInspector :
             MethodInfo setValue)
         {
             FieldsMember = fieldsMember;
-            GetValue = getValue;
+            GetValue = getValue?.MakeGenericMethod(typeof(object));
             SetValue = setValue;
             Valid = fieldsMember != null && getValue != null && setValue != null;
         }
@@ -60,9 +63,22 @@ internal sealed class ManagedObjectProtocolInspector :
         internal bool InspectorSupported;
         internal bool GizmoSupported = true;
         internal bool IsIntVector;
+        internal int ArrayIndex = -1;
+        internal Type StorageType;
+
+        internal Binding WithValue(object value)
+        {
+            Binding copy = (Binding)MemberwiseClone();
+            copy.CurrentValue = value;
+            return copy;
+        }
     }
 
     private static readonly ConcurrentDictionary<Type, DataSchema> Schemas = new();
+    // Many registrations share the same ManagedData CLR type but have different descriptors.
+    // Cache immutable metadata by descriptor identity, never by object type or current values.
+    private static ConditionalWeakTable<object, Binding> DescriptorBindings = new();
+    private static ConditionalWeakTable<object, HashSet<string>> FailedFields = new();
 
     public bool CanInspect(PlacedObject target)
     {
@@ -95,19 +111,31 @@ internal sealed class ManagedObjectProtocolInspector :
         for (int i = 0; i < bindings.Count; i++)
             result.Add(Capture(bindings[i]));
 
-        string serialized;
-        try { serialized = data.ToString() ?? string.Empty; }
-        catch { serialized = "<serialization failed>"; }
+        HashSet<string> managedKeys = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < bindings.Count; i++) managedKeys.Add(bindings[i].RawKey);
+        result.AddRange(NativeDataReflectionInspector.CaptureAdditionalFields(
+            target, schema.FieldsMember.DeclaringType, managedKeys));
 
-        result.Add(new EditorPropertySnapshot
+        // Serializing an entire third-party model is not an inspector render operation.
+        if (DevUiDiagnosticsPolicy.Enabled)
         {
-            Key = "__managedSerialized",
-            DisplayName = "Serialized Data",
-            Group = "Compatibility",
-            Source = "Managed object protocol",
-            Kind = EditorPropertyKind.ReadOnly,
-            StringValue = serialized
-        });
+            string serialized;
+            try { serialized = data.ToString() ?? string.Empty; }
+            catch (Exception error)
+            {
+                ReportFieldFailure(data, "serialization", error);
+                serialized = "<serialization failed: " + RootMessage(error) + ">";
+            }
+            result.Add(new EditorPropertySnapshot
+            {
+                Key = "__managedSerialized",
+                DisplayName = "Serialized Data",
+                Group = "Compatibility",
+                Source = "Managed object protocol",
+                Kind = EditorPropertyKind.ReadOnly,
+                StringValue = serialized
+            });
+        }
         return result;
     }
 
@@ -119,6 +147,9 @@ internal sealed class ManagedObjectProtocolInspector :
         PlacedObject.Data data = target?.data;
         if (data == null || string.IsNullOrEmpty(key))
             return false;
+
+        if (key.StartsWith("native.", StringComparison.Ordinal))
+            return NativeDataReflectionInspector.Instance.TrySetValue(target, key, value);
 
         DataSchema schema = Schemas.GetOrAdd(data.GetType(), BuildSchema);
         if (!schema.Valid ||
@@ -133,7 +164,19 @@ internal sealed class ManagedObjectProtocolInspector :
             if (next == null)
                 return false;
 
-            MethodInfo setter = schema.SetValue.MakeGenericMethod(binding.ValueType);
+            Type storageType = binding.StorageType ?? binding.ValueType;
+            if (binding.ArrayIndex >= 0)
+            {
+                if (ReadManagedValue(data, schema, binding.RawKey) is not Array current ||
+                    binding.ArrayIndex >= current.Length)
+                    return false;
+                // Some frameworks reuse their default array across instances. Never mutate it,
+                // another object's data or a history snapshot through a shared reference.
+                Array copy = (Array)current.Clone();
+                copy.SetValue(next, binding.ArrayIndex);
+                next = copy;
+            }
+            MethodInfo setter = schema.Setters.GetOrAdd(storageType, type => schema.SetValue.MakeGenericMethod(type));
             setter.Invoke(data, new[] { binding.RawKey, next });
             return true;
         }
@@ -141,7 +184,7 @@ internal sealed class ManagedObjectProtocolInspector :
         {
             Plugin.Logger?.LogWarning(
                 "DevTool managed object mutation failed for " +
-                binding.DisplayName + ": " + RootMessage(error));
+                binding.DisplayName + ": " + error);
             return false;
         }
     }
@@ -262,7 +305,12 @@ internal sealed class ManagedObjectProtocolInspector :
         return false;
     }
 
-    internal static void ClearSchemaCache() => Schemas.Clear();
+    internal static void ClearSchemaCache()
+    {
+        Schemas.Clear();
+        DescriptorBindings = new ConditionalWeakTable<object, Binding>();
+        FailedFields = new ConditionalWeakTable<object, HashSet<string>>();
+    }
 
     private static DataSchema BuildSchema(Type dataType)
     {
@@ -311,16 +359,51 @@ internal sealed class ManagedObjectProtocolInspector :
                 if (string.IsNullOrWhiteSpace(rawKey))
                     continue;
 
-                object current = ReadManagedValue(data, schema, rawKey);
-                object defaultValue = ReadNamedMember(descriptor, "DefaultValue");
-                Type valueType = current?.GetType() ?? defaultValue?.GetType();
+                try
+                {
+                    object current = ReadManagedValue(data, schema, rawKey);
+                    if (!DescriptorBindings.TryGetValue(descriptor, out Binding metadata))
+                    {
+                        object defaultValue = ReadNamedMember(descriptor, "DefaultValue");
+                        metadata = BuildBinding(descriptor, rawKey, null,
+                            current?.GetType() ?? defaultValue?.GetType());
+                        DescriptorBindings.Add(descriptor, metadata);
+                    }
 
-                Binding binding = BuildBinding(
-                    descriptor,
-                    rawKey.Trim(),
-                    current ?? defaultValue,
-                    valueType);
-                bindings.Add(binding);
+                    if (current is Vector2[] vectors)
+                    {
+                        // The representation remains authoritative for chain, polygon, driven and
+                        // custom curve geometry. The inspector can still edit every authored point.
+                        bool includeParent = ReadNamedMember(descriptor, "IncludeParent") is bool include && include;
+                        for (int index = includeParent ? 1 : 0; index < vectors.Length; index++)
+                        {
+                            Binding point = metadata.WithValue(vectors[index]);
+                            point.Key += "[" + index + "]";
+                            point.DisplayName += " " + (index + 1);
+                            point.ArrayIndex = index;
+                            point.StorageType = typeof(Vector2[]);
+                            point.ValueType = typeof(Vector2);
+                            point.Kind = EditorPropertyKind.Vector2;
+                            point.InspectorSupported = true;
+                            point.GizmoSupported = false;
+                            bindings.Add(point);
+                        }
+                        if (vectors.Length == 0)
+                            bindings.Add(metadata.WithValue(current));
+                    }
+                    else
+                        bindings.Add(metadata.WithValue(current));
+                }
+                catch (Exception error)
+                {
+                    ReportFieldFailure(data, rawKey, error);
+                    bindings.Add(new Binding
+                    {
+                        RawKey = rawKey, Key = "managed." + rawKey, DisplayName = Humanize(rawKey),
+                        Kind = EditorPropertyKind.ReadOnly, GizmoSupported = false,
+                        CurrentValue = "<read failed: " + RootMessage(error) + ">"
+                    });
+                }
             }
 
             return true;
@@ -328,10 +411,16 @@ internal sealed class ManagedObjectProtocolInspector :
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning(
-                "DevTool managed object protocol capture failed: " + RootMessage(error));
+                "DevTool managed object protocol capture failed: " + error);
             bindings.Clear();
             return false;
         }
+    }
+
+    private static void ReportFieldFailure(object data, string key, Exception error)
+    {
+        if (FailedFields.GetValue(data, _ => new HashSet<string>()).Add(key))
+            Plugin.Logger?.LogWarning("DevTool managed object field '" + key + "' failed: " + error);
     }
 
     private static Binding BuildBinding(
@@ -757,8 +846,7 @@ internal sealed class ManagedObjectProtocolInspector :
         DataSchema schema,
         string key)
     {
-        MethodInfo getter = schema.GetValue.MakeGenericMethod(typeof(object));
-        return getter.Invoke(data, new object[] { key });
+        return schema.GetValue.Invoke(data, new object[] { key });
     }
 
     private static object ReadMember(MemberInfo member, object target) =>

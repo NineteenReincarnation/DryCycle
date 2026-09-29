@@ -25,6 +25,10 @@ internal static class HeadlessObjectCompatibilityHost
         internal ObjectsPage Page;
         internal PlacedObjectRepresentation Representation;
         internal PlacedObject Target;
+        internal PlacedObject.Data Data;
+        internal bool Constructing;
+        internal Exception Failure;
+        internal readonly List<DevUINode> OwnedNodes = new();
         internal readonly FContainer QuarantineContainer = new();
         internal LegacyControlSnapshot[] CachedControls = Array.Empty<LegacyControlSnapshot>();
         internal string ModelFingerprint = string.Empty;
@@ -70,11 +74,14 @@ internal static class HeadlessObjectCompatibilityHost
         bool temporary = page == null;
         Page previous = session.Owner.activePage;
         FContainer quarantine = temporary ? new FContainer() : null;
+        List<DevUINode> ownedNodes = new();
+        HeadlessObjectConstructionScope construction = null;
 
         try
         {
             if (temporary)
             {
+                construction = new HeadlessObjectConstructionScope(session.Owner, ownedNodes, quarantine);
                 page = new ObjectsPage(
                     session.Owner,
                     "DryCycle_Headless_Object_Creation",
@@ -107,11 +114,12 @@ internal static class HeadlessObjectCompatibilityHost
             created = null;
             Plugin.Logger?.LogWarning(
                 "DevTool external object compatibility creation failed for '" +
-                (type.value ?? string.Empty) + "': " + error.Message);
+                (type.value ?? string.Empty) + "': " + error);
             return false;
         }
         finally
         {
+            construction?.Dispose();
             if (temporary && page != null)
             {
                 // Presentation ownership must be restored before any best-effort cleanup. A custom
@@ -133,6 +141,8 @@ internal static class HeadlessObjectCompatibilityHost
                         "DevTool headless object creation cleanup failed: " + error.Message);
                 }
             }
+            if (temporary)
+                ClearQuarantine(quarantine);
         }
     }
 
@@ -238,7 +248,9 @@ internal static class HeadlessObjectCompatibilityHost
         State state = Acquire(session, target);
         if (state?.Representation == null)
         {
-            example = "headless representation unavailable";
+            example = state?.Failure == null
+                ? "headless representation unavailable"
+                : state.Failure.GetBaseException().Message;
             return true;
         }
 
@@ -355,8 +367,20 @@ internal static class HeadlessObjectCompatibilityHost
         if (!ReferenceEquals(state.Target, target))
             return;
 
-        DisposeState(state);
-        states.Remove(session);
+        // A value change invalidates snapshots, not the entire third-party control tree. Recreating
+        // a page on every drag tick is expensive and discards representation-owned state.
+        if (state.Representation != null && ReferenceEquals(state.Data, target.data))
+        {
+            state.ControlsDirty = true;
+            state.CompatibilityDirty = true;
+            state.ModelFingerprint = string.Empty;
+            state.LastModelAuditFrame = int.MinValue;
+        }
+        else
+        {
+            DisposeState(state);
+            states.Remove(session);
+        }
     }
 
     internal static void Release(EditorSession session)
@@ -372,23 +396,32 @@ internal static class HeadlessObjectCompatibilityHost
     {
         Release(DevToolSessionHub.Current);
         states = new ConditionalWeakTable<EditorSession, State>();
+        HeadlessObjectConstructionScope.Reset();
+        ManagedObjectRegistration.Reset();
     }
 
     private static State Acquire(EditorSession session, PlacedObject target)
     {
         State state = states.GetValue(session, _ => new State());
-        if (ReferenceEquals(state.Target, target) && state.Page != null)
+        if (ReferenceEquals(state.Target, target) && ReferenceEquals(state.Data, target.data) &&
+            (state.Page != null || state.Failure != null || state.Constructing))
             return state;
 
         DisposeState(state);
+        state.Target = target;
+        state.Data = target.data;
+        state.Constructing = true;
 
         try
         {
+            using HeadlessObjectConstructionScope construction = new(
+                session.Owner, state.OwnedNodes, state.QuarantineContainer);
             ObjectsPage page = new(
                 session.Owner,
                 "DryCycle_Headless_Object_Compatibility",
                 null,
                 "Objects");
+            state.Page = page;
 
             Page previous = session.Owner.activePage;
             try
@@ -411,11 +444,7 @@ internal static class HeadlessObjectCompatibilityHost
 
             PlacedObjectRepresentation representation = FindRepresentation(page, target);
             if (representation == null)
-            {
-                try { page.ClearSprites(); }
-                catch { }
-                return null;
-            }
+                throw new InvalidOperationException("The original object factory returned no representation.");
 
             state.Page = page;
             state.Representation = representation;
@@ -435,11 +464,26 @@ internal static class HeadlessObjectCompatibilityHost
         {
             Plugin.Logger?.LogWarning(
                 "DevTool could not materialize selected-object headless compatibility host for '" +
-                (target.type?.value ?? string.Empty) + "': " + error.Message);
+                (target.type?.value ?? string.Empty) + "': " + error);
             DisposeState(state);
-            return null;
+            // Negative caching is per selection/data instance. Repaint, coverage inspection and
+            // gizmo capture share this result. An explicit edit, reselection or new session retries.
+            state.Target = target;
+            state.Data = target.data;
+            state.Failure = error;
+            return state;
+        }
+        finally
+        {
+            state.Constructing = false;
         }
     }
+
+    internal static string FailureMessage(EditorSession session, PlacedObject target) =>
+        session != null && states.TryGetValue(session, out State state) &&
+        ReferenceEquals(state.Target, target) && state.Failure != null
+            ? state.Failure.GetBaseException().Message
+            : string.Empty;
 
     private static PlacedObject FindNewlyCreatedObject(
         List<PlacedObject> live,
@@ -523,7 +567,7 @@ internal static class HeadlessObjectCompatibilityHost
         }
     }
 
-    private static void QuarantineNodeVisuals(
+    internal static void QuarantineNodeVisuals(
         DevUINode node,
         FContainer quarantine)
     {
@@ -1018,37 +1062,30 @@ internal static class HeadlessObjectCompatibilityHost
     {
         if (state == null) return;
 
-        List<UnityEngine.GameObject> quarantinedGameObjects = new();
-        try
+        // Nodes created before a constructor failed may not be reachable from Page.
+        for (int i = 0; i < state.OwnedNodes.Count; i++)
         {
-            for (int i = 0; i < state.QuarantineContainer.GetChildCount(); i++)
+            try { QuarantineNodeVisuals(state.OwnedNodes[i], state.QuarantineContainer); }
+            catch (Exception error)
             {
-                if (state.QuarantineContainer.GetChildAt(i) is FGameObjectNode gameObjectNode &&
-                    gameObjectNode.gameObject != null)
-                    quarantinedGameObjects.Add(gameObjectNode.gameObject);
+                Plugin.Logger?.LogWarning("DevTool object compatibility node cleanup failed: " + error);
             }
         }
-        catch { }
 
         if (state.Page != null)
         {
             try { state.Page.ClearSprites(); }
-            catch { }
-        }
-
-        for (int i = 0; i < quarantinedGameObjects.Count; i++)
-        {
-            try
+            catch (Exception error)
             {
-                if (quarantinedGameObjects[i] != null)
-                    UnityEngine.Object.Destroy(quarantinedGameObjects[i]);
+                Plugin.Logger?.LogWarning("DevTool object compatibility page cleanup failed: " + error);
             }
-            catch { }
         }
 
-        try { state.QuarantineContainer.RemoveAllChildren(); }
-        catch { }
-
+        ClearQuarantine(state.QuarantineContainer);
+        state.OwnedNodes.Clear();
+        state.Data = null;
+        state.Failure = null;
+        state.Constructing = false;
         state.Page = null;
         state.Representation = null;
         state.Target = null;
@@ -1061,5 +1098,35 @@ internal static class HeadlessObjectCompatibilityHost
         state.CompatibilityDirty = true;
         state.HasUnsupportedNodes = false;
         state.UnsupportedNodeExample = string.Empty;
+    }
+
+    private static void ClearQuarantine(FContainer quarantine)
+    {
+        if (quarantine == null) return;
+
+        List<UnityEngine.GameObject> quarantinedGameObjects = new();
+        try
+        {
+            for (int i = 0; i < quarantine.GetChildCount(); i++)
+            {
+                if (quarantine.GetChildAt(i) is FGameObjectNode gameObjectNode &&
+                    gameObjectNode.gameObject != null)
+                    quarantinedGameObjects.Add(gameObjectNode.gameObject);
+            }
+        }
+        catch { }
+
+        for (int i = 0; i < quarantinedGameObjects.Count; i++)
+        {
+            try
+            {
+                if (quarantinedGameObjects[i] != null)
+                    UnityEngine.Object.Destroy(quarantinedGameObjects[i]);
+            }
+            catch { }
+        }
+
+        try { quarantine.RemoveAllChildren(); }
+        catch { }
     }
 }
