@@ -187,6 +187,16 @@ public static partial class EditorPresentationHub
             }
         }
 
+        bool needsHeadlessControls =
+            singleSelection &&
+            externalObject &&
+            (!coverage.IsComplete || representationGap);
+        bool needsHeadlessGizmo =
+            singleSelection &&
+            externalObject &&
+            (!coverage.GizmoComplete || representationGap);
+        bool needsHeadlessHost = needsHeadlessControls || needsHeadlessGizmo;
+
         LegacyControlSnapshot[] legacyControls = Array.Empty<LegacyControlSnapshot>();
         if (singleSelection)
         {
@@ -195,16 +205,19 @@ public static partial class EditorPresentationHub
                 legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
                 LegacyObjectSandbox.Release(session);
             }
-            else if (externalObject && (!coverage.IsComplete || representationGap))
+            else if (needsHeadlessControls)
             {
                 // A protocol adapter may cover every Data field while the original Representation
                 // still contains an unknown interactive node. Keep the selected-object host alive
-                // and mirror every supported control, but expose full legacy UI only as an explicit
-                // escape hatch for the remaining gap.
+                // only while a concrete inspector/gizmo compatibility gap still needs it.
                 legacyControls = LegacyObjectSandbox.Capture(session, selected);
             }
-            else if (!externalObject)
+            else if (!needsHeadlessHost)
             {
+                // HasCompatibilityGap() may temporarily materialize a quarantined Representation to
+                // prove that a third-party object is fully covered. Once that proof succeeds, retire
+                // the host immediately so complete native/protocol objects leave no legacy backend
+                // resident behind the rebuilt UI.
                 LegacyObjectSandbox.Release(session);
             }
         }
@@ -217,9 +230,7 @@ public static partial class EditorPresentationHub
             ? NativeObjectGizmoPresentation.Capture(selected, selectedIndex, properties)
             : EditorObjectGizmoSnapshot.Empty;
 
-        if (singleSelection &&
-            externalObject &&
-            (!coverage.GizmoComplete || representationGap))
+        if (needsHeadlessGizmo)
         {
             objectGizmo = NativeObjectGizmoPresentation.Merge(
                 objectGizmo,
@@ -244,7 +255,10 @@ public static partial class EditorPresentationHub
             DataType = selectionCount > 1 ? "Shared properties" : selected?.data?.GetType().FullName ?? string.Empty,
             LegacyUiAvailable =
                 singleSelection &&
-                (!coverage.IsComplete || representationGap || session.LegacyUiVisible),
+                (!coverage.IsComplete ||
+                 !coverage.GizmoComplete ||
+                 representationGap ||
+                 session.LegacyUiVisible),
             LegacyUiVisible = session.LegacyUiVisible,
             Properties = properties,
             ObjectGizmo = objectGizmo,
