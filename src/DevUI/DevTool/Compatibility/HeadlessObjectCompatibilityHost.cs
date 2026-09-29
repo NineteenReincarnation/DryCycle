@@ -47,6 +47,85 @@ internal static class HeadlessObjectCompatibilityHost
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedVisualFields = new();
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedRendererFields = new();
 
+    /// <summary>
+    /// Creates an external PlacedObject through the same isolated ObjectsPage compatibility boundary
+    /// used to prove third-party representations. This keeps concrete ObjectsPage construction out of
+    /// model factories while preserving mods that register creation/data defaults in CreateObjRep.
+    /// </summary>
+    internal static bool TryCreateExternalObject(
+        EditorSession session,
+        PlacedObject.Type type,
+        UnityEngine.Vector2 worldPosition,
+        out PlacedObject created)
+    {
+        created = null;
+        if (session?.Owner == null ||
+            session.RoomSettings?.placedObjects == null ||
+            type == null)
+            return false;
+
+        List<PlacedObject> live = session.RoomSettings.placedObjects;
+        List<PlacedObject> before = new(live);
+        ObjectsPage page = session.Owner.activePage as ObjectsPage;
+        bool temporary = page == null;
+        Page previous = session.Owner.activePage;
+        FContainer quarantine = temporary ? new FContainer() : null;
+
+        try
+        {
+            if (temporary)
+            {
+                page = new ObjectsPage(
+                    session.Owner,
+                    "DryCycle_Headless_Object_Creation",
+                    null,
+                    "Objects");
+
+                // Some third-party CreateObjRep hooks/representation constructors consult
+                // owner.activePage instead of the supplied ObjectsPage instance. Borrow the pointer
+                // only for this synchronous construction boundary; it is restored before returning.
+                session.Owner.activePage = page;
+            }
+
+            page.CreateObjRep(type, null);
+            created = FindNewlyCreatedObject(live, before, type);
+            if (created == null)
+            {
+                RestorePlacedObjectList(live, before);
+                Plugin.Logger?.LogWarning(
+                    "DevTool external object compatibility creation produced no new PlacedObject for '" +
+                    (type.value ?? string.Empty) + "'.");
+                return false;
+            }
+
+            created.pos = worldPosition;
+            return true;
+        }
+        catch (Exception error)
+        {
+            RestorePlacedObjectList(live, before);
+            created = null;
+            Plugin.Logger?.LogWarning(
+                "DevTool external object compatibility creation failed for '" +
+                (type.value ?? string.Empty) + "': " + error.Message);
+            return false;
+        }
+        finally
+        {
+            if (temporary && page != null)
+            {
+                QuarantineVisualTree(page, quarantine);
+                session.Owner.activePage = previous;
+                try { page.ClearSprites(); }
+                catch (Exception error)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "DevTool headless object creation cleanup failed: " + error.Message);
+                }
+            }
+        }
+    }
+
     internal static LegacyControlSnapshot[] Capture(EditorSession session, PlacedObject target)
     {
         if (session?.Owner == null || target?.type == null)
@@ -350,6 +429,60 @@ internal static class HeadlessObjectCompatibilityHost
             DisposeState(state);
             return null;
         }
+    }
+
+    private static PlacedObject FindNewlyCreatedObject(
+        List<PlacedObject> live,
+        List<PlacedObject> before,
+        PlacedObject.Type requestedType)
+    {
+        if (live == null || before == null)
+            return null;
+
+        // Prefer the newly-added object matching the requested type. A third-party hook may append
+        // helper objects as part of creation, so "last item in the list" is not a sufficient proof.
+        for (int i = live.Count - 1; i >= 0; i--)
+        {
+            PlacedObject candidate = live[i];
+            if (candidate == null ||
+                ContainsReference(before, candidate) ||
+                candidate.type != requestedType)
+                continue;
+            return candidate;
+        }
+
+        for (int i = live.Count - 1; i >= 0; i--)
+        {
+            PlacedObject candidate = live[i];
+            if (candidate != null && !ContainsReference(before, candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static bool ContainsReference(
+        List<PlacedObject> values,
+        PlacedObject target)
+    {
+        if (values == null || target == null)
+            return false;
+
+        for (int i = 0; i < values.Count; i++)
+            if (ReferenceEquals(values[i], target))
+                return true;
+        return false;
+    }
+
+    private static void RestorePlacedObjectList(
+        List<PlacedObject> live,
+        List<PlacedObject> before)
+    {
+        if (live == null || before == null)
+            return;
+
+        live.Clear();
+        live.AddRange(before);
     }
 
     private static void QuarantineVisualTree(
