@@ -198,7 +198,7 @@ public static class EditorActions
         }
 
         if (moved == 0) return false;
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
 
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
@@ -358,7 +358,7 @@ public static class EditorActions
             TryRefresh(session, target);
         }
 
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
             session.History.Push(entry);
@@ -436,7 +436,7 @@ public static class EditorActions
             string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal))
             return false;
 
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         if (SnapshotHistoryEntry.TryCreate(
                 changed == 1 ? "Change " + key : "Change " + key + " on " + changed + " objects",
                 before,
@@ -535,10 +535,10 @@ public static class EditorActions
             s => after?.Restore(s) ?? false));
         session.Selection.SelectOnly(created);
 
-        // Transitional compatibility only. Native creation no longer depends on ObjectsPage; this
-        // refresh merely reconciles the still-retained vanilla representation/gizmo backend until
-        // the Native Gizmo Engine takes ownership of world-space editing.
-        RefreshLegacyObjectFallback(session);
+        // Native creation no longer depends on ObjectsPage. Refresh only when a materialized
+        // compatibility page currently owns presentation; rebuilt/headless state is invalidated by
+        // the runtime reconciler and revision hubs above.
+        RefreshMaterializedObjectCompatibilityPage(session);
         return created;
     }
 
@@ -551,7 +551,7 @@ public static class EditorActions
         NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);
 
         session.Selection.Toggle(target);
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         session.History.Push(new DelegateHistoryEntry(
             "Delete " + (target.type?.value ?? "object"),
             s => before?.Restore(s) ?? false,
@@ -580,7 +580,7 @@ public static class EditorActions
         if (removed == 0) return false;
 
         session.Selection.Clear();
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
         if (SnapshotHistoryEntry.TryCreate(
                 removed == 1 ? "Delete object" : "Delete " + removed + " objects",
@@ -618,7 +618,7 @@ public static class EditorActions
 
         if (copies.Count == 0) return false;
 
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         session.Selection.Clear();
         for (int i = 0; i < copies.Count; i++) session.Selection.Toggle(copies[i]);
 
@@ -705,11 +705,11 @@ public static class EditorActions
         if (removed)
             NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, target);
         session.Selection.RemoveMissing(session.RoomSettings.placedObjects);
-        RefreshLegacyObjectFallback(session);
+        RefreshMaterializedObjectCompatibilityPage(session);
         return removed;
     }
 
-    private static void RefreshLegacyObjectFallback(EditorSession session) =>
+    private static void RefreshMaterializedObjectCompatibilityPage(EditorSession session) =>
         NativeLegacyPresentationInvalidation.RefreshCurrentObjectFallback(session);
 
     private static void TryRefresh(EditorSession session, PlacedObject target) =>
