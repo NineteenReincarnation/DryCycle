@@ -152,6 +152,13 @@ internal static class LegacyObjectSandbox
         }
 
         EnsureCompatibilityAudit(state);
+
+        // Objects diagnostics no longer materialize a visible ObjectsPage. Observe the selected
+        // quarantined Representation directly so protocol/coverage diagnostics retain the same
+        // evidence without reviving the legacy workspace.
+        if (DevUiDiagnosticsPolicy.Enabled)
+            DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation);
+
         example = state.UnsupportedNodeExample ?? string.Empty;
         return state.HasUnsupportedNodes;
     }
