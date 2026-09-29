@@ -8,6 +8,7 @@ using System.Text;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Objects;
 using UnityEngine;
 
 namespace DryCycle.DevUI.DevTool.History;
@@ -178,12 +179,62 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
 
         try
         {
+            // Restore serialized/data state before destructively changing collection or runtime
+            // membership. A third-party FromString failure therefore cannot leave half of the room's
+            // live object list removed merely because an Undo/Redo snapshot was being replayed.
+            for (int i = 0; i < states.Count; i++)
+                if (!states[i].RestoreDetachedFields(current))
+                    return false;
+
+            List<PlacedObject> previous = new(current.placedObjects);
+            bool collectionChanged = previous.Count != states.Count;
+            if (!collectionChanged)
+            {
+                for (int i = 0; i < states.Count; i++)
+                {
+                    if (ReferenceEquals(previous[i], states[i].Target)) continue;
+                    collectionChanged = true;
+                    break;
+                }
+            }
+
+            // Runtime instances are not authoring data and are intentionally absent from the
+            // snapshot. Diff them by PlacedObject identity: remove instances that no longer belong,
+            // then recreate/refresh every restored member after the authoritative list is rebuilt.
+            // This is required for CustomDecal and other objects whose sprites/runtime objects are
+            // destroyed by DeleteSelection; restoring only RoomSettings would otherwise produce a
+            // visually empty object after Undo.
+            for (int i = 0; i < previous.Count; i++)
+            {
+                PlacedObject old = previous[i];
+                if (ContainsTarget(states, old)) continue;
+                NativeObjectRuntimeReconciler.RemoveRuntime(session, old);
+            }
+
             current.placedObjects.Clear();
             for (int i = 0; i < states.Count; i++)
-            {
-                if (!states[i].RestoreDetachedFields(current)) return false;
                 current.placedObjects.Add(states[i].Target);
+
+            for (int i = 0; i < previous.Count; i++)
+            {
+                PlacedObject old = previous[i];
+                if (ContainsTarget(states, old)) continue;
+
+                NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, old);
+                HeadlessObjectCompatibilityHost.Invalidate(session, old);
             }
+
+            for (int i = 0; i < states.Count; i++)
+            {
+                PlacedObject restored = states[i].Target;
+                NativeObjectRuntimeReconciler.RefreshAfterMutation(session, restored);
+                HeadlessObjectCompatibilityHost.Invalidate(session, restored);
+            }
+
+            if (collectionChanged)
+                ObjectPresentationChangeHintHub.MarkCollection(session);
+            else
+                ObjectPresentationChangeHintHub.MarkAllMembers(session);
 
             session.Selection.RemoveMissing(current.placedObjects);
             if (refreshCompatibilityPage)
@@ -192,9 +243,18 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool placed-object collection restore failed: " + error.Message);
+            Plugin.Logger?.LogWarning("DevTool placed-object collection restore failed: " + error);
             return false;
         }
+    }
+
+    private static bool ContainsTarget(List<PlacedObjectState> source, PlacedObject target)
+    {
+        if (target == null) return false;
+        for (int i = 0; i < source.Count; i++)
+            if (ReferenceEquals(source[i]?.Target, target))
+                return true;
+        return false;
     }
 }
 

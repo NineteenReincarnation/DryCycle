@@ -96,7 +96,18 @@ internal static class ObjectMarqueeSelectionView
             if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
                 if (dragging)
+                {
                     Commit(snapshot.SceneObjects, viewport, display, start, current, io.KeyShift, io.KeyCtrl);
+                }
+                else if (armed && !io.KeyShift && !io.KeyCtrl)
+                {
+                    // A plain click on empty room space follows ordinary editor selection semantics:
+                    // it clears the current object selection. Modifier-click on empty space is kept
+                    // non-destructive so Shift/Ctrl multi-selection can be continued safely.
+                    EditorUiCommandQueue.Enqueue(new EditorUiCommand(
+                        EditorUiCommandKind.SelectObject,
+                        index: -1));
+                }
                 Reset();
             }
         }

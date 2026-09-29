@@ -566,6 +566,7 @@ public static class EditorActions
         if (live == null || session.Selection.Count == 0) return false;
 
         PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        PlacedObjectSelectionState beforeSelection = PlacedObjectSelectionState.Capture(session);
         List<PlacedObject> selected = new(session.Selection.PlacedObjects);
         int removed = 0;
         for (int i = 0; i < selected.Count; i++)
@@ -583,11 +584,14 @@ public static class EditorActions
         session.Selection.Clear();
         RefreshMaterializedObjectCompatibilityPage(session);
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
-        if (SnapshotHistoryEntry.TryCreate(
+        PlacedObjectSelectionState afterSelection = PlacedObjectSelectionState.Capture(session);
+        if (PlacedObjectCollectionHistoryEntry.TryCreate(
                 removed == 1 ? "Delete object" : "Delete " + removed + " objects",
                 before,
                 after,
-                out SnapshotHistoryEntry entry))
+                beforeSelection,
+                afterSelection,
+                out PlacedObjectCollectionHistoryEntry entry))
             session.History.Push(entry);
         return true;
     }
@@ -600,6 +604,7 @@ public static class EditorActions
             session.SetToolMode(EditorToolMode.Objects);
 
         PlacedObjectsStateSnapshot before = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
+        PlacedObjectSelectionState beforeSelection = PlacedObjectSelectionState.Capture(session);
         List<PlacedObject> originals = new(session.Selection.PlacedObjects);
         List<PlacedObject> copies = new(originals.Count);
         Vector2 offset = new(20f, 20f);
@@ -624,11 +629,14 @@ public static class EditorActions
         for (int i = 0; i < copies.Count; i++) session.Selection.Toggle(copies[i]);
 
         PlacedObjectsStateSnapshot after = PlacedObjectsStateSnapshot.Capture(session.RoomSettings);
-        if (SnapshotHistoryEntry.TryCreate(
+        PlacedObjectSelectionState afterSelection = PlacedObjectSelectionState.Capture(session);
+        if (PlacedObjectCollectionHistoryEntry.TryCreate(
                 copies.Count == 1 ? "Duplicate object" : "Duplicate " + copies.Count + " objects",
                 before,
                 after,
-                out SnapshotHistoryEntry entry))
+                beforeSelection,
+                afterSelection,
+                out PlacedObjectCollectionHistoryEntry entry))
             session.History.Push(entry);
         return true;
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -216,6 +217,143 @@ public sealed class PlacedObjectHistoryEntry : IEditorHistoryEntry
         entry = null;
         if (before == null || after == null || before.SameAs(after)) return false;
         entry = new PlacedObjectHistoryEntry(label, before, after);
+        return true;
+    }
+}
+
+/// <summary>
+/// Presentation selection paired with collection-changing object history. Selection is intentionally
+/// not part of generic model snapshots: scalar/property Undo should not unexpectedly jump the user's
+/// current selection. Delete/Duplicate, however, mutate selection as part of the command and must
+/// restore it together with collection membership.
+/// </summary>
+internal sealed class PlacedObjectSelectionState
+{
+    private readonly PlacedObject[] targets;
+
+    private PlacedObjectSelectionState(PlacedObject[] targets)
+    {
+        this.targets = targets ?? Array.Empty<PlacedObject>();
+    }
+
+    internal static PlacedObjectSelectionState Capture(EditorSession session)
+    {
+        IReadOnlyList<PlacedObject> selected = session?.Selection?.PlacedObjects;
+        if (selected == null || selected.Count == 0)
+            return new PlacedObjectSelectionState(Array.Empty<PlacedObject>());
+
+        PlacedObject[] copy = new PlacedObject[selected.Count];
+        for (int i = 0; i < selected.Count; i++)
+            copy[i] = selected[i];
+        return new PlacedObjectSelectionState(copy);
+    }
+
+    internal void Restore(EditorSession session)
+    {
+        EditorSelection selection = session?.Selection;
+        List<PlacedObject> live = session?.RoomSettings?.placedObjects;
+        if (selection == null)
+            return;
+
+        selection.Clear();
+        if (live == null || targets.Length == 0)
+            return;
+
+        int missing = 0;
+        for (int i = 0; i < targets.Length; i++)
+        {
+            PlacedObject target = targets[i];
+            if (ContainsReference(live, target))
+                selection.Toggle(target);
+            else
+                missing++;
+        }
+
+        if (missing > 0)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool object-history selection restore skipped " + missing +
+                " object(s) that were not present after model restore.");
+        }
+    }
+
+    private static bool ContainsReference(List<PlacedObject> live, PlacedObject target)
+    {
+        if (target == null) return false;
+        for (int i = 0; i < live.Count; i++)
+            if (ReferenceEquals(live[i], target))
+                return true;
+        return false;
+    }
+}
+
+/// <summary>
+/// Atomic model + selection history for collection-changing native object commands. Model restore is
+/// authoritative; selection restoration runs only after the matching object identities are back in
+/// the RoomSettings collection, preventing an Undo from restoring objects while leaving Inspector
+/// and gizmo presentation detached from them.
+/// </summary>
+internal sealed class PlacedObjectCollectionHistoryEntry : IEditorHistoryEntry
+{
+    private readonly PlacedObjectsStateSnapshot before;
+    private readonly PlacedObjectsStateSnapshot after;
+    private readonly PlacedObjectSelectionState beforeSelection;
+    private readonly PlacedObjectSelectionState afterSelection;
+
+    private PlacedObjectCollectionHistoryEntry(
+        string label,
+        PlacedObjectsStateSnapshot before,
+        PlacedObjectsStateSnapshot after,
+        PlacedObjectSelectionState beforeSelection,
+        PlacedObjectSelectionState afterSelection)
+    {
+        Label = string.IsNullOrEmpty(label) ? "Edit objects" : label;
+        this.before = before;
+        this.after = after;
+        this.beforeSelection = beforeSelection;
+        this.afterSelection = afterSelection;
+    }
+
+    public string Label { get; }
+
+    public bool Undo(EditorSession session) =>
+        Restore(session, before, beforeSelection);
+
+    public bool Redo(EditorSession session) =>
+        Restore(session, after, afterSelection);
+
+    internal static bool TryCreate(
+        string label,
+        PlacedObjectsStateSnapshot before,
+        PlacedObjectsStateSnapshot after,
+        PlacedObjectSelectionState beforeSelection,
+        PlacedObjectSelectionState afterSelection,
+        out PlacedObjectCollectionHistoryEntry entry)
+    {
+        entry = null;
+        if (before == null ||
+            after == null ||
+            string.Equals(before.Fingerprint, after.Fingerprint, StringComparison.Ordinal))
+            return false;
+
+        entry = new PlacedObjectCollectionHistoryEntry(
+            label,
+            before,
+            after,
+            beforeSelection,
+            afterSelection);
+        return true;
+    }
+
+    private static bool Restore(
+        EditorSession session,
+        PlacedObjectsStateSnapshot model,
+        PlacedObjectSelectionState selection)
+    {
+        if (model == null || !model.Restore(session))
+            return false;
+
+        selection?.Restore(session);
         return true;
     }
 }
