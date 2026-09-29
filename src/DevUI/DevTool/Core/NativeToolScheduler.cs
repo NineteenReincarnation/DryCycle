@@ -69,7 +69,7 @@ internal static class NativeToolScheduler
         if (!CanOwnNativePresentation(session))
         {
             if (!session.LegacyUiVisible && IsNativeAnchor(session.Owner.activePage))
-                MaterializeLegacyTool(session, session.ToolMode, explicitLegacyUi: false);
+                MaterializeLegacyToolCore(session, session.ToolMode, explicitLegacyUi: false);
             return;
         }
 
@@ -77,7 +77,12 @@ internal static class NativeToolScheduler
             ActivateCore(session, session.ToolMode);
     }
 
-    internal static bool MaterializeLegacyTool(
+    internal static bool ShowExplicitLegacyTool(
+        EditorSession session,
+        EditorToolMode mode) =>
+        MaterializeLegacyToolCore(session, mode, explicitLegacyUi: true);
+
+    private static bool MaterializeLegacyToolCore(
         EditorSession session,
         EditorToolMode mode,
         bool explicitLegacyUi)
