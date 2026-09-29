@@ -494,6 +494,7 @@ gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBr
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
 bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
 runtime_path = Path("src/DevUI/DevTool/Core/DevToolRuntime.cs")
+scheduler_path = Path("src/DevUI/DevTool/Core/NativeToolScheduler.cs")
 quiescence_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevUiQuiescenceController.cs")
 project_path = Path("src/DryCycle.csproj")
 
@@ -506,6 +507,7 @@ for path in (
     coverage_path,
     bridge_path,
     runtime_path,
+    scheduler_path,
     quiescence_path,
     project_path,
 ):
@@ -520,6 +522,7 @@ gizmo = gizmo_path.read_text(encoding="utf-8")
 coverage = coverage_path.read_text(encoding="utf-8")
 bridge = bridge_path.read_text(encoding="utf-8")
 runtime = runtime_path.read_text(encoding="utf-8")
+scheduler = scheduler_path.read_text(encoding="utf-8")
 quiescence = quiescence_path.read_text(encoding="utf-8")
 project = project_path.read_text(encoding="utf-8")
 
@@ -616,6 +619,15 @@ require("ToolMode == EditorToolMode.Objects" in runtime and
         "Objects legacy materialization must be re-authorized from current selection/coverage in the backend, and complete external objects must retire temporary proof hosts.")
 require("new(typeof(ObjectsPage)" not in quiescence,
         "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
+
+require("DiagnosticsRequireLegacyPage" in scheduler and
+        "mode != EditorToolMode.Objects" in scheduler and
+        "!DiagnosticsRequireLegacyPage(session.ToolMode)" in scheduler,
+        "Objects diagnostics must remain on the page-less/headless backend instead of auto-materializing ObjectsPage.")
+require("DevUiDiagnosticsPolicy.Enabled" in host and
+        "DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation)" in host,
+        "Object diagnostics must collect compatibility evidence from the quarantined Representation itself.")
+
 
 
 print("Protocol-based third-party Object compatibility guard passed.")
