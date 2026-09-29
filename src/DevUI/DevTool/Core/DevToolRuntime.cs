@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Dialog;
+using DryCycle.DevUI.DevTool.Factories;
 using DryCycle.DevUI.DevTool.History;
 using DryCycle.DevUI.DevTool.Input;
 using DryCycle.DevUI.DevTool.Map;
@@ -830,12 +831,10 @@ public sealed class EditorSession
         // frontend so stale UI, extensions, or direct command injection cannot materialize a full
         // ObjectsPage for an object already covered by the rebuilt inspector/gizmo pipeline.
         // Closing an already-visible legacy page must always remain possible.
-        if (ToolMode == EditorToolMode.Objects && !LegacyUiVisible)
-        {
-            EditorInspectorSnapshot inspector = EditorPresentationHub.Current?.Inspector;
-            if (inspector?.HasSelection != true || inspector.LegacyUiAvailable != true)
-                return;
-        }
+        if (ToolMode == EditorToolMode.Objects &&
+            !LegacyUiVisible &&
+            !CanOpenObjectLegacyUi())
+            return;
 
         if (NativeToolScheduler.Supports(ToolMode))
         {
@@ -854,6 +853,38 @@ public sealed class EditorSession
         LegacyUiVisible = !LegacyUiVisible;
         if (LegacyUiVisible)
             LegacyUiPresentationController.Restore(Owner?.activePage);
+    }
+
+    private bool CanOpenObjectLegacyUi()
+    {
+        if (Selection?.Count != 1)
+            return false;
+
+        PlacedObject selected = Selection.PrimaryPlacedObject;
+        if (selected?.type == null)
+            return false;
+
+        ObjectInspectorCoverage coverage = ObjectInspectorRegistry.GetCoverage(selected);
+        if (!coverage.IsComplete || !coverage.GizmoComplete)
+            return true;
+
+        // Built-in objects with complete native coverage have no reason to materialize ObjectsPage.
+        // For external objects, prove the Representation tree as well because a complete Data
+        // protocol can still coexist with a custom interactive control surface.
+        if (GameDefinedExtEnumCatalog.Contains(
+                typeof(PlacedObject.Type),
+                selected.type.value))
+            return false;
+
+        bool representationGap = LegacyObjectSandbox.HasCompatibilityGap(
+            this,
+            selected,
+            out _);
+
+        if (!representationGap)
+            LegacyObjectSandbox.Release(this);
+
+        return representationGap;
     }
 
     private static int PageIndex(EditorToolMode mode)
