@@ -576,8 +576,10 @@ require("HasCompatibilityGap" in host and "EnsureCompatibilityAudit" in host,
         "Headless Object host must cache a conservative Representation compatibility verdict.")
 require("TreeSignature" in host and "ComputeTreeSignature" in host and
         "AuditModel" in host and "AuditTree" in host and
-        "ModelAuditIntervalFrames" in host and "TreeAuditIntervalFrames" in host,
-        "Dynamic third-party control trees must use sparse model/tree audits instead of per-frame rescans.")
+        "ModelAuditIntervalFrames" in host and "TreeAuditIntervalFrames" in host and
+        "ReferencedRendererFields" in host and
+        "sprite.element?.name" in host and "sprite.shader?.name" in host,
+        "Dynamic third-party control/visual trees must use sparse structural audits instead of per-frame rescans.")
 require("MarkDirtyAfterMutation" in host,
         "Headless control actions must invalidate dynamic control-tree caches immediately.")
 require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge and
