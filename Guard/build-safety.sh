@@ -792,6 +792,34 @@ require("session.Owner.activePage = page;" in create_external and
 print("Protocol-based third-party Object compatibility guard passed.")
 PY
 
+# Vanilla map config stores canonical/player-map and developer-map positions independently.
+# Protect authored developer layouts from being collapsed onto the canonical map coordinates.
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("src/DevUI/DevTool/Map/NativeMapAuthoringState.cs")
+source = path.read_text(encoding="utf-8")
+
+if "room.InheritedDevPosition = panel.pos;" in source:
+    raise SystemExit(
+        "Native Map authoring must never import RoomPanel.pos as the developer-map layout; "
+        "use RoomPanel.devPos so existing authored layouts are preserved."
+    )
+
+required = (
+    "room.MapPosition = panel.pos;",
+    "room.InheritedDevPosition = panel.devPos;",
+    "panel.devPos = room.InheritedDevPosition;",
+)
+for token in required:
+    if token not in source:
+        raise SystemExit(
+            "Native Map canonical/dev position separation lost required mapping: " + token
+        )
+
+print("Native Map canonical/dev position separation guard passed.")
+PY
+
 # ---------------------------------------------------------------------------
 # 2. Durable MSBuild safety relationships.
 #    Check safety/dependency relationships, not exact target/interface names.
