@@ -534,24 +534,6 @@ internal static class DevToolOverlay
 
         page.DrawInspector(snapshot);
         ScopedScrollChrome.Draw("Inspector");
-        string legacyTooltip = page.LegacyFallbackTooltip;
-        if (!string.IsNullOrEmpty(legacyTooltip))
-            DrawLegacyFallback(snapshot, legacyTooltip);
-    }
-
-    private static void DrawLegacyFallback(EditorPresentationSnapshot snapshot, string tooltip)
-    {
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        bool legacyVisible = snapshot.Inspector?.LegacyUiVisible == true;
-        string label = legacyVisible
-            ? DevToolUiSettings.T("隐藏原版 DevUI", "Hide Original DevUI")
-            : DevToolUiSettings.T("显示原版 DevUI", "Show Original DevUI");
-        if (DevToolWidgets.ActionButton(label, "LegacyDevUI", DevToolButtonTone.Primary))
-            Send(EditorUiCommandKind.ToggleLegacyUi);
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(tooltip);
     }
 
     private static void HandlePlacement(

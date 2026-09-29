@@ -72,7 +72,6 @@ internal interface IDevToolPageView
     bool SupportsSceneSurface { get; }
     bool SupportsPlacementInput { get; }
     bool HasTopControls { get; }
-    string LegacyFallbackTooltip { get; }
 
     string GetSessionStatus(EditorPresentationSnapshot snapshot);
     bool SuppressInspector(EditorPresentationSnapshot snapshot);
@@ -116,7 +115,6 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public virtual bool SupportsSceneSurface => false;
     public virtual bool SupportsPlacementInput => false;
     public virtual bool HasTopControls => false;
-    public virtual string LegacyFallbackTooltip => string.Empty;
 
     public string GetSessionStatus(EditorPresentationSnapshot snapshot)
     {

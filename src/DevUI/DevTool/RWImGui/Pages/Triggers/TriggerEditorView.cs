@@ -325,8 +325,8 @@ internal static partial class TriggerEditorView
             "该事件没有在这里暴露原版 Rain World 参数。",
             "This event has no built-in Rain World parameters exposed here."));
         ImGui.TextWrapped(DevToolUiSettings.T(
-            "如果 Mod 添加了自定义 DevInterface 控件，请切换到原版 UI 编辑。",
-            "If a mod adds custom DevInterface controls, switch to Vanilla UI to edit them."));
+            "该 Mod 添加的自定义 DevInterface 控件尚未映射到新检查器。",
+            "Custom DevInterface controls added by this mod are not mapped into the new inspector yet."));
     }
 
     private static void DrawMusicEvent(

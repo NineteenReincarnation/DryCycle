@@ -357,14 +357,13 @@ internal static class ObjectInspectorView
     private static void DrawCompatibility(EditorInspectorSnapshot inspector)
     {
         LegacyControlSnapshot[] controls = inspector.LegacyControls ?? Array.Empty<LegacyControlSnapshot>();
-        if (controls.Length == 0 && !inspector.LegacyUiAvailable) return;
+        if (controls.Length == 0) return;
 
         DevToolWidgets.SectionHeader(DevToolUiSettings.T("高级 / 兼容", "ADVANCED / COMPATIBILITY"));
         if (!ImGui.CollapsingHeader(DevToolUiSettings.T(
                 "DevInterface 兼容控件##ObjectLegacyControls",
                 "DevInterface Compatibility Controls##ObjectLegacyControls")))
         {
-            DrawLegacyFallbackButton(inspector);
             return;
         }
 
@@ -409,7 +408,6 @@ internal static class ObjectInspectorView
             }
         }
 
-        DrawLegacyFallbackButton(inspector);
     }
 
     private static void DrawLegacyBoolean(EditorInspectorSnapshot inspector, LegacyBinding binding)
@@ -634,23 +632,6 @@ internal static class ObjectInspectorView
         {
             ColorEdits[binding.ColorEditKey] = new Num.Vector4(control.X, control.Y, control.Z, control.W);
         }
-    }
-
-    private static void DrawLegacyFallbackButton(EditorInspectorSnapshot inspector)
-    {
-        if (!inspector.LegacyUiAvailable) return;
-
-        ImGui.Spacing();
-        string label = inspector.LegacyUiVisible
-            ? DevToolUiSettings.T("隐藏完整原版 DevUI", "Hide Full Original DevUI")
-            : DevToolUiSettings.T("显示完整原版 DevUI", "Show Full Original DevUI");
-        if (DevToolWidgets.ActionButton(label, "DevToolLegacyFallback", DevToolButtonTone.Primary, true))
-            EditorUiCommandQueue.Enqueue(new EditorUiCommand(EditorUiCommandKind.ToggleLegacyUi));
-
-        if (ImGui.IsItemHovered())
-            DevToolTooltip.Show(DevToolUiSettings.T(
-                "仅作为迁移期诊断后门。Coverage 仍标记为未映射的复合控件必须继续迁移。",
-                "Migration-only diagnostic escape hatch. Composite controls still reported as unmapped by Coverage must continue to be migrated."));
     }
 
     private static void DrawActions(EditorInspectorSnapshot inspector)

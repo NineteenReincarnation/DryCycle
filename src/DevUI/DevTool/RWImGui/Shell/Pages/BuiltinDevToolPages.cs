@@ -17,10 +17,6 @@ internal sealed class RoomDevToolPage : DevToolFrontendPageBase
     public override int NavigationOrder => 100;
     public override string NavigationLabel => DevToolUiSettings.T("房间", "Room");
     public override string NavigationTooltip => DevToolUiSettings.T("房间设置", "Room settings");
-    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
-        "用于尚未迁移的模板、地形或自定义房间设置控件。",
-        "Fallback for template, terrain or custom RoomSettings controls not migrated yet.");
-
     public override void DrawBrowser(EditorPresentationSnapshot snapshot) =>
         RoomSettingsView.DrawBrowser(RoomEditorPresentationHub.Current);
 
@@ -179,10 +175,6 @@ internal sealed class TriggersDevToolPage : DevToolFrontendPageBase
     public override bool UsesDedicatedWorkspace => true;
     public override bool SupportsSceneSurface => false;
     public override bool HasTopControls => true;
-    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
-        "用于新检查器无法表达的自定义触发器/事件控件。",
-        "Fallback for custom Trigger/TriggeredEvent controls not represented by the native inspector.");
-
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         NativeSpatialGizmoView.DrawTriggers(
@@ -316,10 +308,6 @@ internal sealed class RelationshipsDevToolPage : DevToolFrontendPageBase
     public override int NavigationOrder => 700;
     public override string NavigationLabel => DevToolUiSettings.T("关系", "Relationships");
     public override string NavigationTooltip => DevToolUiSettings.T("关系", "Relationships");
-    public override string LegacyFallbackTooltip => DevToolUiSettings.T(
-        "用于矩阵编辑器尚未表达的关系页面扩展。",
-        "Fallback for custom RelationshipPage extensions not represented by the matrix editor.");
-
     public override void DrawBackground(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         DevToolWorkspaceLayout.GetCentralRect(display, out Num.Vector2 position, out Num.Vector2 size);
