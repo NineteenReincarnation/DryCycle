@@ -547,18 +547,18 @@ reflection_pos = bootstrap.find("NativeDataReflectionInspector.Instance")
 require(managed_pos >= 0 and reflection_pos > managed_pos,
         "Managed Object protocol must run before generic Data reflection.")
 
-require("needsHeadlessControls" in presentation and "needsHeadlessGizmo" in presentation and
-        "needsHeadlessHost" in presentation,
-        "Third-party Object fallback ownership must distinguish inspector, gizmo and host requirements.")
+require("needsHeadlessControls" in presentation and "needsHeadlessGizmo" in presentation,
+        "Third-party Object fallback ownership must distinguish inspector and gizmo requirements.")
 require("HeadlessRepresentationGizmoBridge.Capture" in presentation,
         "Incomplete scene geometry or Representation coverage must merge from the headless Representation.")
 require("!coverage.GizmoComplete" in presentation and "LegacyUiAvailable" in presentation,
         "A scene-gizmo coverage gap must remain visible as an explicit compatibility escape hatch.")
 require("HeadlessObjectCompatibilityHost.HasCompatibilityGap" in presentation,
         "Object presentation must include the Representation tree in compatibility coverage.")
-require("else if (!needsHeadlessHost)" in presentation and
+require("else if (!externalObject)" in presentation and
+        "External selections retain one quarantined proof host" in presentation and
         "HeadlessObjectCompatibilityHost.Release(session);" in presentation,
-        "A fully covered third-party Object must retire its temporary headless Representation host immediately.")
+        "Selected external Objects must retain one quarantined proof host for cheap re-audit, while built-in/non-external selections release it.")
 
 capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
 capture_end = host.find("internal static bool Run(", capture_start)
@@ -635,9 +635,8 @@ require("ToolMode == EditorToolMode.Objects" in runtime and
         "!CanOpenObjectLegacyUi()" in runtime and
         "ObjectInspectorRegistry.GetCoverage(selected)" in runtime and
         "!coverage.IsComplete || !coverage.GizmoComplete" in runtime and
-        "HeadlessObjectCompatibilityHost.HasCompatibilityGap" in runtime and
-        "HeadlessObjectCompatibilityHost.Release(this)" in runtime,
-        "Objects legacy materialization must be re-authorized from current selection/coverage in the backend, and complete external objects must retire temporary proof hosts.")
+        "return HeadlessObjectCompatibilityHost.HasCompatibilityGap(" in runtime,
+        "Objects legacy materialization must be re-authorized from current selection/coverage and the reusable selected-object proof host.")
 require("new(typeof(ObjectsPage)" not in quiescence,
         "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
 
