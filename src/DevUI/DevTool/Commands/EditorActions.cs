@@ -452,7 +452,7 @@ public static class EditorActions
             session,
             target,
             "Legacy button",
-            () => LegacyDevInterfaceBridge.ClickButton(session.Owner, target, path));
+            representation => LegacyDevInterfaceBridge.ClickButton(session.Owner, representation, path));
     }
 
     public static bool SetLegacySlider(EditorSession session, PlacedObject target, string path, float factor)
@@ -461,7 +461,7 @@ public static class EditorActions
             session,
             target,
             "Legacy slider",
-            () => LegacyDevInterfaceBridge.SetSlider(session.Owner, target, path, factor));
+            representation => LegacyDevInterfaceBridge.SetSlider(session.Owner, representation, path, factor));
     }
 
     public static bool ResetLegacySlider(EditorSession session, PlacedObject target, string path)
@@ -470,7 +470,7 @@ public static class EditorActions
             session,
             target,
             "Legacy slider reset",
-            () => LegacyDevInterfaceBridge.ResetSlider(session.Owner, target, path));
+            representation => LegacyDevInterfaceBridge.ResetSlider(session.Owner, representation, path));
     }
 
     public static bool SetLegacyText(EditorSession session, PlacedObject target, string path, string value)
@@ -479,7 +479,7 @@ public static class EditorActions
             session,
             target,
             "Legacy text",
-            () => LegacyDevInterfaceBridge.SetText(session.Owner, target, path, value));
+            representation => LegacyDevInterfaceBridge.SetText(session.Owner, representation, path, value));
     }
 
     public static bool SetLegacyDirection(EditorSession session, PlacedObject target, string path, float x, float y)
@@ -488,7 +488,7 @@ public static class EditorActions
             session,
             target,
             "Legacy direction",
-            () => LegacyDevInterfaceBridge.SetDirection(session.Owner, target, path, x, y));
+            representation => LegacyDevInterfaceBridge.SetDirection(session.Owner, representation, path, x, y));
     }
 
     public static bool SetLegacyColor(
@@ -504,7 +504,7 @@ public static class EditorActions
             session,
             target,
             "Legacy color",
-            () => LegacyDevInterfaceBridge.SetColor(session.Owner, target, path, r, g, b, a));
+            representation => LegacyDevInterfaceBridge.SetColor(session.Owner, representation, path, r, g, b, a));
     }
 
     public static bool MutateObject(EditorSession session, PlacedObject target, string label, Action mutation)
@@ -636,7 +636,7 @@ public static class EditorActions
         EditorSession session,
         PlacedObject target,
         string label,
-        Func<bool> action)
+        Func<PlacedObjectRepresentation, bool> action)
     {
         if (session?.Owner == null || target == null || action == null) return false;
 
@@ -646,7 +646,7 @@ public static class EditorActions
         if (!succeeded) return false;
 
         // A legacy button may only open a custom sub-panel and leave the model unchanged. Mark the
-        // selected member anyway so the rebuilt inspector recaptures the sandbox control tree.
+        // selected member anyway so the rebuilt inspector recaptures the headless control tree.
         EditorRevisionHub.Mark(session, EditorRevisionKind.Objects);
         ObjectPresentationChangeHintHub.MarkMember(session, target);
 
