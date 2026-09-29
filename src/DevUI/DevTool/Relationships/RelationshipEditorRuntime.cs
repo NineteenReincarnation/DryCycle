@@ -162,16 +162,31 @@ public static class RelationshipEditorPresentationHub
             return;
         }
 
-        if (!ReferenceEquals(
+        bool sessionChanged =
+            !ReferenceEquals(
                 observedSession,
-                session) ||
+                session);
+        bool pageChanged =
             !ReferenceEquals(
                 observedPage,
-                page))
+                page);
+
+        if (sessionChanged)
         {
+            // Relationship data is global within one live editor session. A RelationshipPage can
+            // be rematerialized when the developer switches tools; do not throw away expensive
+            // matrices merely because the Page instance changed. A genuinely new session is the
+            // lifetime boundary that invalidates model/value caches.
             primaryRowsCache.Clear();
             primaryRowsCacheOrder.Clear();
+            directedRelationshipCache.Clear();
             activePrimaryRowsBuild = null;
+            nextOpaqueCompatibilityAuditFrame = 0;
+        }
+        else if (pageChanged)
+        {
+            // Keep completed caches and an in-flight build. The next publication will bind the
+            // retained data to the new page identity and continue from the previous row cursor.
             nextOpaqueCompatibilityAuditFrame = 0;
         }
 
