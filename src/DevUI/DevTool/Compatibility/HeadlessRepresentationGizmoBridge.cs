@@ -17,8 +17,23 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 /// </summary>
 internal static class HeadlessRepresentationGizmoBridge
 {
+    private readonly struct GeometryAuditEntry
+    {
+        internal GeometryAuditEntry(DevUINode node, string path, bool insidePanel)
+        {
+            Node = node;
+            Path = path ?? string.Empty;
+            InsidePanel = insidePanel;
+        }
+
+        internal DevUINode Node { get; }
+        internal string Path { get; }
+        internal bool InsidePanel { get; }
+    }
+
     internal const string HandlePrefix = "headless-handle:";
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> LineRendererFields = new();
+    private static readonly ConcurrentDictionary<Type, FieldInfo[]> GameObjectNodeFields = new();
 
     internal static EditorObjectGizmoSnapshot Capture(
         EditorSession session,
@@ -37,6 +52,71 @@ internal static class HeadlessRepresentationGizmoBridge
                 objectIndex,
                 representation),
             EditorObjectGizmoSnapshot.Empty);
+    }
+
+    internal static bool HasUnsupportedVisualGeometry(
+        DevUINode root,
+        out string example)
+    {
+        example = string.Empty;
+        if (root == null)
+        {
+            example = "missing geometry root";
+            return true;
+        }
+
+        HashSet<DevUINode> visited = new();
+        Stack<GeometryAuditEntry> stack = new();
+        stack.Push(new GeometryAuditEntry(root, string.Empty, false));
+        int remaining = 4096;
+
+        while (stack.Count > 0 && remaining-- > 0)
+        {
+            GeometryAuditEntry entry = stack.Pop();
+            DevUINode node = entry.Node;
+            if (node == null || !visited.Add(node))
+                continue;
+
+            bool insidePanel = entry.InsidePanel || node is Panel;
+            if (!insidePanel)
+            {
+                if (HasUnsupportedSpriteGeometry(node, out string spriteExample))
+                {
+                    example = FormatGeometryGap(entry.Path, node, spriteExample);
+                    return true;
+                }
+
+                if (HasUnsupportedGameObjectGeometry(node, out string gameObjectExample))
+                {
+                    example = FormatGeometryGap(entry.Path, node, gameObjectExample);
+                    return true;
+                }
+            }
+
+            // Panel descendants are authoring UI, not room-space geometry. Their visual details are
+            // replaced by the rebuilt inspector and therefore do not count as a scene-gizmo gap.
+            if (insidePanel || node.subNodes == null)
+                continue;
+
+            for (int i = node.subNodes.Count - 1; i >= 0; i--)
+            {
+                DevUINode child = node.subNodes[i];
+                if (child == null)
+                    continue;
+                string path = string.IsNullOrEmpty(entry.Path)
+                    ? i.ToString()
+                    : entry.Path + "." + i;
+                stack.Push(new GeometryAuditEntry(child, path, insidePanel));
+            }
+        }
+
+        if (stack.Count > 0)
+        {
+            example = "geometry node budget exceeded";
+            return true;
+        }
+
+        return false;
     }
 
     internal static bool Move(
@@ -130,6 +210,12 @@ internal static class HeadlessRepresentationGizmoBridge
             insidePanel: false);
 
         CaptureLineRendererGeometry(
+            representation,
+            camera,
+            lines,
+            insidePanel: false);
+
+        CaptureGameObjectNodeGeometry(
             representation,
             camera,
             lines,
@@ -405,6 +491,107 @@ internal static class HeadlessRepresentationGizmoBridge
                 nextInsidePanel);
     }
 
+    private static void CaptureGameObjectNodeGeometry(
+        DevUINode node,
+        Vector2 camera,
+        List<EditorObjectLineSegmentSnapshot> lines,
+        bool insidePanel)
+    {
+        if (node == null || lines == null)
+            return;
+
+        bool nextInsidePanel = insidePanel || node is Panel;
+        if (!nextInsidePanel)
+        {
+            FieldInfo[] fields = GameObjectNodeFields.GetOrAdd(
+                node.GetType(),
+                BuildGameObjectNodeFields);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                object raw;
+                try { raw = fields[i].GetValue(node); }
+                catch { continue; }
+
+                if (raw is FGameObjectNode gameObjectNode)
+                {
+                    CaptureGameObjectNode(gameObjectNode, camera, lines);
+                    continue;
+                }
+
+                if (raw is Array array)
+                {
+                    for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                        if (array.GetValue(itemIndex) is FGameObjectNode item)
+                            CaptureGameObjectNode(item, camera, lines);
+                }
+            }
+        }
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            CaptureGameObjectNodeGeometry(
+                node.subNodes[i],
+                camera,
+                lines,
+                nextInsidePanel);
+    }
+
+    private static void CaptureGameObjectNode(
+        FGameObjectNode node,
+        Vector2 camera,
+        List<EditorObjectLineSegmentSnapshot> lines)
+    {
+        if (node?.gameObject == null)
+            return;
+
+        try
+        {
+            LineRenderer[] renderers = node.gameObject.GetComponents<LineRenderer>();
+            for (int i = 0; i < renderers.Length; i++)
+                CaptureLineRenderer(renderers[i], camera, lines);
+        }
+        catch { }
+    }
+
+    private static FieldInfo[] BuildGameObjectNodeFields(Type nodeType)
+    {
+        List<FieldInfo> result = new();
+        Type current = nodeType;
+
+        while (current != null &&
+               current != typeof(DevUINode) &&
+               typeof(DevUINode).IsAssignableFrom(current))
+        {
+            FieldInfo[] fields = current.GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                Type fieldType = fields[i].FieldType;
+                if (typeof(FGameObjectNode).IsAssignableFrom(fieldType))
+                {
+                    result.Add(fields[i]);
+                    continue;
+                }
+
+                if (fieldType.IsArray &&
+                    fieldType.GetElementType() != null &&
+                    typeof(FGameObjectNode).IsAssignableFrom(fieldType.GetElementType()))
+                    result.Add(fields[i]);
+            }
+
+            current = current.BaseType;
+        }
+
+        return result.ToArray();
+    }
+
     private static FieldInfo[] BuildLineRendererFields(Type nodeType)
     {
         List<FieldInfo> result = new();
@@ -496,6 +683,123 @@ internal static class HeadlessRepresentationGizmoBridge
         catch { }
 
         return new Vector2(point.x, point.y);
+    }
+
+    private static bool HasUnsupportedSpriteGeometry(
+        DevUINode node,
+        out string example)
+    {
+        example = string.Empty;
+        if (node?.fSprites == null)
+            return false;
+
+        // Rebuilt controls/labels provide their own presentation. For Handles, only sprite zero is
+        // framework cursor chrome; additional sprites can be meaningful room-space geometry.
+        if (node is not Handle &&
+            (node is DevUILabel || LegacyDevInterfaceBridge.CanAdaptNode(node)))
+            return false;
+
+        int start = node is Handle ? 1 : 0;
+        for (int i = start; i < node.fSprites.Count; i++)
+        {
+            FSprite sprite = node.fSprites[i];
+            if (sprite == null ||
+                IsPixelSprite(sprite) ||
+                IsVectorCircleSprite(sprite))
+                continue;
+
+            string element = sprite.element?.name ?? "<no element>";
+            string shader = sprite.shader?.name ?? "<no shader>";
+            example = "unsupported FSprite[" + i + "] element=" + element + " shader=" + shader;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasUnsupportedGameObjectGeometry(
+        DevUINode node,
+        out string example)
+    {
+        example = string.Empty;
+        if (node == null)
+            return false;
+
+        FieldInfo[] fields = GameObjectNodeFields.GetOrAdd(
+            node.GetType(),
+            BuildGameObjectNodeFields);
+
+        for (int i = 0; i < fields.Length; i++)
+        {
+            object raw;
+            try { raw = fields[i].GetValue(node); }
+            catch
+            {
+                example = "unreadable FGameObjectNode field " + fields[i].Name;
+                return true;
+            }
+
+            if (raw is FGameObjectNode gameObjectNode)
+            {
+                if (HasUnsupportedGameObjectRenderer(gameObjectNode, out example))
+                    return true;
+                continue;
+            }
+
+            if (raw is Array array)
+            {
+                for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                {
+                    if (array.GetValue(itemIndex) is FGameObjectNode item &&
+                        HasUnsupportedGameObjectRenderer(item, out example))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasUnsupportedGameObjectRenderer(
+        FGameObjectNode node,
+        out string example)
+    {
+        example = string.Empty;
+        if (node?.gameObject == null)
+            return false;
+
+        try
+        {
+            Renderer[] renderers = node.gameObject.GetComponents<Renderer>();
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || renderer is LineRenderer)
+                    continue;
+
+                example = "unsupported Unity renderer " +
+                          (renderer.GetType().FullName ?? renderer.GetType().Name);
+                return true;
+            }
+        }
+        catch
+        {
+            example = "unreadable Unity GameObject renderer set";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string FormatGeometryGap(
+        string path,
+        DevUINode node,
+        string detail)
+    {
+        string location = string.IsNullOrEmpty(path) ? "root" : path;
+        return location + " " +
+               (node?.GetType().FullName ?? node?.GetType().Name ?? "<unknown>") +
+               " " + (detail ?? "unsupported visual geometry");
     }
 
     private static bool IsPixelSprite(FSprite sprite)
