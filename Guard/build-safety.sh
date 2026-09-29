@@ -642,8 +642,9 @@ require("new(typeof(ObjectsPage)" not in quiescence,
 
 require("DiagnosticsRequireLegacyPage" in scheduler and
         "mode != EditorToolMode.Objects" in scheduler and
-        "!DiagnosticsRequireLegacyPage(session.ToolMode)" in scheduler,
-        "Objects diagnostics must remain on the page-less/headless backend instead of auto-materializing ObjectsPage.")
+        "if (CanOwnNativePresentation(session, mode))" in scheduler and
+        "!DiagnosticsRequireLegacyPage(mode)" in scheduler,
+        "Objects diagnostics and native ownership must be evaluated against the target tool mode without auto-materializing ObjectsPage.")
 
 require("private static bool MaterializeLegacyToolCore" in scheduler and
         "internal static bool ShowExplicitLegacyTool" in scheduler,
