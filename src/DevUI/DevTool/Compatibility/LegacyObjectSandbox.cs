@@ -692,11 +692,19 @@ internal static class LegacyObjectSandbox
         if (state?.Representation == null || !state.CompatibilityDirty)
             return;
 
-        state.HasUnsupportedNodes =
+        bool unsupportedNodes =
             LegacyDevInterfaceBridge.HasUnsupportedNodes(
                 state.Representation,
-                out string example);
-        state.UnsupportedNodeExample = example ?? string.Empty;
+                out string nodeExample);
+        bool unsupportedGeometry =
+            HeadlessRepresentationGizmoBridge.HasUnsupportedVisualGeometry(
+                state.Representation,
+                out string geometryExample);
+
+        state.HasUnsupportedNodes = unsupportedNodes || unsupportedGeometry;
+        state.UnsupportedNodeExample = unsupportedNodes
+            ? nodeExample ?? string.Empty
+            : geometryExample ?? string.Empty;
         state.CompatibilityDirty = false;
 
         if (state.HasUnsupportedNodes && DevUiDiagnosticsPolicy.Enabled)
