@@ -46,7 +46,7 @@ internal static class NativeToolScheduler
 
         if (Supports(mode))
         {
-            if (CanOwnNativePresentation(session))
+            if (CanOwnNativePresentation(session, mode))
                 return ActivateCore(session, mode);
 
             return MaterializeLegacyToolCore(
@@ -127,11 +127,16 @@ internal static class NativeToolScheduler
     }
 
     private static bool CanOwnNativePresentation(EditorSession session) =>
+        CanOwnNativePresentation(session, session?.ToolMode ?? EditorToolMode.Room);
+
+    private static bool CanOwnNativePresentation(
+        EditorSession session,
+        EditorToolMode mode) =>
         session != null &&
         EditorInputRouter.FrontendAttached &&
         !EditorUiModeState.UseVanilla &&
         !session.LegacyUiVisible &&
-        !DiagnosticsRequireLegacyPage(session.ToolMode);
+        !DiagnosticsRequireLegacyPage(mode);
 
     private static bool DiagnosticsRequireLegacyPage(EditorToolMode mode) =>
         DevUiDiagnosticsPolicy.Enabled &&
