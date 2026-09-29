@@ -825,6 +825,18 @@ public sealed class EditorSession
             ToolMode != EditorToolMode.Sound && ToolMode != EditorToolMode.Triggers &&
             ToolMode != EditorToolMode.Map && ToolMode != EditorToolMode.Relationships) return;
 
+        // Objects legacy presentation is an escape hatch for a proven compatibility gap, not a
+        // second authoring mode. Enforce that contract behind the command queue as well as in the
+        // frontend so stale UI, extensions, or direct command injection cannot materialize a full
+        // ObjectsPage for an object already covered by the rebuilt inspector/gizmo pipeline.
+        // Closing an already-visible legacy page must always remain possible.
+        if (ToolMode == EditorToolMode.Objects && !LegacyUiVisible)
+        {
+            EditorInspectorSnapshot inspector = EditorPresentationHub.Current?.Inspector;
+            if (inspector?.HasSelection != true || inspector.LegacyUiAvailable != true)
+                return;
+        }
+
         if (NativeToolScheduler.Supports(ToolMode))
         {
             if (LegacyUiVisible)
