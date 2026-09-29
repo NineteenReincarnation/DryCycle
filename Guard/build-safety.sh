@@ -778,9 +778,12 @@ require(direct_objects_page_constructors == [
         ],
         "Concrete ObjectsPage construction escaped the isolated headless host: " +
         ", ".join(direct_objects_page_constructors))
-require("HeadlessObjectsPage" in host and
-        "session.Owner.activePage = state.Page" not in host,
-        "The only directly constructed ObjectsPage must remain detached from DevUI.activePage.")
+require("session.Owner.activePage = state.Page" not in host,
+        "The retained selected-object proof host must never become DevUI.activePage.")
+require("session.Owner.activePage = page;" in create_external and
+        "session.Owner.activePage = previous;" in create_external and
+        restore_owner_pos >= 0 and cleanup_pos > restore_owner_pos,
+        "Temporary CreateObjRep compatibility may borrow activePage only inside the synchronous external-object creation boundary and must restore ownership before cleanup.")
 
 
 
