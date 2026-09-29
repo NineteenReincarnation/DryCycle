@@ -396,9 +396,6 @@ internal static class RelationshipEditorView
 
     private static void DrawLegend()
     {
-        float start =
-            ImGui.GetCursorPosX();
-
         for (int i = 0; i < FamilyOrder.Length; i++)
         {
             RelationFamily family =
@@ -410,15 +407,13 @@ internal static class RelationshipEditorView
                 family,
                 label);
 
-            if (i + 1 < FamilyOrder.Length &&
+            if (i + 1 < FamilyOrder.Length)
+            {
+                // SameLineIfFits performs the SameLine call itself. When the next chip does not fit,
+                // normal ImGui flow already advances to the next row at the original content X.
                 DevToolWidgets.SameLineIfFits(
-                    ImGui.CalcTextSize(label).X + 38f))
-            {
-                ImGui.SameLine();
-            }
-            else if (i + 1 < FamilyOrder.Length)
-            {
-                ImGui.SetCursorPosX(start);
+                    ImGui.CalcTextSize(
+                        GetFamilyLabel(FamilyOrder[i + 1])).X + 38f);
             }
         }
     }
