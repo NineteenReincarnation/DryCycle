@@ -47,10 +47,6 @@ internal static class ObjectExplorerView
 
     private static string objectSearch = string.Empty;
     private static string activeObjectSource = string.Empty;
-    private static string sceneSearch = string.Empty;
-    private static bool sceneTab;
-    private static long sceneSelectionAnchorStableId;
-
     private static EditorObjectTypeSnapshot[] projectedObjectLibrary;
     private static string projectedObjectSearch = string.Empty;
     private static bool projectedObjectChinese;
@@ -59,14 +55,6 @@ internal static class ObjectExplorerView
     private static readonly List<ObjectLibraryGroup> ObjectLibraryGroups = new();
     private static string observedObjectSearch;
     private static string normalizedObjectSearch = string.Empty;
-
-    private static string observedSceneSearch;
-    private static string normalizedSceneSearch = string.Empty;
-
-    private static int sceneStatusObjectCount = -1;
-    private static int sceneStatusSelectionCount = -1;
-    private static bool sceneStatusChinese;
-    private static string sceneStatusText = string.Empty;
 
     private static string placementLabelType = string.Empty;
     private static bool placementLabelChinese;
@@ -88,17 +76,7 @@ internal static class ObjectExplorerView
         observedObjectSearch = null;
         normalizedObjectSearch = string.Empty;
 
-        observedSceneSearch = null;
-        normalizedSceneSearch = string.Empty;
-
         objectSearch = string.Empty;
-        sceneSearch = string.Empty;
-        sceneTab = false;
-        sceneSelectionAnchorStableId = 0L;
-        sceneStatusObjectCount = -1;
-        sceneStatusSelectionCount = -1;
-        sceneStatusChinese = false;
-        sceneStatusText = string.Empty;
         placementLabelType = string.Empty;
         placementLabelChinese = false;
         placementLabelText = string.Empty;
@@ -106,37 +84,10 @@ internal static class ObjectExplorerView
 
     internal static void Draw(EditorPresentationSnapshot snapshot)
     {
-        bool sceneInBrowser = !DevToolUiSettings.SceneInCenter;
-        if (!sceneInBrowser)
-            sceneTab = false;
-        else if (!sceneTab)
-            ObjectSceneVisibilityState.SetSearchQuery(string.Empty);
-
-        if (DevToolWidgets.ActionButton(
-                DevToolUiSettings.T("资源库", "Library"),
-                "ObjectsLibraryTab",
-                sceneTab ? DevToolButtonTone.Subtle : DevToolButtonTone.Primary))
-        {
-            sceneTab = false;
-            if (sceneInBrowser)
-                ObjectSceneVisibilityState.SetSearchQuery(string.Empty);
-        }
-
-        if (sceneInBrowser)
-        {
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("场景", "Scene"),
-                    "ObjectsSceneTab",
-                    sceneTab ? DevToolButtonTone.Primary : DevToolButtonTone.Subtle))
-                sceneTab = true;
-        }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        if (sceneTab && sceneInBrowser) DrawSceneObjectList(snapshot);
-        else DrawObjectLibrary(snapshot);
+        // Browser is now exclusively the object library. The dedicated Scene workspace is opened
+        // from the Object page's top Scene button, so a single Library tab only wastes vertical
+        // space and duplicates navigation.
+        DrawObjectLibrary(snapshot);
     }
 
     private static void DrawObjectLibrary(EditorPresentationSnapshot snapshot)
@@ -428,122 +379,6 @@ internal static class ObjectExplorerView
                Fuzzy(item.DisplayName, query) || Fuzzy(item.Type, query);
     }
 
-    private static void DrawSceneObjectList(EditorPresentationSnapshot snapshot)
-    {
-        EditorObjectSnapshot[] objects = snapshot.SceneObjects ?? Array.Empty<EditorObjectSnapshot>();
-        int selectedCount = snapshot.Inspector?.SelectionCount ?? 0;
-        DevToolWidgets.MutedText(GetSceneStatusText(objects.Length, selectedCount));
-
-        if (selectedCount > 0)
-        {
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("复制", "Duplicate"),
-                    "SceneSelectionDuplicate",
-                    DevToolButtonTone.Normal))
-                Send(EditorUiCommandKind.DuplicateSelection);
-            ImGui.SameLine();
-            if (DevToolWidgets.ActionButton(
-                    DevToolUiSettings.T("删除", "Delete"),
-                    "SceneSelectionDelete",
-                    DevToolButtonTone.Danger))
-                Send(EditorUiCommandKind.DeleteSelection);
-        }
-
-        bool collapseAll = ObjectSceneFilterControls.DrawCollapseAllAction("Browser");
-
-        ImGui.Spacing();
-        DevToolWidgets.MutedText(DevToolUiSettings.T("搜索场景物件", "Search scene objects"));
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputText("##DevToolSceneSearch", ref sceneSearch, 128);
-        ObjectSceneVisibilityState.SetSearchQuery(sceneSearch);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        ObjectSceneListProjectionSnapshot projection =
-            ObjectSceneListProjection.Get(objects, NormalizeSceneSearch());
-
-        ImGuiIOPtr io = ImGui.GetIO();
-        ObjectSceneProjectedCategory[] categories = projection.Categories;
-        for (int categoryIndex = 0; categoryIndex < categories.Length; categoryIndex++)
-        {
-            ObjectSceneProjectedCategory category = categories[categoryIndex];
-            if (categoryIndex > 0) ImGui.Spacing();
-
-            if (!ObjectSceneFilterControls.DrawCategoryHeader(
-                    category.Category,
-                    "BrowserScene",
-                    collapseAll))
-                continue;
-
-            List<ObjectSceneProjectedRow> rows = category.Rows;
-            using DevToolListClipper clipper = new(rows.Count);
-            while (clipper.Step(out int firstVisible, out int lastVisibleExclusive))
-            {
-                for (int rowIndex = firstVisible; rowIndex < lastVisibleExclusive; rowIndex++)
-                {
-                    ObjectSceneProjectedRow row = rows[rowIndex];
-                    EditorObjectSnapshot item = row.Item;
-                    if (!DevToolExplorerRowRenderer.DrawSelectable(row, item.Selected))
-                        continue;
-
-                    if (io.KeyShift && sceneSelectionAnchorStableId != 0L)
-                    {
-                        if (!ObjectSceneListProjection.EnqueueRangeSelection(
-                                projection,
-                                sceneSelectionAnchorStableId,
-                                item.StableId,
-                                io.KeyCtrl))
-                        {
-                            EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                                EditorUiCommandKind.SelectObject,
-                                item.Index,
-                                stableId: item.StableId));
-                            sceneSelectionAnchorStableId = item.StableId;
-                        }
-                    }
-                    else if (io.KeyCtrl)
-                    {
-                        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                            EditorUiCommandKind.ToggleObjectSelection,
-                            item.Index,
-                            stableId: item.StableId));
-                        sceneSelectionAnchorStableId = item.StableId;
-                    }
-                    else
-                    {
-                        EditorUiCommandQueue.Enqueue(new EditorUiCommand(
-                            EditorUiCommandKind.SelectObject,
-                            item.Index,
-                            stableId: item.StableId));
-                        sceneSelectionAnchorStableId = item.StableId;
-                    }
-                }
-            }
-        }
-
-        if (projection.MatchCount == 0)
-            DevToolWidgets.MutedText(DevToolUiSettings.T("没有匹配的场景物件。", "No matching scene objects."));
-    }
-
-    private static string GetSceneStatusText(int objectCount, int selectedCount)
-    {
-        bool chinese = DevToolUiSettings.IsChinese;
-        if (sceneStatusObjectCount == objectCount && sceneStatusSelectionCount == selectedCount &&
-            sceneStatusChinese == chinese && sceneStatusText.Length > 0)
-            return sceneStatusText;
-
-        sceneStatusObjectCount = objectCount;
-        sceneStatusSelectionCount = selectedCount;
-        sceneStatusChinese = chinese;
-        sceneStatusText = chinese
-            ? $"已放置 {objectCount} 个物件 | 已选 {selectedCount}"
-            : $"{objectCount} placed | {selectedCount} selected";
-        return sceneStatusText;
-    }
-
     private static string GetPlacementLabel(string type)
     {
         type ??= string.Empty;
@@ -565,15 +400,6 @@ internal static class ObjectExplorerView
         observedObjectSearch = objectSearch;
         normalizedObjectSearch = objectSearch?.Trim() ?? string.Empty;
         return normalizedObjectSearch;
-    }
-
-    private static string NormalizeSceneSearch()
-    {
-        if (string.Equals(observedSceneSearch, sceneSearch, StringComparison.Ordinal))
-            return normalizedSceneSearch;
-        observedSceneSearch = sceneSearch;
-        normalizedSceneSearch = sceneSearch?.Trim() ?? string.Empty;
-        return normalizedSceneSearch;
     }
 
     private static bool Contains(string value, string query) =>
