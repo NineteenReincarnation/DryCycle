@@ -636,6 +636,27 @@ require("DiagnosticsRequireLegacyPage" in scheduler and
         "mode != EditorToolMode.Objects" in scheduler and
         "!DiagnosticsRequireLegacyPage(session.ToolMode)" in scheduler,
         "Objects diagnostics must remain on the page-less/headless backend instead of auto-materializing ObjectsPage.")
+
+require("private static bool MaterializeLegacyToolCore" in scheduler and
+        "internal static bool ShowExplicitLegacyTool" in scheduler,
+        "Legacy page materialization must expose only an explicit public-in-assembly entry point.")
+
+materialize_core_callers = []
+explicit_entry_callers = []
+for source_path in Path("src/DevUI/DevTool").rglob("*.cs"):
+    source = source_path.read_text(encoding="utf-8")
+    if "MaterializeLegacyToolCore(" in source:
+        materialize_core_callers.append(source_path.as_posix())
+    if "ShowExplicitLegacyTool(" in source:
+        explicit_entry_callers.append(source_path.as_posix())
+
+require(materialize_core_callers == ["src/DevUI/DevTool/Core/NativeToolScheduler.cs"],
+        "Legacy materialization core escaped scheduler ownership: " + ", ".join(materialize_core_callers))
+require(set(explicit_entry_callers).issubset({
+            "src/DevUI/DevTool/Core/NativeToolScheduler.cs",
+            "src/DevUI/DevTool/Core/DevToolRuntime.cs",
+        }),
+        "Explicit legacy materialization acquired an unexpected caller: " + ", ".join(explicit_entry_callers))
 require("DevUiDiagnosticsPolicy.Enabled" in host and
         "DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation)" in host,
         "Object diagnostics must collect compatibility evidence from the quarantined Representation itself.")
