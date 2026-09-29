@@ -35,20 +35,24 @@ internal static class NativeToolScheduler
     }
 
     /// <summary>
-    /// Handles both sides of the virtual-tool boundary before EditorSession falls back to ordinary
-    /// DevUI page switching. Entering a native tool installs the inert native anchor. Leaving that
-    /// anchor for any canonical non-native workspace materializes the requested real page directly,
-    /// so the anchor can never be mistaken for Room merely because ResolveToolMode's unknown-page
-    /// fallback is Room.
+    /// Owns every transition into or out of page-less native workspaces. Supported tools never fall
+    /// through to EditorSession's raw SwitchPage path: the scheduler either installs the inert native
+    /// anchor or materializes the concrete backend page according to current ownership policy.
     /// </summary>
-    internal static bool TryActivate(EditorSession session, EditorToolMode mode)
+    internal static bool SwitchTool(EditorSession session, EditorToolMode mode)
     {
-        if (session?.Owner == null) return false;
+        if (session?.Owner == null)
+            return false;
 
         if (Supports(mode))
         {
-            if (!CanOwnNativePresentation(session)) return false;
-            return ActivateCore(session, mode);
+            if (CanOwnNativePresentation(session))
+                return ActivateCore(session, mode);
+
+            return MaterializeLegacyToolCore(
+                session,
+                mode,
+                explicitLegacyUi: session.LegacyUiVisible);
         }
 
         if (IsNativeAnchor(session.Owner.activePage))
@@ -109,6 +113,8 @@ internal static class NativeToolScheduler
     {
         if (session?.Owner == null || !Supports(session.ToolMode)) return false;
 
+        EditorToolMode mode = session.ToolMode;
+
         // LegacyUiVisible is expected to be true on this transition, so do not reuse
         // CanOwnNativePresentation here. Only external ownership gates can refuse the hand-off.
         if (!EditorInputRouter.FrontendAttached ||
@@ -116,7 +122,6 @@ internal static class NativeToolScheduler
             DiagnosticsRequireLegacyPage(mode))
             return false;
 
-        EditorToolMode mode = session.ToolMode;
         session.AdoptMaterializedToolMode(mode, legacyUiVisible: false);
         return ActivateCore(session, mode);
     }
