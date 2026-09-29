@@ -45,6 +45,7 @@ internal static class LegacyObjectSandbox
 
     private static ConditionalWeakTable<EditorSession, State> states = new();
     private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedVisualFields = new();
+    private static readonly ConcurrentDictionary<Type, FieldInfo[]> ReferencedRendererFields = new();
 
     internal static LegacyControlSnapshot[] Capture(EditorSession session, PlacedObject target)
     {
@@ -535,6 +536,42 @@ internal static class LegacyObjectSandbox
         return result.ToArray();
     }
 
+    private static FieldInfo[] BuildReferencedRendererFields(Type nodeType)
+    {
+        List<FieldInfo> result = new();
+        Type current = nodeType;
+
+        while (current != null &&
+               current != typeof(DevUINode) &&
+               typeof(DevUINode).IsAssignableFrom(current))
+        {
+            FieldInfo[] fields = current.GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly);
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                Type fieldType = fields[i].FieldType;
+                if (typeof(UnityEngine.Renderer).IsAssignableFrom(fieldType))
+                {
+                    result.Add(fields[i]);
+                    continue;
+                }
+
+                if (fieldType.IsArray &&
+                    fieldType.GetElementType() != null &&
+                    typeof(UnityEngine.Renderer).IsAssignableFrom(fieldType.GetElementType()))
+                    result.Add(fields[i]);
+            }
+
+            current = current.BaseType;
+        }
+
+        return result.ToArray();
+    }
+
     private static void MoveVisualToQuarantine(
         FNode visual,
         FContainer quarantine)
@@ -761,6 +798,92 @@ internal static class LegacyObjectSandbox
             int count = node.subNodes?.Count ?? 0;
             hash ^= unchecked((uint)count);
             hash *= prime;
+
+            // Structural visual identity is part of compatibility too. Do not hash positions,
+            // scales or colors: those legitimately change during Refresh(). Identity/element/shader
+            // changes, referenced Futile nodes and Renderer replacement are the signals that the
+            // set of visual protocols itself changed and needs a fresh compatibility proof.
+            int spriteCount = node.fSprites?.Count ?? 0;
+            hash ^= unchecked((uint)spriteCount);
+            hash *= prime;
+            for (int i = 0; i < spriteCount; i++)
+            {
+                FSprite sprite = node.fSprites[i];
+                if (sprite == null)
+                {
+                    hash *= prime;
+                    continue;
+                }
+
+                hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(sprite));
+                hash *= prime;
+                hash ^= unchecked((uint)StringComparer.Ordinal.GetHashCode(
+                    sprite.element?.name ?? string.Empty));
+                hash *= prime;
+                hash ^= unchecked((uint)StringComparer.Ordinal.GetHashCode(
+                    sprite.shader?.name ?? string.Empty));
+                hash *= prime;
+            }
+
+            FieldInfo[] visualFields = ReferencedVisualFields.GetOrAdd(
+                node.GetType(),
+                BuildReferencedVisualFields);
+            for (int i = 0; i < visualFields.Length; i++)
+            {
+                object raw;
+                try { raw = visualFields[i].GetValue(node); }
+                catch { raw = null; }
+
+                if (raw is FNode visual)
+                {
+                    hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(visual));
+                    hash *= prime;
+                }
+                else if (raw is Array visualArray)
+                {
+                    hash ^= unchecked((uint)visualArray.Length);
+                    hash *= prime;
+                    for (int itemIndex = 0; itemIndex < visualArray.Length; itemIndex++)
+                    {
+                        if (visualArray.GetValue(itemIndex) is not FNode item)
+                            continue;
+                        hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(item));
+                        hash *= prime;
+                    }
+                }
+            }
+
+            FieldInfo[] rendererFields = ReferencedRendererFields.GetOrAdd(
+                node.GetType(),
+                BuildReferencedRendererFields);
+            for (int i = 0; i < rendererFields.Length; i++)
+            {
+                object raw;
+                try { raw = rendererFields[i].GetValue(node); }
+                catch { raw = null; }
+
+                if (raw is UnityEngine.Renderer renderer)
+                {
+                    hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(renderer));
+                    hash *= prime;
+                    hash ^= unchecked((uint)renderer.GetType().GetHashCode());
+                    hash *= prime;
+                }
+                else if (raw is Array rendererArray)
+                {
+                    hash ^= unchecked((uint)rendererArray.Length);
+                    hash *= prime;
+                    for (int itemIndex = 0; itemIndex < rendererArray.Length; itemIndex++)
+                    {
+                        if (rendererArray.GetValue(itemIndex) is not UnityEngine.Renderer item)
+                            continue;
+                        hash ^= unchecked((uint)RuntimeHelpers.GetHashCode(item));
+                        hash *= prime;
+                        hash ^= unchecked((uint)item.GetType().GetHashCode());
+                        hash *= prime;
+                    }
+                }
+            }
 
             // Reverse push preserves the same logical child order in the signature.
             for (int i = count - 1; i >= 0; i--)
