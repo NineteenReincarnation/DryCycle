@@ -388,6 +388,11 @@ internal static class RelationshipEditorView
 
         DrawWorkspaceHeader(snapshot);
 
+        if (snapshot.LoadingRows)
+        {
+            DrawRelationshipLoadProgress(snapshot);
+        }
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
@@ -395,9 +400,13 @@ internal static class RelationshipEditorView
         if (projectedVisibleRows.Length == 0)
         {
             DevToolWidgets.MutedText(
-                DevToolUiSettings.T(
-                    "没有关系符合当前过滤条件。",
-                    "No relationships match the current filter."),
+                snapshot.LoadingRows
+                    ? DevToolUiSettings.T(
+                        "正在逐步读取关系，界面保持可响应。",
+                        "Loading relationships incrementally; the editor remains responsive.")
+                    : DevToolUiSettings.T(
+                        "没有关系符合当前过滤条件。",
+                        "No relationships match the current filter."),
                 true);
             ImGui.End();
             return;
@@ -429,9 +438,13 @@ internal static class RelationshipEditorView
         if (row == null)
         {
             ImGui.TextWrapped(
-                DevToolUiSettings.T(
-                    "从生态关系视图中选择一个生物。",
-                    "Select a creature from the ecology relationship view."));
+                snapshot.LoadingRows
+                    ? DevToolUiSettings.T(
+                        "该生物关系尚在加载，完成后即可编辑。",
+                        "This creature relationship is still loading and will become editable when ready.")
+                    : DevToolUiSettings.T(
+                        "从生态关系视图中选择一个生物。",
+                        "Select a creature from the ecology relationship view."));
             return;
         }
 
@@ -457,6 +470,65 @@ internal static class RelationshipEditorView
             snapshot,
             row,
             EditorRelationshipDirection.OtherToPrimary);
+    }
+
+    private static void DrawRelationshipLoadProgress(
+        EditorRelationshipPresentationSnapshot snapshot)
+    {
+        int total =
+            Math.Max(
+                1,
+                snapshot.TotalRowCount);
+        int loaded =
+            Math.Max(
+                0,
+                Math.Min(
+                    snapshot.LoadedRowCount,
+                    total));
+        float progress =
+            loaded /
+            (float)total;
+
+        string label =
+            DevToolUiSettings.T(
+                "关系加载 ",
+                "Loading relationships ") +
+            loaded +
+            " / " +
+            snapshot.TotalRowCount;
+
+        ImGui.TextDisabled(label);
+
+        Num.Vector2 pos =
+            ImGui.GetCursorScreenPos();
+        float width =
+            Math.Max(
+                120f,
+                ImGui.GetContentRegionAvail().X);
+        const float height = 4f;
+        ImDrawListPtr draw =
+            ImGui.GetWindowDrawList();
+
+        draw.AddRectFilled(
+            pos,
+            pos + new Num.Vector2(
+                width,
+                height),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.12f, 0.15f, 0.20f, 0.92f)),
+            2f);
+        draw.AddRectFilled(
+            pos,
+            pos + new Num.Vector2(
+                width * progress,
+                height),
+            ImGui.GetColorU32(
+                new Num.Vector4(0.35f, 0.72f, 1f, 0.95f)),
+            2f);
+        ImGui.Dummy(
+            new Num.Vector2(
+                width,
+                height));
     }
 
     private static void DrawWorkspaceHeader(EditorRelationshipPresentationSnapshot snapshot)

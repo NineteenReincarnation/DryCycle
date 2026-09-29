@@ -41,6 +41,9 @@ public sealed class EditorRelationshipPresentationSnapshot
     public string[] CreatureTypes { get; init; } = Array.Empty<string>();
     public string[] RelationshipTypes { get; init; } = Array.Empty<string>();
     public EditorRelationshipRowSnapshot[] Rows { get; init; } = Array.Empty<EditorRelationshipRowSnapshot>();
+    public bool LoadingRows { get; init; }
+    public int LoadedRowCount { get; init; }
+    public int TotalRowCount { get; init; }
 }
 
 internal sealed class RelationshipEditorState
@@ -69,7 +72,21 @@ public static class RelationshipEditorPresentationHub
         internal EditorRelationshipRowSnapshot[] Rows = Array.Empty<EditorRelationshipRowSnapshot>();
     }
 
+    private sealed class PrimaryRowsBuildJob
+    {
+        internal string PrimaryId = string.Empty;
+        internal long Revision;
+        internal CreatureTemplate Primary;
+        internal int NextTemplateIndex;
+        internal Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> PrimaryChanged;
+        internal readonly List<EditorRelationshipRowSnapshot> Rows = new();
+    }
+
     private const int MaxPrimaryRowsCacheEntries = 12;
+    // Effective relationship queries can execute third-party hooks. Never run the complete N*2
+    // matrix synchronously when the page opens; one target per main-thread publication keeps the
+    // game responsive even when an individual mod's relationship lookup is comparatively heavy.
+    private const int PrimaryRowsPerPublish = 1;
 
     private static string[] relationshipTypes = Array.Empty<string>();
     private static int relationshipTypeCount = -1;
@@ -81,6 +98,7 @@ public static class RelationshipEditorPresentationHub
     private static readonly Dictionary<string, PrimaryRowsCacheEntry> primaryRowsCache =
         new(StringComparer.Ordinal);
     private static readonly Queue<string> primaryRowsCacheOrder = new();
+    private static PrimaryRowsBuildJob activePrimaryRowsBuild;
 
     private static EditorSession observedSession;
     private static RelationshipPage observedPage;
@@ -111,6 +129,7 @@ public static class RelationshipEditorPresentationHub
         {
             primaryRowsCache.Clear();
             primaryRowsCacheOrder.Clear();
+            activePrimaryRowsBuild = null;
         }
 
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
@@ -136,6 +155,30 @@ public static class RelationshipEditorPresentationHub
             catalogStable &&
             string.Equals(observedPrimary, state.PrimaryCreature, StringComparison.Ordinal);
         bool modelStable = primaryStable && observedRevision == revision;
+
+        if (current.LoadingRows &&
+            sameIdentity &&
+            observedCreatureTypeCount == creatureTypeCount &&
+            relationshipTypeCount == nextRelationshipTypeCount &&
+            activePrimaryRowsBuild != null &&
+            activePrimaryRowsBuild.Revision == revision &&
+            string.Equals(
+                activePrimaryRowsBuild.PrimaryId,
+                state.PrimaryCreature,
+                StringComparison.Ordinal))
+        {
+            PublishProgressiveRows(
+                session,
+                page,
+                state,
+                revision,
+                creatureTypeCount);
+            LastOutcome =
+                current.LoadingRows
+                    ? DevToolPresentationOutcome.PartialRebuild
+                    : DevToolPresentationOutcome.FullRebuild;
+            return;
+        }
 
         if (modelStable &&
             string.Equals(observedOther, state.SelectedOtherCreature, StringComparison.Ordinal) &&
@@ -163,7 +206,9 @@ public static class RelationshipEditorPresentationHub
         // both directions for one primary/other pair. Re-capture that one row and retain every other
         // row plus the static creature/relationship catalogs. Unknown history/legacy writers supply
         // no pair hint (or explicitly mark Full) and therefore fall through to the safe full build.
-        if (primaryStable && hint.HasPair &&
+        if (!current.LoadingRows &&
+            primaryStable &&
+            hint.HasPair &&
             string.Equals(hint.Primary, state.PrimaryCreature, StringComparison.Ordinal) &&
             TryPublishPairOnly(state, hint.Other))
         {
@@ -195,30 +240,45 @@ public static class RelationshipEditorPresentationHub
             state.SelectedOtherCreature =
                 string.Empty;
 
-        EditorRelationshipRowSnapshot[] baseRows =
-            GetOrBuildPrimaryRows(
-                primary,
-                revision);
-        EditorRelationshipRowSnapshot[] rows =
-            ApplySelection(
-                baseRows,
-                state.SelectedOtherCreature);
-
         RebuildRelationshipTypesIfNeeded();
 
-        current = new EditorRelationshipPresentationSnapshot
+        if (TryGetCachedPrimaryRows(
+                primary.type.value,
+                revision,
+                out EditorRelationshipRowSnapshot[] cachedRows))
         {
-            Available = true,
-            PrimaryCreature = state.PrimaryCreature,
-            SelectedOtherCreature = state.SelectedOtherCreature,
-            SelectedDirection = state.SelectedDirection,
-            CreatureTypes = creatureTypeCatalog,
-            RelationshipTypes = relationshipTypes,
-            Rows = rows
-        };
+            activePrimaryRowsBuild =
+                null;
+            PublishRowsSnapshot(
+                state,
+                cachedRows,
+                loading: false,
+                loadedCount: cachedRows.Length,
+                totalCount: cachedRows.Length);
+            Observe(
+                session,
+                page,
+                revision,
+                creatureTypeCount,
+                state);
+            LastOutcome =
+                DevToolPresentationOutcome.FullRebuild;
+            return;
+        }
 
-        Observe(session, page, revision, creatureTypeCount, state);
-        LastOutcome = DevToolPresentationOutcome.FullRebuild;
+        StartPrimaryRowsBuild(
+            primary,
+            revision);
+        PublishProgressiveRows(
+            session,
+            page,
+            state,
+            revision,
+            creatureTypeCount);
+        LastOutcome =
+            current.LoadingRows
+                ? DevToolPresentationOutcome.PartialRebuild
+                : DevToolPresentationOutcome.FullRebuild;
     }
 
     private static bool TryPublishPairOnly(RelationshipEditorState state, string otherType)
@@ -260,7 +320,10 @@ public static class RelationshipEditorPresentationHub
             SelectedDirection = state.SelectedDirection,
             CreatureTypes = current.CreatureTypes,
             RelationshipTypes = current.RelationshipTypes,
-            Rows = rows
+            Rows = rows,
+            LoadingRows = current.LoadingRows,
+            LoadedRowCount = current.LoadedRowCount,
+            TotalRowCount = current.TotalRowCount
         };
         return old != null;
     }
@@ -296,7 +359,10 @@ public static class RelationshipEditorPresentationHub
             SelectedDirection = state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther,
             CreatureTypes = current.CreatureTypes,
             RelationshipTypes = current.RelationshipTypes,
-            Rows = next ?? source
+            Rows = next ?? source,
+            LoadingRows = current.LoadingRows,
+            LoadedRowCount = current.LoadedRowCount,
+            TotalRowCount = current.TotalRowCount
         };
 
         observedOther = selectedOther;
@@ -316,6 +382,7 @@ public static class RelationshipEditorPresentationHub
         observedDirection = EditorRelationshipDirection.PrimaryToOther;
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
+        activePrimaryRowsBuild = null;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
@@ -425,48 +492,95 @@ public static class RelationshipEditorPresentationHub
         // Row snapshots depend on the exact template catalog/order.
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
+        activePrimaryRowsBuild = null;
     }
 
-    private static EditorRelationshipRowSnapshot[] GetOrBuildPrimaryRows(
+    private static bool TryGetCachedPrimaryRows(
+        string primaryId,
+        long revision,
+        out EditorRelationshipRowSnapshot[] rows)
+    {
+        if (!string.IsNullOrEmpty(primaryId) &&
+            primaryRowsCache.TryGetValue(
+                primaryId,
+                out PrimaryRowsCacheEntry cached) &&
+            cached.Revision == revision)
+        {
+            rows =
+                cached.Rows ??
+                Array.Empty<EditorRelationshipRowSnapshot>();
+            return true;
+        }
+
+        rows =
+            Array.Empty<EditorRelationshipRowSnapshot>();
+        return false;
+    }
+
+    private static void StartPrimaryRowsBuild(
         CreatureTemplate primary,
         long revision)
     {
         string primaryId =
             primary?.type?.value ??
             string.Empty;
-        if (string.IsNullOrEmpty(primaryId))
-            return Array.Empty<EditorRelationshipRowSnapshot>();
 
-        if (primaryRowsCache.TryGetValue(
+        if (activePrimaryRowsBuild != null &&
+            activePrimaryRowsBuild.Revision == revision &&
+            string.Equals(
+                activePrimaryRowsBuild.PrimaryId,
                 primaryId,
-                out PrimaryRowsCacheEntry cached) &&
-            cached.Revision == revision)
-            return cached.Rows;
+                StringComparison.Ordinal))
+            return;
 
         RelationshipPage.changedRelationships.TryGetValue(
             primary.type,
             out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> primaryChanged);
 
-        EditorRelationshipRowSnapshot[] rows =
-            new EditorRelationshipRowSnapshot[
-                Math.Max(
+        activePrimaryRowsBuild =
+            new PrimaryRowsBuildJob
+            {
+                PrimaryId =
+                    primaryId,
+                Revision =
+                    revision,
+                Primary =
+                    primary,
+                NextTemplateIndex =
                     0,
-                    templateCatalog.Length - 1)];
-        int write = 0;
+                PrimaryChanged =
+                    primaryChanged
+            };
+    }
 
-        for (int i = 0; i < templateCatalog.Length; i++)
+    private static void PublishProgressiveRows(
+        EditorSession session,
+        RelationshipPage page,
+        RelationshipEditorState state,
+        long revision,
+        int creatureTypeCount)
+    {
+        PrimaryRowsBuildJob job =
+            activePrimaryRowsBuild;
+        if (job == null)
+            return;
+
+        int processed =
+            0;
+        while (job.NextTemplateIndex < templateCatalog.Length &&
+               processed < PrimaryRowsPerPublish)
         {
             CreatureTemplate other =
-                templateCatalog[i];
+                templateCatalog[job.NextTemplateIndex++];
             if (other?.type == null ||
-                other.type == primary.type)
+                other.type == job.Primary.type)
                 continue;
 
             RelationshipPage.changedRelationships.TryGetValue(
                 other.type,
                 out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> reverseChanged);
 
-            rows[write++] =
+            job.Rows.Add(
                 new EditorRelationshipRowSnapshot
                 {
                     CreatureType =
@@ -479,27 +593,93 @@ public static class RelationshipEditorPresentationHub
                         false,
                     PrimaryToOther =
                         Capture(
-                            primary,
+                            job.Primary,
                             other,
-                            primaryChanged),
+                            job.PrimaryChanged),
                     OtherToPrimary =
                         Capture(
                             other,
-                            primary,
+                            job.Primary,
                             reverseChanged)
-                };
+                });
+            processed++;
         }
 
-        if (write != rows.Length)
-            Array.Resize(
-                ref rows,
-                write);
+        bool complete =
+            job.NextTemplateIndex >= templateCatalog.Length;
+        EditorRelationshipRowSnapshot[] baseRows =
+            job.Rows.ToArray();
 
-        CachePrimaryRows(
-            primaryId,
+        if (complete)
+        {
+            CachePrimaryRows(
+                job.PrimaryId,
+                job.Revision,
+                baseRows);
+            activePrimaryRowsBuild =
+                null;
+        }
+
+        PublishRowsSnapshot(
+            state,
+            baseRows,
+            loading: !complete,
+            loadedCount: baseRows.Length,
+            totalCount: Math.Max(
+                0,
+                templateCatalog.Length - 1));
+
+        Observe(
+            session,
+            page,
             revision,
-            rows);
-        return rows;
+            creatureTypeCount,
+            state);
+    }
+
+    private static void PublishRowsSnapshot(
+        RelationshipEditorState state,
+        EditorRelationshipRowSnapshot[] baseRows,
+        bool loading,
+        int loadedCount,
+        int totalCount)
+    {
+        EditorRelationshipRowSnapshot[] rows =
+            ApplySelection(
+                baseRows,
+                state?.SelectedOtherCreature);
+
+        current =
+            new EditorRelationshipPresentationSnapshot
+            {
+                Available =
+                    true,
+                PrimaryCreature =
+                    state?.PrimaryCreature ??
+                    string.Empty,
+                SelectedOtherCreature =
+                    state?.SelectedOtherCreature ??
+                    string.Empty,
+                SelectedDirection =
+                    state?.SelectedDirection ??
+                    EditorRelationshipDirection.PrimaryToOther,
+                CreatureTypes =
+                    creatureTypeCatalog,
+                RelationshipTypes =
+                    relationshipTypes,
+                Rows =
+                    rows,
+                LoadingRows =
+                    loading,
+                LoadedRowCount =
+                    Math.Max(
+                        0,
+                        loadedCount),
+                TotalRowCount =
+                    Math.Max(
+                        0,
+                        totalCount)
+            };
     }
 
     private static void CachePrimaryRows(
