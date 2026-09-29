@@ -131,9 +131,19 @@ internal static class HeadlessObjectCompatibilityHost
                 return true;
             }
 
-            return LegacyDevInterfaceBridge.HasUnsupportedNodes(
-                liveRepresentation,
-                out example);
+            bool unsupportedNodes =
+                LegacyDevInterfaceBridge.HasUnsupportedNodes(
+                    liveRepresentation,
+                    out string nodeExample);
+            bool unsupportedGeometry =
+                HeadlessRepresentationGizmoBridge.HasUnsupportedVisualGeometry(
+                    liveRepresentation,
+                    out string geometryExample);
+
+            example = unsupportedNodes
+                ? nodeExample ?? string.Empty
+                : geometryExample ?? string.Empty;
+            return unsupportedNodes || unsupportedGeometry;
         }
 
         State state = Acquire(session, target);
@@ -287,7 +297,7 @@ internal static class HeadlessObjectCompatibilityHost
         {
             ObjectsPage page = new(
                 session.Owner,
-                "DryCycle_Legacy_Object_Sandbox",
+                "DryCycle_Headless_Object_Compatibility",
                 null,
                 "Objects");
 
@@ -335,7 +345,7 @@ internal static class HeadlessObjectCompatibilityHost
         catch (Exception error)
         {
             Plugin.Logger?.LogWarning(
-                "DevTool could not materialize selected-object legacy sandbox for '" +
+                "DevTool could not materialize selected-object headless compatibility host for '" +
                 (target.type?.value ?? string.Empty) + "': " + error.Message);
             DisposeState(state);
             return null;
@@ -537,7 +547,7 @@ internal static class HeadlessObjectCompatibilityHost
 
             // FGameObjectNode destroys its wrapped Unity GameObject when removed from an on-stage
             // container by default. A headless host still needs that GameObject as a semantic source
-            // (for example a LineRenderer), so defer destruction until the sandbox itself is disposed.
+            // (for example a LineRenderer), so defer destruction until the headless compatibility host state itself is disposed.
             if (visual is FGameObjectNode gameObjectNode)
                 gameObjectNode.shouldDestroyOnRemoveFromStage = false;
 
