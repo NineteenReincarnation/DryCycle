@@ -186,40 +186,14 @@ internal static class HeadlessRepresentationGizmoBridge
         List<EditorObjectGizmoHandleSnapshot> handles = new();
         List<EditorObjectLineSegmentSnapshot> lines = new();
         List<Vector2> panelPositions = new();
-        CollectPanelPositions(representation, camera, panelPositions);
-        CaptureChildren(
+        CollectPanelPositionsBounded(representation, camera, panelPositions);
+        CaptureSceneTreeBounded(
             representation,
-            representation,
-            string.Empty,
             target,
             camera,
+            panelPositions,
             handles,
             lines);
-
-        CapturePixelGeometry(
-            representation,
-            camera,
-            panelPositions,
-            lines,
-            insidePanel: false);
-
-        CaptureVectorCircleGeometry(
-            representation,
-            camera,
-            lines,
-            insidePanel: false);
-
-        CaptureLineRendererGeometry(
-            representation,
-            camera,
-            lines,
-            insidePanel: false);
-
-        CaptureGameObjectNodeGeometry(
-            representation,
-            camera,
-            lines,
-            insidePanel: false);
 
         if (handles.Count == 0 && lines.Count == 0)
             return EditorObjectGizmoSnapshot.Empty;
@@ -233,32 +207,65 @@ internal static class HeadlessRepresentationGizmoBridge
         };
     }
 
-    private static void CaptureChildren(
+    private static void CollectPanelPositionsBounded(
         DevUINode root,
-        DevUINode parent,
-        string parentPath,
+        Vector2 camera,
+        List<Vector2> positions)
+    {
+        if (root == null || positions == null)
+            return;
+
+        HashSet<DevUINode> visited = new();
+        Stack<DevUINode> stack = new();
+        stack.Push(root);
+        int remaining = 4096;
+
+        while (stack.Count > 0 && remaining-- > 0)
+        {
+            DevUINode node = stack.Pop();
+            if (node == null || !visited.Add(node))
+                continue;
+
+            if (node is Panel panel)
+                positions.Add(panel.absPos + camera);
+
+            if (node.subNodes == null)
+                continue;
+
+            for (int i = node.subNodes.Count - 1; i >= 0; i--)
+                stack.Push(node.subNodes[i]);
+        }
+    }
+
+    private static void CaptureSceneTreeBounded(
+        DevUINode root,
         PlacedObject target,
         Vector2 camera,
+        List<Vector2> panelPositions,
         List<EditorObjectGizmoHandleSnapshot> handles,
         List<EditorObjectLineSegmentSnapshot> lines)
     {
-        if (parent?.subNodes == null)
+        if (root == null || target == null || handles == null || lines == null)
             return;
 
-        CaptureMultiPointGeometry(parent, target, camera, lines);
+        HashSet<DevUINode> visited = new();
+        Stack<GeometryAuditEntry> stack = new();
+        stack.Push(new GeometryAuditEntry(root, string.Empty, false));
+        int remaining = 4096;
 
-        for (int i = 0; i < parent.subNodes.Count; i++)
+        while (stack.Count > 0 && remaining-- > 0)
         {
-            DevUINode node = parent.subNodes[i];
-            if (node == null)
+            GeometryAuditEntry entry = stack.Pop();
+            DevUINode node = entry.Node;
+            if (node == null || !visited.Add(node))
                 continue;
 
-            string path = string.IsNullOrEmpty(parentPath)
-                ? i.ToString()
-                : parentPath + "." + i;
+            bool insidePanel = entry.InsidePanel || node is Panel;
+            if (insidePanel)
+                continue;
 
-            if (node is Handle handle &&
-                !HasPanelAncestor(handle, root))
+            bool isRoot = ReferenceEquals(node, root);
+            if (!isRoot && node is Handle handle)
             {
                 Vector2 point = handle.absPos + camera;
                 Vector2 anchor = target.pos;
@@ -267,7 +274,7 @@ internal static class HeadlessRepresentationGizmoBridge
 
                 handles.Add(new EditorObjectGizmoHandleSnapshot
                 {
-                    Id = HandlePrefix + path,
+                    Id = HandlePrefix + entry.Path,
                     X = point.x,
                     Y = point.y,
                     AnchorX = anchor.x,
@@ -276,267 +283,196 @@ internal static class HeadlessRepresentationGizmoBridge
                 });
             }
 
-            CaptureChildren(
-                root,
-                node,
-                path,
-                target,
-                camera,
-                handles,
-                lines);
+            CaptureMultiPointGeometry(node, target, camera, lines);
+            CapturePixelGeometryForNode(node, camera, panelPositions, lines);
+            CaptureVectorCircleGeometryForNode(node, camera, lines);
+            CaptureLineRendererGeometryForNode(node, camera, lines);
+            CaptureGameObjectNodeGeometryForNode(node, camera, lines);
+
+            if (node.subNodes == null)
+                continue;
+
+            for (int i = node.subNodes.Count - 1; i >= 0; i--)
+            {
+                DevUINode child = node.subNodes[i];
+                if (child == null)
+                    continue;
+
+                string path = string.IsNullOrEmpty(entry.Path)
+                    ? i.ToString()
+                    : entry.Path + "." + i;
+                stack.Push(new GeometryAuditEntry(child, path, false));
+            }
+        }
+
+        if (stack.Count > 0)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool headless gizmo capture stopped at the 4096-node safety budget.");
         }
     }
 
-    private static void CollectPanelPositions(
-        DevUINode node,
-        Vector2 camera,
-        List<Vector2> positions)
-    {
-        if (node == null || positions == null)
-            return;
-
-        if (node is Panel panel)
-            positions.Add(panel.absPos + camera);
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            CollectPanelPositions(node.subNodes[i], camera, positions);
-    }
-
-    private static void CapturePixelGeometry(
+    private static void CapturePixelGeometryForNode(
         DevUINode node,
         Vector2 camera,
         List<Vector2> panelPositions,
-        List<EditorObjectLineSegmentSnapshot> lines,
-        bool insidePanel)
+        List<EditorObjectLineSegmentSnapshot> lines)
     {
-        if (node == null || lines == null)
+        if (node?.fSprites == null || lines == null)
             return;
 
-        bool nextInsidePanel = insidePanel || node is Panel;
-        if (!nextInsidePanel && node.fSprites != null)
+        for (int i = 0; i < node.fSprites.Count; i++)
         {
-            for (int i = 0; i < node.fSprites.Count; i++)
+            FSprite sprite = node.fSprites[i];
+            if (!IsPixelSprite(sprite))
+                continue;
+
+            float width = Mathf.Abs(sprite.scaleX);
+            float height = Mathf.Abs(sprite.scaleY);
+            if (width < 1.5f && height < 1.5f)
+                continue;
+
+            Vector2 position = new(sprite.x, sprite.y);
+            float radians = sprite.rotation * Mathf.Deg2Rad;
+            Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
+            Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
+
+            if (width <= 2.5f || height <= 2.5f)
             {
-                FSprite sprite = node.fSprites[i];
-                if (!IsPixelSprite(sprite))
+                bool alongY = height >= width;
+                float length = alongY ? height : width;
+                float anchor = alongY ? sprite.anchorY : sprite.anchorX;
+                Vector2 axis = alongY ? yAxis : xAxis;
+                Vector2 a = position + axis * (-anchor * length) + camera;
+                Vector2 b = position + axis * ((1f - anchor) * length) + camera;
+
+                if (NearAny(a, panelPositions, 5f) ||
+                    NearAny(b, panelPositions, 5f))
                     continue;
 
-                float width = Mathf.Abs(sprite.scaleX);
-                float height = Mathf.Abs(sprite.scaleY);
-                if (width < 1.5f && height < 1.5f)
-                    continue;
-
-                Vector2 position = new(sprite.x, sprite.y);
-                float radians = sprite.rotation * Mathf.Deg2Rad;
-                Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
-                Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
-
-                if (width <= 2.5f || height <= 2.5f)
-                {
-                    bool alongY = height >= width;
-                    float length = alongY ? height : width;
-                    float anchor = alongY ? sprite.anchorY : sprite.anchorX;
-                    Vector2 axis = alongY ? yAxis : xAxis;
-                    Vector2 a = position + axis * (-anchor * length) + camera;
-                    Vector2 b = position + axis * ((1f - anchor) * length) + camera;
-
-                    // Representation-level connector lines to control Panels are UI chrome, not
-                    // scene geometry. Panel descendants are already skipped; this catches connectors
-                    // stored directly on the Representation itself.
-                    if (NearAny(a, panelPositions, 5f) ||
-                        NearAny(b, panelPositions, 5f))
-                        continue;
-
-                    AddLineUnique(lines, a, b);
-                    continue;
-                }
-
-                // A scaled pixel with meaningful extent in both axes is a common generic DevUI
-                // rectangle/fill primitive. Emit only its outline; alpha/color remain presentation
-                // details and are intentionally not interpreted as semantics.
-                Vector2 bottomLeft =
-                    position +
-                    xAxis * (-sprite.anchorX * width) +
-                    yAxis * (-sprite.anchorY * height) +
-                    camera;
-                Vector2 bottomRight = bottomLeft + xAxis * width;
-                Vector2 topLeft = bottomLeft + yAxis * height;
-                Vector2 topRight = bottomRight + yAxis * height;
-
-                AddLineUnique(lines, bottomLeft, bottomRight);
-                AddLineUnique(lines, bottomRight, topRight);
-                AddLineUnique(lines, topRight, topLeft);
-                AddLineUnique(lines, topLeft, bottomLeft);
+                AddLineUnique(lines, a, b);
+                continue;
             }
+
+            Vector2 bottomLeft =
+                position +
+                xAxis * (-sprite.anchorX * width) +
+                yAxis * (-sprite.anchorY * height) +
+                camera;
+            Vector2 bottomRight = bottomLeft + xAxis * width;
+            Vector2 topLeft = bottomLeft + yAxis * height;
+            Vector2 topRight = bottomRight + yAxis * height;
+
+            AddLineUnique(lines, bottomLeft, bottomRight);
+            AddLineUnique(lines, bottomRight, topRight);
+            AddLineUnique(lines, topRight, topLeft);
+            AddLineUnique(lines, topLeft, bottomLeft);
         }
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            CapturePixelGeometry(
-                node.subNodes[i],
-                camera,
-                panelPositions,
-                lines,
-                nextInsidePanel);
     }
 
-    private static void CaptureVectorCircleGeometry(
+    private static void CaptureVectorCircleGeometryForNode(
         DevUINode node,
         Vector2 camera,
-        List<EditorObjectLineSegmentSnapshot> lines,
-        bool insidePanel)
+        List<EditorObjectLineSegmentSnapshot> lines)
     {
-        if (node == null || lines == null)
+        if (node?.fSprites == null || lines == null)
             return;
 
-        bool nextInsidePanel = insidePanel || node is Panel;
-        if (!nextInsidePanel && node.fSprites != null)
+        for (int i = 0; i < node.fSprites.Count; i++)
         {
-            for (int i = 0; i < node.fSprites.Count; i++)
+            FSprite sprite = node.fSprites[i];
+            if (!IsVectorCircleSprite(sprite))
+                continue;
+
+            float radiusX = Mathf.Abs(sprite.scaleX) * 8f;
+            float radiusY = Mathf.Abs(sprite.scaleY) * 8f;
+            if (radiusX < 0.5f || radiusY < 0.5f)
+                continue;
+
+            Vector2 center = new Vector2(sprite.x, sprite.y) + camera;
+            float radians = sprite.rotation * Mathf.Deg2Rad;
+            Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
+            Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
+
+            const int segments = 32;
+            Vector2 previous = center + xAxis * radiusX;
+            for (int segment = 1; segment <= segments; segment++)
             {
-                FSprite sprite = node.fSprites[i];
-                if (!IsVectorCircleSprite(sprite))
-                    continue;
-
-                // Rain World's DevInterface VectorCircle contract uses Futile_White at radius/8.
-                // Treat non-uniform scale as an ellipse; this remains structural and also covers
-                // third-party representations that reuse the same shader without inheriting any
-                // vanilla representation class.
-                float radiusX = Mathf.Abs(sprite.scaleX) * 8f;
-                float radiusY = Mathf.Abs(sprite.scaleY) * 8f;
-                if (radiusX < 0.5f || radiusY < 0.5f)
-                    continue;
-
-                Vector2 center = new Vector2(sprite.x, sprite.y) + camera;
-                float radians = sprite.rotation * Mathf.Deg2Rad;
-                Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
-                Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
-
-                const int segments = 32;
-                Vector2 previous = center + xAxis * radiusX;
-                for (int segment = 1; segment <= segments; segment++)
-                {
-                    float angle = Mathf.PI * 2f * segment / segments;
-                    Vector2 current =
-                        center +
-                        xAxis * (Mathf.Cos(angle) * radiusX) +
-                        yAxis * (Mathf.Sin(angle) * radiusY);
-                    AddLineUnique(lines, previous, current);
-                    previous = current;
-                }
+                float angle = Mathf.PI * 2f * segment / segments;
+                Vector2 current =
+                    center +
+                    xAxis * (Mathf.Cos(angle) * radiusX) +
+                    yAxis * (Mathf.Sin(angle) * radiusY);
+                AddLineUnique(lines, previous, current);
+                previous = current;
             }
         }
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            CaptureVectorCircleGeometry(
-                node.subNodes[i],
-                camera,
-                lines,
-                nextInsidePanel);
     }
 
-    private static void CaptureLineRendererGeometry(
+    private static void CaptureLineRendererGeometryForNode(
         DevUINode node,
         Vector2 camera,
-        List<EditorObjectLineSegmentSnapshot> lines,
-        bool insidePanel)
+        List<EditorObjectLineSegmentSnapshot> lines)
     {
         if (node == null || lines == null)
             return;
 
-        bool nextInsidePanel = insidePanel || node is Panel;
-        if (!nextInsidePanel)
+        FieldInfo[] fields = LineRendererFields.GetOrAdd(
+            node.GetType(),
+            BuildLineRendererFields);
+
+        for (int i = 0; i < fields.Length; i++)
         {
-            FieldInfo[] fields = LineRendererFields.GetOrAdd(
-                node.GetType(),
-                BuildLineRendererFields);
+            object raw;
+            try { raw = fields[i].GetValue(node); }
+            catch { continue; }
 
-            for (int i = 0; i < fields.Length; i++)
+            if (raw is LineRenderer renderer)
             {
-                object raw;
-                try { raw = fields[i].GetValue(node); }
-                catch { continue; }
+                CaptureLineRenderer(renderer, camera, lines);
+                continue;
+            }
 
-                if (raw is LineRenderer renderer)
-                {
-                    CaptureLineRenderer(renderer, camera, lines);
-                    continue;
-                }
-
-                if (raw is Array array)
-                {
-                    for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
-                        if (array.GetValue(itemIndex) is LineRenderer item)
-                            CaptureLineRenderer(item, camera, lines);
-                }
+            if (raw is Array array)
+            {
+                for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                    if (array.GetValue(itemIndex) is LineRenderer item)
+                        CaptureLineRenderer(item, camera, lines);
             }
         }
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            CaptureLineRendererGeometry(
-                node.subNodes[i],
-                camera,
-                lines,
-                nextInsidePanel);
     }
 
-    private static void CaptureGameObjectNodeGeometry(
+    private static void CaptureGameObjectNodeGeometryForNode(
         DevUINode node,
         Vector2 camera,
-        List<EditorObjectLineSegmentSnapshot> lines,
-        bool insidePanel)
+        List<EditorObjectLineSegmentSnapshot> lines)
     {
         if (node == null || lines == null)
             return;
 
-        bool nextInsidePanel = insidePanel || node is Panel;
-        if (!nextInsidePanel)
+        FieldInfo[] fields = GameObjectNodeFields.GetOrAdd(
+            node.GetType(),
+            BuildGameObjectNodeFields);
+
+        for (int i = 0; i < fields.Length; i++)
         {
-            FieldInfo[] fields = GameObjectNodeFields.GetOrAdd(
-                node.GetType(),
-                BuildGameObjectNodeFields);
+            object raw;
+            try { raw = fields[i].GetValue(node); }
+            catch { continue; }
 
-            for (int i = 0; i < fields.Length; i++)
+            if (raw is FGameObjectNode gameObjectNode)
             {
-                object raw;
-                try { raw = fields[i].GetValue(node); }
-                catch { continue; }
+                CaptureGameObjectNode(gameObjectNode, camera, lines);
+                continue;
+            }
 
-                if (raw is FGameObjectNode gameObjectNode)
-                {
-                    CaptureGameObjectNode(gameObjectNode, camera, lines);
-                    continue;
-                }
-
-                if (raw is Array array)
-                {
-                    for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
-                        if (array.GetValue(itemIndex) is FGameObjectNode item)
-                            CaptureGameObjectNode(item, camera, lines);
-                }
+            if (raw is Array array)
+            {
+                for (int itemIndex = 0; itemIndex < array.Length; itemIndex++)
+                    if (array.GetValue(itemIndex) is FGameObjectNode item)
+                        CaptureGameObjectNode(item, camera, lines);
             }
         }
-
-        if (node.subNodes == null)
-            return;
-
-        for (int i = 0; i < node.subNodes.Count; i++)
-            CaptureGameObjectNodeGeometry(
-                node.subNodes[i],
-                camera,
-                lines,
-                nextInsidePanel);
     }
 
     private static void CaptureGameObjectNode(
