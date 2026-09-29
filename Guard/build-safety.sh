@@ -701,6 +701,26 @@ require(not retired_object_host_refs,
         "Retired visible-legacy Object sandbox name returned to the headless Object pipeline: " +
         ", ".join(retired_object_host_refs))
 
+# Full ObjectsPage construction is forbidden outside the isolated headless host. Visible legacy
+# pages must be created through DevUI.SwitchPage under NativeToolScheduler ownership.
+import re
+direct_objects_page_constructors = []
+for source_path in Path("src/DevUI/DevTool").rglob("*.cs"):
+    source = source_path.read_text(encoding="utf-8")
+    if (re.search(r"\bnew\s+ObjectsPage\s*\(", source) or
+        re.search(r"\bObjectsPage\s+\w+\s*=\s*new\s*\(", source)):
+        direct_objects_page_constructors.append(source_path.as_posix())
+
+require(direct_objects_page_constructors == [
+            "src/DevUI/DevTool/Compatibility/HeadlessObjectCompatibilityHost.cs"
+        ],
+        "Concrete ObjectsPage construction escaped the isolated headless host: " +
+        ", ".join(direct_objects_page_constructors))
+require("HeadlessObjectsPage" in host and
+        "session.Owner.activePage = state.Page" not in host,
+        "The only directly constructed ObjectsPage must remain detached from DevUI.activePage.")
+
+
 
 
 
