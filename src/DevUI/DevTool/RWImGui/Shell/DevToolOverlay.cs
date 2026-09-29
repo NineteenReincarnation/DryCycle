@@ -226,8 +226,15 @@ internal static class DevToolOverlay
     {
         float left =
             ImGui.GetCursorPosX();
+        // RWImGui currently ships an older ImGui.NET surface that does not expose
+        // GetWindowContentRegionMax(). At the start of this flow, ContentRegionAvail is exactly the
+        // remaining horizontal space from the current local cursor to the content-region right edge,
+        // so reconstruct the same local X boundary from APIs supported by the bundled binding.
         float right =
-            ImGui.GetWindowContentRegionMax().X;
+            left +
+            Math.Max(
+                1f,
+                ImGui.GetContentRegionAvail().X);
         float x =
             left;
         float y =
