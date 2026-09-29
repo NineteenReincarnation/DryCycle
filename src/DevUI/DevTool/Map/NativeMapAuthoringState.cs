@@ -227,7 +227,7 @@ internal static class NativeMapAuthoringStateHub
             if (!externalChange) continue;
 
             room.MapPosition = panel.pos;
-            room.InheritedDevPosition = panel.pos;
+            room.InheritedDevPosition = panel.devPos;
             if (!room.HasDevPositionOverride)
                 room.DevPosition = room.InheritedDevPosition;
             room.Layer = Mathf.Clamp(panel.layer, 0, 2);
@@ -448,9 +448,11 @@ internal static class NativeMapAuthoringStateHub
 
     private static void ImportPanel(RoomState room, RoomPanel panel)
     {
-        // The live vanilla panel is the strongest source for the untouched developer layout:
-        // panel.pos is exactly where the original Map page is currently drawing the room.
-        room.InheritedDevPosition = panel.pos;
+        // Vanilla MapPage stores two independent room positions:
+        // panel.pos is the canonical/player-map position, while panel.devPos is the developer-map
+        // layout. Never collapse devPos into pos here or an existing authored Dev Map layout is lost.
+        room.MapPosition = panel.pos;
+        room.InheritedDevPosition = panel.devPos;
         room.DevPosition = room.InheritedDevPosition;
         room.HasDevPositionOverride = false;
         room.Layer = Mathf.Clamp(panel.layer, 0, 2);
