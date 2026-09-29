@@ -494,6 +494,7 @@ gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBr
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
 bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
 actions_path = Path("src/DevUI/DevTool/Commands/EditorActions.cs")
+factory_path = Path("src/DevUI/DevTool/Factories/NativePlacedObjectFactory.cs")
 runtime_path = Path("src/DevUI/DevTool/Core/DevToolRuntime.cs")
 scheduler_path = Path("src/DevUI/DevTool/Core/NativeToolScheduler.cs")
 quiescence_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevUiQuiescenceController.cs")
@@ -508,6 +509,7 @@ for path in (
     coverage_path,
     bridge_path,
     actions_path,
+    factory_path,
     runtime_path,
     scheduler_path,
     quiescence_path,
@@ -524,6 +526,7 @@ gizmo = gizmo_path.read_text(encoding="utf-8")
 coverage = coverage_path.read_text(encoding="utf-8")
 bridge = bridge_path.read_text(encoding="utf-8")
 actions = actions_path.read_text(encoding="utf-8")
+factory = factory_path.read_text(encoding="utf-8")
 runtime = runtime_path.read_text(encoding="utf-8")
 scheduler = scheduler_path.read_text(encoding="utf-8")
 quiescence = quiescence_path.read_text(encoding="utf-8")
@@ -558,6 +561,14 @@ require("!coverage.GizmoComplete" in presentation and "LegacyUiAvailable" in pre
         "A scene-gizmo coverage gap must remain visible as an explicit compatibility escape hatch.")
 require("HeadlessObjectCompatibilityHost.HasCompatibilityGap" in presentation,
         "Object presentation must include the Representation tree in compatibility coverage.")
+require("HeadlessObjectCompatibilityHost.TryCreateExternalObject" in factory and
+        "TryCreateLegacy" not in factory and
+        "DevTool_LegacyFactorySandbox" not in factory,
+        "External object creation must delegate to the isolated headless compatibility host instead of constructing its own ObjectsPage.")
+require("internal static bool TryCreateExternalObject" in host and
+        "RestorePlacedObjectList" in host and
+        "DryCycle_Headless_Object_Creation" in host,
+        "Headless external object creation must keep a rollback-capable isolated creation boundary.")
 require("else if (!externalObject)" in presentation and
         "External selections retain one quarantined proof host" in presentation and
         "HeadlessObjectCompatibilityHost.Release(session);" in presentation,
