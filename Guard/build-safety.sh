@@ -638,6 +638,15 @@ require("HeadlessRepresentationGizmoBridge.HasUnsupportedVisualGeometry" in host
         "unsupportedNodes || unsupportedGeometry" in host,
         "Object compatibility proof must include Representation visual geometry, not only control nodes.")
 
+gap_start = host.find("internal static bool HasCompatibilityGap")
+gap_end = host.find("internal static T InspectRepresentation", gap_start)
+require(gap_start >= 0 and gap_end > gap_start,
+        "Could not isolate the selected-object compatibility proof.")
+gap = host[gap_start:gap_end]
+require(gap.count("HasUnsupportedVisualGeometry") >= 2 and
+        gap.count("HasUnsupportedNodes") >= 2,
+        "Both live and headless Object compatibility proofs must evaluate control semantics and visual geometry.")
+
 
 require("ObserveHeadlessRepresentation" in coverage,
         "Headless third-party Representation protocols must remain observable by compatibility diagnostics.")
@@ -650,6 +659,26 @@ require("ToolMode == EditorToolMode.Objects" in runtime and
         "!coverage.IsComplete || !coverage.GizmoComplete" in runtime and
         "return HeadlessObjectCompatibilityHost.HasCompatibilityGap(" in runtime,
         "Objects legacy materialization must be re-authorized from current selection/coverage and the reusable selected-object proof host.")
+
+toggle_start = runtime.find("public void ToggleLegacyUi()")
+toggle_end = runtime.find("private bool CanOpenObjectLegacyUi()", toggle_start)
+require(toggle_start >= 0 and toggle_end > toggle_start,
+        "Could not isolate native/legacy presentation switching.")
+toggle = runtime[toggle_start:toggle_end]
+require("bool transitioned = LegacyUiVisible" in toggle and
+        "keeping the current workspace ownership." in toggle and
+        "return;" in toggle,
+        "Native workspace legacy transitions must fail closed instead of flipping presentation state after scheduler failure.")
+
+deferred_start = runtime.find("internal bool ApplyDeferredViewRestore()")
+deferred_end = runtime.find("public void SetToolMode", deferred_start)
+require(deferred_start >= 0 and deferred_end > deferred_start,
+        "Could not isolate deferred workspace restore.")
+deferred = runtime[deferred_start:deferred_end]
+require("if (NativeToolScheduler.ShowExplicitLegacyTool(" in deferred and
+        "deferred legacy workspace restore failed" in deferred and
+        "return false;" in deferred,
+        "Deferred native legacy restore must report materialization failure instead of pretending the workspace was restored.")
 require("new(typeof(ObjectsPage)" not in quiescence,
         "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
 
@@ -695,7 +724,8 @@ require("DevUiDiagnosticsPolicy.Enabled" in host and
 retired_object_host_refs = []
 for source_path in Path("src/DevUI/DevTool").rglob("*.cs"):
     source = source_path.read_text(encoding="utf-8")
-    if "LegacyObjectSandbox" in source:
+    if ("LegacyObjectSandbox" in source or
+        "Legacy_Object_Sandbox" in source):
         retired_object_host_refs.append(source_path.as_posix())
 require(not retired_object_host_refs,
         "Retired visible-legacy Object sandbox name returned to the headless Object pipeline: " +
