@@ -493,6 +493,7 @@ host_path = Path("src/DevUI/DevTool/Compatibility/HeadlessObjectCompatibilityHos
 gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBridge.cs")
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
 bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
+actions_path = Path("src/DevUI/DevTool/Commands/EditorActions.cs")
 runtime_path = Path("src/DevUI/DevTool/Core/DevToolRuntime.cs")
 scheduler_path = Path("src/DevUI/DevTool/Core/NativeToolScheduler.cs")
 quiescence_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevUiQuiescenceController.cs")
@@ -506,6 +507,7 @@ for path in (
     gizmo_path,
     coverage_path,
     bridge_path,
+    actions_path,
     runtime_path,
     scheduler_path,
     quiescence_path,
@@ -521,6 +523,7 @@ host = host_path.read_text(encoding="utf-8")
 gizmo = gizmo_path.read_text(encoding="utf-8")
 coverage = coverage_path.read_text(encoding="utf-8")
 bridge = bridge_path.read_text(encoding="utf-8")
+actions = actions_path.read_text(encoding="utf-8")
 runtime = runtime_path.read_text(encoding="utf-8")
 scheduler = scheduler_path.read_text(encoding="utf-8")
 quiescence = quiescence_path.read_text(encoding="utf-8")
@@ -564,8 +567,8 @@ capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
 capture_end = host.find("internal static bool Run(", capture_start)
 require(capture_start >= 0 and capture_end > capture_start, "Could not isolate headless Object capture.")
 capture = host[capture_start:capture_end]
-require("activePage = state.Page" not in capture,
-        "Normal headless capture must never swap the visible DevUI page.")
+require("activePage = state.Page" not in host,
+        "Headless Object compatibility must never borrow or swap the visible DevUI activePage, including semantic mutations.")
 require("QuarantineContainer" in host and "CachedControls" in host and "ControlsDirty" in host,
         "Headless Object host must retain detached visuals and cached semantic controls.")
 require("page.Refresh()" not in host and "Page.Refresh()" not in host,
@@ -582,6 +585,16 @@ require("TreeSignature" in host and "ComputeTreeSignature" in host and
         "Dynamic third-party control/visual trees must use sparse structural audits instead of per-frame rescans.")
 require("MarkDirtyAfterMutation" in host,
         "Headless control actions must invalidate dynamic control-tree caches immediately.")
+require("Func<PlacedObjectRepresentation, bool>" in host and
+        "MutateRepresentation(session, target, action)" in host,
+        "Headless semantic control execution must receive an explicit Representation root instead of resolving through activePage.")
+require("ResolveLiveRepresentation(owner, target)" in bridge and
+        "PlacedObjectRepresentation representation" in bridge,
+        "Legacy control bridge must keep live-page wrappers separate from explicit-root semantic overloads.")
+require("representation => LegacyDevInterfaceBridge.ClickButton" in actions and
+        "representation => LegacyDevInterfaceBridge.SetSlider" in actions and
+        "Func<PlacedObjectRepresentation, bool> action" in actions,
+        "Editor actions must route headless control writes through the explicit Representation supplied by the host.")
 require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge and
         "UsesOnlyFrameworkUpdate" in bridge and
         "root " in bridge,
