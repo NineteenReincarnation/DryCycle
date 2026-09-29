@@ -695,10 +695,9 @@ public sealed class EditorSession
 
         if (deferredRestoreLegacyUi && NativeToolScheduler.Supports(deferredRestoreMode))
         {
-            NativeToolScheduler.MaterializeLegacyTool(
+            NativeToolScheduler.ShowExplicitLegacyTool(
                 this,
-                deferredRestoreMode,
-                explicitLegacyUi: true);
+                deferredRestoreMode);
             return true;
         }
 
@@ -845,7 +844,7 @@ public sealed class EditorSession
             }
             else
             {
-                if (NativeToolScheduler.MaterializeLegacyTool(this, ToolMode, explicitLegacyUi: true))
+                if (NativeToolScheduler.ShowExplicitLegacyTool(this, ToolMode))
                     return;
             }
         }
