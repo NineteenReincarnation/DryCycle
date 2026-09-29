@@ -177,75 +177,152 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
         RoomSettings current = session?.RoomSettings;
         if (!ReferenceEquals(current, settings) || current?.placedObjects == null) return false;
 
+        List<PlacedObject> previous = new(current.placedObjects);
+        List<PlacedObjectState> rollbackStates = new(states.Count);
+        bool[] memberChanged = new bool[states.Count];
+
+        bool collectionChanged = previous.Count != states.Count;
+        if (!collectionChanged)
+        {
+            for (int i = 0; i < states.Count; i++)
+            {
+                if (ReferenceEquals(previous[i], states[i].Target)) continue;
+                collectionChanged = true;
+                break;
+            }
+        }
+
+        // Phase 1: restore serialized authoring state while collection/runtime membership is still
+        // untouched. Keep a rollback snapshot for every target (including currently detached ones),
+        // so a third-party FromString failure cannot leave a half-restored authoring graph.
         try
         {
-            // Restore serialized/data state before destructively changing collection or runtime
-            // membership. A third-party FromString failure therefore cannot leave half of the room's
-            // live object list removed merely because an Undo/Redo snapshot was being replayed.
             for (int i = 0; i < states.Count; i++)
-                if (!states[i].RestoreDetachedFields(current))
-                    return false;
-
-            List<PlacedObject> previous = new(current.placedObjects);
-            bool collectionChanged = previous.Count != states.Count;
-            if (!collectionChanged)
             {
-                for (int i = 0; i < states.Count; i++)
-                {
-                    if (ReferenceEquals(previous[i], states[i].Target)) continue;
-                    collectionChanged = true;
-                    break;
-                }
-            }
+                PlacedObject target = states[i].Target;
+                PlacedObjectState rollback = PlacedObjectState.Capture(current, target);
+                rollbackStates.Add(rollback);
 
-            // Runtime instances are not authoring data and are intentionally absent from the
-            // snapshot. Diff them by PlacedObject identity: remove instances that no longer belong,
-            // then recreate/refresh every restored member after the authoritative list is rebuilt.
-            // This is required for CustomDecal and other objects whose sprites/runtime objects are
-            // destroyed by DeleteSelection; restoring only RoomSettings would otherwise produce a
-            // visually empty object after Undo.
-            for (int i = 0; i < previous.Count; i++)
-            {
-                PlacedObject old = previous[i];
-                if (ContainsTarget(states, old)) continue;
-                NativeObjectRuntimeReconciler.RemoveRuntime(session, old);
-            }
-
-            current.placedObjects.Clear();
-            for (int i = 0; i < states.Count; i++)
-                current.placedObjects.Add(states[i].Target);
-
-            for (int i = 0; i < previous.Count; i++)
-            {
-                PlacedObject old = previous[i];
-                if (ContainsTarget(states, old)) continue;
-
-                NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, old);
-                HeadlessObjectCompatibilityHost.Invalidate(session, old);
+                bool alreadyPresent = ContainsReference(previous, target);
+                memberChanged[i] =
+                    !alreadyPresent ||
+                    rollback == null ||
+                    !states[i].SameAs(rollback);
             }
 
             for (int i = 0; i < states.Count; i++)
             {
-                PlacedObject restored = states[i].Target;
-                NativeObjectRuntimeReconciler.RefreshAfterMutation(session, restored);
-                HeadlessObjectCompatibilityHost.Invalidate(session, restored);
+                if (states[i].RestoreDetachedFields(current)) continue;
+
+                RestoreDetachedRollback(current, rollbackStates);
+                Plugin.Logger?.LogWarning(
+                    "DevTool placed-object collection restore aborted before membership commit because an object state could not be restored.");
+                return false;
             }
-
-            if (collectionChanged)
-                ObjectPresentationChangeHintHub.MarkCollection(session);
-            else
-                ObjectPresentationChangeHintHub.MarkAllMembers(session);
-
-            session.Selection.RemoveMissing(current.placedObjects);
-            if (refreshCompatibilityPage)
-                PlacedObjectState.RefreshCompatibilityPage(session);
-            return true;
         }
         catch (Exception error)
         {
-            Plugin.Logger?.LogWarning("DevTool placed-object collection restore failed: " + error);
+            RestoreDetachedRollback(current, rollbackStates);
+            Plugin.Logger?.LogWarning(
+                "DevTool placed-object collection restore aborted before membership commit: " + error);
             return false;
         }
+
+        // Phase 2: commit the authoritative RoomSettings membership/order. Runtime objects have not
+        // been touched yet, so this tiny list transaction can still roll back cleanly if something
+        // exceptional happens while rebuilding the collection.
+        try
+        {
+            current.placedObjects.Clear();
+            for (int i = 0; i < states.Count; i++)
+                current.placedObjects.Add(states[i].Target);
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                current.placedObjects.Clear();
+                for (int i = 0; i < previous.Count; i++)
+                    current.placedObjects.Add(previous[i]);
+            }
+            catch (Exception rollbackError)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool placed-object membership rollback also failed: " + rollbackError);
+            }
+
+            RestoreDetachedRollback(current, rollbackStates);
+            Plugin.Logger?.LogWarning(
+                "DevTool placed-object collection membership restore failed: " + error);
+            return false;
+        }
+
+        // Phase 3: runtime presentation is derived state. Reconcile it only after authoring data is
+        // committed, and never make a visual adapter failure invalidate an otherwise successful
+        // Undo/Redo. CustomDecal is the important case here: Delete destroys its runtime/sprites, so
+        // Undo must recreate them instead of restoring only the PlacedObject record.
+        for (int i = 0; i < previous.Count; i++)
+        {
+            PlacedObject old = previous[i];
+            if (ContainsTarget(states, old)) continue;
+
+            try
+            {
+                NativeObjectRuntimeReconciler.RemoveRuntime(session, old);
+                NativeObjectRuntimeReconciler.RefreshAfterRemoval(session, old);
+                HeadlessObjectCompatibilityHost.Invalidate(session, old);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool removed-object runtime reconciliation failed during history restore: " + error);
+            }
+        }
+
+        int changedCount = 0;
+        PlacedObject singleChanged = null;
+        for (int i = 0; i < states.Count; i++)
+        {
+            if (!memberChanged[i]) continue;
+
+            PlacedObject restored = states[i].Target;
+            changedCount++;
+            singleChanged = restored;
+            try
+            {
+                NativeObjectRuntimeReconciler.RefreshAfterMutation(session, restored);
+                HeadlessObjectCompatibilityHost.Invalidate(session, restored);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool restored-object runtime reconciliation failed during history restore: " + error);
+            }
+        }
+
+        if (collectionChanged)
+            ObjectPresentationChangeHintHub.MarkCollection(session);
+        else if (changedCount == 1)
+            ObjectPresentationChangeHintHub.MarkMember(session, singleChanged);
+        else if (changedCount > 1)
+            ObjectPresentationChangeHintHub.MarkAllMembers(session);
+
+        session.Selection.RemoveMissing(current.placedObjects);
+
+        if (refreshCompatibilityPage)
+        {
+            try
+            {
+                PlacedObjectState.RefreshCompatibilityPage(session);
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool object compatibility refresh failed after history restore: " + error);
+            }
+        }
+
+        return true;
     }
 
     private static bool ContainsTarget(List<PlacedObjectState> source, PlacedObject target)
@@ -256,7 +333,42 @@ internal sealed class PlacedObjectsStateSnapshot : IEditorStateSnapshot
                 return true;
         return false;
     }
-}
+
+    private static bool ContainsReference(List<PlacedObject> source, PlacedObject target)
+    {
+        if (target == null) return false;
+        for (int i = 0; i < source.Count; i++)
+            if (ReferenceEquals(source[i], target))
+                return true;
+        return false;
+    }
+
+    private static void RestoreDetachedRollback(
+        RoomSettings current,
+        List<PlacedObjectState> rollbackStates)
+    {
+        if (current == null || rollbackStates == null) return;
+
+        for (int i = 0; i < rollbackStates.Count; i++)
+        {
+            PlacedObjectState rollback = rollbackStates[i];
+            if (rollback == null) continue;
+
+            try
+            {
+                if (!rollback.RestoreDetachedFields(current))
+                {
+                    Plugin.Logger?.LogWarning(
+                        "DevTool placed-object detached rollback could not restore one object state.");
+                }
+            }
+            catch (Exception error)
+            {
+                Plugin.Logger?.LogWarning(
+                    "DevTool placed-object detached rollback failed: " + error);
+            }
+        }
+    }}
 
 internal sealed class RoomSettingsStateSnapshot : IEditorStateSnapshot
 {
