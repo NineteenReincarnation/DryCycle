@@ -493,6 +493,8 @@ host_path = Path("src/DevUI/DevTool/Compatibility/LegacyObjectSandbox.cs")
 gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBridge.cs")
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
 bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
+runtime_path = Path("src/DevUI/DevTool/Core/DevToolRuntime.cs")
+quiescence_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevUiQuiescenceController.cs")
 project_path = Path("src/DryCycle.csproj")
 
 for path in (
@@ -503,6 +505,8 @@ for path in (
     gizmo_path,
     coverage_path,
     bridge_path,
+    runtime_path,
+    quiescence_path,
     project_path,
 ):
     if not path.is_file():
@@ -515,6 +519,8 @@ host = host_path.read_text(encoding="utf-8")
 gizmo = gizmo_path.read_text(encoding="utf-8")
 coverage = coverage_path.read_text(encoding="utf-8")
 bridge = bridge_path.read_text(encoding="utf-8")
+runtime = runtime_path.read_text(encoding="utf-8")
+quiescence = quiescence_path.read_text(encoding="utf-8")
 project = project_path.read_text(encoding="utf-8")
 
 def require(condition, message):
@@ -538,15 +544,18 @@ reflection_pos = bootstrap.find("NativeDataReflectionInspector.Instance")
 require(managed_pos >= 0 and reflection_pos > managed_pos,
         "Managed Object protocol must run before generic Data reflection.")
 
-require("externalObject && (!coverage.IsComplete || representationGap)" in presentation,
-        "Incomplete third-party Objects or unsupported Representation nodes must route through the isolated headless fallback.")
-require("(!coverage.GizmoComplete || representationGap)" in presentation and
-        "HeadlessRepresentationGizmoBridge.Capture" in presentation,
+require("needsHeadlessControls" in presentation and "needsHeadlessGizmo" in presentation and
+        "needsHeadlessHost" in presentation,
+        "Third-party Object fallback ownership must distinguish inspector, gizmo and host requirements.")
+require("HeadlessRepresentationGizmoBridge.Capture" in presentation,
         "Incomplete scene geometry or Representation coverage must merge from the headless Representation.")
-require("(!coverage.IsComplete || representationGap || session.LegacyUiVisible)" in presentation,
-        "Full original DevUI must remain an explicit escape hatch only for proven compatibility gaps.")
+require("!coverage.GizmoComplete" in presentation and "LegacyUiAvailable" in presentation,
+        "A scene-gizmo coverage gap must remain visible as an explicit compatibility escape hatch.")
 require("LegacyObjectSandbox.HasCompatibilityGap" in presentation,
         "Object presentation must include the Representation tree in compatibility coverage.")
+require("else if (!needsHeadlessHost)" in presentation and
+        "LegacyObjectSandbox.Release(session);" in presentation,
+        "A fully covered third-party Object must retire its temporary headless Representation host immediately.")
 
 capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
 capture_end = host.find("internal static bool Run(", capture_start)
@@ -582,6 +591,8 @@ required_gizmo = (
     "TryWriteManagedVectorArrayElement",
     "CaptureMultiPointGeometry",
     "CapturePixelGeometry",
+    "CaptureVectorCircleGeometry",
+    "IsVectorCircleSprite",
     "CaptureLineRendererGeometry",
 )
 for token in required_gizmo:
@@ -593,6 +604,14 @@ require("ObserveHeadlessRepresentation" in coverage,
         "Headless third-party Representation protocols must remain observable by compatibility diagnostics.")
 require("DevUiDiagnosticsPolicy.Enabled" in host and "ObserveHeadlessRepresentation" in host,
         "Expensive compatibility auditing must stay diagnostics-only on normal editor frames.")
+
+require("ToolMode == EditorToolMode.Objects && !LegacyUiVisible" in runtime and
+        "EditorPresentationHub.Current?.Inspector" in runtime and
+        "inspector.LegacyUiAvailable != true" in runtime,
+        "Objects legacy materialization must be blocked in the backend unless the current inspector proves a compatibility gap.")
+require("new(typeof(ObjectsPage)" not in quiescence,
+        "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
+
 
 print("Protocol-based third-party Object compatibility guard passed.")
 PY
