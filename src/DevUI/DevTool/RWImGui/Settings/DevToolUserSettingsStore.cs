@@ -61,7 +61,7 @@ internal readonly struct DevToolPersistedWindowGroup
 /// </summary>
 internal static class DevToolUserSettingsStore
 {
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
     private const string FileName = "DryCycle.DevTool.UI.xml";
     private static readonly object Sync = new();
     private static readonly Dictionary<string, DevToolPersistedWindowLayout> Windows =
@@ -170,6 +170,16 @@ internal static class DevToolUserSettingsStore
                             // Clear only its previous geometry once; future developer resizing stays
                             // sticky through the same custom window-layout store.
                             Windows.Remove("WorldWorkspace");
+                            dirty = true;
+                            saveAfterUtc = DateTime.UtcNow;
+                        }
+
+                        if (storedVersion < 4)
+                        {
+                            // The font window no longer duplicates RGBA numeric fields beside each
+                            // swatch. Drop its previous large geometry once so existing installs pick
+                            // up the compact layout; later manual resizing remains persistent.
+                            Windows.Remove("Font");
                             dirty = true;
                             saveAfterUtc = DateTime.UtcNow;
                         }

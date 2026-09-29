@@ -25,11 +25,14 @@ internal static class FontSettingsWindow
             EditorPresentationHub.Current.ToolMode == EditorToolMode.Triggers)
             return;
 
-        // Only editable controls are shown in this window, so keep its footprint compact.
-        const float preferredWidth = 468f;
-        float preferredHeight = DevToolUiSettings.IsChinese ? 238f : 274f;
-        float width = Math.Min(preferredWidth, Math.Max(320f, display.X - 16f));
-        float height = Math.Min(preferredHeight, Math.Max(190f, display.Y - 16f));
+        // ColorEdit numeric channels are intentionally hidden in the parent window. Clicking the
+        // swatch opens ImGui's full picker, which already provides RGBA/HSV/hex entry. Size the
+        // typography window around the actual persistent controls instead of reserving space for a
+        // second copy of those numeric fields.
+        const float preferredWidth = 352f;
+        float preferredHeight = DevToolUiSettings.IsChinese ? 220f : 252f;
+        float width = Math.Min(preferredWidth, Math.Max(300f, display.X - 16f));
+        float height = Math.Min(preferredHeight, Math.Max(184f, display.Y - 16f));
 
         ImGui.SetNextWindowPos(
             new Num.Vector2(Math.Max(8f, display.X - width - 8f), 8f),
@@ -38,8 +41,8 @@ internal static class FontSettingsWindow
         // allowing the developer to resize the window afterwards during the current session.
         ImGui.SetNextWindowSize(new Num.Vector2(width, height), ImGuiCond.Once);
         ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(Math.Min(420f, Math.Max(320f, display.X - 16f)), 190f),
-            new Num.Vector2(Math.Max(420f, display.X - 16f), Math.Max(190f, display.Y - 16f)));
+            new Num.Vector2(Math.Min(300f, Math.Max(280f, display.X - 16f)), 184f),
+            new Num.Vector2(Math.Max(352f, display.X - 16f), Math.Max(184f, display.Y - 16f)));
         ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
 
         if (!ImGui.Begin(
@@ -69,8 +72,8 @@ internal static class FontSettingsWindow
             // Font size changes affect glyphs and controls, not the authored floating-window
             // footprint. Keep the requested top-right window size stable.
             ImGui.SetWindowSize(new Num.Vector2(
-                Math.Min(preferredWidth, Math.Max(320f, display.X - 16f)),
-                Math.Min(preferredHeight, Math.Max(190f, display.Y - 16f))));
+                Math.Min(preferredWidth, Math.Max(300f, display.X - 16f)),
+                Math.Min(preferredHeight, Math.Max(184f, display.Y - 16f))));
         }
 
         if (!DevToolUiSettings.IsChinese)
@@ -90,13 +93,26 @@ internal static class FontSettingsWindow
         ImGui.Separator();
         ImGui.TextDisabled(DevToolUiSettings.T("颜色", "COLORS"));
 
+        ImGuiColorEditFlags colorFlags =
+            ImGuiColorEditFlags.NoInputs;
+
         Num.Vector4 text = DevToolUiSettings.TextColor;
-        if (ImGui.ColorEdit4(DevToolUiSettings.T("正文##DevToolTextColor", "Text##DevToolTextColor"), ref text))
+        if (ImGui.ColorEdit4(
+                DevToolUiSettings.T("正文##DevToolTextColor", "Text##DevToolTextColor"),
+                ref text,
+                colorFlags))
+        {
             DevToolUiSettings.TextColor = text;
+        }
 
         Num.Vector4 disabled = DevToolUiSettings.DisabledTextColor;
-        if (ImGui.ColorEdit4(DevToolUiSettings.T("弱化文字##DevToolDisabledTextColor", "Muted text##DevToolDisabledTextColor"), ref disabled))
+        if (ImGui.ColorEdit4(
+                DevToolUiSettings.T("弱化文字##DevToolDisabledTextColor", "Muted text##DevToolDisabledTextColor"),
+                ref disabled,
+                colorFlags))
+        {
             DevToolUiSettings.DisabledTextColor = disabled;
+        }
 
         ImGui.Separator();
 
