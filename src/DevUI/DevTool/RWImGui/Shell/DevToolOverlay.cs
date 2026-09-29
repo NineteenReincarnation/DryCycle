@@ -59,9 +59,6 @@ internal static class DevToolOverlay
         // the shared editor chrome here.
         ShortcutWindow.Draw(snapshot, display);
 
-        if (!snapshot.FocusMode)
-            DrawActivityBar(snapshot, display);
-
         if (debugWorkspacePage)
         {
             if (snapshot.PlacementActive)
@@ -94,6 +91,14 @@ internal static class DevToolOverlay
         DevToolDebugWorkspaceView.ResetRetainedState();
     }
 
+    internal static void DrawActivityBarAfterTop(EditorPresentationSnapshot snapshot, Num.Vector2 display)
+    {
+        if (snapshot == null || snapshot.FocusMode)
+            return;
+
+        DrawActivityBar(snapshot, display);
+    }
+
     private static void DrawActivityBar(EditorPresentationSnapshot snapshot, Num.Vector2 display)
     {
         var pages = DevToolPageViewRegistry.NavigationPages;
@@ -103,29 +108,94 @@ internal static class DevToolOverlay
         for (int i = 0; i < pages.Count; i++)
             widest = Math.Max(widest, ImGui.CalcTextSize(pages[i].NavigationLabel).X);
 
-        float defaultWidth = Math.Min(380f, Math.Max(170f, widest + 48f));
+        DevToolActivityPlacement placement =
+            DevToolUserSettingsStore.ActivityPlacement;
+        bool topDocked =
+            placement == DevToolActivityPlacement.TopDocked;
 
-        ImGui.SetNextWindowPos(new Num.Vector2(8f, 120f), ImGuiCond.FirstUseEver);
-        // Y=0 asks ImGui to auto-fit that axis on first use. Height is content-owned afterwards;
-        // only width remains user-resizable/persistent.
-        ImGui.SetNextWindowSize(new Num.Vector2(defaultWidth, 0f), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(
-            new Num.Vector2(140f, 0f),
+        float defaultWidth =
+            Math.Min(
+                300f,
+                Math.Max(
+                    topDocked ? 184f : 170f,
+                    widest + 48f));
+
+        Num.Vector2 windowPosition =
+            new(8f, 120f);
+
+        if (topDocked &&
+            DevToolTopStatusWindow.TryGetCurrentRect(
+                out Num.Vector2 topPosition,
+                out Num.Vector2 topSize))
+        {
+            // Touch the top surface by one pixel so the two windows read as one docked assembly
+            // rather than two unrelated floating cards. Keep the tool palette aligned to the left
+            // edge of the top status bar, which leaves the room center and right inspector visible.
+            windowPosition =
+                new Num.Vector2(
+                    topPosition.X,
+                    Math.Max(
+                        0f,
+                        topPosition.Y + topSize.Y - 1f));
+        }
+
+        float maxHeight =
+            Math.Max(
+                80f,
+                display.Y -
+                Math.Max(
+                    16f,
+                    windowPosition.Y + 8f));
+
+        ImGui.SetNextWindowPos(
+            windowPosition,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(
             new Num.Vector2(
-                Math.Min(520f, Math.Max(140f, display.X - 16f)),
-                Math.Max(80f, display.Y - 16f)));
-        ImGui.SetNextWindowBgAlpha(DevToolUiSettings.WindowAlpha);
+                Math.Min(defaultWidth, Math.Max(140f, display.X - 16f)),
+                0f),
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSizeConstraints(
+            new Num.Vector2(
+                Math.Min(defaultWidth, Math.Max(140f, display.X - 16f)),
+                0f),
+            new Num.Vector2(
+                Math.Min(defaultWidth, Math.Max(140f, display.X - 16f)),
+                maxHeight));
+        ImGui.SetNextWindowBgAlpha(
+            topDocked
+                ? Math.Min(1f, DevToolUiSettings.WindowAlpha + 0.04f)
+                : DevToolUiSettings.WindowAlpha);
+
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.WindowPadding,
+            new Num.Vector2(7f, 6f));
+        ImGui.PushStyleVar(
+            ImGuiStyleVar.ItemSpacing,
+            new Num.Vector2(6f, 5f));
+
+        ImGuiWindowFlags flags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoBringToFrontOnFocus;
 
         if (!ImGui.Begin(
-                DevToolUiSettings.T("工具###DevToolActivity", "Tools###DevToolActivity"),
-                ImGuiWindowFlags.NoCollapse |
-                ImGuiWindowFlags.NoBringToFrontOnFocus))
+                "##DevToolActivity",
+                flags))
         {
             ImGui.End();
+            ImGui.PopStyleVar(2);
             return;
         }
 
-        FloatingWindowSnap.TrackCurrentWindow("Tools");
+        DrawActivityPlacementHeader(placement);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
         for (int i = 0; i < pages.Count; i++)
             DrawModeButton(pages[i], snapshot.ToolMode);
@@ -152,6 +222,7 @@ internal static class DevToolOverlay
         {
             FitActivityBarHeight(display);
             ImGui.End();
+            ImGui.PopStyleVar(2);
             return;
         }
 
@@ -166,6 +237,7 @@ internal static class DevToolOverlay
                 "Diagnostics are collected in one dedicated workspace. Select any normal tool above to return."));
             FitActivityBarHeight(display);
             ImGui.End();
+            ImGui.PopStyleVar(2);
             return;
         }
 
@@ -187,6 +259,55 @@ internal static class DevToolOverlay
 
         FitActivityBarHeight(display);
         ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
+    private static void DrawActivityPlacementHeader(DevToolActivityPlacement placement)
+    {
+        bool topDocked =
+            placement == DevToolActivityPlacement.TopDocked;
+
+        if (DevToolWidgets.ActionButton(
+                "⇆",
+                "DevToolActivityPlacement",
+                DevToolButtonTone.Subtle,
+                fullWidth: false,
+                fixedWidth: 34f))
+        {
+            DevToolActivityPlacement next =
+                topDocked
+                    ? DevToolActivityPlacement.LeftSidebar
+                    : DevToolActivityPlacement.TopDocked;
+
+            DevToolUserSettingsStore.RememberActivityPlacement(next);
+
+            bool movedTop =
+                next == DevToolActivityPlacement.TopDocked;
+            EditorShortcutFeedback.PublishCustom(
+                movedTop ? "工具窗口已停靠到顶部" : "工具窗口已切换到左侧",
+                movedTop ? "Tools docked below top bar" : "Tools moved to left sidebar",
+                "⇆",
+                true,
+                EditorShortcutFeedbackVisual.Toggle);
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            DevToolTooltip.Show(
+                topDocked
+                    ? DevToolUiSettings.T("切换到左侧工具栏", "Move tools to the left sidebar")
+                    : DevToolUiSettings.T("停靠到顶部状态栏下方", "Dock tools below the top status bar"));
+        }
+
+        ImGui.SameLine();
+        float labelY =
+            ImGui.GetCursorPosY() +
+            Math.Max(
+                0f,
+                (ImGui.GetFrameHeight() - ImGui.GetTextLineHeight()) * 0.5f);
+        ImGui.SetCursorPosY(labelY);
+        ImGui.TextUnformatted(
+            DevToolUiSettings.T("工具", "TOOLS"));
     }
 
     private static void FitActivityBarHeight(Num.Vector2 display)

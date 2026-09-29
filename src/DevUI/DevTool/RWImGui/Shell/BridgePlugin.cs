@@ -1086,6 +1086,14 @@ internal static class DevToolFrontend
                             snapshot,
                             topPage,
                             frameContext.DisplaySize);
+
+                        // The tool palette is submitted after the top status surface so TopDocked
+                        // placement can use its exact auto-resized rectangle from this same frame.
+                        // It never overlaps the top bar, so drawing it one layer later does not
+                        // compromise the top chrome's readability.
+                        DevToolOverlay.DrawActivityBarAfterTop(
+                            snapshot,
+                            frameContext.DisplaySize);
                     }
                 }
 

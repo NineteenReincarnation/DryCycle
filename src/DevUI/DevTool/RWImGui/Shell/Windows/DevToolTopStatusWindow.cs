@@ -19,6 +19,25 @@ internal static class DevToolTopStatusWindow
     private const float SegmentGap = 2f;
 
     private static int lastDrawFrame = -1;
+    private static int rectFrame = -1;
+    private static Num.Vector2 currentPosition;
+    private static Num.Vector2 currentSize;
+
+    internal static bool TryGetCurrentRect(out Num.Vector2 position, out Num.Vector2 size)
+    {
+        if (rectFrame == ImGui.GetFrameCount() &&
+            currentSize.X > 1f &&
+            currentSize.Y > 1f)
+        {
+            position = currentPosition;
+            size = currentSize;
+            return true;
+        }
+
+        position = default;
+        size = default;
+        return false;
+    }
 
     internal static void Draw(
         EditorPresentationSnapshot snapshot,
@@ -104,6 +123,13 @@ internal static class DevToolTopStatusWindow
             page.DrawTopControls(snapshot);
             ImGui.SetWindowFontScale(1f);
         }
+
+        // Publish the real auto-resized geometry before End. DevToolOverlay draws the tool palette
+        // immediately afterwards in the same frame and can therefore dock it without a guessed
+        // title-bar height or one-frame positional lag.
+        currentPosition = ImGui.GetWindowPos();
+        currentSize = ImGui.GetWindowSize();
+        rectFrame = frame;
 
         ImGui.End();
         ImGui.PopStyleVar(2);

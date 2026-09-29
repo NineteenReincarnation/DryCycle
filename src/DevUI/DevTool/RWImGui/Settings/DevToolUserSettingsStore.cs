@@ -10,6 +10,12 @@ using Num = System.Numerics;
 
 namespace DryCycle.DevUI.DevTool.RWImGui;
 
+internal enum DevToolActivityPlacement
+{
+    TopDocked = 0,
+    LeftSidebar = 1
+}
+
 internal readonly struct DevToolPersistedWindowLayout
 {
     internal DevToolPersistedWindowLayout(Num.Vector2 position, Num.Vector2 size)
@@ -70,9 +76,19 @@ internal static class DevToolUserSettingsStore
     private static float browserInspectorSplit = 0.23f;
     private static float soundBrowserSplit = 0.26f;
     private static float soundSceneSplit = 0.30f;
+    private static DevToolActivityPlacement activityPlacement = DevToolActivityPlacement.TopDocked;
 
     internal static string SettingsPath =>
         Path.Combine(Paths.ConfigPath, FileName);
+
+    internal static DevToolActivityPlacement ActivityPlacement
+    {
+        get
+        {
+            lock (Sync)
+                return activityPlacement;
+        }
+    }
 
     internal static float BrowserInspectorSplit
     {
@@ -113,6 +129,7 @@ internal static class DevToolUserSettingsStore
             browserInspectorSplit = 0.23f;
             soundBrowserSplit = 0.26f;
             soundSceneSplit = 0.30f;
+            activityPlacement = DevToolActivityPlacement.TopDocked;
 
             try
             {
@@ -158,6 +175,7 @@ internal static class DevToolUserSettingsStore
                 browserInspectorSplit = 0.23f;
                 soundBrowserSplit = 0.26f;
                 soundSceneSplit = 0.30f;
+                activityPlacement = DevToolActivityPlacement.TopDocked;
             }
 
             loaded = true;
@@ -266,6 +284,21 @@ internal static class DevToolUserSettingsStore
         }
     }
 
+    internal static void RememberActivityPlacement(DevToolActivityPlacement value)
+    {
+        if (!Enum.IsDefined(typeof(DevToolActivityPlacement), value))
+            value = DevToolActivityPlacement.TopDocked;
+
+        lock (Sync)
+        {
+            if (!loaded || activityPlacement == value)
+                return;
+
+            activityPlacement = value;
+            MarkDirtyLocked();
+        }
+    }
+
     internal static void RememberBrowserInspectorSplit(float value)
     {
         value = Math.Max(0.08f, Math.Min(0.82f, value));
@@ -352,6 +385,11 @@ internal static class DevToolUserSettingsStore
     {
         if (element == null)
             return;
+
+        activityPlacement =
+            ParseEnum(
+                Attribute(element, "toolPlacement"),
+                DevToolActivityPlacement.TopDocked);
 
         browserInspectorSplit =
             ReadFloat(
@@ -551,6 +589,7 @@ internal static class DevToolUserSettingsStore
             "Presentation",
             new XAttribute("language", DevToolUiSettings.Language),
             new XAttribute("scenePlacement", DevToolUiSettings.ScenePlacement),
+            new XAttribute("toolPlacement", activityPlacement),
             new XAttribute("browserInspectorSplit", F(browserInspectorSplit)),
             new XAttribute("soundBrowserSplit", F(soundBrowserSplit)),
             new XAttribute("soundSceneSplit", F(soundSceneSplit)),
