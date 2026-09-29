@@ -195,8 +195,6 @@ public static partial class EditorPresentationHub
             singleSelection &&
             externalObject &&
             (!coverage.GizmoComplete || representationGap);
-        bool needsHeadlessHost = needsHeadlessControls || needsHeadlessGizmo;
-
         LegacyControlSnapshot[] legacyControls = Array.Empty<LegacyControlSnapshot>();
         if (singleSelection)
         {
@@ -212,12 +210,13 @@ public static partial class EditorPresentationHub
                 // only while a concrete inspector/gizmo compatibility gap still needs it.
                 legacyControls = HeadlessObjectCompatibilityHost.Capture(session, selected);
             }
-            else if (!needsHeadlessHost)
+            else if (!externalObject)
             {
-                // HasCompatibilityGap() may temporarily materialize a quarantined Representation to
-                // prove that a third-party object is fully covered. Once that proof succeeds, retire
-                // the host immediately so complete native/protocol objects leave no legacy backend
-                // resident behind the rebuilt UI.
+                // External selections retain one quarantined proof host for the selection lifetime,
+                // even when every current control/gizmo is natively covered. It has no visible page
+                // and receives no stable-frame Update; keeping it avoids reconstructing third-party
+                // Representations on every drag revision and lets later Data-driven tree changes be
+                // re-audited against the same isolated instance.
                 HeadlessObjectCompatibilityHost.Release(session);
             }
         }
