@@ -84,6 +84,7 @@ internal static class RelationshipEditorView
 
     private static RelationshipViewMode viewMode = RelationshipViewMode.Atlas;
     private static RelationshipFilterMode filterMode = RelationshipFilterMode.All;
+    private const float PrimaryCreatureRowHeight = 36f;
 
     private static EditorRelationshipRowSnapshot[] projectedRowsSource;
     private static PairPresentation[] projectedRows = Array.Empty<PairPresentation>();
@@ -145,6 +146,13 @@ internal static class RelationshipEditorView
         string query =
             PrimarySearchQuery();
 
+        float clipTop =
+            ImGui.GetWindowPos().Y - PrimaryCreatureRowHeight;
+        float clipBottom =
+            ImGui.GetWindowPos().Y +
+            ImGui.GetWindowHeight() +
+            PrimaryCreatureRowHeight;
+
         int matches = 0;
         for (int i = 0; i < creatures.Length; i++)
         {
@@ -154,6 +162,19 @@ internal static class RelationshipEditorView
                 continue;
 
             matches++;
+
+            float rowScreenY =
+                ImGui.GetCursorScreenPos().Y;
+            if (rowScreenY + PrimaryCreatureRowHeight < clipTop ||
+                rowScreenY > clipBottom)
+            {
+                ImGui.Dummy(
+                    new Num.Vector2(
+                        1f,
+                        PrimaryCreatureRowHeight));
+                continue;
+            }
+
             bool selected =
                 string.Equals(
                     type,
@@ -187,7 +208,7 @@ internal static class RelationshipEditorView
             Math.Max(
                 120f,
                 ImGui.GetContentRegionAvail().X);
-        const float height = 36f;
+        const float height = PrimaryCreatureRowHeight;
 
         ImGui.PushID(
             "RelationshipPrimary:" + creatureId);
@@ -235,11 +256,12 @@ internal static class RelationshipEditorView
 
         Num.Vector2 iconPos =
             min + new Num.Vector2(6f, 4f);
-        WorldCreatureCatalogPicker.DrawInlineIcon(
+        WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             creatureId,
             iconPos,
-            new Num.Vector2(28f, 28f));
+            new Num.Vector2(28f, 28f),
+            maxRuns: 84);
 
         draw.AddText(
             min + new Num.Vector2(40f, 9f),
@@ -555,8 +577,6 @@ internal static class RelationshipEditorView
                 Math.Max(520f, available.X),
                 Math.Max(420f, available.Y));
 
-        Num.Vector2 cursorLocal =
-            ImGui.GetCursorPos();
         Num.Vector2 origin =
             ImGui.GetCursorScreenPos();
 
@@ -586,6 +606,8 @@ internal static class RelationshipEditorView
 
         Num.Vector2 mouse =
             ImGui.GetIO().MousePos;
+        bool canvasHovered =
+            ImGui.IsWindowHovered();
         AtlasNodeLayout hot =
             null;
         for (int i = 0; i < atlasNodes.Count; i++)
@@ -595,12 +617,24 @@ internal static class RelationshipEditorView
             float half =
                 node.Size * 0.5f;
             node.Hovered =
+                canvasHovered &&
                 PointInRect(
                     mouse,
                     node.Center - new Num.Vector2(half, half),
                     node.Center + new Num.Vector2(half, half));
             if (node.Hovered)
                 hot = node;
+        }
+
+        if (hot?.Pair?.Row != null &&
+            ImGui.IsMouseClicked(
+                ImGuiMouseButton.Left))
+        {
+            RelationshipEditorCommandQueue.Enqueue(
+                new RelationshipEditorCommand(
+                    RelationshipEditorCommandKind.SelectPair,
+                    other: hot.Pair.Row.CreatureType,
+                    direction: EditorRelationshipDirection.PrimaryToOther));
         }
 
         DrawAtlasZones(
@@ -639,17 +673,14 @@ internal static class RelationshipEditorView
             primaryCenter,
             108f);
 
-        // Restore the local cursor and submit node hit targets over the already-painted graph.
-        ImGui.SetCursorPos(cursorLocal);
+        // Nodes are pure draw-list primitives. Hit-testing is manual above, which avoids rewinding
+        // ImGui's layout cursor and creating dozens of overlapping invisible widgets on the native
+        // Present thread.
         for (int i = 0; i < atlasNodes.Count; i++)
         {
-            AtlasNodeLayout node =
-                atlasNodes[i];
             DrawAtlasNode(
                 snapshot,
-                node,
-                origin,
-                cursorLocal);
+                atlasNodes[i]);
         }
 
         ImGui.SetCursorPos(afterCanvas);
@@ -963,13 +994,14 @@ internal static class RelationshipEditorView
             ImDrawFlags.None,
             2f);
 
-        WorldCreatureCatalogPicker.DrawInlineIcon(
+        WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             creatureId,
             min + new Num.Vector2(14f, 10f),
             new Num.Vector2(
                 size - 28f,
-                size - 42f));
+                size - 42f),
+            maxRuns: 128);
 
         string label =
             FitText(
@@ -988,9 +1020,7 @@ internal static class RelationshipEditorView
 
     private static void DrawAtlasNode(
         EditorRelationshipPresentationSnapshot snapshot,
-        AtlasNodeLayout node,
-        Num.Vector2 canvasOrigin,
-        Num.Vector2 canvasCursorLocal)
+        AtlasNodeLayout node)
     {
         if (node?.Pair?.Row == null)
             return;
@@ -1010,23 +1040,8 @@ internal static class RelationshipEditorView
                 half,
                 half);
 
-        Num.Vector2 local =
-            canvasCursorLocal +
-            (min - canvasOrigin);
-        ImGui.SetCursorPos(local);
-
-        ImGui.PushID(
-            "RelationshipAtlasNode:" +
-            node.Pair.Row.CreatureType);
-        bool clicked =
-            ImGui.InvisibleButton(
-                "##node",
-                new Num.Vector2(
-                    size,
-                    size));
         bool hovered =
-            ImGui.IsItemHovered();
-        ImGui.PopID();
+            node.Hovered;
 
         ImDrawListPtr draw =
             ImGui.GetWindowDrawList();
@@ -1081,7 +1096,7 @@ internal static class RelationshipEditorView
             Clamp01(node.Pair.Forward.Intensity) *
             1.8f);
 
-        WorldCreatureCatalogPicker.DrawInlineIcon(
+        WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             node.Pair.Row.CreatureType,
             min + new Num.Vector2(
@@ -1089,7 +1104,8 @@ internal static class RelationshipEditorView
                 size * 0.13f),
             new Num.Vector2(
                 size * 0.68f,
-                size * 0.68f));
+                size * 0.68f),
+            maxRuns: 56);
 
         if (node.Pair.Asymmetric)
         {
@@ -1123,15 +1139,6 @@ internal static class RelationshipEditorView
                     new Num.Vector4(0.50f, 0.84f, 1f, 1f)),
                 32,
                 2f);
-        }
-
-        if (clicked)
-        {
-            RelationshipEditorCommandQueue.Enqueue(
-                new RelationshipEditorCommand(
-                    RelationshipEditorCommandKind.SelectPair,
-                    other: node.Pair.Row.CreatureType,
-                    direction: EditorRelationshipDirection.PrimaryToOther));
         }
 
         if (hovered)
@@ -1333,17 +1340,19 @@ internal static class RelationshipEditorView
                 new Num.Vector4(0.045f, 0.06f, 0.085f, 0.82f)),
             6f);
 
-        WorldCreatureCatalogPicker.DrawInlineIcon(
+        WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             primary,
             min + new Num.Vector2(8f, 8f),
-            new Num.Vector2(44f, 44f));
+            new Num.Vector2(44f, 44f),
+            maxRuns: 112);
 
-        WorldCreatureCatalogPicker.DrawInlineIcon(
+        WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             other,
             new Num.Vector2(max.X - 52f, min.Y + 8f),
-            new Num.Vector2(44f, 44f));
+            new Num.Vector2(44f, 44f),
+            maxRuns: 112);
 
         Num.Vector2 lineStart =
             new(min.X + 62f, min.Y + 31f);

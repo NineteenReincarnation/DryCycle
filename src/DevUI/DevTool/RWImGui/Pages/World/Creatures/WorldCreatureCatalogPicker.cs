@@ -172,6 +172,10 @@ internal static class WorldCreatureCatalogPicker
     private const int MaxSandboxSymbolsPerFrame = 48;
     private const double MainThreadBudgetMs = 1.50;
     private const int MaxIconRasterDimension = 40;
+    // Dense editors such as Relationships may show dozens of icons in one ImGui draw list. Each
+    // prepared creature icon is a run-length raster expanded into AddRectFilled primitives. Bound
+    // that expansion so a single page can never flood the native draw list / backend vertex buffer.
+    private const int MaxCompactIconRunsPerFrame = 7000;
     private const int MaxAtlasCacheBytes = 32 * 1024 * 1024;
     private const float SaveDebounceSeconds = 4.0f;
     private const int StableEnvironmentCheckFrames = 300;
@@ -188,6 +192,8 @@ internal static class WorldCreatureCatalogPicker
     private static readonly Dictionary<string, string> searchByPicker = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, Num.Vector2> pickerSizeByPopup = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, FilterCacheEntry> filterCache = new(StringComparer.OrdinalIgnoreCase);
+    private static int compactIconBudgetFrame = -1;
+    private static int compactIconRunsUsed;
 
     private static readonly Dictionary<string, string> sourceByCreature = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> sourceLabelByKey = new(StringComparer.OrdinalIgnoreCase);
@@ -714,6 +720,231 @@ internal static class WorldCreatureCatalogPicker
         return state == IconState.Ready &&
                icon != null &&
                icon.Available;
+    }
+
+    /// <summary>
+    /// Draws the same prepared creature icon through a strict primitive budget. This path is for
+    /// dense editor surfaces that can display many icons at once. It never touches Unity/Futile
+    /// resources from the Present thread; it only consumes the immutable prepared raster snapshot.
+    /// </summary>
+    internal static unsafe bool DrawInlineIconCompact(
+        ImDrawListPtr draw,
+        string creatureId,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize,
+        int maxRuns = 72)
+    {
+        if (draw.NativePtr == null ||
+            string.IsNullOrWhiteSpace(creatureId) ||
+            areaSize.X <= 0f ||
+            areaSize.Y <= 0f)
+            return false;
+
+        catalogRequested = true;
+        TryGetIconForRender(
+            creatureId,
+            out IconRaster icon,
+            out IconState state);
+
+        if (state != IconState.Ready ||
+            icon == null ||
+            !icon.Available ||
+            icon.Runs == null ||
+            icon.Runs.Length == 0)
+        {
+            DrawCompactIconFallback(
+                draw,
+                creatureId,
+                state,
+                areaPos,
+                areaSize);
+            return false;
+        }
+
+        int frame = ImGui.GetFrameCount();
+        if (frame != compactIconBudgetFrame)
+        {
+            compactIconBudgetFrame = frame;
+            compactIconRunsUsed = 0;
+        }
+
+        int remaining =
+            Math.Max(
+                0,
+                MaxCompactIconRunsPerFrame - compactIconRunsUsed);
+        int allowed =
+            Math.Max(
+                0,
+                Math.Min(
+                    Math.Max(12, maxRuns),
+                    remaining));
+
+        if (allowed < 12)
+        {
+            DrawCompactIconFallback(
+                draw,
+                creatureId,
+                state,
+                areaPos,
+                areaSize);
+            return true;
+        }
+
+        int used =
+            DrawIconBudgeted(
+                draw,
+                icon,
+                areaPos,
+                areaSize,
+                allowed);
+        compactIconRunsUsed += used;
+        return true;
+    }
+
+    private static int DrawIconBudgeted(
+        ImDrawListPtr draw,
+        IconRaster icon,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize,
+        int maxRuns)
+    {
+        PixelRun[] runs =
+            icon?.Runs ?? Array.Empty<PixelRun>();
+        if (runs.Length == 0 ||
+            maxRuns <= 0)
+            return 0;
+
+        float scale =
+            Math.Min(
+                areaSize.X / Math.Max(1, icon.Width),
+                areaSize.Y / Math.Max(1, icon.Height));
+        scale =
+            Math.Min(
+                scale,
+                4f);
+
+        Num.Vector2 origin =
+            areaPos +
+            new Num.Vector2(
+                (areaSize.X - icon.Width * scale) * 0.5f,
+                (areaSize.Y - icon.Height * scale) * 0.5f);
+
+        int stride =
+            Math.Max(
+                1,
+                (runs.Length + maxRuns - 1) / maxRuns);
+        int used = 0;
+
+        for (int i = 0; i < runs.Length && used < maxRuns; i += stride)
+        {
+            PixelRun run =
+                runs[i];
+            float alpha =
+                run.Color.a / 255f;
+            if (alpha <= 0.02f)
+                continue;
+
+            Num.Vector4 color =
+                new(
+                    icon.Tint.r * run.Color.r / 255f,
+                    icon.Tint.g * run.Color.g / 255f,
+                    icon.Tint.b * run.Color.b / 255f,
+                    icon.Tint.a * alpha);
+
+            float y =
+                icon.Height - 1 - run.Y;
+            Num.Vector2 a =
+                origin +
+                new Num.Vector2(
+                    run.X * scale,
+                    y * scale);
+            Num.Vector2 b =
+                a +
+                new Num.Vector2(
+                    Math.Max(
+                        scale,
+                        run.Width * scale),
+                    // When runs are sampled, slightly deepen the scanline so the compact icon reads
+                    // as a continuous silhouette instead of a dotted set of isolated pixels.
+                    Math.Max(
+                        scale,
+                        scale * Math.Min(2f, stride * 0.35f + 1f)));
+
+            draw.AddRectFilled(
+                a,
+                b,
+                ImGui.GetColorU32(color));
+            used++;
+        }
+
+        return used;
+    }
+
+    private static void DrawCompactIconFallback(
+        ImDrawListPtr draw,
+        string creatureId,
+        IconState state,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize)
+    {
+        Num.Vector2 center =
+            areaPos +
+            areaSize * 0.5f;
+        float radius =
+            Math.Max(
+                5f,
+                Math.Min(
+                    areaSize.X,
+                    areaSize.Y) *
+                0.29f);
+
+        uint color =
+            ImGui.GetColorU32(
+                state == IconState.Pending
+                    ? new Num.Vector4(0.42f, 0.68f, 0.90f, 0.88f)
+                    : new Num.Vector4(0.58f, 0.64f, 0.72f, 0.84f));
+
+        draw.AddCircle(
+            center,
+            radius,
+            color,
+            16,
+            1.4f);
+
+        int hash =
+            StableIconFallbackHash(creatureId);
+        float a =
+            radius * (0.45f + (hash & 3) * 0.06f);
+        float b =
+            radius * (0.30f + ((hash >> 2) & 3) * 0.06f);
+
+        draw.AddLine(
+            center + new Num.Vector2(-a, -b),
+            center + new Num.Vector2(a, -b),
+            color,
+            1.3f);
+        draw.AddLine(
+            center + new Num.Vector2(-b, 0f),
+            center + new Num.Vector2(b, 0f),
+            color,
+            1.3f);
+        draw.AddLine(
+            center + new Num.Vector2(-a, b),
+            center + new Num.Vector2(a, b),
+            color,
+            1.3f);
+    }
+
+    private static int StableIconFallbackHash(string value)
+    {
+        unchecked
+        {
+            int hash = 17;
+            value ??= string.Empty;
+            for (int i = 0; i < value.Length; i++)
+                hash = hash * 31 + value[i];
+            return hash;
+        }
     }
 
     private static void DrawIcon(
