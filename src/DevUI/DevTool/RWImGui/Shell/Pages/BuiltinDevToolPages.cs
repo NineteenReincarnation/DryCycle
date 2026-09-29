@@ -29,6 +29,7 @@ internal sealed class RoomDevToolPage : DevToolFrontendPageBase
 internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 {
     private string activeDocument = string.Empty;
+    private bool sceneWorkspaceOpen;
 
     public override string Id => "objects";
     public override EditorToolMode Mode => EditorToolMode.Objects;
@@ -37,6 +38,10 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     public override string NavigationTooltip => DevToolUiSettings.T("物件", "Objects");
     public override bool SupportsSceneSurface => true;
     public override bool SupportsPlacementInput => true;
+    public override bool HasTopControls => true;
+
+    public override bool IsSceneSurfaceVisible(EditorPresentationSnapshot snapshot) =>
+        sceneWorkspaceOpen && DevToolUiSettings.SceneInCenter;
 
     public override bool SuppressInspector(EditorPresentationSnapshot snapshot) =>
         snapshot.Inspector?.HasSelection != true;
@@ -58,6 +63,48 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
 
     public override void DrawInspector(EditorPresentationSnapshot snapshot) =>
         ObjectInspectorView.Draw(snapshot.Inspector);
+
+    public override void DrawTopControls(EditorPresentationSnapshot snapshot)
+    {
+        string sceneLabel =
+            DevToolUiSettings.T(
+                "场景",
+                "Scene");
+
+        if (DevToolWidgets.ActionButton(
+                sceneLabel,
+                "ObjectsTopScene",
+                sceneWorkspaceOpen
+                    ? DevToolButtonTone.Primary
+                    : DevToolButtonTone.Subtle))
+        {
+            sceneWorkspaceOpen =
+                !sceneWorkspaceOpen;
+
+            if (sceneWorkspaceOpen &&
+                !DevToolUiSettings.SceneInCenter)
+            {
+                // The new Object-page Scene control owns the floating Scene surface. Old installs
+                // may still carry the retired left-browser placement preference, so opening Scene
+                // promotes it to the center/floating placement instead of yielding a button that
+                // appears active while no Scene window can be shown.
+                DevToolUiSettings.ScenePlacement =
+                    DevToolScenePlacement.Center;
+            }
+        }
+
+        if (ImGuiNET.ImGui.IsItemHovered())
+        {
+            DevToolTooltip.Show(
+                sceneWorkspaceOpen
+                    ? DevToolUiSettings.T(
+                        "隐藏物件场景窗口",
+                        "Hide the Objects Scene window")
+                    : DevToolUiSettings.T(
+                        "显示物件场景窗口",
+                        "Show the Objects Scene window"));
+        }
+    }
 
     public override void DrawSceneWorkspace(EditorPresentationSnapshot snapshot) =>
         ObjectSceneWorkspaceView.Draw(snapshot);
@@ -88,6 +135,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
     protected override void OnReset()
     {
         activeDocument = string.Empty;
+        sceneWorkspaceOpen = false;
         ResetObjectFrontendState();
     }
 
@@ -98,6 +146,7 @@ internal sealed class ObjectsDevToolPage : DevToolFrontendPageBase
             return;
 
         activeDocument = document;
+        sceneWorkspaceOpen = false;
         ResetObjectFrontendState();
     }
 

@@ -72,6 +72,7 @@ internal interface IDevToolPageView
     bool SupportsSceneSurface { get; }
     bool SupportsPlacementInput { get; }
     bool HasTopControls { get; }
+    bool IsSceneSurfaceVisible(EditorPresentationSnapshot snapshot);
 
     string GetSessionStatus(EditorPresentationSnapshot snapshot);
     bool SuppressInspector(EditorPresentationSnapshot snapshot);
@@ -115,6 +116,8 @@ internal abstract class DevToolFrontendPageBase : IDevToolFrontendPage
     public virtual bool SupportsSceneSurface => false;
     public virtual bool SupportsPlacementInput => false;
     public virtual bool HasTopControls => false;
+    public virtual bool IsSceneSurfaceVisible(EditorPresentationSnapshot snapshot) =>
+        SupportsSceneSurface;
 
     public string GetSessionStatus(EditorPresentationSnapshot snapshot)
     {

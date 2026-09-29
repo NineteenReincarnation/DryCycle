@@ -19,7 +19,8 @@ internal static class SceneWorkspaceWindow
             DevToolOverlay.SuppressesSharedPageSurfaces ||
             !DevToolUiSettings.SceneInCenter ||
             !DevToolPageViewRegistry.TryGet(snapshot.ToolMode, out IDevToolPageView page) ||
-            !page.SupportsSceneSurface)
+            !page.SupportsSceneSurface ||
+            !page.IsSceneSurfaceVisible(snapshot))
             return;
 
         float scale = Math.Max(0.78f, Math.Min(2.2f, DevToolUiSettings.UiScale));
