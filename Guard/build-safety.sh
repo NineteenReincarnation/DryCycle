@@ -581,8 +581,9 @@ require("TreeSignature" in host and "ComputeTreeSignature" in host and
 require("MarkDirtyAfterMutation" in host,
         "Headless control actions must invalidate dynamic control-tree caches immediately.")
 require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge and
-        "UsesOnlyFrameworkUpdate" in bridge,
-        "Unknown interactive DevUI nodes and custom Update() surfaces must remain explicit compatibility gaps instead of being silently accepted.")
+        "UsesOnlyFrameworkUpdate" in bridge and
+        "root " in bridge,
+        "Unknown interactive DevUI nodes, including the root Representation, and custom Update() surfaces must remain explicit compatibility gaps instead of being silently accepted.")
 require("node is ArrowButton" in bridge and "arrowButton.Clicked()" in bridge,
         "Vanilla/custom ArrowButton controls must remain bridged through their original Clicked() semantic boundary.")
 require("SynchronizePollingParent" in bridge and
@@ -599,11 +600,20 @@ required_gizmo = (
     "CaptureVectorCircleGeometry",
     "IsVectorCircleSprite",
     "CaptureLineRendererGeometry",
+    "CaptureGameObjectNodeGeometry",
+    "HasUnsupportedVisualGeometry",
+    "HasUnsupportedSpriteGeometry",
+    "HasUnsupportedGameObjectGeometry",
 )
 for token in required_gizmo:
     require(token in gizmo, f"Headless Object gizmo compiler lost required generic capability: {token}")
 require("ResolveNode(representation, path)" in gizmo,
         "Headless Handle edits must resolve the current tree by path instead of caching stale node references.")
+
+require("HeadlessRepresentationGizmoBridge.HasUnsupportedVisualGeometry" in host and
+        "unsupportedNodes || unsupportedGeometry" in host,
+        "Object compatibility proof must include Representation visual geometry, not only control nodes.")
+
 
 require("ObserveHeadlessRepresentation" in coverage,
         "Headless third-party Representation protocols must remain observable by compatibility diagnostics.")
