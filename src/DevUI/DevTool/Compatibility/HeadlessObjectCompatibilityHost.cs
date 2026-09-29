@@ -106,10 +106,8 @@ internal static class HeadlessObjectCompatibilityHost
     internal static bool Run(
         EditorSession session,
         PlacedObject target,
-        Func<bool> action)
-    {
-        return Run(session, target, action, false);
-    }
+        Func<PlacedObjectRepresentation, bool> action) =>
+        MutateRepresentation(session, target, action);
 
     internal static bool HasCompatibilityGap(
         EditorSession session,
@@ -231,16 +229,12 @@ internal static class HeadlessObjectCompatibilityHost
         if (state?.Representation == null)
             return false;
 
-        Page previous = session.Owner.activePage;
         try
         {
             QuarantineVisualTree(state.Page, state.QuarantineContainer);
-            session.Owner.activePage = state.Page;
             bool changed = mutation(state.Representation);
             if (changed)
-            {
                 MarkDirtyAfterMutation(state, target);
-            }
             return changed;
         }
         catch (Exception error)
@@ -252,7 +246,6 @@ internal static class HeadlessObjectCompatibilityHost
         finally
         {
             QuarantineVisualTree(state.Page, state.QuarantineContainer);
-            session.Owner.activePage = previous;
         }
     }
 
@@ -280,49 +273,6 @@ internal static class HeadlessObjectCompatibilityHost
     {
         Release(DevToolSessionHub.Current);
         states = new ConditionalWeakTable<EditorSession, State>();
-    }
-
-    private static T Run<T>(
-        EditorSession session,
-        PlacedObject target,
-        Func<T> action,
-        T fallback)
-    {
-        if (session?.Owner == null || target?.type == null || action == null)
-            return fallback;
-
-        // Explicit legacy ownership already has the authoritative full ObjectsPage. Reuse it rather
-        // than creating a second compatibility tree.
-        if (session.Owner.activePage is ObjectsPage)
-            return action();
-
-        State state = Acquire(session, target);
-        if (state?.Page == null)
-            return fallback;
-
-        Page previous = session.Owner.activePage;
-        try
-        {
-            // Existing LegacyDevInterfaceBridge semantics are intentionally reused. The swap is
-            // synchronous on the DevUI/main thread and no EditorSession synchronization occurs until
-            // after this call returns. The sandbox is a semantic backend only: none of its Futile
-            // visuals may ever leak into the rebuilt editor.
-            QuarantineVisualTree(state.Page, state.QuarantineContainer);
-            session.Owner.activePage = state.Page;
-            T result = action();
-            MarkDirtyAfterMutation(state, target);
-            return result;
-        }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning("DevTool legacy object sandbox failed: " + error.Message);
-            return fallback;
-        }
-        finally
-        {
-            QuarantineVisualTree(state.Page, state.QuarantineContainer);
-            session.Owner.activePage = previous;
-        }
     }
 
     private static State Acquire(EditorSession session, PlacedObject target)
