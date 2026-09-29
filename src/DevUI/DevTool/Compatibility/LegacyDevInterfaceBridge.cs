@@ -84,6 +84,11 @@ public static class LegacyDevInterfaceBridge
         return representation == null ? Array.Empty<LegacyControlSnapshot>() : CaptureRoot(representation);
     }
 
+    private static PlacedObjectRepresentation ResolveLiveRepresentation(
+        global::DevInterface.DevUI owner,
+        PlacedObject target) =>
+        FindRepresentation(owner?.activePage as ObjectsPage, target);
+
     /// <summary>
     /// Generic entry point used by coverage/tests and by future page-level mirrors. The root itself
     /// is treated as a container; paths are relative to its subNodes collection.
@@ -396,20 +401,25 @@ public static class LegacyDevInterfaceBridge
     internal static bool CanAdaptDirection(DevUINode node) =>
         node != null && TryReadDirection(node, out _) && CanWriteDirection(node);
 
-    internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path)
+    internal static bool ClickButton(global::DevInterface.DevUI owner, PlacedObject target, string path) =>
+        ClickButton(owner, ResolveLiveRepresentation(owner, target), path);
+
+    internal static bool ClickButton(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path)
     {
         if (TryParseCompositeAction(path, CyclerActionPrefix, out int cyclerIndex, out string cyclerPath))
-            return SetCycler(owner, target, cyclerPath, cyclerIndex);
+            return SetCycler(owner, representation, cyclerPath, cyclerIndex);
         if (TryParseCompositeAction(path, ExtEnumActionPrefix, out int extEnumIndex, out string extEnumPath))
-            return SetExtEnum(owner, target, extEnumPath, extEnumIndex);
+            return SetExtEnum(owner, representation, extEnumPath, extEnumIndex);
         if (TryParseCompositeAction(path, IntegerActionPrefix, out int integerChange, out string integerPath))
-            return IncrementInteger(owner, target, integerPath, integerChange);
+            return IncrementInteger(owner, representation, integerPath, integerChange);
         if (TryParseCompositeAction(path, SelectActionPrefix, out int selectedIndex, out string selectPath))
-            return SetSelect(owner, target, selectPath, selectedIndex);
+            return SetSelect(owner, representation, selectPath, selectedIndex);
         if (TryParseCompositeAction(path, PanelSelectActionPrefix, out int panelIndex, out string panelPath))
-            return SetPanelSelect(owner, target, panelPath, panelIndex);
+            return SetPanelSelect(owner, representation, panelPath, panelIndex);
 
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
 
@@ -441,9 +451,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path, float factor)
+    internal static bool SetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path, float factor) =>
+        SetSlider(owner, ResolveLiveRepresentation(owner, target), path, factor);
+
+    internal static bool SetSlider(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        float factor)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null || ResolveNode(representation, path) is not Slider slider) return false;
 
         try
@@ -470,9 +486,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool ResetLegacyBoolean(global::DevInterface.DevUI owner, PlacedObject target, string path, bool desired)
+    internal static bool ResetLegacyBoolean(global::DevInterface.DevUI owner, PlacedObject target, string path, bool desired) =>
+        ResetLegacyBoolean(owner, ResolveLiveRepresentation(owner, target), path, desired);
+
+    internal static bool ResetLegacyBoolean(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        bool desired)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         if (!CanAdaptBoolean(node) || node is not Button button) return false;
@@ -500,9 +522,14 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool ResetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path)
+    internal static bool ResetSlider(global::DevInterface.DevUI owner, PlacedObject target, string path) =>
+        ResetSlider(owner, ResolveLiveRepresentation(owner, target), path);
+
+    internal static bool ResetSlider(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         if (ResolveNode(representation, path) is not Slider slider || !slider.inheritButton) return false;
 
@@ -520,9 +547,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetCycler(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    internal static bool SetCycler(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex) =>
+        SetCycler(owner, ResolveLiveRepresentation(owner, target), path, selectedIndex);
+
+    internal static bool SetCycler(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        int selectedIndex)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null || ResolveNode(representation, path) is not Cycler cycler) return false;
         if (cycler.alternatives == null || selectedIndex < 0 || selectedIndex >= cycler.alternatives.Count) return false;
 
@@ -543,9 +576,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetExtEnum(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    internal static bool SetExtEnum(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex) =>
+        SetExtEnum(owner, ResolveLiveRepresentation(owner, target), path, selectedIndex);
+
+    internal static bool SetExtEnum(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        int selectedIndex)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         if (!TryReadExtEnum(node, out Type enumType, out string memberName, out string[] options, out _)) return false;
@@ -568,10 +607,16 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool IncrementInteger(global::DevInterface.DevUI owner, PlacedObject target, string path, int change)
+    internal static bool IncrementInteger(global::DevInterface.DevUI owner, PlacedObject target, string path, int change) =>
+        IncrementInteger(owner, ResolveLiveRepresentation(owner, target), path, change);
+
+    internal static bool IncrementInteger(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        int change)
     {
         if (change == 0) return false;
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null || ResolveNode(representation, path) is not IntegerControl control) return false;
 
         try
@@ -588,9 +633,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    internal static bool SetSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex) =>
+        SetSelect(owner, ResolveLiveRepresentation(owner, target), path, selectedIndex);
+
+    internal static bool SetSelect(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        int selectedIndex)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null || ResolveNode(representation, path) is not ButtonWithSelectPanel button) return false;
 
         string[] options = ReadSelectOptions(button);
@@ -612,9 +663,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetPanelSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex)
+    internal static bool SetPanelSelect(global::DevInterface.DevUI owner, PlacedObject target, string path, int selectedIndex) =>
+        SetPanelSelect(owner, ResolveLiveRepresentation(owner, target), path, selectedIndex);
+
+    internal static bool SetPanelSelect(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        int selectedIndex)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         if (!CanAdaptPanelSelect(node) || node is not Button button) return false;
@@ -640,9 +697,15 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetText(global::DevInterface.DevUI owner, PlacedObject target, string path, string value)
+    internal static bool SetText(global::DevInterface.DevUI owner, PlacedObject target, string path, string value) =>
+        SetText(owner, ResolveLiveRepresentation(owner, target), path, value);
+
+    internal static bool SetText(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        string value)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         MethodInfo commit = FindTextCommitMethod(node?.GetType());
@@ -667,9 +730,16 @@ public static class LegacyDevInterfaceBridge
         }
     }
 
-    internal static bool SetDirection(global::DevInterface.DevUI owner, PlacedObject target, string path, float x, float y)
+    internal static bool SetDirection(global::DevInterface.DevUI owner, PlacedObject target, string path, float x, float y) =>
+        SetDirection(owner, ResolveLiveRepresentation(owner, target), path, x, y);
+
+    internal static bool SetDirection(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        float x,
+        float y)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         if (!CanAdaptDirection(node)) return false;
@@ -697,9 +767,18 @@ public static class LegacyDevInterfaceBridge
         float r,
         float g,
         float b,
+        float a) =>
+        SetColor(owner, ResolveLiveRepresentation(owner, target), path, r, g, b, a);
+
+    internal static bool SetColor(
+        global::DevInterface.DevUI owner,
+        PlacedObjectRepresentation representation,
+        string path,
+        float r,
+        float g,
+        float b,
         float a)
     {
-        PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
         DevUINode node = ResolveNode(representation, path);
         if (!CanAdaptColorSelect(node) || node is not Button button) return false;
