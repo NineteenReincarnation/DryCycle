@@ -175,7 +175,7 @@ internal static class WorldCreatureCatalogPicker
     // Dense editors such as Relationships may show dozens of icons in one ImGui draw list. Each
     // prepared creature icon is a run-length raster expanded into AddRectFilled primitives. Bound
     // that expansion so a single page can never flood the native draw list / backend vertex buffer.
-    private const int MaxCompactIconRunsPerFrame = 7000;
+    private const int MaxCompactIconRunsPerFrame = 4200;
     private const int MaxAtlasCacheBytes = 32 * 1024 * 1024;
     private const float SaveDebounceSeconds = 4.0f;
     private const int StableEnvironmentCheckFrames = 300;
@@ -741,9 +741,33 @@ internal static class WorldCreatureCatalogPicker
             areaSize.Y <= 0f)
             return false;
 
-        catalogRequested = true;
+        TryPeekIconForRender(
+            creatureId,
+            out IconRaster passiveIcon,
+            out IconState passiveState);
+
+        // Persistent ready rasters are safe immutable presentation data. Dense relationship views
+        // must not turn merely drawing 90 cached icons into 90 validation jobs plus a complete
+        // creature-catalog rescan. Explicit catalog cards / hovered nodes can still validate on
+        // demand; missing icons request discovery normally.
+        if (passiveState == IconState.Ready &&
+            passiveIcon != null &&
+            passiveIcon.Available)
+        {
+            return DrawInlineIconCompactResolved(
+                draw,
+                creatureId,
+                areaPos,
+                areaSize,
+                maxRuns,
+                passiveIcon,
+                passiveState);
+        }
+
         if (requestPreparation)
         {
+            catalogRequested =
+                true;
             TryGetIconForRender(
                 creatureId,
                 out IconRaster icon,
@@ -758,10 +782,7 @@ internal static class WorldCreatureCatalogPicker
                 state);
         }
 
-        TryPeekIconForRender(
-            creatureId,
-            out IconRaster passiveIcon,
-            out IconState passiveState);
+        
         return DrawInlineIconCompactResolved(
             draw,
             creatureId,
@@ -1056,17 +1077,32 @@ internal static class WorldCreatureCatalogPicker
         return ellipsis;
     }
 
-    internal static void RequestIconPreparation(string creatureId)
+    internal static bool RequestIconPreparation(string creatureId)
     {
         if (string.IsNullOrWhiteSpace(creatureId))
-            return;
+            return true;
+
+        TryPeekIconForRender(
+            creatureId,
+            out IconRaster cached,
+            out IconState state);
+
+        if (state == IconState.Ready &&
+            cached != null &&
+            cached.Available)
+            return true;
+
+        if (state == IconState.Failed)
+            return true;
 
         catalogRequested =
             true;
         TryGetIconForRender(
             creatureId,
-            out _,
-            out _);
+            out cached,
+            out state);
+
+        return state != IconState.Pending;
     }
 
     private static void TryPeekIconForRender(

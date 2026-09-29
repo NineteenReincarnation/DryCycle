@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using DevInterface;
 using DryCycle.DevUI.DevTool.Core;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Objects;
 
 namespace DryCycle.DevUI.DevTool.Relationships;
@@ -79,14 +80,23 @@ public static class RelationshipEditorPresentationHub
         internal CreatureTemplate Primary;
         internal int NextTemplateIndex;
         internal Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> PrimaryChanged;
-        internal readonly List<EditorRelationshipRowSnapshot> Rows = new();
+        internal EditorRelationshipRowSnapshot[] Buffer = Array.Empty<EditorRelationshipRowSnapshot>();
+        internal int Count;
+        internal int LastPublishedCount;
     }
 
-    private const int MaxPrimaryRowsCacheEntries = 12;
-    // Effective relationship queries can execute third-party hooks. Never run the complete N*2
-    // matrix synchronously when the page opens; one target per main-thread publication keeps the
-    // game responsive even when an individual mod's relationship lookup is comparatively heavy.
-    private const int PrimaryRowsPerPublish = 1;
+    // A relationship matrix for ~100 creatures is still small in memory, so keeping more recently
+    // visited primaries is substantially cheaper than re-running third-party effective-relationship
+    // hooks when the developer switches back and forth between creatures.
+    private const int MaxPrimaryRowsCacheEntries = 24;
+    private const int PrimaryRowsMaxPerPublish = 4;
+    private const int PrimaryRowsPublishBatch = 6;
+    private const double PrimaryRowsBudgetMs = 0.70;
+    // Hidden third-party RelationshipPage nodes are conservatively treated as opaque writers by the
+    // compatibility backend. Do not let their heartbeat invalidate a completed matrix every frame.
+    // The rebuilt editor still performs a periodic full audit, while DryCycle edits use exact pair
+    // hints and remain immediate.
+    private const int OpaqueCompatibilityAuditFrames = 180;
 
     private static string[] relationshipTypes = Array.Empty<string>();
     private static int relationshipTypeCount = -1;
@@ -107,6 +117,7 @@ public static class RelationshipEditorPresentationHub
     private static string observedPrimary = string.Empty;
     private static string observedOther = string.Empty;
     private static EditorRelationshipDirection observedDirection;
+    private static int nextOpaqueCompatibilityAuditFrame;
 
     public static EditorRelationshipPresentationSnapshot Current => current;
     internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
@@ -130,6 +141,7 @@ public static class RelationshipEditorPresentationHub
             primaryRowsCache.Clear();
             primaryRowsCacheOrder.Clear();
             activePrimaryRowsBuild = null;
+            nextOpaqueCompatibilityAuditFrame = 0;
         }
 
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
@@ -161,12 +173,21 @@ public static class RelationshipEditorPresentationHub
             observedCreatureTypeCount == creatureTypeCount &&
             relationshipTypeCount == nextRelationshipTypeCount &&
             activePrimaryRowsBuild != null &&
-            activePrimaryRowsBuild.Revision == revision &&
             string.Equals(
                 activePrimaryRowsBuild.PrimaryId,
                 state.PrimaryCreature,
                 StringComparison.Ordinal))
         {
+            if (activePrimaryRowsBuild.Revision != revision)
+            {
+                RelationshipPresentationChangeHint loadingHint =
+                    RelationshipPresentationChangeHintHub.Consume(session);
+                ReconcileActiveBuildRevision(
+                    activePrimaryRowsBuild,
+                    revision,
+                    loadingHint);
+            }
+
             PublishProgressiveRows(
                 session,
                 page,
@@ -202,6 +223,42 @@ public static class RelationshipEditorPresentationHub
             ? RelationshipPresentationChangeHintHub.Consume(session)
             : default;
 
+        if (modelChanged &&
+            !hint.HasPair &&
+            !hint.Full &&
+            !session.LegacyUiVisible &&
+            LegacyDevUiQuiescenceController.HasExternalCompatibilityNodes(page))
+        {
+            int frame =
+                UnityEngine.Time.frameCount;
+            if (nextOpaqueCompatibilityAuditFrame <= 0)
+                nextOpaqueCompatibilityAuditFrame =
+                    frame + OpaqueCompatibilityAuditFrames;
+
+            if (frame < nextOpaqueCompatibilityAuditFrame)
+            {
+                // The hidden third-party node was pumped, but no semantic relationship hint exists.
+                // Accept its opaque heartbeat without invalidating an otherwise stable matrix.
+                observedRevision =
+                    revision;
+                LastOutcome =
+                    DevToolPresentationOutcome.CacheHit;
+                return;
+            }
+
+            nextOpaqueCompatibilityAuditFrame =
+                frame + OpaqueCompatibilityAuditFrames;
+        }
+
+        if (modelChanged &&
+            !hint.HasPair)
+        {
+            // Unknown/full writers cannot safely reuse row values from an older model revision.
+            primaryRowsCache.Clear();
+            primaryRowsCacheOrder.Clear();
+            activePrimaryRowsBuild = null;
+        }
+
         // A type/intensity/reset edit changes exactly one directed relationship, but the UI row owns
         // both directions for one primary/other pair. Re-capture that one row and retain every other
         // row plus the static creature/relationship catalogs. Unknown history/legacy writers supply
@@ -209,12 +266,52 @@ public static class RelationshipEditorPresentationHub
         if (!current.LoadingRows &&
             primaryStable &&
             hint.HasPair &&
-            string.Equals(hint.Primary, state.PrimaryCreature, StringComparison.Ordinal) &&
-            TryPublishPairOnly(state, hint.Other))
+            string.Equals(
+                hint.Primary,
+                state.PrimaryCreature,
+                StringComparison.Ordinal))
         {
-            Observe(session, page, revision, creatureTypeCount, state);
-            LastOutcome = DevToolPresentationOutcome.PartialRebuild;
-            return;
+            RebasePrimaryRowsCachesForPair(
+                hint.Primary,
+                hint.Other,
+                revision);
+
+            if (TryGetCachedPrimaryRows(
+                    state.PrimaryCreature,
+                    revision,
+                    out EditorRelationshipRowSnapshot[] rebasedRows))
+            {
+                PublishRowsSnapshot(
+                    state,
+                    rebasedRows,
+                    loading: false,
+                    loadedCount: rebasedRows.Length,
+                    totalCount: rebasedRows.Length);
+                Observe(
+                    session,
+                    page,
+                    revision,
+                    creatureTypeCount,
+                    state);
+                LastOutcome =
+                    DevToolPresentationOutcome.PartialRebuild;
+                return;
+            }
+
+            if (TryPublishPairOnly(
+                    state,
+                    hint.Other))
+            {
+                Observe(
+                    session,
+                    page,
+                    revision,
+                    creatureTypeCount,
+                    state);
+                LastOutcome =
+                    DevToolPresentationOutcome.PartialRebuild;
+                return;
+            }
         }
 
         EnsureTemplateCatalog(
@@ -303,14 +400,27 @@ public static class RelationshipEditorPresentationHub
 
         EditorRelationshipRowSnapshot old = source[rowIndex];
         EditorRelationshipRowSnapshot[] rows = (EditorRelationshipRowSnapshot[])source.Clone();
-        rows[rowIndex] = new EditorRelationshipRowSnapshot
-        {
-            CreatureType = other.type.value,
-            DisplayName = string.IsNullOrEmpty(other.name) ? other.type.value : other.name,
-            Selected = string.Equals(state.SelectedOtherCreature, other.type.value, StringComparison.Ordinal),
-            PrimaryToOther = Capture(primary, other),
-            OtherToPrimary = Capture(other, primary)
-        };
+        EditorRelationshipRowSnapshot rebuilt =
+            BuildRowSnapshot(
+                primary,
+                other);
+        rows[rowIndex] =
+            new EditorRelationshipRowSnapshot
+            {
+                CreatureType =
+                    rebuilt.CreatureType,
+                DisplayName =
+                    rebuilt.DisplayName,
+                Selected =
+                    string.Equals(
+                        state.SelectedOtherCreature,
+                        other.type.value,
+                        StringComparison.Ordinal),
+                PrimaryToOther =
+                    rebuilt.PrimaryToOther,
+                OtherToPrimary =
+                    rebuilt.OtherToPrimary
+            };
 
         current = new EditorRelationshipPresentationSnapshot
         {
@@ -383,6 +493,7 @@ public static class RelationshipEditorPresentationHub
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
         activePrimaryRowsBuild = null;
+        nextOpaqueCompatibilityAuditFrame = 0;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
@@ -493,6 +604,7 @@ public static class RelationshipEditorPresentationHub
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
         activePrimaryRowsBuild = null;
+        nextOpaqueCompatibilityAuditFrame = 0;
     }
 
     private static bool TryGetCachedPrimaryRows(
@@ -549,7 +661,16 @@ public static class RelationshipEditorPresentationHub
                 NextTemplateIndex =
                     0,
                 PrimaryChanged =
-                    primaryChanged
+                    primaryChanged,
+                Buffer =
+                    new EditorRelationshipRowSnapshot[
+                        Math.Max(
+                            0,
+                            templateCatalog.Length - 1)],
+                Count =
+                    0,
+                LastPublishedCount =
+                    0
             };
     }
 
@@ -565,11 +686,18 @@ public static class RelationshipEditorPresentationHub
         if (job == null)
             return;
 
+        long started =
+            System.Diagnostics.Stopwatch.GetTimestamp();
         int processed =
             0;
+
         while (job.NextTemplateIndex < templateCatalog.Length &&
-               processed < PrimaryRowsPerPublish)
+               processed < PrimaryRowsMaxPerPublish)
         {
+            if (processed > 0 &&
+                ElapsedMilliseconds(started) >= PrimaryRowsBudgetMs)
+                break;
+
             CreatureTemplate other =
                 templateCatalog[job.NextTemplateIndex++];
             if (other?.type == null ||
@@ -580,35 +708,77 @@ public static class RelationshipEditorPresentationHub
                 other.type,
                 out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> reverseChanged);
 
-            job.Rows.Add(
-                new EditorRelationshipRowSnapshot
-                {
-                    CreatureType =
-                        other.type.value,
-                    DisplayName =
-                        string.IsNullOrEmpty(other.name)
-                            ? other.type.value
-                            : other.name,
-                    Selected =
-                        false,
-                    PrimaryToOther =
-                        Capture(
-                            job.Primary,
-                            other,
-                            job.PrimaryChanged),
-                    OtherToPrimary =
-                        Capture(
-                            other,
-                            job.Primary,
-                            reverseChanged)
-                });
+            if (job.Count < job.Buffer.Length)
+            {
+                job.Buffer[job.Count++] =
+                    BuildRowSnapshot(
+                        job.Primary,
+                        other,
+                        job.PrimaryChanged,
+                        reverseChanged);
+            }
+
             processed++;
         }
 
         bool complete =
             job.NextTemplateIndex >= templateCatalog.Length;
-        EditorRelationshipRowSnapshot[] baseRows =
-            job.Rows.ToArray();
+
+        bool selectionChanged =
+            !string.Equals(
+                observedOther,
+                state?.SelectedOtherCreature ?? string.Empty,
+                StringComparison.Ordinal) ||
+            observedDirection !=
+            (state?.SelectedDirection ??
+             EditorRelationshipDirection.PrimaryToOther);
+
+        bool shouldPublish =
+            complete ||
+            selectionChanged ||
+            (job.Count > 0 &&
+             job.LastPublishedCount == 0) ||
+            job.Count - job.LastPublishedCount >=
+            PrimaryRowsPublishBatch;
+
+        if (!shouldPublish)
+        {
+            // Keep ownership/revision observation current without allocating a new immutable
+            // presentation array. The last published partial graph remains visible until the next
+            // batch is ready.
+            Observe(
+                session,
+                page,
+                revision,
+                creatureTypeCount,
+                state);
+            return;
+        }
+
+        EditorRelationshipRowSnapshot[] baseRows;
+        if (complete &&
+            job.Count == job.Buffer.Length)
+        {
+            // The completed fixed buffer becomes immutable once the job is retired; reuse it
+            // directly as both the presentation base and cache storage.
+            baseRows =
+                job.Buffer;
+        }
+        else
+        {
+            baseRows =
+                new EditorRelationshipRowSnapshot[job.Count];
+            if (job.Count > 0)
+            {
+                Array.Copy(
+                    job.Buffer,
+                    baseRows,
+                    job.Count);
+            }
+        }
+
+        job.LastPublishedCount =
+            job.Count;
 
         if (complete)
         {
@@ -627,7 +797,7 @@ public static class RelationshipEditorPresentationHub
             loadedCount: baseRows.Length,
             totalCount: Math.Max(
                 0,
-                templateCatalog.Length - 1));
+                job.Buffer.Length));
 
         Observe(
             session,
@@ -635,6 +805,205 @@ public static class RelationshipEditorPresentationHub
             revision,
             creatureTypeCount,
             state);
+    }
+
+    private static double ElapsedMilliseconds(long startedTimestamp) =>
+        (System.Diagnostics.Stopwatch.GetTimestamp() - startedTimestamp) *
+        1000d /
+        System.Diagnostics.Stopwatch.Frequency;
+
+    private static EditorRelationshipRowSnapshot BuildRowSnapshot(
+        CreatureTemplate primary,
+        CreatureTemplate other,
+        Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> primaryChanged = null,
+        Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> reverseChanged = null)
+    {
+        if (primaryChanged == null)
+        {
+            RelationshipPage.changedRelationships.TryGetValue(
+                primary.type,
+                out primaryChanged);
+        }
+
+        if (reverseChanged == null)
+        {
+            RelationshipPage.changedRelationships.TryGetValue(
+                other.type,
+                out reverseChanged);
+        }
+
+        return new EditorRelationshipRowSnapshot
+        {
+            CreatureType =
+                other.type.value,
+            DisplayName =
+                string.IsNullOrEmpty(other.name)
+                    ? other.type.value
+                    : other.name,
+            Selected =
+                false,
+            PrimaryToOther =
+                Capture(
+                    primary,
+                    other,
+                    primaryChanged),
+            OtherToPrimary =
+                Capture(
+                    other,
+                    primary,
+                    reverseChanged)
+        };
+    }
+
+    private static void ReconcileActiveBuildRevision(
+        PrimaryRowsBuildJob job,
+        long revision,
+        RelationshipPresentationChangeHint hint)
+    {
+        if (job == null)
+            return;
+
+        job.Revision =
+            revision;
+
+        if (!hint.HasPair ||
+            !string.Equals(
+                hint.Primary,
+                job.PrimaryId,
+                StringComparison.Ordinal))
+            return;
+
+        CreatureTemplate other =
+            ResolveTemplate(
+                hint.Other);
+        if (other?.type == null)
+            return;
+
+        for (int i = 0; i < job.Count; i++)
+        {
+            EditorRelationshipRowSnapshot row =
+                job.Buffer[i];
+            if (!string.Equals(
+                    row?.CreatureType,
+                    hint.Other,
+                    StringComparison.Ordinal))
+                continue;
+
+            job.Buffer[i] =
+                BuildRowSnapshot(
+                    job.Primary,
+                    other);
+            // Force the next publication to include the repaired row even if the normal batch
+            // threshold has not been reached yet.
+            job.LastPublishedCount =
+                Math.Min(
+                    job.LastPublishedCount,
+                    Math.Max(
+                        0,
+                        job.Count - PrimaryRowsPublishBatch));
+            return;
+        }
+    }
+
+    private static void RebasePrimaryRowsCachesForPair(
+        string primaryId,
+        string otherId,
+        long revision)
+    {
+        if (string.IsNullOrEmpty(primaryId) ||
+            string.IsNullOrEmpty(otherId) ||
+            primaryRowsCache.Count == 0)
+            return;
+
+        CreatureTemplate primary =
+            ResolveTemplate(
+                primaryId);
+        CreatureTemplate other =
+            ResolveTemplate(
+                otherId);
+        if (primary?.type == null ||
+            other?.type == null)
+            return;
+
+        foreach (KeyValuePair<string, PrimaryRowsCacheEntry> pair in primaryRowsCache)
+        {
+            PrimaryRowsCacheEntry entry =
+                pair.Value;
+            if (entry == null)
+                continue;
+
+            bool affected =
+                string.Equals(
+                    pair.Key,
+                    primaryId,
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    pair.Key,
+                    otherId,
+                    StringComparison.Ordinal);
+
+            if (!affected)
+            {
+                // A precise pair edit cannot affect any third primary's matrix.
+                entry.Revision =
+                    revision;
+                continue;
+            }
+
+            CreatureTemplate cachePrimary =
+                string.Equals(
+                    pair.Key,
+                    primaryId,
+                    StringComparison.Ordinal)
+                    ? primary
+                    : other;
+            CreatureTemplate cacheOther =
+                ReferenceEquals(
+                    cachePrimary,
+                    primary)
+                    ? other
+                    : primary;
+
+            if (TryPatchCachedRow(
+                    entry,
+                    cachePrimary,
+                    cacheOther))
+            {
+                entry.Revision =
+                    revision;
+            }
+        }
+    }
+
+    private static bool TryPatchCachedRow(
+        PrimaryRowsCacheEntry entry,
+        CreatureTemplate primary,
+        CreatureTemplate other)
+    {
+        EditorRelationshipRowSnapshot[] source =
+            entry?.Rows ??
+            Array.Empty<EditorRelationshipRowSnapshot>();
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (!string.Equals(
+                    source[i]?.CreatureType,
+                    other.type.value,
+                    StringComparison.Ordinal))
+                continue;
+
+            EditorRelationshipRowSnapshot[] next =
+                (EditorRelationshipRowSnapshot[])source.Clone();
+            next[i] =
+                BuildRowSnapshot(
+                    primary,
+                    other);
+            entry.Rows =
+                next;
+            return true;
+        }
+
+        return false;
     }
 
     private static void PublishRowsSnapshot(

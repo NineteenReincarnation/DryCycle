@@ -92,6 +92,10 @@ internal static class RelationshipEditorView
     private static RelationshipFilterMode projectedFilterMode;
     private static PairPresentation[] projectedVisibleRows = Array.Empty<PairPresentation>();
     private static readonly int[] projectedFamilyCounts = new int[7];
+    private static readonly Dictionary<string, RelationFamily> familyByType =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> atlasIconWarmSettled =
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<AtlasNodeLayout> atlasNodes = new();
     private static PairPresentation[] atlasLayoutRowsSource;
     private static Num.Vector2 atlasLayoutOrigin;
@@ -107,6 +111,9 @@ internal static class RelationshipEditorView
     private static string inspectorEditPrimary = string.Empty;
     private static string inspectorEditOther = string.Empty;
     private static EditorRelationshipDirection inspectorEditDirection;
+    private static EditorRelationshipRowSnapshot[] selectedRowSource;
+    private static string selectedRowKey = string.Empty;
+    private static EditorRelationshipRowSnapshot selectedRowCache;
 
     internal static void ResetRetainedState()
     {
@@ -122,6 +129,7 @@ internal static class RelationshipEditorView
         atlasLayoutSize = default;
         atlasLayoutValid = false;
         atlasIconWarmCursor = 0;
+        atlasIconWarmSettled.Clear();
 
         browserCreatureSource = null;
         browserCreatureQuery = string.Empty;
@@ -131,6 +139,9 @@ internal static class RelationshipEditorView
         inspectorEditPrimary = string.Empty;
         inspectorEditOther = string.Empty;
         inspectorEditDirection = default;
+        selectedRowSource = null;
+        selectedRowKey = string.Empty;
+        selectedRowCache = null;
 
         primarySearch = string.Empty;
         matrixSearch = string.Empty;
@@ -963,24 +974,38 @@ internal static class RelationshipEditorView
         int count =
             projectedVisibleRows.Length;
         if (count <= 0 ||
-            budget <= 0)
+            budget <= 0 ||
+            atlasIconWarmSettled.Count >= count)
             return;
 
-        int steps =
-            Math.Min(
-                budget,
-                count);
-        for (int i = 0; i < steps; i++)
+        int inspected =
+            0;
+        int requested =
+            0;
+
+        while (inspected < count &&
+               requested < budget)
         {
             if (atlasIconWarmCursor >= count)
                 atlasIconWarmCursor = 0;
 
             PairPresentation pair =
                 projectedVisibleRows[atlasIconWarmCursor++];
+            inspected++;
+
             string creature =
                 pair?.Row?.CreatureType;
-            if (!string.IsNullOrEmpty(creature))
-                WorldCreatureCatalogPicker.RequestIconPreparation(creature);
+            if (string.IsNullOrEmpty(creature) ||
+                atlasIconWarmSettled.Contains(creature))
+                continue;
+
+            bool settled =
+                WorldCreatureCatalogPicker.RequestIconPreparation(
+                    creature);
+            requested++;
+
+            if (settled)
+                atlasIconWarmSettled.Add(creature);
         }
     }
 
@@ -1305,7 +1330,7 @@ internal static class RelationshipEditorView
             new Num.Vector2(
                 size * 0.68f,
                 size * 0.68f),
-            maxRuns: 56,
+            maxRuns: hovered || selected ? 56 : 28,
             requestPreparation: hovered || selected);
 
         if (node.Pair.Asymmetric)
@@ -1426,6 +1451,12 @@ internal static class RelationshipEditorView
     {
         float strength =
             Clamp01(intensity);
+
+        if (deEmphasized ||
+            (!emphasized &&
+             strength <= 0.01f))
+            return;
+
         Num.Vector4 color =
             GetFamilyColor(family);
 
@@ -2076,18 +2107,40 @@ internal static class RelationshipEditorView
             return null;
 
         EditorRelationshipRowSnapshot[] rows =
-            snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
+            snapshot.Rows ??
+            Array.Empty<EditorRelationshipRowSnapshot>();
 
+        if (ReferenceEquals(
+                selectedRowSource,
+                rows) &&
+            string.Equals(
+                selectedRowKey,
+                type,
+                StringComparison.Ordinal))
+            return selectedRowCache;
+
+        EditorRelationshipRowSnapshot found =
+            null;
         for (int i = 0; i < rows.Length; i++)
         {
-            if (string.Equals(
-                    rows[i].CreatureType,
+            if (!string.Equals(
+                    rows[i]?.CreatureType,
                     type,
                     StringComparison.Ordinal))
-                return rows[i];
+                continue;
+
+            found =
+                rows[i];
+            break;
         }
 
-        return null;
+        selectedRowSource =
+            rows;
+        selectedRowKey =
+            type;
+        selectedRowCache =
+            found;
+        return found;
     }
 
     private static void EnsureRows(
@@ -2098,78 +2151,23 @@ internal static class RelationshipEditorView
                 rows))
             return;
 
-        bool canPatch =
+        rows ??=
+            Array.Empty<EditorRelationshipRowSnapshot>();
+
+        bool sameShape =
             projectedRows.Length ==
             rows.Length &&
             projectedRows.Length > 0;
 
-        if (canPatch)
+        if (sameShape &&
+            PrefixMatches(
+                rows,
+                projectedRows.Length))
         {
-            for (int i = 0; i < rows.Length; i++)
-            {
-                PairPresentation pair =
-                    projectedRows[i];
-                EditorRelationshipRowSnapshot row =
-                    rows[i];
-
-                if (pair?.Row == null ||
-                    row == null ||
-                    !string.Equals(
-                        pair.Row.CreatureType,
-                        row.CreatureType,
-                        StringComparison.Ordinal))
-                {
-                    canPatch = false;
-                    break;
-                }
-            }
-        }
-
-        bool filterAffectingChange =
-            false;
-
-        if (canPatch)
-        {
-            for (int i = 0; i < rows.Length; i++)
-            {
-                PairPresentation pair =
-                    projectedRows[i];
-                EditorRelationshipRowSnapshot row =
-                    rows[i];
-
-                EditorRelationshipValueSnapshot forward =
-                    row.PrimaryToOther ??
-                    EmptyRelationship;
-                EditorRelationshipValueSnapshot reverse =
-                    row.OtherToPrimary ??
-                    EmptyRelationship;
-
-                bool valuesChanged =
-                    !ReferenceEquals(
-                        pair.Forward,
-                        forward) ||
-                    !ReferenceEquals(
-                        pair.Reverse,
-                        reverse);
-
-                pair.Row =
-                    row;
-                pair.Name =
-                    string.IsNullOrEmpty(row.DisplayName)
-                        ? row.CreatureType ?? string.Empty
-                        : row.DisplayName;
-
-                if (!valuesChanged)
-                    continue;
-
-                ProjectPairValues(
-                    pair,
-                    forward,
-                    reverse);
-                filterAffectingChange =
-                    true;
-            }
-
+            bool filterAffectingChange =
+                PatchProjectedPrefix(
+                    rows,
+                    projectedRows.Length);
             projectedRowsSource =
                 rows;
 
@@ -2178,38 +2176,161 @@ internal static class RelationshipEditorView
             return;
         }
 
-        PairPresentation[] next =
+        bool canAppend =
+            rows.Length >
+            projectedRows.Length &&
+            projectedRows.Length > 0 &&
+            PrefixMatches(
+                rows,
+                projectedRows.Length);
+
+        if (canAppend)
+        {
+            int oldLength =
+                projectedRows.Length;
+            PairPresentation[] next =
+                new PairPresentation[rows.Length];
+            Array.Copy(
+                projectedRows,
+                next,
+                oldLength);
+
+            bool filterAffectingChange =
+                PatchProjectedPrefix(
+                    rows,
+                    oldLength);
+
+            for (int i = oldLength; i < rows.Length; i++)
+                next[i] =
+                    CreatePairPresentation(
+                        rows[i]);
+
+            projectedRowsSource =
+                rows;
+            projectedRows =
+                next;
+
+            // Appending changes the visible population even if the existing prefix did not change.
+            // Rebuild filter/layout once per published batch, not once per relationship row.
+            InvalidateVisibleRows();
+            return;
+        }
+
+        PairPresentation[] rebuilt =
             new PairPresentation[rows.Length];
 
         for (int i = 0; i < rows.Length; i++)
-        {
-            EditorRelationshipRowSnapshot row =
-                rows[i];
-            PairPresentation pair =
-                new()
-                {
-                    Row = row,
-                    Name =
-                        string.IsNullOrEmpty(row?.DisplayName)
-                            ? row?.CreatureType ?? string.Empty
-                            : row.DisplayName
-                };
-
-            ProjectPairValues(
-                pair,
-                row?.PrimaryToOther ??
-                EmptyRelationship,
-                row?.OtherToPrimary ??
-                EmptyRelationship);
-            next[i] =
-                pair;
-        }
+            rebuilt[i] =
+                CreatePairPresentation(
+                    rows[i]);
 
         projectedRowsSource =
             rows;
         projectedRows =
-            next;
+            rebuilt;
         InvalidateVisibleRows();
+    }
+
+    private static bool PrefixMatches(
+        EditorRelationshipRowSnapshot[] rows,
+        int length)
+    {
+        if (length < 0 ||
+            rows == null ||
+            rows.Length < length ||
+            projectedRows.Length < length)
+            return false;
+
+        for (int i = 0; i < length; i++)
+        {
+            PairPresentation pair =
+                projectedRows[i];
+            EditorRelationshipRowSnapshot row =
+                rows[i];
+
+            if (pair?.Row == null ||
+                row == null ||
+                !string.Equals(
+                    pair.Row.CreatureType,
+                    row.CreatureType,
+                    StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool PatchProjectedPrefix(
+        EditorRelationshipRowSnapshot[] rows,
+        int length)
+    {
+        bool filterAffectingChange =
+            false;
+
+        for (int i = 0; i < length; i++)
+        {
+            PairPresentation pair =
+                projectedRows[i];
+            EditorRelationshipRowSnapshot row =
+                rows[i];
+
+            EditorRelationshipValueSnapshot forward =
+                row.PrimaryToOther ??
+                EmptyRelationship;
+            EditorRelationshipValueSnapshot reverse =
+                row.OtherToPrimary ??
+                EmptyRelationship;
+
+            bool valuesChanged =
+                !ReferenceEquals(
+                    pair.Forward,
+                    forward) ||
+                !ReferenceEquals(
+                    pair.Reverse,
+                    reverse);
+
+            pair.Row =
+                row;
+            pair.Name =
+                string.IsNullOrEmpty(row.DisplayName)
+                    ? row.CreatureType ?? string.Empty
+                    : row.DisplayName;
+
+            if (!valuesChanged)
+                continue;
+
+            ProjectPairValues(
+                pair,
+                forward,
+                reverse);
+            filterAffectingChange =
+                true;
+        }
+
+        return filterAffectingChange;
+    }
+
+    private static PairPresentation CreatePairPresentation(
+        EditorRelationshipRowSnapshot row)
+    {
+        PairPresentation pair =
+            new()
+            {
+                Row =
+                    row,
+                Name =
+                    string.IsNullOrEmpty(row?.DisplayName)
+                        ? row?.CreatureType ?? string.Empty
+                        : row.DisplayName
+            };
+
+        ProjectPairValues(
+            pair,
+            row?.PrimaryToOther ??
+            EmptyRelationship,
+            row?.OtherToPrimary ??
+            EmptyRelationship);
+        return pair;
     }
 
     private static void ProjectPairValues(
@@ -2261,6 +2382,13 @@ internal static class RelationshipEditorView
             false;
         atlasIconWarmCursor =
             0;
+        atlasIconWarmSettled.Clear();
+        selectedRowSource =
+            null;
+        selectedRowKey =
+            string.Empty;
+        selectedRowCache =
+            null;
     }
 
     private static void EnsureVisibleRows(
@@ -2275,6 +2403,43 @@ internal static class RelationshipEditorView
                 StringComparison.Ordinal) &&
             projectedFilterMode == mode)
             return;
+
+        if (mode == RelationshipFilterMode.All &&
+            string.IsNullOrEmpty(query))
+        {
+            Array.Clear(
+                projectedFamilyCounts,
+                0,
+                projectedFamilyCounts.Length);
+
+            for (int i = 0; i < projectedRows.Length; i++)
+            {
+                PairPresentation pair =
+                    projectedRows[i];
+                int familyIndex =
+                    pair == null
+                        ? -1
+                        : (int)pair.ForwardFamily;
+                if (familyIndex >= 0 &&
+                    familyIndex < projectedFamilyCounts.Length)
+                    projectedFamilyCounts[familyIndex]++;
+            }
+
+            projectedFilter =
+                query;
+            projectedFilterMode =
+                mode;
+            projectedVisibleRows =
+                projectedRows;
+            atlasLayoutRowsSource =
+                null;
+            atlasLayoutValid =
+                false;
+            atlasIconWarmCursor =
+                0;
+            atlasIconWarmSettled.Clear();
+            return;
+        }
 
         int count = 0;
         for (int i = 0; i < projectedRows.Length; i++)
@@ -2326,6 +2491,7 @@ internal static class RelationshipEditorView
             false;
         atlasIconWarmCursor =
             0;
+        atlasIconWarmSettled.Clear();
     }
 
     private static bool PassesFilter(
@@ -2379,42 +2545,50 @@ internal static class RelationshipEditorView
 
     private static RelationFamily Classify(string type)
     {
+        type ??=
+            string.Empty;
+
+        if (familyByType.TryGetValue(
+                type,
+                out RelationFamily cached))
+            return cached;
+
         string token =
             NormalizeType(type);
 
+        RelationFamily family;
         if (token.Contains("eat") ||
             token.Contains("prey") ||
             token.Contains("predat") ||
             token.Contains("consume"))
-            return RelationFamily.Predation;
+            family = RelationFamily.Predation;
+        else if (token.Contains("antagon") ||
+                 token.Contains("hostil") ||
+                 token.Contains("attack") ||
+                 token.Contains("aggress") ||
+                 token.Contains("rival"))
+            family = RelationFamily.Hostility;
+        else if (token.Contains("afraid") ||
+                 token.Contains("fear") ||
+                 token.Contains("flee"))
+            family = RelationFamily.Fear;
+        else if (token.Contains("uncomfort") ||
+                 token.Contains("avoid") ||
+                 token.Contains("stayaway"))
+            family = RelationFamily.Unease;
+        else if (token.Contains("doesnttrack") ||
+                 token.Contains("donottrack") ||
+                 token.Contains("notrack"))
+            family = RelationFamily.Untracked;
+        else if (token.Contains("ignore") ||
+                 token.Contains("neutral"))
+            family = RelationFamily.Neutral;
+        else
+            family = RelationFamily.Other;
 
-        if (token.Contains("antagon") ||
-            token.Contains("hostil") ||
-            token.Contains("attack") ||
-            token.Contains("aggress") ||
-            token.Contains("rival"))
-            return RelationFamily.Hostility;
-
-        if (token.Contains("afraid") ||
-            token.Contains("fear") ||
-            token.Contains("flee"))
-            return RelationFamily.Fear;
-
-        if (token.Contains("uncomfort") ||
-            token.Contains("avoid") ||
-            token.Contains("stayaway"))
-            return RelationFamily.Unease;
-
-        if (token.Contains("doesnttrack") ||
-            token.Contains("donottrack") ||
-            token.Contains("notrack"))
-            return RelationFamily.Untracked;
-
-        if (token.Contains("ignore") ||
-            token.Contains("neutral"))
-            return RelationFamily.Neutral;
-
-        return RelationFamily.Other;
+        familyByType[type] =
+            family;
+        return family;
     }
 
     private static string NormalizeType(string type)
