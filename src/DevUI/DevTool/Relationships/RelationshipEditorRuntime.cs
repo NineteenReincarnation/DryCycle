@@ -67,10 +67,36 @@ internal static class RelationshipEditorStateHub
 public static class RelationshipEditorPresentationHub
 {
     private static volatile EditorRelationshipPresentationSnapshot current = EditorRelationshipPresentationSnapshot.Empty;
+    private readonly struct DirectedRelationshipKey : IEquatable<DirectedRelationshipKey>
+    {
+        internal DirectedRelationshipKey(string from, string to)
+        {
+            From = from ?? string.Empty;
+            To = to ?? string.Empty;
+        }
+
+        internal string From { get; }
+        internal string To { get; }
+
+        public bool Equals(DirectedRelationshipKey other) =>
+            string.Equals(From, other.From, StringComparison.Ordinal) &&
+            string.Equals(To, other.To, StringComparison.Ordinal);
+
+        public override bool Equals(object obj) =>
+            obj is DirectedRelationshipKey other &&
+            Equals(other);
+
+        public override int GetHashCode() =>
+            (StringComparer.Ordinal.GetHashCode(From) * 397) ^
+            StringComparer.Ordinal.GetHashCode(To);
+    }
+
     private sealed class PrimaryRowsCacheEntry
     {
         internal long Revision;
         internal EditorRelationshipRowSnapshot[] Rows = Array.Empty<EditorRelationshipRowSnapshot>();
+        internal Dictionary<string, int> RowIndexByCreature =
+            new(StringComparer.Ordinal);
     }
 
     private sealed class PrimaryRowsBuildJob
@@ -89,7 +115,7 @@ public static class RelationshipEditorPresentationHub
     // visited primaries is substantially cheaper than re-running third-party effective-relationship
     // hooks when the developer switches back and forth between creatures.
     private const int MaxPrimaryRowsCacheEntries = 24;
-    private const int PrimaryRowsMaxPerPublish = 4;
+    private const int PrimaryRowsMaxPerPublish = 8;
     private const int PrimaryRowsPublishBatch = 6;
     private const double PrimaryRowsBudgetMs = 0.70;
     // Hidden third-party RelationshipPage nodes are conservatively treated as opaque writers by the
@@ -108,6 +134,11 @@ public static class RelationshipEditorPresentationHub
     private static readonly Dictionary<string, PrimaryRowsCacheEntry> primaryRowsCache =
         new(StringComparer.Ordinal);
     private static readonly Queue<string> primaryRowsCacheOrder = new();
+    // Directed values are shared by every primary matrix. After A's matrix reads A->B and B->A,
+    // opening B must not execute those same effective-relationship hooks again. Exact pair edits
+    // invalidate only the two affected directions; opaque/full invalidation clears this cache.
+    private static readonly Dictionary<DirectedRelationshipKey, EditorRelationshipValueSnapshot>
+        directedRelationshipCache = new();
     private static PrimaryRowsBuildJob activePrimaryRowsBuild;
 
     private static EditorSession observedSession;
@@ -241,6 +272,8 @@ public static class RelationshipEditorPresentationHub
                 // Accept its opaque heartbeat without invalidating an otherwise stable matrix.
                 observedRevision =
                     revision;
+                AdvancePrimaryRowsCacheRevision(
+                    revision);
                 LastOutcome =
                     DevToolPresentationOutcome.CacheHit;
                 return;
@@ -256,6 +289,7 @@ public static class RelationshipEditorPresentationHub
             // Unknown/full writers cannot safely reuse row values from an older model revision.
             primaryRowsCache.Clear();
             primaryRowsCacheOrder.Clear();
+            directedRelationshipCache.Clear();
             activePrimaryRowsBuild = null;
         }
 
@@ -271,6 +305,9 @@ public static class RelationshipEditorPresentationHub
                 state.PrimaryCreature,
                 StringComparison.Ordinal))
         {
+            InvalidateDirectedPair(
+                hint.Primary,
+                hint.Other);
             RebasePrimaryRowsCachesForPair(
                 hint.Primary,
                 hint.Other,
@@ -492,6 +529,7 @@ public static class RelationshipEditorPresentationHub
         observedDirection = EditorRelationshipDirection.PrimaryToOther;
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
+        directedRelationshipCache.Clear();
         activePrimaryRowsBuild = null;
         nextOpaqueCompatibilityAuditFrame = 0;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
@@ -603,6 +641,7 @@ public static class RelationshipEditorPresentationHub
         // Row snapshots depend on the exact template catalog/order.
         primaryRowsCache.Clear();
         primaryRowsCacheOrder.Clear();
+        directedRelationshipCache.Clear();
         activePrimaryRowsBuild = null;
         nextOpaqueCompatibilityAuditFrame = 0;
     }
@@ -873,6 +912,10 @@ public static class RelationshipEditorPresentationHub
                 StringComparison.Ordinal))
             return;
 
+        InvalidateDirectedPair(
+            hint.Primary,
+            hint.Other);
+
         CreatureTemplate other =
             ResolveTemplate(
                 hint.Other);
@@ -903,6 +946,34 @@ public static class RelationshipEditorPresentationHub
                         job.Count - PrimaryRowsPublishBatch));
             return;
         }
+    }
+
+    private static void AdvancePrimaryRowsCacheRevision(long revision)
+    {
+        foreach (PrimaryRowsCacheEntry entry in primaryRowsCache.Values)
+        {
+            if (entry != null)
+                entry.Revision =
+                    revision;
+        }
+    }
+
+    private static void InvalidateDirectedPair(
+        string primaryId,
+        string otherId)
+    {
+        if (string.IsNullOrEmpty(primaryId) ||
+            string.IsNullOrEmpty(otherId))
+            return;
+
+        directedRelationshipCache.Remove(
+            new DirectedRelationshipKey(
+                primaryId,
+                otherId));
+        directedRelationshipCache.Remove(
+            new DirectedRelationshipKey(
+                otherId,
+                primaryId));
     }
 
     private static void RebasePrimaryRowsCachesForPair(
@@ -984,26 +1055,23 @@ public static class RelationshipEditorPresentationHub
             entry?.Rows ??
             Array.Empty<EditorRelationshipRowSnapshot>();
 
-        for (int i = 0; i < source.Length; i++)
-        {
-            if (!string.Equals(
-                    source[i]?.CreatureType,
-                    other.type.value,
-                    StringComparison.Ordinal))
-                continue;
+        if (entry.RowIndexByCreature == null ||
+            !entry.RowIndexByCreature.TryGetValue(
+                other.type.value,
+                out int index) ||
+            index < 0 ||
+            index >= source.Length)
+            return false;
 
-            EditorRelationshipRowSnapshot[] next =
-                (EditorRelationshipRowSnapshot[])source.Clone();
-            next[i] =
-                BuildRowSnapshot(
-                    primary,
-                    other);
-            entry.Rows =
-                next;
-            return true;
-        }
-
-        return false;
+        EditorRelationshipRowSnapshot[] next =
+            (EditorRelationshipRowSnapshot[])source.Clone();
+        next[index] =
+            BuildRowSnapshot(
+                primary,
+                other);
+        entry.Rows =
+            next;
+        return true;
     }
 
     private static void PublishRowsSnapshot(
@@ -1059,11 +1127,31 @@ public static class RelationshipEditorPresentationHub
         if (!primaryRowsCache.ContainsKey(primaryId))
             primaryRowsCacheOrder.Enqueue(primaryId);
 
+        Dictionary<string, int> rowIndex =
+            new(
+                rows?.Length ?? 0,
+                StringComparer.Ordinal);
+        if (rows != null)
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                string creature =
+                    rows[i]?.CreatureType;
+                if (!string.IsNullOrEmpty(creature))
+                    rowIndex[creature] =
+                        i;
+            }
+        }
+
         primaryRowsCache[primaryId] =
             new PrimaryRowsCacheEntry
             {
                 Revision = revision,
-                Rows = rows
+                Rows =
+                    rows ??
+                    Array.Empty<EditorRelationshipRowSnapshot>(),
+                RowIndexByCreature =
+                    rowIndex
             };
 
         while (primaryRowsCache.Count > MaxPrimaryRowsCacheEntries &&
@@ -1131,6 +1219,24 @@ public static class RelationshipEditorPresentationHub
         CreatureTemplate to,
         Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> directMap)
     {
+        string fromId =
+            from?.type?.value ??
+            string.Empty;
+        string toId =
+            to?.type?.value ??
+            string.Empty;
+
+        DirectedRelationshipKey key =
+            new(
+                fromId,
+                toId);
+        if (!string.IsNullOrEmpty(fromId) &&
+            !string.IsNullOrEmpty(toId) &&
+            directedRelationshipCache.TryGetValue(
+                key,
+                out EditorRelationshipValueSnapshot cached))
+            return cached;
+
         CreatureTemplate.Relationship effective =
             RelationshipPage.GetEffectiveRelationship(
                 from,
@@ -1139,16 +1245,24 @@ public static class RelationshipEditorPresentationHub
             directMap != null &&
             directMap.ContainsKey(to.type);
 
-        return new EditorRelationshipValueSnapshot
-        {
-            Type =
-                effective.type?.value ??
-                string.Empty,
-            Intensity =
-                effective.intensity,
-            DirectOverride =
-                direct
-        };
+        EditorRelationshipValueSnapshot captured =
+            new()
+            {
+                Type =
+                    effective.type?.value ??
+                    string.Empty,
+                Intensity =
+                    effective.intensity,
+                DirectOverride =
+                    direct
+            };
+
+        if (!string.IsNullOrEmpty(fromId) &&
+            !string.IsNullOrEmpty(toId))
+            directedRelationshipCache[key] =
+                captured;
+
+        return captured;
     }
 
     private static CreatureTemplate ResolveTemplate(string typeName)

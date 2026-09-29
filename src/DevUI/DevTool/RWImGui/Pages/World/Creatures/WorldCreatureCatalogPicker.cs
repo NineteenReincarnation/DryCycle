@@ -750,9 +750,8 @@ internal static class WorldCreatureCatalogPicker
         // must not turn merely drawing 90 cached icons into 90 validation jobs plus a complete
         // creature-catalog rescan. Explicit catalog cards / hovered nodes can still validate on
         // demand; missing icons request discovery normally.
-        if (passiveState == IconState.Ready &&
-            passiveIcon != null &&
-            passiveIcon.Available)
+        if (passiveState == IconState.Ready ||
+            passiveState == IconState.Failed)
         {
             return DrawInlineIconCompactResolved(
                 draw,
@@ -1087,12 +1086,8 @@ internal static class WorldCreatureCatalogPicker
             out IconRaster cached,
             out IconState state);
 
-        if (state == IconState.Ready &&
-            cached != null &&
-            cached.Available)
-            return true;
-
-        if (state == IconState.Failed)
+        if (state == IconState.Ready ||
+            state == IconState.Failed)
             return true;
 
         catalogRequested =
