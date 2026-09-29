@@ -8,8 +8,9 @@ namespace DryCycle.DevUI.DevTool.Core;
 /// <summary>
 /// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
 /// DevInterface Page. Objects, Sound and Triggers use a minimal DryCycle Page only as a room/document
-/// lifetime anchor; their concrete legacy pages are materialized solely for Vanilla/Legacy mode or
-/// diagnostics that explicitly need to inspect the real DevInterface control tree.
+/// lifetime anchor. Objects diagnostics are fully headless; its concrete legacy page is materialized
+/// only for explicit Vanilla/Legacy ownership. Sound/Trigger diagnostics may still require their
+/// concrete backend pages until those subsystems reach the same headless audit boundary.
 /// </summary>
 internal static class NativeToolScheduler
 {
@@ -105,8 +106,9 @@ internal static class NativeToolScheduler
 
         // LegacyUiVisible is expected to be true on this transition, so do not reuse
         // CanOwnNativePresentation here. Only external ownership gates can refuse the hand-off.
-        if (!EditorInputRouter.FrontendAttached || EditorUiModeState.UseVanilla ||
-            DevUiDiagnosticsPolicy.Enabled)
+        if (!EditorInputRouter.FrontendAttached ||
+            EditorUiModeState.UseVanilla ||
+            DiagnosticsRequireLegacyPage(mode))
             return false;
 
         EditorToolMode mode = session.ToolMode;
@@ -119,7 +121,11 @@ internal static class NativeToolScheduler
         EditorInputRouter.FrontendAttached &&
         !EditorUiModeState.UseVanilla &&
         !session.LegacyUiVisible &&
-        !DevUiDiagnosticsPolicy.Enabled;
+        !DiagnosticsRequireLegacyPage(session.ToolMode);
+
+    private static bool DiagnosticsRequireLegacyPage(EditorToolMode mode) =>
+        DevUiDiagnosticsPolicy.Enabled &&
+        mode != EditorToolMode.Objects;
 
     private static bool ActivateCore(EditorSession session, EditorToolMode mode)
     {
