@@ -157,6 +157,15 @@ public static class LegacyDevInterfaceBridge
             return true;
         }
 
+        // The Representation itself is an authoring node too. A third-party subclass can put
+        // interaction directly in Update() without creating a child control; validating only
+        // descendants would incorrectly certify that object as fully migrated.
+        if (!IsStructurallyCoveredNode(root))
+        {
+            example = "root " + (root.GetType().FullName ?? root.GetType().Name);
+            return true;
+        }
+
         HashSet<DevUINode> visited = new();
         visited.Add(root);
         int remaining = 4096;
