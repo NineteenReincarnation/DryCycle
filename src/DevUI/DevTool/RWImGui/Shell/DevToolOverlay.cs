@@ -812,16 +812,37 @@ internal static class DevToolOverlay
             ImGui.InvisibleButton(
                 "##DockSwitch",
                 size);
-        bool hovered =
-            ImGui.IsItemHovered();
-        bool held =
-            ImGui.IsItemActive();
         ImGui.PopID();
 
         Num.Vector2 min =
             ImGui.GetItemRectMin();
         Num.Vector2 max =
             ImGui.GetItemRectMax();
+
+        // Do not derive the custom visual state from ImGui's generic active-item state. On the
+        // RWImGui backend, focusing/clicking the containing no-titlebar window can transiently leave
+        // the invisible item reported as active, which made this layout button light up even when
+        // the pointer was elsewhere in the window. The button should react only to its own hit rect.
+        Num.Vector2 mouse =
+            ImGui.GetIO().MousePos;
+        bool pointerInside =
+            mouse.X >= min.X &&
+            mouse.X < max.X &&
+            mouse.Y >= min.Y &&
+            mouse.Y < max.Y;
+        bool hovered =
+            pointerInside &&
+            ImGui.IsWindowHovered();
+        bool held =
+            hovered &&
+            ImGui.IsMouseDown(
+                ImGuiMouseButton.Left);
+
+        // Keep ImGui's click ownership/drag-cancel semantics, but never accept a stale/reported click
+        // if the pointer is no longer over this button.
+        clicked =
+            clicked &&
+            pointerInside;
         ImDrawListPtr draw =
             ImGui.GetWindowDrawList();
 
