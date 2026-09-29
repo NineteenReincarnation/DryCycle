@@ -609,6 +609,15 @@ required_gizmo = (
 )
 for token in required_gizmo:
     require(token in gizmo, f"Headless Object gizmo compiler lost required generic capability: {token}")
+require("CaptureSceneTreeBounded" in gizmo and
+        "CollectPanelPositionsBounded" in gizmo and
+        "int remaining = 4096" in gizmo and
+        "HashSet<DevUINode> visited" in gizmo,
+        "Headless Object gizmo capture must use bounded/cycle-safe tree traversal.")
+require("private static void CaptureChildren(" not in gizmo and
+        "private static void CapturePixelGeometry(" not in gizmo and
+        "private static void CaptureVectorCircleGeometry(" not in gizmo,
+        "Recursive legacy gizmo tree walkers must not return after bounded traversal consolidation.")
 require("ResolveNode(representation, path)" in gizmo,
         "Headless Handle edits must resolve the current tree by path instead of caching stale node references.")
 
