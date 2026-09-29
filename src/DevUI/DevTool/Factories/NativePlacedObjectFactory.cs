@@ -1,5 +1,5 @@
 using System;
-using DevInterface;
+using DryCycle.DevUI.DevTool.Compatibility;
 using DryCycle.DevUI.DevTool.Core;
 using UnityEngine;
 
@@ -8,7 +8,8 @@ namespace DryCycle.DevUI.DevTool.Factories;
 /// <summary>
 /// Native model factory for Rain World/DLC/Watcher PlacedObject types. Registered native providers
 /// get first refusal, game-defined ExtEnum IDs then construct directly through
-/// PlacedObject.GenerateEmptyData, and external IDs finally enter an isolated ObjectsPage fallback.
+/// PlacedObject.GenerateEmptyData, and external IDs delegate to the isolated headless compatibility
+/// host so CreateObjRep-based third-party creation stays supported without owning a legacy page here.
 /// </summary>
 internal static class NativePlacedObjectFactory
 {
@@ -32,7 +33,11 @@ internal static class NativePlacedObjectFactory
         }
 
         if (!GameDefinedExtEnumCatalog.Contains(typeof(PlacedObject.Type), type.value))
-            return TryCreateLegacy(session, type, worldPosition, out created);
+            return HeadlessObjectCompatibilityHost.TryCreateExternalObject(
+                session,
+                type,
+                worldPosition,
+                out created);
 
         try
         {
@@ -93,52 +98,6 @@ internal static class NativePlacedObjectFactory
             // This is the one model/runtime side effect vanilla CreateObjRep performs at creation.
             // Keep it here rather than tying TerrainHandle authoring to a representation constructor.
             session.Room.AddObject(new TerrainCurve(session.Room));
-        }
-    }
-
-    private static bool TryCreateLegacy(
-        EditorSession session,
-        PlacedObject.Type type,
-        Vector2 worldPosition,
-        out PlacedObject created)
-    {
-        created = null;
-        if (session?.Owner == null)
-            return false;
-
-        ObjectsPage page = session.Owner.activePage as ObjectsPage;
-        bool temporary = page == null;
-        if (temporary)
-            page = new ObjectsPage(session.Owner, "DevTool_LegacyFactorySandbox", null, "Objects");
-
-        try
-        {
-            int before = session.RoomSettings.placedObjects.Count;
-            page.CreateObjRep(type, null);
-            if (session.RoomSettings.placedObjects.Count <= before)
-                return false;
-
-            created = session.RoomSettings.placedObjects[session.RoomSettings.placedObjects.Count - 1];
-            if (created == null)
-                return false;
-
-            created.pos = worldPosition;
-            return true;
-        }
-        catch (Exception error)
-        {
-            Plugin.Logger?.LogWarning(
-                "DevTool legacy object factory fallback failed for '" + (type.value ?? string.Empty) + "': " + error.Message);
-            created = null;
-            return false;
-        }
-        finally
-        {
-            if (temporary)
-            {
-                try { page.ClearSprites(); }
-                catch { }
-            }
         }
     }
 
