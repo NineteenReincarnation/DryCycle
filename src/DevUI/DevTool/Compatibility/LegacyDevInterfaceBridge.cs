@@ -126,7 +126,7 @@ public static class LegacyDevInterfaceBridge
     internal static bool CanAdaptNode(DevUINode node)
     {
         if (node == null) return false;
-        if (node is Slider || node is Cycler || node is IntegerControl) return true;
+        if (node is Slider || node is Cycler || node is IntegerControl || node is ArrowButton) return true;
         if (node is ButtonWithSelectPanel) return true; // combo when discoverable, generic button otherwise
         if (CanAdaptBoolean(node) || CanAdaptExtEnum(node) || CanAdaptPanelSelect(node) ||
             CanAdaptColorSelect(node) || CanAdaptText(node) || CanAdaptDirection(node))
@@ -367,7 +367,8 @@ public static class LegacyDevInterfaceBridge
     /// their newly-created child panels are recursively scanned as well.
     /// </summary>
     internal static bool IsTerminalSemanticButton(DevUINode node) =>
-        node is Button button && !IsInfrastructureButton(button);
+        node is ArrowButton ||
+        (node is Button button && !IsInfrastructureButton(button));
 
     internal static bool CanAdaptSelect(ButtonWithSelectPanel button) =>
         button != null && ReadSelectOptions(button).Length > 0;
@@ -401,21 +402,27 @@ public static class LegacyDevInterfaceBridge
 
         PlacedObjectRepresentation representation = FindRepresentation(owner?.activePage as ObjectsPage, target);
         if (representation == null) return false;
-        if (ResolveNode(representation, path) is not Button button || IsInfrastructureButton(button)) return false;
+        DevUINode node = ResolveNode(representation, path);
 
         try
         {
-            // Do not reproduce the implementation of custom buttons. Clicked() is exactly the
-            // semantic boundary the original UI itself uses. If it opens a panel, CaptureChildren
-            // will mirror that panel recursively on the following frame.
-            button.Clicked();
-            button.Refresh();
+            // Button and ArrowButton are separate vanilla classes but expose the same semantic
+            // Clicked() boundary. Delegate through the original virtual method so custom numeric
+            // controllers, pagers and mod-defined arrow actions keep their own parent-signal logic.
+            if (node is Button button && !IsInfrastructureButton(button))
+                button.Clicked();
+            else if (node is ArrowButton arrowButton)
+                arrowButton.Clicked();
+            else
+                return false;
+
+            node.Refresh();
 
             // Several third-party Panels defer structural work until their next Update after a
-            // child Button signal (pagination, file pickers, searchable lists). The headless host
+            // child signal (pagination, file pickers, searchable lists). The headless host
             // intentionally has no vanilla per-frame page loop, so advance only the direct polling
             // parent once after an explicit semantic action.
-            SynchronizePollingParent(owner, button);
+            SynchronizePollingParent(owner, node);
             return true;
         }
         catch (Exception error)
@@ -796,6 +803,14 @@ public static class LegacyDevInterfaceBridge
                     LegacyControlKind.Button));
                 // Not atomic: arbitrary Buttons may create a custom child panel. If such a panel
                 // is already open, recurse into it and mirror its controls too.
+            }
+            else if (node is ArrowButton)
+            {
+                output.Add(Snapshot(
+                    path,
+                    node,
+                    SemanticTitle(node, "Arrow"),
+                    LegacyControlKind.Button));
             }
 
             if (!atomic)
