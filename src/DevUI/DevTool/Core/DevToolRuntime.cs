@@ -887,15 +887,10 @@ public sealed class EditorSession
                 selected.type.value))
             return false;
 
-        bool representationGap = HeadlessObjectCompatibilityHost.HasCompatibilityGap(
+        return HeadlessObjectCompatibilityHost.HasCompatibilityGap(
             this,
             selected,
             out _);
-
-        if (!representationGap)
-            HeadlessObjectCompatibilityHost.Release(this);
-
-        return representationGap;
     }
 
     private static int PageIndex(EditorToolMode mode)
