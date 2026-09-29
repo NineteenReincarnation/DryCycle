@@ -695,10 +695,15 @@ public sealed class EditorSession
 
         if (deferredRestoreLegacyUi && NativeToolScheduler.Supports(deferredRestoreMode))
         {
-            NativeToolScheduler.ShowExplicitLegacyTool(
-                this,
-                deferredRestoreMode);
-            return true;
+            if (NativeToolScheduler.ShowExplicitLegacyTool(
+                    this,
+                    deferredRestoreMode))
+                return true;
+
+            Plugin.Logger?.LogError(
+                "DevTool deferred legacy workspace restore failed for " + deferredRestoreMode +
+                "; keeping the current workspace ownership.");
+            return false;
         }
 
         SetToolMode(deferredRestoreMode);
@@ -849,16 +854,17 @@ public sealed class EditorSession
 
         if (NativeToolScheduler.Supports(ToolMode))
         {
-            if (LegacyUiVisible)
+            bool transitioned = LegacyUiVisible
+                ? NativeToolScheduler.ReturnToNativeTool(this)
+                : NativeToolScheduler.ShowExplicitLegacyTool(this, ToolMode);
+
+            if (!transitioned)
             {
-                if (NativeToolScheduler.ReturnToNativeTool(this))
-                    return;
+                Plugin.Logger?.LogError(
+                    "DevTool legacy presentation transition failed for " + ToolMode +
+                    "; keeping the current workspace ownership.");
             }
-            else
-            {
-                if (NativeToolScheduler.ShowExplicitLegacyTool(this, ToolMode))
-                    return;
-            }
+            return;
         }
 
         LegacyUiVisible = !LegacyUiVisible;
