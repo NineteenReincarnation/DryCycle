@@ -580,6 +580,8 @@ require("MarkDirtyAfterMutation" in host,
 require("HasUnsupportedNodes" in bridge and "IsStructurallyCoveredNode" in bridge and
         "UsesOnlyFrameworkUpdate" in bridge,
         "Unknown interactive DevUI nodes and custom Update() surfaces must remain explicit compatibility gaps instead of being silently accepted.")
+require("node is ArrowButton" in bridge and "arrowButton.Clicked()" in bridge,
+        "Vanilla/custom ArrowButton controls must remain bridged through their original Clicked() semantic boundary.")
 require("SynchronizePollingParent" in bridge and
         "owner.mouseClick = false" in bridge and
         "owner.mouseDown = false" in bridge and
