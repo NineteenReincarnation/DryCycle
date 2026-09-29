@@ -607,10 +607,13 @@ require("ObserveHeadlessRepresentation" in coverage,
 require("DevUiDiagnosticsPolicy.Enabled" in host and "ObserveHeadlessRepresentation" in host,
         "Expensive compatibility auditing must stay diagnostics-only on normal editor frames.")
 
-require("ToolMode == EditorToolMode.Objects && !LegacyUiVisible" in runtime and
-        "EditorPresentationHub.Current?.Inspector" in runtime and
-        "inspector.LegacyUiAvailable != true" in runtime,
-        "Objects legacy materialization must be blocked in the backend unless the current inspector proves a compatibility gap.")
+require("ToolMode == EditorToolMode.Objects" in runtime and
+        "!CanOpenObjectLegacyUi()" in runtime and
+        "ObjectInspectorRegistry.GetCoverage(selected)" in runtime and
+        "!coverage.IsComplete || !coverage.GizmoComplete" in runtime and
+        "LegacyObjectSandbox.HasCompatibilityGap" in runtime and
+        "LegacyObjectSandbox.Release(this)" in runtime,
+        "Objects legacy materialization must be re-authorized from current selection/coverage in the backend, and complete external objects must retire temporary proof hosts.")
 require("new(typeof(ObjectsPage)" not in quiescence,
         "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
 
