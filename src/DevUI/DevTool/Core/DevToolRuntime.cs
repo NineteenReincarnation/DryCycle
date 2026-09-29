@@ -727,8 +727,20 @@ public sealed class EditorSession
             ? System.Diagnostics.Stopwatch.GetTimestamp()
             : 0L;
 
-        if (NativeToolScheduler.TryActivate(this, mode))
+        if (NativeToolScheduler.SwitchTool(this, mode))
         {
+            RecordSoundWorkspaceSwitch(soundSwitchStarted);
+            return;
+        }
+
+        // Objects/Sound/Triggers are lifecycle-owned by NativeToolScheduler. If its transition
+        // fails, never bypass that ownership with a raw SwitchPage: doing so would reintroduce an
+        // untracked concrete legacy page and can desynchronize selection/history/backend state.
+        if (NativeToolScheduler.Supports(mode))
+        {
+            Plugin.Logger?.LogError(
+                "DevTool native workspace transition failed for " + mode +
+                "; refusing unmanaged legacy page materialization.");
             RecordSoundWorkspaceSwitch(soundSwitchStarted);
             return;
         }
