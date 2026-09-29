@@ -10,15 +10,15 @@ namespace DryCycle.DevUI.DevTool.Compatibility;
 
 /// <summary>
 /// Headless selected-object Representation host for PlacedObject types that do not yet have complete
-/// native authoring coverage. The historical class name is retained to avoid spreading a migration
-/// through callers, but this is no longer a visible "legacy page" fallback.
+/// native authoring coverage. This is an isolated semantic/geometry compatibility backend, never a
+/// visible fallback page and never a normal Objects workspace.
 ///
 /// Exactly one target Representation is materialized per session. Its Futile visuals are quarantined
 /// from every container, semantic controls are compiled only when the target/tree changes, and normal
 /// capture never swaps DevUI.activePage. The hidden ObjectsPage exists only because third-party
 /// CreateObjRep hooks conventionally require that constructor boundary.
 /// </summary>
-internal static class LegacyObjectSandbox
+internal static class HeadlessObjectCompatibilityHost
 {
     private sealed class State
     {

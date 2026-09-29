@@ -99,7 +99,7 @@ internal static class DevToolSubsystemCoordinator
         CartographyRuntime.ResetView();
         ClearCommandQueues();
         EditorContinuousTransactionHub.Reset();
-        LegacyObjectSandbox.Reset();
+        HeadlessObjectCompatibilityHost.Reset();
         NativeObjectRuntimeReconciler.ResetRuntimeState();
         LegacySoundPageHydrator.Reset();
         LegacyTriggerPageHydrator.Reset();

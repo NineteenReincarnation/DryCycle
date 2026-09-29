@@ -43,7 +43,7 @@ internal static class HeadlessRepresentationGizmoBridge
         if (session?.Owner == null || target == null || objectIndex < 0)
             return EditorObjectGizmoSnapshot.Empty;
 
-        return LegacyObjectSandbox.InspectRepresentation(
+        return HeadlessObjectCompatibilityHost.InspectRepresentation(
             session,
             target,
             representation => CaptureRepresentation(
@@ -133,7 +133,7 @@ internal static class HeadlessRepresentationGizmoBridge
             return false;
 
         string path = handleId.Substring(HandlePrefix.Length);
-        return LegacyObjectSandbox.MutateRepresentation(
+        return HeadlessObjectCompatibilityHost.MutateRepresentation(
             session,
             target,
             representation =>

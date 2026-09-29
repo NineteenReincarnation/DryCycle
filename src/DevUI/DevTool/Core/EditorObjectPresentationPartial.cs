@@ -173,7 +173,7 @@ public static partial class EditorPresentationHub
         bool representationGap = false;
         if (singleSelection && externalObject)
         {
-            representationGap = LegacyObjectSandbox.HasCompatibilityGap(
+            representationGap = HeadlessObjectCompatibilityHost.HasCompatibilityGap(
                 session,
                 selected,
                 out string unsupportedNode);
@@ -203,14 +203,14 @@ public static partial class EditorPresentationHub
             if (session.LegacyUiVisible && session.Owner?.activePage is global::DevInterface.ObjectsPage)
             {
                 legacyControls = LegacyDevInterfaceBridge.Capture(session.Owner, selected);
-                LegacyObjectSandbox.Release(session);
+                HeadlessObjectCompatibilityHost.Release(session);
             }
             else if (needsHeadlessControls)
             {
                 // A protocol adapter may cover every Data field while the original Representation
                 // still contains an unknown interactive node. Keep the selected-object host alive
                 // only while a concrete inspector/gizmo compatibility gap still needs it.
-                legacyControls = LegacyObjectSandbox.Capture(session, selected);
+                legacyControls = HeadlessObjectCompatibilityHost.Capture(session, selected);
             }
             else if (!needsHeadlessHost)
             {
@@ -218,12 +218,12 @@ public static partial class EditorPresentationHub
                 // prove that a third-party object is fully covered. Once that proof succeeds, retire
                 // the host immediately so complete native/protocol objects leave no legacy backend
                 // resident behind the rebuilt UI.
-                LegacyObjectSandbox.Release(session);
+                HeadlessObjectCompatibilityHost.Release(session);
             }
         }
         else
         {
-            LegacyObjectSandbox.Release(session);
+            HeadlessObjectCompatibilityHost.Release(session);
         }
 
         EditorObjectGizmoSnapshot objectGizmo = singleSelection

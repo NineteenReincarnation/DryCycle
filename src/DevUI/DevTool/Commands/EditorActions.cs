@@ -642,7 +642,7 @@ public static class EditorActions
 
         IEditorStateSnapshot before =
             SinglePlacedObjectStateSnapshot.Capture(session.RoomSettings, target);
-        bool succeeded = LegacyObjectSandbox.Run(session, target, action);
+        bool succeeded = HeadlessObjectCompatibilityHost.Run(session, target, action);
         if (!succeeded) return false;
 
         // A legacy button may only open a custom sub-panel and leave the model unchanged. Mark the

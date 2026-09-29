@@ -875,13 +875,13 @@ public sealed class EditorSession
                 selected.type.value))
             return false;
 
-        bool representationGap = LegacyObjectSandbox.HasCompatibilityGap(
+        bool representationGap = HeadlessObjectCompatibilityHost.HasCompatibilityGap(
             this,
             selected,
             out _);
 
         if (!representationGap)
-            LegacyObjectSandbox.Release(this);
+            HeadlessObjectCompatibilityHost.Release(this);
 
         return representationGap;
     }
@@ -1067,7 +1067,7 @@ public static class DevToolSessionHub
             if (previous != null && !ReferenceEquals(previous.Owner, ui))
             {
                 LegacyDevUiQuiescenceController.ReleasePage(previous.Owner?.activePage);
-                LegacyObjectSandbox.Release(previous);
+                HeadlessObjectCompatibilityHost.Release(previous);
             }
 
             bool restoreViewState = CanRestoreViewState(previous, ui);

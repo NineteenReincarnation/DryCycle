@@ -489,7 +489,7 @@ from pathlib import Path
 managed_path = Path("src/DevUI/DevTool/Objects/ManagedObjectProtocolInspector.cs")
 bootstrap_path = Path("src/DevUI/DevTool/Objects/NativeObjectInspectorBootstrap.cs")
 presentation_path = Path("src/DevUI/DevTool/Core/EditorObjectPresentationPartial.cs")
-host_path = Path("src/DevUI/DevTool/Compatibility/LegacyObjectSandbox.cs")
+host_path = Path("src/DevUI/DevTool/Compatibility/HeadlessObjectCompatibilityHost.cs")
 gizmo_path = Path("src/DevUI/DevTool/Compatibility/HeadlessRepresentationGizmoBridge.cs")
 coverage_path = Path("src/DevUI/DevTool/Compatibility/DevUiMigrationCoverage.cs")
 bridge_path = Path("src/DevUI/DevTool/Compatibility/LegacyDevInterfaceBridge.cs")
@@ -554,10 +554,10 @@ require("HeadlessRepresentationGizmoBridge.Capture" in presentation,
         "Incomplete scene geometry or Representation coverage must merge from the headless Representation.")
 require("!coverage.GizmoComplete" in presentation and "LegacyUiAvailable" in presentation,
         "A scene-gizmo coverage gap must remain visible as an explicit compatibility escape hatch.")
-require("LegacyObjectSandbox.HasCompatibilityGap" in presentation,
+require("HeadlessObjectCompatibilityHost.HasCompatibilityGap" in presentation,
         "Object presentation must include the Representation tree in compatibility coverage.")
 require("else if (!needsHeadlessHost)" in presentation and
-        "LegacyObjectSandbox.Release(session);" in presentation,
+        "HeadlessObjectCompatibilityHost.Release(session);" in presentation,
         "A fully covered third-party Object must retire its temporary headless Representation host immediately.")
 
 capture_start = host.find("internal static LegacyControlSnapshot[] Capture")
@@ -626,8 +626,8 @@ require("ToolMode == EditorToolMode.Objects" in runtime and
         "!CanOpenObjectLegacyUi()" in runtime and
         "ObjectInspectorRegistry.GetCoverage(selected)" in runtime and
         "!coverage.IsComplete || !coverage.GizmoComplete" in runtime and
-        "LegacyObjectSandbox.HasCompatibilityGap" in runtime and
-        "LegacyObjectSandbox.Release(this)" in runtime,
+        "HeadlessObjectCompatibilityHost.HasCompatibilityGap" in runtime and
+        "HeadlessObjectCompatibilityHost.Release(this)" in runtime,
         "Objects legacy materialization must be re-authorized from current selection/coverage in the backend, and complete external objects must retire temporary proof hosts.")
 require("new(typeof(ObjectsPage)" not in quiescence,
         "ObjectsPage must never re-enter the hidden legacy quiescence/pump backend; normal Objects editing is page-less.")
@@ -660,6 +660,16 @@ require(set(explicit_entry_callers).issubset({
 require("DevUiDiagnosticsPolicy.Enabled" in host and
         "DevUiMigrationCoverage.ObserveHeadlessRepresentation(state.Representation)" in host,
         "Object diagnostics must collect compatibility evidence from the quarantined Representation itself.")
+
+retired_object_host_refs = []
+for source_path in Path("src/DevUI/DevTool").rglob("*.cs"):
+    source = source_path.read_text(encoding="utf-8")
+    if "LegacyObjectSandbox" in source:
+        retired_object_host_refs.append(source_path.as_posix())
+require(not retired_object_host_refs,
+        "Retired visible-legacy Object sandbox name returned to the headless Object pipeline: " +
+        ", ".join(retired_object_host_refs))
+
 
 
 
