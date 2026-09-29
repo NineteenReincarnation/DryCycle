@@ -14,8 +14,9 @@ internal static class ObjectSceneFilterControls
         float buttonWidth = DevToolWidgets.ButtonWidth(label);
 
         ImGui.SameLine();
-        float actionX = ImGui.GetWindowContentRegionMax().X - buttonWidth;
-        if (actionX > ImGui.GetCursorPosX())
+        float cursorX = ImGui.GetCursorPosX();
+        float actionX = cursorX + ImGui.GetContentRegionAvail().X - buttonWidth;
+        if (actionX > cursorX)
             ImGui.SetCursorPosX(actionX);
 
         return DevToolWidgets.ActionButton(
