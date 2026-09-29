@@ -91,7 +91,17 @@ internal static class RelationshipEditorView
     private static string projectedFilter = string.Empty;
     private static RelationshipFilterMode projectedFilterMode;
     private static PairPresentation[] projectedVisibleRows = Array.Empty<PairPresentation>();
+    private static readonly int[] projectedFamilyCounts = new int[7];
     private static readonly List<AtlasNodeLayout> atlasNodes = new();
+    private static PairPresentation[] atlasLayoutRowsSource;
+    private static Num.Vector2 atlasLayoutOrigin;
+    private static Num.Vector2 atlasLayoutSize;
+    private static bool atlasLayoutValid;
+    private static int atlasIconWarmCursor;
+
+    private static string[] browserCreatureSource;
+    private static string browserCreatureQuery = string.Empty;
+    private static string[] browserVisibleCreatures = Array.Empty<string>();
 
     private static string inspectorEditKey = string.Empty;
     private static string inspectorEditPrimary = string.Empty;
@@ -105,7 +115,17 @@ internal static class RelationshipEditorView
         projectedFilter = string.Empty;
         projectedFilterMode = RelationshipFilterMode.All;
         projectedVisibleRows = Array.Empty<PairPresentation>();
+        Array.Clear(projectedFamilyCounts, 0, projectedFamilyCounts.Length);
         atlasNodes.Clear();
+        atlasLayoutRowsSource = null;
+        atlasLayoutOrigin = default;
+        atlasLayoutSize = default;
+        atlasLayoutValid = false;
+        atlasIconWarmCursor = 0;
+
+        browserCreatureSource = null;
+        browserCreatureQuery = string.Empty;
+        browserVisibleCreatures = Array.Empty<string>();
 
         inspectorEditKey = string.Empty;
         inspectorEditPrimary = string.Empty;
@@ -145,50 +165,45 @@ internal static class RelationshipEditorView
             snapshot.CreatureTypes ?? Array.Empty<string>();
         string query =
             PrimarySearchQuery();
+        EnsureBrowserCreatures(
+            creatures,
+            query);
 
-        float clipTop =
-            ImGui.GetWindowPos().Y - PrimaryCreatureRowHeight;
-        float clipBottom =
-            ImGui.GetWindowPos().Y +
-            ImGui.GetWindowHeight() +
-            PrimaryCreatureRowHeight;
+        int matches =
+            browserVisibleCreatures.Length;
+        float itemHeight =
+            PrimaryCreatureRowHeight +
+            ImGui.GetStyle().ItemSpacing.Y;
 
-        int matches = 0;
-        for (int i = 0; i < creatures.Length; i++)
+        using (DevToolListClipper clipper =
+            new(
+                matches,
+                itemHeight))
         {
-            string type =
-                creatures[i] ?? string.Empty;
-            if (!Matches(type, query))
-                continue;
-
-            matches++;
-
-            float rowScreenY =
-                ImGui.GetCursorScreenPos().Y;
-            if (rowScreenY + PrimaryCreatureRowHeight < clipTop ||
-                rowScreenY > clipBottom)
+            while (clipper.Step(
+                       out int firstVisible,
+                       out int lastVisibleExclusive))
             {
-                ImGui.Dummy(
-                    new Num.Vector2(
-                        1f,
-                        PrimaryCreatureRowHeight));
-                continue;
-            }
+                for (int i = firstVisible; i < lastVisibleExclusive; i++)
+                {
+                    string type =
+                        browserVisibleCreatures[i];
+                    bool selected =
+                        string.Equals(
+                            type,
+                            snapshot.PrimaryCreature,
+                            StringComparison.Ordinal);
 
-            bool selected =
-                string.Equals(
-                    type,
-                    snapshot.PrimaryCreature,
-                    StringComparison.Ordinal);
-
-            if (DrawPrimaryCreatureRow(
-                    type,
-                    selected))
-            {
-                RelationshipEditorCommandQueue.Enqueue(
-                    new RelationshipEditorCommand(
-                        RelationshipEditorCommandKind.SelectPrimary,
-                        primary: type));
+                    if (DrawPrimaryCreatureRow(
+                            type,
+                            selected))
+                    {
+                        RelationshipEditorCommandQueue.Enqueue(
+                            new RelationshipEditorCommand(
+                                RelationshipEditorCommandKind.SelectPrimary,
+                                primary: type));
+                    }
+                }
             }
         }
 
@@ -198,6 +213,59 @@ internal static class RelationshipEditorView
                 DevToolUiSettings.T("没有匹配的生物。", "No matching creatures."),
                 true);
         }
+    }
+
+    private static void EnsureBrowserCreatures(
+        string[] creatures,
+        string query)
+    {
+        query ??= string.Empty;
+        if (ReferenceEquals(
+                browserCreatureSource,
+                creatures) &&
+            string.Equals(
+                browserCreatureQuery,
+                query,
+                StringComparison.Ordinal))
+            return;
+
+        browserCreatureSource =
+            creatures;
+        browserCreatureQuery =
+            query;
+
+        if (string.IsNullOrEmpty(query))
+        {
+            browserVisibleCreatures =
+                creatures;
+            return;
+        }
+
+        int count = 0;
+        for (int i = 0; i < creatures.Length; i++)
+        {
+            if (Matches(
+                    creatures[i],
+                    query))
+                count++;
+        }
+
+        string[] next =
+            new string[count];
+        int write = 0;
+        for (int i = 0; i < creatures.Length; i++)
+        {
+            string creature =
+                creatures[i];
+            if (Matches(
+                    creature,
+                    query))
+                next[write++] =
+                    creature;
+        }
+
+        browserVisibleCreatures =
+            next;
     }
 
     private static bool DrawPrimaryCreatureRow(
@@ -599,6 +667,8 @@ internal static class RelationshipEditorView
         BuildAtlasLayout(
             origin,
             canvasSize);
+        WarmAtlasIcons(
+            2);
 
         Num.Vector2 primaryCenter =
             origin +
@@ -690,6 +760,29 @@ internal static class RelationshipEditorView
         Num.Vector2 origin,
         Num.Vector2 size)
     {
+        if (atlasLayoutValid &&
+            ReferenceEquals(
+                atlasLayoutRowsSource,
+                projectedVisibleRows) &&
+            NearlyEqual(
+                atlasLayoutSize,
+                size))
+        {
+            if (!NearlyEqual(
+                    atlasLayoutOrigin,
+                    origin))
+            {
+                Num.Vector2 delta =
+                    origin -
+                    atlasLayoutOrigin;
+                for (int i = 0; i < atlasNodes.Count; i++)
+                    atlasNodes[i].Center += delta;
+                atlasLayoutOrigin =
+                    origin;
+            }
+            return;
+        }
+
         atlasNodes.Clear();
 
         for (int familyIndex = 0; familyIndex < FamilyOrder.Length; familyIndex++)
@@ -782,22 +875,57 @@ internal static class RelationshipEditorView
                 localIndex++;
             }
         }
+
+        atlasLayoutRowsSource =
+            projectedVisibleRows;
+        atlasLayoutOrigin =
+            origin;
+        atlasLayoutSize =
+            size;
+        atlasLayoutValid =
+            true;
     }
+
+    private static void WarmAtlasIcons(int budget)
+    {
+        int count =
+            projectedVisibleRows.Length;
+        if (count <= 0 ||
+            budget <= 0)
+            return;
+
+        int steps =
+            Math.Min(
+                budget,
+                count);
+        for (int i = 0; i < steps; i++)
+        {
+            if (atlasIconWarmCursor >= count)
+                atlasIconWarmCursor = 0;
+
+            PairPresentation pair =
+                projectedVisibleRows[atlasIconWarmCursor++];
+            string creature =
+                pair?.Row?.CreatureType;
+            if (!string.IsNullOrEmpty(creature))
+                WorldCreatureCatalogPicker.RequestIconPreparation(creature);
+        }
+    }
+
+    private static bool NearlyEqual(
+        Num.Vector2 a,
+        Num.Vector2 b) =>
+        Math.Abs(a.X - b.X) < 0.25f &&
+        Math.Abs(a.Y - b.Y) < 0.25f;
 
     private static int CountFamily(RelationFamily family)
     {
-        int count = 0;
-        for (int i = 0; i < projectedVisibleRows.Length; i++)
-        {
-            PairPresentation pair = projectedVisibleRows[i];
-            if (pair != null &&
-                pair.ForwardFamily == family)
-            {
-                count++;
-            }
-        }
-
-        return count;
+        int index =
+            (int)family;
+        return index >= 0 &&
+               index < projectedFamilyCounts.Length
+            ? projectedFamilyCounts[index]
+            : 0;
     }
 
     private static void GetFamilyRegion(
@@ -1105,7 +1233,8 @@ internal static class RelationshipEditorView
             new Num.Vector2(
                 size * 0.68f,
                 size * 0.68f),
-            maxRuns: 56);
+            maxRuns: 56,
+            requestPreparation: hovered || selected);
 
         if (node.Pair.Asymmetric)
         {
@@ -1897,6 +2026,86 @@ internal static class RelationshipEditorView
                 rows))
             return;
 
+        bool canPatch =
+            projectedRows.Length ==
+            rows.Length &&
+            projectedRows.Length > 0;
+
+        if (canPatch)
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                PairPresentation pair =
+                    projectedRows[i];
+                EditorRelationshipRowSnapshot row =
+                    rows[i];
+
+                if (pair?.Row == null ||
+                    row == null ||
+                    !string.Equals(
+                        pair.Row.CreatureType,
+                        row.CreatureType,
+                        StringComparison.Ordinal))
+                {
+                    canPatch = false;
+                    break;
+                }
+            }
+        }
+
+        bool filterAffectingChange =
+            false;
+
+        if (canPatch)
+        {
+            for (int i = 0; i < rows.Length; i++)
+            {
+                PairPresentation pair =
+                    projectedRows[i];
+                EditorRelationshipRowSnapshot row =
+                    rows[i];
+
+                EditorRelationshipValueSnapshot forward =
+                    row.PrimaryToOther ??
+                    EmptyRelationship;
+                EditorRelationshipValueSnapshot reverse =
+                    row.OtherToPrimary ??
+                    EmptyRelationship;
+
+                bool valuesChanged =
+                    !ReferenceEquals(
+                        pair.Forward,
+                        forward) ||
+                    !ReferenceEquals(
+                        pair.Reverse,
+                        reverse);
+
+                pair.Row =
+                    row;
+                pair.Name =
+                    string.IsNullOrEmpty(row.DisplayName)
+                        ? row.CreatureType ?? string.Empty
+                        : row.DisplayName;
+
+                if (!valuesChanged)
+                    continue;
+
+                ProjectPairValues(
+                    pair,
+                    forward,
+                    reverse);
+                filterAffectingChange =
+                    true;
+            }
+
+            projectedRowsSource =
+                rows;
+
+            if (filterAffectingChange)
+                InvalidateVisibleRows();
+            return;
+        }
+
         PairPresentation[] next =
             new PairPresentation[rows.Length];
 
@@ -1904,54 +2113,82 @@ internal static class RelationshipEditorView
         {
             EditorRelationshipRowSnapshot row =
                 rows[i];
-            EditorRelationshipValueSnapshot forward =
-                row?.PrimaryToOther ??
-                EmptyRelationship;
-            EditorRelationshipValueSnapshot reverse =
-                row?.OtherToPrimary ??
-                EmptyRelationship;
-
-            RelationFamily forwardFamily =
-                Classify(forward.Type);
-            RelationFamily reverseFamily =
-                Classify(reverse.Type);
-
-            next[i] =
-                new PairPresentation
+            PairPresentation pair =
+                new()
                 {
                     Row = row,
-                    Forward = forward,
-                    Reverse = reverse,
                     Name =
                         string.IsNullOrEmpty(row?.DisplayName)
                             ? row?.CreatureType ?? string.Empty
-                            : row.DisplayName,
-                    ForwardFamily = forwardFamily,
-                    ReverseFamily = reverseFamily,
-                    Asymmetric =
-                        IsAsymmetric(
-                            forward,
-                            reverse,
-                            forwardFamily,
-                            reverseFamily),
-                    Changed =
-                        forward.DirectOverride ||
-                        reverse.DirectOverride,
-                    PeakIntensity =
-                        Math.Max(
-                            Clamp01(forward.Intensity),
-                            Clamp01(reverse.Intensity))
+                            : row.DisplayName
                 };
+
+            ProjectPairValues(
+                pair,
+                row?.PrimaryToOther ??
+                EmptyRelationship,
+                row?.OtherToPrimary ??
+                EmptyRelationship);
+            next[i] =
+                pair;
         }
 
         projectedRowsSource =
             rows;
         projectedRows =
             next;
+        InvalidateVisibleRows();
+    }
+
+    private static void ProjectPairValues(
+        PairPresentation pair,
+        EditorRelationshipValueSnapshot forward,
+        EditorRelationshipValueSnapshot reverse)
+    {
+        RelationFamily forwardFamily =
+            Classify(forward.Type);
+        RelationFamily reverseFamily =
+            Classify(reverse.Type);
+
+        pair.Forward =
+            forward;
+        pair.Reverse =
+            reverse;
+        pair.ForwardFamily =
+            forwardFamily;
+        pair.ReverseFamily =
+            reverseFamily;
+        pair.Asymmetric =
+            IsAsymmetric(
+                forward,
+                reverse,
+                forwardFamily,
+                reverseFamily);
+        pair.Changed =
+            forward.DirectOverride ||
+            reverse.DirectOverride;
+        pair.PeakIntensity =
+            Math.Max(
+                Clamp01(forward.Intensity),
+                Clamp01(reverse.Intensity));
+    }
+
+    private static void InvalidateVisibleRows()
+    {
         projectedFilter =
             null;
         projectedVisibleRows =
             Array.Empty<PairPresentation>();
+        Array.Clear(
+            projectedFamilyCounts,
+            0,
+            projectedFamilyCounts.Length);
+        atlasLayoutRowsSource =
+            null;
+        atlasLayoutValid =
+            false;
+        atlasIconWarmCursor =
+            0;
     }
 
     private static void EnsureVisibleRows(
@@ -1980,6 +2217,10 @@ internal static class RelationshipEditorView
         PairPresentation[] next =
             new PairPresentation[count];
         int write = 0;
+        Array.Clear(
+            projectedFamilyCounts,
+            0,
+            projectedFamilyCounts.Length);
 
         for (int i = 0; i < projectedRows.Length; i++)
         {
@@ -1993,6 +2234,12 @@ internal static class RelationshipEditorView
 
             next[write++] =
                 pair;
+
+            int familyIndex =
+                (int)pair.ForwardFamily;
+            if (familyIndex >= 0 &&
+                familyIndex < projectedFamilyCounts.Length)
+                projectedFamilyCounts[familyIndex]++;
         }
 
         projectedFilter =
@@ -2001,6 +2248,12 @@ internal static class RelationshipEditorView
             mode;
         projectedVisibleRows =
             next;
+        atlasLayoutRowsSource =
+            null;
+        atlasLayoutValid =
+            false;
+        atlasIconWarmCursor =
+            0;
     }
 
     private static bool PassesFilter(

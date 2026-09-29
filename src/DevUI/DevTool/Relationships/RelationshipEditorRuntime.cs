@@ -63,8 +63,24 @@ internal static class RelationshipEditorStateHub
 public static class RelationshipEditorPresentationHub
 {
     private static volatile EditorRelationshipPresentationSnapshot current = EditorRelationshipPresentationSnapshot.Empty;
+    private sealed class PrimaryRowsCacheEntry
+    {
+        internal long Revision;
+        internal EditorRelationshipRowSnapshot[] Rows = Array.Empty<EditorRelationshipRowSnapshot>();
+    }
+
+    private const int MaxPrimaryRowsCacheEntries = 12;
+
     private static string[] relationshipTypes = Array.Empty<string>();
     private static int relationshipTypeCount = -1;
+    private static CreatureTemplate[] templateCatalog = Array.Empty<CreatureTemplate>();
+    private static string[] creatureTypeCatalog = Array.Empty<string>();
+    private static Dictionary<string, CreatureTemplate> templateByType =
+        new(StringComparer.Ordinal);
+    private static int templateCatalogTypeCount = -1;
+    private static readonly Dictionary<string, PrimaryRowsCacheEntry> primaryRowsCache =
+        new(StringComparer.Ordinal);
+    private static readonly Queue<string> primaryRowsCacheOrder = new();
 
     private static EditorSession observedSession;
     private static RelationshipPage observedPage;
@@ -84,6 +100,17 @@ public static class RelationshipEditorPresentationHub
         {
             Clear();
             return;
+        }
+
+        if (!ReferenceEquals(
+                observedSession,
+                session) ||
+            !ReferenceEquals(
+                observedPage,
+                page))
+        {
+            primaryRowsCache.Clear();
+            primaryRowsCacheOrder.Clear();
         }
 
         if (EditorRevisionHub.RequiresLiveWorkspaceRefresh(session))
@@ -145,8 +172,11 @@ public static class RelationshipEditorPresentationHub
             return;
         }
 
-        List<CreatureTemplate> templates = CollectTemplates();
-        if (templates.Count == 0)
+        EnsureTemplateCatalog(
+            creatureTypeCount);
+        CreatureTemplate[] templates =
+            templateCatalog;
+        if (templates.Length == 0)
         {
             current = new EditorRelationshipPresentationSnapshot { Available = true };
             Observe(session, page, revision, creatureTypeCount, state);
@@ -154,30 +184,25 @@ public static class RelationshipEditorPresentationHub
             return;
         }
 
-        CreatureTemplate primary = FindTemplate(templates, state.PrimaryCreature) ?? templates[0];
-        state.PrimaryCreature = primary.type.value;
+        CreatureTemplate primary =
+            FindTemplate(state.PrimaryCreature) ??
+            templates[0];
+        state.PrimaryCreature =
+            primary.type.value;
 
         if (!string.IsNullOrEmpty(state.SelectedOtherCreature) &&
-            FindTemplate(templates, state.SelectedOtherCreature) == null)
-            state.SelectedOtherCreature = string.Empty;
+            FindTemplate(state.SelectedOtherCreature) == null)
+            state.SelectedOtherCreature =
+                string.Empty;
 
-        string[] creatureTypes = new string[templates.Count];
-        List<EditorRelationshipRowSnapshot> rows = new(Math.Max(0, templates.Count - 1));
-        for (int i = 0; i < templates.Count; i++)
-        {
-            CreatureTemplate other = templates[i];
-            creatureTypes[i] = other.type.value;
-            if (other.type == primary.type) continue;
-
-            rows.Add(new EditorRelationshipRowSnapshot
-            {
-                CreatureType = other.type.value,
-                DisplayName = string.IsNullOrEmpty(other.name) ? other.type.value : other.name,
-                Selected = string.Equals(state.SelectedOtherCreature, other.type.value, StringComparison.Ordinal),
-                PrimaryToOther = Capture(primary, other),
-                OtherToPrimary = Capture(other, primary)
-            });
-        }
+        EditorRelationshipRowSnapshot[] baseRows =
+            GetOrBuildPrimaryRows(
+                primary,
+                revision);
+        EditorRelationshipRowSnapshot[] rows =
+            ApplySelection(
+                baseRows,
+                state.SelectedOtherCreature);
 
         RebuildRelationshipTypesIfNeeded();
 
@@ -187,9 +212,9 @@ public static class RelationshipEditorPresentationHub
             PrimaryCreature = state.PrimaryCreature,
             SelectedOtherCreature = state.SelectedOtherCreature,
             SelectedDirection = state.SelectedDirection,
-            CreatureTypes = creatureTypes,
+            CreatureTypes = creatureTypeCatalog,
             RelationshipTypes = relationshipTypes,
-            Rows = rows.ToArray()
+            Rows = rows
         };
 
         Observe(session, page, revision, creatureTypeCount, state);
@@ -289,6 +314,8 @@ public static class RelationshipEditorPresentationHub
         observedPrimary = string.Empty;
         observedOther = string.Empty;
         observedDirection = EditorRelationshipDirection.PrimaryToOther;
+        primaryRowsCache.Clear();
+        primaryRowsCacheOrder.Clear();
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
@@ -308,51 +335,289 @@ public static class RelationshipEditorPresentationHub
         observedDirection = state?.SelectedDirection ?? EditorRelationshipDirection.PrimaryToOther;
     }
 
-    private static EditorRelationshipValueSnapshot Capture(CreatureTemplate from, CreatureTemplate to)
+    private static EditorRelationshipValueSnapshot Capture(
+        CreatureTemplate from,
+        CreatureTemplate to)
     {
-        CreatureTemplate.Relationship effective = RelationshipPage.GetEffectiveRelationship(from, to);
-        bool direct = RelationshipPage.changedRelationships.TryGetValue(from.type, out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> changed) &&
-                      changed.ContainsKey(to.type);
-        return new EditorRelationshipValueSnapshot
-        {
-            Type = effective.type?.value ?? string.Empty,
-            Intensity = effective.intensity,
-            DirectOverride = direct
-        };
+        RelationshipPage.changedRelationships.TryGetValue(
+            from.type,
+            out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> directMap);
+        return Capture(
+            from,
+            to,
+            directMap);
     }
 
-    private static List<CreatureTemplate> CollectTemplates()
+    private static void EnsureTemplateCatalog(int creatureTypeCount)
     {
-        List<CreatureTemplate> result = new();
-        HashSet<string> seen = new(StringComparer.Ordinal);
+        if (templateCatalogTypeCount ==
+            creatureTypeCount)
+            return;
+
+        List<CreatureTemplate> result =
+            new();
+        HashSet<string> seen =
+            new(StringComparer.Ordinal);
+
         for (int i = 0; i < ExtEnum<CreatureTemplate.Type>.values.Count; i++)
         {
-            string entry = ExtEnum<CreatureTemplate.Type>.values.GetEntry(i);
-            if (string.IsNullOrEmpty(entry) || !seen.Add(entry)) continue;
+            string entry =
+                ExtEnum<CreatureTemplate.Type>.values.GetEntry(i);
+            if (string.IsNullOrEmpty(entry) ||
+                !seen.Add(entry))
+                continue;
+
             try
             {
-                CreatureTemplate.Type type = new(entry, false);
-                CreatureTemplate template = StaticWorld.GetCreatureTemplate(type);
-                if (template?.type == null) continue;
+                CreatureTemplate.Type type =
+                    new(
+                        entry,
+                        false);
+                CreatureTemplate template =
+                    StaticWorld.GetCreatureTemplate(type);
+                if (template?.type == null)
+                    continue;
+
                 result.Add(template);
             }
             catch
             {
-                // An ExtEnum entry may be registered before its template exists. It is safer
-                // to skip it until StaticWorld can resolve it than to manufacture editor data.
+                // Registration can precede template construction. The catalog is rebuilt when the
+                // ExtEnum count changes; unresolved entries are skipped rather than stalling the UI.
             }
         }
 
-        result.Sort((a, b) => string.Compare(a?.type?.value, b?.type?.value, StringComparison.OrdinalIgnoreCase));
-        return result;
+        result.Sort(
+            (a, b) =>
+                string.Compare(
+                    a?.type?.value,
+                    b?.type?.value,
+                    StringComparison.OrdinalIgnoreCase));
+
+        templateCatalog =
+            result.ToArray();
+        creatureTypeCatalog =
+            new string[templateCatalog.Length];
+        Dictionary<string, CreatureTemplate> nextByType =
+            new(
+                templateCatalog.Length,
+                StringComparer.Ordinal);
+
+        for (int i = 0; i < templateCatalog.Length; i++)
+        {
+            CreatureTemplate template =
+                templateCatalog[i];
+            string id =
+                template?.type?.value ??
+                string.Empty;
+            creatureTypeCatalog[i] =
+                id;
+            if (!string.IsNullOrEmpty(id))
+                nextByType[id] =
+                    template;
+        }
+
+        templateByType =
+            nextByType;
+        templateCatalogTypeCount =
+            creatureTypeCount;
+
+        // Row snapshots depend on the exact template catalog/order.
+        primaryRowsCache.Clear();
+        primaryRowsCacheOrder.Clear();
+    }
+
+    private static EditorRelationshipRowSnapshot[] GetOrBuildPrimaryRows(
+        CreatureTemplate primary,
+        long revision)
+    {
+        string primaryId =
+            primary?.type?.value ??
+            string.Empty;
+        if (string.IsNullOrEmpty(primaryId))
+            return Array.Empty<EditorRelationshipRowSnapshot>();
+
+        if (primaryRowsCache.TryGetValue(
+                primaryId,
+                out PrimaryRowsCacheEntry cached) &&
+            cached.Revision == revision)
+            return cached.Rows;
+
+        RelationshipPage.changedRelationships.TryGetValue(
+            primary.type,
+            out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> primaryChanged);
+
+        EditorRelationshipRowSnapshot[] rows =
+            new EditorRelationshipRowSnapshot[
+                Math.Max(
+                    0,
+                    templateCatalog.Length - 1)];
+        int write = 0;
+
+        for (int i = 0; i < templateCatalog.Length; i++)
+        {
+            CreatureTemplate other =
+                templateCatalog[i];
+            if (other?.type == null ||
+                other.type == primary.type)
+                continue;
+
+            RelationshipPage.changedRelationships.TryGetValue(
+                other.type,
+                out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> reverseChanged);
+
+            rows[write++] =
+                new EditorRelationshipRowSnapshot
+                {
+                    CreatureType =
+                        other.type.value,
+                    DisplayName =
+                        string.IsNullOrEmpty(other.name)
+                            ? other.type.value
+                            : other.name,
+                    Selected =
+                        false,
+                    PrimaryToOther =
+                        Capture(
+                            primary,
+                            other,
+                            primaryChanged),
+                    OtherToPrimary =
+                        Capture(
+                            other,
+                            primary,
+                            reverseChanged)
+                };
+        }
+
+        if (write != rows.Length)
+            Array.Resize(
+                ref rows,
+                write);
+
+        CachePrimaryRows(
+            primaryId,
+            revision,
+            rows);
+        return rows;
+    }
+
+    private static void CachePrimaryRows(
+        string primaryId,
+        long revision,
+        EditorRelationshipRowSnapshot[] rows)
+    {
+        if (!primaryRowsCache.ContainsKey(primaryId))
+            primaryRowsCacheOrder.Enqueue(primaryId);
+
+        primaryRowsCache[primaryId] =
+            new PrimaryRowsCacheEntry
+            {
+                Revision = revision,
+                Rows = rows
+            };
+
+        while (primaryRowsCache.Count > MaxPrimaryRowsCacheEntries &&
+               primaryRowsCacheOrder.Count > 0)
+        {
+            string remove =
+                primaryRowsCacheOrder.Dequeue();
+            if (string.Equals(
+                    remove,
+                    primaryId,
+                    StringComparison.Ordinal))
+            {
+                primaryRowsCacheOrder.Enqueue(remove);
+                continue;
+            }
+
+            primaryRowsCache.Remove(remove);
+        }
+    }
+
+    private static EditorRelationshipRowSnapshot[] ApplySelection(
+        EditorRelationshipRowSnapshot[] source,
+        string selectedOther)
+    {
+        if (source == null ||
+            source.Length == 0 ||
+            string.IsNullOrEmpty(selectedOther))
+            return source ??
+                   Array.Empty<EditorRelationshipRowSnapshot>();
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            EditorRelationshipRowSnapshot row =
+                source[i];
+            if (!string.Equals(
+                    row?.CreatureType,
+                    selectedOther,
+                    StringComparison.Ordinal))
+                continue;
+
+            EditorRelationshipRowSnapshot[] next =
+                (EditorRelationshipRowSnapshot[])source.Clone();
+            next[i] =
+                new EditorRelationshipRowSnapshot
+                {
+                    CreatureType =
+                        row.CreatureType,
+                    DisplayName =
+                        row.DisplayName,
+                    Selected =
+                        true,
+                    PrimaryToOther =
+                        row.PrimaryToOther,
+                    OtherToPrimary =
+                        row.OtherToPrimary
+                };
+            return next;
+        }
+
+        return source;
+    }
+
+    private static EditorRelationshipValueSnapshot Capture(
+        CreatureTemplate from,
+        CreatureTemplate to,
+        Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> directMap)
+    {
+        CreatureTemplate.Relationship effective =
+            RelationshipPage.GetEffectiveRelationship(
+                from,
+                to);
+        bool direct =
+            directMap != null &&
+            directMap.ContainsKey(to.type);
+
+        return new EditorRelationshipValueSnapshot
+        {
+            Type =
+                effective.type?.value ??
+                string.Empty,
+            Intensity =
+                effective.intensity,
+            DirectOverride =
+                direct
+        };
     }
 
     private static CreatureTemplate ResolveTemplate(string typeName)
     {
-        if (string.IsNullOrEmpty(typeName)) return null;
+        if (string.IsNullOrEmpty(typeName))
+            return null;
+
+        if (templateByType.TryGetValue(
+                typeName,
+                out CreatureTemplate cached))
+            return cached;
+
         try
         {
-            return StaticWorld.GetCreatureTemplate(new CreatureTemplate.Type(typeName, false));
+            return StaticWorld.GetCreatureTemplate(
+                new CreatureTemplate.Type(
+                    typeName,
+                    false));
         }
         catch
         {
@@ -360,16 +625,16 @@ public static class RelationshipEditorPresentationHub
         }
     }
 
-    private static CreatureTemplate FindTemplate(List<CreatureTemplate> templates, string typeName)
+    private static CreatureTemplate FindTemplate(string typeName)
     {
-        if (templates == null || string.IsNullOrEmpty(typeName)) return null;
-        for (int i = 0; i < templates.Count; i++)
-        {
-            CreatureTemplate template = templates[i];
-            if (template?.type != null && string.Equals(template.type.value, typeName, StringComparison.Ordinal))
-                return template;
-        }
-        return null;
+        if (string.IsNullOrEmpty(typeName))
+            return null;
+
+        return templateByType.TryGetValue(
+            typeName,
+            out CreatureTemplate template)
+            ? template
+            : null;
     }
 
     private static void RebuildRelationshipTypesIfNeeded()

@@ -732,7 +732,8 @@ internal static class WorldCreatureCatalogPicker
         string creatureId,
         Num.Vector2 areaPos,
         Num.Vector2 areaSize,
-        int maxRuns = 72)
+        int maxRuns = 72,
+        bool requestPreparation = true)
     {
         if (draw.NativePtr == null ||
             string.IsNullOrWhiteSpace(creatureId) ||
@@ -741,10 +742,45 @@ internal static class WorldCreatureCatalogPicker
             return false;
 
         catalogRequested = true;
-        TryGetIconForRender(
+        if (requestPreparation)
+        {
+            TryGetIconForRender(
+                creatureId,
+                out IconRaster icon,
+                out IconState state);
+            return DrawInlineIconCompactResolved(
+                draw,
+                creatureId,
+                areaPos,
+                areaSize,
+                maxRuns,
+                icon,
+                state);
+        }
+
+        TryPeekIconForRender(
             creatureId,
-            out IconRaster icon,
-            out IconState state);
+            out IconRaster passiveIcon,
+            out IconState passiveState);
+        return DrawInlineIconCompactResolved(
+            draw,
+            creatureId,
+            areaPos,
+            areaSize,
+            maxRuns,
+            passiveIcon,
+            passiveState);
+    }
+
+    private static bool DrawInlineIconCompactResolved(
+        ImDrawListPtr draw,
+        string creatureId,
+        Num.Vector2 areaPos,
+        Num.Vector2 areaSize,
+        int maxRuns,
+        IconRaster icon,
+        IconState state)
+    {
 
         if (state != IconState.Ready ||
             icon == null ||
@@ -1018,6 +1054,53 @@ internal static class WorldCreatureCatalogPicker
             if (ImGui.CalcTextSize(candidate).X <= maxWidth) return candidate;
         }
         return ellipsis;
+    }
+
+    internal static void RequestIconPreparation(string creatureId)
+    {
+        if (string.IsNullOrWhiteSpace(creatureId))
+            return;
+
+        catalogRequested =
+            true;
+        TryGetIconForRender(
+            creatureId,
+            out _,
+            out _);
+    }
+
+    private static void TryPeekIconForRender(
+        string creatureId,
+        out IconRaster raster,
+        out IconState state)
+    {
+        string id =
+            (creatureId ?? string.Empty).Trim();
+        lock (iconSync)
+        {
+            if (iconAliases.TryGetValue(
+                    id,
+                    out string canonical))
+                id =
+                    canonical;
+
+            if (iconSlots.TryGetValue(
+                    id,
+                    out IconSlot slot))
+            {
+                raster =
+                    slot.Raster ??
+                    new IconRaster();
+                state =
+                    slot.State;
+                return;
+            }
+        }
+
+        raster =
+            new IconRaster();
+        state =
+            IconState.Pending;
     }
 
     private static void TryGetIconForRender(string creatureId, out IconRaster raster, out IconState state)
