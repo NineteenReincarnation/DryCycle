@@ -114,8 +114,18 @@ internal static class HeadlessObjectCompatibilityHost
         {
             if (temporary && page != null)
             {
-                QuarantineVisualTree(page, quarantine);
+                // Presentation ownership must be restored before any best-effort cleanup. A custom
+                // third-party visual must never be able to strand DevUI on the temporary page by
+                // throwing during quarantine or sprite disposal.
                 session.Owner.activePage = previous;
+
+                try { QuarantineVisualTree(page, quarantine); }
+                catch (Exception error)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "DevTool headless object creation quarantine failed: " + error.Message);
+                }
+
                 try { page.ClearSprites(); }
                 catch (Exception error)
                 {
