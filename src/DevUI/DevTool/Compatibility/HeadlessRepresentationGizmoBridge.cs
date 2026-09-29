@@ -123,6 +123,12 @@ internal static class HeadlessRepresentationGizmoBridge
             lines,
             insidePanel: false);
 
+        CaptureVectorCircleGeometry(
+            representation,
+            camera,
+            lines,
+            insidePanel: false);
+
         CaptureLineRendererGeometry(
             representation,
             camera,
@@ -293,6 +299,64 @@ internal static class HeadlessRepresentationGizmoBridge
                 nextInsidePanel);
     }
 
+    private static void CaptureVectorCircleGeometry(
+        DevUINode node,
+        Vector2 camera,
+        List<EditorObjectLineSegmentSnapshot> lines,
+        bool insidePanel)
+    {
+        if (node == null || lines == null)
+            return;
+
+        bool nextInsidePanel = insidePanel || node is Panel;
+        if (!nextInsidePanel && node.fSprites != null)
+        {
+            for (int i = 0; i < node.fSprites.Count; i++)
+            {
+                FSprite sprite = node.fSprites[i];
+                if (!IsVectorCircleSprite(sprite))
+                    continue;
+
+                // Rain World's DevInterface VectorCircle contract uses Futile_White at radius/8.
+                // Treat non-uniform scale as an ellipse; this remains structural and also covers
+                // third-party representations that reuse the same shader without inheriting any
+                // vanilla representation class.
+                float radiusX = Mathf.Abs(sprite.scaleX) * 8f;
+                float radiusY = Mathf.Abs(sprite.scaleY) * 8f;
+                if (radiusX < 0.5f || radiusY < 0.5f)
+                    continue;
+
+                Vector2 center = new Vector2(sprite.x, sprite.y) + camera;
+                float radians = sprite.rotation * Mathf.Deg2Rad;
+                Vector2 xAxis = new(Mathf.Cos(radians), -Mathf.Sin(radians));
+                Vector2 yAxis = new(Mathf.Sin(radians), Mathf.Cos(radians));
+
+                const int segments = 32;
+                Vector2 previous = center + xAxis * radiusX;
+                for (int segment = 1; segment <= segments; segment++)
+                {
+                    float angle = Mathf.PI * 2f * segment / segments;
+                    Vector2 current =
+                        center +
+                        xAxis * (Mathf.Cos(angle) * radiusX) +
+                        yAxis * (Mathf.Sin(angle) * radiusY);
+                    AddLineUnique(lines, previous, current);
+                    previous = current;
+                }
+            }
+        }
+
+        if (node.subNodes == null)
+            return;
+
+        for (int i = 0; i < node.subNodes.Count; i++)
+            CaptureVectorCircleGeometry(
+                node.subNodes[i],
+                camera,
+                lines,
+                nextInsidePanel);
+    }
+
     private static void CaptureLineRendererGeometry(
         DevUINode node,
         Vector2 camera,
@@ -441,6 +505,14 @@ internal static class HeadlessRepresentationGizmoBridge
 
         string name = sprite.element.name ?? string.Empty;
         return string.Equals(name, "pixel", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsVectorCircleSprite(FSprite sprite)
+    {
+        string shaderName = sprite?.shader?.name ?? string.Empty;
+        return shaderName.IndexOf(
+            "VectorCircle",
+            StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool NearAny(
