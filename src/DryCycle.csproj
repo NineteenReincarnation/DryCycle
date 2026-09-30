@@ -136,7 +136,10 @@
          assemblies are compile-time inputs, then ILRepack merges NAudio.Wasapi + NAudio.Core into
          DryCycle.dll so deployment remains a single gameplay DLL with no hidden runtime sidecar. -->
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46">
+    <!-- 2.0.46 can fail task activation under newer MSBuild hosts with
+         MissingMethodException for ILRepack..ctor. 2.0.48 is the current rebuilt task package
+         and keeps the same net472/MSBuild task contract while updating ILRepack itself. -->
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.48">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
