@@ -313,6 +313,29 @@ public static class RelationshipEditorPresentationHub
         internal int LastPublishedCount;
     }
 
+    private sealed class PairDependencyScope
+    {
+        internal HashSet<string> PrimarySide =
+            new(StringComparer.Ordinal);
+        internal HashSet<string> OtherSide =
+            new(StringComparer.Ordinal);
+
+        internal bool AffectsPrimary(string creatureId) =>
+            !string.IsNullOrEmpty(creatureId) &&
+            (PrimarySide.Contains(creatureId) ||
+             OtherSide.Contains(creatureId));
+
+        internal bool AffectsDirected(
+            string from,
+            string to) =>
+            !string.IsNullOrEmpty(from) &&
+            !string.IsNullOrEmpty(to) &&
+            ((PrimarySide.Contains(from) &&
+              OtherSide.Contains(to)) ||
+             (OtherSide.Contains(from) &&
+              PrimarySide.Contains(to)));
+    }
+
     // A relationship matrix for ~100 creatures is still small in memory, so keeping more recently
     // visited primaries is substantially cheaper than re-running third-party effective-relationship
     // hooks when the developer switches back and forth between creatures.
@@ -446,10 +469,38 @@ public static class RelationshipEditorPresentationHub
             {
                 RelationshipPresentationChangeHint loadingHint =
                     RelationshipPresentationChangeHintHub.Consume(session);
-                ReconcileActiveBuildRevision(
-                    activePrimaryRowsBuild,
-                    revision,
-                    loadingHint);
+
+                if (loadingHint.HasPair)
+                {
+                    PairDependencyScope dependencyScope =
+                        BuildPairDependencyScope(
+                            loadingHint.Primary,
+                            loadingHint.Other);
+                    InvalidateDirectedDependencyScope(
+                        dependencyScope);
+                    RebasePrimaryRowsCachesForScope(
+                        dependencyScope,
+                        revision);
+                    ReconcileActiveBuildRevision(
+                        activePrimaryRowsBuild,
+                        revision,
+                        dependencyScope);
+                }
+                else
+                {
+                    // An unknown/full writer can change any effective inherited relationship.
+                    // Partial rows captured under the old revision are not safe to retain.
+                    CreatureTemplate restartPrimary =
+                        activePrimaryRowsBuild.Primary;
+                    primaryRowsCache.Clear();
+                    primaryRowsCacheOrder.Clear();
+                    directedRelationshipCache.Clear();
+                    activePrimaryRowsBuild =
+                        null;
+                    StartPrimaryRowsBuild(
+                        restartPrimary,
+                        revision);
+                }
             }
 
             PublishProgressiveRows(
@@ -533,18 +584,16 @@ public static class RelationshipEditorPresentationHub
         // no pair hint (or explicitly mark Full) and therefore fall through to the safe full build.
         if (!current.LoadingRows &&
             primaryStable &&
-            hint.HasPair &&
-            string.Equals(
-                hint.Primary,
-                state.PrimaryCreature,
-                StringComparison.Ordinal))
+            hint.HasPair)
         {
-            InvalidateDirectedPair(
-                hint.Primary,
-                hint.Other);
-            RebasePrimaryRowsCachesForPair(
-                hint.Primary,
-                hint.Other,
+            PairDependencyScope dependencyScope =
+                BuildPairDependencyScope(
+                    hint.Primary,
+                    hint.Other);
+            InvalidateDirectedDependencyScope(
+                dependencyScope);
+            RebasePrimaryRowsCachesForScope(
+                dependencyScope,
                 revision);
 
             if (TryGetCachedPrimaryRows(
@@ -569,20 +618,10 @@ public static class RelationshipEditorPresentationHub
                 return;
             }
 
-            if (TryPublishPairOnly(
-                    state,
-                    hint.Other))
-            {
-                Observe(
-                    session,
-                    page,
-                    revision,
-                    creatureTypeCount,
-                    state);
-                LastOutcome =
-                    DevToolPresentationOutcome.PartialRebuild;
-                return;
-            }
+            // A precise inherited override can affect more than the literal endpoint row when either
+            // creature has descendants. If the current full matrix is no longer cached, fall through
+            // to the normal progressive rebuild instead of patching one row and publishing stale
+            // inherited values.
         }
 
         if (activationTracePending)
@@ -1179,7 +1218,7 @@ public static class RelationshipEditorPresentationHub
     private static void ReconcileActiveBuildRevision(
         PrimaryRowsBuildJob job,
         long revision,
-        RelationshipPresentationChangeHint hint)
+        PairDependencyScope dependencyScope)
     {
         if (job == null)
             return;
@@ -1187,46 +1226,51 @@ public static class RelationshipEditorPresentationHub
         job.Revision =
             revision;
 
-        if (!hint.HasPair ||
-            !string.Equals(
-                hint.Primary,
-                job.PrimaryId,
-                StringComparison.Ordinal))
+        RelationshipPage.changedRelationships.TryGetValue(
+            job.Primary?.type,
+            out job.PrimaryChanged);
+
+        if (dependencyScope == null ||
+            !dependencyScope.AffectsPrimary(
+                job.PrimaryId))
             return;
 
-        InvalidateDirectedPair(
-            hint.Primary,
-            hint.Other);
-
-        CreatureTemplate other =
-            ResolveTemplate(
-                hint.Other);
-        if (other?.type == null)
-            return;
-
+        bool repaired =
+            false;
         for (int i = 0; i < job.Count; i++)
         {
             EditorRelationshipRowSnapshot row =
                 job.Buffer[i];
-            if (!string.Equals(
-                    row?.CreatureType,
-                    hint.Other,
-                    StringComparison.Ordinal))
+            if (row == null ||
+                !dependencyScope.AffectsDirected(
+                    job.PrimaryId,
+                    row.CreatureType))
+                continue;
+
+            CreatureTemplate other =
+                ResolveTemplate(
+                    row.CreatureType);
+            if (other?.type == null)
                 continue;
 
             job.Buffer[i] =
                 BuildRowSnapshot(
                     job.Primary,
                     other);
-            // Force the next publication to include the repaired row even if the normal batch
-            // threshold has not been reached yet.
+            repaired =
+                true;
+        }
+
+        if (repaired)
+        {
+            // Force the next publication to include every repaired inherited row even if the normal
+            // batch threshold has not been reached yet.
             job.LastPublishedCount =
                 Math.Min(
                     job.LastPublishedCount,
                     Math.Max(
                         0,
                         job.Count - PrimaryRowsPublishBatch));
-            return;
         }
     }
 
@@ -1240,120 +1284,174 @@ public static class RelationshipEditorPresentationHub
         }
     }
 
-    private static void InvalidateDirectedPair(
+    private static PairDependencyScope BuildPairDependencyScope(
         string primaryId,
         string otherId)
     {
-        if (string.IsNullOrEmpty(primaryId) ||
-            string.IsNullOrEmpty(otherId))
-            return;
+        PairDependencyScope scope =
+            new();
 
-        directedRelationshipCache.Remove(
-            new DirectedRelationshipKey(
-                primaryId,
-                otherId));
-        directedRelationshipCache.Remove(
-            new DirectedRelationshipKey(
-                otherId,
-                primaryId));
+        CollectSameOrDescendantTypes(
+            primaryId,
+            scope.PrimarySide);
+        CollectSameOrDescendantTypes(
+            otherId,
+            scope.OtherSide);
+
+        // Missing/unresolved third-party template IDs still need their literal cache keys invalidated.
+        if (!string.IsNullOrEmpty(primaryId))
+            scope.PrimarySide.Add(primaryId);
+        if (!string.IsNullOrEmpty(otherId))
+            scope.OtherSide.Add(otherId);
+
+        return scope;
     }
 
-    private static void RebasePrimaryRowsCachesForPair(
-        string primaryId,
-        string otherId,
-        long revision)
+    private static void CollectSameOrDescendantTypes(
+        string rootId,
+        HashSet<string> destination)
     {
-        if (string.IsNullOrEmpty(primaryId) ||
-            string.IsNullOrEmpty(otherId) ||
-            primaryRowsCache.Count == 0)
+        if (string.IsNullOrEmpty(rootId) ||
+            destination == null)
             return;
 
-        CreatureTemplate primary =
-            ResolveTemplate(
-                primaryId);
-        CreatureTemplate other =
-            ResolveTemplate(
-                otherId);
-        if (primary?.type == null ||
-            other?.type == null)
+        const int MaxAncestorDepth = 128;
+
+        for (int i = 0; i < templateCatalog.Length; i++)
+        {
+            CreatureTemplate template =
+                templateCatalog[i];
+            CreatureTemplate cursor =
+                template;
+
+            int depth =
+                0;
+            while (cursor?.type != null &&
+                   depth++ < MaxAncestorDepth)
+            {
+                if (string.Equals(
+                        cursor.type.value,
+                        rootId,
+                        StringComparison.Ordinal))
+                {
+                    string id =
+                        template?.type?.value;
+                    if (!string.IsNullOrEmpty(id))
+                        destination.Add(id);
+                    break;
+                }
+
+                cursor =
+                    cursor.ancestor;
+            }
+        }
+    }
+
+    private static void InvalidateDirectedDependencyScope(
+        PairDependencyScope scope)
+    {
+        if (scope == null ||
+            directedRelationshipCache.Count == 0)
+            return;
+
+        List<DirectedRelationshipKey> stale =
+            null;
+
+        foreach (KeyValuePair<DirectedRelationshipKey, EditorRelationshipValueSnapshot> pair
+                 in directedRelationshipCache)
+        {
+            if (!scope.AffectsDirected(
+                    pair.Key.From,
+                    pair.Key.To))
+                continue;
+
+            stale ??=
+                new List<DirectedRelationshipKey>();
+            stale.Add(
+                pair.Key);
+        }
+
+        if (stale == null)
+            return;
+
+        for (int i = 0; i < stale.Count; i++)
+            directedRelationshipCache.Remove(
+                stale[i]);
+    }
+
+    private static void RebasePrimaryRowsCachesForScope(
+        PairDependencyScope scope,
+        long revision)
+    {
+        if (scope == null ||
+            primaryRowsCache.Count == 0)
             return;
 
         foreach (KeyValuePair<string, PrimaryRowsCacheEntry> pair in primaryRowsCache)
         {
+            string cachedPrimaryId =
+                pair.Key;
             PrimaryRowsCacheEntry entry =
                 pair.Value;
             if (entry == null)
                 continue;
 
-            bool affected =
-                string.Equals(
-                    pair.Key,
-                    primaryId,
-                    StringComparison.Ordinal) ||
-                string.Equals(
-                    pair.Key,
-                    otherId,
-                    StringComparison.Ordinal);
-
-            if (!affected)
+            if (!scope.AffectsPrimary(
+                    cachedPrimaryId))
             {
-                // A precise pair edit cannot affect any third primary's matrix.
                 entry.Revision =
                     revision;
                 continue;
             }
 
-            CreatureTemplate cachePrimary =
-                string.Equals(
-                    pair.Key,
-                    primaryId,
-                    StringComparison.Ordinal)
-                    ? primary
-                    : other;
-            CreatureTemplate cacheOther =
-                ReferenceEquals(
-                    cachePrimary,
-                    primary)
-                    ? other
-                    : primary;
-
-            if (TryPatchCachedRow(
-                    entry,
-                    cachePrimary,
-                    cacheOther))
+            CreatureTemplate cachedPrimary =
+                ResolveTemplate(
+                    cachedPrimaryId);
+            if (cachedPrimary?.type == null)
             {
-                entry.Revision =
-                    revision;
+                // Leave the old revision in place. The normal cache lookup will reject this entry
+                // and rebuild it rather than pretending an unresolved third-party template was
+                // safely patched.
+                continue;
             }
+
+            EditorRelationshipRowSnapshot[] source =
+                entry.Rows ??
+                Array.Empty<EditorRelationshipRowSnapshot>();
+            EditorRelationshipRowSnapshot[] next =
+                null;
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                EditorRelationshipRowSnapshot row =
+                    source[i];
+                if (row == null ||
+                    !scope.AffectsDirected(
+                        cachedPrimaryId,
+                        row.CreatureType))
+                    continue;
+
+                CreatureTemplate other =
+                    ResolveTemplate(
+                        row.CreatureType);
+                if (other?.type == null)
+                    continue;
+
+                next ??=
+                    (EditorRelationshipRowSnapshot[])source.Clone();
+                next[i] =
+                    BuildRowSnapshot(
+                        cachedPrimary,
+                        other);
+            }
+
+            if (next != null)
+                entry.Rows =
+                    next;
+
+            entry.Revision =
+                revision;
         }
-    }
-
-    private static bool TryPatchCachedRow(
-        PrimaryRowsCacheEntry entry,
-        CreatureTemplate primary,
-        CreatureTemplate other)
-    {
-        EditorRelationshipRowSnapshot[] source =
-            entry?.Rows ??
-            Array.Empty<EditorRelationshipRowSnapshot>();
-
-        if (entry.RowIndexByCreature == null ||
-            !entry.RowIndexByCreature.TryGetValue(
-                other.type.value,
-                out int index) ||
-            index < 0 ||
-            index >= source.Length)
-            return false;
-
-        EditorRelationshipRowSnapshot[] next =
-            (EditorRelationshipRowSnapshot[])source.Clone();
-        next[index] =
-            BuildRowSnapshot(
-                primary,
-                other);
-        entry.Rows =
-            next;
-        return true;
     }
 
     private static void PublishRowsSnapshot(
