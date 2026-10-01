@@ -67,6 +67,7 @@ internal static class RelationshipEditorStateHub
 internal static class RelationshipEffectiveResolver
 {
     private const int MaxInheritedPairVisits = 512;
+    private static bool inheritedVisitCapWarningLogged;
 
     private readonly struct TemplatePair : IEquatable<TemplatePair>
     {
@@ -94,11 +95,12 @@ internal static class RelationshipEffectiveResolver
 
     /// <summary>
     /// Resolve the static authoring relationship without executing CreatureRelationship hooks.
-    /// The vanilla DevTools route recursively walks inherited overrides and then calls a mod-
-    /// extensible method. A malformed ancestor graph or one expensive hook can therefore stall the
-    /// game thread. The rebuilt editor represents the static template matrix, so it resolves the
-    /// same authored override graph iteratively with cycle protection and reads the template array
-    /// directly for the base value.
+    ///
+    /// Vanilla DevTools first checks changedRelationships and then lets CreatureRelationship walk
+    /// inherited overrides recursively. The rebuilt editor keeps the same source-first inheritance
+    /// order, but the common no-override path is a direct array read and the inherited path is
+    /// iterative, de-duplicated and bounded so malformed third-party ancestor cycles cannot stall
+    /// the game thread.
     /// </summary>
     internal static CreatureTemplate.Relationship Resolve(
         CreatureTemplate from,
@@ -108,27 +110,49 @@ internal static class RelationshipEffectiveResolver
             to?.type == null)
             return Ignore();
 
-        if (TryResolveChanged(
+        Dictionary<CreatureTemplate.Type, Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship>>
+            changed =
+                RelationshipPage.changedRelationships;
+
+        // This is by far the common case in a fresh editor session. Do not allocate Stack/HashSet
+        // state for every directed cell when there are no authored DevTools overrides at all.
+        if (changed == null ||
+            changed.Count == 0)
+            return ReadBase(
+                from,
+                to);
+
+        if (changed.TryGetValue(
+                from.type,
+                out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> directMap) &&
+            directMap != null &&
+            directMap.TryGetValue(
+                to.type,
+                out CreatureTemplate.Relationship direct))
+            return direct;
+
+        if (from.ancestor == null &&
+            to.ancestor == null)
+            return ReadBase(
+                from,
+                to);
+
+        if (TryResolveInheritedChanged(
                 from,
                 to,
-                out CreatureTemplate.Relationship changed))
-            return changed;
+                changed,
+                out CreatureTemplate.Relationship inherited))
+            return inherited;
 
-        int index =
-            to.type.Index;
-        CreatureTemplate.Relationship[] relationships =
-            from.relationships;
-        if (relationships != null &&
-            index >= 0 &&
-            index < relationships.Length)
-            return relationships[index];
-
-        return Ignore();
+        return ReadBase(
+            from,
+            to);
     }
 
-    private static bool TryResolveChanged(
+    private static bool TryResolveInheritedChanged(
         CreatureTemplate from,
         CreatureTemplate to,
+        Dictionary<CreatureTemplate.Type, Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship>> changed,
         out CreatureTemplate.Relationship relationship)
     {
         relationship =
@@ -138,10 +162,24 @@ internal static class RelationshipEffectiveResolver
             new();
         HashSet<TemplatePair> visited =
             new();
-        pending.Push(
-            new TemplatePair(
-                from,
-                to));
+
+        // Vanilla recursion checks the source ancestor branch before the target ancestor branch.
+        // Stack is LIFO, so push target first and source second.
+        if (to.ancestor != null)
+        {
+            pending.Push(
+                new TemplatePair(
+                    from,
+                    to.ancestor));
+        }
+
+        if (from.ancestor != null)
+        {
+            pending.Push(
+                new TemplatePair(
+                    from.ancestor,
+                    to));
+        }
 
         int visits =
             0;
@@ -161,7 +199,7 @@ internal static class RelationshipEffectiveResolver
 
             visits++;
 
-            if (RelationshipPage.changedRelationships.TryGetValue(
+            if (changed.TryGetValue(
                     source.type,
                     out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> map) &&
                 map != null &&
@@ -170,8 +208,6 @@ internal static class RelationshipEffectiveResolver
                     out relationship))
                 return true;
 
-            // LIFO: target first, then source, so source inheritance is visited next just like the
-            // vanilla recursive implementation while duplicate/cyclic pairs are bounded.
             if (target.ancestor != null)
             {
                 pending.Push(
@@ -189,7 +225,39 @@ internal static class RelationshipEffectiveResolver
             }
         }
 
+        if (pending.Count > 0 &&
+            !inheritedVisitCapWarningLogged)
+        {
+            inheritedVisitCapWarningLogged =
+                true;
+            Plugin.Logger?.LogWarning(
+                "DevTool relationship inheritance exceeded the bounded " +
+                MaxInheritedPairVisits +
+                "-pair search while resolving '" +
+                (from.type?.value ?? "<unknown>") +
+                "' -> '" +
+                (to.type?.value ?? "<unknown>") +
+                "'. The editor fell back to the static template relationship instead of blocking.");
+        }
+
         return false;
+    }
+
+    private static CreatureTemplate.Relationship ReadBase(
+        CreatureTemplate from,
+        CreatureTemplate to)
+    {
+        int index =
+            to?.type?.Index ??
+            -1;
+        CreatureTemplate.Relationship[] relationships =
+            from?.relationships;
+        if (relationships != null &&
+            index >= 0 &&
+            index < relationships.Length)
+            return relationships[index];
+
+        return Ignore();
     }
 
     private static CreatureTemplate.Relationship Ignore() =>
@@ -265,6 +333,8 @@ public static class RelationshipEditorPresentationHub
     private static Dictionary<string, CreatureTemplate> templateByType =
         new(StringComparer.Ordinal);
     private static int templateCatalogTypeCount = -1;
+    private static CreatureTemplate[] observedStaticTemplateArray;
+    private static int observedStaticTemplateLength = -1;
     private static readonly Dictionary<string, PrimaryRowsCacheEntry> primaryRowsCache =
         new(StringComparer.Ordinal);
     private static readonly Queue<string> primaryRowsCacheOrder = new();
@@ -745,46 +815,39 @@ public static class RelationshipEditorPresentationHub
 
     private static void EnsureTemplateCatalog(int creatureTypeCount)
     {
-        if (templateCatalogTypeCount ==
-            creatureTypeCount)
+        CreatureTemplate[] liveTemplates =
+            StaticWorld.creatureTemplates ??
+            Array.Empty<CreatureTemplate>();
+
+        if (templateCatalogTypeCount == creatureTypeCount &&
+            ReferenceEquals(
+                observedStaticTemplateArray,
+                liveTemplates) &&
+            observedStaticTemplateLength == liveTemplates.Length)
             return;
 
         List<CreatureTemplate> result =
-            new();
-        HashSet<string> seen =
-            new(StringComparer.Ordinal);
+            new(
+                liveTemplates.Length);
         HashSet<string> resolvedTypes =
-            new(StringComparer.Ordinal);
+            new(
+                StringComparer.Ordinal);
 
-        for (int i = 0; i < ExtEnum<CreatureTemplate.Type>.values.Count; i++)
+        // StaticWorld.creatureTemplates is the authoritative, already-constructed registry used by
+        // CreatureRelationship itself. Walking it directly avoids allocating one ExtEnum value and
+        // calling StaticWorld.GetCreatureTemplate for every registered name on the first
+        // Relationships frame. Null/unresolved registration slots are simply ignored.
+        for (int i = 0; i < liveTemplates.Length; i++)
         {
-            string entry =
-                ExtEnum<CreatureTemplate.Type>.values.GetEntry(i);
-            if (string.IsNullOrEmpty(entry) ||
-                !seen.Add(entry))
+            CreatureTemplate template =
+                liveTemplates[i];
+            string resolvedId =
+                template?.type?.value;
+            if (string.IsNullOrEmpty(resolvedId) ||
+                !resolvedTypes.Add(resolvedId))
                 continue;
 
-            try
-            {
-                CreatureTemplate.Type type =
-                    new(
-                        entry,
-                        false);
-                CreatureTemplate template =
-                    StaticWorld.GetCreatureTemplate(type);
-                string resolvedId =
-                    template?.type?.value;
-                if (string.IsNullOrEmpty(resolvedId) ||
-                    !resolvedTypes.Add(resolvedId))
-                    continue;
-
-                result.Add(template);
-            }
-            catch
-            {
-                // Registration can precede template construction. The catalog is rebuilt when the
-                // ExtEnum count changes; unresolved entries are skipped rather than stalling the UI.
-            }
+            result.Add(template);
         }
 
         result.Sort(
@@ -821,6 +884,10 @@ public static class RelationshipEditorPresentationHub
             nextByType;
         templateCatalogTypeCount =
             creatureTypeCount;
+        observedStaticTemplateArray =
+            liveTemplates;
+        observedStaticTemplateLength =
+            liveTemplates.Length;
 
         // Row snapshots depend on the exact template catalog/order.
         primaryRowsCache.Clear();
@@ -899,7 +966,7 @@ public static class RelationshipEditorPresentationHub
 
     private static void PublishProgressiveRows(
         EditorSession session,
-        RelationshipPage page,
+        Page page,
         RelationshipEditorState state,
         long revision,
         int creatureTypeCount)
