@@ -549,10 +549,19 @@ public static class RelationshipEditorPresentationHub
             return;
         }
 
-        bool modelChanged = sameIdentity && observedRevision != revision;
-        RelationshipPresentationChangeHint hint = modelChanged
-            ? RelationshipPresentationChangeHintHub.Consume(session)
-            : default;
+        bool revisionChanged =
+            ReferenceEquals(
+                observedSession,
+                session) &&
+            observedRevision != 0L &&
+            observedRevision != revision;
+        bool modelChanged =
+            sameIdentity &&
+            revisionChanged;
+        RelationshipPresentationChangeHint hint =
+            revisionChanged
+                ? RelationshipPresentationChangeHintHub.Consume(session)
+                : default;
 
         if (modelChanged &&
             !hint.HasPair &&
@@ -584,24 +593,13 @@ public static class RelationshipEditorPresentationHub
                 frame + OpaqueCompatibilityAuditFrames;
         }
 
-        if (modelChanged &&
-            !hint.HasPair)
-        {
-            // Unknown/full writers cannot safely reuse row values from an older model revision.
-            primaryRowsCache.Clear();
-            primaryRowsCacheOrder.Clear();
-            directedRelationshipCache.Clear();
-            activePrimaryRowsBuild = null;
-        }
-
-        // A type/intensity/reset edit changes exactly one directed relationship, but the UI row owns
-        // both directions for one primary/other pair. Re-capture that one row and retain every other
-        // row plus the static creature/relationship catalogs. Unknown history/legacy writers supply
-        // no pair hint (or explicitly mark Full) and therefore fall through to the safe full build.
-        if (!current.LoadingRows &&
-            primaryStable &&
+        if (revisionChanged &&
             hint.HasPair)
         {
+            // Relationship overrides inherit through both source and target ancestor chains. Apply
+            // the precise dependency closure even when the page identity or selected primary changed
+            // on the same frame; otherwise the unversioned directed-value cache could survive with a
+            // stale inherited result.
             PairDependencyScope dependencyScope =
                 BuildPairDependencyScope(
                     hint.Primary,
@@ -611,7 +609,23 @@ public static class RelationshipEditorPresentationHub
             RebasePrimaryRowsCachesForScope(
                 dependencyScope,
                 revision);
+        }
+        else if (revisionChanged)
+        {
+            // Unknown/full writers cannot safely reuse row values from an older model revision.
+            primaryRowsCache.Clear();
+            primaryRowsCacheOrder.Clear();
+            directedRelationshipCache.Clear();
+            activePrimaryRowsBuild = null;
+        }
 
+        // A precise edit has already rebased every cached primary that can inherit from either
+        // endpoint. If the currently selected primary remained stable, publish that patched matrix
+        // immediately; otherwise the normal lookup below can still reuse its rebased cache.
+        if (!current.LoadingRows &&
+            primaryStable &&
+            hint.HasPair)
+        {
             if (TryGetCachedPrimaryRows(
                     state.PrimaryCreature,
                     revision,
