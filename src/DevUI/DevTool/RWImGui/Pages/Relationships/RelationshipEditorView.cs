@@ -114,6 +114,7 @@ internal static class RelationshipEditorView
     private static EditorRelationshipRowSnapshot[] selectedRowSource;
     private static string selectedRowKey = string.Empty;
     private static EditorRelationshipRowSnapshot selectedRowCache;
+    private static int activationTraceStage;
 
     internal static void ResetRetainedState()
     {
@@ -142,6 +143,7 @@ internal static class RelationshipEditorView
         selectedRowSource = null;
         selectedRowKey = string.Empty;
         selectedRowCache = null;
+        activationTraceStage = 0;
 
         primarySearch = string.Empty;
         matrixSearch = string.Empty;
@@ -365,6 +367,13 @@ internal static class RelationshipEditorView
             size.Y < 120f)
             return;
 
+        TraceActivationStage(
+            1,
+            "matrix begin rows=" +
+            (snapshot.Rows?.Length ?? 0) +
+            " loading=" +
+            snapshot.LoadingRows);
+
         ImGui.SetNextWindowPos(
             position,
             ImGuiCond.Always);
@@ -396,8 +405,15 @@ internal static class RelationshipEditorView
             snapshot.Rows ?? Array.Empty<EditorRelationshipRowSnapshot>();
         EnsureRows(rows);
         EnsureVisibleRows(MatrixSearchQuery(), filterMode);
+        TraceActivationStage(
+            2,
+            "projection ready visible=" +
+            projectedVisibleRows.Length);
 
         DrawWorkspaceHeader(snapshot);
+        TraceActivationStage(
+            3,
+            "header ready");
 
         if (snapshot.LoadingRows)
         {
@@ -426,7 +442,15 @@ internal static class RelationshipEditorView
         if (viewMode == RelationshipViewMode.Atlas)
             DrawAtlas(snapshot);
         else
+        {
+            TraceActivationStage(
+                4,
+                "heatmap begin");
             DrawHeatmap(snapshot);
+            TraceActivationStage(
+                8,
+                "heatmap ready");
+        }
 
         ImGui.End();
     }
@@ -721,6 +745,10 @@ internal static class RelationshipEditorView
 
     private static void DrawAtlas(EditorRelationshipPresentationSnapshot snapshot)
     {
+        TraceActivationStage(
+            4,
+            "atlas begin");
+
         Num.Vector2 available =
             ImGui.GetContentRegionAvail();
         Num.Vector2 canvasSize =
@@ -750,6 +778,10 @@ internal static class RelationshipEditorView
         BuildAtlasLayout(
             origin,
             canvasSize);
+        TraceActivationStage(
+            5,
+            "layout ready nodes=" +
+            atlasNodes.Count);
         WarmAtlasIcons(
             2);
 
@@ -820,6 +852,10 @@ internal static class RelationshipEditorView
                 deEmphasized);
         }
 
+        TraceActivationStage(
+            6,
+            "connections ready");
+
         DrawPrimaryAtlasNode(
             draw,
             snapshot.PrimaryCreature,
@@ -836,7 +872,13 @@ internal static class RelationshipEditorView
                 atlasNodes[i]);
         }
 
+        TraceActivationStage(
+            7,
+            "nodes ready");
         ImGui.SetCursorPos(afterCanvas);
+        TraceActivationStage(
+            8,
+            "atlas ready");
     }
 
     private static void BuildAtlasLayout(
@@ -1279,6 +1321,10 @@ internal static class RelationshipEditorView
 
         bool selected =
             node.Pair.Row.Selected;
+        int circleSegments =
+            selected || hovered
+                ? 32
+                : 18;
 
         Num.Vector4 bg =
             selected
@@ -1291,7 +1337,7 @@ internal static class RelationshipEditorView
             node.Center,
             half,
             ImGui.GetColorU32(bg),
-            32);
+            circleSegments);
 
         draw.AddCircle(
             node.Center,
@@ -1302,7 +1348,7 @@ internal static class RelationshipEditorView
                     reverseColor.Y,
                     reverseColor.Z,
                     selected || hovered ? 1f : 0.78f)),
-            32,
+            circleSegments,
             1.2f +
             Clamp01(node.Pair.Reverse.Intensity) *
             2.2f);
@@ -1363,7 +1409,7 @@ internal static class RelationshipEditorView
                 half + 3f,
                 ImGui.GetColorU32(
                     new Num.Vector4(0.50f, 0.84f, 1f, 1f)),
-                32,
+                circleSegments,
                 2f);
         }
 
@@ -3119,6 +3165,19 @@ internal static class RelationshipEditorView
                 hash = hash * 31 + value[i];
             return hash;
         }
+    }
+
+    private static void TraceActivationStage(
+        int stage,
+        string message)
+    {
+        if (stage <= activationTraceStage)
+            return;
+
+        activationTraceStage =
+            stage;
+        DevToolFrontend.LogRelationshipTrace(
+            message);
     }
 
     private static float Clamp01(float value) =>

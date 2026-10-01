@@ -708,6 +708,9 @@ internal static class DevToolFrontend
 
     internal static void SetLogger(ManualLogSource value) => log = value;
 
+    internal static void LogRelationshipTrace(string message) =>
+        log?.LogInfo("[DevTool.Relationships][Frontend] " + (message ?? string.Empty));
+
     internal static void RequestContextRebuildForLanguageChange()
     {
         // Language buttons are clicked on RWImGui's render thread. Only publish intent here; the
