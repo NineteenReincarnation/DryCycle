@@ -221,6 +221,7 @@ internal static class WorldCreatureCatalogPicker
     private static int catalogRevision;
     private static int atlasCacheBytes;
     private static bool gpuFallbackLogged;
+    private static bool invalidIconTintWarningLogged;
 
     private static string cacheFilePath = string.Empty;
     private static bool cacheDirty;
@@ -273,6 +274,7 @@ internal static class WorldCreatureCatalogPicker
         unreadableAtlases.Clear();
         atlasCacheBytes = 0;
         gpuFallbackLogged = false;
+        invalidIconTintWarningLogged = false;
         cacheDirty = false;
         cacheSaveInFlight = false;
         backgroundSaveError = null;
@@ -891,6 +893,23 @@ internal static class WorldCreatureCatalogPicker
                 (runs.Length + maxRuns - 1) / maxRuns);
         int used = 0;
 
+        float tintR =
+            SafeTintComponent(
+                icon.Tint.r,
+                1f);
+        float tintG =
+            SafeTintComponent(
+                icon.Tint.g,
+                1f);
+        float tintB =
+            SafeTintComponent(
+                icon.Tint.b,
+                1f);
+        float tintA =
+            SafeTintComponent(
+                icon.Tint.a,
+                1f);
+
         for (int i = 0; i < runs.Length && used < maxRuns; i += stride)
         {
             PixelRun run =
@@ -902,10 +921,10 @@ internal static class WorldCreatureCatalogPicker
 
             Num.Vector4 color =
                 new(
-                    icon.Tint.r * run.Color.r / 255f,
-                    icon.Tint.g * run.Color.g / 255f,
-                    icon.Tint.b * run.Color.b / 255f,
-                    icon.Tint.a * alpha);
+                    tintR * run.Color.r / 255f,
+                    tintG * run.Color.g / 255f,
+                    tintB * run.Color.b / 255f,
+                    tintA * alpha);
 
             float y =
                 icon.Height - 1 - run.Y;
@@ -1036,21 +1055,64 @@ internal static class WorldCreatureCatalogPicker
             (areaSize.X - icon.Width * scale) * 0.5f,
             (areaSize.Y - icon.Height * scale) * 0.5f);
 
+        float tintR =
+            SafeTintComponent(
+                icon.Tint.r,
+                1f);
+        float tintG =
+            SafeTintComponent(
+                icon.Tint.g,
+                1f);
+        float tintB =
+            SafeTintComponent(
+                icon.Tint.b,
+                1f);
+        float tintA =
+            SafeTintComponent(
+                icon.Tint.a,
+                1f);
+
         for (int i = 0; i < icon.Runs.Length; i++)
         {
             PixelRun run = icon.Runs[i];
             float alpha = run.Color.a / 255f;
             if (alpha <= 0.02f) continue;
             Num.Vector4 color = new(
-                icon.Tint.r * run.Color.r / 255f,
-                icon.Tint.g * run.Color.g / 255f,
-                icon.Tint.b * run.Color.b / 255f,
-                icon.Tint.a * alpha);
+                tintR * run.Color.r / 255f,
+                tintG * run.Color.g / 255f,
+                tintB * run.Color.b / 255f,
+                tintA * alpha);
             float y = icon.Height - 1 - run.Y;
             Num.Vector2 a = origin + new Num.Vector2(run.X * scale, y * scale);
             Num.Vector2 b = a + new Num.Vector2(run.Width * scale, scale);
             draw.AddRectFilled(a, b, ImGui.GetColorU32(color));
         }
+    }
+
+    private static float SafeTintComponent(
+        float value,
+        float fallback)
+    {
+        if (float.IsNaN(value) ||
+            float.IsInfinity(value))
+        {
+            if (!invalidIconTintWarningLogged)
+            {
+                invalidIconTintWarningLogged =
+                    true;
+                log?.LogWarning(
+                    "Creature icon cache contained a non-finite tint component; " +
+                    "RWImGui rendering will use a safe fallback component.");
+            }
+
+            return fallback;
+        }
+
+        return Math.Max(
+            0f,
+            Math.Min(
+                1f,
+                value));
     }
 
     private static void DrawCenteredId(ImDrawListPtr draw, string id, Num.Vector2 cardPos, float cardWidth, float y)
