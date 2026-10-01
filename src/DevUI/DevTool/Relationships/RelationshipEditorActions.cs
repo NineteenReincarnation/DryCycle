@@ -76,6 +76,7 @@ internal static class RelationshipEditorActions
         SingleRelationshipStateSnapshot before =
             SingleRelationshipStateSnapshot.Capture(from.type, to.type, primaryType, otherType);
         RelationshipPage.ResetChangedRelationship(from.type, to.type);
+        RelationshipEditorPresentationHub.ObserveKnownOverrideMutation();
         SingleRelationshipStateSnapshot after =
             SingleRelationshipStateSnapshot.Capture(from.type, to.type, primaryType, otherType);
         if (!SnapshotHistoryEntry.TryCreate("Reset relationship override", before, after, out SnapshotHistoryEntry entry))
@@ -104,6 +105,7 @@ internal static class RelationshipEditorActions
         SingleRelationshipStateSnapshot before =
             SingleRelationshipStateSnapshot.Capture(from.type, to.type, primaryType, otherType);
         RelationshipPage.SetChangedRelationship(from.type, to.type, relationship);
+        RelationshipEditorPresentationHub.ObserveKnownOverrideMutation();
         SingleRelationshipStateSnapshot after =
             SingleRelationshipStateSnapshot.Capture(from.type, to.type, primaryType, otherType);
         if (!SnapshotHistoryEntry.TryCreate(label, before, after, out SnapshotHistoryEntry entry))
@@ -282,6 +284,7 @@ internal static class RelationshipEditorActions
                 RelationshipPage.ResetChangedRelationship(from, to);
             }
 
+            RelationshipEditorPresentationHub.ObserveKnownOverrideMutation();
             RelationshipPresentationChangeHintHub.MarkPair(session, hintPrimary, hintOther);
             RefreshPage(session);
             return true;

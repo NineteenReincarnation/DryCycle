@@ -903,6 +903,26 @@ public static class RelationshipEditorPresentationHub
             directMap);
     }
 
+    internal static void ObserveKnownOverrideMutation()
+    {
+        try
+        {
+            observedOverrideFingerprint =
+                ComputeOverrideFingerprint();
+            overrideFingerprintInitialized =
+                true;
+            nextOverrideFingerprintAuditFrame =
+                UnityEngine.Time.frameCount +
+                OverrideFingerprintAuditFrames;
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool relationship override fingerprint baseline refresh failed: " +
+                error.Message);
+        }
+    }
+
     private static bool AuditOverrideFingerprintIfDue(
         EditorSession session,
         long revision)
@@ -916,8 +936,20 @@ public static class RelationshipEditorPresentationHub
             frame +
             OverrideFingerprintAuditFrames;
 
-        ulong fingerprint =
-            ComputeOverrideFingerprint();
+        ulong fingerprint;
+        try
+        {
+            fingerprint =
+                ComputeOverrideFingerprint();
+        }
+        catch (Exception error)
+        {
+            Plugin.Logger?.LogWarning(
+                "DevTool relationship sparse override audit was skipped because the override " +
+                "dictionary could not be read safely: " +
+                error.Message);
+            return false;
+        }
 
         if (!overrideFingerprintInitialized)
         {
