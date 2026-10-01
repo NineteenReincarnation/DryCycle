@@ -342,7 +342,7 @@ internal static class RelationshipEditorView
             creatureId,
             iconPos,
             new Num.Vector2(28f, 28f),
-            maxRuns: 84);
+            maxRuns: 24);
 
         draw.AddText(
             min + new Num.Vector2(40f, 9f),
@@ -1268,7 +1268,7 @@ internal static class RelationshipEditorView
             new Num.Vector2(
                 size - 28f,
                 size - 42f),
-            maxRuns: 128);
+            maxRuns: 48);
 
         string label =
             FitText(
@@ -1365,7 +1365,10 @@ internal static class RelationshipEditorView
             forwardColor,
             2.2f +
             Clamp01(node.Pair.Forward.Intensity) *
-            1.8f);
+            1.8f,
+            selected || hovered
+                ? 12
+                : 6);
 
         WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
@@ -1376,7 +1379,7 @@ internal static class RelationshipEditorView
             new Num.Vector2(
                 size * 0.68f,
                 size * 0.68f),
-            maxRuns: hovered || selected ? 56 : 28,
+            maxRuns: hovered || selected ? 32 : 12,
             requestPreparation: hovered || selected);
 
         if (node.Pair.Asymmetric)
@@ -1500,7 +1503,7 @@ internal static class RelationshipEditorView
 
         if (deEmphasized ||
             (!emphasized &&
-             strength <= 0.01f))
+             strength <= 0.08f))
             return;
 
         Num.Vector4 color =
@@ -1531,6 +1534,13 @@ internal static class RelationshipEditorView
             to,
             packed,
             thickness);
+
+        // Passive weak rails remain readable as a single stroke. Arrowheads are reserved for
+        // selected/hovered pairs and stronger relationships, removing thousands of native AddLine
+        // calls from a dense stable atlas without hiding meaningful direction cues.
+        if (!emphasized &&
+            strength < 0.55f)
+            return;
 
         Num.Vector2 delta =
             to - from;
@@ -1623,14 +1633,14 @@ internal static class RelationshipEditorView
             primary,
             min + new Num.Vector2(8f, 8f),
             new Num.Vector2(44f, 44f),
-            maxRuns: 112);
+            maxRuns: 40);
 
         WorldCreatureCatalogPicker.DrawInlineIconCompact(
             draw,
             other,
             new Num.Vector2(max.X - 52f, min.Y + 8f),
             new Num.Vector2(44f, 44f),
-            maxRuns: 112);
+            maxRuns: 40);
 
         Num.Vector2 lineStart =
             new(min.X + 62f, min.Y + 31f);
@@ -2701,12 +2711,18 @@ internal static class RelationshipEditorView
         float endAngle,
         float progress,
         Num.Vector4 color,
-        float thickness)
+        float thickness,
+        int segments)
     {
         progress =
             Clamp01(progress);
+        segments =
+            Math.Max(
+                3,
+                Math.Min(
+                    18,
+                    segments));
 
-        const int segments = 18;
         int activeSegments =
             Math.Max(
                 1,

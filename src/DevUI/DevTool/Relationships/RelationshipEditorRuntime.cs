@@ -67,7 +67,12 @@ internal static class RelationshipEditorStateHub
 internal static class RelationshipEffectiveResolver
 {
     private const int MaxInheritedPairVisits = 512;
+    private const int MaxSourceAncestorProbeDepth = 128;
     private static bool inheritedVisitCapWarningLogged;
+    // Resolve is main-thread only. Reuse these containers so a matrix with one unrelated override
+    // does not allocate a Stack + HashSet for every directed cell.
+    private static readonly Stack<TemplatePair> inheritedPending = new();
+    private static readonly HashSet<TemplatePair> inheritedVisited = new();
 
     private readonly struct TemplatePair : IEquatable<TemplatePair>
     {
@@ -137,6 +142,17 @@ internal static class RelationshipEffectiveResolver
                 from,
                 to);
 
+        // changedRelationships is keyed by the source creature. If neither this source nor any of
+        // its ancestors owns a non-empty override map, target-ancestor traversal cannot possibly
+        // produce a hit. This cheap bounded probe keeps the common sparse-override case O(depth)
+        // without allocating the full DFS state.
+        if (!HasChangedSourceAncestor(
+                from,
+                changed))
+            return ReadBase(
+                from,
+                to);
+
         if (TryResolveInheritedChanged(
                 from,
                 to,
@@ -149,6 +165,32 @@ internal static class RelationshipEffectiveResolver
             to);
     }
 
+    private static bool HasChangedSourceAncestor(
+        CreatureTemplate from,
+        Dictionary<CreatureTemplate.Type, Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship>> changed)
+    {
+        CreatureTemplate cursor =
+            from;
+        int depth =
+            0;
+
+        while (cursor?.type != null &&
+               depth++ < MaxSourceAncestorProbeDepth)
+        {
+            if (changed.TryGetValue(
+                    cursor.type,
+                    out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> map) &&
+                map != null &&
+                map.Count > 0)
+                return true;
+
+            cursor =
+                cursor.ancestor;
+        }
+
+        return false;
+    }
+
     private static bool TryResolveInheritedChanged(
         CreatureTemplate from,
         CreatureTemplate to,
@@ -159,9 +201,11 @@ internal static class RelationshipEffectiveResolver
             default;
 
         Stack<TemplatePair> pending =
-            new();
+            inheritedPending;
         HashSet<TemplatePair> visited =
-            new();
+            inheritedVisited;
+        pending.Clear();
+        visited.Clear();
 
         // Vanilla recursion checks the source ancestor branch before the target ancestor branch.
         // Stack is LIFO, so push target first and source second.
@@ -206,7 +250,11 @@ internal static class RelationshipEffectiveResolver
                 map.TryGetValue(
                     target.type,
                     out relationship))
+            {
+                pending.Clear();
+                visited.Clear();
                 return true;
+            }
 
             if (target.ancestor != null)
             {
@@ -225,7 +273,12 @@ internal static class RelationshipEffectiveResolver
             }
         }
 
-        if (pending.Count > 0 &&
+        bool capped =
+            pending.Count > 0;
+        pending.Clear();
+        visited.Clear();
+
+        if (capped &&
             !inheritedVisitCapWarningLogged)
         {
             inheritedVisitCapWarningLogged =

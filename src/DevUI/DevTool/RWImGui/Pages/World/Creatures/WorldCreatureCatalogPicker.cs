@@ -175,7 +175,7 @@ internal static class WorldCreatureCatalogPicker
     // Dense editors such as Relationships may show dozens of icons in one ImGui draw list. Each
     // prepared creature icon is a run-length raster expanded into AddRectFilled primitives. Bound
     // that expansion so a single page can never flood the native draw list / backend vertex buffer.
-    private const int MaxCompactIconRunsPerFrame = 4200;
+    private const int MaxCompactIconRunsPerFrame = 2400;
     private const int MaxAtlasCacheBytes = 32 * 1024 * 1024;
     private const float SaveDebounceSeconds = 4.0f;
     private const int StableEnvironmentCheckFrames = 300;
@@ -1298,12 +1298,30 @@ internal static class WorldCreatureCatalogPicker
 
     private static void SetIconReady(string creatureId, string sourceFingerprint, IconRaster raster)
     {
+        raster ??=
+            new IconRaster();
+
+        if (!TryNormalizeRasterForRendering(
+                raster,
+                out string invalidReason))
+        {
+            log?.LogWarning(
+                "Creature icon raster rejected for '" +
+                (creatureId ?? string.Empty) +
+                "': " +
+                invalidReason);
+            SetIconFailed(
+                creatureId,
+                sourceFingerprint);
+            return;
+        }
+
         lock (iconSync)
         {
             iconSlots[creatureId] = new IconSlot
             {
                 State = IconState.Ready,
-                Raster = raster ?? new IconRaster(),
+                Raster = raster,
                 SourceFingerprint = sourceFingerprint ?? string.Empty,
                 Validated = true
             };
@@ -2309,7 +2327,10 @@ internal static class WorldCreatureCatalogPicker
             Tint = new Color(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
             Available = reader.ReadBoolean()
         };
-        int runCount = ReadSafeCount(reader, 200000);
+        int runCount = ReadSafeCount(
+            reader,
+            MaxIconRasterDimension *
+            MaxIconRasterDimension);
         PixelRun[] runs = new PixelRun[runCount];
         for (int i = 0; i < runCount; i++)
         {
@@ -2320,7 +2341,111 @@ internal static class WorldCreatureCatalogPicker
             runs[i] = new PixelRun(x, y, width, color);
         }
         raster.Runs = runs;
+
+        if (!TryNormalizeRasterForRendering(
+                raster,
+                out string invalidReason))
+        {
+            throw new InvalidDataException(
+                "Invalid creature icon raster: " +
+                invalidReason);
+        }
+
         return raster;
+    }
+
+    private static bool TryNormalizeRasterForRendering(
+        IconRaster raster,
+        out string invalidReason)
+    {
+        invalidReason =
+            string.Empty;
+        if (raster == null)
+        {
+            invalidReason =
+                "null raster";
+            return false;
+        }
+
+        if (raster.Width < 1 ||
+            raster.Width > MaxIconRasterDimension ||
+            raster.Height < 1 ||
+            raster.Height > MaxIconRasterDimension)
+        {
+            invalidReason =
+                "dimensions " +
+                raster.Width +
+                "x" +
+                raster.Height +
+                " exceed the supported 1.." +
+                MaxIconRasterDimension +
+                " range";
+            return false;
+        }
+
+        PixelRun[] runs =
+            raster.Runs ??
+            Array.Empty<PixelRun>();
+        int maxRuns =
+            raster.Width *
+            raster.Height;
+        if (runs.Length > maxRuns)
+        {
+            invalidReason =
+                "run count " +
+                runs.Length +
+                " exceeds raster capacity " +
+                maxRuns;
+            return false;
+        }
+
+        for (int i = 0; i < runs.Length; i++)
+        {
+            PixelRun run =
+                runs[i];
+            if (run.X < 0 ||
+                run.Y < 0 ||
+                run.Width <= 0 ||
+                run.X >= raster.Width ||
+                run.Y >= raster.Height ||
+                run.Width > raster.Width - run.X)
+            {
+                invalidReason =
+                    "run " +
+                    i +
+                    " is outside " +
+                    raster.Width +
+                    "x" +
+                    raster.Height;
+                return false;
+            }
+        }
+
+        if (raster.Available &&
+            runs.Length == 0)
+        {
+            invalidReason =
+                "available raster contains no drawable runs";
+            return false;
+        }
+
+        raster.Runs =
+            runs;
+        raster.Tint =
+            new Color(
+                SafeTintComponent(
+                    raster.Tint.r,
+                    1f),
+                SafeTintComponent(
+                    raster.Tint.g,
+                    1f),
+                SafeTintComponent(
+                    raster.Tint.b,
+                    1f),
+                SafeTintComponent(
+                    raster.Tint.a,
+                    1f));
+        return true;
     }
 
     private static void MarkCacheDirty()
