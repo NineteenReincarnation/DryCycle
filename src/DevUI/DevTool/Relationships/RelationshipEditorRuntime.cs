@@ -363,6 +363,7 @@ public static class RelationshipEditorPresentationHub
     // The rebuilt editor still performs a periodic full audit, while DryCycle edits use exact pair
     // hints and remain immediate.
     private const int OpaqueCompatibilityAuditFrames = 180;
+    private const int OverrideFingerprintAuditFrames = 180;
 
     private static string[] relationshipTypes = Array.Empty<string>();
     private static int relationshipTypeCount = -1;
@@ -392,6 +393,9 @@ public static class RelationshipEditorPresentationHub
     private static string observedOther = string.Empty;
     private static EditorRelationshipDirection observedDirection;
     private static int nextOpaqueCompatibilityAuditFrame;
+    private static int nextOverrideFingerprintAuditFrame;
+    private static ulong observedOverrideFingerprint;
+    private static bool overrideFingerprintInitialized;
     private static bool invalidIntensityWarningLogged;
 
     public static EditorRelationshipPresentationSnapshot Current => current;
@@ -439,6 +443,9 @@ public static class RelationshipEditorPresentationHub
             directedRelationshipCache.Clear();
             activePrimaryRowsBuild = null;
             nextOpaqueCompatibilityAuditFrame = 0;
+            nextOverrideFingerprintAuditFrame = 0;
+            observedOverrideFingerprint = 0UL;
+            overrideFingerprintInitialized = false;
         }
         else if (pageChanged)
         {
@@ -455,6 +462,17 @@ public static class RelationshipEditorPresentationHub
 
         RelationshipEditorState state = RelationshipEditorStateHub.Get(session);
         long revision = EditorRevisionHub.Get(session, EditorRevisionKind.Relationships);
+
+        if (AuditOverrideFingerprintIfDue(
+                session,
+                revision))
+        {
+            revision =
+                EditorRevisionHub.Get(
+                    session,
+                    EditorRevisionKind.Relationships);
+        }
+
         int creatureTypeCount = ExtEnum<CreatureTemplate.Type>.values.Count;
         int nextRelationshipTypeCount = ExtEnum<CreatureTemplate.Relationship.Type>.values.Count;
 
@@ -849,6 +867,9 @@ public static class RelationshipEditorPresentationHub
         directedRelationshipCache.Clear();
         activePrimaryRowsBuild = null;
         nextOpaqueCompatibilityAuditFrame = 0;
+        nextOverrideFingerprintAuditFrame = 0;
+        observedOverrideFingerprint = 0UL;
+        overrideFingerprintInitialized = false;
         activationTracePending = false;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
@@ -880,6 +901,173 @@ public static class RelationshipEditorPresentationHub
             from,
             to,
             directMap);
+    }
+
+    private static bool AuditOverrideFingerprintIfDue(
+        EditorSession session,
+        long revision)
+    {
+        int frame =
+            UnityEngine.Time.frameCount;
+        if (nextOverrideFingerprintAuditFrame > frame)
+            return false;
+
+        nextOverrideFingerprintAuditFrame =
+            frame +
+            OverrideFingerprintAuditFrames;
+
+        ulong fingerprint =
+            ComputeOverrideFingerprint();
+
+        if (!overrideFingerprintInitialized)
+        {
+            observedOverrideFingerprint =
+                fingerprint;
+            overrideFingerprintInitialized =
+                true;
+            return false;
+        }
+
+        if (observedOverrideFingerprint ==
+            fingerprint)
+            return false;
+
+        observedOverrideFingerprint =
+            fingerprint;
+
+        // Native Relationships intentionally owns no hidden RelationshipPage, so third-party code
+        // can legally mutate the static changedRelationships dictionary without passing through a
+        // DryCycle command or compatibility node. Detect that external writer sparsely and widen to
+        // a full semantic invalidation instead of letting retained directed values become stale.
+        EditorRevisionHub.Mark(
+            session,
+            EditorRevisionKind.Relationships);
+        RelationshipPresentationChangeHintHub.MarkFull(
+            session);
+
+        Plugin.Logger?.LogInfo(
+            "[DevTool.Relationships] external relationship override mutation detected by sparse audit; " +
+            "retained relationship caches will be rebuilt.");
+
+        return true;
+    }
+
+    private static ulong ComputeOverrideFingerprint()
+    {
+        unchecked
+        {
+            ulong xor =
+                0UL;
+            ulong sum =
+                0UL;
+            int count =
+                0;
+
+            foreach (KeyValuePair<CreatureTemplate.Type, Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship>> outer
+                     in RelationshipPage.changedRelationships)
+            {
+                string from =
+                    outer.Key?.value ??
+                    string.Empty;
+                Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> map =
+                    outer.Value;
+                if (map == null)
+                    continue;
+
+                foreach (KeyValuePair<CreatureTemplate.Type, CreatureTemplate.Relationship> inner in map)
+                {
+                    string to =
+                        inner.Key?.value ??
+                        string.Empty;
+                    CreatureTemplate.Relationship relationship =
+                        inner.Value;
+
+                    ulong item =
+                        StableFingerprintString(
+                            from);
+                    item =
+                        MixFingerprint(
+                            item,
+                            StableFingerprintString(
+                                to));
+                    item =
+                        MixFingerprint(
+                            item,
+                            StableFingerprintString(
+                                relationship.type?.value ??
+                                string.Empty));
+                    item =
+                        MixFingerprint(
+                            item,
+                            (uint)relationship.intensity.GetHashCode());
+
+                    xor ^=
+                        RotateLeft(
+                            item,
+                            count & 31);
+                    sum +=
+                        item *
+                        0x9E3779B185EBCA87UL;
+                    count++;
+                }
+            }
+
+            return xor ^
+                   RotateLeft(
+                       sum,
+                       17) ^
+                   ((ulong)(uint)count *
+                    0xC2B2AE3D27D4EB4FUL);
+        }
+    }
+
+    private static ulong StableFingerprintString(string value)
+    {
+        unchecked
+        {
+            ulong hash =
+                1469598103934665603UL;
+            value ??=
+                string.Empty;
+            for (int i = 0; i < value.Length; i++)
+            {
+                hash ^=
+                    value[i];
+                hash *=
+                    1099511628211UL;
+            }
+            return hash;
+        }
+    }
+
+    private static ulong MixFingerprint(
+        ulong left,
+        ulong right)
+    {
+        unchecked
+        {
+            ulong value =
+                left ^
+                (right +
+                 0x9E3779B97F4A7C15UL +
+                 (left << 6) +
+                 (left >> 2));
+            value *=
+                0xC2B2AE3D27D4EB4FUL;
+            return value;
+        }
+    }
+
+    private static ulong RotateLeft(
+        ulong value,
+        int bits)
+    {
+        bits &=
+            63;
+        return bits == 0
+            ? value
+            : (value << bits) |
+              (value >> (64 - bits));
     }
 
     private static void EnsureTemplateCatalog(int creatureTypeCount)
