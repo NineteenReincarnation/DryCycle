@@ -7,10 +7,11 @@ namespace DryCycle.DevUI.DevTool.Core;
 
 /// <summary>
 /// Owns page-less rebuilt tools whose authoring/runtime state no longer requires a matching
-/// DevInterface Page. Objects, Sound and Triggers use a minimal DryCycle Page only as a room/document
-/// lifetime anchor. Objects diagnostics are fully headless; its concrete legacy page is materialized
-/// only for explicit Vanilla/Legacy ownership. Sound/Trigger diagnostics may still require their
-/// concrete backend pages until those subsystems reach the same headless audit boundary.
+/// DevInterface Page. Objects, Sound, Triggers and Relationships use a minimal DryCycle Page as a
+/// lifetime anchor. Relationships is especially important here: constructing the vanilla
+/// RelationshipPage executes mod-extensible DevInterface setup before the rebuilt atlas can draw.
+/// Rebuilt mode therefore never materializes it; the concrete page exists only for explicit
+/// Vanilla/Legacy ownership or diagnostics.
 /// </summary>
 internal static class NativeToolScheduler
 {
@@ -25,7 +26,8 @@ internal static class NativeToolScheduler
     internal static bool Supports(EditorToolMode mode) =>
         mode == EditorToolMode.Objects ||
         mode == EditorToolMode.Sound ||
-        mode == EditorToolMode.Triggers;
+        mode == EditorToolMode.Triggers ||
+        mode == EditorToolMode.Relationships;
 
     internal static bool IsVirtualToolActive(EditorSession session)
     {
@@ -146,22 +148,66 @@ internal static class NativeToolScheduler
     {
         if (session?.Owner == null || !Supports(mode)) return false;
 
-        if (!IsNativeAnchor(session.Owner.activePage))
+        NativeToolAnchorPage currentAnchor =
+            session.Owner.activePage as NativeToolAnchorPage;
+        bool replaceAnchor =
+            currentAnchor == null ||
+            currentAnchor.GetType() != typeof(NativeToolAnchorPage) ||
+            currentAnchor.ToolMode != mode;
+
+        long relationshipStarted =
+            mode == EditorToolMode.Relationships
+                ? System.Diagnostics.Stopwatch.GetTimestamp()
+                : 0L;
+
+        if (mode == EditorToolMode.Relationships)
         {
-            LegacyUiPresentationController.Restore(session.Owner.activePage);
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Activate][BEGIN] from=" +
+                (session.Owner.activePage?.GetType().Name ?? "<null>"));
+        }
+
+        if (replaceAnchor)
+        {
+            if (currentAnchor == null)
+                LegacyUiPresentationController.Restore(session.Owner.activePage);
+
             session.LegacyTransactions.Reset();
 
-            // DevUI.SwitchPage only constructs canonical legacy pages. Native workspaces instead
-            // mirror its ClearSprites ownership boundary and install one tiny inert Page directly.
+            if (mode == EditorToolMode.Relationships)
+                Plugin.Logger?.LogInfo("[DevTool.Relationships][Activate] retiring previous page sprites");
+
             session.Owner.ClearSprites();
-            session.Owner.activePage = new NativeToolAnchorPage(session.Owner);
+            session.Owner.activePage =
+                new NativeToolAnchorPage(
+                    session.Owner,
+                    mode);
+
+            if (mode == EditorToolMode.Relationships)
+                Plugin.Logger?.LogInfo("[DevTool.Relationships][Activate] native anchor installed");
+
             session.Synchronize(session.Owner);
+
+            if (mode == EditorToolMode.Relationships)
+                Plugin.Logger?.LogInfo("[DevTool.Relationships][Activate] session synchronized");
         }
 
         if (!IsNativeAnchor(session.Owner.activePage))
             return false;
 
         session.AdoptVirtualToolMode(mode);
+
+        if (mode == EditorToolMode.Relationships)
+        {
+            double elapsed =
+                (System.Diagnostics.Stopwatch.GetTimestamp() - relationshipStarted) *
+                1000d /
+                System.Diagnostics.Stopwatch.Frequency;
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Activate][READY] elapsedMs=" +
+                elapsed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
         return true;
     }
 
@@ -183,6 +229,7 @@ internal static class NativeToolScheduler
         EditorToolMode.Objects => ObjectsPageIndex,
         EditorToolMode.Sound => SoundPageIndex,
         EditorToolMode.Triggers => TriggerPageIndex,
+        EditorToolMode.Relationships => RelationshipsPageIndex,
         _ => -1
     };
 
@@ -203,6 +250,7 @@ internal static class NativeToolScheduler
         EditorToolMode.Objects => page is ObjectsPage && page.GetType() == typeof(ObjectsPage),
         EditorToolMode.Sound => page is SoundPage && page.GetType() == typeof(SoundPage),
         EditorToolMode.Triggers => page is TriggersPage && page.GetType() == typeof(TriggersPage),
+        EditorToolMode.Relationships => page is RelationshipPage && page.GetType() == typeof(RelationshipPage),
         _ => false
     };
 }

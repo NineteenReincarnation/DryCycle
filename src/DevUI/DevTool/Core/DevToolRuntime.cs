@@ -918,7 +918,11 @@ public sealed class EditorSession
     {
         if (ui?.activePage is MapPage)
             return new EditorDocumentKey(EditorDocumentKind.RegionMap, ui.game?.world?.name ?? "<world>");
-        if (ui?.activePage is RelationshipPage)
+        if (ui?.activePage is RelationshipPage ||
+            ui?.activePage is NativeToolAnchorPage
+            {
+                ToolMode: EditorToolMode.Relationships
+            })
             return new EditorDocumentKey(EditorDocumentKind.Relationships, "global");
 
         global::Room room = ui?.room;
@@ -931,6 +935,8 @@ public sealed class EditorSession
 
     private static EditorToolMode ResolveToolMode(Page page)
     {
+        if (page is NativeToolAnchorPage nativeAnchor)
+            return nativeAnchor.ToolMode;
         if (page is ObjectsPage) return EditorToolMode.Objects;
         if (page is SoundPage) return EditorToolMode.Sound;
         if (page is TriggersPage) return EditorToolMode.Triggers;

@@ -45,7 +45,7 @@ public static class EditorActions
             if (session.Owner.activePage is MapPage map)
                 return SaveMapWorkspace(session, map);
 
-            if (session.Owner.activePage is RelationshipPage)
+            if (session.ToolMode == EditorToolMode.Relationships)
             {
                 RelationshipPage.LogAllChangedRelationships();
                 return true;

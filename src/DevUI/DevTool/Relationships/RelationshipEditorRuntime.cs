@@ -64,6 +64,140 @@ internal static class RelationshipEditorStateHub
     internal static void Reset() => states = new ConditionalWeakTable<EditorSession, RelationshipEditorState>();
 }
 
+internal static class RelationshipEffectiveResolver
+{
+    private const int MaxInheritedPairVisits = 512;
+
+    private readonly struct TemplatePair : IEquatable<TemplatePair>
+    {
+        internal TemplatePair(CreatureTemplate from, CreatureTemplate to)
+        {
+            From = from;
+            To = to;
+        }
+
+        internal CreatureTemplate From { get; }
+        internal CreatureTemplate To { get; }
+
+        public bool Equals(TemplatePair other) =>
+            ReferenceEquals(From, other.From) &&
+            ReferenceEquals(To, other.To);
+
+        public override bool Equals(object obj) =>
+            obj is TemplatePair other &&
+            Equals(other);
+
+        public override int GetHashCode() =>
+            (RuntimeHelpers.GetHashCode(From) * 397) ^
+            RuntimeHelpers.GetHashCode(To);
+    }
+
+    /// <summary>
+    /// Resolve the static authoring relationship without executing CreatureRelationship hooks.
+    /// The vanilla DevTools route recursively walks inherited overrides and then calls a mod-
+    /// extensible method. A malformed ancestor graph or one expensive hook can therefore stall the
+    /// game thread. The rebuilt editor represents the static template matrix, so it resolves the
+    /// same authored override graph iteratively with cycle protection and reads the template array
+    /// directly for the base value.
+    /// </summary>
+    internal static CreatureTemplate.Relationship Resolve(
+        CreatureTemplate from,
+        CreatureTemplate to)
+    {
+        if (from?.type == null ||
+            to?.type == null)
+            return Ignore();
+
+        if (TryResolveChanged(
+                from,
+                to,
+                out CreatureTemplate.Relationship changed))
+            return changed;
+
+        int index =
+            to.type.Index;
+        CreatureTemplate.Relationship[] relationships =
+            from.relationships;
+        if (relationships != null &&
+            index >= 0 &&
+            index < relationships.Length)
+            return relationships[index];
+
+        return Ignore();
+    }
+
+    private static bool TryResolveChanged(
+        CreatureTemplate from,
+        CreatureTemplate to,
+        out CreatureTemplate.Relationship relationship)
+    {
+        relationship =
+            default;
+
+        Stack<TemplatePair> pending =
+            new();
+        HashSet<TemplatePair> visited =
+            new();
+        pending.Push(
+            new TemplatePair(
+                from,
+                to));
+
+        int visits =
+            0;
+        while (pending.Count > 0 &&
+               visits < MaxInheritedPairVisits)
+        {
+            TemplatePair pair =
+                pending.Pop();
+            CreatureTemplate source =
+                pair.From;
+            CreatureTemplate target =
+                pair.To;
+            if (source?.type == null ||
+                target?.type == null ||
+                !visited.Add(pair))
+                continue;
+
+            visits++;
+
+            if (RelationshipPage.changedRelationships.TryGetValue(
+                    source.type,
+                    out Dictionary<CreatureTemplate.Type, CreatureTemplate.Relationship> map) &&
+                map != null &&
+                map.TryGetValue(
+                    target.type,
+                    out relationship))
+                return true;
+
+            // LIFO: target first, then source, so source inheritance is visited next just like the
+            // vanilla recursive implementation while duplicate/cyclic pairs are bounded.
+            if (target.ancestor != null)
+            {
+                pending.Push(
+                    new TemplatePair(
+                        source,
+                        target.ancestor));
+            }
+
+            if (source.ancestor != null)
+            {
+                pending.Push(
+                    new TemplatePair(
+                        source.ancestor,
+                        target));
+            }
+        }
+
+        return false;
+    }
+
+    private static CreatureTemplate.Relationship Ignore() =>
+        new(
+            CreatureTemplate.Relationship.Type.Ignores,
+            0f);
+}
+
 public static class RelationshipEditorPresentationHub
 {
     private static volatile EditorRelationshipPresentationSnapshot current = EditorRelationshipPresentationSnapshot.Empty;
@@ -142,7 +276,8 @@ public static class RelationshipEditorPresentationHub
     private static PrimaryRowsBuildJob activePrimaryRowsBuild;
 
     private static EditorSession observedSession;
-    private static RelationshipPage observedPage;
+    private static Page observedPage;
+    private static bool activationTracePending;
     private static long observedRevision;
     private static int observedCreatureTypeCount = -1;
     private static string observedPrimary = string.Empty;
@@ -156,11 +291,14 @@ public static class RelationshipEditorPresentationHub
     internal static void Publish(EditorSession session)
     {
         if (session?.ToolMode != EditorToolMode.Relationships ||
-            session.Owner?.activePage is not RelationshipPage page)
+            session.Owner?.activePage == null)
         {
             Clear();
             return;
         }
+
+        Page page =
+            session.Owner.activePage;
 
         bool sessionChanged =
             !ReferenceEquals(
@@ -170,6 +308,16 @@ public static class RelationshipEditorPresentationHub
             !ReferenceEquals(
                 observedPage,
                 page);
+
+        if (sessionChanged ||
+            pageChanged)
+        {
+            activationTracePending =
+                true;
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Presentation][BEGIN] page=" +
+                page.GetType().Name);
+        }
 
         if (sessionChanged)
         {
@@ -273,6 +421,7 @@ public static class RelationshipEditorPresentationHub
             !hint.HasPair &&
             !hint.Full &&
             !session.LegacyUiVisible &&
+            page is RelationshipPage &&
             LegacyDevUiQuiescenceController.HasExternalCompatibilityNodes(page))
         {
             int frame =
@@ -366,10 +515,24 @@ public static class RelationshipEditorPresentationHub
             }
         }
 
+        if (activationTracePending)
+        {
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Presentation] catalog begin extEnumCount=" +
+                creatureTypeCount);
+        }
+
         EnsureTemplateCatalog(
             creatureTypeCount);
         CreatureTemplate[] templates =
             templateCatalog;
+
+        if (activationTracePending)
+        {
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Presentation] catalog ready templates=" +
+                templates.Length);
+        }
         if (templates.Length == 0)
         {
             current = new EditorRelationshipPresentationSnapshot { Available = true };
@@ -547,12 +710,13 @@ public static class RelationshipEditorPresentationHub
         directedRelationshipCache.Clear();
         activePrimaryRowsBuild = null;
         nextOpaqueCompatibilityAuditFrame = 0;
+        activationTracePending = false;
         LastOutcome = DevToolPresentationOutcome.FullRebuild;
     }
 
     private static void Observe(
         EditorSession session,
-        RelationshipPage page,
+        Page page,
         long revision,
         int creatureTypeCount,
         RelationshipEditorState state)
@@ -589,6 +753,8 @@ public static class RelationshipEditorPresentationHub
             new();
         HashSet<string> seen =
             new(StringComparer.Ordinal);
+        HashSet<string> resolvedTypes =
+            new(StringComparer.Ordinal);
 
         for (int i = 0; i < ExtEnum<CreatureTemplate.Type>.values.Count; i++)
         {
@@ -606,7 +772,10 @@ public static class RelationshipEditorPresentationHub
                         false);
                 CreatureTemplate template =
                     StaticWorld.GetCreatureTemplate(type);
-                if (template?.type == null)
+                string resolvedId =
+                    template?.type?.value;
+                if (string.IsNullOrEmpty(resolvedId) ||
+                    !resolvedTypes.Add(resolvedId))
                     continue;
 
                 result.Add(template);
@@ -740,6 +909,20 @@ public static class RelationshipEditorPresentationHub
         if (job == null)
             return;
 
+        if (activationTracePending)
+        {
+            string next =
+                job.NextTemplateIndex >= 0 &&
+                job.NextTemplateIndex < templateCatalog.Length
+                    ? templateCatalog[job.NextTemplateIndex]?.type?.value ?? "<null>"
+                    : "<complete>";
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Presentation] batch begin index=" +
+                job.NextTemplateIndex +
+                " next=" +
+                next);
+        }
+
         long started =
             System.Diagnostics.Stopwatch.GetTimestamp();
         int processed =
@@ -859,6 +1042,23 @@ public static class RelationshipEditorPresentationHub
             revision,
             creatureTypeCount,
             state);
+
+        if (activationTracePending)
+        {
+            Plugin.Logger?.LogInfo(
+                "[DevTool.Relationships][Presentation] batch end loaded=" +
+                baseRows.Length +
+                "/" +
+                Math.Max(0, job.Buffer.Length) +
+                " complete=" +
+                complete);
+            if (complete)
+            {
+                activationTracePending =
+                    false;
+                Plugin.Logger?.LogInfo("[DevTool.Relationships][Presentation][READY]");
+            }
+        }
     }
 
     private static double ElapsedMilliseconds(long startedTimestamp) =>
@@ -1253,7 +1453,7 @@ public static class RelationshipEditorPresentationHub
             return cached;
 
         CreatureTemplate.Relationship effective =
-            RelationshipPage.GetEffectiveRelationship(
+            RelationshipEffectiveResolver.Resolve(
                 from,
                 to);
         bool direct =

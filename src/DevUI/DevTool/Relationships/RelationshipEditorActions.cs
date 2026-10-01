@@ -37,7 +37,7 @@ internal static class RelationshipEditorActions
         if (string.IsNullOrEmpty(relationshipType) || !TryResolvePair(primaryType, otherType, direction, out CreatureTemplate from, out CreatureTemplate to))
             return false;
 
-        CreatureTemplate.Relationship current = RelationshipPage.GetEffectiveRelationship(from, to);
+        CreatureTemplate.Relationship current = RelationshipEffectiveResolver.Resolve(from, to);
         CreatureTemplate.Relationship next = new(new CreatureTemplate.Relationship.Type(relationshipType, false), current.intensity);
         return SetRelationship(session, from, to, primaryType, otherType, next, "Change relationship type");
     }
@@ -52,7 +52,7 @@ internal static class RelationshipEditorActions
         if (!TryResolvePair(primaryType, otherType, direction, out CreatureTemplate from, out CreatureTemplate to))
             return false;
 
-        CreatureTemplate.Relationship current = RelationshipPage.GetEffectiveRelationship(from, to);
+        CreatureTemplate.Relationship current = RelationshipEffectiveResolver.Resolve(from, to);
         CreatureTemplate.Relationship next = new(current.type, Mathf.Clamp01(intensity));
         return SetRelationship(session, from, to, primaryType, otherType, next, "Change relationship intensity");
     }
@@ -91,7 +91,10 @@ internal static class RelationshipEditorActions
         CreatureTemplate.Relationship relationship,
         string label)
     {
-        if (session?.Owner?.activePage is not RelationshipPage || from?.type == null || to?.type == null)
+        if (session?.ToolMode != EditorToolMode.Relationships ||
+            session.Owner == null ||
+            from?.type == null ||
+            to?.type == null)
             return false;
 
         SingleRelationshipStateSnapshot before =
@@ -151,7 +154,14 @@ internal static class RelationshipEditorActions
 
     private static void RefreshPage(EditorSession session)
     {
-        if (session?.Owner?.activePage is not RelationshipPage page) return;
+        if (session?.ToolMode != EditorToolMode.Relationships ||
+            session.Owner == null)
+            return;
+
+        // Native rebuilt Relationships deliberately has no RelationshipPage to refresh. Model
+        // revision + pair hints drive the immutable snapshot directly.
+        if (session.Owner.activePage is not RelationshipPage page)
+            return;
 
         // The rebuilt relationship matrix owns presentation while the vanilla page is quiescent.
         // Rebuilding the complete hidden RelationshipPage for every slider step defeats the pair-
@@ -245,13 +255,14 @@ internal static class RelationshipEditorActions
         }
 
         public IEditorStateSnapshot CaptureCurrent(EditorSession session) =>
-            session?.Owner?.activePage is RelationshipPage
+            session?.ToolMode == EditorToolMode.Relationships
                 ? Capture(from, to, hintPrimary, hintOther)
                 : null;
 
         public bool Restore(EditorSession session)
         {
-            if (session?.Owner?.activePage is not RelationshipPage)
+            if (session?.ToolMode != EditorToolMode.Relationships ||
+                session.Owner == null)
                 return false;
 
             if (present)

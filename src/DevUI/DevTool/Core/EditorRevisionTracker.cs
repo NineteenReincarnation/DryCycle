@@ -239,6 +239,12 @@ internal static class EditorRevisionHub
         if (session.LegacyTransactions.HasPendingTransaction)
             return true;
 
+        // NativeToolAnchorPage contains no legacy authoring controls. Treating it as an unknown,
+        // non-quiescent page would dirty the workspace every frame and continuously invalidate
+        // retained native presentations, including the relationship matrix.
+        if (NativeToolScheduler.IsVirtualToolActive(session))
+            return false;
+
         Page page = session.Owner?.activePage;
         if (session.LegacyUiVisible &&
             IsExactMigratedPage(session) &&
