@@ -42,7 +42,12 @@ internal static partial class LegacyDevUiQuiescenceController
         new(typeof(TriggersPage), EditorToolMode.Triggers, materializeInitialRefresh: true, bypassPageOverride: true),
         new(typeof(MapPage), EditorToolMode.Map, materializeInitialRefresh: false, bypassPageOverride: true),
         new(typeof(DialogPage), EditorToolMode.Dialog, materializeInitialRefresh: true, bypassPageOverride: true),
-        new(typeof(RelationshipPage), EditorToolMode.Relationships, materializeInitialRefresh: true, bypassPageOverride: true)
+        // RelationshipPage's hidden initial Refresh is not presentation-neutral: with a large
+        // CreatureTemplate registry it can synchronously materialize/sort a sizeable legacy
+        // relationship control tree on the game thread. The rebuilt atlas reads the authoritative
+        // static relationship model directly, so keep the legacy page skeletal until the developer
+        // explicitly switches back to Vanilla/Legacy presentation.
+        new(typeof(RelationshipPage), EditorToolMode.Relationships, materializeInitialRefresh: false, bypassPageOverride: true)
     };
 
     private static readonly System.Reflection.Assembly VanillaDevUiAssembly = typeof(global::DevInterface.DevUI).Assembly;
@@ -169,6 +174,18 @@ internal static partial class LegacyDevUiQuiescenceController
     private static void PrepareFullLegacyPageUpdate(Page page)
     {
         LegacyUiPresentationController.Restore(page);
+
+        // Derived page hooks (Map/Dialog/Relationships) bypass DevUINode_Update, so suppressed
+        // initial refresh state must be restored here as well. This makes it safe for rebuilt
+        // Relationships to defer its expensive hidden Refresh without breaking an explicit return
+        // to the vanilla editor: the very first vanilla Update observes initRefresh=true and
+        // materializes the original controls exactly when they are actually needed.
+        if (page != null &&
+            SuppressedInitialRefreshPages.Remove(page))
+        {
+            page.initRefresh = true;
+        }
+
         FlushDeferredRefresh(page);
     }
 
@@ -226,8 +243,8 @@ internal static partial class LegacyDevUiQuiescenceController
 
             PrepareFullLegacyPageUpdate(page);
 
-            // Map intentionally skips its first hidden legacy Refresh while the rebuilt map owns
-            // presentation. Returning to vanilla restores that initialization contract losslessly.
+            // Non-derived exact pages can still arrive through this generic hook. Derived
+            // Map/Dialog/Relationships restore the same flag in PrepareFullLegacyPageUpdate.
             if (SuppressedInitialRefreshPages.Remove(page))
                 page.initRefresh = true;
         }
