@@ -38,7 +38,9 @@ internal static class RelationshipEditorActions
             return false;
 
         CreatureTemplate.Relationship current = RelationshipEffectiveResolver.Resolve(from, to);
-        CreatureTemplate.Relationship next = new(new CreatureTemplate.Relationship.Type(relationshipType, false), current.intensity);
+        CreatureTemplate.Relationship next = new(
+            new CreatureTemplate.Relationship.Type(relationshipType, false),
+            RelationshipEffectiveResolver.NormalizeIntensity(current.intensity));
         return SetRelationship(session, from, to, primaryType, otherType, next, "Change relationship type");
     }
 
@@ -53,7 +55,9 @@ internal static class RelationshipEditorActions
             return false;
 
         CreatureTemplate.Relationship current = RelationshipEffectiveResolver.Resolve(from, to);
-        CreatureTemplate.Relationship next = new(current.type, Mathf.Clamp01(intensity));
+        CreatureTemplate.Relationship next = new(
+            current.type,
+            RelationshipEffectiveResolver.NormalizeIntensity(intensity));
         return SetRelationship(session, from, to, primaryType, otherType, next, "Change relationship intensity");
     }
 

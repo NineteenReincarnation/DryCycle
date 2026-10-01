@@ -3180,8 +3180,19 @@ internal static class RelationshipEditorView
             message);
     }
 
-    private static float Clamp01(float value) =>
-        Math.Max(0f, Math.Min(1f, value));
+    private static float Clamp01(float value)
+    {
+        if (float.IsNaN(value) ||
+            float.IsNegativeInfinity(value))
+            return 0f;
+        if (float.IsPositiveInfinity(value))
+            return 1f;
+        return Math.Max(
+            0f,
+            Math.Min(
+                1f,
+                value));
+    }
 
     private static string GetInspectorEditKey(
         string primary,

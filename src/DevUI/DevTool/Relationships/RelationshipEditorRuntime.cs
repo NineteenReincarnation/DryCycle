@@ -243,6 +243,21 @@ internal static class RelationshipEffectiveResolver
         return false;
     }
 
+    internal static float NormalizeIntensity(float value)
+    {
+        if (float.IsNaN(value))
+            return 0f;
+        if (float.IsPositiveInfinity(value))
+            return 1f;
+        if (float.IsNegativeInfinity(value))
+            return 0f;
+        return (float)Math.Max(
+            0d,
+            Math.Min(
+                1d,
+                value));
+    }
+
     private static CreatureTemplate.Relationship ReadBase(
         CreatureTemplate from,
         CreatureTemplate to)
@@ -377,6 +392,7 @@ public static class RelationshipEditorPresentationHub
     private static string observedOther = string.Empty;
     private static EditorRelationshipDirection observedDirection;
     private static int nextOpaqueCompatibilityAuditFrame;
+    private static bool invalidIntensityWarningLogged;
 
     public static EditorRelationshipPresentationSnapshot Current => current;
     internal static DevToolPresentationOutcome LastOutcome { get; private set; } = DevToolPresentationOutcome.FullRebuild;
@@ -1625,6 +1641,24 @@ public static class RelationshipEditorPresentationHub
             directMap != null &&
             directMap.ContainsKey(to.type);
 
+        float normalizedIntensity =
+            RelationshipEffectiveResolver.NormalizeIntensity(
+                effective.intensity);
+
+        if (!invalidIntensityWarningLogged &&
+            (float.IsNaN(effective.intensity) ||
+             float.IsInfinity(effective.intensity)))
+        {
+            invalidIntensityWarningLogged =
+                true;
+            Plugin.Logger?.LogWarning(
+                "DevTool relationship received a non-finite intensity for '" +
+                fromId +
+                "' -> '" +
+                toId +
+                "'. The authoring snapshot was normalized before reaching RWImGui.");
+        }
+
         EditorRelationshipValueSnapshot captured =
             new()
             {
@@ -1632,7 +1666,7 @@ public static class RelationshipEditorPresentationHub
                     effective.type?.value ??
                     string.Empty,
                 Intensity =
-                    effective.intensity,
+                    normalizedIntensity,
                 DirectOverride =
                     direct
             };
